@@ -515,6 +515,11 @@ a daň za prosinec pak spárujete s úhradou v Bance.
    firmě. Zkouška nanečisto jen upozorní, ostrý převod se spustí až po
    výslovném potvrzení.
 
+   Kontrola upozorní také na adresář zálohy bez účetního deníku, který přesto
+   obsahuje doklady (faktury, ostatní závazky a pohledávky včetně mzdových,
+   interní doklady, banku nebo pokladnu). Převod bere jen roky s deníkem
+   a takový adresář vynechá.
+
    Volby:
    - *Převést do roku* - poslední převáděný účetní rok. Pozdější adresáře zálohy
      (deník, doklady, banka, pokladna) se nepřevedou a protokol je vyjmenuje.
@@ -574,8 +579,11 @@ s počty, upozornění a chyby a pro každý rok rekonciliaci:
   proti 211 a banka proti 221.
 
 **Kontrola saldokonta.** Na konci protokolu je kontrolní sestava saldokonta ke
-konci posledního převáděného roku (tedy k 1. 1. dalšího roku) proti zůstatkům
-účtů 311, 321, 314, 324, 331, 336 a 342. Počítá ji stejná sestava jako
+konci posledního převáděného roku proti počátečním stavům dalšího roku na
+účtech 311, 321, 314, 324, 331, 336 a 342. Počátečním stavem je otevírací zápis
+dalšího roku v MyÚčtu (převzatý z Money nebo zadaný v MyÚčtu). Nemá-li další rok
+otevírací zápis, porovná se saldokonto se zůstatky účtů k poslednímu dni roku
+a protokol to výslovně uvede. Počítá ji stejná sestava jako
 Účetnictví → Saldokonto. Rozdíl znamená zůstatek bez dokladu nebo položky, který
 v dalším roce nepůjde spárovat s úhradou; založte k němu položku ze zůstatku.
 
@@ -657,7 +665,7 @@ uzavřete ho ručně v Uzávěrce (kapitola [Uzávěrka](72_Uzaverka.md)).
 Otevření dalšího roku převzaté počáteční stavy z Money ponechá a nic nového
 nezaúčtuje, takže se počáteční stavy nezdvojí. Poslední převedený rok zůstává
 otevřený, pokud nezvolíte otevření dalšího roku z počátečních stavů Money (níže).
-Rok, jehož knihy se uzavřely, ale další rok se otevřít nepodařilo, opakovaný
+Rok, jehož knihy uzavřel převod, ale další rok se otevřít nepodařilo, opakovaný
 převod dotáhne.
 
 **Otevření dalšího roku z počátečních stavů Money.** Při finálním převodu (třeba
@@ -668,16 +676,30 @@ příkazová řádka `--opening-only-next`). Ve výchozím stavu je volba vypnut
 1. Z adresáře roku po posledním převáděném roce (volba **Převést do roku**,
    bez ní předposlední rok zálohy) převod převezme jen počáteční stavy jako
    otevírací zápis. Doklady, banka ani deník toho roku z Money nepřijdou.
+   Má-li záloha jediný rok, nebo začíná-li převod (**Převést od roku**) až po
+   takto určeném posledním roce, není co převést a převod se zastaví. Dávka
+   s volbou „od roku" automaticky posuzuje navazování let jen v převáděných
+   letech, rok jen s počátečními stavy výběr neovlivní.
 2. Do roku s vlastními zápisy z MyÚčta smí, jen když v něm ještě není otevírací
-   zápis. Otevírací zápis zadaný v MyÚčtu převod nezmění a počáteční stavy
-   Money s ním jen porovná. Rok musí být otevřený a mimo zámek k datu.
+   zápis. Otevírací zápis, který už v roce je (zadaný v MyÚčtu nebo převzatý
+   dřívějším převodem), převod nezmění a před uzávěrkou ho porovná
+   s počátečními stavy z aktuální zálohy Money. Při rozdílu nechá poslední
+   převáděný rok otevřený a protokol vypíše rozdíly po účtech. Opravte otevírací
+   zápis podle Money (nebo Money podle MyÚčta) a převod spusťte znovu. Rok musí
+   být otevřený a mimo zámek k datu.
 3. Poslední převáděný rok se proti počátečním stavům ověří a uzavře stejně jako
    historické roky, přeskočené kroky dostanou poznámku a průvodce uzávěrkou je
    znovu nenabídne. Nesedí-li konečné stavy na počáteční stavy z Money, protokol
    vypíše rozdíly po účtech a rok zůstane otevřený.
 4. Má-li rok co přeceňovat kurzem nebo vyžaduje-li krok Zásoby, uzávěrka zůstane
-   rozpracovaná: kroky z Money jsou přeskočené a zbytek dokončíte v Uzávěrce.
-   Opakovaný převod uzavřený rok jen přeskočí.
+   rozpracovaná a protokol uvede skutečný stav jejích kroků (které převod
+   přeskočil a které čekají). Zbytek dokončíte v Uzávěrce. Opakovaný převod
+   uzavřený rok jen přeskočí.
+5. Na rozpracovanou uzávěrku naváže opakovaný převod jen tehdy, když ji zahájil
+   sám a od té doby se v ní nepracovalo. Uzávěrku, kterou zahájila nebo upravila
+   účetní v MyÚčtu (stačí znovu spuštěné kontroly), nechá beze změny a v protokolu
+   ji ohlásí se stavem kroků. Stejně nechá rok s uzavřenými knihami, ze kterého
+   účetní ještě neotevřela další rok.
 
 ### 106.10.7 Režim účetnictví a automatika
 
