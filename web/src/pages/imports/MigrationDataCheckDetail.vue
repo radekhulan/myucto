@@ -62,10 +62,11 @@ function setState(value: MigrationCheckItemState | '') {
 const title = computed(() => detail.value
   ? (te(`migrationChecks.checks.${detail.value.key}.title`) ? t(`migrationChecks.checks.${detail.value.key}.title`) : detail.value.title)
   : t('migrationChecks.title'))
-const manualTo = computed(() => {
-  if (!detail.value) return null
+// Manuál je samostatná stránka mimo SPA (manual/index.php), router by ho nenašel.
+const manualHref = computed(() => {
+  if (!detail.value?.manual) return null
   const [chapter, anchor] = detail.value.manual.split('#')
-  return { path: '/manual', query: { ch: chapter }, ...(anchor ? { hash: `#${anchor}` } : {}) }
+  return `/manual?ch=${encodeURIComponent(chapter)}${anchor ? `#${anchor}` : ''}`
 })
 const canFix = computed(() => !!detail.value && detail.value.fixable && detail.value.can_fix && detail.value.fixable_count > 0)
 
@@ -117,7 +118,7 @@ const actions = computed<ActionItem[]>(() => [
     disabledReason: t('migrationChecks.fix_nothing'), run: () => { void openPreview() },
   },
   { key: 'refresh', label: t('migrationChecks.refresh'), icon: 'cycle', tier: 'secondary', variant: 'neutral', loading: loading.value, run: () => { void load() } },
-  { key: 'manual', label: t('migrationChecks.manual'), icon: 'help', tier: 'secondary', variant: 'neutral', show: !!manualTo.value, to: manualTo.value ?? undefined },
+  { key: 'manual', label: t('migrationChecks.manual'), icon: 'help', tier: 'secondary', variant: 'neutral', show: !!manualHref.value, href: manualHref.value ?? undefined },
   { key: 'back', label: t('migrationChecks.back'), icon: 'chevronLeft', tier: 'overflow', variant: 'neutral', to: { name: 'imports-checks' } },
 ])
 

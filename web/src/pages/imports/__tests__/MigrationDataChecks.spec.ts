@@ -36,7 +36,7 @@ import MigrationOverview from '@/pages/imports/MigrationOverview.vue'
 const ActionBarStub = defineComponent({
   props: ['actions'],
   template: `<div><button v-for="a in actions.filter(x => x.show === undefined || x.show)" :key="a.key" :data-testid="'action-' + a.key"
-    :disabled="a.disabled" @click="a.run && a.run()">{{ a.label }}</button></div>`,
+    :disabled="a.disabled" :data-href="a.href" @click="a.run && a.run()">{{ a.label }}</button></div>`,
 })
 const ModalStub = defineComponent({ template: '<div data-testid="modal"><slot /><slot name="footer" /></div>' })
 const stubs = { ActionBar: ActionBarStub, Modal: ModalStub, EmptyState: true, PaginationBar: true }
@@ -145,6 +145,14 @@ describe('Kontrola dat po převodu: detail a oprava', () => {
     expect(rows[0].find('a').attributes('href')).toBe('/invoices/41')
     expect(JSON.parse(rows[2].find('a').attributes('data-to')!)).toEqual({ path: '/accounting/saldo', query: { period_id: '5', account: '311', as_of: '2099-12-31' } })
     expect(rows[1].text()).toContain('migrationChecks.state.locked')
+  })
+
+  it('postup v manuálu vede na stránku manuálu, ne do routeru aplikace', async () => {
+    m.detail.mockResolvedValue(detail())
+    const w = mount(MigrationDataCheckDetail, { global: { stubs } })
+    await flushPromises()
+    expect(w.get('[data-testid="action-manual"]').attributes('data-href'))
+      .toBe('/manual?ch=126_Kontrola_dat_po_prevodu#1269-ddkp-bez-vazby-na-zalohu')
   })
 
   it('filtr stavu načte jen nálezy v daném stavu', async () => {
