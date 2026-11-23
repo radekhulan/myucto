@@ -839,7 +839,7 @@ final class Routes
         // Řádky odpočtu poskytnuté zálohy z jejích DDKP pro editor konečné faktury.
         $app->get    ('/api/purchase-invoices/advance-deduction-lines',    \MyInvoice\Action\PurchaseInvoice\AdvanceDeductionLinesAction::class);
         $app->get    ('/api/purchase-invoices/advance-candidates',         \MyInvoice\Action\PurchaseInvoice\NewInvoiceAdvanceCandidatesAction::class);
-        // Přečíslování měsíce podle data vystavení (náhled + provedení).
+        // Přečíslování měsíce podle data pro číslování (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
         $app->post   ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'renumber']);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);

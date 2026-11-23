@@ -23740,9 +23740,10 @@
     },
     "renumber": {
       "title": "Přečíslování přijatých dokladů",
-      "intro": "Interní číslo dostane doklad při přijetí, takže pořadí čísel odpovídá pořadí přijímání. Přečíslování vybere automaticky očíslované doklady zvoleného měsíce podle zvoleného data (vystavení, přijetí nebo DUZP), seřadí je podle něj a v každé číselné řadě je očísluje znovu od 1. Ručně zadaná čísla a čísla jiného měsíce zůstanou beze změny.",
+      "intro": "Interní číslo dostane doklad při přijetí, takže pořadí čísel odpovídá pořadí přijímání. Přečíslování vybere automaticky očíslované doklady zvoleného měsíce podle zvoleného data (vystavení, přijetí nebo DUZP), seřadí je podle něj a v každé číselné řadě je očísluje znovu od 1. Doklad s automatickým číslem jiného měsíce, který podle zvoleného data patří do tohoto měsíce, dostane číslo tohoto měsíce. Ručně zadaná čísla zůstanou beze změny.",
       "tax_note": "Přepíše se i interní číslo v účetním deníku a v popisu příjemky. Do kontrolního hlášení jde číslo dodavatele, na daně tedy přečíslování vliv nemá.",
-      "basis": "Řadit podle",
+      "basis": "Číslovat podle data",
+      "basis_hint": "Výchozí je nastavení firmy „Číslovat přijaté doklady podle data“. Provedené přečíslování zvolené datum do nastavení uloží, podle něj pak dostávají číslo i nové doklady.",
       "basis_option": {
         "issue": "Datum vystavení",
         "received": "Datum přijetí",
@@ -23774,7 +23775,7 @@
       "in_order": "Čísla už odpovídají pořadí podle zvoleného data.",
       "changes_count": "Změní se čísla {count} dokladů.",
       "kept_title": "Ponechaná čísla ({count})",
-      "kept_hint": "Ručně zadaná a cizí čísla a čísla jiného měsíce, přečíslování se jich netýká.",
+      "kept_hint": "Ručně zadaná a cizí čísla, čísla tohoto měsíce u dokladů s datem v jiném měsíci a doklady, které by přesun dostal do období po uzávěrce nebo uzamčeného.",
       "blocked_title": "Měsíc nelze přečíslovat",
       "blocked_hint": "Po uzávěrce se čísla dokladů nemění. Tyto doklady leží v uzavřeném nebo uzamčeném období:",
       "reason": {
@@ -23783,8 +23784,10 @@
         "period_closed": "uzavřené období",
         "date_locked": "uzamčeno k datu",
         "manual_number": "ruční číslo",
-        "number_other_month": "číslo patří do měsíce vystavení, ne do zvoleného měsíce",
-        "date_other_month": "číslo tohoto měsíce, zvolené datum leží v jiném měsíci",
+        "date_other_month": "číslo tohoto měsíce, zvolené datum leží v jiném měsíci (přesune ho přečíslování toho měsíce)",
+        "document_locked": "doklad je po uzávěrce nebo uzamčený k datu, do jiného měsíce se nepřesune",
+        "number_month_locked": "číslo patří do měsíce po uzávěrce nebo uzamčeného k datu, z něj se doklad nepřesune",
+        "month_locked": "tento měsíc je po uzávěrce nebo uzamčený k datu, doklad se do něj nepřesune",
         "cash_in": "příjmový doklad, číslo má plátce",
         "eet": "evidováno v EET",
         "vat_document": "doklad s DPH",
@@ -23827,6 +23830,8 @@
       "col_partner": "Partner",
       "col_description": "Popis",
       "col_reason": "Důvod",
+      "col_note": "Poznámka",
+      "moved_from": "číslo z {period}, přesune se do tohoto měsíce",
       "in_order_agenda": "Čísla už odpovídají pořadí podle data.",
       "kept_hint_agenda": "Ručně zadaná, převzatá nebo předaná čísla, přečíslování se jich netýká."
     },
@@ -29799,7 +29804,7 @@
     "numbering_issued_title": "Vydané doklady",
     "purchase_numbering": {
       "title": "Přijaté doklady",
-      "intro": "Interní číslo dostane přijatý doklad při přijetí, měsíc v čísle se bere z data vystavení.",
+      "intro": "Interní číslo dostane přijatý doklad při přijetí. Měsíc a rok v čísle se berou z data, podle kterého firma doklady čísluje.",
       "mode": "Číselné řady",
       "mode_shared": "Jedna řada pro všechny typy dokladů",
       "mode_by_kind": "Samostatná řada pro každý typ dokladu",
@@ -29812,6 +29817,13 @@
         "advance": "Šablona pro zálohy",
         "tax_document": "Šablona pro daňové doklady k platbě"
       },
+      "date_basis": "Číslovat přijaté doklady podle data",
+      "date_basis_option": {
+        "issue": "Datum vystavení",
+        "received": "Datum přijetí",
+        "tax": "DUZP"
+      },
+      "date_basis_hint": "Určuje měsíc a rok v čísle nového dokladu i výběr dokladů při přečíslování. Příklad: faktura vystavená 28. 10. a přijatá 3. 11. dostane podle data přijetí číslo listopadu (PF2611001), podle data vystavení číslo října (PF2610001). Doklad bez zvoleného data se čísluje podle data vystavení. Už očíslované doklady se změnou nastavení nemění, srovná je přečíslování.",
       "renumber_hint": "Doklady očíslované v jiném pořadí, než odpovídá datu, srovnáte funkcí"
     },
     "numbering_preview": "Náhled příštího čísla",

@@ -624,7 +624,7 @@ jako samostatná položka a promítne se do částky k úhradě, QR platby, plat
 |---|---|
 | **Dodavatel** | Vyberte ze seznamu nebo začněte psát. Vyhledávání nabídne i firmu vedenou pouze jako odběratel, po úspěšném uložení faktury se jí doplní role dodavatele. Bez hledaného textu se nabízejí jen dodavatelé. Pokud firma v adresáři chybí, klikněte na **+ Vytvořit nového dodavatele** a využijte ARES podle IČO. |
 | **Číslo dokladu dodavatele** | Tak, jak je vytištěno na originálu (například `FA-2026-001`). Maximálně 50 znaků. Jedinečné pro dvojici dodavatel a datum vystavení, stejnou fakturu nelze importovat dvakrát. |
-| **Naše číslo** | Volitelné. Pokud ho necháte prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (například `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je za měsíc (přeteče na 4 a více míst nad 999 dokladů). Šablonu změníte v `Nastavení`, záložce **Číslování faktur**, v části **Přijaté doklady** (například `PF-{YYYY}{MM}-{CCCC}` dá `PF-202605-0001`). Při ručním zadání čísla aplikace hlídá kolize a automatický generátor obsazená čísla přeskakuje. |
+| **Naše číslo** | Volitelné. Pokud ho necháte prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (například `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je za měsíc (přeteče na 4 a více míst nad 999 dokladů). Měsíc a rok čísla se berou z data podle nastavení **Číslovat přijaté doklady podle data** (výchozí je datum vystavení, viz „Číslování podle data“ v [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)). Šablonu změníte v `Nastavení`, záložce **Číslování faktur**, v části **Přijaté doklady** (například `PF-{YYYY}{MM}-{CCCC}` dá `PF-202605-0001`). Při ručním zadání čísla aplikace hlídá kolize a automatický generátor obsazená čísla přeskakuje. |
 | **Typ dokladu** | Faktura, Účtenka / paragon, Dobropis, Záloha, Daňový doklad k platbě (pro filtrování v seznamu). |
 | **Datum vystavení** | Z faktury. |
 | **DUZP** (datum uskutečnění zdanitelného plnění) | Klíčové pro období DPH. Výchozí je datum vystavení. U **reverse charge** se doklad zařazuje do období DPH právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu). U **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve, editor to připomene nápovědou. |
@@ -796,25 +796,38 @@ aplikace nastavení neuloží. Přepnutí se týká jen nově přijatých doklad
 přečíslováním (viz níže). Změníte-li u očíslovaného dokladu typ, číslo zůstane ze staré řady, dokud měsíc
 nepřečíslujete.
 
+**Číslování podle data.** Ve stejné části nastavení zvolíte v poli **Číslovat přijaté
+doklady podle data**, z kterého data dostane interní číslo měsíc a rok: **Datum vystavení** (výchozí), **Datum přijetí**
+nebo **DUZP**. Faktura vystavená 28. 10. a přijatá 3. 11. dostane podle data přijetí číslo listopadu (`PF2611001`),
+podle data vystavení číslo října (`PF2610001`). Doklad, který zvolené datum nemá (například bez DUZP), se čísluje podle
+data vystavení. Nastavení platí pro každé přidělení čísla, tedy pro ruční přijetí, hromadné přijetí, schválení
+i doklady z AI vytěžení, ISDOC, e-mailové schránky a importů, a také pro řady z číselníku řad. Už očíslované doklady se
+změnou nastavení nemění, do měsíců podle nového data je srovná přečíslování.
+
 **Přečíslování podle data.** Interní číslo dostane doklad při přijetí, takže pořadí čísel v měsíci odpovídá pořadí,
 v jakém jste doklady přijímali, ne datu vystavení. Hromadné **Označit jako přijaté** v seznamu přijímá vybrané
 doklady v pořadí podle data vystavení. Doklady očíslované v jiném pořadí srovnáte v menu `Nákup → Přečíslování`:
 
-1. V poli **Řadit podle** zvolte datum vystavení, datum přijetí nebo DUZP. Aplikace nabídne volbu z posledního
-   přečíslování, napoprvé datum vystavení.
+1. V poli **Číslovat podle data** zvolte datum vystavení, datum přijetí nebo DUZP. Předvyplněné je nastavení firmy
+   **Číslovat přijaté doklady podle data**.
 2. Zvolte měsíc. Zobrazí se náhled se sloupci **Vystaveno** a **Přijato** (při řazení podle DUZP i **DUZP**) a se
    současným a novým číslem každého dokladu.
-3. Klikněte na **Přečíslovat** a potvrďte. Zvolené datum se uloží jako výchozí pro firmu.
+3. Klikněte na **Přečíslovat** a potvrďte. Zvolené datum se uloží do nastavení firmy, takže podle něj dostávají číslo
+   i nově přijaté doklady.
 
 Zvolené datum určuje, které doklady do měsíce patří, i jejich pořadí. Doklad, který zvolené datum nemá, se řadí podle
 data vystavení a náhled u něj uvede „bez data přijetí, řazeno podle data vystavení“ (u DUZP obdobně). Přečíslují se jen
 automaticky očíslované doklady zvoleného měsíce. Každá řada začne znovu od 1 a doklady jdou podle zvoleného data.
 
-Měsíc v interním čísle se odvozuje z data vystavení. Při řazení podle data přijetí nebo DUZP proto může doklad měsíce
-nést číslo jiného měsíce, například faktura vystavená 30. 7. a přijatá 2. 8. má červencové číslo. Takový doklad zůstane
-beze změny a v náhledu je mezi ponechanými čísly s důvodem „číslo patří do měsíce vystavení, ne do zvoleného měsíce“.
-Naopak doklad s číslem zvoleného měsíce, jehož zvolené datum leží v jiném měsíci, si číslo také nechá („číslo tohoto
-měsíce, zvolené datum leží v jiném měsíci“) a nová čísla ho přeskočí.
+Doklad, který podle zvoleného data patří do měsíce, ale má automatické číslo jiného měsíce, dostane číslo tohoto
+měsíce. Například faktura vystavená 30. 7. a přijatá 2. 8., očíslovaná podle data vystavení červencovým číslem, dostane
+při přečíslování srpna podle data přijetí srpnové číslo. Náhled u ní ve sloupci **Poznámka** uvede například „číslo z 07/2026,
+přesune se do tohoto měsíce“. Číslo v původním měsíci se tím uvolní, řada původního měsíce se
+jinak nemění a uvolněné číslo se znovu nevydá. Doklad zůstane beze změny a náhled uvede důvod mezi ponechanými čísly,
+když je sám po uzávěrce nebo uzamčený k datu, když jeho číslo patří do měsíce po uzávěrce nebo uzamčeného, nebo když je
+po uzávěrce či uzamčený přečíslovaný měsíc. Doklad s číslem zvoleného měsíce, jehož zvolené datum leží v jiném měsíci,
+si číslo nechá („číslo tohoto měsíce, zvolené datum leží v jiném měsíci“), nová čísla ho přeskočí a do jeho měsíce ho
+přesune přečíslování toho měsíce.
 
 Ručně zadaná a cizí čísla zůstanou beze změny a nová čísla je přeskočí. Interní číslo se přepíše i
 v účetním deníku (číslo dokladu a popis zápisu, včetně storna) a v popisu příjemky. Do kontrolního hlášení jde číslo

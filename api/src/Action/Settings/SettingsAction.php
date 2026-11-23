@@ -33,6 +33,7 @@ use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
+use MyInvoice\Service\PurchaseInvoice\PurchaseNumberingDate;
 use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\Supplier\SupplierCarryOver;
@@ -677,6 +678,8 @@ final class SettingsAction
             // Číslování přijatých dokladů podle typu (migrace 2001)
             'purchase_invoice_numbering', 'purchase_receipt_number_format', 'purchase_credit_note_number_format',
             'purchase_advance_number_format', 'purchase_tax_document_number_format',
+            // Datum pro měsíc a rok čísla přijatých dokladů i přečíslování (migrace 2336)
+            'purchase_numbering_date_basis',
             'invoice_number_period',
             // Per-supplier branding emailů (migrace 0016) + PDF logo+název (migrace 0058)
             'email_branding_enabled', 'email_accent_color', 'pdf_logo_show_name', 'branding_profiles_enabled',
@@ -1106,6 +1109,9 @@ final class SettingsAction
             && !in_array($body['purchase_invoice_numbering'], [PurchaseNumberSeries::MODE_SHARED, PurchaseNumberSeries::MODE_BY_KIND], true)
         ) {
             return Json::error($response, 'validation_failed', 'Neplatné purchase_invoice_numbering (shared|by_kind).', 400);
+        }
+        if (array_key_exists(PurchaseNumberingDate::COLUMN, $body) && !PurchaseNumberingDate::isValid($body[PurchaseNumberingDate::COLUMN])) {
+            return Json::error($response, 'validation_failed', 'Neplatné purchase_numbering_date_basis (issue|received|tax).', 400);
         }
         // Řady přijatých dokladů podle typu musí jít od sebe rozeznat, jinak by se
         // počítadla i přečíslování pletla (číslo účtenky by prošlo vzorem faktur).

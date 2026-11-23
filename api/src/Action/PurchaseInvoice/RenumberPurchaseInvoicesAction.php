@@ -17,7 +17,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/purchase-invoices/renumber {period, date_basis}                 přečíslování měsíce
  *
  * date_basis = issue (datum vystavení) | received (datum přijetí) | tax (DUZP). Bez něj
- * platí volba uložená při posledním přečíslování firmy.
+ * platí nastavení firmy „Číslovat přijaté doklady podle data“, provedené přečíslování
+ * zvolené datum do nastavení uloží.
  *
  * Interní plumbing (není ve veřejném API). Klient přečíslovat nesmí, interní čísla
  * spravuje účetní.

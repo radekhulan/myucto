@@ -215,6 +215,8 @@ const PURCHASE_SERIES_KINDS = [
   { kind: 'tax_document', field: 'purchase_tax_document_number_format', fallback: 'DZ{YY}{MM}{CCC}' },
 ] as const
 type PurchaseSeriesField = typeof PURCHASE_SERIES_KINDS[number]['field']
+// Datum pro měsíc a rok čísla přijatých dokladů (PurchaseNumberingDate::BASES na backendu).
+const PURCHASE_NUMBERING_BASES = ['issue', 'received', 'tax'] as const
 const purchaseByKind = computed(() => supplier.value?.purchase_invoice_numbering === 'by_kind')
 function purchaseSeriesCheck(field: PurchaseSeriesField, fallback: string) {
   const own = (supplier.value?.[field] ?? '').trim()
@@ -635,6 +637,10 @@ async function saveSupplier() {
         purchase_credit_note_number_format: supplier.value.purchase_credit_note_number_format ?? null,
         purchase_advance_number_format: supplier.value.purchase_advance_number_format ?? null,
         purchase_tax_document_number_format: supplier.value.purchase_tax_document_number_format ?? null,
+      } : {}),
+      // Chybějící hodnota (nedoběhlá migrace 2336) se neposílá.
+      ...(supplier.value.purchase_numbering_date_basis !== undefined ? {
+        purchase_numbering_date_basis: supplier.value.purchase_numbering_date_basis,
       } : {}),
       invoice_number_period: supplier.value.invoice_number_period,
       // Sklad (Epic SKLAD) — nezávislé na accounting_mode.
@@ -1518,6 +1524,15 @@ async function confirmTaxRepDelete() {
               </p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
               <p class="text-xs text-neutral-400 mt-1">{{ t('settings.purchase_invoice_number_format_hint') }}</p>
+            </div>
+            <div class="md:col-span-2" data-test="purchase-numbering-date">
+              <label class="block text-xs font-medium text-neutral-700 mb-1" for="purchase-numbering-date-basis">{{ t('settings.purchase_numbering.date_basis') }}</label>
+              <select id="purchase-numbering-date-basis" v-model="supplier.purchase_numbering_date_basis" data-test="purchase-numbering-date-basis"
+                :disabled="supplier.purchase_numbering_date_basis === undefined"
+                class="w-full md:w-1/2 h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface disabled:opacity-60">
+                <option v-for="b in PURCHASE_NUMBERING_BASES" :key="b" :value="b">{{ t(`settings.purchase_numbering.date_basis_option.${b}`) }}</option>
+              </select>
+              <p class="text-xs text-neutral-400 mt-1">{{ t('settings.purchase_numbering.date_basis_hint') }}</p>
             </div>
             <template v-if="purchaseByKind">
               <div v-for="s in PURCHASE_SERIES_KINDS" :key="s.kind" :data-test="`purchase-series-${s.kind}`">

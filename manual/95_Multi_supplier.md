@@ -147,6 +147,7 @@ pořadové číslo resetuje.
 1. Otevřete `Firma → Nastavení`, záložku **Číslování faktur**.
 2. Vyplňte šablonu pro fakturu, zálohovou fakturu a dobropis. Pod každým polem je živý náhled příštího čísla (například „Náhled: `JD2026-001`"). Chcete-li číslovat zjednodušené daňové doklady zvlášť, vyplňte i **Šablonu pro zjednodušený daňový doklad**; prázdná znamená, že se číslují řadou faktur.
 3. V poli **Reset číselné řady** zvolte **Roční (1. ledna)**, **Měsíční (1. dne v měsíci)**, nebo **Bez resetu (souvislá řada)**.
+   U přijatých dokladů zvolte v části **Přijaté doklady** i pole **Číslovat přijaté doklady podle data** (datum vystavení, přijetí nebo DUZP), z kterého data dostane číslo měsíc a rok (viz „Číslování podle data“ v [§ 23.11.7](23_Prijate_faktury.md#23117-danova-uznatelnost-a-narok-na-odpocet)).
 4. Uložte nastavení.
 5. Navazujete-li na rozjetou číselnou řadu (typicky při přechodu z jiného programu), zadejte do pole **Příští číslo** číslo, kterým má řada pokračovat, a klikněte na **Nastavit počítadlo**. Ukáže se náhled výsledného čísla. Šablonu uložte před nastavením počítadla.
 

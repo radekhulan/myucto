@@ -6,6 +6,7 @@ namespace MyInvoice\Service\NumberSeries;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\NumberSeriesRepository;
+use MyInvoice\Service\PurchaseInvoice\PurchaseNumberingDate;
 use PDO;
 
 /**
@@ -39,11 +40,17 @@ final class NativeSeriesCompleteness
         }
         $s = NumberSeriesKinds::SPACES[$space];
         $period = (string) $row['period'];
-        $sql = "SELECT {$s['number']} AS num, {$s['date']} AS d FROM {$s['table']}
+        // Přijaté doklady dělí řadu na období podle data pro číslování (nastavení firmy),
+        // stejně jako ho přiděluje PurchaseInvoiceRepository::ensureVarsymbol(). Výběr zužuje
+        // index řady (supplier_id, number_series_id), datum ve WHERE je až nad ním.
+        $date = $space === 'purchase'
+            ? PurchaseNumberingDate::sql(PurchaseNumberingDate::stored($this->db, $supplierId))
+            : $s['date'];
+        $sql = "SELECT {$s['number']} AS num, {$date} AS d FROM {$s['table']}
                  WHERE supplier_id = ? AND number_series_id = ? AND {$s['number']} IS NOT NULL";
         $params = [$supplierId, (int) $row['id']];
         if ($period !== 'none') {
-            $sql .= " AND {$s['date']} >= ? AND {$s['date']} < ?";
+            $sql .= " AND {$date} >= ? AND {$date} < ?";
             $params[] = sprintf('%04d-01-01', $year);
             $params[] = sprintf('%04d-01-01', $year + 1);
         }

@@ -134,6 +134,37 @@ final class PurchaseNumberSeries
         return '/^' . $regex . '$/';
     }
 
+    /**
+     * Období, které nese číslo podle šablony (opak {@see render()}): rok a měsíc z čísla,
+     * null u části, kterou šablona nemá. Null = číslo šabloně neodpovídá (ruční nebo cizí
+     * číslo, číslo jiné řady).
+     *
+     * @return array{year: ?string, month: ?string}|null rok YYYY, měsíc MM
+     */
+    public static function numberPeriod(string $template, string $number): ?array
+    {
+        if (!preg_match('/\{C+\}/', $template)) {
+            return null;
+        }
+        $parts = preg_split('/(\{PP\}|\{YYYY\}|\{YY\}|\{MM\}|\{C+\})/', $template, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $regex = '';
+        foreach ($parts as $p) {
+            $regex .= match (true) {
+                $p === '{PP}'                       => '(?:' . implode('|', self::TAX_PREFIXES) . ')',
+                $p === '{YYYY}'                     => '(?<y4>\d{4})',
+                $p === '{YY}'                       => '(?<y2>\d{2})',
+                $p === '{MM}'                       => '(?<mm>0[1-9]|1[0-2])',
+                (bool) preg_match('/^\{C+\}$/', $p) => '\d+',
+                default                             => preg_quote($p, '/'),
+            };
+        }
+        if (!preg_match('/^' . $regex . '$/J', $number, $m)) {
+            return null;
+        }
+        $year = ($m['y4'] ?? '') !== '' ? $m['y4'] : (($m['y2'] ?? '') !== '' ? '20' . $m['y2'] : null);
+        return ['year' => $year, 'month' => ($m['mm'] ?? '') !== '' ? $m['mm'] : null];
+    }
+
     /** Vyrenderuje číslo ze šablony: {PP} prefix, {YYYY}/{YY}/{MM} z období, {C+} čítač. */
     public static function render(string $template, string $prefix, string $period, int $counter): string
     {

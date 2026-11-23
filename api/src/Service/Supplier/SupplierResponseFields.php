@@ -51,7 +51,7 @@ final class SupplierResponseFields
         'credit_note_number_format', 'simplified_number_format', 'simplified_hide_customer_default',
         'purchase_invoice_number_format', 'purchase_invoice_numbering', 'purchase_receipt_number_format',
         'purchase_credit_note_number_format', 'purchase_advance_number_format',
-        'purchase_tax_document_number_format', 'invoice_number_period', 'email_branding_enabled',
+        'purchase_tax_document_number_format', 'purchase_numbering_date_basis', 'invoice_number_period', 'email_branding_enabled',
         'email_accent_color', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled',
         'default_branding_profile_id', 'has_email_logo', 'payment_thanks_enabled',
         'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf',

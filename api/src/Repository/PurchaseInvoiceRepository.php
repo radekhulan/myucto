@@ -17,6 +17,7 @@ use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
+use MyInvoice\Service\PurchaseInvoice\PurchaseNumberingDate;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
@@ -3438,7 +3439,7 @@ final class PurchaseInvoiceRepository
      * číslo nevezme — skočí za nejvyšší skutečně použité číslo dané řady a najde
      * první volné. Unique index `uq_pi_supplier_varsymbol` je definitivní pojistka.
      *
-     * $period je YYYYMM (období DUZP/vystavení); čítačový klíč se z něj odvodí dle scope.
+     * $period je YYYYMM (období data pro číslování, {@see PurchaseNumberingDate}); čítačový klíč se z něj odvodí dle scope.
      * $kind = typ dokladu; řadu (šablonu a klíč počítadla) určuje {@see PurchaseNumberSeries}.
      */
     public function nextVarsymbol(int $supplierId, ?string $period = null, string $prefix = 'PF', string $kind = 'invoice'): string
@@ -3728,12 +3729,13 @@ final class PurchaseInvoiceRepository
 
     /**
      * Přiřadí varsymbol fakture, pokud ho nemá. Idempotentní — pokud už ho má, nedělá nic.
+     * Měsíc a rok čísla plyne z data pro číslování podle nastavení firmy ({@see PurchaseNumberingDate}).
      */
     public function ensureVarsymbol(int $id, int $supplierId): string
     {
         $pdo = $this->db->pdo();
         $seriesColumn = $this->db->hasColumn('purchase_invoices', 'number_series_id') ? 'number_series_id' : 'NULL AS number_series_id';
-        $stmt = $pdo->prepare("SELECT varsymbol, issue_date, vat_deduction, tax_deductible, document_kind, {$seriesColumn} FROM purchase_invoices WHERE id = ? AND supplier_id = ?");
+        $stmt = $pdo->prepare("SELECT varsymbol, issue_date, received_at, tax_date, vat_deduction, tax_deductible, document_kind, {$seriesColumn} FROM purchase_invoices WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
@@ -3743,7 +3745,8 @@ final class PurchaseInvoiceRepository
             return (string) $row['varsymbol'];
         }
 
-        $period = date('Ym', strtotime((string) $row['issue_date']));
+        $numberingDate = PurchaseNumberingDate::of($row, PurchaseNumberingDate::stored($this->db, $supplierId));
+        $period = str_replace('-', '', substr($numberingDate, 0, 7));
         $prefix = self::varsymbolPrefix((string) ($row['vat_deduction'] ?? 'full'), (bool) ($row['tax_deductible'] ?? 1));
 
         // Číslo se čerpá ve stejné transakci, která ho zapíše na doklad (viz
@@ -3757,10 +3760,10 @@ final class PurchaseInvoiceRepository
             // Řada z číselníku: volba na dokladu, jinak výchozí řada. Převedená řada nebo
             // prázdný číselník čísluje dosavadní cestou podle druhu dokladu.
             $chosen = $row['number_series_id'] !== null ? (int) $row['number_series_id'] : null;
-            $issueDate = new \DateTimeImmutable((string) $row['issue_date']);
-            $native = $this->numberSeriesAllocator()->nativeFor($supplierId, 'purchase', $chosen, $issueDate);
+            $date = new \DateTimeImmutable($numberingDate);
+            $native = $this->numberSeriesAllocator()->nativeFor($supplierId, 'purchase', $chosen, $date);
             $varsymbol = $native !== null
-                ? $this->numberSeriesAllocator()->allocate($supplierId, $native, $issueDate, $prefix)
+                ? $this->numberSeriesAllocator()->allocate($supplierId, $native, $date, $prefix)
                 : $this->nextVarsymbol($supplierId, $period, $prefix, (string) ($row['document_kind'] ?? 'invoice'));
             $usedSeries = $native !== null ? (int) $native['id'] : null;
             if ($usedSeries !== $chosen) {

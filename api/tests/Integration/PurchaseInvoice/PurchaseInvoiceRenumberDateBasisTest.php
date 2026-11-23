@@ -18,7 +18,8 @@ use PHPUnit\Framework\TestCase;
  * - Podle data přijetí se doklady měsíce vyberou i seřadí jinak než podle data vystavení.
  * - Bez volby platí uložená volba firmy, výchozí je datum vystavení (dosavadní chování).
  * - Doklad bez data přijetí se řadí podle data vystavení a náhled to označí.
- * - Doklad s číslem jiného měsíce zůstane beze změny a náhled uvede důvod.
+ * - Doklad s automatickým číslem jiného měsíce dostane číslo měsíce zvoleného data, pokud
+ *   tím přečíslování nesáhne na zamčený nebo uzavřený měsíc ani doklad.
  *
  * Izolace: období 2099-07 až 2099-09, doklady se zakládají a mažou v testu.
  */
@@ -63,7 +64,7 @@ final class PurchaseInvoiceRenumberDateBasisTest extends TestCase
         }
 
         $this->origSupplier = (array) $pdo->query(
-            "SELECT purchase_invoice_number_format, purchase_invoice_numbering, purchase_renumber_date_basis
+            "SELECT purchase_invoice_number_format, purchase_invoice_numbering, purchase_numbering_date_basis
                FROM supplier WHERE id = {$this->supplierId}"
         )->fetch(PDO::FETCH_ASSOC);
         $locked = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
@@ -71,7 +72,7 @@ final class PurchaseInvoiceRenumberDateBasisTest extends TestCase
         $row = $locked->fetch(PDO::FETCH_ASSOC);
         $this->origLockedUntil = $row === false ? false : ($row['locked_until'] ?? null);
 
-        $this->setSupplier(['purchase_invoice_number_format' => null, 'purchase_invoice_numbering' => 'shared', 'purchase_renumber_date_basis' => 'issue']);
+        $this->setSupplier(['purchase_invoice_number_format' => null, 'purchase_invoice_numbering' => 'shared', 'purchase_numbering_date_basis' => 'issue']);
         $this->cleanup();
     }
 
@@ -136,7 +137,7 @@ final class PurchaseInvoiceRenumberDateBasisTest extends TestCase
 
     private function storedBasis(): string
     {
-        return (string) $this->db->pdo()->query("SELECT purchase_renumber_date_basis FROM supplier WHERE id = {$this->supplierId}")->fetchColumn();
+        return (string) $this->db->pdo()->query("SELECT purchase_numbering_date_basis FROM supplier WHERE id = {$this->supplierId}")->fetchColumn();
     }
 
     /**
@@ -231,7 +232,7 @@ final class PurchaseInvoiceRenumberDateBasisTest extends TestCase
         self::assertSame([false, true], array_column($plan['changes'], 'date_fallback'));
     }
 
-    public function testDocumentNumberedInOtherMonthIsKeptWithReason(): void
+    public function testDocumentNumberedInOtherMonthMovesToMonthOfChosenDate(): void
     {
         $july = $this->received('2099-07-30', '2099-08-02');
         $septReceived = $this->received('2099-08-03', '2099-09-01');
@@ -242,23 +243,119 @@ final class PurchaseInvoiceRenumberDateBasisTest extends TestCase
 
         $plan = $this->renumber->preview($this->supplierId, '2099-08', 'received');
 
-        self::assertSame([$august], array_column($plan['changes'], 'id'));
-        $kept = array_column($plan['kept'], 'reason', 'id');
-        self::assertSame('number_other_month', $kept[$july] ?? null,
-            'Doklad přijatý v srpnu s červencovým číslem zůstane, jeho číslo nepatří do srpnové řady.');
-        self::assertSame('date_other_month', $kept[$septReceived] ?? null,
+        self::assertSame([$july, $august], array_column($plan['changes'], 'id'));
+        $rows = array_column($plan['changes'], null, 'id');
+        self::assertSame('209907', $rows[$july]['from_period'], 'Náhled uvede měsíc, ze kterého číslo odchází.');
+        self::assertNull($rows[$august]['from_period']);
+        self::assertSame([$septReceived => 'date_other_month'], array_column($plan['kept'], 'reason', 'id'),
             'Srpnové číslo dokladu přijatého v září zůstane obsazené.');
-        self::assertSame([$august => 'PF9908002'], self::newNumbers($plan));
+        self::assertSame([$july => 'PF9908002', $august => 'PF9908003'], self::newNumbers($plan));
 
         $this->renumber->renumber($this->supplierId, '2099-08', $this->userId, 'received');
 
-        self::assertSame('PF9907001', $this->numberOf($july));
+        self::assertSame('PF9908002', $this->numberOf($july), 'Doklad přijatý v srpnu dostane srpnové číslo.');
         self::assertSame('PF9908001', $this->numberOf($septReceived));
-        self::assertSame('PF9908002', $this->numberOf($august));
+        self::assertSame('PF9908003', $this->numberOf($august));
+        self::assertSame(3, $this->counter('209908'));
+        self::assertSame(1, $this->counter('209907'), 'Řada původního měsíce se nesnižuje, uvolněné číslo se znovu nevydá.');
 
         $september = $this->renumber->preview($this->supplierId, '2099-09', 'received');
-        self::assertSame([], $september['changes']);
-        self::assertSame([$septReceived => 'number_other_month'], array_column($september['kept'], 'reason', 'id'));
+        self::assertSame([$septReceived => 'PF9909001'], self::newNumbers($september));
+        self::assertSame([], $september['kept']);
+        $this->renumber->renumber($this->supplierId, '2099-09', $this->userId, 'received');
+        self::assertSame('PF9909001', $this->numberOf($septReceived));
+    }
+
+    public function testDocumentIsNotMovedOutOfLockedMonth(): void
+    {
+        // Číslo podle data přijetí (červenec), datum vystavení i doklad sám v srpnu.
+        $this->setSupplier(['purchase_numbering_date_basis' => 'received']);
+        $moved = $this->received('2099-08-10', '2099-07-28');
+        $august = $this->received('2099-08-12', '2099-08-12');
+        self::assertSame('PF9907001', $this->numberOf($moved));
+        self::assertSame('PF9908001', $this->numberOf($august));
+        $this->lockUntil('2099-07-31');
+
+        $plan = $this->renumber->preview($this->supplierId, '2099-08', 'issue');
+
+        self::assertSame([], $plan['blocked']);
+        self::assertSame([$moved => 'number_month_locked'], array_column($plan['kept'], 'reason', 'id'),
+            'Číslo zamčeného měsíce se nepřesune, náhled uvede důvod.');
+        self::assertSame([$august], array_column($plan['changes'], 'id'));
+
+        $this->renumber->renumber($this->supplierId, '2099-08', $this->userId, 'issue');
+
+        self::assertSame('PF9907001', $this->numberOf($moved));
+        self::assertSame('PF9908001', $this->numberOf($august));
+    }
+
+    public function testDocumentIsNotMovedIntoLockedMonth(): void
+    {
+        // Číslo podle vystavení (září), přijatý v zamčeném srpnu.
+        $moved = $this->received('2099-09-05', '2099-08-03');
+        self::assertSame('PF9909001', $this->numberOf($moved));
+        $this->lockUntil('2099-08-31');
+
+        $plan = $this->renumber->preview($this->supplierId, '2099-08', 'received');
+
+        self::assertSame([], $plan['changes']);
+        self::assertSame([$moved => 'month_locked'], array_column($plan['kept'], 'reason', 'id'));
+    }
+
+    public function testLockedDocumentIsNotMoved(): void
+    {
+        $moved = $this->received('2099-07-30', '2099-08-02');
+        $this->lockUntil('2099-07-30');
+
+        $plan = $this->renumber->preview($this->supplierId, '2099-08', 'received');
+
+        self::assertSame([$moved => 'document_locked'], array_column($plan['kept'], 'reason', 'id'));
+        self::assertSame([], $plan['changes']);
+    }
+
+    public function testManualNumberIsNotMoved(): void
+    {
+        $manual = $this->received('2099-07-30', '2099-08-02');
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET varsymbol = ? WHERE id = ?')->execute(['RUCNI-7', $manual]);
+        $august = $this->received('2099-08-05', '2099-08-06');
+
+        $plan = $this->renumber->preview($this->supplierId, '2099-08', 'received');
+
+        self::assertSame([$manual => 'manual_number'], array_column($plan['kept'], 'reason', 'id'));
+        self::assertSame([$august => 'PF9908001'], self::newNumbers($plan));
+        $this->renumber->renumber($this->supplierId, '2099-08', $this->userId, 'received');
+        self::assertSame('RUCNI-7', $this->numberOf($manual));
+    }
+
+    public function testChangedDocumentKindMovesToOwnSeriesOfChosenMonth(): void
+    {
+        $this->setSupplier(['purchase_invoice_numbering' => 'by_kind']);
+        $receipt = $this->received('2099-07-30', '2099-08-02');
+        self::assertSame('PF9907001', $this->numberOf($receipt));
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET document_kind = 'receipt' WHERE id = ?")->execute([$receipt]);
+
+        $plan = $this->renumber->preview($this->supplierId, '2099-08', 'received');
+
+        self::assertSame([$receipt => 'UC9908001'], self::newNumbers($plan),
+            'Doklad se změněným typem dostane číslo své řady v měsíci data přijetí.');
+        $this->renumber->renumber($this->supplierId, '2099-08', $this->userId, 'received');
+        self::assertSame('UC9908001', $this->numberOf($receipt));
+        self::assertSame(1, $this->counter('receipt:209908'));
+    }
+
+    private function lockUntil(string $date): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        )->execute([$this->supplierId, $date]);
+    }
+
+    private function counter(string $key): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT last_number FROM purchase_invoice_counters WHERE supplier_id = ? AND period = ?');
+        $stmt->execute([$this->supplierId, $key]);
+        return (int) $stmt->fetchColumn();
     }
 
     public function testReceivedBasisStillRefusesLockedMonth(): void

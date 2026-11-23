@@ -16,8 +16,9 @@ import { ICONS, btnFilled, disabledTitle } from '@/components/ui/buttonStyles'
  * Přečíslování dokladů jednoho měsíce podle data. Záložky = agendy: přijaté doklady
  * (výchozí), pokladna, ostatní pohledávky, ostatní závazky a interní doklady. Náhled
  * se načte po výběru měsíce, samotné přečíslování až po potvrzení. Přijaté doklady se
- * řadí podle zvoleného data (vystavení, přijetí, DUZP); výchozí volbu vrací náhled
- * a server ji uloží při přečíslování. Pravidla (co se
+ * číslují podle zvoleného data (vystavení, přijetí, DUZP); výchozí je nastavení firmy,
+ * které vrací náhled, a server zvolené datum do nastavení uloží při přečíslování.
+ * Doklad s číslem jiného měsíce, který se do měsíce přesune, ukáže poznámku. Pravidla (co se
  * přečísluje, co zůstane, kdy je měsíc zamčený) drží backend
  * (PurchaseInvoiceRenumberService, AgendaRenumberService), stránka je jen zobrazuje.
  * Záložka se ukáže jen s právem zápisu dané agendy, stejným, jaké chce server.
@@ -38,6 +39,7 @@ interface ViewRow {
   received?: string
   taxDate?: string
   fallback?: boolean
+  fromPeriod?: string | null
 }
 
 interface ViewPlan {
@@ -114,10 +116,22 @@ function fromPurchase(p: PurchaseRenumberPlan): ViewPlan {
     kind: t(`purchase_invoice.document_kind.${r.document_kind}`), number: r.varsymbol,
     newNumber: r.new_varsymbol ?? '', changed: !!r.changed, reason: r.reason ?? '',
     issued: r.issue_date, received: r.received_at, taxDate: r.tax_date, fallback: !!r.date_fallback,
+    fromPeriod: r.from_period ?? null,
   }))
   dateBasis.value = p.date_basis
   return { changes: map(p.changes), kept: map(p.kept), blocked: map(p.blocked) }
 }
+
+/** Období čísla jiného měsíce: 209907 → 07/2099, u roční řady jen rok. */
+function periodLabel(p: string): string {
+  return p.length === 6 ? `${p.slice(4)}/${p.slice(0, 4)}` : p
+}
+
+function movedNote(r: ViewRow): string {
+  return r.fromPeriod != null && r.changed ? t('purchase_invoice.renumber.moved_from', { period: periodLabel(r.fromPeriod) }) : ''
+}
+
+const hasMoves = computed(() => isPurchase.value && (plan.value?.changes ?? []).some(c => movedNote(c) !== ''))
 
 function fromAgenda(p: AgendaRenumberPlan): ViewPlan {
   const map = (rows: AgendaRenumberPlan['changes']): ViewRow[] => rows.map(r => ({
@@ -243,6 +257,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
           {{ t('purchase_invoice.renumber.run', { count: moves.length }) }}
         </button>
       </div>
+      <p v-if="isPurchase" class="text-xs text-neutral-500" data-test="renumber-basis-hint">{{ t('purchase_invoice.renumber.basis_hint') }}</p>
       <p class="text-xs text-neutral-500">
         {{ isPurchase ? t('purchase_invoice.renumber.tax_note') : t(`purchase_invoice.renumber.agenda_note.${agendaGroup}`) }}
       </p>
@@ -285,6 +300,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
               <th v-if="showKind" class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_kind') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_old') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_new') }}</th>
+              <th v-if="hasMoves" class="text-left font-medium px-3 py-2" data-test="renumber-col-note">{{ t('purchase_invoice.renumber.col_note') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -308,6 +324,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
               <td class="px-3 py-2 font-mono" :class="c.changed ? 'font-semibold text-warning-700' : ''">
                 {{ c.changed ? c.newNumber : t('purchase_invoice.renumber.unchanged') }}
               </td>
+              <td v-if="hasMoves" class="px-3 py-2 text-xs text-neutral-600" :data-test="`renumber-moved-${c.id}`">{{ movedNote(c) }}</td>
             </tr>
           </tbody>
         </table>
@@ -319,6 +336,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
             </div>
             <div class="text-xs text-neutral-500">{{ [c.kind, c.detail].filter(Boolean).join(' · ') }}</div>
             <div v-if="isPurchase && c.fallback" class="text-xs text-warning-700">{{ t(`purchase_invoice.renumber.fallback.${dateBasis}`) }}</div>
+            <div v-if="movedNote(c)" class="text-xs text-neutral-600">{{ movedNote(c) }}</div>
             <div class="mt-1 font-mono text-xs">
               {{ c.number }} → <span :class="c.changed ? 'font-semibold text-warning-700' : ''">{{ c.changed ? c.newNumber : t('purchase_invoice.renumber.unchanged') }}</span>
             </div>

@@ -12,31 +12,34 @@ use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 use PDO;
 
 /**
- * Přečíslování přijatých dokladů jednoho měsíce podle zvoleného data.
+ * Přečíslování přijatých dokladů jednoho měsíce podle data pro číslování.
  *
  * Interní číslo dostává doklad při přijetí, takže pořadí v řadě odpovídá pořadí
- * přijímání, ne datu. Přečíslování vezme automaticky očíslované doklady měsíce
- * (číslo odpovídá šabloně některé řady pro daný měsíc), seřadí je podle zvoleného data
- * a v každé řadě jim přidělí čísla od 1. Řadu určuje AKTUÁLNÍ typ dokladu, takže
- * doklad, kterému se po očíslování změnil typ, se přesune do správné řady.
+ * přijímání, ne datu. Přečíslování vezme automaticky očíslované doklady, jejichž datum
+ * pro číslování ({@see PurchaseNumberingDate}: vystavení, přijetí nebo DUZP) leží v měsíci,
+ * seřadí je podle něj a v každé řadě jim přidělí čísla od 1. Řadu určuje AKTUÁLNÍ typ
+ * dokladu, takže doklad, kterému se po očíslování změnil typ, se přesune do správné řady.
  *
- * Datum pro výběr měsíce i pořadí ({@see BASES}): datum vystavení (výchozí), datum přijetí
- * nebo DUZP. Doklad bez zvoleného data se řadí podle data vystavení. Volba se uloží
- * do `supplier.purchase_renumber_date_basis` při provedení přečíslování.
+ * Volbu data bere náhled z nastavení firmy (`supplier.purchase_numbering_date_basis`,
+ * stejné nastavení, podle kterého dostává číslo nový doklad), dialog ji může změnit
+ * a provedené přečíslování ji uloží. Doklad bez zvoleného data se řadí podle data vystavení.
  *
- * Měsíc v čísle dokladu plyne z data vystavení ({@see PurchaseInvoiceRepository::ensureVarsymbol()}),
- * takže při výběru podle jiného data může doklad měsíce nést číslo jiného měsíce. Takový
- * doklad zůstane beze změny (důvod `number_other_month`), stejně jako doklad s číslem
- * tohoto měsíce, jehož zvolené datum leží v jiném měsíci (`date_other_month`).
+ * Doklad měsíce s automatickým číslem jiného měsíce (číslo dostal podle jiného data)
+ * dostane číslo tohoto měsíce. Číslo původního měsíce se tím uvolní, nic jiného se
+ * v jeho řadě nemění. Nepřesune se doklad, který je sám po uzávěrce nebo uzamčený
+ * (`document_locked`), ani když je po uzávěrce nebo uzamčený původní měsíc čísla
+ * (`number_month_locked`) či přečíslovaný měsíc (`month_locked`). Doklad s číslem tohoto
+ * měsíce, jehož datum pro číslování leží jinde, si číslo nechá (`date_other_month`),
+ * přesune ho přečíslování jeho měsíce.
  *
- * Mimo přečíslování zůstávají ručně zadaná a cizí čísla (neodpovídají šabloně)
- * i čísla jiného měsíce. Jejich čísla se při přidělování přeskočí.
+ * Mimo přečíslování zůstávají ručně zadaná a cizí čísla (neodpovídají šabloně).
+ * Jejich čísla se při přidělování přeskočí.
  *
  * U přijatých dokladů se souvislá řada nevyžaduje a do kontrolního hlášení jde
  * číslo dodavatele, takže přečíslování daňově nic nemění. Kopie interního čísla
  * v deníku (číslo dokladu a popis zápisu, včetně storna) a v popisu příjemky se
- * přepíší. Měsíc po uzávěrce (uzavřené i uzavírané účetní období, dokončená roční
- * uzávěrka daňové evidence) nebo uzamčený k datu se nepřečísluje vůbec.
+ * přepíší. Měsíc, jehož doklad je po uzávěrce (uzavřené i uzavírané účetní období,
+ * dokončená roční uzávěrka daňové evidence) nebo uzamčený k datu, se nepřečísluje vůbec.
  */
 final class PurchaseInvoiceRenumberService
 {
@@ -47,30 +50,29 @@ final class PurchaseInvoiceRenumberService
         private readonly ActivityLogger $activity,
     ) {}
 
-    /** Datum pro výběr měsíce a pořadí: vystavení (výchozí), přijetí, DUZP. */
-    public const BASES = ['issue', 'received', 'tax'];
+    /** Datum pro výběr měsíce a pořadí, viz {@see PurchaseNumberingDate::BASES}. */
+    public const BASES = PurchaseNumberingDate::BASES;
 
-    private const BASIS_COLUMN = ['issue' => 'issue_date', 'received' => 'received_at', 'tax' => 'tax_date'];
+    /** @var array<string, bool> období (YYYYMM / YYYY) → po uzávěrce nebo uzamčené */
+    private array $periodLocks = [];
 
-    /** Uložená volba firmy ({@see BASES}), bez uložené volby datum vystavení. */
+    /** Nastavení firmy ({@see BASES}), bez něj datum vystavení. */
     public function storedBasis(int $supplierId): string
     {
-        $stmt = $this->db->pdo()->prepare('SELECT purchase_renumber_date_basis FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        $basis = (string) $stmt->fetchColumn();
-        return in_array($basis, self::BASES, true) ? $basis : 'issue';
+        return PurchaseNumberingDate::stored($this->db, $supplierId);
     }
 
     /**
      * Náhled přečíslování (nic nezapisuje).
      *
-     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = uložená volba firmy
+     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = nastavení firmy
      * @return array{period: string, date_basis: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>}
      */
     public function preview(int $supplierId, string $period, ?string $basis = null): array
     {
         $period = self::normalizePeriod($period);
         $basis = $basis === null ? $this->storedBasis($supplierId) : self::normalizeBasis($basis);
+        $this->periodLocks = [];
         $settings = $this->repo->purchaseSeriesSettings($supplierId);
         $series = PurchaseNumberSeries::all($settings);
         $regexes = [];
@@ -86,35 +88,29 @@ final class PurchaseInvoiceRenumberService
             }
         }
 
-        // Prázdné nebo nulové datum (starší data z nestriktního režimu) = doklad bez data.
-        $column = self::BASIS_COLUMN[$basis];
-        $basisDate = $basis === 'issue'
-            ? 'p.issue_date'
-            : "CASE WHEN p.{$column} >= '1000-01-01' THEN p.{$column} END";
-
+        $basisDate = PurchaseNumberingDate::sql($basis, 'p.');
         $from = substr($period, 0, 4) . '-' . substr($period, 4, 2) . '-01';
         $to = date('Y-m-t', (int) strtotime($from));
         $stmt = $this->db->pdo()->prepare(
             "SELECT p.id, p.supplier_id, p.varsymbol, p.vendor_invoice_number, p.document_kind, p.issue_date,
                     p.tax_date, p.received_at, p.effective_cost_date, p.booked_at, p.status, p.vat_deduction,
-                    p.tax_deductible, c.company_name, {$basisDate} AS basis_date
+                    p.tax_deductible, c.company_name
                FROM purchase_invoices p
                LEFT JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
               WHERE p.supplier_id = ? AND p.varsymbol IS NOT NULL AND p.varsymbol <> ''
-              ORDER BY COALESCE({$basisDate}, p.issue_date) ASC, p.issue_date ASC, p.id ASC"
+              ORDER BY {$basisDate} ASC, p.issue_date ASC, p.id ASC"
         );
         $stmt->execute([$supplierId]);
 
         $participants = [];
         $kept = [];
-        /** @var array<string, true> $occupied čísla, která přečíslování nesmí použít */
+        /** @var array<string, true> $occupied čísla řad tohoto měsíce, která přečíslování nesmí použít */
         $occupied = [];
-        /** @var array<string, list<string>> $issueRegexes vzory čísel měsíce vystavení (YYYYMM) */
-        $issueRegexes = [];
+        $monthLocked = null;
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
             $vs = (string) $row['varsymbol'];
-            $row['date_fallback'] = $row['basis_date'] === null;
-            $row['basis_date'] = $row['basis_date'] ?? $row['issue_date'];
+            $row['date_fallback'] = PurchaseNumberingDate::usesFallback($row, $basis);
+            $row['basis_date'] = PurchaseNumberingDate::of($row, $basis);
             $inMonth = $row['basis_date'] >= $from && $row['basis_date'] <= $to;
             $auto = false;
             $monthNumber = false;
@@ -129,16 +125,38 @@ final class PurchaseInvoiceRenumberService
                 $participants[] = $row;
                 continue;
             }
-            $occupied[$vs] = true;
-            if ($inMonth) {
-                $issuePeriod = substr(str_replace('-', '', (string) $row['issue_date']), 0, 6);
-                $issueRegexes[$issuePeriod] ??= self::monthlyRegexes($series, $issuePeriod);
-                $otherMonth = $issuePeriod !== $period && self::matchesAny($issueRegexes[$issuePeriod], $vs);
-                $kept[] = self::describe($row) + ['reason' => $otherMonth ? 'number_other_month' : 'manual_number'];
-            } elseif ($monthNumber) {
-                // Číslo tohoto měsíce, ale zvolené datum leží jinde: číslo zůstane obsazené.
-                $kept[] = self::describe($row) + ['reason' => 'date_other_month'];
+            if (!$inMonth) {
+                if ($auto) {
+                    $occupied[$vs] = true;
+                }
+                if ($monthNumber) {
+                    // Číslo tohoto měsíce, ale datum pro číslování leží jinde: číslo zůstane obsazené.
+                    $kept[] = self::describe($row) + ['reason' => 'date_other_month'];
+                }
+                continue;
             }
+            $origin = self::numberOrigin($series, $vs);
+            if ($origin === null) {
+                $occupied[$vs] = true;
+                $kept[] = self::describe($row) + ['reason' => 'manual_number'];
+                continue;
+            }
+            // Automatické číslo jiného měsíce: doklad dostane číslo tohoto měsíce, pokud se
+            // nic nemění po uzávěrce ani v zamčeném období (doklad, původní ani tento měsíc).
+            $row['from_period'] = $origin;
+            $lock = $this->locks->forPurchaseInvoice($row);
+            $monthLocked ??= $this->periodLocked($supplierId, $period);
+            $reason = match (true) {
+                $lock->inClosedPeriod || $lock->inClosingPeriod || $lock->dateLocked => 'document_locked',
+                $this->periodLocked($supplierId, $origin, substr((string) $row['issue_date'], 0, 4)) => 'number_month_locked',
+                $monthLocked => 'month_locked',
+                default => null,
+            };
+            if ($reason !== null) {
+                $kept[] = self::describe($row) + ['reason' => $reason];
+                continue;
+            }
+            $participants[] = $row;
         }
 
         // Po uzávěrce (i rozpracované) se čísla nemění: podvojné účetnictví podle stavu
@@ -176,39 +194,56 @@ final class PurchaseInvoiceRenumberService
     }
 
     /**
-     * Vzory čísel řad s měsícem v šabloně pro dané období.
+     * Období automatického čísla podle šablony některé řady (YYYYMM, u roční řady YYYY,
+     * u šablony bez roku jen MM, u řady bez data prázdný řetězec), null = ruční nebo cizí číslo.
      *
      * @param array<string, array{template: string, kinds: list<string>}> $series
-     * @return list<string>
      */
-    private static function monthlyRegexes(array $series, string $period): array
+    private static function numberOrigin(array $series, string $number): ?string
     {
-        $out = [];
         foreach ($series as $s) {
-            $regex = str_contains($s['template'], '{MM}') ? PurchaseNumberSeries::counterRegex($s['template'], $period) : null;
-            if ($regex !== null) {
-                $out[] = $regex;
+            $p = PurchaseNumberSeries::numberPeriod($s['template'], $number);
+            if ($p !== null) {
+                return ($p['year'] ?? '') . ($p['month'] ?? '');
             }
         }
-        return $out;
+        return null;
     }
 
-    /** @param list<string> $regexes */
-    private static function matchesAny(array $regexes, string $value): bool
+    /**
+     * Je období (YYYYMM nebo YYYY) po uzávěrce nebo aspoň zčásti uzamčené k datu? Rok
+     * s dokončenou roční uzávěrkou daňové evidence, uzavřené nebo uzavírané účetní období
+     * na začátku či konci období, zámek k datu od jeho začátku.
+     *
+     * @param string $fallbackYear rok pro číslo bez roku (šablona jen s {MM})
+     */
+    private function periodLocked(int $supplierId, string $period, string $fallbackYear = ''): bool
     {
-        foreach ($regexes as $regex) {
-            if (preg_match($regex, $value)) {
-                return true;
-            }
+        if (strlen($period) === 2) {
+            $period = $fallbackYear . $period;
         }
-        return false;
+        if (!preg_match('/^\d{4}(\d{2})?$/', $period)) {
+            return false;
+        }
+        if (isset($this->periodLocks[$period])) {
+            return $this->periodLocks[$period];
+        }
+        $year = substr($period, 0, 4);
+        $first = strlen($period) === 6 ? $year . '-' . substr($period, 4, 2) . '-01' : $year . '-01-01';
+        $last = strlen($period) === 6 ? date('Y-m-t', (int) strtotime($first)) : $year . '-12-31';
+        $start = $this->locks->forDate($supplierId, $first);
+        $end = $this->locks->forDate($supplierId, $last);
+        return $this->periodLocks[$period] = TaxEvidenceYearLock::isFinal($this->db, $supplierId, (int) $year)
+            || $start->dateLocked
+            || $start->inClosedPeriod || $start->inClosingPeriod
+            || $end->inClosedPeriod || $end->inClosingPeriod;
     }
 
     /**
      * Přečísluje měsíc. Vrací stejný tvar jako {@see preview()} + počet změněných dokladů.
-     * Zadané datum pro výběr a pořadí se uloží jako volba firmy.
+     * Zadané datum pro výběr a pořadí se uloží do nastavení firmy (platí i pro číslo nového dokladu).
      *
-     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = uložená volba firmy
+     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = nastavení firmy
      * @return array{period: string, date_basis: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>, renumbered: int}
      * @throws \DomainException měsíc obsahuje doklad v uzavřeném nebo uzamčeném období
      */
@@ -249,7 +284,7 @@ final class PurchaseInvoiceRenumberService
             }
 
             if ($basis !== null) {
-                $pdo->prepare('UPDATE supplier SET purchase_renumber_date_basis = ? WHERE id = ?')->execute([$basis, $supplierId]);
+                $pdo->prepare('UPDATE supplier SET ' . PurchaseNumberingDate::COLUMN . ' = ? WHERE id = ?')->execute([$basis, $supplierId]);
             }
 
             if ($moves !== []) {
@@ -346,6 +381,8 @@ final class PurchaseInvoiceRenumberService
             'tax_date'              => (string) ($row['tax_date'] ?? ''),
             'date'                  => (string) ($row['basis_date'] ?? $row['issue_date']),
             'date_fallback'         => (bool) ($row['date_fallback'] ?? false),
+            // Období čísla jiného měsíce (YYYYMM / YYYY), které doklad opouští; null = číslo tohoto měsíce.
+            'from_period'           => isset($row['from_period']) ? (string) $row['from_period'] : null,
         ];
     }
 

@@ -204,7 +204,7 @@ final class MyuctoImportProfile
         'journal_entry_templates' => 'is_seeded = 1',
     ];
     /** Číslovací nastavení firmy, které obnova převezme z řádku `supplier` zdroje (zbytek firmy zůstává). */
-    public const SUPPLIER_NUMBERING_COLUMNS = ['invoice_number_period', 'purchase_invoice_numbering'];
+    public const SUPPLIER_NUMBERING_COLUMNS = ['invoice_number_period', 'purchase_invoice_numbering', 'purchase_numbering_date_basis'];
     public const SUPPLIER_NUMBERING_SUFFIX = '_number_format';
     public const CONFIG_TABLES = ['supplier_vat_status_history'];
     /**

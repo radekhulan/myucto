@@ -23740,9 +23740,10 @@
     },
     "renumber": {
       "title": "Renumbering received documents",
-      "intro": "A document gets its internal number when it is received, so the numbers follow the order of receiving. Renumbering selects the automatically numbered documents of the month by the chosen date (issue, receipt or tax point), sorts them by it and numbers them again from 1 in each number series. Manually entered numbers and numbers of another month stay unchanged.",
+      "intro": "A document gets its internal number when it is received, so the numbers follow the order of receiving. Renumbering selects the automatically numbered documents of the month by the chosen date (issue, receipt or tax point), sorts them by it and numbers them again from 1 in each number series. A document with an automatic number of another month that belongs to this month by the chosen date gets a number of this month. Manually entered numbers stay unchanged.",
       "tax_note": "The internal number is also rewritten in the accounting journal and in the stock receipt description. The VAT control statement uses the supplier number, so renumbering has no tax effect.",
-      "basis": "Sort by",
+      "basis": "Number by date",
+      "basis_hint": "The default is the company setting “Number received documents by date”. Renumbering saves the chosen date to the setting, and new documents are numbered by it too.",
       "basis_option": {
         "issue": "Issue date",
         "received": "Receipt date",
@@ -23774,7 +23775,7 @@
       "in_order": "The numbers already follow the chosen date.",
       "changes_count": "Numbers of {count} documents will change.",
       "kept_title": "Numbers kept ({count})",
-      "kept_hint": "Manually entered and foreign numbers and numbers of another month are not renumbered.",
+      "kept_hint": "Manually entered and foreign numbers, numbers of this month on documents dated in another month, and documents the move would take into a period after closing or locked to date.",
       "blocked_title": "This month cannot be renumbered",
       "blocked_hint": "Document numbers do not change after closing. These documents are in a closed or locked period:",
       "reason": {
@@ -23783,8 +23784,10 @@
         "period_closed": "closed period",
         "date_locked": "locked to date",
         "manual_number": "manual number",
-        "number_other_month": "the number belongs to the month of issue, not to the selected month",
-        "date_other_month": "number of this month, the chosen date is in another month",
+        "date_other_month": "number of this month, the chosen date is in another month (renumbering that month moves it)",
+        "document_locked": "the document is after closing or locked to date, it is not moved to another month",
+        "number_month_locked": "the number belongs to a month after closing or locked to date, the document is not moved out of it",
+        "month_locked": "this month is after closing or locked to date, the document is not moved into it",
         "cash_in": "receipt document, the payer has the number",
         "eet": "recorded in EET",
         "vat_document": "document with VAT",
@@ -23827,6 +23830,8 @@
       "col_partner": "Partner",
       "col_description": "Description",
       "col_reason": "Reason",
+      "col_note": "Note",
+      "moved_from": "number from {period}, moves to this month",
       "in_order_agenda": "The numbers already follow the dates.",
       "kept_hint_agenda": "Manually entered, taken over or handed-out numbers are not renumbered."
     },
@@ -29799,7 +29804,7 @@
     "numbering_issued_title": "Issued documents",
     "purchase_numbering": {
       "title": "Received documents",
-      "intro": "A received document gets its internal number when it is received; the month in the number comes from the issue date.",
+      "intro": "A received document gets its internal number when it is received. The month and year in the number come from the date the company numbers documents by.",
       "mode": "Number series",
       "mode_shared": "One series for all document types",
       "mode_by_kind": "Separate series for each document type",
@@ -29812,6 +29817,13 @@
         "advance": "Template for advances",
         "tax_document": "Template for tax documents for payment"
       },
+      "date_basis": "Number received documents by date",
+      "date_basis_option": {
+        "issue": "Issue date",
+        "received": "Receipt date",
+        "tax": "Tax point date"
+      },
+      "date_basis_hint": "Sets the month and year in the number of a new document and the selection of documents when renumbering. Example: an invoice issued on 28 Oct and received on 3 Nov gets a November number by receipt date (PF2611001) and an October number by issue date (PF2610001). A document without the chosen date is numbered by its issue date. Documents already numbered do not change with the setting; renumbering puts them in order.",
       "renumber_hint": "Documents numbered in a different order than their dates can be put in order with"
     },
     "numbering_preview": "Next number preview",

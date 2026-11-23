@@ -40,7 +40,9 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: m.replace }),
   RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }),
+}))
 
 import Renumber from '../Renumber.vue'
 
@@ -61,8 +63,9 @@ function receivedPlan() {
     changes: [
       purchaseRow(2, 'PF9908002', { issue_date: '2099-08-10', received_at: '0000-00-00', date: '2099-08-10', date_fallback: true, new_varsymbol: 'PF9908001', changed: true }),
       purchaseRow(1, 'PF9908001', { new_varsymbol: 'PF9908002', changed: true }),
+      purchaseRow(4, 'PF9907002', { issue_date: '2099-07-31', received_at: '2099-08-21', date: '2099-08-21', new_varsymbol: 'PF9908003', changed: true, from_period: '209907' }),
     ],
-    kept: [purchaseRow(3, 'PF9907001', { issue_date: '2099-07-30', received_at: '2099-08-03', date: '2099-08-03', reason: 'number_other_month' })],
+    kept: [purchaseRow(3, 'PF9907001', { issue_date: '2099-07-30', received_at: '2099-08-03', date: '2099-08-03', reason: 'number_month_locked', from_period: '209907' })],
     blocked: [],
   }
 }
@@ -170,7 +173,7 @@ describe('Renumber', () => {
     expect(wrapper.find('[data-test="renumber-fallback"]').text()).toBe('purchase_invoice.renumber.fallback.received')
 
     await wrapper.find('[data-test="renumber-kept"] button').trigger('click')
-    expect(wrapper.find('[data-test="renumber-kept-reason-3"]').text()).toBe('purchase_invoice.renumber.reason.number_other_month')
+    expect(wrapper.find('[data-test="renumber-kept-reason-3"]').text()).toBe('purchase_invoice.renumber.reason.number_month_locked')
 
     await wrapper.find('[data-test="renumber-run"]').trigger('click')
     await flushPromises()
@@ -185,5 +188,28 @@ describe('Renumber', () => {
 
     expect(wrapper.find('[data-test="renumber-col-taxDate"]').text()).toBe('purchase_invoice.renumber.col_tax_date')
     expect(wrapper.find('[data-test="renumber-fallback"]').text()).toBe('purchase_invoice.renumber.fallback.tax')
+  })
+
+  it('přijaté doklady: doklad s číslem jiného měsíce má poznámku o přesunu a dialog vysvětlí nastavení', async () => {
+    m.writable = new Set(['purchase_invoices'])
+    m.purchasePreview.mockResolvedValue(receivedPlan())
+    const wrapper = mount(Renumber)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="renumber-basis-hint"]').text()).toBe('purchase_invoice.renumber.basis_hint')
+    expect(wrapper.find('[data-test="renumber-col-note"]').text()).toBe('purchase_invoice.renumber.col_note')
+    expect(wrapper.find('[data-test="renumber-moved-4"]').text()).toBe('purchase_invoice.renumber.moved_from:{"period":"07/2099"}')
+    expect(wrapper.find('[data-test="renumber-moved-1"]').text()).toBe('')
+  })
+
+  it('bez přesunů z jiného měsíce sloupec poznámky nezobrazí', async () => {
+    m.writable = new Set(['purchase_invoices'])
+    const plan = receivedPlan()
+    plan.changes = plan.changes.slice(0, 2)
+    m.purchasePreview.mockResolvedValue(plan)
+    const wrapper = mount(Renumber)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="renumber-col-note"]').exists()).toBe(false)
   })
 })

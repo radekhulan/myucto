@@ -315,6 +315,8 @@ export interface Supplier {
   purchase_credit_note_number_format?: string | null
   purchase_advance_number_format?: string | null
   purchase_tax_document_number_format?: string | null
+  /** Datum pro měsíc a rok čísla přijatých dokladů i přečíslování (migrace 2336). */
+  purchase_numbering_date_basis?: 'issue' | 'received' | 'tax'
   invoice_number_period: 'year' | 'month' | 'none'
   // Per-supplier email branding (migrace 0016)
   email_branding_enabled: boolean

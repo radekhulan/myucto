@@ -893,10 +893,13 @@ export interface PurchaseRenumberRow {
   new_varsymbol?: string
   series?: string
   changed?: boolean
-  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number' | 'number_other_month' | 'date_other_month'
+  /** Období (YYYYMM, u roční řady YYYY) automatického čísla jiného měsíce, které doklad opouští. */
+  from_period?: string | null
+  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number' | 'date_other_month'
+    | 'document_locked' | 'number_month_locked' | 'month_locked'
 }
 
-/** Datum pro výběr měsíce a pořadí přečíslování: vystavení, přijetí, DUZP. */
+/** Datum pro číslování přijatých dokladů (nastavení firmy i přečíslování): vystavení, přijetí, DUZP. */
 export type PurchaseRenumberBasis = 'issue' | 'received' | 'tax'
 
 export interface PurchaseRenumberPlan {
