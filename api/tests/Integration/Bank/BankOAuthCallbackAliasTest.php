@@ -87,7 +87,9 @@ final class BankOAuthCallbackAliasTest extends TestCase
 
         $response = $this->container->get(CsasOnboardingAction::class)->callback($this->request($state), new Response());
 
-        self::assertSame('/bank?tab=accounts&csas=error', $response->getHeaderLine('Location'));
+        // Návrat nese účet a důvod, aby hláška u účtu řekla, proč připojení neprošlo.
+        self::assertSame('/bank?tab=accounts&csas=error&currency_id=' . $this->currencyId . '&code=account_inactive',
+            $response->getHeaderLine('Location'));
         self::assertSame(['failed', 'account_inactive', ''], $this->sharedRow($state));
     }
 
@@ -97,7 +99,7 @@ final class BankOAuthCallbackAliasTest extends TestCase
 
         $response = $this->container->get(OAuthCallbackAction::class)($this->request($state, 0), new Response());
 
-        self::assertSame('/bank?tab=accounts&csas=error', $response->getHeaderLine('Location'));
+        self::assertStringStartsWith('/bank?tab=accounts&csas=error&currency_id=' . $this->currencyId . '&code=', $response->getHeaderLine('Location'));
         self::assertSame('failed', $this->sharedRow($state)[0]);
     }
 
@@ -115,7 +117,7 @@ final class BankOAuthCallbackAliasTest extends TestCase
 
         $response = $this->container->get(CsasOnboardingAction::class)->callback($this->request($state), new Response());
 
-        self::assertSame('/bank?tab=accounts&csas=error', $response->getHeaderLine('Location'));
+        self::assertSame('/bank?tab=accounts&csas=error&code=account_inactive', $response->getHeaderLine('Location'));
         $stmt = $this->pdo->prepare('SELECT status, secret_ciphertext FROM bank_oauth_sessions WHERE state_hash = ?');
         $stmt->execute([$hash]);
         self::assertSame(['status' => 'failed', 'secret_ciphertext' => ''], $stmt->fetch(PDO::FETCH_ASSOC));
@@ -127,7 +129,7 @@ final class BankOAuthCallbackAliasTest extends TestCase
 
         $response = $this->container->get(CsasOnboardingAction::class)->callback($this->request($state), new Response());
 
-        self::assertSame('/bank?tab=accounts&csas=error', $response->getHeaderLine('Location'));
+        self::assertSame('/bank?tab=accounts&csas=error&code=csas_oauth_expired', $response->getHeaderLine('Location'));
         self::assertSame('pending', $this->sharedRow($state)[0]);
     }
 

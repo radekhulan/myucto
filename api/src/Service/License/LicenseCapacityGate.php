@@ -45,12 +45,12 @@ final class LicenseCapacityGate
     public function mutateSeats(callable $mutation): mixed
     {
         return $this->withLock(function () use ($mutation): mixed {
-            $before = $this->seats->countActiveSeats();
+            $before = $this->countSeats();
             $payrollBefore = $this->payroll->countActiveUsers();
 
             return $this->transactional(function () use ($mutation, $before, $payrollBefore): mixed {
                 $result = $mutation();
-                $after = $this->seats->countActiveSeats();
+                $after = $this->countSeats();
                 $payrollAfter = $this->payroll->countActiveUsers();
                 $state = $this->license->current()->withActiveUsers($before);
                 $reason = $state->seatCountBlockReason($after);
@@ -66,6 +66,41 @@ final class LicenseCapacityGate
                 return $result;
             });
         });
+    }
+
+    /**
+     * Vytvoření přístupu se zápisem (API token, MCP oprávnění).
+     *
+     * Brána se uplatní jen tehdy, když parametr licence započítává tokeny se
+     * zápisem do míst. Jinak se mutace provede přímo, bez zámku, a chování
+     * zůstává stejné jako dřív.
+     *
+     * @template T
+     * @param callable():T $mutation
+     * @return T
+     */
+    public function mutateWriteTokens(callable $mutation): mixed
+    {
+        if (!$this->writeTokensCount()) {
+            return $mutation();
+        }
+        return $this->mutateSeats($mutation);
+    }
+
+    /** Obsazená místa včetně tokenů se zápisem, když je parametr licence počítá. */
+    private function countSeats(): int
+    {
+        $seats = $this->seats->countActiveSeats();
+        if ($this->writeTokensCount()) {
+            $seats += $this->seats->countActiveWriteTokens();
+        }
+        return $seats;
+    }
+
+    /** Parametr platné licence; bez licence se tokeny do míst nepočítají. */
+    private function writeTokensCount(): bool
+    {
+        return $this->license->current()->boolParam(LicenseState::PARAM_COUNT_WRITE_TOKENS_AS_SEATS);
     }
 
     /**

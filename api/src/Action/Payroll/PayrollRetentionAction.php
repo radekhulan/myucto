@@ -475,7 +475,7 @@ final class PayrollRetentionAction
         string $permission,
         AccessLevel $level,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         if (!$this->requirePermission($request, $response, $permission, $level, $error)) {

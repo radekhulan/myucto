@@ -28,7 +28,7 @@ final class PayrollCostCenterCloneTest extends TestCase
     {
         $base = Config::load(Bootstrap::rootDir());
         self::assertStringEndsWith('_test', $base->get('db.name'));
-        self::assertContains($base->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($base->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $server = new PDO('mysql:host='.$base->get('db.host').';port='.$base->get('db.port',3306).';charset=utf8mb4', $base->get('db.user'), $base->get('db.pass',''), [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
         $previous = getenv('MYINVOICE_DB_NAME');
         try {

@@ -3,7 +3,8 @@ import { useTablePrefs } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 
 /**
- * Volba výkazů „průběžné časové rozlišení" (381/384 k rozvahovému dni, mimo deník).
+ * Volba výkazů „průběžné časové rozlišení a odpisy" (381/384 a účetní odpisy za uplynulé
+ * měsíce k rozvahovému dni, mimo deník).
  * Zapamatuje se jako lepkavý přepínač pohledu v preferencích uživatele a sdílí ji
  * výsledovka v obou členěních i rozvaha, aby obě sestavy pro klienta seděly k sobě.
  * Výchozí stav je vypnutý: výkaz z deníku beze změny.

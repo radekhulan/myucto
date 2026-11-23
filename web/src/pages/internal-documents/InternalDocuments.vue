@@ -67,6 +67,8 @@ const actions = computed<ActionItem[]>(() => [
     show: canWrite.value, to: { name: 'accounting-internal-document-new' } },
   { key: 'export', label: t('internal_documents.export_csv'), icon: 'download', tier: 'secondary', variant: 'neutral',
     disabled: exporting.value || total.value === 0, run: () => void exportCsv() },
+  { key: 'renumber', label: t('common.renumber_by_date'), icon: 'cycle', tier: 'overflow', variant: 'warning',
+    show: canWrite.value && !auth.isClientRole, to: { path: '/purchase-invoices/renumber', query: { agenda: 'internal' } } },
 ])
 
 function toggleSort(key: string) {

@@ -143,7 +143,7 @@ final class PayrollPensionRequestAction
 
     private function guard(Request $request, Response $response, AccessLevel $level, ?Response &$error): bool
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response);
             return false;
         }

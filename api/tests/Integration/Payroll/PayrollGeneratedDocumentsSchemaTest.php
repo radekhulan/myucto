@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\PayrollArtifact;
@@ -32,7 +31,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         );
         self::assertNull(PayrollDocumentKind::tryFrom('taxable_income_certificate'));
 
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $create = (string) $this->query(
             $connection->pdo(),
@@ -47,7 +46,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 
     public function testImmutableArtifactDownloadAndDmsSchemaIsInstalled(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
 
         foreach ([
@@ -86,7 +85,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 
     public function testAnnualDocumentUsesAnnualAnchorWithoutFakeMonthlyRun(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(PayrollDocumentService::class);
         self::assertInstanceOf(Connection::class, $connection);
@@ -193,7 +192,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 
     public function testIdempotentReplayWorksWithImmutableDocumentTrigger(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $repository = $container->get(PayrollDocumentRepository::class);
         self::assertInstanceOf(Connection::class, $connection);
@@ -323,7 +322,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 
     public function testAnnualSourceCannotCrossEmployeeBoundary(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();
@@ -422,7 +421,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 
     public function testDocumentCannotSupersedeArtifactFromAnotherPayrollRun(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $repository = $container->get(PayrollDocumentRepository::class);
         $service = $container->get(PayrollDocumentService::class);
@@ -517,7 +516,7 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         $dataDir = sys_get_temp_dir() . '/myucto-payroll-bundle-' . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $dataDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $repository = $container->get(PayrollDocumentRepository::class);
         $service = $container->get(PayrollDocumentService::class);

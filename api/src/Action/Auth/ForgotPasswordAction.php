@@ -55,10 +55,20 @@ final class ForgotPasswordAction
         private readonly TurnstileVerifier $turnstile,
         private readonly RateLimitMiddleware $rateLimit,
         private readonly AfterResponseTasks $afterResponse,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
+        // Vynucení je veřejné (setup-status), odpověď proto nic neprozradí.
+        if ($this->loginPolicy->isEnforced()) {
+            return Json::error(
+                $response,
+                'password_login_disabled',
+                'Instalace se přihlašuje přes poskytovatele identity organizace, heslo se nepoužívá.',
+                409,
+            );
+        }
         $started = hrtime(true);
         $body = (array) ($request->getParsedBody() ?? []);
         $email = trim((string) ($body['email'] ?? ''));

@@ -27,7 +27,9 @@ final class ChartAccountUsageOtherItemTest extends TestCase
         $pdo->exec('CREATE TABLE journal_entry_templates (id INTEGER, supplier_id INTEGER)');
         $pdo->exec('CREATE TABLE journal_entry_template_lines (template_id INTEGER, account_code TEXT)');
         $pdo->exec('CREATE TABLE purchase_invoices (id INTEGER, supplier_id INTEGER)');
-        $pdo->exec('CREATE TABLE purchase_invoice_items (purchase_invoice_id INTEGER, expense_account_code TEXT)');
+        $pdo->exec('CREATE TABLE purchase_invoice_items (purchase_invoice_id INTEGER, expense_account_code TEXT, counter_account_code TEXT)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoice_items (invoice_id INTEGER, counter_account_code TEXT)');
         $pdo->exec('CREATE TABLE other_items (supplier_id INTEGER, account_code TEXT, counter_account_code TEXT)');
         $pdo->exec("INSERT INTO other_items VALUES (7, '315.987', '518.987'), (8, '315.986', '518.986')");
 

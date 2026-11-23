@@ -21,9 +21,11 @@ final class AiOtherItemNormalizer
      * @param mixed                                    $raw        pole položek tak, jak je vrátil model
      * @param array<string,string>                     $chartNames kód účtu => název
      * @param array<string,array{id:int,name:string}> $partners   IČO => klient firmy
+     * @param list<string>                             $hiddenKinds skryté vestavěné druhy `strana:kód` — návrh
+     *                                                              by šel uložit jen jako jiná pohledávka / jiný závazek
      * @return list<array<string,mixed>>
      */
-    public static function normalize(mixed $raw, array $chartNames, string $today, array $partners): array
+    public static function normalize(mixed $raw, array $chartNames, string $today, array $partners, array $hiddenKinds = []): array
     {
         if (!is_array($raw)) {
             return [];
@@ -41,6 +43,9 @@ final class AiOtherItemNormalizer
             }
             $cents = (int) round($amount * 100);
             $kind = in_array($item['kind'] ?? null, self::KINDS, true) ? (string) $item['kind'] : 'other';
+            if (in_array($side . ':' . $kind, $hiddenKinds, true)) {
+                $kind = 'other';
+            }
             $issued = self::date($item['issued_on'] ?? null, $today);
             $due = self::date($item['due_on'] ?? null, $issued);
             if ($due < $issued) {

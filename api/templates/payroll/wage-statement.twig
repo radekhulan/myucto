@@ -59,8 +59,11 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.1pt; color:
 <table class="grid">
   <tr>
     <td style="width:34%">
-      <div class="label">Sjednaná měsíční mzda</div>
-      {% if wage.monthly_gross_minor is not null %}
+      <div class="label">{{ (wage.remuneration_type ?? 'monthly') == 'hourly' ? 'Sjednaná hodinová mzda' : 'Sjednaná měsíční mzda' }}</div>
+      {% if (wage.remuneration_type ?? 'monthly') == 'hourly' %}
+        <div class="amount">{{ wage.hourly_rate_minor|exact_czk }} Kč/h</div>
+        <div>{% if wage.remuneration_basis_kind_label ?? '' %}{{ wage.remuneration_basis_kind_label }}: {% endif %}{{ wage.remuneration_basis }}</div>
+      {% elseif wage.monthly_gross_minor is not null %}
         <div class="amount">{{ wage.monthly_gross_minor|exact_czk }} Kč</div>
       {% else %}
         <div class="value">Mzda se skládá ze složek níže</div>

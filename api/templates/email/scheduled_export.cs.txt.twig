@@ -1,0 +1,13 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Dobrý den,
+
+{% if has_attachment %}v příloze zasíláme doklady za období {{ period }} ve formátu XML pro import do Pohody. Počet dokladů: {{ count }}.{% else %}Za období {{ period }} nebyly vystaveny žádné doklady k exportu.{% endif %}
+
+{% for note in change_notes %}{{ note }}
+
+{% endfor %}Export obsahuje vydané faktury{% if include_credit_notes %}, zjednodušené daňové doklady a dobropisy{% else %} a zjednodušené daňové doklady{% endif %} podle data vystavení. Neobsahuje {% if not include_credit_notes %}dobropisy, {% endif %}pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.
+
+E-mail byl odeslán automaticky.
+{% endblock %}

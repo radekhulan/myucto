@@ -267,12 +267,13 @@ final class InvoiceMath
 
     /**
      * Sestav invoice totals + vat_breakdown ze (případně přepsaných) řádků.
+     * Používá i rekapitulace vystaveného výkazu z uložených částek, bez nového výpočtu daně.
      *
      * @param list<array{base: float, vat: float, with: float, rate: float}> $perItem
      * @param array<int,true> $textIdx indexy textových řádků (nezakládají řádek rekapitulace)
      * @return array{totals: array{without_vat: float, vat: float, with_vat: float}, vat_breakdown: list<array{rate: float, base: float, vat: float}>}
      */
-    private static function summarize(array $perItem, array $textIdx = []): array
+    public static function summarize(array $perItem, array $textIdx = []): array
     {
         $totalWithoutVat = 0.0;
         $totalVat = 0.0;

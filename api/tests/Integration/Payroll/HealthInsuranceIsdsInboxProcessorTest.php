@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionInboxRepository;
@@ -45,7 +44,7 @@ final class HealthInsuranceIsdsInboxProcessorTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);
         self::assertInstanceOf(Connection::class, $connection);
@@ -110,7 +109,7 @@ final class HealthInsuranceIsdsInboxProcessorTest extends TestCase
 
     public function testCompositeBindingKeepsJmhzProcessorAvailableAlongsideHealthProcessor(): void
     {
-        $resolved = Bootstrap::buildContainer()->get(SubmissionInboxMessageProcessor::class);
+        $resolved = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(SubmissionInboxMessageProcessor::class);
 
         self::assertInstanceOf(CompositeSubmissionInboxMessageProcessor::class, $resolved);
     }

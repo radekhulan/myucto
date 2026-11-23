@@ -27,6 +27,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotFixableException;
 use MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
@@ -70,6 +71,10 @@ final class PayrollRunsAction
         private readonly \MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup $migrationSetup,
         // Trvale skrytá varování se do kontrol běhu ani do jejich počtů nepočítají.
         private readonly \MyInvoice\Service\Payroll\Run\PayrollWarningSuppressionService $warningSuppressions,
+        // Vztahy, které do období uzavřeného běhu patří, ale v jeho revizi
+        // nejsou (zaměstnanec založený až po schválení měsíce).
+        private readonly \MyInvoice\Repository\Payroll\PayrollRunMissingEmploymentRepository $missingEmployments,
+        private readonly \MyInvoice\Service\Payroll\Run\PayrollRunAverageChangeService $averageChanges,
     ) {}
 
     /**
@@ -421,6 +426,16 @@ final class PayrollRunsAction
         // Součet exekučních srážek běhu je u malého zaměstnavatele srážka
         // jednoho člověka; bez práva na agendu se nevrací.
         $canSeeEnforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
+        // Jedním dotazem za celou stránku; uzavřené běhy si vybere dotaz sám.
+        $missingEmployments = $this->missingEmployments->forRuns(
+            $this->currentSupplierId($request),
+            array_map(static fn (array $row): int => (int) ($row['id'] ?? 0), $items),
+        );
+        try {
+            $averageChanges = $this->averageChanges->forRuns($this->currentSupplierId($request), $items);
+        } catch (\Throwable) {
+            $averageChanges = [];
+        }
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -464,6 +479,18 @@ final class PayrollRunsAction
                 PayrollRunStatus::from($status),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
             );
+            /*
+             * Vztahy, které do období patří, ale schválená revize je nezná:
+             * zaměstnanec založený po schválení, nástup posunutý dozadu. Běh je
+             * neměnný, takže jediná cesta je oprava běhu; bez tohohle výčtu
+             * osoba tiše zůstala bez mzdy i bez měsíčního hlášení.
+             */
+            $item['missing_employments'] = $missingEmployments[(int) ($item['id'] ?? 0)] ?? [];
+            $item['exclusions'] = $this->runs->exclusions(
+                $this->currentSupplierId($request),
+                PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
+            );
+            $item['average_change'] = $averageChanges[(int) ($item['id'] ?? 0)] ?? null;
             $deletion = $this->runs->canDelete(
                 $this->currentSupplierId($request),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
@@ -566,16 +593,22 @@ final class PayrollRunsAction
             return null;
         }
         try {
-            $revision = $this->runs->currentRevision($supplierId, $runId);
-            if (!is_array($revision['input_snapshot'] ?? null)) {
+            // Jen vstupní snímek: výsledkový (u 150 osob další megabajty) se
+            // s podklady neporovnává.
+            $revision = $this->runs->currentInputSnapshot($supplierId, $runId);
+            if ($revision === null) {
                 return null;
             }
 
             return [
                 ...$this->sourceDrift
-                    ->detect($supplierId, $revision['input_snapshot'])
+                    ->detect(
+                        $supplierId,
+                        $revision['input_snapshot'],
+                        $this->runs->excludedEmploymentIds($supplierId, $runId),
+                    )
                     ->toArray(),
-                'snapshot_created_at' => (string) $revision['created_at'],
+                'snapshot_created_at' => $revision['created_at'],
             ];
         } catch (\Throwable) {
             return null;
@@ -797,7 +830,8 @@ final class PayrollRunsAction
 
     /**
      * Detail běhu s CELÝM výsledkovým snapshotem — objemná data, která seznam
-     * záměrně neposílá. Frontend si je dotahuje pro jeden rozbalený běh.
+     * záměrně neposílá. Nese souhrn výsledku a nálezy kontrol; výsledky osob
+     * stránkuje {@see PayrollRunPeopleAction}.
      *
      * @param array<string,string> $args
      */
@@ -819,20 +853,29 @@ final class PayrollRunsAction
         if ($run === null) {
             return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
         }
+        $revisionId = ($run['revision_id'] ?? null) === null
+            ? null
+            : (int) $run['revision_id'];
         $run['payment_coverage'] = $this->autoSettlement->coverageSummary(
             $this->currentSupplierId($request),
-            ($run['revision_id'] ?? null) === null
-                ? null
-                : (int) $run['revision_id'],
+            $revisionId,
         );
-        // Snímek nese u každé osoby celý vstup výpočtu srážek. Obecné `payroll`
-        // READ na něj nestačí, platí totéž co pro exekuční a insolvenční agendu.
+        // Nálezy kontrol revize, stejně zúžené o trvale skrytá varování jako
+        // v seznamu běhů.
+        $filtered = $this->warningSuppressions
+            ->activeSet($this->currentSupplierId($request))
+            ->filterRows($revisionId === null
+                ? []
+                : $this->runs->validations($this->currentSupplierId($request), $revisionId));
+        $run['validations'] = $filtered['visible'];
+        $run['hidden_validation_count'] = $filtered['hidden_count'];
+        // Výsledky osob detail nenese (stránkuje je PayrollRunPeopleAction),
+        // zbývá souhrn. Součet exekučních srážek se bez práva na agendu
+        // nevrací, stejně jako v seznamu.
         $snapshot = $run['result_snapshot'] ?? null;
-        $run['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
-            is_array($snapshot) ? $snapshot : null,
-            PayrollEnforcementDisclosure::canSeeEnforcement($request),
-            PayrollEnforcementDisclosure::canSeeInsolvency($request),
-        );
+        if (is_array($snapshot) && !PayrollEnforcementDisclosure::canSeeEnforcement($request)) {
+            $run['result_snapshot'] = PayrollEnforcementDisclosure::redactRunTotals($snapshot);
+        }
 
         return Json::ok($response, ['run' => $run]);
     }
@@ -905,6 +948,8 @@ final class PayrollRunsAction
             return Json::error($response, 'payroll_period_owned', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
         /*
          * Nulové počáteční stavy kumulací tam, kde je nula prokazatelná.
@@ -988,6 +1033,8 @@ final class PayrollRunsAction
                 $e->getMessage(),
                 422,
             );
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
 
         return Json::ok($response, [
@@ -1012,7 +1059,14 @@ final class PayrollRunsAction
             // sloučený krok zamyká nově schválené vstupy, takže i ona projde
             // oběma branami.
             'refresh_inputs' => 'payroll.calculate',
-            'review', 'request_correction' => 'payroll.review',
+            // Změna data výplaty u běhu se snímkem založí novou revizi stejnou
+            // cestou jako obnova podkladů, proto tytéž dvě brány.
+            'change_payment_date' => 'payroll.calculate',
+            'review', 'request_correction', 'withdraw_correction' => 'payroll.review',
+            // Vyřazení osoby je rozhodnutí „tuhle osobu teď nevyplácím" — stejná
+            // váha jako výjimka u kontroly, kterou smí schválit jen `payroll.approve`.
+            // Nová revize navíc zamyká vstupy, takže i `payroll.inputs.write`.
+            'exclude_employee', 'include_employee' => 'payroll.approve',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
             // `post` vytváří účetní zápis v hlavní knize — patří pod stejné
@@ -1040,7 +1094,13 @@ final class PayrollRunsAction
         )) !== null) {
             return $error;
         }
-        if (in_array($command, ['lock_and_calculate', 'refresh_inputs'], true)
+        if (in_array($command, [
+            'lock_and_calculate',
+            'refresh_inputs',
+            'change_payment_date',
+            'exclude_employee',
+            'include_employee',
+        ], true)
             && ($error = $this->authorize(
                 $request,
                 $response,
@@ -1078,6 +1138,7 @@ final class PayrollRunsAction
                 $idempotencyKey,
                 $this->requiredUserId($request),
                 $reason,
+                $body,
             );
         } catch (PayrollYearClosedException $e) {
             return self::yearClosedError($response, $e);
@@ -1096,6 +1157,8 @@ final class PayrollRunsAction
                 $e->getMessage(),
                 409,
             );
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409, $e->responseExtra());
         } catch (PayrollRunPaymentsUnsettledException $e) {
             $hasIncomingRefund =
                 $e->coverage['incoming_unsettled_count'] > 0;
@@ -1117,8 +1180,15 @@ final class PayrollRunsAction
             );
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (PayrollRunSnapshotFixableException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422, [
+                'finding_code' => $e->findingCode,
+                'remediation_path' => $e->remediationPath,
+            ]);
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
         $payload = $this->serialize($result, $request);
         if ($command === PayrollRunCommand::PREPARE_PAYMENTS->value) {
@@ -1140,6 +1210,7 @@ final class PayrollRunsAction
         return Json::ok($response, $payload);
     }
 
+    /** @param array<string,mixed> $body */
     private function dispatch(
         string $command,
         int $supplierId,
@@ -1148,6 +1219,7 @@ final class PayrollRunsAction
         string $idempotencyKey,
         int $userId,
         string $reason,
+        array $body,
     ): PayrollRunCommandResult {
         return match ($command) {
             'lock_inputs' => $this->commands->lockInputs(
@@ -1207,10 +1279,63 @@ final class PayrollRunsAction
             'close' => $this->commands->close(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
+            'withdraw_correction' => $this->commands->withdrawCorrection(
+                $supplierId, $runId, $version, $idempotencyKey, $userId, $reason,
+            ),
+            'change_payment_date' => $this->commands->changePaymentDate(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->requiredString($body, 'payment_date'),
+            ),
+            'exclude_employee' => $this->commands->excludeEmployee(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->targetEmployee($supplierId, $body),
+                $reason,
+            ),
+            'include_employee' => $this->commands->includeEmployee(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->targetEmployee($supplierId, $body),
+            ),
             default => throw new \InvalidArgumentException(
                 'Nepodporovaný příkaz mzdového běhu.',
             ),
         };
+    }
+
+    /**
+     * Osoba, které se vyřazení týká. Nález zákonného výpočtu nese buď osobu,
+     * nebo pracovní vztah; vztah se převede na osobu.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function targetEmployee(int $supplierId, array $body): int
+    {
+        $employeeId = filter_var($body['employee_id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (is_int($employeeId)) {
+            return $employeeId;
+        }
+        $employmentId = filter_var($body['employment_id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (is_int($employmentId)) {
+            return $this->runs->employeeOfEmployment($supplierId, $employmentId)
+                ?? throw new \OutOfBoundsException('Pracovní vztah neexistuje.');
+        }
+
+        throw new \InvalidArgumentException('Vyberte osobu (employee_id nebo employment_id).');
     }
 
     /** @return array<string,mixed> */
@@ -1228,37 +1353,27 @@ final class PayrollRunsAction
     }
 
     /**
-     * Revize v odpovědi příkazu nese oba snímky. Výsledný se zúží stejně jako
-     * v detailu běhu; vstupní nese podklady srážek všech osob a žádná obrazovka
-     * ho z odpovědi nečte, takže ho volající bez práv k exekucím a insolvencím
-     * nedostane vůbec.
+     * Revize v odpovědi příkazu: hlavička, stav, otisky a souhrn výsledku bez
+     * osob ({@see PayrollRunRepository::revisionSummary()}). Oba snímky dělaly
+     * z odpovědi na jedno kliknutí megabajty (u 150 osob přes 10 MB) a žádná
+     * obrazovka je z ní nečetla. Součet exekučních srážek se bez práva na
+     * agendu nevrací, stejně jako v seznamu běhů.
      *
      * @param array<string,mixed>|null $revision
      * @return array<string,mixed>|null
      */
     private static function disclosedRevision(?array $revision, Request $request): ?array
     {
-        if ($revision === null) {
+        $summary = PayrollRunRepository::revisionSummary($revision);
+        if ($summary === null) {
             return null;
         }
-        $enforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
-        $insolvency = PayrollEnforcementDisclosure::canSeeInsolvency($request);
-        if ($enforcement && $insolvency) {
-            return $revision;
+        $snapshot = $summary['result_snapshot'] ?? null;
+        if (is_array($snapshot) && !PayrollEnforcementDisclosure::canSeeEnforcement($request)) {
+            $summary['result_snapshot'] = PayrollEnforcementDisclosure::redactRunTotals($snapshot);
         }
-        $snapshot = $revision['result_snapshot'] ?? null;
-        $revision['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
-            is_array($snapshot) ? $snapshot : null,
-            $enforcement,
-            $insolvency,
-        );
-        if (array_key_exists('input_snapshot', $revision)) {
-            $revision['input_snapshot'] = null;
-        }
-        // Surové JSON sloupce nesou totéž v nezúžené podobě.
-        unset($revision['result_snapshot_json'], $revision['input_snapshot_json']);
 
-        return $revision;
+        return $summary;
     }
 
     private function authorize(
@@ -1268,7 +1383,7 @@ final class PayrollRunsAction
         AccessLevel $level,
         bool $allowBearer = false,
     ): ?Response {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

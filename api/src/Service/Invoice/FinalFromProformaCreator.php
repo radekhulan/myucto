@@ -8,7 +8,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AdvanceDeductionRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemCarryOver;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceService;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Vytvoří DRAFT finální faktury (typu `invoice`) k zaplacené proformě.
@@ -19,7 +22,8 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  *     stejné transakce před voláním)
  *
  * Idempotence: pokud už existuje child faktura (`parent_invoice_id = proformaId`,
- * `invoice_type = 'invoice'`), vrátí její id a nevytvoří duplikát.
+ * `invoice_type = 'invoice'`, nebo faktura čerpající zálohu odpočtovým řádkem), vrátí její
+ * id a nevytvoří duplikát.
  *
  * Bezpečné vůči vnořeným transakcím — pokud caller už má otevřenou transakci,
  * neotevírá vlastní a neflushuje.
@@ -58,6 +62,12 @@ final class FinalFromProformaCreator
      *                                 zkopírovaných položek, doplní se rozdílový řádek —
      *                                 viz {@see self::appendRemainder()}. null = jen
      *                                 rozsah proformy (dosavadní chování).
+     * @param bool        $requirePostedReceipt Proforma s DDKP s daní ve firmě s podvojným
+     *                                 účetnictvím: přijatá záloha v deníku musí pokrýt, co faktura
+     *                                 odečte ({@see AdvanceReceiptGuard}), jinak
+     *                                 {@see AdvanceReceiptNotPostedException}. False jen pro
+     *                                 automatické vyúčtování uvnitř zápisu úhrady, kdy úhrada
+     *                                 ještě zaúčtovaná být nemůže.
      * @return int  ID nového draftu (nebo již existující final faktury)
      */
     public function create(
@@ -67,10 +77,11 @@ final class FinalFromProformaCreator
         ?string $dueDate = null,
         ?float $advance = null,
         ?float $finalTotal = null,
+        bool $requirePostedReceipt = true,
     ): int {
         return $this->cycleLock->synchronized(
             $proformaId,
-            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal),
+            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal, $requirePostedReceipt),
         );
     }
 
@@ -81,6 +92,7 @@ final class FinalFromProformaCreator
         ?string $dueDate,
         ?float $advance,
         ?float $finalTotal = null,
+        bool $requirePostedReceipt = true,
     ): int {
         $proforma = $this->repo->find($proformaId);
         if ($proforma === null) {
@@ -92,14 +104,16 @@ final class FinalFromProformaCreator
 
         $pdo = $this->db->pdo();
 
-        // Idempotence — pokud už existuje child final, vrátit její id
+        // Idempotence: pokud už existuje child final, vrátit její id. Patří sem i faktura,
+        // která zálohu čerpá odpočtovým řádkem spolu s dalšími zálohami (AdvanceDrawSql).
         $existing = $pdo->prepare(
-            "SELECT id FROM invoices
-              WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
-                AND status <> 'cancelled'
-              ORDER BY id LIMIT 1"
+            'SELECT i.id FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+               JOIN invoices i ON i.id = fx.id
+              WHERE i.status <> 'cancelled'
+              ORDER BY i.id LIMIT 1"
         );
-        $existing->execute([$proformaId]);
+        $supplierId = (int) $proforma['supplier_id'];
+        $existing->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
         $existingId = $existing->fetchColumn();
         if ($existingId !== false) {
             return (int) $existingId;
@@ -107,18 +121,6 @@ final class FinalFromProformaCreator
 
         $taxDate = $taxDate ?? date('Y-m-d');
         $dueDate = $dueDate ?? date('Y-m-d');
-
-        VatRateValidityGuard::assertValidOn(
-            $pdo,
-            array_column(
-                array_filter(
-                    $proforma['items'],
-                    static fn (array $item): bool => (float) ($item['total_with_vat'] ?? 0) > 0.0,
-                ),
-                'vat_rate_id',
-            ),
-            $taxDate,
-        );
 
         // Daňové doklady k přijatým platbám proformy (§ 37a ZDPH): jejich základ/daň
         // se na vyúčtování odečte zápornými řádky per doklad per sazba — daň na finálu
@@ -132,28 +134,38 @@ final class FinalFromProformaCreator
         // `vat_rate_id`, protože polská 23% sazba je ve `vat_rates` vedená se zemí CZ.
         // Totéž platí pro klasifikaci: odpočet ruší přesně to, co doklad k platbě vykázal,
         // takže 1c a 26c musí zůstat na svých řádcích přiznání i v režimu KH.
-        $ossSelect = $this->ossCarry->selectList('ii');
-        $tdStmt = $pdo->prepare(
-            "SELECT td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot, ii.vat_classification_code{$ossSelect},
-                    SUM(ii.total_without_vat) AS base, SUM(ii.total_vat) AS vat,
-                    SUM(ii.total_with_vat) AS gross
-               FROM invoices td
-               JOIN invoice_items ii ON ii.invoice_id = td.id
-              WHERE td.invoice_type = 'tax_document'
-                AND td.status NOT IN ('draft', 'cancelled')
-                AND (td.parent_invoice_id = ?
-                     OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
-                                   WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
-           GROUP BY td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot, ii.vat_classification_code{$ossSelect}
-           ORDER BY td.id, ii.vat_rate_snapshot DESC"
-        );
-        $tdStmt->execute([$proformaId, $proformaId]);
-        $taxDocRates = $tdStmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        $taxDocRates = ProformaVatRates::taxDocumentRows($pdo, $this->ossCarry->selectList('ii'), $proformaId);
         $taxDocGross = 0.0;
         foreach ($taxDocRates as $r) {
             $taxDocGross += (float) $r['gross'];
         }
         $taxDocGross = round($taxDocGross, 2);
+
+        // Záloha, jejíž položky sazbu plnění nenesou (převzatá z programu, který zálohy vede
+        // bez sazeb): položky konečné faktury nesou sazby jejích DDKP, jinak by odpočtové
+        // řádky DDKP vyšly proti nulové sazbě a faktura se zápornou DPH ({@see ProformaVatRates}).
+        $taxDocVat = round(array_sum(array_map(static fn (array $r): float => (float) $r['vat'], $taxDocRates)), 2);
+        if (ProformaVatRates::itemsWithoutVat((array) $proforma['items']) && abs($taxDocVat) >= 0.005) {
+            $proforma['items'] = $this->itemsFromTaxDocuments($proforma, $taxDocRates, $taxDocGross);
+        } elseif (ProformaVatRates::ratesUnknown($pdo, $proforma, $taxDate)) {
+            throw new ProformaWithoutVatRatesException(sprintf(
+                'Zálohová faktura %s je převzatá z Money S3 bez sazeb DPH a nemá daňový doklad k přijaté platbě se sazbou. '
+                . 'Konečná faktura by vyšla bez DPH. Vystavte ji ručně se sazbami plnění, nebo nejdřív doplňte sazby položek zálohy.',
+                (string) ($proforma['varsymbol'] ?? '#' . $proformaId),
+            ));
+        }
+
+        VatRateValidityGuard::assertValidOn(
+            $pdo,
+            array_column(
+                array_filter(
+                    $proforma['items'],
+                    static fn (array $item): bool => (float) ($item['total_with_vat'] ?? 0) > 0.0,
+                ),
+                'vat_rate_id',
+            ),
+            $taxDate,
+        );
 
         if ($advance === null) {
             $paidTotal = (float) ($proforma['paid_total'] ?? 0);
@@ -175,6 +187,18 @@ final class FinalFromProformaCreator
             throw new \RuntimeException('Záloha nesmí být záporná.');
         }
 
+        // Proforma s DDKP s daní: zaúčtování konečné faktury zúčtuje jen přijatou zálohu,
+        // kterou nese deník (stejně jako čerpání v AdvancePartialDrawdown). Faktura odečte
+        // DDKP odpočtovými řádky a úhradu bez DDKP v hlavičce, obojí musí přijatá záloha krýt.
+        if ($requirePostedReceipt && abs($taxDocVat) >= 0.005) {
+            (new AdvanceReceiptGuard($this->db))->assertCovers(
+                (int) $proforma['supplier_id'],
+                $proformaId,
+                (string) ($proforma['varsymbol'] ?? ''),
+                round($taxDocGross + $advance, 2),
+            );
+        }
+
         $noteAbove = ($proforma['language'] ?? 'cs') === 'en'
             ? "Tax document for advance invoice {$proforma['varsymbol']}"
             : "Daňový doklad k zálohové faktuře {$proforma['varsymbol']}";
@@ -184,6 +208,18 @@ final class FinalFromProformaCreator
             $pdo->beginTransaction();
         }
         try {
+            $quoteOrigins = [];
+            if ($this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                $sourceRows = QuoteInvoiceOrigin::rows($pdo, $proformaId);
+                QuoteInvoiceService::assertFinalCanUseQuoteItems(
+                    $pdo,
+                    $supplierId,
+                    $proformaId,
+                    $sourceRows,
+                    $this->db->hasTable('sales_quote_orders'),
+                );
+                $quoteOrigins = array_column($sourceRows, 'sales_quote_item_key', 'order_index');
+            }
             // Konečná faktura z proformy čerpá celou zálohu vazbou parent_invoice_id; proformu
             // už čerpanou po dvojicích v saldokontu by vyúčtovala podruhé.
             AdvanceDeductionRepository::assertLinkAllowed($pdo, (int) $proforma['supplier_id'], 'invoice', 0, $proformaId);
@@ -303,6 +339,7 @@ final class FinalFromProformaCreator
                 }
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
+            QuoteInvoiceOrigin::writeKeys($pdo, $finalId, $quoteOrigins);
 
             // Doplatek zakázky: proforma bývá jen DÍLČÍ akontace (70 000 Kč ze zakázky
             // za 100 000 Kč). Kopie jejích položek proto popisuje jen rozsah zálohy —
@@ -408,6 +445,84 @@ final class FinalFromProformaCreator
         }
 
         return $finalId;
+    }
+
+    /**
+     * Položky konečné faktury k záloze bez sazeb: jedna položka na sazbu (a místo plnění
+     * či klasifikaci) jejích DDKP v jejich výši, takže odpočtové řádky § 37a je přesně
+     * vyrovnají. Část zálohy, kterou DDKP nepokrývají, dostane jedinou sazbu DDKP
+     * ({@see ProformaVatRates::singleRate()}); při víc sazbách ji nejde určit a zálohu nejde
+     * vyúčtovat automaticky.
+     *
+     * @param array<string,mixed> $proforma
+     * @param list<array<string,mixed>> $taxDocRates
+     * @return list<array<string,mixed>>
+     */
+    private function itemsFromTaxDocuments(array $proforma, array $taxDocRates, float $taxDocGross): array
+    {
+        $proformaItems = (array) $proforma['items'];
+        $remainder = round((float) $proforma['total_with_vat'] - $taxDocGross, 2);
+        // Část zálohy, kterou DDKP nepokrývají (záloha uhrazená přes hranici roku, doplatek
+        // přijatý v MyÚčtu): sazbu nese jediná sazba DDKP, při víc sazbách ji nejde určit.
+        $single = $remainder >= 0.01 ? ProformaVatRates::singleRate($taxDocRates) : null;
+        if ($remainder >= 0.01 && $single === null) {
+            throw new ProformaWithoutVatRatesException(sprintf(
+                'Zálohová faktura %s nenese sazby DPH, daňové doklady k přijatým platbám pokrývají jen %s z %s a mají víc sazeb. '
+                . 'Sazbu zbytku nejde určit; vystavte konečnou fakturu ručně se sazbami plnění.',
+                (string) ($proforma['varsymbol'] ?? '#' . $proforma['id']),
+                number_format($taxDocGross, 2, ',', ' '),
+                number_format((float) $proforma['total_with_vat'], 2, ',', ' '),
+            ));
+        }
+        $first = $proformaItems[0] ?? [];
+        $description = count($proformaItems) === 1 && trim((string) ($first['description'] ?? '')) !== ''
+            ? (string) $first['description']
+            : ((($proforma['language'] ?? 'cs') === 'en' ? 'Supply under advance invoice ' : 'Plnění dle zálohové faktury ') . ($proforma['varsymbol'] ?? ''));
+        $grossMode = !empty($proforma['prices_include_vat']);
+        $groups = [];
+        foreach ($taxDocRates as $r) {
+            $key = implode('|', array_map(static fn ($v): string => (string) $v, array_diff_key($r, array_flip(['id', 'varsymbol', 'base', 'vat', 'gross']))));
+            $groups[$key] ??= $r + ['base_sum' => 0.0, 'gross_sum' => 0.0];
+            $groups[$key]['base_sum'] += (float) $r['base'];
+            $groups[$key]['gross_sum'] += (float) $r['gross'];
+        }
+        $items = [];
+        $order = 0;
+        foreach ($groups as $g) {
+            $amount = round($grossMode ? $g['gross_sum'] : $g['base_sum'], 2);
+            if (abs($amount) < 0.005) {
+                continue;
+            }
+            $items[] = array_diff_key($g, array_flip(['id', 'varsymbol', 'base', 'vat', 'gross', 'base_sum', 'gross_sum'])) + [
+                'description' => count($groups) > 1 ? $description . ' (' . rtrim(rtrim(number_format((float) $g['vat_rate_snapshot'], 2, '.', ''), '0'), '.') . ' %)' : $description,
+                'quantity' => 1,
+                'duration_minutes' => null,
+                'unit' => (string) ($first['unit'] ?? ''),
+                'unit_price_without_vat' => $amount,
+                'order_index' => ++$order,
+                'item_kind' => 'standard',
+                'revenue_account_code' => $first['revenue_account_code'] ?? null,
+                'total_without_vat' => round($g['base_sum'], 2),
+                'total_with_vat' => round($g['gross_sum'], 2),
+            ];
+        }
+        if ($single !== null) {
+            $rate = (float) $single['vat_rate_snapshot'];
+            $base = round($remainder / (1 + $rate / 100), 2);
+            $items[] = $single + [
+                'description' => $description . (($proforma['language'] ?? 'cs') === 'en' ? ' (not covered by tax documents)' : ' (nepokryto daňovými doklady)'),
+                'quantity' => 1,
+                'duration_minutes' => null,
+                'unit' => (string) ($first['unit'] ?? ''),
+                'unit_price_without_vat' => $grossMode ? $remainder : $base,
+                'order_index' => ++$order,
+                'item_kind' => 'standard',
+                'revenue_account_code' => $first['revenue_account_code'] ?? null,
+                'total_without_vat' => $base,
+                'total_with_vat' => $remainder,
+            ];
+        }
+        return $items;
     }
 
     /**

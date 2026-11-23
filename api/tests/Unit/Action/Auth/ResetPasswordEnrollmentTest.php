@@ -66,6 +66,7 @@ final class ResetPasswordEnrollmentTest extends TestCase
         $action = new ResetPasswordAction(
             $db, $hasher, $sessions, $this->createMock(ActivityLogger::class), new IpMatcher(), $issuer,
             new MfaPolicyService(new Config(['auth' => ['require_mfa' => true]])),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/auth/reset', ['REMOTE_ADDR' => '127.0.0.1'])
             ->withParsedBody(['token' => 'synthetic-token', 'password' => 'Synthetic-password-42', 'password_confirm' => 'Synthetic-password-42']);

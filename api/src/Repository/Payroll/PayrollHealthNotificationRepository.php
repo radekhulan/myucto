@@ -177,7 +177,7 @@ final readonly class PayrollHealthNotificationRepository
                     terms.health_insurance_participation,
                     terms.health_association_member,
                     terms.activity_code,
-                    COALESCE(terms.monthly_gross_minor, employment.monthly_gross_minor)
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                         AS agreed_monthly_minor,
                     coverage.insurer_code
                FROM payroll_employments employment
@@ -201,6 +201,8 @@ final readonly class PayrollHealthNotificationRepository
               LIMIT 1'
         );
         $statement->execute([
+            $onDate,
+            $onDate,
             $onDate,
             $onDate,
             $onDate,
@@ -306,18 +308,7 @@ final readonly class PayrollHealthNotificationRepository
                              OR terms.effective_to >= ?)
                       ORDER BY terms.effective_from DESC
                       LIMIT 1) AS activity_code,
-                    COALESCE(
-                      (SELECT terms.monthly_gross_minor
-                         FROM payroll_employment_terms terms
-                        WHERE terms.supplier_id = employment.supplier_id
-                          AND terms.employment_id = employment.id
-                          AND terms.effective_from <= ?
-                          AND (terms.effective_to IS NULL
-                               OR terms.effective_to >= ?)
-                        ORDER BY terms.effective_from DESC
-                        LIMIT 1),
-                      employment.monthly_gross_minor
-                    ) AS agreed_monthly_minor,
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . ' AS agreed_monthly_minor,
                     (SELECT coverage.insurer_code
                        FROM payroll_person_health_coverage_history coverage
                       WHERE coverage.supplier_id = employment.supplier_id

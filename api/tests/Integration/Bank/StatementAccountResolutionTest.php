@@ -181,6 +181,41 @@ final class StatementAccountResolutionTest extends TestCase
     }
 
     /**
+     * Korunový a EUR účet se stejným číslem i bankou (Raiffeisenbank): detail, seznam
+     * i „Všechny pohyby" korunového výpisu nesou název korunového účtu, ne prvního
+     * nalezeného (EUR je založený dřív).
+     */
+    public function testSameNumberInTwoCurrenciesUsesLabelOfStatementCurrency(): void
+    {
+        $account = '9912345681';
+        $this->registerCurrency('EUR', $account, '5500');
+        $this->registerCurrency('CZK', $account, '5500');
+        $this->db->pdo()->prepare(
+            "INSERT INTO bank_statements (source, file_name, file_hash, account_number, bank_code, currency, statement_date, curr_balance)
+             VALUES ('pdf', 'TEST-label-czk.pdf', ?, ?, '5500', 'CZK', '2026-06-30', 100.00)"
+        )->execute([hash('sha256', uniqid('label-czk', true)), $account]);
+        $statementId = (int) $this->db->pdo()->lastInsertId();
+        $this->statementIds[] = $statementId;
+        $this->db->pdo()->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount) VALUES (?, '2026-06-30', 100.00)")
+            ->execute([$statementId]);
+
+        $detail = json_decode((string) $this->action->detail(
+            $this->mockRequest($this->supplierId, 'admin', [], []), new Response(), ['id' => (string) $statementId],
+        )->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('TEST CZK/5500 #206', $detail['account_label'] ?? null, 'detail korunového výpisu nese název korunového účtu');
+
+        $list = json_decode((string) $this->action->list(
+            $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['account' => $account]]), new Response(),
+        )->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $listed = array_values(array_filter($list['items'] ?? [], static fn (array $i): bool => (int) $i['id'] === $statementId));
+        $this->assertSame('TEST CZK/5500 #206', $listed[0]['account_label'] ?? null);
+
+        $movements = Bootstrap::buildContainer()->get(\MyInvoice\Repository\BankPostingSuggestionRepository::class);
+        $page = $movements->paginateUnposted($this->supplierId, 10, 0, ['scope' => 'all', 'account' => $account]);
+        $this->assertSame(['TEST CZK/5500 #206'], array_column($page['items'], 'account_label'), 'pohyb korunového výpisu nese název korunového účtu');
+    }
+
+    /**
      * Jediný odpovídající účet → import proběhne automaticky (regrese #167/#206 nesmí
      * rozbít běžný jednoúčtový případ).
      */
@@ -570,6 +605,34 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame(200.0, (float) $months['2099-07']);
     }
 
+    /**
+     * Ranní stažení z API nese stav z okamžiku stažení. Pohyb, který přišel později téhož dne
+     * až s dalším stažením, do něj patří: měsíc ukáže zůstatek konce dne, ne ranní stav.
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith([true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    public function testMonthClosingUsesDayEndBalanceInsteadOfMorningDownload(bool $projectionFirst): void
+    {
+        $account = self::ACCOUNT;
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $pdo = $this->db->pdo();
+        $this->insertStatement('gpc', $account, '2250', '2099-06-30', 1000.0, 'dayend-anchor');
+        if ($projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $morning = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-07-31', 1000.0, 1000.0, null, null, 'dayend-morning');
+        if (!$projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$projection]);
+        $nextDay = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-08-01', 1000.0, 900.0, null, null, 'dayend-next');
+        $pdo->prepare("UPDATE bank_statements SET imported_at = CONCAT(statement_date, ' 00:05:00') WHERE id IN (?, ?)")->execute([$morning, $nextDay]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-31', -100, 'CZK')")->execute([$nextDay]);
+
+        $response = $this->action->accountBalances($this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]), new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        $months = array_column($accounts[$currencyId]['months'], 'balance', 'month');
+        self::assertSame(900.0, (float) $months['2099-07']);
+        self::assertSame(900.0, (float) $months['2099-08']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     public function testLinkedApiMovementAppearsInGpcListFiltersAndSuggestions(): void
@@ -627,6 +690,37 @@ final class StatementAccountResolutionTest extends TestCase
         $deleted = $this->action->delete($request, new Response(), ['id' => $monthId]);
         self::assertSame(409, $deleted->getStatusCode());
         self::assertSame('monthly_api_statement', json_decode((string) $deleted->getBody(), true)['error']['code']);
+    }
+
+    /**
+     * Import z MyÚčta přenese měsíční výpis API, ale ne jeho evidenci (`bank_api_months`,
+     * vazby podkladů). Další načtení z banky pak zakládalo měsíc znovu a padalo
+     * na duplicitním otisku výpisu.
+     */
+    public function testProjectionAdoptsMonthlyStatementWithoutMonthEvidence(): void
+    {
+        $account = self::ACCOUNT;
+        $this->registerCurrency('CZK', $account, '2250');
+        $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-08-31', 100.0, 'orphan-month');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$this->supplierId, $apiId]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-08-15', 100, 'CZK')")->execute([$apiId]);
+        $monthly = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+        $pdo->beginTransaction();
+        $monthId = $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK')[$apiId][0];
+        $pdo->commit();
+        $this->statementIds[] = $monthId;
+
+        $pdo->prepare('DELETE FROM bank_transaction_imports WHERE statement_id = ?')->execute([$monthId]);
+        $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE monthly_statement_id = ?')->execute([$monthId]);
+        $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$monthId]);
+
+        $pdo->beginTransaction();
+        $mapping = $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK');
+        $pdo->commit();
+        self::assertSame([$apiId => [$monthId]], $mapping);
+        self::assertSame([$monthId], $monthly->monthIds($apiId, $this->supplierId));
+        self::assertSame(1, (int) $pdo->query('SELECT transaction_count FROM bank_statements WHERE id = ' . $monthId)->fetchColumn());
     }
 
     public static function pdfEvidenceCases(): array

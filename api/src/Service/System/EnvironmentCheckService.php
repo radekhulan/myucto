@@ -121,26 +121,51 @@ final class EnvironmentCheckService
         $facts  = $this->facts();
         $checks = $this->evaluate($facts, $onlyIds, $isSetupPreflight);
 
+        return [
+            'generated_at' => date(\DateTimeInterface::ATOM),
+            'summary'      => self::summary($checks),
+            'checks'       => $checks,
+            'facts'        => $facts,
+        ];
+    }
+
+    /**
+     * Report pro spravovanou instalaci: disk hlídá provozovatel, zákazník ho neřeší,
+     * takže kontrola nesmí ani zhoršit verdikt.
+     *
+     * @param array<string,mixed> $report
+     * @return array<string,mixed>
+     */
+    public static function withoutDiskSpace(array $report): array
+    {
+        $report['checks'] = array_values(array_filter(
+            $report['checks'],
+            static fn (array $check): bool => $check['id'] !== 'disk_space',
+        ));
+        $report['summary'] = self::summary($report['checks']);
+        unset($report['facts']['storage']['free_bytes'], $report['facts']['storage']['total_bytes']);
+        return $report;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $checks
+     * @return array{status:string,ok:int,warn:int,fail:int,skip:int}
+     */
+    private static function summary(array $checks): array
+    {
         $counts = [self::STATUS_OK => 0, self::STATUS_WARN => 0, self::STATUS_FAIL => 0, self::STATUS_SKIP => 0];
         foreach ($checks as $check) {
             $counts[$check['status']] = ($counts[$check['status']] ?? 0) + 1;
         }
 
-        $overall = $counts[self::STATUS_FAIL] > 0
-            ? self::STATUS_FAIL
-            : ($counts[self::STATUS_WARN] > 0 ? self::STATUS_WARN : self::STATUS_OK);
-
         return [
-            'generated_at' => date(\DateTimeInterface::ATOM),
-            'summary'      => [
-                'status' => $overall,
-                'ok'     => $counts[self::STATUS_OK],
-                'warn'   => $counts[self::STATUS_WARN],
-                'fail'   => $counts[self::STATUS_FAIL],
-                'skip'   => $counts[self::STATUS_SKIP],
-            ],
-            'checks' => $checks,
-            'facts'  => $facts,
+            'status' => $counts[self::STATUS_FAIL] > 0
+                ? self::STATUS_FAIL
+                : ($counts[self::STATUS_WARN] > 0 ? self::STATUS_WARN : self::STATUS_OK),
+            'ok'     => $counts[self::STATUS_OK],
+            'warn'   => $counts[self::STATUS_WARN],
+            'fail'   => $counts[self::STATUS_FAIL],
+            'skip'   => $counts[self::STATUS_SKIP],
         ];
     }
 
@@ -810,20 +835,7 @@ final class EnvironmentCheckService
         );
 
         // --- Úložiště ---
-        $free = $store['free_bytes'] ?? null;
-        $freeStatus = self::STATUS_SKIP;
-        if (is_int($free)) {
-            $freeStatus = $free < self::CRIT_FREE_BYTES
-                ? self::STATUS_FAIL
-                : ($free < self::MIN_FREE_BYTES ? self::STATUS_WARN : self::STATUS_OK);
-        }
-        $checks[] = $this->check(
-            'disk_space',
-            $freeStatus,
-            is_int($free) ? self::humanBytes($free) : '?',
-            '>= ' . self::humanBytes(self::MIN_FREE_BYTES),
-            '999_Reseni_problemu'
-        );
+        $checks[] = self::diskSpaceCheck($store['free_bytes'] ?? null, $store['total_bytes'] ?? null);
 
         $logBytes = $store['log_bytes'] ?? null;
         $checks[] = $this->check(
@@ -942,6 +954,26 @@ final class EnvironmentCheckService
             '101_Bezpecnost'
         );
 
+        // --- Přihlášení přes poskytovatele identity ---
+        // Neúplně nastavený poskytovatel se nezapne (OidcProviderRegistry), tady se
+        // ukáže proč. Bez prefixu __Host- může cookie s vazbou přihlášení podvrhnout
+        // sesterská subdoména a vnutit prohlížeči přihlášení do cizího účtu.
+        if ((bool) $this->config->get('auth.oidc.enabled', false)) {
+            $oidc = new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($this->config);
+            $errors = $oidc->configurationErrors();
+            $enabled = array_keys($oidc->enabled());
+            $hostCookie = str_starts_with((string) $this->config->get('session.cookie_name', '__Host-myinvoice_session'), '__Host-');
+            $checks[] = $this->check(
+                'oidc_config',
+                $errors !== [] ? self::STATUS_FAIL : ($hostCookie ? self::STATUS_OK : self::STATUS_WARN),
+                $errors !== []
+                    ? implode('; ', array_map(static fn ($id, $msg) => $id . ': ' . $msg, array_keys($errors), $errors))
+                    : ($enabled === [] ? 'žádný poskytovatel' : implode(', ', $enabled) . ($hostCookie ? '' : ' (cookie bez __Host-)')),
+                'poskytovatelé nastavení, session cookie s prefixem __Host-',
+                '101_Bezpecnost',
+            );
+        }
+
         // --- Verze aplikace ---
         // Sahá na cache aktualizací (a přes ni potenciálně po síti), takže se
         // vůbec nepočítá, když o ni volající nestojí — třeba v preflightu.
@@ -1005,6 +1037,30 @@ final class EnvironmentCheckService
             $check['variant'] = $variant;
         }
         return $check;
+    }
+
+    /**
+     * Stav určuje jen volné místo, celková velikost svazku je informace.
+     *
+     * @return array<string,mixed>
+     */
+    public static function diskSpaceCheck(mixed $free, mixed $total): array
+    {
+        $status = self::STATUS_SKIP;
+        if (is_int($free)) {
+            $status = $free < self::CRIT_FREE_BYTES
+                ? self::STATUS_FAIL
+                : ($free < self::MIN_FREE_BYTES ? self::STATUS_WARN : self::STATUS_OK);
+        }
+        return self::check(
+            'disk_space',
+            $status,
+            is_int($free) ? self::humanBytes($free) : '?',
+            '>= ' . self::humanBytes(self::MIN_FREE_BYTES),
+            '999_Reseni_problemu',
+            [],
+            is_int($total) ? self::humanBytes($total) : '',
+        );
     }
 
     /**

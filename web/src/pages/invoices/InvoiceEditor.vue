@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
+import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
+import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId, toRaw } from 'vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type InvoiceRoundingMode, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
@@ -28,7 +35,8 @@ import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
-import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
+import { formatMoney, formatNumber, formatPercent, formatUnitPrice } from '@/composables/useFormat'
+import { hasSubCentPrice, roundUnitPrice, unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
 import { formatAdjustment } from '@/pages/eshop/priceAdjustment'
 import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
@@ -47,6 +55,7 @@ import { isReturnRow, preselectFromSearch, takenByOtherRows, trackingChoices, tr
 import { applyLineDiscount, canDiscountUnitPrice, legacyListPrice, lineDiscountInputValue, lineDiscountPct, parseLineDiscountInput, quotedListPrice } from './invoiceLineDiscount'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { stockApi, type StockItemPackagingUnit, type StockItemSearchResult, type Warehouse } from '@/api/stock'
 import { stockSearchMatchLabel } from '@/utils/stockSearchMatch'
@@ -58,16 +67,26 @@ import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
-import { ICONS } from '@/components/ui/buttonStyles'
+import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
+import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
+import { useEditorPosting } from '@/composables/useEditorPosting'
+import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import { accountingApi, type PostingRule } from '@/api/accounting'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { documentVatInputs, itemVatInputs, loadedItemVatCode, type LoadedItemVat } from './itemVatClassification'
 import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
-import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
+import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey, stockSearchBadge } from './invoiceStockAvailability'
 import { unchangedRows, useUnitDecimals } from '@/composables/useUnitDecimals'
+import { useUnitLabels } from '@/composables/useUnitLabels'
+import { SIMPLIFIED_LIMIT_WITH_VAT, simplifiedOnlyClientProblem } from '@/utils/simplifiedOnlyClient'
 import {
   availabilityQuantity,
   availabilityUnit,
@@ -202,6 +221,7 @@ const currencies = ref<Currency[]>([])
 const units = ref<Unit[]>([])
 // Desetinná místa množství podle jednotky (2036): upozornění místo tichého zaokrouhlení.
 const { decimalsFor: unitDecimalsFor, tooPrecise: quantityTooPrecise, stepFor: quantityStepFor, mathDecimalsFor: quantityMathDecimals } = useUnitDecimals(units)
+const { unitLabel } = useUnitLabels(units, locale)
 // Uložené řádky dokladu: řádek beze změny jednotky a množství se nekontroluje (vznikl
 // dřív, než jednotka dostala nastavení), stejně jako na serveru.
 const storedItemQuantities = ref<Array<{ quantity: unknown; unit?: string | null }>>([])
@@ -223,7 +243,7 @@ const priceListOptions = computed(() => priceListItems.value.map(item => {
     value: item.id,
     label: `${item.code} · ${item.name}`,
     secondary: resolved
-      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${resolved.unit_price_without_vat.toFixed(2)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
+      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${unitPriceText(resolved.unit_price_without_vat)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
       : undefined,
   }
 }))
@@ -539,7 +559,8 @@ function stockPriceForRow(item: InvoiceItem, net: number | null): number | null
 function stockPriceForRow(item: InvoiceItem, net: number | null): number | null {
   if (net === null || !form.value.prices_include_vat || !supplierIsVatPayer.value || form.value.reverse_charge) return net
   const rate = vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0
-  return round2(net * (100 + rate) / 100)
+  const gross = net * (100 + rate) / 100
+  return hasSubCentPrice(net) ? roundUnitPrice(gross) : round2(gross)
 }
 
 /** Odběratel bez hladiny u karty bez funkcí: řádek dostane zpět původní cenu karty, jednotka zůstává. */
@@ -601,7 +622,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       }
       if (si.promo_price != null) {
         toast.info(t('invoice.promo_price_applied', {
-          price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+          price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
           label: si.promo_label ?? t('invoice.promo_price_generic'),
         }))
       }
@@ -623,7 +644,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       void quoteStockRows([item], 'select', initialStockUnit(si)).then((quoted) => {
         if (!quoted && quoteFailureFallback('select', si)?.promoToast) {
           toast.info(t('invoice.promo_price_applied', {
-            price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+            price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
             label: si.promo_label ?? t('invoice.promo_price_generic'),
           }))
         }
@@ -799,7 +820,7 @@ function lineDiscountHint(item: InvoiceItem): string | null {
   const pct = lineDiscountPct(item.list_unit_price, item.unit_price_without_vat)
   if (pct === null || item.list_unit_price == null) return null
   const params = {
-    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: unitPriceDecimals(item.list_unit_price) }),
     pct: formatNumber(Math.abs(pct), { maximumFractionDigits: 2 }),
   }
   // Se slevou zadávanou u řádku je vidět, že se skladový řádek počítá z ceníku karty (ne z ceny hladiny).
@@ -1030,26 +1051,74 @@ function hydrateAssetSelections() {
   if (form.value.items.some(it => it.accrual_from || it.accrual_to)) {
     showAccrual.value = true
   }
+  const document = documentVatInputs(form.value)
   for (const it of form.value.items) {
-    if (it.revenue_account_code) itemAccountOpen.add(it)
+    if (it.revenue_account_code) itemDetailsOpen.add(it)
+    itemVatLoaded.set(it, { code: it.vat_classification_code ?? null, item: itemVatInputs(it), document })
   }
 }
 
-// ─── ÚČET A DIMENZE POLOŽKY Z PRODUKTU (F1) ─────────────────────────────
-// Volitelný účet položky je „pokročilá" volba: pole se u řádku otevře šipkou stejně jako
-// u přijaté faktury (samo, když už položka účet má). Prázdné pole = účet produktu, jeho
+// ─── ÚČET, ČLENĚNÍ DPH A DIMENZE POLOŽKY (F1) ───────────────────────────
+// Účet a členění DPH položky jsou „pokročilé" volby: otevře je šipka u řádku stejně jako
+// u přijaté faktury (sama, když už položka účet má). Prázdný účet = účet produktu, jeho
 // kategorie, pravidlo výnosů, jinak předkontace dokladu — totéž rozhodne zaúčtování.
 const resultAccounts = useResultAccounts()
-const itemAccountOpen = reactive(new Set<InvoiceItem>())
+const itemDetailsOpen = reactive(new Set<InvoiceItem>())
 const itemAccountsAvailable = computed(() => assetSaleAvailable.value && resultAccounts.available.value)
 onMounted(() => { void resultAccounts.load() })
 
 function itemAccountEditable(item: InvoiceItem): boolean {
   return itemAccountsAvailable.value && !item.asset_id && !item.small_asset_id
 }
-function toggleItemAccount(item: InvoiceItem) {
-  if (itemAccountOpen.has(item)) itemAccountOpen.delete(item)
-  else itemAccountOpen.add(item)
+function itemVatEditable(item: InvoiceItem): boolean {
+  return supplierIsVatPayer.value && !item.oss_applicable
+}
+function itemDetailsAvailable(item: InvoiceItem): boolean {
+  return itemAccountEditable(item) || itemVatEditable(item)
+}
+
+// ─── ZAÚČTOVÁNÍ UŽ PŘI ZADÁNÍ (předkontace a protiúčet řádku, náhled, Uložit a zaúčtovat) ───
+const editorPosting = useEditorPosting()
+const postingErrorToast = useAccountingPeriodToast()
+onMounted(() => { void editorPosting.load() })
+/** Druhy dokladu, které se účtují do deníku (PostingService::POSTABLE_ISSUED_INVOICE_TYPES). */
+const POSTABLE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty']
+const editorPostable = computed(() => editorPosting.enabled.value && POSTABLE_TYPES.includes(form.value.invoice_type))
+const canSaveAndPost = computed(() => editorPostable.value && editorPosting.canPost.value
+  && (editedStatus.value !== 'draft' || auth.canWrite('invoices.issue')))
+/** Pohledávka, která platí bez volby na řádku — nápověda v poli protiúčtu. */
+const defaultCounterAccount = computed(() => editorPosting.ruleAccount('invoice.services.issued', 'debit') ?? '311')
+/** Předkontace řádku doplní výnosový účet, který řádek ještě nemá (server pak totéž). */
+function applyItemRule(item: InvoiceItem, rule: PostingRule) {
+  if (!item.revenue_account_code && rule.credit_account_code) item.revenue_account_code = rule.credit_account_code
+}
+function toggleItemDetails(item: InvoiceItem) {
+  if (itemDetailsOpen.has(item)) itemDetailsOpen.delete(item)
+  else itemDetailsOpen.add(item)
+}
+
+const itemVatLoaded = new WeakMap<object, LoadedItemVat>()
+const itemVatChoice = reactive(new Map<InvoiceItem, string | null>())
+
+function itemVatCode(item: InvoiceItem): string | null {
+  if (item.oss_applicable) return null
+  if (itemVatChoice.has(item)) return itemVatChoice.get(item) ?? null
+  return loadedItemVatCode(itemVatLoaded.get(item), item, form.value)
+}
+function setItemVatCode(item: InvoiceItem, value: string) {
+  itemVatChoice.set(item, value === '' ? null : value)
+}
+// Účet nebo kód odlišný od hlavičky se pozná i na zavřené šipce, stejně jako u přijaté faktury.
+function itemDetailsFilled(item: InvoiceItem): boolean {
+  const code = itemVatCode(item)
+  const header = form.value.vat_classification_code
+  return !!item.revenue_account_code || (!!code && !!header && code !== header)
+}
+// Vynechaný kód server odvodí jako dřív. Výslovný null posílá jen volba „Automaticky",
+// aby ji server u podaného období vyhodnotil jako změnu řádku přiznání.
+function itemVatPayload(item: InvoiceItem): { vat_classification_code?: string | null } {
+  const code = itemVatCode(item)
+  return code !== null || (itemVatChoice.has(item) && !item.oss_applicable) ? { vat_classification_code: code } : {}
 }
 
 /**
@@ -1068,7 +1137,7 @@ function applyProductDefaults(item: InvoiceItem, account: string | null, dims: R
   if (!item.revenue_account_code && account && itemAccountsAvailable.value) {
     item.revenue_account_code = account
     productPrefilledAccount.set(item, account)
-    itemAccountOpen.add(item)
+    itemDetailsOpen.add(item)
   }
   if (docDims.enabled.value && docDims.canEdit.value) {
     const result = applyPrefill(docDims.itemDimsOf(item), productPrefilledDims.get(item) ?? {}, dims)
@@ -1336,6 +1405,19 @@ async function loadInvoiceVatRates(): Promise<VatRate[]> {
   return codebooksApi.vatRates(country, form.value.issue_date).catch(() => [])
 }
 
+// Pozná jen nezměněné řádky vytvořené editorem; ruční ani načtené položky se nezahazují.
+const automaticItemBaselines = new WeakMap<InvoiceItem, string>()
+function automaticItemSignature(item: InvoiceItem): string {
+  return JSON.stringify({ ...toRaw(item), order_index: 0 })
+}
+function rememberAutomaticItem(item: InvoiceItem): void {
+  automaticItemBaselines.set(toRaw(item), automaticItemSignature(item))
+}
+function isUntouchedAutomaticItem(item: InvoiceItem): boolean {
+  return !item.id && !item.stock_item_id && !item.small_asset_id && !item.asset_id
+    && automaticItemBaselines.get(toRaw(item)) === automaticItemSignature(item)
+}
+
 function blankItem(): InvoiceItem {
   // Dobropis = záporné množství (sleva/refundace), default -1
   const qty = form.value.invoice_type === 'credit_note' ? -1 : 1
@@ -1345,7 +1427,7 @@ function blankItem(): InvoiceItem {
   const rate = (projectRate && projectRate > 0) ? projectRate
     : (clientRate && clientRate > 0) ? clientRate
     : 0
-  return {
+  const item: InvoiceItem = {
     description: '',
     quantity: qty,
     duration_minutes: null,
@@ -1367,7 +1449,19 @@ function blankItem(): InvoiceItem {
     oss_supply_type: 'goods',
     oss_original_period: null,
   }
+  rememberAutomaticItem(item)
+  return item
 }
+
+// Řada z číselníku zvolená v hlavičce konceptu. undefined = beze změny (do payloadu
+// nejde), null = výchozí řada druhu. Výběr se ukáže jen u druhu s víc řadami.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+const numberSeriesType = computed<'invoice' | 'proforma' | 'credit_note'>(() =>
+  form.value.invoice_type === 'proforma' || form.value.invoice_type === 'credit_note' ? form.value.invoice_type : 'invoice')
+// Synchronně: načtení dokladu mění typ dřív, než se z něj nastaví řada, a ta se nesmí smazat.
+watch(numberSeriesType, () => {
+  if (numberSeriesId.value != null) numberSeriesId.value = null
+}, { flush: 'sync' })
 
 // Náhled čísla faktury — backend zná aktuální counter pro per-supplier templ.
 // Volá se při mount + při změně typu / data; cancellation nemá číslo.
@@ -1384,6 +1478,7 @@ async function loadVarsymbolPreview() {
       form.value.client_id ?? undefined,
       form.value.revenue_category_id ?? undefined,
       varsymbolSeriesType(form.value.invoice_type, form.value.is_simplified) === 'simplified',
+      numberSeriesId.value,
     )
     varsymbolAutoPreview.value = r.varsymbol
     varsymbolAutoHasTemplate.value = r.has_template
@@ -1392,7 +1487,7 @@ async function loadVarsymbolPreview() {
     varsymbolAutoHasTemplate.value = false
   }
 }
-watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified], () => {
+watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified, numberSeriesId.value], () => {
   if (loaded.value && editedStatus.value === 'draft') loadVarsymbolPreview()
 })
 
@@ -1566,10 +1661,12 @@ onMounted(async () => {
       router.replace(`/invoices/${inv.id}`)
       return
     }
+    setLoadedProjectBillingContext(inv)
     editedStatus.value = inv.status
     editedVarsymbol.value = inv.varsymbol
     storedItemQuantities.value = inv.items.filter(i => i.item_kind !== 'discount').map(i => ({ quantity: i.quantity, unit: i.unit }))
     editedType.value = inv.invoice_type
+    clientSimplifiedOnly.value = inv.client_simplified_only === true
     Object.assign(form.value, {
       invoice_type: (inv.invoice_type === 'proforma' || inv.invoice_type === 'credit_note'
         || hasPaymentSchedule(inv.invoice_type))
@@ -1613,6 +1710,7 @@ onMounted(async () => {
       payment_schedule: (inv.payment_schedule ?? []).map(r => ({ ...r })),
       calendar_contract_ref: inv.calendar_contract_ref ?? '',
     })
+    numberSeriesId.value = inv.status === 'draft' ? (inv.number_series_id ?? undefined) : undefined
     rememberLoadedStockPrices()
     // Pořadí položek bez slevových řádků = pořadí na serveru (sleva se generuje na konec).
     void docDims.load(inv.id, form.value.items)
@@ -1656,6 +1754,7 @@ onMounted(async () => {
     if (form.value.items.length === 0) {
       form.value.items = [blankItem()]
     }
+    applyReceiptPreset()
     // Bez klienta i zakázky: splatnost z výchozího nastavení dodavatele
     // (supplier store je teď spolehlivě načtený, na rozdíl od init form refu).
     if (!form.value.client_id && !form.value.project_id) {
@@ -1708,6 +1807,16 @@ async function onClientCreatedInModal(client: Client) {
   await onClientChange()
 }
 
+// Karta aktualizovaná z ARES/VIES: rozpracovaný doklad čte odběratele z cache, takže
+// stačí ji nahradit, obnovit popisek výběru a znovu ověřit DIČ.
+async function onClientRegistryUpdated(client: Client) {
+  mergeClients([client])
+  clientOptions.value = clientOptions.value.map(o => o.value === client.id ? clientToOption(client) : o)
+  if (form.value.client_id !== client.id) return
+  selectedClientOption.value = clientToOption(client)
+  await verifyClientVies(client.id)
+}
+
 async function onProjectCreatedInModal(project: Project) {
   projects.value = [project, ...projects.value.filter(p => p.id !== project.id)]
   form.value.project_id = project.id
@@ -1730,12 +1839,19 @@ async function onClientChange() {
   } else {
     selectedClientOption.value = null
     viesResult.value = null
+    clientSimplifiedOnly.value = false
   }
 }
 
 async function applyClientDefaults(clientId: number) {
   const c = clients.value.find(c => c.id === clientId)
   if (!c) return
+  clientSimplifiedOnly.value = c.simplified_only === true
+  // Drobnému zákazníkovi bez adresy (#310) jde jen zjednodušený doklad, předvol ho.
+  if (clientSimplifiedOnly.value && supplierIsVatPayer.value && form.value.invoice_type === 'invoice' && !form.value.is_simplified) {
+    form.value.is_simplified = true
+    onSimplifiedToggle()
+  }
   form.value.currency_id = c.currency_default_id
   form.value.currency = c.currency_default
   form.value.language = c.language
@@ -1765,9 +1881,11 @@ async function applyClientDefaults(clientId: number) {
   // „Prázdná položka" = prázdný popis; rate mohl naplnit předchozí klient/projekt, přesto chceme refresh.
   if (!form.value.project_id && c.hourly_rate && c.hourly_rate > 0) {
     if (form.value.items.length === 1 && !isTextItem(form.value.items[0]) && (form.value.items[0].description || '').trim() === '') {
+      const wasAutomatic = isUntouchedAutomaticItem(form.value.items[0])
       form.value.items[0].unit_price_without_vat = c.hourly_rate
       form.value.items[0].unit = defaultItemUnit()
       onItemUnitChange(form.value.items[0])
+      if (wasAutomatic) rememberAutomaticItem(form.value.items[0])
     }
     if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
       wrItems.value[0].rate = c.hourly_rate
@@ -1819,9 +1937,11 @@ async function applyProjectDefaults(projectId: number) {
   }
   // Pokud má jen jednu prázdnou položku (bez popisu), refresh sazby z projektu.
   if (form.value.items.length === 1 && !isTextItem(form.value.items[0]) && (form.value.items[0].description || '').trim() === '') {
+    const wasAutomatic = isUntouchedAutomaticItem(form.value.items[0])
     form.value.items[0].unit_price_without_vat = p.hourly_rate
     form.value.items[0].unit = defaultItemUnit()
     onItemUnitChange(form.value.items[0])
+    if (wasAutomatic) rememberAutomaticItem(form.value.items[0])
   }
   if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
     wrItems.value[0].rate = p.hourly_rate
@@ -1930,6 +2050,15 @@ function moveDown(index: number) {
   form.value.items.forEach((it, i) => (it.order_index = i))
 }
 
+/** Telefon: nabídka „…" na kartě položky místo malých tlačítek ▲ ▼ ×. */
+function itemRowMenuActions(index: number): RowAction[] {
+  return [
+    { key: 'move-up', label: t('invoice.phone.move_up'), disabled: index === 0, run: () => moveUp(index) },
+    { key: 'move-down', label: t('invoice.phone.move_down'), disabled: index >= form.value.items.length - 1, run: () => moveDown(index) },
+    { key: 'remove', label: t('common.delete'), icon: 'trash', variant: 'danger', run: () => removeItem(index) },
+  ]
+}
+
 const roundingAvailable = computed(() =>
   ['invoice', 'credit_note'].includes(form.value.invoice_type)
   && form.value.currency === 'CZK'
@@ -1949,7 +2078,7 @@ const computed_totals = computed(() => {
     const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (isPreciseTimeItem(item)) {
+    if (isPreciseUnitPrice(item)) {
       const totals = timeItemTotals(item, vatRate, pricesIncl)
       base = totals.base
       vat = totals.vat
@@ -2040,7 +2169,6 @@ const computed_totals = computed(() => {
  * Limit se posuzuje z částky VČETNĚ daně: doklad se základem 9 000 Kč je s 21 % na
  * 10 890 Kč, tedy nad limitem, přestože na základ se pohodlně vejde.
  */
-const SIMPLIFIED_LIMIT_WITH_VAT = 10000
 const SIMPLIFIED_FORBIDDEN_LINES: Record<string, string> = {
   '20': 'invoice.simplified_blocked_eu',
   '25': 'invoice.simplified_blocked_reverse_charge',
@@ -2061,6 +2189,33 @@ const simplifiedBlockedReason = computed<string | null>(() => {
   const key = line === null ? undefined : SIMPLIFIED_FORBIDDEN_LINES[String(line)]
 
   return key === undefined ? null : t(key)
+})
+
+// Drobný zákazník bez adresy (#310): z karty odběratele, u uloženého dokladu z detailu.
+const clientSimplifiedOnly = ref(false)
+const simplifiedOnlyClientWarning = computed<string | null>(() => {
+  const total = Math.abs(computed_totals.value.with_vat)
+  const problem = simplifiedOnlyClientProblem({
+    simplifiedOnly: clientSimplifiedOnly.value,
+    supplierIsVatPayer: supplierIsVatPayer.value,
+    invoiceType: form.value.invoice_type,
+    isSimplified: form.value.is_simplified,
+    totalWithVat: total,
+    hasOriginal: !!form.value.parent_invoice_id,
+  })
+  if (problem === 'credit_note_requires_original') return t('invoice.simplified_only_client_credit_note_requires_original')
+  if (problem === 'requires_simplified') {
+    return t(form.value.invoice_type === 'credit_note'
+      ? 'invoice.simplified_only_client_credit_note_requires'
+      : 'invoice.simplified_only_client_requires')
+  }
+  if (problem === 'over_limit') {
+    return t('invoice.simplified_only_client_over_limit', {
+      limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.value.currency),
+      total: formatMoney(total, form.value.currency),
+    })
+  }
+  return null
 })
 
 /**
@@ -2173,6 +2328,14 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
+  // Prázdný koncept smí zůstat uložený; připravený přenos ale položky doplní, proto ho posuzuje níž.
+  && !(editedStatus.value === 'draft' && amountItems(form.value.items).length === 0 && !wrBillingPending.value)
+  // Připravený kladný přenos doplní položky až po uložení konceptu.
+  && !(editedStatus.value === 'draft' && wrBillingPending.value
+    && Number(wrBillingPendingPreview.value?.totals?.with_vat ?? wrBillingPendingPreview.value?.total_amount) > 0)
+  // Koncept jen z řádků „cenu zadá člověk" bez ceny smí být nulový, hlídá ho až vystavení (jako backend).
+  && !(amountItems(form.value.items).length > 0
+    && amountItems(form.value.items).every(it => it.manual_price && Number(it.unit_price_without_vat) === 0))
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2194,7 +2357,7 @@ function round6(n: number): number {
  * net základ + DPH je v souhrnu níže). U neplátce / reverse-charge je sazba 0 → = základ.
  */
 function itemTotal(item: InvoiceItem): number {
-  if (isPreciseTimeItem(item)) {
+  if (isPreciseUnitPrice(item)) {
     const rate = (form.value.reverse_charge || !supplierIsVatPayer.value)
       ? 0 : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
     return timeItemTotals(item, rate, !!form.value.prices_include_vat && supplierIsVatPayer.value).with
@@ -2223,7 +2386,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
   if (qty === 0) return
   if (form.value.prices_include_vat && supplierIsVatPayer.value) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : round2(gross / qty)
+    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : unitPriceForAmount(gross, qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u neplátce / RC je sazba 0).
@@ -2231,19 +2394,112 @@ function setItemGross(item: InvoiceItem, raw: string): void {
     ? 0
     : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
   const net = gross / (1 + vatRate / 100)
-  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : round2(net / qty)
+  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : unitPriceForAmount(net, qty)
 }
 
 // Přepínač „ceny s DPH" má smysl jen pro plátce DPH (u neplátce/RC je sazba 0 → gross = net).
 const showPricesIncludeVatUI = computed(() => supplierIsVatPayer.value)
+
+// ── Telefon ──
+// Editor má na telefonu přes pět obrazovek. Méně častá pole (čísla a reference,
+// příznaky dokladu) se sbalí, dokud nic neobsahují, šedé nápovědy se skryjí.
+// Varování a vyplněné hodnoty zůstávají vidět vždy, nic se neschová potichu.
+const isPhone = useIsPhone()
+const refsOpen = ref(false)
+const hasRefs = computed(() => paymentVsInvalid.value
+  || [form.value.varsymbol, form.value.payment_variable_symbol, form.value.supplier_order_number].some(v => v.trim() !== ''))
+const showRefs = computed(() => !isPhone.value || refsOpen.value || hasRefs.value)
+const docOptionsOpen = ref(false)
+const activeDocFlags = computed(() => [
+  showReverseChargeUI.value && form.value.reverse_charge ? t('invoice.reverse_charge') : null,
+  supplierIsVatPayer.value && form.value.is_simplified ? t('invoice.simplified_document_short') : null,
+  showPricesIncludeVatUI.value && form.value.prices_include_vat ? t('invoice.prices_include_vat') : null,
+  showIncomeTaxExemptUI.value && form.value.income_tax_exempt ? t('invoice.income_tax_exempt') : null,
+].filter((flag): flag is string => flag !== null))
+const docOptionsNeedAttention = computed(() => !!simplifiedOnlyClientWarning.value
+  || (form.value.is_simplified && !!simplifiedBlockedReason.value)
+  || (form.value.income_tax_exempt && showIncomeTaxExemptUI.value))
+const showDocOptions = computed(() => !isPhone.value || docOptionsOpen.value || docOptionsNeedAttention.value)
+// Klasifikace, dimenze, poznámky, výkazy a přílohy: na telefonu za jedním řádkem
+// pod položkami. Rozepsaný výkaz nebo poznámka zůstávají vidět i sbalené.
+const secondaryOpen = ref(false)
+const showSecondary = computed(() => !isPhone.value || secondaryOpen.value)
+
+/**
+ * Účtenka (`?simplified=1`, dlaždice v mobilní nabídce Prodej): zjednodušený daňový
+ * doklad § 30 ZDPH pro koncového zákazníka placený na místě. Předvyplní jen to, co
+ * by uživatel jinak přepínal ručně; vše zůstává běžným editorem a jde změnit.
+ */
+const receiptPreset = ref(false)
+
+function applyReceiptPreset(): void {
+  if (route.query.simplified !== '1' || !supplierIsVatPayer.value || form.value.invoice_type !== 'invoice') return
+  receiptPreset.value = true
+  form.value.is_simplified = true
+  onSimplifiedToggle()
+  form.value.payment_method = 'cash'
+  form.value.prices_include_vat = true
+  pickDefaultCashRegister()
+}
+
+function pickDefaultCashRegister(): void {
+  if (!receiptPreset.value || form.value.cash_register_id !== null || !showCashSettlement.value) return
+  const registers = cashRegisters.value
+  const preferred = registers.find(r => r.is_default) ?? (registers.length === 1 ? registers[0] : undefined)
+  if (preferred) form.value.cash_register_id = preferred.id
+}
+
+watch(cashRegisters, pickDefaultCashRegister)
+
+function switchReceiptToInvoice(): void {
+  receiptPreset.value = false
+  form.value.is_simplified = false
+}
 // Záhlaví sloupce jednotkové ceny — v režimu „ceny s DPH" je to cena včetně DPH.
 const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && supplierIsVatPayer.value
   ? t('invoice.items_table.unit_price_gross')
   : t('invoice.items_table.unit_price'))
 
 // ─── WORK REPORT ────────────────────────────────────────────────
+const wrBillingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
+const wrBillingTemplateId = ref<number | null>(null)
+const wrBillingModeChosen = ref(false)
+const loadedProjectBillingContext = ref<Pick<Invoice, 'project_id' | 'project_name' | 'project_billing_template_id'> | null>(null)
+function setLoadedProjectBillingContext(invoice: Pick<Invoice, 'project_id' | 'project_name' | 'project_billing_template_id'>): void {
+  loadedProjectBillingContext.value = { project_id: invoice.project_id, project_name: invoice.project_name, project_billing_template_id: invoice.project_billing_template_id }
+}
+const wrBillingProjectName = computed(() => projects.value.find(project => project.id === form.value.project_id)?.name
+  ?? (loadedProjectBillingContext.value?.project_id === form.value.project_id ? loadedProjectBillingContext.value?.project_name ?? '' : ''))
+const wrBillingPeriod = ref('')
+const wrBillingStale = ref(false)
+const wrBillingReportId = ref<number | null>(null)
+const wrBillingCurrentPreview = ref<WorkReportBillingPreview | null>(null)
+const wrBillingPending = ref(false)
+const wrBillingPendingPreview = ref<WorkReportBillingPreview | null>(null)
+const billingDraftId = ref<number | null>(null)
+const wrBillingLegacyItemId = ref<number | null>(null)
+function queueWrBilling(preview: WorkReportBillingPreview) {
+  wrBillingPendingPreview.value = preview
+  wrBillingPending.value = true
+}
+// Po částečném uložení držíme serverové ID i nové řádky. Ruční řádky si ponechají
+// identitu objektu kvůli lokálním dimenzím a skladovým volbám pro případ opakování.
+function syncBillingInvoiceItems(items: InvoiceItem[], transferred = false, removedLegacyId?: number): void {
+  const rows = items.filter(item => item.item_kind !== 'discount')
+  const oldBilling = new Map(form.value.items.filter(item => item.work_report_billing_key != null).map(item => [item.work_report_billing_key, item]))
+  const oldManual = form.value.items.filter(item => item.work_report_billing_key == null && (removedLegacyId == null || item.id !== removedLegacyId))
+  form.value.items = rows.map((row, index) => {
+    const previous = transferred
+      ? (row.work_report_billing_key != null ? oldBilling.get(row.work_report_billing_key) : oldManual.shift())
+      : form.value.items[index]
+    return previous ? Object.assign(previous, row) : { ...row }
+  })
+  storedItemQuantities.value = form.value.items.map(item => ({ quantity: item.quantity, unit: item.unit }))
+  rememberLoadedStockPrices()
+}
 const wrOpen = ref(false)
 const wrTitle = ref('')
+const wrDisplayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
 const wrItems = ref<WorkReportItem[]>([])
 const wrVatRateId = ref<number | null>(null)
 
@@ -2262,6 +2518,14 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrBillingModeChosen.value = true
+    wrBillingReportId.value = wr.id
+    wrBillingCurrentPreview.value = wr.billing_preview ?? null
+    wrBillingSnapshot.value = wr.billing_snapshot ?? null
+    wrBillingTemplateId.value = wr.billing_template_id ?? null
+    wrBillingPeriod.value = wr.billing_period ?? (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
+    wrBillingStale.value = !!wr.billing_stale
+    wrDisplayOptions.value = wr.display_options ?? null
     wrTitle.value = wr.title
     wrItems.value = wr.items.map(i => ({ ...i }))
     // Neplátce DPH: vždy 0% „Osvobozeno" (defaultVatRateId()), ať se do položek faktury
@@ -2269,7 +2533,7 @@ async function loadWorkReport() {
     wrVatRateId.value = supplierIsVatPayer.value
       ? (wr.vat_rate_id ?? vatRateIdByPercent(21) ?? defaultVatRateId())
       : defaultVatRateId()
-    if (wr.items.length > 0) wrOpen.value = true
+    if (wr.items.length > 0 || wr.billing_snapshot) wrOpen.value = true
     // Materiál
     if (wr.material_title) matTitle.value = wr.material_title
     matItems.value = (wr.materials ?? []).map(m => ({ ...m }))
@@ -2311,7 +2575,20 @@ function moveWrItem(idx: number, dir: -1 | 1) {
   const [item] = wrItems.value.splice(idx, 1)
   wrItems.value.splice(newIdx, 0, item)
 }
-function openWorkReport() {
+async function openWorkReport() {
+  wrBillingPeriod.value ||= (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
+  const project = projects.value.find(p => p.id === form.value.project_id)
+  const defaultTemplate = project ? project.billing_template_id
+    : (loadedProjectBillingContext.value?.project_id === form.value.project_id ? loadedProjectBillingContext.value?.project_billing_template_id : null)
+  if (!wrBillingModeChosen.value && wrBillingReportId.value == null && !wrBillingSnapshot.value && defaultTemplate) {
+    try {
+      const template = (await workReportBillingApi.list()).find(item => item.id === defaultTemplate)
+      if (template && template.currency === form.value.currency) { wrBillingTemplateId.value = template.id; wrBillingSnapshot.value = JSON.parse(JSON.stringify(template)) }
+    } catch (e) {
+      error.value = apiErrorMessage(e, t('common.error'))
+      return
+    }
+  }
   if (wrVatRateId.value == null) wrVatRateId.value = supplierIsVatPayer.value ? (vatRateIdByPercent(21) ?? defaultVatRateId()) : defaultVatRateId()
   if (wrItems.value.length === 0) {
     const date = (form.value.tax_date || form.value.issue_date || '').slice(0, 7) // YYYY-MM
@@ -2383,6 +2660,9 @@ async function deleteWorkReport() {
   }
   wrItems.value = []
   wrTitle.value = ''
+  wrBillingSnapshot.value = null
+  wrBillingTemplateId.value = null
+  wrBillingPending.value = false
   wrOpen.value = false
 }
 
@@ -2391,6 +2671,11 @@ async function deleteWorkReport() {
  * Vrací null = OK, jinak warning string pro confirm().
  */
 function checkWorkReportSync(): string | null {
+  if (wrBillingSnapshot.value) {
+    return billingSaveNeedsConfirmation({ snapshot: wrBillingSnapshot.value, stale: wrBillingStale.value, pending: wrBillingPending.value,
+      reportId: wrBillingReportId.value, preview: wrBillingCurrentPreview.value, invoiceItems: form.value.items })
+      ? t('work_report_billing.save_unsynced_confirm', { description: wrTitle.value || t('invoice.work_report') }) : null
+  }
   if (!wrOpen.value || wrItemsValid.value.length === 0) return null
   const totalHours = Math.round(wrTotalHours.value * 100) / 100
   const totalAmount = Math.round(wrTotalAmount.value * 100) / 100
@@ -2636,6 +2921,9 @@ async function submit() {
   if (!validateDurationInputs(paneDom.root())) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
+  // Částku dodá až ručně vyžádaný přenos výkazu. Nedokončený automatický řádek
+  // s předvyplněnou sazbou není plnění; upravený řádek dál musí projít validací popisu.
+  if (wrBillingPending.value) form.value.items = form.value.items.filter(item => !isUntouchedAutomaticItem(item))
   form.value.items = form.value.items.filter(it =>
     (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0
   )
@@ -2662,7 +2950,21 @@ async function submit() {
   submitting.value = true
   error.value = ''
   try {
-    const payload: InvoicePayload = {
+    await saveDocument(buildPayload(form.value.items))
+  } catch (e: any) {
+    error.value = apiErrorMessage(e, t('common.save_failed'))
+    // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
+    toast.error(error.value)
+    await nextTick()
+    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** Tělo dokladu pro uložení i pro náhled zápisu (náhled ho uloží v odvolané transakci). */
+function buildPayload(items: InvoiceItem[]): InvoicePayload {
+  return {
       invoice_type: form.value.invoice_type,
       // Zjednodušený doklad bez odběratele: backend doplní koncového zákazníka firmy.
       client_id: form.value.client_id ?? null,
@@ -2709,11 +3011,13 @@ async function submit() {
       // Volitelný ruční varsymbol — backend ho akceptuje jen u draftu;
       // prázdný řetězec → backend uloží NULL a vygeneruje při issue automaticky.
       varsymbol: form.value.varsymbol.trim(),
+      number_series_id: numberSeriesId.value,
       vat_classification_code: form.value.vat_classification_code,
       revenue_category: form.value.revenue_category,
       revenue_category_id: form.value.revenue_category_id,
       // Textový řádek jde jen jako druh + text + pořadí; zbytek si server vynuluje.
-      items: form.value.items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
+      items: items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
+        id: it.id ?? null,
         description: it.description,
         quantity: itemQuantity(it),
         duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
@@ -2722,12 +3026,16 @@ async function submit() {
         // Ceníková cena (2035): round-trip, procento slevy dopočítá server.
         list_unit_price: it.list_unit_price ?? null,
         vat_rate_id: it.vat_rate_id,
+        ...itemVatPayload(it),
         order_index: i,
+        linked_work_report_id: it.linked_work_report_id ?? null,
+        work_report_billing_key: it.work_report_billing_key ?? null,
         // B5: MUSÍ se posílat zpět, jinak je InvoiceRepository::replaceItems (DELETE+INSERT) tiše smaže.
         stock_item_id: it.stock_item_id ?? null,
         warehouse_id: it.warehouse_id ?? null,
         // Vybraná sériová čísla / šarže — round-trip ze stejného důvodu jako karta.
         tracking_allocations: it.stock_item_id != null ? (it.tracking_allocations ?? []) : [],
+        manual_price: it.manual_price ?? false,
         // Totéž pro vazbu na kartu majetku (1177) — bez round-tripu by prodej zmizel.
         small_asset_id: it.small_asset_id ?? null,
         asset_id: it.asset_id ?? null,
@@ -2735,7 +3043,11 @@ async function submit() {
         accrual_to: it.accrual_to || null,
         // Výnosový účet položky (F1) — round-trip jako ostatní pole položky.
         revenue_account_code: (it.revenue_account_code ?? '').trim() || null,
+        counter_account_code: (it.counter_account_code ?? '').trim() || null,
+        posting_rule_key: it.posting_rule_key || null,
         seller_item_code: it.seller_item_code ?? null,
+        // Záloha odpočtového řádku (čerpání záloh): round-trip, jinak ji replaceItems zahodí.
+        advance_invoice_id: it.advance_invoice_id ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         // Prázdný typ sazby se posílá jako null, ne jako „standard" — dosazení základní
@@ -2760,13 +3072,22 @@ async function submit() {
         oss_needs_manual_review: it.oss_applicable ? (it.oss_needs_manual_review ?? false) : false,
       })),
     }
+}
 
+/** Uloží doklad a jeho navázané části (dimenze, výkazy, přílohy) a přejde na detail. */
+async function saveDocument(payload: InvoicePayload): Promise<void> {
+    const legacyItemIndex = wrBillingLegacyItemId.value == null ? -1 : form.value.items.findIndex(item => item.id === wrBillingLegacyItemId.value)
     const itemDimsSnapshot = docDims.snapshot(form.value.items)
     let saved: Invoice
-    if (isEdit.value && invoiceId.value) {
-      saved = await invoicesApi.update(invoiceId.value, payload, isForce.value)
+    if ((isEdit.value && invoiceId.value) || billingDraftId.value) {
+      saved = await invoicesApi.update(billingDraftId.value ?? invoiceId.value!, payload, isForce.value)
     } else {
       saved = await invoicesApi.create(payload)
+      if (wrBillingSnapshot.value) billingDraftId.value = saved.id
+    }
+    if (wrBillingSnapshot.value) {
+      if (legacyItemIndex >= 0) wrBillingLegacyItemId.value = saved.items[legacyItemIndex]?.id ?? null
+      syncBillingInvoiceItems(saved.items)
     }
     await docDims.save(saved.id, itemDimsSnapshot)
 
@@ -2809,11 +3130,15 @@ async function submit() {
     notifyCashSettlement(saved._cash_settlement)
     // Po uložení faktury — pokud uživatel otevřel work report, ulož ho
     // (jen řádky s vyplněným popisem; prázdné řádky tiše ignorujeme — viz wrItemsValid)
-    if (wrOpen.value && wrItemsValid.value.length > 0) {
+    if (wrOpen.value && (wrItemsValid.value.length > 0 || wrBillingSnapshot.value || wrBillingReportId.value != null)) {
       try {
         await invoicesApi.saveWorkReport(saved.id, {
           project_id: saved.project_id,
           title: wrTitle.value,
+          billing_template_id: wrBillingTemplateId.value,
+          billing_snapshot: wrBillingSnapshot.value,
+          ...(wrBillingSnapshot.value ? { billing_period: wrBillingPeriod.value || null } : {}),
+          display_options: wrDisplayOptions.value,
           vat_rate_id: wrVatRateId.value,
           items: wrItemsValid.value.map((it, i) => ({
             description: it.description,
@@ -2850,6 +3175,24 @@ async function submit() {
         return
       }
     }
+    // Přenos až po obou částech výkazu: chyba materiálu nesmí při dalším Save
+    // přepsat už přenesené řádky starým obsahem formuláře.
+    if (wrBillingSnapshot.value && wrBillingPending.value) {
+      try {
+        const preview = await workReportBillingApi.preview(saved.id)
+        const legacyItemId = legacyItemIndex < 0 ? undefined : saved.items[legacyItemIndex]?.id
+        const result = await workReportBillingApi.transfer(saved.id, preview.fingerprint, isForce.value, legacyItemId)
+        syncBillingInvoiceItems(result.items, true, legacyItemId)
+        wrBillingReportId.value = result.work_report.id
+        wrBillingCurrentPreview.value = result.preview
+        wrBillingStale.value = false
+        wrBillingPending.value = false
+        wrBillingLegacyItemId.value = null
+      } catch (e: any) {
+        error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
+        return
+      }
+    }
     // Přílohy nasbírané u nové faktury (držené v prohlížeči) — nahraj teď, když známe id.
     // Selhání uploadu nesmí shodit už vytvořenou fakturu → jen upozorni, pokračuj na detail.
     if (pendingAttachments.value.length > 0) {
@@ -2860,19 +3203,61 @@ async function submit() {
         toast.warning(apiErrorMessage(e, t('invoice.attachments.post_save_failed')))
       }
     }
+    if (postAfterSave) await postSavedInvoice(saved)
     if (eetChoiceVisible.value && eetOnSave.value !== 'none') {
       router.push({ path: `/invoices/${saved.id}`, query: { eet: eetOnSave.value } })
     } else {
       router.push(`/invoices/${saved.id}`)
     }
-  } catch (e: any) {
-    error.value = apiErrorMessage(e, t('common.save_failed'))
-    // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
-    toast.error(error.value)
-    await nextTick()
-    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+/**
+ * Náhled zápisu pod položkami: jen u účtovaného druhu dokladu a jen když doklad jde
+ * uložit. Prázdné řádky vynechá stejně jako uložení; rozepsaná položka (bez popisu
+ * nebo s nulovou cenou) náhled odloží, server by ji odmítl validací.
+ */
+/** Co chybí, aby šel doklad pro náhled zápisu uložit (klíče `accounting.editor_posting.missing_*`). */
+const previewMissing = computed<string[]>(() => {
+  const missing: string[] = []
+  if (!form.value.client_id && !form.value.is_simplified) missing.push('partner')
+  if (!form.value.currency_id) missing.push('currency')
+  const filled = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  if (filled.length === 0) missing.push('items')
+  else if (!filled.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)) missing.push('item_detail')
+  return missing
+})
+const previewPayload = computed<InvoicePayload | null>(() => {
+  if (!editorPostable.value || !form.value.currency_id || (!form.value.client_id && !form.value.is_simplified)) return null
+  const items = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  const complete = items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
+  return items.length > 0 && complete ? buildPayload(items) : null
+})
+
+let postAfterSave = false
+/** Uložit a zaúčtovat: uloží doklad stejnou cestou jako Uložit, koncept vystaví a zaúčtuje. */
+async function saveAndPost() {
+  if (!canSaveAndPost.value) return
+  postAfterSave = true
+  try {
+    await submit()
   } finally {
-    submitting.value = false
+    postAfterSave = false
+  }
+}
+
+/**
+ * Zaúčtuje právě uložený doklad. Koncept se neúčtuje, proto ho nejdřív vystaví (stejná
+ * akce jako Vystavit v detailu). Chyba zaúčtování uložení nevrací: doklad zůstane uložený.
+ */
+async function postSavedInvoice(saved: Invoice): Promise<void> {
+  try {
+    const issued = saved.status === 'draft' ? await invoicesApi.issue(saved.id) : saved
+    await accountingApi.postInvoice(issued.id)
+    toast.success(t('accounting.editor_posting.posted_toast'))
+  } catch (e: any) {
+    postingErrorToast(e)
   }
 }
 
@@ -2931,10 +3316,27 @@ useWindowTitle(
       </div>
     </div>
 
+    <!-- Účtenka: zjednodušený doklad § 30 ZDPH jedním řádkem místo zaškrtávátka
+         s paragrafem schovaného mezi dalšími volbami dokladu. -->
+    <div v-if="form.is_simplified && supplierIsVatPayer && (receiptPreset || isPhone)"
+      class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm text-primary-800"
+      data-test="receipt-banner">
+      <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2z" />
+      </svg>
+      <span class="min-w-0 flex-1 basis-56">
+        <span class="font-semibold">{{ t('invoice.receipt_banner_title') }}</span>
+        <span class="text-primary-700"> · {{ t('invoice.receipt_banner_text', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency, 0) }) }}</span>
+      </span>
+      <button v-if="editedStatus === 'draft'" type="button" class="cursor-pointer whitespace-nowrap font-medium underline" @click="switchReceiptToInvoice">
+        {{ t('invoice.receipt_switch') }}
+      </button>
+    </div>
+
     <form ref="editorForm" @submit.prevent="submit" class="space-y-4">
       <!-- Klient + zakázka + datumy -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.client') }} &amp; {{ t('invoice.project') }}</h3>
           <div class="space-y-3">
             <div>
@@ -2970,7 +3372,7 @@ useWindowTitle(
               <input v-model="form.calendar_contract_ref" type="text" maxlength="190"
                 :placeholder="t('invoice.calendar_contract_ref_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.calendar_contract_ref_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.calendar_contract_ref_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.client') }}{{ form.is_simplified ? '' : ' *' }}</label>
@@ -2988,6 +3390,7 @@ useWindowTitle(
                     :clearable="form.is_simplified"
                   />
                 </div>
+                <ClientRegistryCheck :client-id="form.client_id" :client="selectedClient" @updated="onClientRegistryUpdated" />
                 <button type="button" @click="clientModalOpen = true"
                   class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                   :title="t('client.new_title')">
@@ -3028,7 +3431,7 @@ useWindowTitle(
                 <option v-for="l in priceLevelOptions" :key="l.id" :value="l.id">{{ l.name }}</option>
               </select>
               <p v-if="priceLevelStale" class="text-xs text-warning-600 mt-1">{{ t('invoice.price_level.stale') }}</p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
             </div>
             <!-- Firma mezitím deaktivovala všechny hladiny: výběr zmizí, zrušení hladiny konceptu ale nesmí být tiché. -->
             <p v-else-if="stockEnabled && priceLevelStale && !auth.isClientRole" class="text-xs text-warning-600">{{ t('invoice.price_level.stale') }}</p>
@@ -3087,15 +3490,6 @@ useWindowTitle(
                 {{ t('payment_method.hint') }}
               </p>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.rounding.label') }}</label>
-              <select v-model="form.rounding_mode" :disabled="!roundingAvailable" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-50">
-                <option value="auto">{{ t('invoice.rounding.auto') }}</option>
-                <option value="none">{{ t('invoice.rounding.none') }}</option>
-                <option value="whole_czk">{{ t('invoice.rounding.whole_czk') }}</option>
-              </select>
-              <p class="text-xs text-neutral-500 mt-1">{{ t(roundingAvailable ? 'invoice.rounding.hint' : 'invoice.rounding.unavailable') }}</p>
-            </div>
             <!-- Hotovostní vyrovnání (migrace 1327): pokladna k formě úhrady „Hotově".
                  Nepovinné — bez pokladny se nic nezaúčtuje a faktura zůstane pohledávkou. -->
             <div v-if="showCashSettlement">
@@ -3112,6 +3506,30 @@ useWindowTitle(
               <p v-else-if="form.cash_register_id" class="text-xs text-neutral-500 mt-1">
                 {{ t('cash_settlement.invoice_hint') }}
               </p>
+            </div>
+            <!-- Telefon: zaokrouhlení a příznaky dokladu pod jedním řádkem. Zapnuté
+                 příznaky jsou vidět jako štítky i sbalené, varování sekci otevře. -->
+            <button v-if="isPhone" type="button"
+              class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-left text-sm text-neutral-700"
+              :aria-expanded="showDocOptions" data-test="doc-options-toggle"
+              @click="docOptionsOpen = !docOptionsOpen">
+              <span class="font-medium">{{ t('invoice.doc_options') }}</span>
+              <span class="flex min-w-0 flex-1 flex-wrap justify-end gap-1">
+                <span v-for="flag in activeDocFlags" :key="flag" class="truncate rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700">{{ flag }}</span>
+              </span>
+              <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showDocOptions ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div v-show="showDocOptions" class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.rounding.label') }}</label>
+              <select v-model="form.rounding_mode" :disabled="!roundingAvailable" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-50">
+                <option value="auto">{{ t('invoice.rounding.auto') }}</option>
+                <option value="none">{{ t('invoice.rounding.none') }}</option>
+                <option value="whole_czk">{{ t('invoice.rounding.whole_czk') }}</option>
+              </select>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t(roundingAvailable ? 'invoice.rounding.hint' : 'invoice.rounding.unavailable') }}</p>
             </div>
             <div v-if="showReverseChargeUI">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
@@ -3131,7 +3549,7 @@ useWindowTitle(
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.is_simplified" type="checkbox" class="rounded border-neutral-300 text-primary-600"
                   @change="onSimplifiedToggle" />
-                <span>{{ t('invoice.simplified_document') }}</span>
+                <span>{{ isPhone ? t('invoice.simplified_document_short') : t('invoice.simplified_document') }}</span>
               </label>
               <!-- Zjednodušený doklad údaje odběratele nevyžaduje (§ 30a), klient zůstává
                    na dokladu kvůli statistikám a cenové hladině. Bez klienta se netiskne nic. -->
@@ -3140,12 +3558,20 @@ useWindowTitle(
                 <input v-model="form.hide_customer_on_pdf" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.hide_customer_on_pdf') }}</span>
               </label>
-              <p v-if="form.is_simplified && simplifiedBlockedReason"
+              <p v-if="simplifiedOnlyClientWarning" data-test="simplified-only-client-warning"
+                 class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedOnlyClientWarning }}</p>
+              <p v-else-if="clientSimplifiedOnly && form.client_id" data-test="simplified-only-client-hint"
+                 class="text-xs text-neutral-500 mt-1 ml-6">
+                {{ form.invoice_type === 'credit_note'
+                  ? t('invoice.simplified_only_client_credit_note_hint')
+                  : t('invoice.simplified_only_client_hint', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency) }) }}
+              </p>
+              <p v-else-if="form.is_simplified && simplifiedBlockedReason"
                  class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedBlockedReason }}</p>
               <p v-else-if="form.is_simplified && !form.client_id" class="text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.simplified_document_walk_in_hint') }}
               </p>
-              <p v-else class="text-xs text-neutral-500 mt-1 ml-6">
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.simplified_document_hint') }}
               </p>
             </div>
@@ -3154,14 +3580,14 @@ useWindowTitle(
                 <input v-model="form.prices_include_vat" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.prices_include_vat') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.prices_include_vat_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.prices_include_vat_hint') }}</p>
             </div>
             <div v-if="showIncomeTaxExemptUI">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.income_tax_exempt" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.income_tax_exempt') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.income_tax_exempt_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.income_tax_exempt_hint') }}</p>
               <div v-if="form.income_tax_exempt" class="ml-6 mt-2">
                 <input
                   v-model="form.income_tax_exempt_reason"
@@ -3172,15 +3598,32 @@ useWindowTitle(
                 />
               </div>
             </div>
+            </div>
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.dates_section') }}</h3>
-          <div class="space-y-3">
+          <div class="flex flex-col gap-3">
+            <!-- Telefon: data dokladu jdou první, čísla a reference až za nimi a sbalené,
+                 dokud nic neobsahují (číslo i VS se jinak doplní samy). -->
+            <div class="flex flex-col gap-3 max-md:order-last">
+            <button v-if="isPhone && !hasRefs" type="button"
+              class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-left text-sm text-neutral-700"
+              :aria-expanded="showRefs" data-test="refs-toggle"
+              @click="refsOpen = !refsOpen">
+              <span class="flex-1 font-medium">{{ t('invoice.refs_section') }}</span>
+              <span class="truncate font-mono text-xs text-neutral-500">{{ varsymbolAutoPreview }}</span>
+              <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showRefs ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div v-show="showRefs" class="flex flex-col gap-3">
             <!-- Ruční override čísla faktury — jen u draftu; prázdné = vygeneruje se při Vystavení.
                  Placeholder ukazuje, jaké číslo dostane fakturu při Issue (z preview API).
                  Když není žádný template (ani per-supplier ani v cfg), ukáže warning. -->
+            <NumberSeriesSelect v-if="editedStatus === 'draft' && !form.varsymbol.trim()"
+              :scope="{ module: 'invoices', type: numberSeriesType }" v-model="numberSeriesId" />
             <div v-if="editedStatus === 'draft'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t(varsymbolLabelKey) }}</label>
               <input v-model="form.varsymbol" type="text" maxlength="20"
@@ -3192,7 +3635,7 @@ useWindowTitle(
               <p v-else-if="form.varsymbol.trim()" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.varsymbol_manual_warning') }}
               </p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.varsymbol_hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.varsymbol_hint') }}</p>
             </div>
             <div v-else-if="editedVarsymbol" class="rounded-md bg-neutral-50 border border-neutral-200 p-3 text-sm">
               <span class="text-neutral-500">{{ t(varsymbolLabelKey) }}:</span>
@@ -3205,47 +3648,53 @@ useWindowTitle(
                 :placeholder="derivedPaymentVs || t('invoice.payment_variable_symbol_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
               <p v-if="paymentVsInvalid" class="text-xs text-danger-600 mt-1">{{ t('invoice.payment_variable_symbol_invalid') }}</p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.payment_variable_symbol_hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.payment_variable_symbol_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.supplier_order_number') }}</label>
               <input v-model="form.supplier_order_number" type="text" maxlength="80"
                 :placeholder="t('invoice.supplier_order_number_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.supplier_order_number_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.supplier_order_number_hint') }}</p>
             </div>
+            </div>
+            </div>
+            <div class="grid grid-cols-1 gap-3 max-md:grid-cols-2">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.issue_date') }} *</label>
               <DateInput v-model="form.issue_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
-            <div v-if="isInstalmentCalendar" class="rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
+            <div v-if="isInstalmentCalendar" class="max-md:col-span-2 rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
               {{ isRentCalendar ? t('invoice.calendar_tax_date_rent') : t('invoice.calendar_tax_date_advance') }}
             </div>
             <div v-else-if="form.invoice_type !== 'proforma'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.tax_date') }} *</label>
               <DateInput v-model="form.tax_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
-            <div v-else class="rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
+            <div v-else class="max-md:col-span-2 rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
               {{ t('invoice.proforma_no_tax_point') }}
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.due_date') }} *</label>
               <DateInput v-model="form.due_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
+            </div>
             <div v-if="form.invoice_type !== 'credit_note' && remindersAvailable">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.auto_send_reminders" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.auto_send_reminders') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.auto_send_reminders_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.auto_send_reminders_hint') }}</p>
             </div>
             <div v-if="form.currency !== 'CZK' && form.exchange_rate !== null && form.exchange_rate > 0">
               <label class="block text-sm font-medium text-neutral-700 mb-1">
                 {{ t('invoice.exchange_rate_label', { currency: form.currency }) }}
               </label>
-              <input v-model.number="form.exchange_rate" type="number" step="0.0001" min="0"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">
+              <input v-model.number="form.exchange_rate" type="number" step="any" min="0"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono"
+                @keydown.up.prevent @keydown.down.prevent
+                @wheel="($event.target as HTMLInputElement).blur()" />
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">
                 {{ t('invoice.exchange_rate_hint') }}
               </p>
             </div>
@@ -3282,10 +3731,10 @@ useWindowTitle(
               </button>
             </template>
             <button type="button" @click="addTextItem" data-test="invoice-add-text-row" :title="t('invoice.text_row_hint')"
-              class="cursor-pointer inline-flex items-center justify-center h-8 px-3 border border-neutral-300 bg-surface hover:bg-neutral-50 text-neutral-700 text-sm font-medium rounded-md whitespace-nowrap">
+              class="cursor-pointer inline-flex items-center justify-center h-8 max-md:h-11 px-3 border border-neutral-300 bg-surface hover:bg-neutral-50 text-neutral-700 text-sm font-medium rounded-md whitespace-nowrap">
               {{ t('invoice.add_text_row') }}
             </button>
-            <button type="button" @click="addItem" class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md">
+            <button type="button" @click="addItem" data-test="invoice-add-item" class="px-3 h-8 max-md:h-11 max-md:w-full text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md">
               {{ t('invoice.add_item') }}
             </button>
           </div>
@@ -3293,6 +3742,10 @@ useWindowTitle(
         <div v-if="requiresPositiveAmountToPay" class="px-5 py-3 border-b border-neutral-100 text-xs text-neutral-500">
           {{ t(refundInvoiceAllowed ? 'refundInvoice.negative_item_hint' : 'invoice.negative_item_hint') }}
           <template v-if="showLineDiscountInput">{{ t('invoice.line_discount.table_hint') }}</template>
+        </div>
+        <div v-if="wrBillingPending && wrBillingPendingPreview" class="m-4 rounded-md border border-success-500/40 bg-success-50/30 p-3 space-y-3" data-test="pending-billing-items">
+          <p role="status" class="text-sm font-medium text-success-700">{{ t('work_report_billing.pending', { count: wrBillingPendingPreview.items.length }) }}</p>
+          <BillingRecap :preview="wrBillingPendingPreview" :currency="form.currency" :prices-include-vat="form.prices_include_vat" />
         </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
@@ -3388,12 +3841,6 @@ useWindowTitle(
                   @update:model-value="(v) => onTrackingChange(item, v)" />
                 <ItemAccrualFields v-if="showAccrual" :description="item.description"
                   v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
-                <label v-if="itemAccountEditable(item) && itemAccountOpen.has(item)" :title="t('invoice.item_account.hint')"
-                  class="mt-1.5 flex items-start gap-2 text-xs text-neutral-500" data-test="invoice-item-account">
-                  <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
-                  <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
-                    class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
-                </label>
                 <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" data-test="stock-row-meta"
                   class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                   <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
@@ -3414,16 +3861,17 @@ useWindowTitle(
               <td class="px-3 py-2">
                 <select v-if="rowUnitChoices(item)" :value="item.unit" @change="onStockUnitSelect(item, ($event.target as HTMLSelectElement).value)"
                   class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
-                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
+                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ unitLabel(code) }}</option>
                 </select>
                 <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
-                  <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
+                  <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ unitLabel(item.unit) }}</option>
                 </select>
               </td>
               <td class="px-3 py-2">
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
+                <p v-if="item.manual_price && !Number(item.unit_price_without_vat)" data-test="manual-price" class="mt-1 text-xs font-medium text-warning-600 text-right">{{ t('invoice.manual_price') }}</p>
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
               </td>
@@ -3451,18 +3899,48 @@ useWindowTitle(
                       @change="onOssApplicableChange(item)" />
                     <span>{{ t('invoice.oss.enabled') }}</span>
                   </label>
-                  <button v-if="itemAccountEditable(item)" type="button" data-test="item-account-toggle"
-                    :title="itemAccountOpen.has(item) ? t('invoice.item_account.close') : t('invoice.item_account.open')"
-                    :aria-label="itemAccountOpen.has(item) ? t('invoice.item_account.close') : t('invoice.item_account.open')"
-                    :aria-expanded="itemAccountOpen.has(item)"
+                  <button v-if="itemDetailsAvailable(item)" type="button" data-test="item-details-toggle"
+                    :title="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                    :aria-label="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                    :aria-expanded="itemDetailsOpen.has(item)"
                     class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded border"
-                    :class="item.revenue_account_code
+                    :class="itemDetailsFilled(item)
                       ? 'border-primary-300 bg-primary-50 text-primary-700'
-                      : itemAccountOpen.has(item) ? 'border-neutral-300 bg-neutral-100 text-neutral-700' : 'border-transparent text-neutral-400 hover:text-neutral-700 hover:border-neutral-300'"
-                    @click="toggleItemAccount(item)">
-                    <svg class="w-4 h-4 transition-transform" :class="itemAccountOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+                      : itemDetailsOpen.has(item) ? 'border-neutral-300 bg-neutral-100 text-neutral-700' : 'border-transparent text-neutral-400 hover:text-neutral-700 hover:border-neutral-300'"
+                    @click="toggleItemDetails(item)">
+                    <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                   </button>
                   <button type="button" @click="removeItem(i)" class="text-danger-500 hover:text-danger-600 text-lg leading-none">×</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!isTextItem(item) && itemDetailsOpen.has(item) && (itemAccountEditable(item) || itemVatEditable(item))"
+              :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']" data-test="invoice-item-details-row">
+              <td></td>
+              <td :colspan="(supplierIsVatPayer ? 7 : 6) + lineDiscountCols" class="px-3 pb-2">
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-neutral-500">
+                  <label v-if="itemAccountEditable(item)" :title="t('invoice.item_account.hint')"
+                    class="flex items-center gap-2" data-test="invoice-item-account">
+                    <span class="whitespace-nowrap">{{ t('invoice.item_account.label') }}</span>
+                    <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
+                      class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
+                  </label>
+                  <ItemPostingFields v-if="editorPostable && itemAccountEditable(item)" direction="sale"
+                    v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
+                    :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                    :default-counter="defaultCounterAccount"
+                    @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
+                  <label v-if="itemVatEditable(item)" :title="t('invoice.item_details.vat_classification_hint')"
+                    class="flex items-center gap-2">
+                    <span class="whitespace-nowrap">{{ t('invoice.item_details.vat_classification') }}</span>
+                    <select :value="itemVatCode(item) ?? ''" data-test="invoice-item-vat-classification"
+                      class="w-56 max-w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm text-neutral-900"
+                      @change="setItemVatCode(item, ($event.target as HTMLSelectElement).value)">
+                      <option value="">{{ t('invoice.item_details.vat_classification_auto') }}</option>
+                      <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vc.code }} - {{ vc.label.length > 50 ? vc.label.slice(0, 50) + '…' : vc.label }}</option>
+                      <option v-if="itemVatCode(item) && !vatClassifications.some(vc => vc.code === itemVatCode(item))" :value="itemVatCode(item) ?? ''">{{ itemVatCode(item) }}</option>
+                    </select>
+                  </label>
                 </div>
               </td>
             </tr>
@@ -3572,21 +4050,27 @@ useWindowTitle(
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
               <div class="flex items-center gap-2">
-                <ItemDimensionsToggle v-if="docDims.enabled.value && !isTextItem(item)"
+                <ItemDimensionsToggle v-if="docDims.enabled.value && !isTextItem(item)" class="max-md:w-11 max-md:h-11"
                   :open="docDims.isItemOpen(item)" :filled="docDims.itemHasDims(item)" :disabled="!docDims.canEdit.value"
                   @toggle="docDims.toggleItem(item)" />
-                <button v-if="!isTextItem(item) && itemAccountEditable(item)" type="button" data-test="item-account-toggle-mobile"
-                  :title="itemAccountOpen.has(item) ? t('invoice.item_account.close') : t('invoice.item_account.open')"
-                  :aria-label="itemAccountOpen.has(item) ? t('invoice.item_account.close') : t('invoice.item_account.open')"
-                  :aria-expanded="itemAccountOpen.has(item)"
-                  class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border rounded"
-                  :class="item.revenue_account_code ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-neutral-300 hover:bg-neutral-50'"
-                  @click="toggleItemAccount(item)">
-                  <svg class="w-4 h-4 transition-transform" :class="itemAccountOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+                <button v-if="!isTextItem(item) && itemDetailsAvailable(item)" type="button" data-test="item-details-toggle-mobile"
+                  :title="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                  :aria-label="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                  :aria-expanded="itemDetailsOpen.has(item)"
+                  class="cursor-pointer w-8 h-8 max-md:w-11 max-md:h-11 inline-flex items-center justify-center border rounded"
+                  :class="itemDetailsFilled(item) ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-neutral-300 hover:bg-neutral-50'"
+                  @click="toggleItemDetails(item)">
+                  <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                 </button>
+                <!-- Telefon: ▲ ▼ × v jedné nabídce „…" se spouštěčem 44 px. -->
+                <div v-if="isPhone" class="[&_[aria-haspopup=menu]]:w-11 [&_[aria-haspopup=menu]]:h-11" data-test="item-row-menu-phone">
+                  <RowActionsMenu :inline-count="0" :actions="itemRowMenuActions(i)" />
+                </div>
+                <template v-else>
                 <button type="button" @click="moveUp(i)" :disabled="i === 0" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▲</button>
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
                 <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
+                </template>
               </div>
             </div>
             <div v-if="isTextItem(item)" data-test="invoice-text-row-mobile">
@@ -3648,11 +4132,27 @@ useWindowTitle(
                 @update:model-value="(v) => onTrackingChange(item, v)" />
               <ItemAccrualFields v-if="showAccrual" stacked :description="item.description"
                 v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
-              <label v-if="itemAccountEditable(item) && itemAccountOpen.has(item)" :title="t('invoice.item_account.hint')"
+              <label v-if="itemAccountEditable(item) && itemDetailsOpen.has(item)" :title="t('invoice.item_account.hint')"
                 class="mt-1.5 block text-xs font-medium text-neutral-600">
                 <span class="mb-1 block">{{ t('invoice.item_account.label') }}</span>
                 <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
                   compact :placeholder="t('invoice.item_account.placeholder')" />
+              </label>
+              <ItemPostingFields v-if="editorPostable && itemAccountEditable(item) && itemDetailsOpen.has(item)"
+                class="mt-1.5" direction="sale" stacked
+                v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
+                :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                :default-counter="defaultCounterAccount"
+                @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
+              <label v-if="itemVatEditable(item) && itemDetailsOpen.has(item)" class="mt-1.5 block text-xs font-medium text-neutral-600">
+                <span class="mb-1 block">{{ t('invoice.item_details.vat_classification') }}</span>
+                <select :value="itemVatCode(item) ?? ''" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm"
+                  @change="setItemVatCode(item, ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('invoice.item_details.vat_classification_auto') }}</option>
+                  <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vc.code }} - {{ vc.label.length > 40 ? vc.label.slice(0, 40) + '…' : vc.label }}</option>
+                  <option v-if="itemVatCode(item) && !vatClassifications.some(vc => vc.code === itemVatCode(item))" :value="itemVatCode(item) ?? ''">{{ itemVatCode(item) }}</option>
+                </select>
+                <span class="mt-1 block font-normal text-neutral-500">{{ t('invoice.item_details.vat_classification_hint') }}</span>
               </label>
               <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                 <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
@@ -3747,19 +4247,20 @@ useWindowTitle(
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.unit') }}</label>
                 <select v-if="rowUnitChoices(item)" :value="item.unit" @change="onStockUnitSelect(item, ($event.target as HTMLSelectElement).value)"
                   class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
-                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ code }}</option>
+                  <option v-for="code in rowUnitChoices(item) ?? []" :key="code" :value="code">{{ unitLabel(code) }}</option>
                 </select>
                 <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
-                  <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
+                  <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ unitLabel(item.unit) }}</option>
                 </select>
               </div>
             </div>
             <div :class="supplierIsVatPayer || showLineDiscountInput ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
+                <p v-if="item.manual_price && !Number(item.unit_price_without_vat)" data-test="manual-price" class="mt-1 text-xs font-medium text-warning-600 text-right">{{ t('invoice.manual_price') }}</p>
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
               </div>
@@ -3788,8 +4289,25 @@ useWindowTitle(
         </div>
       </div>
 
+      <button v-if="isPhone" type="button"
+        class="flex min-h-12 w-full cursor-pointer items-center gap-2 rounded-lg border border-neutral-200 bg-surface px-4 py-2.5 text-left shadow-sm"
+        :aria-expanded="showSecondary" data-test="secondary-toggle"
+        @click="secondaryOpen = !secondaryOpen">
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-medium text-neutral-800">{{ t('invoice.secondary_section') }}</span>
+          <span class="block truncate text-xs text-neutral-500">{{ t('invoice.secondary_section_hint') }}</span>
+        </span>
+        <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showSecondary ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
+      <DraftPostingPreviewPanel v-if="editorPostable" source="invoices"
+        :doc-id="invoiceId ?? null" :payload="previewPayload" :missing="previewMissing" />
+
       <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div v-show="showSecondary" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
         <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('invoice.classification.title') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -3823,17 +4341,17 @@ useWindowTitle(
       <!-- Sumace + poznámky -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="md:col-span-2 space-y-4">
-          <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_above_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_above') }}</label>
             <textarea v-model="form.note_above_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
-          <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_below_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_below') }}</label>
             <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
           <div class="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-neutral-100">
             <label :for="`${pageId}-discount-percent`" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
@@ -4009,16 +4527,16 @@ useWindowTitle(
       </div>
 
       <!-- Výkaz víceprací -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+      <div v-show="showSecondary || wrOpen" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h3>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <button v-if="!wrOpen" type="button" @click="openWorkReport"
               class="cursor-pointer px-4 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md inline-flex items-center gap-1.5">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
               {{ t('invoice.wr_add') }}
             </button>
-            <button v-if="wrOpen && wrItems.length > 0" type="button" @click="pushWrToInvoiceItem"
+            <button v-if="wrOpen && wrItems.length > 0 && !wrBillingSnapshot" type="button" @click="pushWrToInvoiceItem"
               class="cursor-pointer px-4 h-9 text-sm bg-success-600 hover:bg-success-600 text-white font-semibold rounded-md inline-flex items-center gap-1.5 shadow-sm">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
               {{ t('invoice.wr_push_to_item') }}
@@ -4039,6 +4557,10 @@ useWindowTitle(
               <option v-for="r in domesticVatRates" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
             </select>
           </div>
+          <ReportBillingEditor v-model:snapshot="wrBillingSnapshot" v-model:template-id="wrBillingTemplateId" v-model:period="wrBillingPeriod" v-model:legacy-item-id="wrBillingLegacyItemId" :invoice-items="form.items"
+            :currency="form.currency" :title="wrTitle" :items="wrItems" :project-name="wrBillingProjectName"
+            :vat-rate-id="wrVatRateId" :prices-include-vat="form.prices_include_vat" :reverse-charge="form.reverse_charge"
+            :stale="wrBillingStale" :pending="wrBillingPending" @transfer="queueWrBilling" @mode-selected="wrBillingModeChosen = true" @changed="wrBillingPending = false; wrBillingStale = true" />
           <!-- Desktop: tabulka -->
           <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm table-sticky-first">
@@ -4048,8 +4570,8 @@ useWindowTitle(
                 <th class="px-3 py-2 text-left font-medium">{{ t('invoice.wr_description') }}</th>
                 <th class="px-3 py-2 text-left font-medium w-36">{{ t('invoice.wr_date') }}</th>
                 <th class="px-3 py-2 text-right font-medium w-24">{{ t('invoice.wr_hours') }}</th>
-                <th class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
-                <th class="px-3 py-2 text-right font-medium w-32">{{ t('invoice.wr_total') }}</th>
+                <th v-if="!wrBillingSnapshot" class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
+                <th v-if="!wrBillingSnapshot" class="px-3 py-2 text-right font-medium w-32">{{ t('invoice.wr_total') }}</th>
                 <th class="px-2 py-2 w-10"></th>
               </tr>
             </thead>
@@ -4072,10 +4594,10 @@ useWindowTitle(
                 <td class="px-2 py-1.5">
                   <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </td>
-                <td class="px-2 py-1.5">
+                <td v-if="!wrBillingSnapshot" class="px-2 py-1.5">
                   <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
-                <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
+                <td v-if="!wrBillingSnapshot" class="px-3 py-1.5 text-right font-mono text-neutral-700">
                   {{ formatMoney(workRowTotal(it), form.currency) }}
                 </td>
                 <td class="px-2 py-1.5 text-center">
@@ -4097,11 +4619,11 @@ useWindowTitle(
                   <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}
                 </td>
                 <td v-else></td>
-                <td></td>
-                <td v-if="wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
+                <td v-if="!wrBillingSnapshot"></td>
+                <td v-if="!wrBillingSnapshot && wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
                   {{ formatMoney(wrTotalAmount, form.currency) }}
                 </td>
-                <td v-else colspan="2"></td>
+                <td v-else-if="!wrBillingSnapshot" colspan="2"></td>
               </tr>
             </tfoot>
           </table>
@@ -4141,7 +4663,7 @@ useWindowTitle(
                   <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </div>
               </div>
-              <div class="grid grid-cols-2 gap-2 items-end">
+              <div v-if="!wrBillingSnapshot" class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_rate') }}</label>
                   <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
@@ -4161,19 +4683,23 @@ useWindowTitle(
             </button>
             <div v-if="wrItems.length > 0" class="bg-neutral-50 rounded-md px-3 py-2 flex items-center justify-between font-semibold text-sm">
               <span class="font-mono">Σ {{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}</span>
-              <span class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
+              <span v-if="!wrBillingSnapshot" class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
             </div>
           </div>
 
-          <p class="text-xs text-neutral-500">
+          <!-- Nejdřív data výkazu, nastavení jeho zobrazení až pod nimi (stejně jako v dialogu Výkaz). -->
+          <WorkReportDisplaySettings v-model="wrDisplayOptions" inheritable
+            :defaults="supplierStore.currentSupplier?.work_report_display_options" />
+
+          <p v-if="!wrBillingSnapshot" class="text-xs text-neutral-500">
             {{ t('invoice.wr_hint', { title: wrTitle, hours: wrTotalHours.toFixed(2), rate: wrItems[0]?.rate || 0, currency: form.currency }) }}
           </p>
         </div>
       </div>
 
       <!-- Výkaz materiálu -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+      <div v-show="showSecondary || matOpen" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report_material') }}</h3>
           <div class="flex items-center gap-2">
             <button v-if="!matOpen" type="button" @click="openMaterial"
@@ -4241,12 +4767,12 @@ useWindowTitle(
                 </td>
                 <td class="px-2 py-1.5">
                   <select v-model="m.unit" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface">
-                    <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ m.unit }}</option>
+                    <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ unitLabel(m.unit) }}</option>
                   </select>
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model.number="m.unit_price" type="number" step="0.01" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                  <input v-model.number="m.unit_price" type="number" step="any" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
                   {{ formatMoney((Number(m.quantity) || 0) * (Number(m.unit_price) || 0), form.currency) }}
@@ -4309,15 +4835,15 @@ useWindowTitle(
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_material_unit') }}</label>
                   <select v-model="m.unit" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm bg-surface">
-                    <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ m.unit }}</option>
+                    <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ unitLabel(m.unit) }}</option>
                   </select>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="0.01" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
+                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="any" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
                 </div>
                 <div class="text-right pb-2">
                   <div class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('invoice.wr_total') }}</div>
@@ -4341,7 +4867,7 @@ useWindowTitle(
 
       <!-- Přílohy — u nové faktury držené v prohlížeči (nahrají se po vytvoření),
            u existující faktury rovnou nahrávané / mazané -->
-      <div v-if="attachmentsAllowed"
+      <div v-if="attachmentsAllowed" v-show="showSecondary || attachments.length + pendingAttachments.length > 0"
            class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
           <div>
@@ -4421,12 +4947,20 @@ useWindowTitle(
       </fieldset>
 
       <!-- Action bar -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex justify-between items-center shadow-sm">
-        <RouterLink to="/invoices" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">{{ t('common.back') }}</RouterLink>
-        <button type="submit" :disabled="submitting"
-          class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
-          {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
-        </button>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-2 shadow-sm max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 max-md:p-3 max-md:shadow-lg">
+        <RouterLink to="/invoices" data-test="editor-bar-back" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors max-md:hidden">{{ t('common.back') }}</RouterLink>
+        <div class="flex flex-wrap items-center gap-2 max-md:w-full">
+          <button v-if="canSaveAndPost" type="button" :disabled="submitting" data-test="save-and-post"
+            :title="t('accounting.editor_posting.save_and_post_hint_sale')"
+            :class="btnFilled('success')" class="whitespace-nowrap max-md:flex-1 max-md:justify-center max-md:h-11" @click="saveAndPost">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('accounting.editor_posting.save_and_post') }}
+          </button>
+          <button type="submit" :disabled="submitting" data-test="editor-bar-submit"
+            class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md whitespace-nowrap max-md:flex-1 max-md:h-11">
+            {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
+          </button>
+        </div>
       </div>
     </form>
 

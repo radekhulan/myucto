@@ -53,8 +53,15 @@ final class PayrollImportLinkRepository
         if ($externalKey === '') {
             return false;
         }
-        $existing = $this->all($supplierId, $sourceSystem)[self::key($keyKind, $externalKey)] ?? null;
-        if ($existing !== null && $existing['employment_id'] === $employmentId && $existing['employee_id'] === $employeeId) {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id, employment_id FROM payroll_import_links
+              WHERE supplier_id = ? AND source_system = ? AND key_kind = ? AND external_key = ?'
+        );
+        $stmt->execute([$supplierId, $sourceSystem, $keyKind, $externalKey]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($existing)
+            && (int) $existing['employment_id'] === $employmentId
+            && (int) $existing['employee_id'] === $employeeId) {
             return false;
         }
         $this->db->pdo()->prepare(

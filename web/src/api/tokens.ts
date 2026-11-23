@@ -10,6 +10,10 @@ export interface ApiToken {
   scope: 'read' | 'read_write'
   /** Smí v Dokumentech vidět evidenci mzdových podání (doručenky, protokoly). */
   allow_payroll_submission_docs: boolean
+  /** Smí vynuceně upravit vystavenou vydanou fakturu (PUT ?force=1), přísněji než správce. */
+  allow_issued_invoice_edit?: boolean
+  /** Plný zápis jako přihlášený uživatel (#371); platí jen na instanci, která ho povoluje. */
+  allow_system_write?: boolean
   /** Úhrady faktur z tokenu bez okolností platby eviduje EET externí systém (e-shop). */
   eet_external_by_default?: boolean
   last_used_at: string | null
@@ -74,8 +78,11 @@ export interface ApiLogFilter {
 
 export interface CreateTokenPayload {
   name: string
-  /** Re-auth současným heslem — backend ho vyžaduje vždy (step-up, CreateTokenAction). */
-  password: string
+  /**
+   * Re-auth současným heslem — backend ho vyžaduje vždy (step-up, CreateTokenAction).
+   * Při vynuceném přihlášení přes organizaci se heslo neposílá, jen `step_up_token`.
+   */
+  password?: string
   supplier_id?: number | null
   scope: 'read' | 'read_write'
   expires_at?: string | null
@@ -87,6 +94,17 @@ export interface CreateTokenPayload {
    * exekuce, insolvence, výplatní pásky — zůstává jen pro přihlášenou relaci.
    */
   allow_payroll_submission_docs?: boolean
+  /**
+   * Vynucená úprava vystavené vydané faktury přes API. Jen token vázaný na firmu
+   * se zápisem a jen od správce firmy nebo role s právem upravit vystavenou fakturu.
+   */
+  allow_issued_invoice_edit?: boolean
+  /**
+   * Plný zápis: token smí totéž co uživatel v aplikaci ve všech agendách. Jen se zápisem,
+   * jen na povolené instanci; u tokenu vázaného na firmu ho povolí správce firmy, bez vazby
+   * superadmin. Uzavřené ani podané období token nepřebije.
+   */
+  allow_system_write?: boolean
   totp_code?: string
   step_up_token?: string
 }
@@ -100,6 +118,10 @@ export interface CreateTokenResult {
 
 export const tokensApi = {
   list: () => api.get<{ tokens: ApiToken[] }>('/auth/tokens').then((r) => r.data.tokens),
+
+  /** Tokeny a to, zda instance povoluje plný zápis (`api.allow_system_write_tokens`). */
+  overview: () => api.get<{ tokens: ApiToken[]; system_write_available?: boolean }>('/auth/tokens')
+    .then((r) => ({ tokens: r.data.tokens, systemWriteAvailable: r.data.system_write_available === true })),
 
   create: (payload: CreateTokenPayload) =>
     api.post<CreateTokenResult>('/auth/tokens', payload).then((r) => r.data),

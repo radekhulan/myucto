@@ -7,7 +7,10 @@ namespace MyInvoice\Service\Bank\Match;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -50,6 +53,13 @@ final class MatchCandidateProvider
         $txCard = isset($tx['card_last4']) && \MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) $tx['card_last4'])
             ? (string) $tx['card_last4']
             : null;
+        // Faktury čerpající zálohy jen odpočtovým řádkem (víc záloh, bez vazby dokladu): jeden dotaz.
+        $drawingByLines = $incoming
+            ? \MyInvoice\Service\Invoice\AdvanceDrawLinks::drawingByLines($this->db->pdo(), array_map(
+                static fn (array $row): int => (string) ($row['invoice_type'] ?? '') === 'invoice' && empty($row['parent_invoice_id']) ? (int) $row['id'] : 0,
+                $rows,
+            ))
+            : [];
         $base = [];
         foreach ($rows as $row) {
             // Doklad placený JINOU kartou není kandidát ani pro návrh (viz StatementMatcher).
@@ -63,7 +73,8 @@ final class MatchCandidateProvider
                 continue;
             }
             // Zrcadlo vydané strany: platba neuhrazené proformy se nenavrhuje na vyúčtovací fakturu.
-            if ($incoming && (string) ($row['invoice_type'] ?? '') === 'invoice' && !empty($row['parent_invoice_id'])
+            if ($incoming && (string) ($row['invoice_type'] ?? '') === 'invoice'
+                && (!empty($row['parent_invoice_id']) || isset($drawingByLines[(int) $row['id']]))
                 && (new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db))
                     ->issuedViolation($supplierId, (int) $row['id'], $amount) !== null) {
                 continue;
@@ -131,7 +142,8 @@ final class MatchCandidateProvider
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
                    JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
-                  WHERE i.supplier_id = ? AND i.invoice_type IN ('invoice','proforma')";
+                  WHERE i.supplier_id = ? AND i.invoice_type IN ('invoice','proforma')
+                    AND " . InvoiceOtherItemPayments::notLinkedSql('i');
         $branches = [];
         $params = [];
         foreach (self::ISSUED_OPEN_STATUSES as $status) {
@@ -191,6 +203,7 @@ final class MatchCandidateProvider
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued','sent','reminded')
                 AND i.invoice_type IN ('invoice','proforma')
+                AND " . InvoiceOtherItemPayments::notLinkedSql('i') . "
                 AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)
               ORDER BY ABS(DATEDIFF(i.due_date, ?)), i.id DESC LIMIT 300"
         );
@@ -215,22 +228,26 @@ final class MatchCandidateProvider
                     (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
                     p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4,
-                    p.advance_purchase_invoice_id,
+                    COALESCE(p.advance_purchase_invoice_id,
+                             (SELECT MIN(lnk.advance_invoice_id) FROM purchase_advance_deductions lnk
+                               WHERE lnk.supplier_id = p.supplier_id AND lnk.final_invoice_id = p.id
+                                 AND lnk.source = '" . PurchaseAdvanceLinks::SOURCE . "')) AS advance_purchase_invoice_id,
                     fin.final_ref
                FROM purchase_invoices p
                JOIN currencies cur ON cur.id = p.currency_id
                JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
-               -- Konečná faktura, která zálohu vyúčtovává: platba pod JEJÍM VS je u neuhrazené
-               -- zálohy platbou zálohy (AdvanceFinalMatchGuard ji na fakturu nepustí).
-               LEFT JOIN (SELECT f.advance_purchase_invoice_id AS advance_id,
+               -- Konečná faktura, která zálohu vyúčtovává (hlavičkou i jako jedna z víc záloh):
+               -- platba pod JEJÍM VS je u neuhrazené zálohy platbou zálohy
+               -- (AdvanceFinalMatchGuard ji na fakturu nepustí).
+               LEFT JOIN (SELECT l.advance_id,
                                  MIN(COALESCE(NULLIF(f.vendor_invoice_number, ''), f.varsymbol)) AS final_ref
-                            FROM purchase_invoices f
-                           WHERE f.supplier_id = ? AND f.advance_purchase_invoice_id IS NOT NULL
-                             AND f.status <> 'cancelled'
-                           GROUP BY f.advance_purchase_invoice_id) fin ON fin.advance_id = p.id
+                            FROM (" . PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") l
+                            JOIN purchase_invoices f ON f.id = l.final_id
+                           WHERE f.supplier_id = ? AND f.status <> 'cancelled'
+                           GROUP BY l.advance_id) fin ON fin.advance_id = p.id
               WHERE p.supplier_id = ?
                 AND {$statusCondition}
-                AND p.document_kind IN ('invoice','advance')
+                AND " . PurchasePaymentKinds::bankPayableSql('p') . "
                 AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)";
         $stmt = $this->db->pdo()->prepare(
             'SELECT * FROM (' . $branch("p.status IN ('received','booked')") . ' UNION ALL '

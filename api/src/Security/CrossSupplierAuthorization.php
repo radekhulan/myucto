@@ -71,7 +71,7 @@ final class CrossSupplierAuthorization
     public function suppliersAllowing(Request $request, array $permissions, AccessLevel $level = AccessLevel::WRITE): array
     {
         $out = [];
-        foreach ($this->candidateIds($request) as $supplierId) {
+        foreach ($this->supplierAccess->filterAllowedSupplierIds($request, $this->candidateIds($request)) as $supplierId) {
             if ($this->allowsIn($request, $supplierId, $permissions, $level)) {
                 $out[] = $supplierId;
             }
@@ -167,15 +167,26 @@ final class CrossSupplierAuthorization
         return $out;
     }
 
+    /**
+     * Syntetický požadavek úlohy na pozadí za uživatele v dané firmě s jeho aktuální rolí.
+     * Úloha (hromadné akce) se tak o každém záznamu ptá týmiž právy jako akce v aplikaci;
+     * NULL = uživatel je neaktivní nebo do firmy už nesmí.
+     */
+    public function backgroundRequestFor(int $userId, int $supplierId): ?Request
+    {
+        $request = $this->requestForUser($userId);
+        return $request === null ? null : $this->scopedRequest($request, $supplierId);
+    }
+
     private function requestForUser(int $userId): ?Request
     {
         $user = $this->activeUser($userId);
         if ($user === null) {
             return null;
         }
-        return (new ServerRequestFactory())
+        return RequestAuthorization::asBackground((new ServerRequestFactory())
             ->createServerRequest('GET', '/')
-            ->withAttribute(AuthMiddleware::ATTR_USER, $user);
+            ->withAttribute(AuthMiddleware::ATTR_USER, $user));
     }
 
     /**

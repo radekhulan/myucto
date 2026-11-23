@@ -67,4 +67,12 @@ final class AccountingRuleEquivalenceTest extends TestCase
             'applies_currency' => 'czk',
         ]));
     }
+
+    public function testBankRuleLimitedToOwnAccountIsNotEquivalentToGeneralRule(): void
+    {
+        $rule = ['direction' => 'incoming', 'message_contains' => 'urok', 'debit_account_code' => '221', 'credit_account_code' => '662'];
+        self::assertTrue(AccountingRuleEquivalence::bank($rule + ['bank_account_id' => 3], $rule + ['bank_account_id' => 3]));
+        self::assertFalse(AccountingRuleEquivalence::bank($rule + ['bank_account_id' => 3], $rule));
+        self::assertFalse(AccountingRuleEquivalence::bank($rule + ['bank_account_id' => 3], $rule + ['bank_account_id' => 4]));
+    }
 }

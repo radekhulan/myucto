@@ -10,6 +10,7 @@ import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategor
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import BillingTemplateSelect from '@/components/work-reports/BillingTemplateSelect.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 
 /**
@@ -55,6 +56,7 @@ const form = ref<ProjectPayload>({
   budget_total: null,
   budget_yearly: null,
   budget_monthly: null,
+  billing_template_id: null,
   hourly_rate: 1500,
   currency_id: 0,
   status: 'active',
@@ -166,6 +168,7 @@ function sanitize(p: Project): Partial<ProjectPayload> {
     budget_total: p.budget_total ?? null,
     budget_yearly: p.budget_yearly ?? null,
     budget_monthly: p.budget_monthly ?? null,
+    billing_template_id: p.billing_template_id ?? null,
     hourly_rate: p.hourly_rate,
     currency_id: p.currency_id,
     status: p.status,
@@ -268,7 +271,7 @@ async function submit() {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.currency') }}</label>
-            <select v-model.number="form.currency_id"
+            <select v-model.number="form.currency_id" @change="form.billing_template_id = null"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
               <option v-for="c in currencies" :key="c.id" :value="c.id">{{ c.label }}</option>
             </select>
@@ -357,6 +360,8 @@ async function submit() {
             <p class="text-xs text-neutral-500 mt-1">{{ t('project.billing_emails_mode_hint') }}</p>
           </div>
         </div>
+
+        <BillingTemplateSelect v-model="form.billing_template_id" :currency="currencies.find(c => c.id === form.currency_id)?.code" />
 
         <!-- Schvalování výkazu zákazníkem -->
         <div class="border-t border-neutral-200 pt-4">

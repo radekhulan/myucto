@@ -724,8 +724,8 @@ function valueCount(typeId: number) {
                   <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded.has(value.id) }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
                 </button>
                 <span v-else class="w-5" />
-                <span class="font-mono text-xs text-neutral-500 whitespace-nowrap">{{ value.code }}</span>
-                <span class="truncate">{{ value.name }}</span>
+                <span v-if="!value.semantic_key" class="font-mono text-xs text-neutral-500 whitespace-nowrap">{{ value.code }}</span>
+                <span class="truncate">{{ dims.nameOf(value) }}</span>
                 <span v-if="selectedType.system_key && value.semantic_key" class="rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700 break-all" :title="t('dimensions.builtin_hint')">{{ t('dimensions.builtin_badge') }}</span>
                 <span v-if="!value.is_active" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500">{{ t('dimensions.closed') }}</span>
                 <span v-if="value.car_registration" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ value.car_registration }}</span>
@@ -867,9 +867,10 @@ function valueCount(typeId: number) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
-            <input v-model="valueForm.name" :disabled="builtinValue" type="text" maxlength="190" @input="valueForm.id === null && valueSlug.fromName(valueForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
+            <input v-if="builtinValue && editingValue" :value="dims.nameOf(editingValue)" disabled type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
+            <input v-else v-model="valueForm.name" :disabled="builtinValue" type="text" maxlength="190" @input="valueForm.id === null && valueSlug.fromName(valueForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
           </div>
-          <div>
+          <div v-if="!builtinValue">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.code') }}</label>
             <input v-model="valueForm.code" type="text" maxlength="50" @input="valueSlug.markManual(valueForm.code)" :disabled="valueForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" data-test="dimension-value-code" />
             <p v-if="valueForm.id !== null" class="text-xs text-neutral-400 mt-1">{{ t('dimensions.code_immutable') }}</p>
@@ -880,7 +881,7 @@ function valueCount(typeId: number) {
             <select v-model="valueForm.parent_id" :disabled="builtinValue" data-test="dimension-value-parent" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
               <option :value="null">{{ t('dimensions.parent_none') }}</option>
               <option v-for="{ value, depth } in parentOptions" :key="value.id" :value="value.id">
-                {{ '  '.repeat(depth) }}{{ value.code }} – {{ value.name }}
+                {{ '  '.repeat(depth) }}{{ dims.labelOf(value) }}
               </option>
             </select>
           </div>

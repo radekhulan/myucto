@@ -62,7 +62,7 @@ final class ClientBankPermissionsMigrationTest extends TestCase
         if ($this->server !== null
             && preg_match('/^myucto_client_bank_[0-9a-f]{12}$/D', $this->database) === 1
         ) {
-            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

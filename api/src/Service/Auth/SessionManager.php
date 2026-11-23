@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\License\SessionConcurrencyPolicy;
 use PDO;
 
 /**
@@ -21,7 +22,14 @@ final class SessionManager
         private readonly Connection $db,
         private readonly Config $config,
         private readonly SecurityClock $securityClock,
+        /**
+         * Limit souběžných relací podle parametrů licence. Kontejner ho
+         * dosazuje vždy (Bootstrap); `null` mají jen přímo sestavené testy.
+         */
+        private readonly ?SessionConcurrencyPolicy $concurrency = null,
     ) {}
+
+    public const REVOKE_SUPERSEDED = 'superseded';
 
     /**
      * @return array{token:string,csrf_token:string,expires_at:int,issued_at:\DateTimeImmutable}
@@ -92,15 +100,26 @@ final class SessionManager
         $token = bin2hex(random_bytes(32));
         $csrf = bin2hex(random_bytes(32));
         $familyId = random_bytes(32);
-        $expiresAt = $cutoff->epochSeconds + ($lifetimeDays * 86400);
+        $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
+        $lifetimeSeconds = $lifetimeDays * 86400;
+        if (self::isLifetimeCapped($authContext)) {
+            $lifetimeSeconds = min($lifetimeSeconds, $this->externalSessionLifetimeSeconds());
+        }
+        $expiresAt = $this->anchorToIdentityVerification(
+            $pdo,
+            $cutoff,
+            $userId,
+            $authContext,
+            $cutoff->epochSeconds + $lifetimeSeconds,
+        );
         $stmt = $pdo->prepare(
             'INSERT INTO sessions
-                (id, user_id, csrf_token, ip, user_agent, supplier_domain_id,
+                (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                 last_user_activity_at, session_family_id, generation)
-             VALUES (?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                     ?, ?, ?, ?, ?, ?, ?)'
+                 last_user_activity_at, session_family_id, generation, external_identity_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
+                     ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $token,
@@ -108,6 +127,7 @@ final class SessionManager
             $csrf,
             $packedIp,
             mb_substr($userAgent, 0, 255),
+            $deviceClass,
             $supplierDomainId,
             $cutoff->epochSeconds,
             $cutoff->epochSeconds,
@@ -119,7 +139,9 @@ final class SessionManager
             $cutoff->utcSql,
             $familyId,
             1,
+            $authContext->externalIdentityId,
         ]);
+        $this->enforceConcurrencyLimit($pdo, $cutoff, $userId, $deviceClass, $supplierDomainId, $familyId);
 
         return [
             'token' => $token,
@@ -127,6 +149,69 @@ final class SessionManager
             'expires_at' => $expiresAt,
             'issued_at' => $cutoff->utc,
         ];
+    }
+
+    public function externalSessionLifetimeSeconds(): int
+    {
+        return self::externalLifetimeSeconds($this->config);
+    }
+
+    /**
+     * Strop platnosti sezení z přihlášení u poskytovatele identity
+     * (`auth.oidc.session_lifetime_hours`). Stejný strop platí pro API tokeny
+     * a MCP připojení vydaná ze sezení přes Entra ID (ApiTokenService).
+     */
+    public static function externalLifetimeSeconds(?Config $config): int
+    {
+        $hours = (int) ($config?->get('auth.oidc.session_lifetime_hours', 12) ?? 12);
+        return max(1, min(720, $hours)) * 3600;
+    }
+
+    /**
+     * Uživatele zablokovaného u poskytovatele identity nemáme jak odhlásit,
+     * takže sezení z jeho přihlášení platí kratší dobu. U Entra ID vždy, i když
+     * druhý faktor ověřilo MyÚčto (`skip_mfa = false`): blokaci provádí správce
+     * tenantu a sezení ji musí následovat. U Googlu a dalších poskytovatelů jen
+     * tehdy, když poskytovatel nahradil celé přihlášení. Platí i pro sezení
+     * vlastní domény odvozené z canonical sezení (DomainLoginService).
+     */
+    private static function isLifetimeCapped(SessionAuthContext $authContext): bool
+    {
+        return SessionAuthContext::isExternalMethod($authContext->authMethod)
+            && ($authContext->assuranceLevel === 'strong'
+                || SessionAuthContext::isOrganizationIdentityMethod($authContext->authMethod));
+    }
+
+    /**
+     * Sezení z Entra ID nesmí skončit později než strop od posledního úspěšného
+     * ověření u poskytovatele (`user_external_identities.last_used_at`). Jinak by
+     * sezení odvozené ze staršího sezení (vlastní doména, dokončení MFA setupu)
+     * běželo strop znovu od začátku, přestože poskytovatel uživatele mezitím
+     * zablokoval.
+     */
+    private function anchorToIdentityVerification(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        SessionAuthContext $authContext,
+        int $expiresAt,
+    ): int {
+        if (!SessionAuthContext::isOrganizationIdentityMethod($authContext->authMethod)
+            || $authContext->externalIdentityId === null
+        ) {
+            return $expiresAt;
+        }
+        $stmt = $pdo->prepare(
+            'SELECT TIMESTAMPDIFF(SECOND, last_used_at, ?)
+               FROM user_external_identities
+              WHERE id = ? AND user_id = ? AND last_used_at IS NOT NULL'
+        );
+        $stmt->execute([$cutoff->utcSql, $authContext->externalIdentityId, $userId]);
+        $age = $stmt->fetchColumn();
+        if (!is_numeric($age)) {
+            return min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds());
+        }
+        return min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds() - max(0, (int) $age));
     }
 
     /**
@@ -162,7 +247,7 @@ final class SessionManager
                     s.auth_credential_id, s.last_user_activity_at, s.locked_at,
                     s.lock_reason, s.last_unlock_at, s.last_unlock_method,
                     HEX(s.session_family_id) AS session_family_id,
-                    s.generation, s.replaced_at, s.revoked_at,
+                    s.generation, s.replaced_at, s.revoked_at, s.external_identity_id,
                     UTC_TIMESTAMP(6) AS evaluated_at,
                     UNIX_TIMESTAMP(CURRENT_TIMESTAMP(6)) AS evaluated_at_epoch,
                     u.id AS account_id, u.email AS account_email,
@@ -280,36 +365,54 @@ final class SessionManager
 
     /**
      * Revokuje celou lineage i při logoutu přes starší nahrazenou generaci.
+     * Volitelný audit proběhne ve stejné transakci; jeho chyba revokaci vrátí.
      */
-    public function destroy(string $token): void
+    public function destroy(string $token, ?callable $onRevoked = null): int
     {
-        if (!self::isTokenShapeValid($token)) {
-            return;
-        }
+        return $this->destroyMany([$token], $onRevoked);
+    }
 
+    /**
+     * Atomická revokace nejvýše 50 vybraných lineage, se společným transakčním auditem.
+     * Vrací počet nově ukončených lineage; audit proběhne, jen když nějaká skutečně skončila.
+     */
+    public function destroyMany(array $tokens, ?callable $onRevoked = null): int
+    {
+        $tokens = array_values(array_unique(array_filter($tokens, self::isTokenShapeValid(...))));
+        if ($tokens === []) return 0;
+        if (count($tokens) > 50) throw new \InvalidArgumentException('Příliš mnoho relací.');
+        sort($tokens);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
             $cutoff = $this->securityClock->capture($pdo);
-            $family = $pdo->prepare('SELECT session_family_id FROM sessions WHERE id = ? FOR UPDATE');
-            $family->execute([$token]);
-            $familyId = $family->fetchColumn();
-            if (!is_string($familyId) || $familyId === '') {
+            $placeholders = implode(',', array_fill(0, count($tokens), '?'));
+            $family = $pdo->prepare('SELECT session_family_id FROM sessions WHERE id IN (' . $placeholders . ') ORDER BY id FOR UPDATE');
+            $family->execute($tokens);
+            $families = array_values(array_unique($family->fetchAll(PDO::FETCH_COLUMN)));
+            if ($families !== []) {
+                $placeholders = implode(',', array_fill(0, count($families), '?'));
+                $active = $pdo->prepare('SELECT DISTINCT session_family_id FROM sessions
+                    WHERE session_family_id IN (' . $placeholders . ') AND revoked_at IS NULL FOR UPDATE');
+                $active->execute($families);
+                $families = $active->fetchAll(PDO::FETCH_COLUMN);
+            }
+            if ($families === []) {
                 $pdo->commit();
-                return;
+                return 0;
             }
-
+            $placeholders = implode(',', array_fill(0, count($families), '?'));
             $revoke = $pdo->prepare(
-                'UPDATE sessions
-                    SET revoked_at = COALESCE(revoked_at, ?)
-                  WHERE session_family_id = ?'
+                'UPDATE sessions SET revoked_at = ?
+                  WHERE session_family_id IN (' . $placeholders . ') AND revoked_at IS NULL'
             );
-            $revoke->execute([$cutoff->utcSql, $familyId]);
+            $revoke->execute([$cutoff->utcSql, ...$families]);
+            // Administrátorský audit musí uspět ve stejné transakci jako revokace.
+            if ($onRevoked !== null) $onRevoked(count($families));
             $pdo->commit();
+            return count($families);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }
@@ -395,6 +498,7 @@ final class SessionManager
         $token = bin2hex(random_bytes(32));
         $csrf = bin2hex(random_bytes(32));
         $familyId = random_bytes(32);
+        $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -407,7 +511,7 @@ final class SessionManager
             }
 
             $current = $pdo->prepare(
-                'SELECT id
+                'SELECT id, auth_method, external_identity_id
                    FROM sessions
                   WHERE id = ?
                     AND user_id = ?
@@ -418,8 +522,19 @@ final class SessionManager
                   FOR UPDATE'
             );
             $current->execute([$setupToken, $userId, 'setup', $cutoff->epochSeconds]);
-            if ($current->fetchColumn() === false) {
+            $setupSession = $current->fetch(PDO::FETCH_ASSOC);
+            if ($setupSession === false) {
                 throw new \DomainException('Setup session už není dostupná.');
+            }
+            if (SessionAuthContext::isExternalMethod($setupSession['auth_method'])
+                && (int) ($setupSession['external_identity_id'] ?? 0) > 0
+            ) {
+                $authContext = $authContext->withExternalIdentity(
+                    substr($setupSession['auth_method'], strlen(SessionAuthContext::EXTERNAL_PREFIX)),
+                    (int) $setupSession['external_identity_id'],
+                );
+                $expiresAt = min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds());
+                $expiresAt = $this->anchorToIdentityVerification($pdo, $cutoff, $userId, $authContext, $expiresAt);
             }
 
             $revoke = $pdo->prepare(
@@ -431,11 +546,11 @@ final class SessionManager
 
             $insert = $pdo->prepare(
                 'INSERT INTO sessions
-                    (id, user_id, csrf_token, ip, user_agent, created_at, last_seen, expires_at,
+                    (id, user_id, csrf_token, ip, user_agent, device_class, created_at, last_seen, expires_at,
                      auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                     last_user_activity_at, session_family_id, generation)
-                 VALUES (?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                         ?, ?, ?, ?, ?, ?, 1)'
+                     last_user_activity_at, session_family_id, generation, external_identity_id)
+                 VALUES (?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
+                         ?, ?, ?, ?, ?, ?, 1, ?)'
             );
             $insert->execute([
                 $token,
@@ -443,6 +558,7 @@ final class SessionManager
                 $csrf,
                 $packedIp,
                 mb_substr($userAgent, 0, 255),
+                $deviceClass,
                 $cutoff->epochSeconds,
                 $cutoff->epochSeconds,
                 $expiresAt,
@@ -452,10 +568,12 @@ final class SessionManager
                 $authContext->authCredentialId,
                 $cutoff->utcSql,
                 $familyId,
+                $authContext->externalIdentityId,
             ]);
             if ($insert->rowCount() !== 1) {
                 throw new \RuntimeException('Strong session se nepodařilo vytvořit.');
             }
+            $this->enforceConcurrencyLimit($pdo, $cutoff, $userId, $deviceClass, null, $familyId);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -494,7 +612,9 @@ final class SessionManager
 
         $stmt = $pdo->prepare(
             "UPDATE sessions
-                SET auth_method = 'password', assurance_level = 'setup',
+                SET auth_method = CASE WHEN external_identity_id IS NOT NULL AND auth_method LIKE 'oidc:%'
+                                       THEN auth_method ELSE 'password' END,
+                    assurance_level = 'setup',
                     mfa_verified_at = NULL, auth_credential_id = NULL
               WHERE id = ? AND user_id = ?
                 AND assurance_level = 'strong'
@@ -612,15 +732,17 @@ final class SessionManager
         $newCsrf = bin2hex(random_bytes(32));
         $insert = $pdo->prepare(
             'INSERT INTO sessions
-                (id, user_id, csrf_token, ip, user_agent, supplier_domain_id,
+                (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                  last_user_activity_at, locked_at, lock_reason, last_unlock_at,
-                 last_unlock_method, session_family_id, generation, replaced_at, revoked_at)
-             SELECT ?, user_id, ?, ip, user_agent, supplier_domain_id,
+                 last_unlock_method, session_family_id, generation, replaced_at, revoked_at,
+                 external_identity_id)
+             SELECT ?, user_id, ?, ip, user_agent, device_class, supplier_domain_id,
                     created_at, FROM_UNIXTIME(?), expires_at,
                     auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                    ?, NULL, NULL, ?, ?, session_family_id, generation + 1, NULL, NULL
+                    ?, NULL, NULL, ?, ?, session_family_id, generation + 1, NULL, NULL,
+                    external_identity_id
                FROM sessions
               WHERE id = ? AND user_id = ?
                 AND locked_at IS NOT NULL AND replaced_at IS NULL AND revoked_at IS NULL'
@@ -657,6 +779,77 @@ final class SessionManager
             'user_id' => $userId,
             'issued_at' => $cutoff->utc,
         ];
+    }
+
+    /**
+     * Byla předložená relace ukončena novějším přihlášením téhož uživatele
+     * nad limit souběžných relací? Slouží jen k vysvětlení odhlášení.
+     */
+    public function isSuperseded(string $token): bool
+    {
+        if (!self::isTokenShapeValid($token)) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM sessions
+              WHERE id = ? AND revoke_reason = ? AND expires_at > CURRENT_TIMESTAMP(6)
+              LIMIT 1'
+        );
+        $stmt->execute([$token, self::REVOKE_SUPERSEDED]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Ukončí nejstarší relace téhož uživatele a druhu zařízení nad limit
+     * z parametrů licence. Nová relace (`$keepFamilyId`) zůstává vždy.
+     *
+     * Relace na vlastní doméně firmy jsou samostatné přihlášení: limit se
+     * počítá zvlášť pro canonical adresu a zvlášť pro každou doménu, takže
+     * přihlášení do portálu na doméně neodhlásí hlavní aplikaci.
+     *
+     * Řádek uživatele se zamyká, aby dvě souběžná přihlášení nenechala
+     * aktivní obě relace nad limit.
+     */
+    private function enforceConcurrencyLimit(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        string $deviceClass,
+        ?int $supplierDomainId,
+        string $keepFamilyId,
+    ): void {
+        $limit = $this->concurrency?->limitFor($deviceClass) ?? 0;
+        if ($limit < 1) {
+            return;
+        }
+        $user = $pdo->prepare('SELECT id FROM users WHERE id = ? FOR UPDATE');
+        $user->execute([$userId]);
+
+        $select = $pdo->prepare(
+            "SELECT session_family_id
+               FROM sessions
+              WHERE user_id = ?
+                AND revoked_at IS NULL
+                AND replaced_at IS NULL
+                AND expires_at > FROM_UNIXTIME(?)
+                AND IFNULL(device_class, 'browser') = ?
+                AND supplier_domain_id <=> ?
+                AND session_family_id <> ?
+              ORDER BY created_at DESC, last_user_activity_at DESC, id DESC
+              FOR UPDATE"
+        );
+        $select->execute([$userId, $cutoff->epochSeconds, $deviceClass, $supplierDomainId, $keepFamilyId]);
+        $families = array_values(array_unique($select->fetchAll(PDO::FETCH_COLUMN)));
+        $excess = array_slice($families, $limit - 1);
+        if ($excess === []) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($excess), '?'));
+        $pdo->prepare(
+            "UPDATE sessions
+                SET revoked_at = ?, revoke_reason = ?
+              WHERE user_id = ? AND session_family_id IN ({$placeholders}) AND revoked_at IS NULL"
+        )->execute([$cutoff->utcSql, self::REVOKE_SUPERSEDED, $userId, ...$excess]);
     }
 
     /**

@@ -6,12 +6,17 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
+use MyInvoice\Service\Payroll\Submission\PayrollAgendaGroupCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
@@ -31,11 +36,14 @@ final class PayrollSubmissionOverviewAction
         private readonly PayrollDispatchCapabilityCatalog $capabilities,
         private readonly PayrollObligationSubjectResolver $subjects,
         private readonly PayrollSubmissionManualAcceptanceReader $manualAcceptances,
+        private readonly JmhzPreparationGate $jmhzGate,
+        private readonly PayrollSigningProfileRepository $signingProfiles,
+        private readonly PayrollMonthlyAgendaDutyService $agendaDuties,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         if (!$this->requirePermission(
@@ -123,13 +131,14 @@ final class PayrollSubmissionOverviewAction
             'action_required' => 0,
             'cancelled' => 0,
         ];
-        foreach ($this->repository->overviewSummaryRows(
+        $summaryRows = $this->repository->overviewSummaryRows(
             $supplierId,
             $environment,
             $periodStart,
             $periodEnd,
             $agendaGroup,
-        ) as $row) {
+        );
+        foreach ($summaryRows as $row) {
             $status = $row['status'];
             if (array_key_exists($status, $summary) && $status !== 'total') {
                 ++$summary[$status];
@@ -142,6 +151,37 @@ final class PayrollSubmissionOverviewAction
                 $status,
                 $row['submission_status'],
             )->phase];
+        }
+
+        /*
+         * Povinnosti období, ke kterým v evidenci ještě není řádek (typicky
+         * JMHZ za schválený měsíc, které se zatím nepřipravilo). Měsíční přehled
+         * nad panelem je hlásí jako „Nepřipraveno"; souhrn panelu bez nich
+         * ukazoval „Celkem 0", jako by za měsíc nebylo co podat. Tentýž pramen
+         * a tentýž doplněk k evidenci jako měsíční přehled
+         * ({@see PayrollMonthlyAgendaDutyService::unprepared()}).
+         */
+        $unpreparedSummary = array_fill_keys(array_keys($deadlineSummary), 0);
+        foreach ($this->agendaDuties->unprepared(
+            $supplierId,
+            substr($periodStart, 0, 7),
+            array_map(
+                static fn (array $row): array => [
+                    'agenda_code' => $row['agenda_code'],
+                    'subject_reference' => $row['subject_reference'],
+                ],
+                $summaryRows,
+            ),
+        ) as $duty) {
+            if ($agendaGroup !== null
+                && PayrollAgendaGroupCatalog::groupOf((string) $duty['agenda_code']) !== $agendaGroup
+            ) {
+                continue;
+            }
+            $phase = (string) $duty['phase'];
+            if (array_key_exists($phase, $unpreparedSummary)) {
+                ++$unpreparedSummary[$phase];
+            }
         }
 
         // Doklad o odeslání pro CELOU stránku jedním dotazem. Rozhoduje o tom,
@@ -176,6 +216,9 @@ final class PayrollSubmissionOverviewAction
             ))),
         );
 
+        $signingReady = $this->signingProfiles->find($supplierId, $environment) !== null;
+        $gate = new PayrollDispatchGate();
+
         // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
         // u řádku vidí, ne kvůli souhrnu.
         foreach ($items as $index => &$item) {
@@ -197,6 +240,26 @@ final class PayrollSubmissionOverviewAction
             $item['dispatch_channel'] = isset(
                 $outboxes[(int) ($item['latest_submission']['id'] ?? 0)],
             ) ? 'isds' : null;
+            /*
+             * Kudy podání odejde, DOKUD neodešlo: tatáž volba jako při
+             * odeslání frontou a jako sloupec „Jakou cestou" měsíčního
+             * přehledu ({@see PayrollDispatchGate::channels()}). Bez ní řádek
+             * ukazoval plán z doby založení povinnosti („VREP / APEP"),
+             * zatímco přehled nad ním správně říkal „datová schránka".
+             */
+            $capability = $this->capabilities->forAgenda((string) $item['agenda_code']);
+            $latestStatus = $item['latest_submission']['status'] ?? null;
+            $item['planned_channel'] = null;
+            if ($capability->isDispatchable()
+                && ($latestStatus === null || in_array($latestStatus, ['validated', 'prepared', 'ready'], true))
+            ) {
+                $mode = $gate->channels($capability, $environment, $signingReady)['default'];
+                $item['planned_channel'] = match (true) {
+                    str_starts_with($mode, 'vrep_') => 'vrep_apep',
+                    str_starts_with($mode, 'isds_') => 'isds',
+                    default => null,
+                };
+            }
         }
         unset($item);
 
@@ -207,6 +270,13 @@ final class PayrollSubmissionOverviewAction
             'agenda_group' => $agendaGroup,
             'summary' => $summary,
             'deadline_summary' => $deadlineSummary,
+            // Nepřipravené povinnosti období podle fáze lhůty (bez řádku v evidenci).
+            'unprepared_deadline_summary' => $unpreparedSummary,
+            // Proč hlášení JMHZ za tohle období teď nejde zmrazit ani odeslat
+            // (období neskončilo, ročník nejde sestavit); `null` = jde. Panel
+            // odeslání podle toho zneaktivní tlačítka i tam, kde povinnost
+            // ještě není v evidenci.
+            'jmhz_preparation_gate' => $this->jmhzGate->blocked($periodStart),
             'items' => $items,
             'total' => $page['total'],
             'limit' => $limit,

@@ -30,7 +30,7 @@ Cesta: `Účetnictví → Výkaz zisku a ztráty`. Výkaz je dostupný jen pro p
 3. V poli **Sestaveno k** zvolte datum. Prázdná hodnota znamená dřívější z posledního dne období a dneška.
 4. V poli **Rozsah** ponechte **Automaticky (dle kategorie ÚJ)**, nebo zvolte plný či zkrácený rozsah.
 5. Podle potřeby přepněte **Kč / tis. Kč**. PDF a XLSX zůstávají v korunách.
-6. Posíláte-li průběžnou výsledovku klientovi, zaškrtněte **Průběžné časové rozlišení**. Náklady a výnosy dokladů s obdobím od–do se pak započtou jen poměrnou částí do data **Sestaveno k** (viz [§ 58.7.7](#5877-prubezne-casove-rozliseni)).
+6. Posíláte-li průběžnou výsledovku klientovi, zaškrtněte **Průběžné časové rozlišení a odpisy**. Náklady a výnosy dokladů s obdobím od–do se pak započtou jen poměrnou částí do data **Sestaveno k** a v nákladech budou účetní odpisy majetku za uplynulé měsíce (viz [§ 58.7.7](#5877-prubezne-casove-rozliseni-a-odpisy)).
 7. Pod výkazem zkontrolujte **Výsledek hospodaření za účetní období** a **Čistý obrat za účetní období**.
 8. Řádek rozbalte kliknutím. Uvidíte přímo namapované účty a jejich příspěvky. Kód účtu otevře opis od začátku období do data sestavení.
 9. Klikněte na **Export PDF** nebo **Export XLSX**.
@@ -39,10 +39,14 @@ Cesta: `Účetnictví → Výkaz zisku a ztráty`. Výkaz je dostupný jen pro p
 
 ## 58.4 Krok za krokem: výsledovka po účtech
 
+Následující skupiny a název **Účet 710 (po účtech)** platí pro rámec 500.
+V rámci 504 zvolte **Průběžný účetní přehled**; jeho členění odpovídá
+nevýdělečné organizaci, včetně hlavní a hospodářské činnosti.
+
 1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
-2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**.
+2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
 3. Zkontrolujte mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
-4. Klikněte na účet. Otevře se jeho opis.
+4. Klikněte na účet. Otevře se inventura účtu, odtud vede jeho opis.
 5. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
 6. Klikněte na **Export PDF** nebo **Export XLSX**.
 
@@ -191,8 +195,12 @@ období do data sestavení, rozdělené do skupin **Provozní činnost**,
 **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku
 hospodaření společníkům**. Skupinu určuje stejná mapa jako výkaz (včetně
 výjimek firmy), takže účet je vždy ve skupině, do které ho výkaz započte.
-Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**,
-každá skupina končí svým výsledkem.
+Náklady jsou vlevo a výnosy vpravo na jednom řádku. Každá strana má sloupce
+**Počáteční stav**, **Obrat** měsíce, **Obrat od** začátku období a **Konečný stav**,
+se znaménkem podle typu účtu: náklady `MD − Dal`, výnosy `Dal − MD`. Výnos s převahou
+MD a náklad s převahou Dal jsou proto záporné a červené. Každá skupina končí součtem
+nákladů a výnosů. Přepínač **Skrýt nulové účty** funguje jako
+u [rozvahy po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech).
 
 Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
 **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
@@ -206,8 +214,10 @@ výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
 tabulkou upozorní a účet je třeba zařadit výjimkou mapování
 ([Mapování účtů](57_Rozvaha.md#5777-mapovani-uctu-pro-konkretni-firmu)).
 
-Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
-vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
+Kliknutím na účet se otevře záložka **Inventura účtu**. Výsledkové účty se
+neinventarizují, stránka to řekne a vede do opisu. Export XLSX i PDF z této záložky má
+stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč**. PDF se tiskne
+na šířku stránky.
 
 #### 58.7.6.1 Odhad do konce roku (nezaúčtováno)
 
@@ -230,14 +240,15 @@ už ukazují jiné stránky:
 
 Blok i náhled DPPO ukazují tatáž čísla. Jakmile se krok uzávěrky nebo odpisy
 roku zaúčtují, položka z projekce zmizí a částka je v průběžném výsledku,
-takže se nic nezapočte dvakrát. Mzdy ani jiné budoucí provozní náklady do
+takže se nic nezapočte dvakrát. Selže-li náhled některého kroku uzávěrky, blok
+ukáže varování o neúplné projekci s krokem a důvodem; odhad je pak bez něj. Mzdy ani jiné budoucí provozní náklady do
 zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
 
 U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
 nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani
 uživateli bez práva na přiznání k dani z příjmů.
 
-### 58.7.7 Průběžné časové rozlišení
+### 58.7.7 Průběžné časové rozlišení a odpisy
 
 Přijatá faktura s obdobím od–do (pojistné, předplatné, nájem) jde při
 zaúčtování celá do nákladu dne dokladu, vydaná faktura s obdobím celá do výnosu.
@@ -245,7 +256,7 @@ zaúčtování celá do nákladu dne dokladu, vydaná faktura s obdobím celá d
 **Časové rozlišení** ([kap. 72](72_Uzaverka.md)). Průběžná výsledovka je proto
 v měsíci dokladu zatížená celým nákladem či výnosem.
 
-Volba **Průběžné časové rozlišení** výkaz k datu **Sestaveno k** sestaví tak,
+Volba **Průběžné časové rozlišení a odpisy** výkaz k datu **Sestaveno k** sestaví tak,
 jako by uzávěrka proběhla k tomu dni:
 
 - do nákladů a výnosů se započte jen poměrná část období do data **Sestaveno k**
@@ -262,8 +273,28 @@ interní doklad k faktuře), se znovu neupravuje. Účet nákladu či výnosu je
 na který doklad zaúčtoval řádek, včetně analytik účtotvorné dimenze. Stejné
 pravidlo platí pro sloupec **Minulé období** k jeho konci.
 
+Stejná volba započte i účetní odpisy majetku. Odpis celého roku zaúčtuje krok
+uzávěrky **Odpisy majetku** (nebo tlačítko na stránce Majetek) k poslednímu dni období, průběžná výsledovka by tak během roku
+odpisy neobsahovala. S volbou se k datu **Sestaveno k** ukáže odpis za uplynulé
+celé měsíce (k 15. 10. za období do září, k 31. 10. i za říjen):
+
+- počítá se z ročního účetního odpisu karty, stejně jako v kroku uzávěrky; u
+  rovnoměrných účetních odpisů po měsících od měsíce po zařazení do užívání,
+  u účetních odpisů podle daňových rovným dílem na měsíce, ve kterých karta v roce
+  odpisuje,
+- v nákladech je na účtu odpisů (551, případně podle nastavení předkontace odpisů),
+  v rozvaze sníží majetek přes oprávky karty a výsledek běžného období se upraví
+  o totéž,
+- karta, jejíž odpis roku už v evidenci je (zaúčtovaný krok, odpis při vyřazení,
+  odpis převzatý z jiného programu), se znovu neupravuje. Rok uzavřený původním
+  programem se neupravuje vůbec.
+
+U neziskové organizace se při průběžném odpisu nepromítá rozpuštění investičního
+zdroje (901), které zaúčtování odpisu v uzávěrce doprovází.
+
 Do deníku se nic nezapisuje a uzávěrka zůstává stejná. Nad výkazem je poznámka
-s částkami na 381 a 384 a počtem upravených dokladů, totéž je v záhlaví PDF a XLSX.
+s částkami na 381 a 384, počtem upravených dokladů a průběžnými odpisy, totéž je
+v záhlaví PDF a XLSX.
 Volba je výchozí vypnutá, aplikace si ji pamatuje pro každého uživatele a platí
 společně pro výsledovku v obou členěních i pro rozvahu. Výkaz za hodnotu dimenze
 a výkazy podle vyhlášky 504 ji neuplatní. Podání účetní závěrky, přiznání

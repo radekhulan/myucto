@@ -26,6 +26,7 @@ final class JournalWriterAuditTrailGuardTest extends TestCase
     private const ALLOWED = [
         'insert' => 'obecný zápis; stopu zapisuje PostingService (accounting.posted)',
         'insertReversal' => 'obecné storno; stopu zapisuje PostingService::reverse (accounting.reversed)',
+        'insertPairReversal' => 'storno dvojic; stopu zapisuje PostingService::reversePairs (accounting.reversed s pair_nos)',
     ];
 
     public function testEveryTypedJournalWriterLogsItsEntry(): void

@@ -214,7 +214,7 @@ final class MyInvoiceBackupConverter
             }
             // Same integrity, document hashes and size limits as UI/worker imports.
             $package = (new MyuctoExportReader())->read($temp, $outputPassword);
-            $counts = array_map('count', $package['tables']);
+            $counts = $package['tables']->counts();
             unset($package);
             $destination = @fopen($output, 'x+b');
             if ($destination === false) {

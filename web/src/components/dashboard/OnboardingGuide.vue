@@ -115,7 +115,7 @@ const GROUPS: Group[] = [
       // Právo zrcadlí skutečnou bránu `/admin/integrations` (viz AppLayout).
       // `settings.company = WRITE` má nově i klientská role a na integrace nesmí.
       { id: 'ai_extraction', to: '/admin/integrations?tab=ai', visible: () => auth.canWrite('settings.company.write') },
-      { id: 'users',     to: '/admin/users',                   visible: () => isSuperadmin.value },
+      { id: 'users',     to: '/admin/users',                   visible: () => isSuperadmin.value && !auth.isDemo },
     ],
   },
   {

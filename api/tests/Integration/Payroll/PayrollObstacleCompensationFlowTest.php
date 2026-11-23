@@ -55,6 +55,23 @@ final class PayrollObstacleCompensationFlowTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testHourlyObstacleUsesCurrentFloorAndRunAcceptsTrustedProof(): void
+    {
+        $person = $this->hire('Syntetická Překážka', 'female', '1987-05-12');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare('UPDATE payroll_average_earning_snapshots SET average_hourly_minor = 13440 WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $person['average_id']]);
+        $this->obstacle($person, 'employer_obstacle', 'downtime', '2026-07-13', '2026-07-13');
+        $stmt = $pdo->prepare('SELECT input.amount_minor, input.source_snapshot_json FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL"');
+        $stmt->execute([$this->supplierId, $person['employment_id']]);
+        $input = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(91800, (int) $input['amount_minor']);
+        $trace = json_decode((string) $input['source_snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $trace['hourly_average_floor'][0]['average_hourly_minor']);
+        $snapshot = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-07-01', '2026-08-14');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($validation): string => $validation->code, $snapshot->validations));
+    }
+
     public function testDoctorDowntimeAndOtherEmployerObstacleReachPayAndSubmission(): void
     {
         $person = $this->hire('Olga Překážková', 'female', '1987-05-12');

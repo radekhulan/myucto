@@ -21,6 +21,21 @@ function mountFor(checkKey: string) {
   })
 }
 
+describe('CheckFindings — počet v řádku', () => {
+  it('nový výsledek kontroly přebije dříve načtený detail', async () => {
+    const { closingApi } = await import('../../../api/closing')
+    vi.mocked(closingApi.checkFindings).mockResolvedValue({ key: 'x', severity: 'warning', ok: false, value: { count: 9, findings: [] } })
+    const wrapper = mount(CheckFindings, {
+      props: { checkKey: 'x', label: 'X', periodId: 3, value: { count: 9, findings: [{ doc_id: 1 }] } },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
+    })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ value: { count: 0, findings: [] } })
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+})
+
 describe('CheckFindings — nález marked_paid_unposted', () => {
   it('u přijatých faktur má vlastní popisek bez GoPay', async () => {
     const wrapper = mountFor('paid_purchases_open_saldo')
@@ -78,4 +93,26 @@ it.each([
 it('neukáže předkontrolu SVJ u jiného poplatníka 504', () => {
   const wrapper = mount(CheckFindings, { props: { checkKey: 'nonprofit_tax_assessment', label: 'Tax', value: { applicable: true, complete: true, findings: [] } } })
   expect(wrapper.find('[data-test="svj-precheck"]').exists()).toBe(false)
+})
+
+describe('CheckFindings - ostatní položky', () => {
+  it('nález typu other_item odkazuje na detail položky', async () => {
+    const wrapper = mount(CheckFindings, {
+      props: { checkKey: 'other_item_installments_overdue', label: 'OI', value: { kind: 'document', count: 1,
+        findings: [{ doc_type: 'other_item', doc_id: 42, doc_no: 'OP1', amount: 500 }] } },
+      global: { stubs: {
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        Modal: { template: '<div><slot /></div>' },
+      } },
+    })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('a[data-to]').attributes('data-to')).toBe('{"name":"other-item-detail","params":{"id":42}}')
+  })
+})
+
+it('kontrolu, která selhala, popíše přeloženým důvodem místo syrového kódu', () => {
+  const wrapper = mount(CheckFindings, { props: { checkKey: 'vat_clearing_stale', label: 'DPH', value: { reason: 'check_failed' } } })
+  expect(wrapper.text()).toContain('T:checks.field.reason')
+  expect(wrapper.text()).toContain('T:checks.value.check_failed')
 })

@@ -318,6 +318,18 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
+- Finalizované **DPPO** si pamatuje stav účetnictví období, ze kterého vzniklo (výsledkové
+  účty bez daně z příjmů 59x a u neziskové organizace i činnost a daňový režim řádků).
+  Když se účetnictví po finalizaci změní, detail přiznání upozorní **Účetnictví se po
+  finalizaci přiznání změnilo, zvažte dodatečné přiznání** a průvodce uzávěrkou přestane
+  daň z tohoto přiznání nabízet (navrhne ji z aktuálních knih). Zaúčtování samotné daně
+  z příjmů, odložené daně ani uzavření knih upozornění nevyvolá.
+  Přiznání finalizované dřív, které stav účetnictví uložený nemá, se porovná podle výsledku
+  hospodaření uloženého v podkladech přiznání s výsledkem z aktuálních knih. Při shodě je
+  přiznání aktuální. Liší-li se výsledek jen tak, že základ daně po zaokrouhlení na celé
+  tisíce i daň zůstávají stejné, detail přiznání rozdíl jen ukáže jako informaci a průvodce
+  uzávěrkou daň z přiznání dál navrhuje. Mění-li rozdíl základ daně, platí stejné upozornění
+  jako u změněného účetnictví i s výší rozdílu.
 - **PDF sestava** (tlačítko **Stáhnout PDF sestavu**) - přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
   s účetní a do archivu. Není podáním pro finanční úřad a netváří se jako tiskopis; každá
   strana to uvádí. Obsahuje identifikaci poplatníka, zdaňovací období, druh a stav
@@ -427,8 +439,12 @@ z minulého roku, konečný stav zásob (způsob B) a odpisy roku podle odpisov�
 stejně jako u zaúčtovaných odpisů. Opravné a dohadné položky jsou jen návrhy
 k potvrzení, zobrazí se šedě a do projekce se nesčítají. Každá položka odkazuje na
 uzávěrku období, odpisy na Majetek. Zaúčtovaný krok z projekce zmizí, takže se nic
-nezapočte dvakrát. Samotné přiznání (řádky a XML) počítá jen se zaúčtovanými položkami
-a schválenými ručními úpravami. Účetní závěrku dokončete podle
+nezapočte dvakrát. Když náhled některého kroku selže (například kvůli neplatnému
+nastavení časového rozlišení), projekce ho nezahrne a nad panelem se zobrazí varování
+**Projekce uzávěrky je neúplná** s krokem a důvodem. Projektovaný výsledek a daň jsou
+pak bez tohoto kroku, opravte jeho nastavení v uzávěrce období. Samotné přiznání (řádky
+a XML) počítá jen se zaúčtovanými položkami a schválenými ručními úpravami. Účetní
+závěrku dokončete podle
 [kapitoly Účetní závěrka](72_Uzaverka.md).
 
 ### 43.11.8 Zálohy na daň a pojistné
@@ -766,7 +782,14 @@ odlišný od sražené daně. Přečtěte si je před odesláním.
 
 Formulář zatím neumí víc odvodů sražené daně v jednom oznámení, byť je tiskopis
 připouští, a nepracuje s řádky 27a a 27b (příjem navýšený o povinné pojistné).
-Nevytváří textovou přílohu ani zástupce; takový případ dokončete v EPO.
+Nevytváří textovou přílohu; takový případ dokončete v EPO.
+
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+jako podepisující osoba do obou písemností, stejně jako u přiznání DPH a daně z příjmů.
+Oznámení ani hlášení nemají pole "podává daňový poradce", uvede se jen zástupce
+a jeho kód. Lhůtu prodlužují jen kódy 4b a 4c; u ostatních kódů, například obecného
+zmocněnce 4a, aplikace uloží k podání varování.
 
 ### 43.11.19 Rozsah a co aplikace vědomě nepodporuje
 
@@ -832,6 +855,8 @@ Načtení obrazovky podklady DPPO nesestavuje. Připravenost výpočtu ověřít
 tlačítkem **Ověřit připravenost výpočtu**; teprve potom obrazovka ukáže zjištění
 a nabídne převzetí do přiznání.
 
+V **Uzávěrka → Daňové posouzení** zvolte u nákladu **Posoudit** a zadejte **Uznatelnou část nákladu před vyloučením financování** v Kč. U záporného nákladu zadejte zápornou uznatelnou část nebo nulu. U povinně neuznatelného nebo vyloučeného nákladu aplikace nastaví nulu. Po uložení rozhodnutí spusťte **Náhled**.
+
 Finalizace, export XML a podání DPPO 504 jsou dostupné až po **akceptaci výpočtu**.
 Akceptaci zapíná pouze správce firmy v sekci **Akceptace výpočtu DPPO 504**:
 výslovně potvrdí, že výpočet ověřil, a uvede odkaz na provedené ověření (například
@@ -846,7 +871,10 @@ bez průkazného období nelze automaticky použít v této příloze. Hospodá�
 rok nebo zkrácené období s přílohou ztrát vyžaduje samostatné zpracování.
 
 Přehled daňových úspor zobrazuje doložené uložené záznamy podle oprávnění uživatele.
-Právní profily a interní podklady úspor jsou přístupné pouze v přihlášeném webovém rozhraní.
+Právní profily a interní podklady úspor vyžadují přihlášenou aplikaci
+nebo API token s **Plným zápisem** a odpovídajícími právy
+([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)).
+Běžný token ani katalog MCP tyto interní podklady nezpřístupňují.
 
 #### Použití daňové úspory v následujícím období
 

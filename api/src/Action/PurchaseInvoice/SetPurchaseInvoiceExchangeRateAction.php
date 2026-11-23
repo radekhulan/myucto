@@ -52,8 +52,19 @@ final class SetPurchaseInvoiceExchangeRateAction
         }
 
         // Zámek dokladu (Epic F6): kurz mění účetní hodnoty dokladu.
-        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($existing), 'purchase_invoice', $id)) {
+        $lock = $this->locks->forPurchaseInvoice($existing);
+        if ($deny = $this->denyIfLocked($request, $response, $lock, 'purchase_invoice', $id)) {
             return $deny;
+        }
+        // Kurz mění korunové částky dokladu, tenhle úzký endpoint ale deník nepřeúčtuje.
+        // Zaúčtovaný doklad se proto opravuje úpravou dokladu ({@see UpdatePurchaseInvoiceAction}),
+        // která zápis dorovná; storno je neměnné.
+        if ((string) ($existing['status'] ?? '') === 'cancelled') {
+            return Json::error($response, 'not_editable', 'Stornovaný doklad nelze upravit.', 409);
+        }
+        if ($lock->posted) {
+            return Json::error($response, 'posted_document',
+                'Doklad je zaúčtovaný. Kurz změňte úpravou dokladu, která zápis v deníku dorovná.', 409);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

@@ -77,6 +77,9 @@ final class PayrollRegistrationSpecVersionRules
             self::assertA1($payload);
         } elseif (in_array($action, [3, 4], true)) {
             self::assertDelta($payload, $action, self::array($data['delta'] ?? null));
+            if ($action === 4) {
+                self::assertUnemployment(self::array($data['unemployment'] ?? null));
+            }
         } elseif ($action === 2) {
             self::assertUnemployment(self::array($data['unemployment'] ?? null));
         } elseif ($action === 7) {
@@ -91,8 +94,9 @@ final class PayrollRegistrationSpecVersionRules
     /**
      * EDV 1.5.0.3 a 1.4.0.7, Slovník (DM-296), Changelog 1.5.0.3 ř. 277 až
      * 280: ročník musí odpovídat rozhodnému datu. Volba verze stojí na téže
-     * metodě ({@see PayrollRegistrationSchemaCatalog::decisiveDate()}); tady
-     * je pojistka proti payloadu složenému mimo službu podání.
+     * metodě ({@see PayrollRegistrationSchemaCatalog::versionFor()}, u A3/A4
+     * podle 10224, bez něj podle dne vyhotovení 10005); tady je pojistka
+     * proti payloadu složenému mimo službu podání.
      */
     private static function assertBoundary(PayrollRegistrationXmlPayload $payload): void
     {
@@ -101,27 +105,37 @@ final class PayrollRegistrationSpecVersionRules
             return;
         }
         $data = self::eventData($payload);
-        $date = $action === 1
-            ? ($payload->identity->regzecA1?->employment['actual_start_on'] ?? $payload->actualStartOn)
-            : PayrollRegistrationSchemaCatalog::decisiveDate(
+        if ($action === 1) {
+            $date = $payload->identity->regzecA1?->employment['actual_start_on'] ?? $payload->actualStartOn;
+            if (!is_string($date) || $date === '') {
+                return;
+            }
+            $expected = JmhzSpecVersion::forRegistrationEventDate($date);
+        } else {
+            $effectiveOn = (string) ($payload->eventSnapshot['effective_on'] ?? '');
+            if ($effectiveOn === '') {
+                return;
+            }
+            $date = PayrollRegistrationSchemaCatalog::decisiveDate($action, $effectiveOn, $data);
+            $expected = PayrollRegistrationSchemaCatalog::versionFor(
                 $action,
-                (string) ($payload->eventSnapshot['effective_on'] ?? ''),
+                $effectiveOn,
                 $data,
+                $payload->preparedOn,
             );
-        if (!is_string($date) || $date === '') {
-            return;
         }
-        $expected = JmhzSpecVersion::forRegistrationEventDate($date);
         if ($expected === $payload->specVersion) {
             return;
         }
         throw new PayrollRegistrationXmlException(
             'registration_spec_version_mismatch',
             PayrollRegistrationFieldVocabulary::action('REGZEC25', $action)
-                . " s rozhodným datem {$date} se podává formulářem "
+                . " s rozhodným datem {$date} vyhotovené {$payload->preparedOn}"
+                . ' se podává formulářem '
                 . ($expected === JmhzSpecVersion::V2027 ? 'REGZEC27' : 'REGZEC25')
-                . ', ČSSZ jiný ročník odmítne (hranice 1. 1. 2027). Připravte'
-                . ' podání znovu.',
+                . ', ČSSZ jiný ročník odmítne (hranice 1. 1. 2027, u změny'
+                . ' a opravy bez data skončení rozhoduje den vyhotovení,'
+                . ' REGZEC27 od 23. 12. 2026). Připravte podání znovu.',
         );
     }
 

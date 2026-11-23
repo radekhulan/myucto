@@ -145,6 +145,40 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame($restoredPartner, (int) $item['partner_id']);
     }
 
+    public function testOtherItemKindIsRemappedOnItemsAndScheduleTemplate(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $kinds = $container->get(\MyInvoice\Service\Accounting\OtherItemKindService::class);
+        $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $kind = $kinds->create($this->supplierId, ['side' => 'payable', 'name' => 'Syntetické nájemné'], $this->userId);
+        $source = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind_id' => $kind['id'], 'title' => 'Syntetický archivní nájem druhu',
+            'issued_on' => '2097-01-01', 'due_on' => '2097-01-20', 'currency' => 'CZK', 'amount' => 900,
+        ], $this->userId);
+        $items->post($this->supplierId, (int) $source['id'], $this->userId);
+        $plans->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], $this->userId);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $newSid = (int) $this->restore->restore($path)['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $restoredKind = array_values(array_filter($kinds->list($newSid), static fn (array $k): bool => !$k['builtin']));
+        self::assertCount(1, $restoredKind);
+        self::assertNotSame((int) $kind['id'], $restoredKind[0]['id']);
+        $pdo = $this->db->pdo();
+        $schedule = (int) $pdo->query('SELECT id FROM other_item_schedules WHERE supplier_id = ' . $newSid)->fetchColumn();
+        $generated = $plans->generate($newSid, $schedule, '2097-02-01', $this->userId);
+        self::assertCount(1, $generated['created_ids']);
+        foreach ($items->list($newSid, ['status' => 'all'], 1, 10)['items'] as $item) {
+            self::assertSame($restoredKind[0]['id'], (int) $item['kind_id'], (string) $item['title']);
+        }
+    }
+
     public function testInternalDocumentsSurviveArchiveRoundTrip(): void
     {
         $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
@@ -190,6 +224,229 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ?');
         $stmt->execute([$newSid]);
         self::assertSame((int) $stmt->fetchColumn(), (int) $links[0]['doc_id']);
+    }
+
+    public function testDimensionCatalogAndFrameworkTimelineSurviveArchiveRoundTrip(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '2096-01-01', 'cz_500'), (?, '2097-01-01', 'cz_504')")
+            ->execute([$this->supplierId, $this->supplierId]);
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind, sort_order) VALUES (?, 'ZAK', 'Zakázka', 'custom', 1), (?, 'STR', 'Středisko', 'custom', 2)")
+            ->execute([$this->supplierId, $this->supplierId]);
+        $typeId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'P', 'Rodič')")->execute([$typeId, $this->supplierId]);
+        $parentId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, parent_id, code, name) VALUES (?, ?, ?, 'C1', 'Dítě 1'), (?, ?, ?, 'C2', 'Dítě 2')")
+            ->execute([$typeId, $this->supplierId, $parentId, $typeId, $this->supplierId, $parentId]);
+        $snapshot = function (int $sid) use ($pdo): array {
+            $q = $pdo->prepare('SELECT effective_from, accounting_framework FROM supplier_accounting_frameworks WHERE supplier_id = ? ORDER BY effective_from');
+            $q->execute([$sid]); $frameworks = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare('SELECT code, name, kind, sort_order FROM dimension_types WHERE supplier_id = ? ORDER BY code');
+            $q->execute([$sid]); $types = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare('SELECT t.code type_code, v.code, v.name, p.code parent_code FROM dimension_values v
+                JOIN dimension_types t ON t.id = v.type_id AND t.supplier_id = v.supplier_id
+                LEFT JOIN dimension_values p ON p.id = v.parent_id AND p.supplier_id = v.supplier_id
+                WHERE v.supplier_id = ? ORDER BY t.code, v.code');
+            $q->execute([$sid]); $values = $q->fetchAll(PDO::FETCH_ASSOC);
+            return compact('frameworks', 'types', 'values');
+        };
+        $source = $snapshot($this->supplierId);
+        self::assertCount(2, $source['types']);
+        self::assertCount(3, $source['values']);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        self::assertSame($source, $snapshot($newSid));
+        self::assertSame($source, $snapshot($this->supplierId), 'Obnova nesmí měnit ani zdvojit číselník zdrojové firmy.');
+        $q = $pdo->prepare('SELECT COUNT(*) FROM dimension_values v LEFT JOIN dimension_types t ON t.id = v.type_id
+            LEFT JOIN dimension_values p ON p.id = v.parent_id
+            WHERE v.supplier_id = ? AND (t.supplier_id <> v.supplier_id OR (v.parent_id IS NOT NULL AND p.supplier_id <> v.supplier_id))');
+        $q->execute([$newSid]);
+        self::assertSame(0, (int) $q->fetchColumn(), 'Obnovené hodnoty nesmí odkazovat do zdrojové firmy.');
+    }
+
+    public function testDimensionAssignmentsSurviveArchiveRoundTrip(): void
+    {
+        $pdo = $this->db->pdo();
+        $fx = $this->seedDimensionAssignments();
+        $snapshot = function (int $sid) use ($pdo): array {
+            $out = [];
+            $q = $pdo->prepare("SELECT CONCAT(jel.side, ':', a.account_code) line, t.code type_code, v.code value_code, d.assignment_origin,
+                    REPLACE(d.assignment_origin_ref, CONCAT(':', (SELECT MIN(i.id) FROM invoices i WHERE i.supplier_id = d.supplier_id), ':'), ':#:') origin_ref
+                FROM journal_entry_line_dimensions d JOIN journal_entry_lines jel ON jel.id = d.line_id AND jel.supplier_id = d.supplier_id
+                JOIN chart_of_accounts a ON a.id = jel.account_id JOIN dimension_types t ON t.id = d.dimension_type_id
+                JOIN dimension_values v ON v.id = d.dimension_value_id AND v.type_id = d.dimension_type_id
+                WHERE d.supplier_id = ? ORDER BY line, type_code");
+            $q->execute([$sid]); $out['lines'] = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare("SELECT CONCAT(jel.side, ':', a.account_code) line, t.code type_code, v.code value_code, d.share
+                FROM journal_entry_line_dimension_splits d JOIN journal_entry_lines jel ON jel.id = d.line_id AND jel.supplier_id = d.supplier_id
+                JOIN chart_of_accounts a ON a.id = jel.account_id JOIN dimension_types t ON t.id = d.dimension_type_id
+                JOIN dimension_values v ON v.id = d.dimension_value_id WHERE d.supplier_id = ? ORDER BY line, type_code, value_code");
+            $q->execute([$sid]); $out['line_splits'] = $q->fetchAll(PDO::FETCH_ASSOC);
+            foreach (['document_dimensions' => 'documents', 'document_dimension_splits' => 'document_splits'] as $table => $key) {
+                $share = $table === 'document_dimension_splits' ? ', d.share' : '';
+                $q = $pdo->prepare("SELECT d.doc_type, i.varsymbol, d.item_no, t.code type_code, v.code value_code{$share},
+                        REPLACE(d.assignment_origin_ref, CONCAT(':', i.id, ':'), ':#:') origin_ref
+                    FROM {$table} d JOIN invoices i ON i.id = d.doc_id AND i.supplier_id = d.supplier_id AND d.doc_type = 'invoice'
+                    JOIN dimension_types t ON t.id = d.dimension_type_id JOIN dimension_values v ON v.id = d.dimension_value_id
+                    WHERE d.supplier_id = ? ORDER BY d.item_no, type_code, value_code");
+                $q->execute([$sid]); $out[$key] = $q->fetchAll(PDO::FETCH_ASSOC);
+            }
+            $q = $pdo->prepare('SELECT r.account_mask, t.code type_code, v.code value_code FROM dimension_account_rules r
+                JOIN dimension_types t ON t.id = r.dimension_type_id LEFT JOIN dimension_values v ON v.id = r.default_value_id WHERE r.supplier_id = ?');
+            $q->execute([$sid]); $out['rules'] = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare('SELECT c.company_name, t.code type_code, v.code value_code FROM dimension_defaults d
+                JOIN clients c ON c.id = d.client_id AND c.supplier_id = d.supplier_id
+                JOIN dimension_types t ON t.id = d.dimension_type_id JOIN dimension_values v ON v.id = d.dimension_value_id WHERE d.supplier_id = ?');
+            $q->execute([$sid]); $out['defaults'] = $q->fetchAll(PDO::FETCH_ASSOC);
+            return $out;
+        };
+        $source = $snapshot($this->supplierId);
+        self::assertCount(2, $source['lines']);
+        self::assertCount(2, $source['line_splits']);
+        self::assertCount(2, $source['documents']);
+        self::assertCount(2, $source['document_splits']);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        self::assertSame($source, $snapshot($newSid));
+        self::assertSame($source, $snapshot($this->supplierId), 'Obnova nesmí měnit přiřazení zdrojové firmy.');
+
+        // Sdílená hodnota skupiny se nesmí zdvojit ani přemapovat, firemní hodnoty ano.
+        $q = $pdo->prepare('SELECT COUNT(*) FROM dimension_values WHERE supplier_group_id = ?');
+        $q->execute([$fx['group']]);
+        self::assertSame(1, (int) $q->fetchColumn());
+        $q = $pdo->prepare('SELECT COUNT(*) FROM journal_entry_line_dimensions WHERE supplier_id = ? AND dimension_value_id = ?');
+        $q->execute([$newSid, $fx['shared_value']]);
+        self::assertSame(1, (int) $q->fetchColumn());
+        $q = $pdo->prepare('SELECT COUNT(*) FROM (
+                SELECT dimension_value_id FROM journal_entry_line_dimensions WHERE supplier_id = ?
+                UNION ALL SELECT dimension_value_id FROM document_dimensions WHERE supplier_id = ?
+                UNION ALL SELECT dimension_value_id FROM document_dimension_splits WHERE supplier_id = ?) a
+            JOIN dimension_values v ON v.id = a.dimension_value_id WHERE v.supplier_id = ?');
+        $q->execute([$newSid, $newSid, $newSid, $this->supplierId]);
+        self::assertSame(0, (int) $q->fetchColumn(), 'Obnovená přiřazení nesmí odkazovat na hodnoty zdrojové firmy.');
+
+        // Přiřazení k šabloně (archiv šablony nenese) se vynechá a vykáže, obnova nepadá.
+        $q = $pdo->prepare("SELECT COUNT(*) FROM document_dimensions WHERE supplier_id = ? AND doc_type = 'recurring_template'");
+        $q->execute([$newSid]);
+        self::assertSame(0, (int) $q->fetchColumn());
+        self::assertNotEmpty(array_filter($report['warnings'], static fn (string $w): bool =>
+            str_starts_with($w, 'document_dimensions: 1×') && str_contains($w, 'recurring_template')));
+        self::assertSame(2, $report['counts']['document_dimensions']);
+    }
+
+    public function testUnmatchedBankTransactionOfOwnStatementSurvivesWithDimensions(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR', 'Středisko', 'cost_center')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'S1', 'Jedna')")->execute([$type, $this->supplierId]);
+        $value = (int) $pdo->lastInsertId();
+        $statementId = $this->bankStatement(bin2hex(random_bytes(16)));
+        // Pohyb bez párování na fakturu (např. poplatek zaúčtovaný přímo do nákladů).
+        $pdo->prepare('INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, variable_symbol) VALUES (?, ?, -250, "CZK", "97300")')
+            ->execute([$statementId, self::YEAR . '-06-18']);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id) VALUES (?, 'bank_transaction', ?, 0, ?, ?)")
+            ->execute([$this->supplierId, $txId, $type, $value]);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $q = $pdo->prepare("SELECT bt.variable_symbol, bt.amount, v.code FROM document_dimensions d
+            JOIN bank_transactions bt ON bt.id = d.doc_id JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = d.supplier_id
+            JOIN dimension_values v ON v.id = d.dimension_value_id
+            WHERE d.supplier_id = ? AND d.doc_type = 'bank_transaction'");
+        $q->execute([$newSid]);
+        self::assertSame([['variable_symbol' => '97300', 'amount' => '-250.00', 'code' => 'S1']], $q->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function testRestoreFailsWhenSharedDimensionValueDiffersInTargetInstance(): void
+    {
+        $pdo = $this->db->pdo();
+        $fx = $this->seedDimensionAssignments();
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+
+        // Cílová instance má pod stejným id jinou hodnotu skupiny.
+        $pdo->prepare("UPDATE dimension_values SET code = 'JINA' WHERE id = ?")->execute([$fx['shared_value']]);
+        try {
+            $this->restore->restore($path);
+            self::fail('Obnova s odlišnými sdílenými dimenzemi musí skončit chybou.');
+        } catch (\MyInvoice\Service\Accounting\Archive\RestoreException $e) {
+            self::assertStringContainsString('sdílené dimenze skupiny firem', $e->getMessage());
+            self::assertStringContainsString('„G1"', $e->getMessage());
+        }
+    }
+
+    /**
+     * Firma ve skupině: vlastní typ STR (S1, S2), sdílený typ skupiny PRJ (G1). Ruční zápis
+     * 518/321 s dimenzemi řádků i rozpadem na podíly, faktura s dimenzemi hlavičky i položky,
+     * přiřazení k šabloně mimo archiv, pravidlo účtu a výchozí dimenze klienta.
+     *
+     * @return array{group:int, shared_value:int}
+     */
+    private function seedDimensionAssignments(): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+        $pdo->exec("INSERT INTO supplier_groups (name) VALUES ('Syntetická skupina')");
+        $group = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE supplier SET supplier_group_id = ? WHERE id = ?')->execute([$group, $this->supplierId]);
+        $pdo->prepare("INSERT INTO dimension_types (supplier_group_id, code, name, kind) VALUES (?, 'PRJ', 'Projekt skupiny', 'project')")->execute([$group]);
+        $sharedType = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_group_id, code, name) VALUES (?, ?, 'G1', 'Sdílený projekt')")->execute([$sharedType, $group]);
+        $sharedValue = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR', 'Středisko', 'cost_center')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'S1', 'Jedna')")->execute([$type, $this->supplierId]);
+        $s1 = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'S2', 'Dvě')")->execute([$type, $this->supplierId]);
+        $s2 = (int) $pdo->lastInsertId();
+
+        $this->manual(1000, '518', '321');
+        $q = $pdo->prepare('SELECT jel.side, jel.id FROM journal_entry_lines jel WHERE jel.supplier_id = ?');
+        $q->execute([$this->supplierId]);
+        $lines = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+        $clientId = $this->client();
+        $invoiceId = $this->saleInvoice('97101', $clientId, 1000);
+
+        $jeld = $pdo->prepare('INSERT INTO journal_entry_line_dimensions (line_id, dimension_type_id, supplier_id, dimension_value_id, assignment_origin, assignment_origin_ref) VALUES (?, ?, ?, ?, ?, ?)');
+        $jeld->execute([$lines['debit'], $type, $this->supplierId, $s1, 'explicit', 'document:invoice:' . $invoiceId . ':0']);
+        $jeld->execute([$lines['debit'], $sharedType, $this->supplierId, $sharedValue, 'unknown', null]);
+        $jelds = $pdo->prepare('INSERT INTO journal_entry_line_dimension_splits (line_id, dimension_type_id, dimension_value_id, supplier_id, share) VALUES (?, ?, ?, ?, ?)');
+        $jelds->execute([$lines['credit'], $type, $s1, $this->supplierId, '0.4000000000']);
+        $jelds->execute([$lines['credit'], $type, $s2, $this->supplierId, '0.6000000000']);
+
+        $dd = $pdo->prepare('INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id, assignment_origin, assignment_origin_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $dd->execute([$this->supplierId, 'invoice', $invoiceId, 0, $type, $s2, 'explicit', 'document:invoice:' . $invoiceId . ':0']);
+        $dd->execute([$this->supplierId, 'invoice', $invoiceId, 0, $sharedType, $sharedValue, 'unknown', null]);
+        $dd->execute([$this->supplierId, 'recurring_template', 987654321, 0, $type, $s1, 'unknown', null]);
+        $dds = $pdo->prepare('INSERT INTO document_dimension_splits (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id, share) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $dds->execute([$this->supplierId, 'invoice', $invoiceId, 1, $type, $s1, '0.5000000000']);
+        $dds->execute([$this->supplierId, 'invoice', $invoiceId, 1, $type, $s2, '0.5000000000']);
+
+        $pdo->prepare("INSERT INTO dimension_account_rules (supplier_id, dimension_type_id, account_mask, enforcement, default_value_id) VALUES (?, ?, '5', 'warning', ?)")
+            ->execute([$this->supplierId, $type, $s1]);
+        $pdo->prepare('INSERT INTO dimension_defaults (supplier_id, client_id, dimension_type_id, dimension_value_id) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, $clientId, $type, $s2]);
+        return ['group' => $group, 'shared_value' => $sharedValue];
     }
 
     protected function setUp(): void
@@ -270,6 +527,28 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         }
     }
 
+    /** Rozdělení výsledku z počátečních stavů prvního roku nese klíč 6e12 + id období; obnova ho přemapuje. */
+    public function testOpeningProfitDistributionKeySurvivesArchiveRoundTrip(): void
+    {
+        $period = (int) $this->periods->findByYear($this->supplierId, self::YEAR)['id'];
+        $this->posting->postDocument($this->supplierId, 'profit_distribution', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::openingProfitDistribution($period), [
+            ['account_code' => '431', 'side' => 'debit', 'amount' => 700],
+            ['account_code' => '428', 'side' => 'credit', 'amount' => 700],
+        ], ['entry_date' => self::YEAR . '-03-01', 'posted_by' => $this->userId]);
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $zip = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $zip;
+        $report = $this->restore->restore($zip);
+        $newSupplier = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSupplier;
+
+        $newPeriod = (int) $this->periods->findByYear($newSupplier, self::YEAR)['id'];
+        self::assertNotSame($period, $newPeriod);
+        $stmt = $this->db->pdo()->prepare("SELECT source_id FROM journal_entries WHERE supplier_id = ? AND source_type = 'profit_distribution'");
+        $stmt->execute([$newSupplier]);
+        self::assertSame(\MyInvoice\Service\Accounting\Closing\ClosingSourceId::openingProfitDistribution($newPeriod), (int) $stmt->fetchColumn());
+    }
+
     public function testProvisionSourceAndClosingStateSurviveArchiveRoundTrip(): void
     {
         $invoice = $this->saleInvoice('TEST-PROVISION', $this->client(), 50000);
@@ -348,6 +627,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $pdo->prepare('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_without_vat, total_without_vat, total_vat, total_with_vat, stock_item_id, warehouse_id, vat_rate_id, vat_rate_snapshot) VALUES (?, ?, 1, 10, 10, 0, 10, ?, ?, ?, 0)')
             ->execute([$invoiceId, 'Syntetická archivní položka', $items['COMPONENT'], $warehouse, $vatRateId]);
         $invoiceItemId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO stock_receipt_invoice_links (supplier_id, document_id, line_no, invoice_id) VALUES (?, ?, 1, ?)')->execute([$sid, $receipt['id'], $invoiceId]);
         $source = $documents->create($sid, ['doc_type' => 'issue', 'origin' => 'manual', 'description' => 'Syntetický archivní výdej', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d'), 'invoice_id' => $invoiceId,
             'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '1', 'invoice_item_id' => $invoiceItemId]]], $this->userId);
         $fulfillment = $container->get(\MyInvoice\Service\Stock\FulfillmentService::class);
@@ -405,6 +685,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $restoredTask = $fulfillment->find($newSid, (int) $newTask['id']);
         self::assertSame((int) $restoredItems['COMPONENT'], $restoredTask['lines'][0]['component_snapshot']['stock_item_id']);
         $restoredInvoiceItem = $pdo->query('SELECT ii.id FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.supplier_id = ' . $newSid)->fetchColumn();
+        $link = $pdo->query('SELECT l.line_no, d.description, i.supplier_id AS invoice_supplier FROM stock_receipt_invoice_links l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id JOIN invoices i ON i.id = l.invoice_id WHERE l.supplier_id = ' . $newSid)->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame([['line_no' => 1, 'description' => 'Syntetický archivní příjem', 'invoice_supplier' => $newSid]], array_map(static fn (array $row): array => ['line_no' => (int) $row['line_no'], 'description' => $row['description'], 'invoice_supplier' => (int) $row['invoice_supplier']], $link));
         self::assertNotSame($invoiceItemId, (int) $restoredInvoiceItem);
         self::assertSame((int) $restoredInvoiceItem, (int) $restoredTask['lines'][0]['component_snapshot']['invoice_item_id']);
         $newAssembly = $pdo->query('SELECT * FROM product_assemblies WHERE supplier_id = ' . $newSid)->fetch(PDO::FETCH_ASSOC);

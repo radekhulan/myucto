@@ -52,6 +52,7 @@ const auth = useAuthStore()
 const closeHistory = ref(true)
 const firstPeriodStart = ref('')
 const fromYear = ref<number | null>(null)
+const toYear = ref<number | null>(null)
 const confirmIco = ref(false)
 const reportBusy = ref<number | null>(null)
 
@@ -72,12 +73,24 @@ const {
     firstPeriodStart.value = params.first_period_start ?? ''
     confirmIco.value = params.confirm_ico ?? false
     fromYear.value = params.from_year ?? null
+    toYear.value = params.to_year ?? null
   },
 })
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: t(`money_s3.step${number}`) })))
 const agenda = computed(() => upload.value?.agenda ?? null)
+/** Agenda vedená v Money jako daňová evidence: bez voleb podvojného účetnictví (předvahy, začátek období). */
+const taxRecords = computed(() => agenda.value?.tax_records === true)
 const preflightErrors = computed(() => (upload.value?.preflight ?? []).filter(m => m.level === 'error'))
+/** Roky zálohy s účetním rokem firmy (volby „Převést od roku" a „Převést do roku"). */
+const agendaYears = computed(() => (agenda.value?.years ?? []).filter(y => y.fiscal_year !== null))
+/** Výchozí „Převést do roku" podle kontroly před převodem: firma už účtuje pozdější rok v MyÚčtu. */
+const defaultToYear = computed(() => {
+  const message = (upload.value?.preflight ?? []).find(m => m.code === 'to_year_default')
+  const year = message?.context?.to_year
+  return typeof year === 'number' ? year : null
+})
+const toYearOptions = computed(() => agendaYears.value.filter(y => fromYear.value === null || (y.fiscal_year as number) >= fromYear.value))
 // IČO chybí v záloze nebo ve firmě — ostrý převod potřebuje výslovné potvrzení (BE ico_unverified).
 const icoUnverified = computed(() => (upload.value?.preflight ?? []).some(m => m.code === 'agenda_ico_missing' || m.code === 'supplier_ico_missing'))
 // Stejná práva jako BE MoneyS3MigrationAction::missingLiveImportRights().
@@ -115,6 +128,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     first_period_start: firstPeriodStart.value || null,
     confirm_ico: confirmIco.value,
     from_year: fromYear.value,
+    to_year: toYear.value !== null && (fromYear.value === null || toYear.value >= fromYear.value) ? toYear.value : null,
   })
 }
 
@@ -138,6 +152,7 @@ const actions = computed<ActionItem[]>(() => {
   if (importDone.value) return [
     { key: 'journal', label: t('money_s3.open_journal'), icon: 'doc', tier: 'primary', variant: 'primary', to: { name: 'accounting-journal' } },
     { key: 'trial', label: t('money_s3.open_trial_balance'), icon: 'chart', tier: 'secondary', variant: 'neutral', to: { name: 'accounting-trial-balance' } },
+    { key: 'checks', label: t('money_s3.open_checks'), icon: 'clipboardCheck', tier: 'secondary', variant: 'neutral', to: { name: 'imports-checks' } },
   ]
   const icoPending = icoUnverified.value && !confirmIco.value
   const importReason = missingRights.value.length
@@ -236,8 +251,8 @@ const actions = computed<ActionItem[]>(() => {
             <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
               <tr>
                 <th class="px-3 py-2">{{ t('money_s3.col_year') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('money_s3.col_journal') }}</th>
-                <th class="px-3 py-2 text-right">{{ t('money_s3.col_opening') }}</th>
+                <th class="px-3 py-2 text-right">{{ taxRecords ? t('money_s3.col_cashbook') : t('money_s3.col_journal') }}</th>
+                <th v-if="!taxRecords" class="px-3 py-2 text-right">{{ t('money_s3.col_opening') }}</th>
                 <th class="px-3 py-2">{{ t('money_s3.col_range') }}</th>
                 <th class="px-3 py-2 text-right">{{ t('money_s3.col_purchase') }}</th>
                 <th class="px-3 py-2 text-right">{{ t('money_s3.col_issued') }}</th>
@@ -248,8 +263,8 @@ const actions = computed<ActionItem[]>(() => {
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="y in agenda.years" :key="y.dir">
                 <td class="px-3 py-2 font-medium" :data-testid="`money-year-${y.dir}`">{{ y.fiscal_year !== null ? migrationYearLabel(y.fiscal_year, y, locale) : y.dir }}</td>
-                <td class="px-3 py-2 text-right">{{ y.journal_rows }}</td>
-                <td class="px-3 py-2 text-right">{{ y.opening_rows }}</td>
+                <td class="px-3 py-2 text-right">{{ taxRecords ? y.cashbook_rows : y.journal_rows }}</td>
+                <td v-if="!taxRecords" class="px-3 py-2 text-right">{{ y.opening_rows }}</td>
                 <td class="px-3 py-2 whitespace-nowrap">{{ y.first_date ?? '—' }} – {{ y.last_date ?? '—' }}</td>
                 <td class="px-3 py-2 text-right">{{ y.purchase_invoices }}</td>
                 <td class="px-3 py-2 text-right">{{ y.issued_invoices }}</td>
@@ -273,30 +288,43 @@ const actions = computed<ActionItem[]>(() => {
         <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.options_title') }}</h3>
         <label class="mb-2 flex cursor-pointer items-start gap-3">
           <input v-model="closeHistory" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" />
-          <span class="text-sm"><span class="font-medium">{{ t('money_s3.close_history') }}</span><br /><span class="text-neutral-500">{{ t('money_s3.close_history_hint') }}</span></span>
+          <span class="text-sm"><span class="font-medium">{{ taxRecords ? t('money_s3.close_history_tax_records') : t('money_s3.close_history') }}</span><br /><span class="text-neutral-500">{{ taxRecords ? t('money_s3.close_history_tax_records_hint') : t('money_s3.close_history_hint') }}</span></span>
         </label>
-        <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.first_period_start') }}
-          <DateInput v-model="firstPeriodStart" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" />
-        </label>
-        <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.first_period_start_hint') }}</p>
+        <template v-if="!taxRecords">
+          <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.first_period_start') }}
+            <DateInput v-model="firstPeriodStart" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" />
+          </label>
+          <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.first_period_start_hint') }}</p>
+        </template>
         <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.from_year') }}
           <select v-model="fromYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="from-year">
             <option :value="null">{{ t('money_s3.from_year_all') }}</option>
-            <option v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
+            <option v-for="y in agendaYears" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
           </select>
         </label>
         <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.from_year_hint') }}</p>
-
-        <h3 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.reports_title') }}</h3>
-        <p class="mb-3 text-sm text-neutral-500">{{ t('money_s3.reports_hint') }}</p>
-        <div class="flex flex-wrap gap-3">
-          <label v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir"
-            class="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm whitespace-nowrap"
-            :class="upload?.reports.includes(y.fiscal_year as number) ? 'border-success-500/40 bg-success-50 text-success-600' : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'">
-            <input type="file" accept=".csv,.txt" class="hidden" :disabled="reportBusy !== null" @change="attachReport(y.fiscal_year as number, $event)" />
-            {{ upload?.reports.includes(y.fiscal_year as number) ? t('money_s3.report_ready', { year: migrationYearLabel(y.fiscal_year as number, y, locale) }) : t('money_s3.report_upload', { year: migrationYearLabel(y.fiscal_year as number, y, locale) }) }}
+        <template v-if="!taxRecords">
+          <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.to_year') }}
+            <select v-model="toYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="to-year">
+              <option :value="null">{{ defaultToYear !== null ? t('money_s3.to_year_auto_year', { year: defaultToYear }) : t('money_s3.to_year_auto') }}</option>
+              <option v-for="y in toYearOptions" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
+            </select>
           </label>
-        </div>
+          <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.to_year_hint') }}</p>
+        </template>
+
+        <template v-if="!taxRecords">
+          <h3 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.reports_title') }}</h3>
+          <p class="mb-3 text-sm text-neutral-500">{{ t('money_s3.reports_hint') }}</p>
+          <div class="flex flex-wrap gap-3">
+            <label v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir"
+              class="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm whitespace-nowrap"
+              :class="upload?.reports.includes(y.fiscal_year as number) ? 'border-success-500/40 bg-success-50 text-success-600' : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'">
+              <input type="file" accept=".csv,.txt" class="hidden" :disabled="reportBusy !== null" @change="attachReport(y.fiscal_year as number, $event)" />
+              {{ upload?.reports.includes(y.fiscal_year as number) ? t('money_s3.report_ready', { year: migrationYearLabel(y.fiscal_year as number, y, locale) }) : t('money_s3.report_upload', { year: migrationYearLabel(y.fiscal_year as number, y, locale) }) }}
+            </label>
+          </div>
+        </template>
       </template>
 
       <template v-else-if="currentStep === 3">

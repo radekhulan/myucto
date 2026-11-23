@@ -172,17 +172,23 @@ export const workSummaryRemediationCodes: Record<string, string> = {
   import_worked_hours_missing: 'import_values',
   import_overtime_invalid: 'import_values',
   import_overtime_exceeds_worked: 'import_values',
+  manual_summary_missing: 'manual_missing',
+  manual_segment_invalid: 'manual_values',
+  manual_segments_overlap: 'manual_overlap',
+  manual_worked_days_invalid: 'manual_days',
 }
 
 export function workSummaryRemediation(code: string, employmentId: number, period: string) {
   const kind = Object.hasOwn(workSummaryRemediationCodes, code) ? workSummaryRemediationCodes[code]! : 'unknown'
   const support = kind === 'unknown' || kind === 'integrity'
   const imports = kind === 'import_missing' || kind === 'import_values'
+  const manual = ['manual_missing', 'manual_values', 'manual_overlap', 'manual_days'].includes(kind)
   const path = kind === 'terms'
     ? `/payroll/people?employment=${employmentId}&panel=employment_terms&field=weekly_hours`
     : kind === 'absence' ? `/payroll/absences?employment=${employmentId}&tab=absences&period=${encodeURIComponent(period.slice(0, 7))}`
-      : support ? '/admin/support' : imports ? '/payroll/imports' : null
-  const action = kind === 'terms' ? 'terms' : kind === 'absence' ? 'absences' : support ? 'support' : imports ? 'imports' : kind === 'calendar' ? 'calendar' : 'entries'
+      : manual ? `/payroll/quick-inputs?employment=${employmentId}&period=${encodeURIComponent(period.slice(0, 7))}&hours=1`
+        : support ? '/admin/support' : imports ? '/payroll/imports' : null
+  const action = kind === 'terms' ? 'terms' : kind === 'absence' ? 'absences' : manual ? 'manual_hours' : support ? 'support' : imports ? 'imports' : kind === 'calendar' ? 'calendar' : 'entries'
   return { problemKey: `payroll.remediation.work.problems.${kind}`, stepKey: `payroll.remediation.work.steps.${kind}`, path, actionKey: `payroll.remediation.actions.${action}`, localTarget: kind === 'calendar' ? 'calendar' : 'entries' }
 }
 
@@ -209,4 +215,45 @@ export function averageEarningsTarget(employmentId: number, year?: number | null
   return Number.isInteger(year) && Number(year) >= 1900 && Number(year) <= 9999
     && Number.isInteger(quarter) && Number(quarter) >= 1 && Number(quarter) <= 4
     ? `${base}&year=${year}&quarter=${quarter}` : base
+}
+
+export interface SubmissionRemediation { path: string, actionKey: string }
+
+const HEALTH_PAYER_CODES = [
+  'zp_payer_account_missing',
+  'zp_payer_number_missing',
+  'zp_payer_number_invalid',
+  'zp_payer_business_id_missing',
+  'zp_payer_accounting_unit_invalid',
+]
+
+/**
+ * Proklik k chybě přípravy přehledu o platbě pojistného (PPZ). Číslo plátce
+ * a platební účet pojišťovny se zadávají v záložce Platební účty institucí;
+ * ostatní kódy nápravu na jiném místě nemají a zůstávají jen u textu.
+ */
+export function healthOverviewRemediation(code: string | null | undefined): SubmissionRemediation | null {
+  return code && HEALTH_PAYER_CODES.includes(code)
+    ? { path: '/payroll/settings?tab=institutions', actionKey: 'payroll.remediation.actions.institution_accounts' }
+    : null
+}
+
+/**
+ * Proklik k chybě záměru OZUSPOJ: důvod slevy podle § 7a odst. 1 je
+ * v podmínkách vztahu, kód OSSZ v registraci zaměstnavatele a variabilní
+ * symbol ČSSZ u účtárny.
+ */
+export function ozuspojRemediation(code: string | null | undefined, employmentId: number | null | undefined): SubmissionRemediation | null {
+  if (code === 'ozuspoj_discount_reason_missing' || code === 'ozuspoj_discount_reason_age_not_met') {
+    return Number.isInteger(employmentId) && Number(employmentId) > 0
+      ? { path: `/payroll/people?employment=${employmentId}&panel=employment_terms&field=social_part_time_discount_reason`, actionKey: 'payroll.remediation.actions.terms' }
+      : null
+  }
+  if (code === 'ozuspoj_ossz_code_missing' || code === 'ozuspoj_ossz_code_not_in_codebook') {
+    return { path: '/payroll/settings?tab=employer#payroll-employer-registration', actionKey: 'payroll.remediation.actions.employer_registration' }
+  }
+  if (code === 'ozuspoj_variable_symbol_missing') {
+    return { path: '/payroll/settings?tab=employer#payroll-employer-offices', actionKey: 'payroll.remediation.actions.employer_offices' }
+  }
+  return null
 }

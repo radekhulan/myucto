@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { JournalSide, LinkableDocType } from './accounting'
+import type { JournalSide, LinkableDocType, PostedDeletion } from './accounting'
 import type { DimensionMap } from './dimensions'
 
 export type InternalDocumentStatus = 'draft' | 'posted' | 'reversed'
@@ -22,10 +22,14 @@ export interface InternalDocumentLink {
   doc_type: LinkableDocType
   doc_id: number
   note?: string | null
+  /** Číslo navázaného dokladu z API; při ukládání se neposílá. */
+  doc_title?: string | null
 }
 
 export interface InternalDocument {
   id: number
+  /** Řada z číselníku: na konceptu volba, po zaúčtování nová řada (null = řada ID). */
+  number_series_id?: number | null
   kind: InternalDocumentKind
   title: string
   document_date: string
@@ -46,9 +50,13 @@ export interface InternalDocument {
   document_count?: number
   lines?: InternalDocumentLine[]
   document_links: InternalDocumentLink[]
+  /** Jen detail zaúčtovaného dokladu: smí se smazat i se zápisem? */
+  posted_deletion?: PostedDeletion
 }
 
 export interface InternalDocumentPayload {
+  /** Řada z číselníku; vynechané = beze změny, null = výchozí řada interních dokladů. */
+  number_series_id?: number | null
   kind: InternalDocumentKind
   title: string
   document_date: string
@@ -98,6 +106,14 @@ export const internalDocumentsApi = {
   update: (id: number, payload: Partial<InternalDocumentPayload>) =>
     api.put<InternalDocument>(`/accounting/internal-documents/${id}`, payload).then(r => r.data),
   remove: (id: number) => api.delete(`/accounting/internal-documents/${id}`).then(r => r.data),
+  /** Poznámka vystaveného dokladu; popis jen u zaúčtovaného (mění i popis zápisu v deníku). */
+  updateText: (id: number, payload: { note?: string | null; title?: string }) =>
+    api.put<InternalDocument>(`/accounting/internal-documents/${id}/text`, payload).then(r => r.data),
+  /** Smaže zaúčtovaný doklad i se zápisem v deníku; `ackLocked` = potvrzený zásah do uzamčeného období. */
+  removePosted: (id: number, ackLocked = false) =>
+    api.delete<{ deleted: boolean; journal_entry_id: number; number_released: boolean }>(`/accounting/internal-documents/${id}/posted`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   post: (id: number) => api.post<InternalDocument>(`/accounting/internal-documents/${id}/post`).then(r => r.data),
   reverse: (id: number, payload: { reason: string; entry_date?: string }) =>
     api.post<InternalDocument>(`/accounting/internal-documents/${id}/reverse`, payload).then(r => r.data),

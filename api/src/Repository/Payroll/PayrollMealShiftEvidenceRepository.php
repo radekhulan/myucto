@@ -39,7 +39,7 @@ final class PayrollMealShiftEvidenceRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.id AS employment_id,
                     employment.meal_entitlement_basis,
-                    month.status AS month_status
+                    month.status AS month_status, month.work_source
                FROM payroll_employments employment
                LEFT JOIN payroll_time_months month
                  ON month.supplier_id = employment.supplier_id
@@ -68,6 +68,7 @@ final class PayrollMealShiftEvidenceRepository
                 'month_status' => $row['month_status'] === null
                     ? null
                     : (string) $row['month_status'],
+                'work_source' => $row['work_source'] === null ? null : (string) $row['work_source'],
             ];
         }
 

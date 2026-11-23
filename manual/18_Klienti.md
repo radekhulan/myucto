@@ -47,6 +47,44 @@ se v editoru faktury.
 
 Bez IČO (fyzická osoba) zadejte alespoň jméno a adresu ručně.
 
+### 18.3.1 Drobný zákazník bez adresy
+
+Stálého zákazníka, který u vás nakupuje drobně (např. jednou měsíčně ve skladu za
+1 000 Kč) a doklad chce poslat e-mailem, můžete vést jen se jménem a kontaktem.
+
+1. V novém klientovi zaškrtněte **Drobný zákazník (jen pro zjednodušené doklady)**.
+2. Vyplňte **Firma / jméno** a **Hlavní e-mail** nebo **Telefon**. Adresa ani IČO
+   nejsou povinné.
+3. Klikněte na **Vytvořit**.
+
+**Jak poznáte, že je hotovo:** klient má v seznamu odznak **Drobný zákazník**.
+
+Plátce DPH může takovému zákazníkovi vystavit jen zjednodušený daňový doklad
+(§ 30 ZDPH) do 10 000 Kč včetně DPH, viz [§ 15.9.2](15_Faktura_editor.md#1592-hlavicka).
+Běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 ZDPH), proto ho
+aplikace na takovou kartu nevystaví. Potřebujete-li vyšší prodej, běžnou fakturu
+nebo zálohovou fakturu, doplňte na kartě adresu a volbu vypněte. Volba nejde
+kombinovat s přenesenou daňovou povinností.
+
+**Dobropis drobnému zákazníkovi.** Vrátí-li zákazník zboží, vystavte dobropis z původního
+zjednodušeného dokladu tlačítkem **Storno / dobropis** v jeho detailu (viz
+[§ 15.7](15_Faktura_editor.md#157-krok-za-krokem-opravit-chybnou-fakturu-storno-nebo-dobropis)).
+Dobropis vznikne rovnou jako **zjednodušený opravný daňový doklad**. Zákon to dovoluje,
+když byl původní doklad zjednodušený a odběratel vám není dostatečně znám: opravný doklad
+pak nemusí nést označení a DIČ odběratele ani rozdíl základu a daně (§ 45 odst. 2 ZDPH).
+Číslo původního dokladu, důvod opravy, rozdíl celkové částky a den doručení na něm zůstávají.
+
+- Dobropis musí opravovat vystavený zjednodušený doklad téhož zákazníka. Dobropis bez vazby
+  na původní doklad, nebo k běžné faktuře, aplikace nevystaví.
+- Dobropisy k jednomu dokladu nesmí dohromady přesáhnout jeho částku. Zjednodušený opravný
+  doklad jen snižuje původní plnění, které bylo samo do 10 000 Kč včetně DPH.
+- Potřebujete-li jinou opravu, doplňte na kartě adresu, volbu **Drobný zákazník** vypněte
+  a vystavte běžný dobropis.
+
+Neplátce DPH zjednodušené doklady nevystavuje. Jeho faktura není daňový doklad
+a jako označení odběratele jí stačí jméno, takže ji drobnému zákazníkovi vystaví
+bez omezení.
+
 > [!TIP]
 > Slovenského klienta zakládáte stejně, jen se po výběru státu mění popisky
 > polí (viz [§ 18.7.3](#1873-slovensky-klient-a-narodni-danova-cisla)).
@@ -140,6 +178,9 @@ Smazat lze jen klienta bez faktur a zakázek, jinak použijte archivaci.
 | ARES klienta nenašel | ARES funguje jen pro česká IČO | Zadejte údaje ručně |
 | Ověření ve VIES chvíli trvá nebo selže | VIES je pomalý a občas nedostupný | Zkuste to za chvíli |
 | Změna klienta se neprojevila na vystavené faktuře | Vystavené doklady mají vlastní kopii údajů | Je to záměr, vystavené doklady jsou neměnné |
+| Uložení drobného zákazníka hlásí chybějící e-mail | Kartě bez adresy chybí kontakt, kam poslat doklad | Vyplňte hlavní e-mail nebo telefon |
+| Po vypnutí volby **Drobný zákazník** nejde karta uložit | Běžná karta vyžaduje adresu | Doplňte ulici, město a PSČ |
+| Dobropis drobnému zákazníkovi nejde vystavit | Dobropis nemá vazbu na vystavený zjednodušený doklad téhož zákazníka, není zaškrtnutý jako zjednodušený, nebo přesahuje částku, která z původního dokladu zbývá | Založte dobropis z detailu původního dokladu a částku držte v jeho mezích, nebo doplňte adresu na kartě a volbu **Drobný zákazník** vypněte |
 
 ## 18.7 Podrobnosti a pravidla
 
@@ -184,7 +225,8 @@ zakázky. Jinak by smazání skončilo chybou.
 | IČO | České IČO (8 číslic); slovenské funguje s ARES SK |
 | DIČ | Daňové ID s prefixem země: ČR „CZ12345678“, SK „SK1234567890“, EU různě. U slovenského klienta se pole jmenuje **IČ DPH** (viz [§ 18.7.3](#1873-slovensky-klient-a-narodni-danova-cisla)) |
 | Národní daňové číslo | Zobrazí se jen u zemí, kde existuje vedle VAT ID: SK **DIČ**, DE/AT **Steuernummer**, PL **NIP**, HU **Adószám**. Tiskne se na fakturu mezi IČO a DIČ/IČ DPH |
-| Ulice / Město / PSČ / Země | Adresa pro fakturu |
+| Drobný zákazník (jen pro zjednodušené doklady) | Karta bez adresy jen se jménem a e-mailem nebo telefonem. Plátce jí vystaví jen zjednodušený daňový doklad do 10 000 Kč včetně DPH a k němu zjednodušený dobropis (§ 45 odst. 2 ZDPH), viz [§ 18.3.1](#1831-drobny-zakaznik-bez-adresy) |
+| Ulice / Město / PSČ / Země | Adresa pro fakturu, u drobného zákazníka nepovinná |
 | Hlavní e-mail | Volitelný, výchozí adresa pro odesílání faktur a upomínek |
 | Telefon | Volitelný |
 | Jazyk | `cs` nebo `en`, určuje jazyk PDF, e-mailových šablon a formát měny |

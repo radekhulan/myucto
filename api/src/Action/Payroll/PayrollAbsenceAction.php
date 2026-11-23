@@ -73,7 +73,41 @@ final class PayrollAbsenceAction
         private readonly PayrollObstacleInputMaterializer $obstacleInputs,
         private readonly SicknessCaseFromAbsenceService $sicknessCases,
         private readonly PayrollAbsenceApprovalWarnings $approvalWarnings,
+        private readonly \MyInvoice\Service\Payroll\Absence\ProbableAverageFromRateFiller $probableFromRate,
+        private readonly \MyInvoice\Service\Payroll\Absence\ProbableEarningBulkService $probableBulk,
     ) {}
+
+    /**
+     * „Doplnit pravděpodobný výdělek ze sazby" pro vztahy mzdového měsíce,
+     * kterým chybí schválený průměr ({@see \MyInvoice\Service\Payroll\Absence\ProbableAverageFromRateFiller}).
+     */
+    public function fillProbableFromRate(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $period = $body['period'] ?? null;
+            if (!is_string($period) || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+                throw new \InvalidArgumentException('Zadejte mzdové období ve tvaru RRRR-MM.');
+            }
+            $officeId = $body['office_id'] ?? null;
+            if ($officeId !== null && (!is_int($officeId) || $officeId <= 0)) {
+                throw new \InvalidArgumentException('Mzdová účtárna není platná.');
+            }
+            $result = $this->probableFromRate->fill(
+                $this->currentSupplierId($request),
+                $period . '-01',
+                $officeId,
+                $this->userId($request),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result, 201);
+    }
 
     public function context(Request $request, Response $response): Response
     {
@@ -543,6 +577,7 @@ final class PayrollAbsenceAction
                     throw self::missingAverage($averageSource);
                 }
                 $segments = $this->withQuarterAverages($supplierId, $absence, (string) $averageSource['date_from'], $segments);
+                $segments = $this->withHourlyAverageFloors($supplierId, $absence, (int) $averageSource['average_hourly_minor'], $segments);
                 $result = $this->sicknessCalculator->calculate(
                     $rulesDate,
                     (int) $averageSource['average_hourly_minor'],
@@ -630,6 +665,27 @@ final class PayrollAbsenceAction
             }
         }
 
+        return $segments;
+    }
+
+    /** @param array<string,mixed> $absence @param list<array<string,mixed>> $segments @return list<array<string,mixed>> */
+    private function withHourlyAverageFloors(int $supplierId, array $absence, int $approvedAverage, array $segments): array
+    {
+        if ($segments === []) return [];
+        $dates = array_column($segments, 'local_date');
+        $employmentId = (int) $absence['employment_id'];
+        $intervals = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, [$employmentId], min($dates), max($dates), true)[$employmentId] ?? [];
+        foreach ($segments as &$segment) {
+            $adjusted = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::apply(
+                $intervals, (string) $segment['local_date'], (int) ($segment['average_hourly_minor'] ?? $approvedAverage),
+            );
+            if ($adjusted['hourly_proof'] !== null) {
+                $segment['average_hourly_minor'] = $adjusted['hourly_minor'];
+                $segment['hourly_minimum_proof'] = $adjusted['hourly_proof'];
+            }
+        }
+        unset($segment);
         return $segments;
     }
 
@@ -795,14 +851,14 @@ final class PayrollAbsenceAction
                 $data['worked_days'],
                 $data['probable_hourly_minor'],
                 $data['rationale'],
-                // Kratší STANOVENÁ týdenní pracovní doba (§ 79 odst. 2 a 3 ZP)
-                // hodinovou minimální mzdu zvyšuje, kratší SJEDNANÁ pracovní doba
-                // (§ 80 ZP, částečný úvazek) ne. `payroll_employment_terms.weekly_hours`
-                // drží jen jedno číslo a obojí nerozliší, takže se z něj nedovozuje:
-                // u dvacetihodinového úvazku by přepočet zdvojnásobil minimum.
-                // Dokud vztah stanovenou dobu neeviduje, platí sazba pro 40 hodin.
+                // Historický měsíční výpočet zachová původní minimum. Nová hodinová
+                // cesta níže samostatně ověří doloženou stanovenou týdenní dobu.
                 null,
+                $data['worked_duration_units'] ?? null,
             );
+            $floorResolver = new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db);
+            $floorIntervals = $floorResolver->forMany($this->currentSupplierId($request), [$data['employment_id']], $applicationDate, $applicationDate);
+            $floorResolver::assertFloorKnown($floorIntervals[$data['employment_id']] ?? [], $applicationDate, $result->averageHourlyMinor);
             $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
                 $applicationDate,
@@ -822,6 +878,7 @@ final class PayrollAbsenceAction
                 $result,
                 $ruleset,
                 $this->userId($request),
+                $data['worked_duration_units'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -1070,7 +1127,7 @@ final class PayrollAbsenceAction
             if (!is_array($items) || !array_is_list($items)) {
                 throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
             }
-            $averages = $this->averageBatch->createBatch(
+            $batch = $this->averageBatch->createBatch(
                 $this->currentSupplierId($request),
                 $this->requiredPositiveInt($body['year'] ?? null, 'year'),
                 $this->requiredPositiveInt($body['quarter'] ?? null, 'quarter'),
@@ -1089,7 +1146,50 @@ final class PayrollAbsenceAction
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
         }
 
-        return Json::ok($response, ['averages' => $averages], 201);
+        return Json::ok($response, ['averages' => $batch['approved'], 'skipped' => $batch['skipped']], 201);
+    }
+
+    /**
+     * „Nastavit pravděpodobný výdělek vybraným" ({@see ProbableEarningBulkService}).
+     *
+     * Zapisuje podmínky vztahu i průměr, proto chce obě práva. Rozhoduje
+     * {@see RequestAuthorization::canSetProbableEarningInBulk()}.
+     */
+    public function setProbableEarningBulk(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        if (!RequestAuthorization::canSetProbableEarningInBulk($request)) {
+            return Json::error(
+                $response,
+                'forbidden',
+                'Pravděpodobný výdělek se ukládá i do podmínek pracovního vztahu; chybí vám právo spravovat pracovní vztahy.',
+                403,
+            );
+        }
+        try {
+            $body = $this->body($request);
+            $ids = $body['employment_ids'] ?? null;
+            if (!is_array($ids) || !array_is_list($ids)) {
+                throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
+            }
+            $result = $this->probableBulk->apply(
+                $this->currentSupplierId($request),
+                $this->requiredPositiveInt($body['year'] ?? null, 'year'),
+                $this->requiredPositiveInt($body['quarter'] ?? null, 'quarter'),
+                $this->requiredPositiveInt($body['probable_hourly_minor'] ?? null, 'probable_hourly_minor'),
+                is_string($body['rationale'] ?? null) ? $body['rationale'] : '',
+                $ids,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result);
     }
 
     /**
@@ -1186,7 +1286,7 @@ final class PayrollAbsenceAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Mzdové absence jsou dostupné pouze z přihlášené relace.');
         }
         $permission = $level === AccessLevel::READ ? 'payroll' : 'payroll.time.write';

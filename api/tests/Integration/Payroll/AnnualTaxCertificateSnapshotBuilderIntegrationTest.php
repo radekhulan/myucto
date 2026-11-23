@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
@@ -34,7 +33,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testStorageCleanupLockSerializesAnotherSupplierWriter(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $config = $container->get(Config::class);
         $service = $container->get(AnnualTaxCertificateService::class);
@@ -70,7 +69,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testBuildsAndArchivesBothImmutable2026Certificates(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $renderer = $container->get(AnnualTaxCertificatePdfRenderer::class);
@@ -335,9 +334,79 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * Řádek 11: děti jdou v pořadí id dítěte i přes hranici řádu. Odkaz řazený jako text by dal
+     * `dependant-1000000` před `dependant-999999` a řádky prvního a druhého dítěte by se prohodily.
+     */
+    public function testChildRowsFollowNumericDependantIdAcrossDigitBoundary(): void
+    {
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture($pdo, $sourceSupplierId, $sensitive);
+            $insert = $pdo->prepare("INSERT INTO payroll_dependants
+                (id, supplier_id, employee_id, full_name, birth_date, existence_from, relation)
+                VALUES (?, ?, ?, ?, ?, ?, 'child_own')");
+            $insert->execute([999_999, $supplierId, $employeeId, 'Syntetické první dítě', '2018-05-01', '2018-05-01']);
+            $insert->execute([1_000_000, $supplierId, $employeeId, 'Syntetické druhé dítě', '2020-09-01', '2020-09-01']);
+            $method = new \ReflectionMethod(AnnualTaxCertificateSnapshotBuilder::class, 'childTaxBenefits');
+
+            $rows = $method->invoke($builder, $supplierId, $employeeId, [
+                'dependant-1000000' => [1 => ['order' => 2, 'ztp_p' => false]],
+                'dependant-999999' => [1 => ['order' => 1, 'ztp_p' => false]],
+            ]);
+
+            self::assertSame(['Syntetické první dítě', 'Syntetické druhé dítě'], array_column($rows, 'name'));
+            self::assertSame(['1', ''], [$rows[0]['first_child_period'], $rows[0]['second_child_period']]);
+            self::assertSame(['', '1'], [$rows[1]['first_child_period'], $rows[1]['second_child_period']]);
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+    }
+
+    /**
+     * Issue #420: řádek 11 uvádí děti v pořadí nároku (§ 35c odst. 1). Dítě zadané dřív
+     * (nižší id) je 2. dítě a v potvrzení musí stát až za 1. dítětem.
+     */
+    public function testChildRowsFollowClaimOrderNotDependantId(): void
+    {
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture($pdo, $sourceSupplierId, $sensitive);
+            $insert = $pdo->prepare("INSERT INTO payroll_dependants
+                (id, supplier_id, employee_id, full_name, birth_date, existence_from, relation)
+                VALUES (?, ?, ?, ?, ?, ?, 'child_own')");
+            $insert->execute([999_997, $supplierId, $employeeId, 'Syntetické dítě zadané dřív', '2018-05-01', '2018-05-01']);
+            $insert->execute([999_998, $supplierId, $employeeId, 'Syntetické dítě zadané později', '2020-09-01', '2020-09-01']);
+            $method = new \ReflectionMethod(AnnualTaxCertificateSnapshotBuilder::class, 'childTaxBenefits');
+
+            $rows = $method->invoke($builder, $supplierId, $employeeId, [
+                'dependant-999997' => [1 => ['order' => 2, 'ztp_p' => false]],
+                'dependant-999998' => [1 => ['order' => 1, 'ztp_p' => false]],
+            ]);
+
+            self::assertSame(['Syntetické dítě zadané později', 'Syntetické dítě zadané dřív'], array_column($rows, 'name'));
+            self::assertSame(['1', ''], [$rows[0]['first_child_period'], $rows[0]['second_child_period']]);
+            self::assertSame(['', '1'], [$rows[1]['first_child_period'], $rows[1]['second_child_period']]);
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+    }
+
     public function testBuildsDocumentedChildrenDisabilityAndAnnualSettlement(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $settlementBuilder = $container->get(AnnualSettlementSnapshotBuilder::class);
@@ -423,7 +492,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
      */
     public function testCarriedMonthsCarryDeclarationChildrenAndDisability(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $openings = $container->get(PayrollOpeningBalanceService::class);
@@ -537,7 +606,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testBuildsNonresidentAdvanceCertificateFromFrozenInsurance(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -575,7 +644,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testRefusedAnnualSettlementLeavesRowThirteenEmpty(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $annualRevisions = $container->get(PayrollAnnualDocumentRepository::class);

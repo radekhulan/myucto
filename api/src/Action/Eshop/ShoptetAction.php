@@ -273,7 +273,7 @@ final class ShoptetAction
                 return $error;
             }
         }
-        if ($request->getMethod() !== 'GET' && !RequestAuthorization::isSessionAuth($request)) {
+        if ($request->getMethod() !== 'GET' && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $sid = $this->currentSupplierId($request);

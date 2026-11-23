@@ -14,6 +14,14 @@ final class AttendanceRuleSuggesterTest extends TestCase
     /** @return iterable<string,array{string,string,?string}> */
     public static function headers(): iterable
     {
+        // Hlavičky šablony Vzoru MyÚčto pozná návrh i ve vlastním sešitu.
+        yield ['Státní občanství', 'citizenship', null];
+        yield ['PSČ', 'address_postal_code', null];
+        yield ['Obec trvalého pobytu', 'address_city', null];
+        yield ['CZ-ISCO', 'cz_isco_code', null];
+        yield ['Místo výkonu práce', 'workplace', null];
+        yield ['Prohlášení poplatníka', 'tax_declaration', null];
+        yield ['Hodinová sazba (Kč/h)', 'hourly_rate', null];
         yield ['Jméno a příjmení', 'person_name', null];
         yield ['Zaměstnanec', 'person_name', null];
         yield ['Osobní číslo', 'personal_number', null];
@@ -24,7 +32,8 @@ final class AttendanceRuleSuggesterTest extends TestCase
         yield ['Druh poměru', 'relation_label', null];
         yield ['Oddělení', 'department', null];
         yield ['Středisko', 'cost_center', null];
-        yield ['Název pozice', 'position', null];
+        yield ['Název pozice', 'position_name', null];
+        yield ['Pozice', 'position', null];
         yield ['Týdenní fond', 'weekly_hours', null];
         yield ['Nástup/ukončení', 'start_end_note', null];
         yield ['Fond prac. doby', 'fund_hours', null];

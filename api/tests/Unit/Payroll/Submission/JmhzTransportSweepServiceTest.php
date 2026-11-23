@@ -14,15 +14,18 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzPollSchedule;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportSweepService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzVrepClient;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Dotažení protokolu a uzavření transakce BEZ UŽIVATELE.
@@ -38,6 +41,7 @@ final class JmhzTransportSweepServiceTest extends TestCase
     private const ATTEMPT = 7;
     private const OBLIGATION = 91;
     private const CORRELATION = 'CCCC9999DDDD0000EEEE1111FFFF2222';
+    private const REGISTRATION_VS = '1234567890';
 
     /** @var list<array<string,mixed>> */
     private array $history = [];
@@ -301,6 +305,115 @@ final class JmhzTransportSweepServiceTest extends TestCase
     }
 
     /**
+     * Odeslaná registrace (REGZEC/PREZEC) se dřív sama nedotáhla: fronta
+     * brala jen JMHZ. Teď se na výsledek ptá registrační transport — tatáž
+     * cesta jako ruční „Zjistit výsledek" — pod třídou CSSZ_REGZEC a po
+     * dotažení se transakce uzavře stejně jako tlačítkem „Uzavřít".
+     */
+    public function testSentRegistrationIsPolledAndClosedThroughTheRegistrationTransport(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listDuePolls')->willReturn([]);
+        $attempts->method('listDueCloses')->willReturn([]);
+        $attempts->method('listDueRegistrationPolls')->willReturn([self::sentRow()]);
+        $attempts->method('listDueRegistrationCloses')->willReturn([]);
+        $this->ledgerRows = [self::sentRow(), self::completedRow()];
+        $attempts->expects(self::never())->method('markExpired');
+
+        $registrationDispatch = $this->createMock(JmhzDispatchService::class);
+        $registrationDispatch->expects(self::once())->method('poll')
+            ->with(self::SUPPLIER, 'test', self::ATTEMPT, self::REGISTRATION_VS, 1, 'CSSZ_REGZEC')
+            ->willReturn(new JmhzDispatchOutcome(self::completedRow(), null, null, true));
+        $registrationDispatch->expects(self::once())->method('close')
+            ->with(self::SUPPLIER, 'test', self::ATTEMPT, self::REGISTRATION_VS, 'CSSZ_REGZEC')
+            ->willReturn([
+                'closed' => true,
+                'already_closed' => false,
+                'attempt' => self::completedRow(['closed_at' => '2026-11-11 09:00:00']),
+            ]);
+
+        $result = $this->sweep($attempts, [], null, $registrationDispatch)->run();
+
+        self::assertSame(1, $result['polled']);
+        self::assertSame(1, $result['completed']);
+        self::assertSame(1, $result['closed']);
+        self::assertSame(0, $result['errors']);
+        self::assertSame([], $this->history, 'JMHZ cesta se registrace nedotkne.');
+    }
+
+    /** Potvrzení převzetí registrace není výsledek: nic se neuzavírá. */
+    public function testRegistrationStillProcessingIsNotClosed(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listDuePolls')->willReturn([]);
+        $attempts->method('listDueCloses')->willReturn([]);
+        $attempts->method('listDueRegistrationPolls')->willReturn([self::sentRow()]);
+        $attempts->method('listDueRegistrationCloses')->willReturn([]);
+        $this->ledgerRows = [self::sentRow()];
+        $attempts->expects(self::never())->method('markExpired');
+
+        $registrationDispatch = $this->createMock(JmhzDispatchService::class);
+        $registrationDispatch->expects(self::once())->method('poll')
+            ->willReturn(new JmhzDispatchOutcome(self::sentRow(['poll_count' => 1])));
+        $registrationDispatch->expects(self::never())->method('close');
+
+        $result = $this->sweep($attempts, [], null, $registrationDispatch)->run();
+
+        self::assertSame(1, $result['pending']);
+        self::assertSame(0, $result['closed']);
+    }
+
+    /** Neuzavřená transakce dotažené registrace se zkusí uzavřít znovu. */
+    public function testCompletedRegistrationFromTheCloseQueueIsClosed(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listDuePolls')->willReturn([]);
+        $attempts->method('listDueCloses')->willReturn([]);
+        $attempts->method('listDueRegistrationPolls')->willReturn([]);
+        $attempts->method('listDueRegistrationCloses')->willReturn([self::completedRow()]);
+        $this->ledgerRows = [self::completedRow()];
+        $attempts->expects(self::never())->method('markExpired');
+
+        $registrationDispatch = $this->createMock(JmhzDispatchService::class);
+        $registrationDispatch->expects(self::never())->method('poll');
+        $registrationDispatch->expects(self::once())->method('close')
+            ->with(self::SUPPLIER, 'test', self::ATTEMPT, self::REGISTRATION_VS, 'CSSZ_REGZEC')
+            ->willReturn([
+                'closed' => true,
+                'already_closed' => false,
+                'attempt' => self::completedRow(['closed_at' => '2026-11-11 09:00:00']),
+            ]);
+
+        $result = $this->sweep($attempts, [], null, $registrationDispatch)->run();
+
+        self::assertSame(1, $result['closed']);
+    }
+
+    /** Strop stáří platí i pro registrace: vzdá se nahlas a bez dotazu na ČSSZ. */
+    public function testExhaustedRegistrationExpiresWithoutAsking(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listDuePolls')->willReturn([]);
+        $attempts->method('listDueCloses')->willReturn([]);
+        $attempts->method('listDueRegistrationPolls')->willReturn([
+            self::sentRow(['sent_at' => '2026-08-01 08:00:00']),
+        ]);
+        $attempts->method('listDueRegistrationCloses')->willReturn([]);
+        $attempts->expects(self::once())->method('markExpired')
+            ->willReturn(self::sentRow(['status' => 'expired', 'row_version' => 2]));
+        $submissionRepository = $this->submissionRepository();
+        $submissionRepository->expects(self::once())->method('updateObligationStatus');
+
+        $registrationDispatch = $this->createMock(JmhzDispatchService::class);
+        $registrationDispatch->expects(self::never())->method('poll');
+
+        $result = $this->sweep($attempts, [], $submissionRepository, $registrationDispatch)->run();
+
+        self::assertSame(1, $result['expired']);
+        self::assertSame(0, $result['polled']);
+    }
+
+    /**
      * @param list<Response> $queue
      * @param (MockObject&PayrollSubmissionRepository)|null $submissionRepository
      */
@@ -308,6 +421,7 @@ final class JmhzTransportSweepServiceTest extends TestCase
         PayrollSubmissionTransportAttemptRepository $attempts,
         array $queue,
         ?PayrollSubmissionRepository $submissionRepository = null,
+        ?JmhzDispatchService $registrationDispatch = null,
     ): JmhzTransportSweepService {
         if ($submissionRepository === null) {
             $submissionRepository = $this->submissionRepository();
@@ -337,6 +451,44 @@ final class JmhzTransportSweepServiceTest extends TestCase
             $submissionRepository,
             new JmhzFrozenPayloadReader($submissionRepository, $submissions),
             $dispatch,
+            $this->registrationTransport($attempts, $registrationDispatch),
+        );
+    }
+
+    private function registrationTransport(
+        PayrollSubmissionTransportAttemptRepository $attempts,
+        ?JmhzDispatchService $dispatch,
+    ): PayrollRegistrationTransportService {
+        $repository = $this->createStub(PayrollSubmissionRepository::class);
+        $repository->method('findSubmission')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'environment' => 'test',
+        ]);
+        $repository->method('findObligationOfSubmission')->willReturn([
+            'agenda_code' => 'REGZEC25',
+            'subject_type' => 'employment',
+            'subject_reference' => 'employment:9',
+        ]);
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn(
+            '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
+            . '<employee sqnr="1" act="1"><comp vs="' . self::REGISTRATION_VS . '"/>'
+            . '<job fro="2026-10-05" rel="1" relDetail="1"/>'
+            . '</employee></employees></REGZEC>',
+        );
+        if ($dispatch === null) {
+            $dispatch = $this->createMock(JmhzDispatchService::class);
+            $dispatch->expects(self::never())->method('poll');
+            $dispatch->expects(self::never())->method('close');
+        }
+
+        return new PayrollRegistrationTransportService(
+            $repository,
+            $attempts,
+            $frozen,
+            $dispatch,
+            new MockClock(new \DateTimeImmutable('2026-11-11 12:00:00')),
         );
     }
 

@@ -31,8 +31,7 @@ const error = ref('')
 const revoking = ref<number | null>(null)
 const settingsLoaded = ref(false)
 const mainDomain = computed(() => auth.domainContext?.locked !== true)
-const canConnect = computed(() => !mainDomain.value
-  && (auth.canRead('profile.mcp') || (!auth.isClientRole && auth.canRead('profile.tokens'))))
+const canConnect = computed(() => auth.canRead('profile.mcp') || (!auth.isClientRole && auth.canRead('profile.tokens')))
 let mounted = false
 
 async function load() {

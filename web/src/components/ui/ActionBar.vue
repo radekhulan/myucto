@@ -4,6 +4,7 @@ import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { usePaneActivity } from '@/workspace/paneActivity'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 /**
  * Sdílená lišta akcí pro detailní stránky (faktura / přijatá faktura / klient …).
@@ -34,6 +35,12 @@ export interface ActionItem {
   /** název ikony z ICONS mapy níže (volitelné) */
   icon?: keyof typeof ICONS
   tier?: ActionTier          // default 'secondary'
+  /**
+   * Nadpis skupiny v nabídce „…" (jen tier `overflow`). Sousední akce se stejnou skupinou
+   * stojí pod jedním nadpisem a od ostatních je dělí čára, takže související akce zůstanou
+   * pohromadě bez ohledu na šířku okna. Akce skupiny drž v poli za sebou.
+   */
+  group?: string
   variant?: ActionVariant    // default 'neutral'
   show?: unknown             // default true; truthy = zobrazit, falsy (false/null/0/'') = skrýt
   disabled?: boolean
@@ -62,17 +69,25 @@ const props = defineProps<{
   actions: ActionItem[]
   // Výjimka z desktopového stropu pro stránky s krátkými popisky (detail skladové karty).
   desktopInline?: number
+  // Popisek místo samotných teček, když jde o samostatný seznam funkcí stránky.
+  moreLabel?: string
 }>()
 
 const { t } = useI18n()
 const paneActive = usePaneActivity()
+// Telefon (okno prohlížeče pod 768 px): inline jen hlavní krok, zbytek v nabídce zespodu.
+// Úzký panel na desktopu se řídí dál šířkou panelu (sm:) jako dosud.
+const isPhone = useIsPhone()
 
 // Ikony a barevné varianty (FILLED/OUTLINE/MENU_ICON) žijí v buttonStyles.ts —
 // sdílené s tlačítky mimo ActionBar (jednotný koncept UI, AGENTS.md §Frontend).
 const DOTS = 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z'
 
 const visible = computed(() => props.actions.filter(a => a.show === undefined || !!a.show))
-const primary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'primary'))
+const allPrimary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'primary'))
+// Na telefonu zůstane inline jen první hlavní akce, další hlavní jdou na začátek nabídky.
+const primary = computed(() => (isPhone.value ? allPrimary.value.slice(0, PHONE_INLINE) : allPrimary.value))
+const phonePrimaryOverflow = computed(() => (isPhone.value ? allPrimary.value.slice(PHONE_INLINE) : []))
 const secondary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'secondary'))
 const overflow = computed(() => visible.value.filter(a => a.tier === 'overflow'))
 const advanced = computed(() => visible.value.filter(a => a.tier === 'advanced'))
@@ -80,10 +95,11 @@ const advanced = computed(() => visible.value.filter(a => a.tier === 'advanced')
 // Kolik akcí (primary + secondary) zůstane inline v hlavičce; zbytek spadne do „…".
 // Desktop = max 3 (AGENTS.md: max 3 tlačítka v hlavičce), mobil = 2.
 const MOBILE_INLINE = 2
+const PHONE_INLINE = 1
 const DESKTOP_INLINE = 3
 const inlineOrder = computed(() => [...primary.value, ...secondary.value])
 const mobileInlineKeys = computed(() => new Set(
-  inlineOrder.value.slice(0, MOBILE_INLINE).map(a => a.key),
+  inlineOrder.value.slice(0, isPhone.value ? PHONE_INLINE : MOBILE_INLINE).map(a => a.key),
 ))
 const desktopInlineKeys = computed(() => new Set(
   inlineOrder.value.slice(0, props.desktopInline ?? DESKTOP_INLINE).map(a => a.key),
@@ -100,7 +116,8 @@ const hasSecondaryOverflow = computed(() => secondaryOverflow.value.length > 0)
 const hasOverflow = computed(() => overflow.value.length > 0)
 const hasAdvanced = computed(() => advanced.value.length > 0)
 // „…" trigger: vždy když je overflow/advanced/secondaryOverflow; jinak (jen collapsnuté secondary) jen na mobilu
-const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value || hasSecondaryDesktop.value)
+const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value || hasSecondaryDesktop.value
+  || phonePrimaryOverflow.value.length > 0)
 // na desktopu má „…" smysl pro overflow/advanced/secondaryOverflow (secondaryDesktop jsou inline)
 const triggerDesktop = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value)
 const advancedOpen = ref(false)
@@ -124,18 +141,24 @@ const blockedNotes = computed(() => [...new Set(
   [...primary.value, ...secondary.value].map(reasonOf).filter((r): r is string => !!r),
 )])
 
+// Zamčená akce je vždy tlačítko: odkaz (to/href) by klávesou Enter navigoval i zašedlý.
 function tagOf(a: ActionItem) {
+  if (a.disabled) return 'button'
   if (a.to) return RouterLink
   if (a.href) return 'a'
   return 'button'
 }
 function attrsOf(a: ActionItem): Record<string, unknown> {
+  if (a.disabled) return { type: 'button' }
   if (a.to) return { to: a.to }
   if (a.href) return { href: a.href, target: '_blank', rel: 'noopener', ...(a.download ? { download: '' } : {}) }
   return { type: 'button' }
 }
 
 const inlineBase = BTN_BASE
+// Sekundární akce inline až od sm: `inline-flex` ze základu tlačítka by v Tailwindu
+// přebilo `hidden` a na telefonu by akce byly v řádku i v nabídce (#395).
+const inlineBaseFromSm = BTN_BASE.split(' ').filter(c => c !== 'inline-flex').join(' ')
 
 // ─── dropdown ───
 const open = ref(false)
@@ -156,23 +179,47 @@ function reposition() {
 }
 async function toggle() {
   if (open.value) { open.value = false; return }
+  if (isPhone.value) { open.value = true; return }
   reposition(); open.value = true; await nextTick(); reposition()
 }
 function close() { open.value = false; advancedOpen.value = false }
 function runItem(a: ActionItem) {
+  // Zamčená položka nabídky (pointer-events-none) jde vybrat klávesou: nesmí nic spustit.
+  if (a.disabled) return
   close()
   if (a.run) a.run()
 }
 
-function onKey(e: KeyboardEvent) { if (paneActive.value && e.key === 'Escape') close() }
+/** Akce nabídky „…“ po souvislých skupinách: skupina má nadpis a role=group, ostatní stojí samy. */
+const overflowSegments = computed(() => {
+  const segments: { group: string | undefined; items: ActionItem[] }[] = []
+  for (const a of overflow.value) {
+    const last = segments[segments.length - 1]
+    if (last && last.group === a.group) last.items.push(a)
+    else segments.push({ group: a.group, items: [a] })
+  }
+  return segments
+})
+
+// Nabídka zespodu na telefonu se při posouvání jejího obsahu zavírat nesmí.
+function closeOnScroll(e: Event) {
+  if (isPhone.value && menuRef.value && e.target instanceof Node && menuRef.value.contains(e.target)) return
+  close()
+}
+// Capture na dokumentu: rozbalenou nabídku zavře dřív, než Escape dojde k oknu (Modal), a okno tak zůstane.
+function onKey(e: KeyboardEvent) {
+  if (!paneActive.value || e.key !== 'Escape') return
+  if (open.value) e.preventDefault()
+  close()
+}
 onMounted(() => {
-  window.addEventListener('keydown', onKey)
-  window.addEventListener('scroll', close, true)
+  document.addEventListener('keydown', onKey, true)
+  window.addEventListener('scroll', closeOnScroll, true)
   window.addEventListener('resize', close)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKey)
-  window.removeEventListener('scroll', close, true)
+  document.removeEventListener('keydown', onKey, true)
+  window.removeEventListener('scroll', closeOnScroll, true)
   window.removeEventListener('resize', close)
 })
 </script>
@@ -204,7 +251,7 @@ onBeforeUnmount(() => {
 
     <!-- SECONDARY (zbytek): inline jen na sm+; na mobilu jsou v menu -->
     <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
-      :class="['hidden sm:inline-flex', inlineBase, OUTLINE[a.variant ?? 'neutral']]"
+      :class="['hidden sm:inline-flex', inlineBaseFromSm, OUTLINE[a.variant ?? 'neutral']]"
       :disabled="a.disabled" :title="titleOf(a)"
       @click="a.run && a.run()">
       <svg v-if="a.icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -215,22 +262,43 @@ onBeforeUnmount(() => {
 
     <!-- „…" trigger — light: decentní neutral ghost; dark: vyplněný accent „pill" (drží kontrast na tmavém pozadí) -->
     <button v-if="showTrigger" ref="triggerRef" type="button" @click.stop="toggle"
-      :class="['cursor-pointer w-9 h-9 shrink-0 inline-flex items-center justify-center rounded-md ring-1 ring-inset transition-colors',
+      :class="['cursor-pointer h-9 shrink-0 inline-flex items-center justify-center rounded-md ring-1 ring-inset transition-colors',
+               moreLabel ? 'gap-1.5 whitespace-nowrap px-3 text-sm font-medium' : 'w-9',
                open ? 'bg-neutral-100 text-neutral-700 ring-neutral-400 dark:bg-primary-600/40 dark:text-primary-900 dark:ring-primary-500/60'
                     : 'text-neutral-500 ring-neutral-300 hover:bg-neutral-100 hover:text-neutral-700 dark:text-primary-700 dark:bg-primary-100 dark:ring-primary-500/30 dark:hover:bg-primary-600/30 dark:hover:text-primary-900 dark:hover:ring-primary-500/50',
                triggerDesktop ? '' : 'sm:hidden']"
-      :aria-expanded="open" :title="t('common.more_actions')">
+      :aria-expanded="open" :title="moreLabel ?? t('common.more_actions')">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path :d="DOTS" /></svg>
+      <template v-if="moreLabel">{{ moreLabel }}</template>
     </button>
 
     <WorkspaceTeleport>
       <template v-if="open">
-        <div class="fixed inset-0 z-[60]" @click="close" @contextmenu.prevent="close" aria-hidden="true"></div>
-        <div ref="menuRef" class="fixed z-[61] w-60 max-w-[calc(100vw-16px)] bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 text-sm"
-          :style="{ top: pos.top + 'px', left: pos.left + 'px' }">
+        <div class="fixed inset-0 z-[60]" :class="isPhone ? 'bg-black/40' : ''" @click="close" @contextmenu.prevent="close" aria-hidden="true"></div>
+        <div ref="menuRef"
+          :class="isPhone
+            ? 'phone-action-sheet fixed inset-x-0 bottom-0 z-[61] max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-neutral-200 bg-surface pb-[max(0.5rem,env(safe-area-inset-bottom))] text-[15px] shadow-2xl'
+            : 'fixed z-[61] w-60 max-w-[calc(100vw-16px)] bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 text-sm'"
+          :style="isPhone ? undefined : { top: pos.top + 'px', left: pos.left + 'px' }"
+          data-test="action-bar-menu">
           <div class="px-3 py-2 text-xs font-semibold text-neutral-500 text-center border-b border-neutral-100 truncate">
-            {{ t('common.more_actions') }}
+            {{ moreLabel ?? t('common.more_actions') }}
           </div>
+
+          <!-- Telefon: další hlavní akce, které se nevešly vedle jediné inline akce. -->
+          <template v-if="isPhone">
+            <component :is="tagOf(a)" v-for="a in phonePrimaryOverflow" :key="a.key" v-bind="attrsOf(a)"
+              :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
+                       a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                       a.disabled ? 'opacity-50 pointer-events-none' : '']"
+              :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
+              <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+              </svg>
+              <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
+            </component>
+          </template>
 
           <!-- sekundární, které se nevešly inline: secondaryOverflow vždy, secondaryDesktop jen na mobilu -->
           <template v-if="hasSecondaryOverflow || hasSecondaryDesktop">
@@ -238,7 +306,7 @@ onBeforeUnmount(() => {
               :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                        a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                        a.disabled ? 'opacity-50 pointer-events-none' : '']"
-              :title="titleOf(a)" @click="runItem(a)">
+              :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
               <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -250,7 +318,7 @@ onBeforeUnmount(() => {
                 :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="titleOf(a)" @click="runItem(a)">
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -261,18 +329,26 @@ onBeforeUnmount(() => {
             <div v-if="hasOverflow" :class="['my-1 border-t border-neutral-100', hasSecondaryOverflow ? '' : 'sm:hidden']"></div>
           </template>
 
-          <!-- overflow vždy -->
-          <component :is="tagOf(a)" v-for="a in overflow" :key="a.key" v-bind="attrsOf(a)"
-            :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
-                     a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
-                     a.disabled ? 'opacity-50 pointer-events-none' : '']"
-            :title="titleOf(a)" @click="runItem(a)">
-            <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
-            </svg>
-            <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
-          </component>
+          <!-- overflow vždy; skupina (group) má nadpis, role=group a od ostatních akcí ji dělí čára -->
+          <template v-for="(segment, index) in overflowSegments" :key="segment.items[0].key">
+            <div v-if="index > 0 && (segment.group || overflowSegments[index - 1].group)" class="my-1 border-t border-neutral-100" data-test="action-bar-group-rule"></div>
+            <div :role="segment.group ? 'group' : undefined" :aria-label="segment.group || undefined"
+              :data-test="segment.group ? 'action-bar-group-items' : undefined">
+              <div v-if="segment.group" data-test="action-bar-group" aria-hidden="true"
+                class="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">{{ segment.group }}</div>
+              <component :is="tagOf(a)" v-for="a in segment.items" :key="a.key" v-bind="attrsOf(a)"
+                :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
+                         a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                         a.disabled ? 'opacity-50 pointer-events-none' : '']"
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
+                <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+                </svg>
+                <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
+              </component>
+            </div>
+          </template>
 
           <!-- advanced → rozbalovací „Pokročilé" (méně časté / admin / destruktivní akce) -->
           <template v-if="hasAdvanced">
@@ -297,7 +373,7 @@ onBeforeUnmount(() => {
                 :class="['w-full flex items-center gap-2.5 pl-6 pr-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="titleOf(a)" @click="runItem(a)">
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />

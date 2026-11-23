@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -431,11 +432,11 @@ watch(employeeId, (value) => {
             <p v-else class="self-end text-xs text-neutral-500">{{ t('payroll.personnel_file.upload.multi_title_hint') }}</p>
             <label :class="LABEL">
               {{ t('payroll.personnel_file.field.document_date') }}
-              <input v-model="uploadMeta.document_date" type="date" :class="FIELD" :disabled="busy">
+              <DateInput v-model="uploadMeta.document_date" :class="FIELD" :disabled="busy" />
             </label>
             <label :class="LABEL">
               {{ t('payroll.personnel_file.field.valid_until') }}
-              <input v-model="uploadMeta.valid_until" type="date" :class="FIELD" :disabled="busy">
+              <DateInput v-model="uploadMeta.valid_until" :class="FIELD" :disabled="busy" />
             </label>
             <label :class="[LABEL, 'md:col-span-2']">
               {{ t('payroll.personnel_file.field.note') }}
@@ -684,11 +685,11 @@ watch(employeeId, (value) => {
         </label>
         <label :class="LABEL">
           {{ t('payroll.personnel_file.field.document_date') }}
-          <input v-model="editing.meta.document_date" type="date" :class="FIELD" :disabled="busy">
+          <DateInput v-model="editing.meta.document_date" :class="FIELD" :disabled="busy" />
         </label>
         <label :class="LABEL">
           {{ t('payroll.personnel_file.field.valid_until') }}
-          <input v-model="editing.meta.valid_until" type="date" :class="FIELD" :disabled="busy">
+          <DateInput v-model="editing.meta.valid_until" :class="FIELD" :disabled="busy" />
         </label>
         <label :class="[LABEL, 'md:col-span-2']">
           {{ t('payroll.personnel_file.field.note') }}

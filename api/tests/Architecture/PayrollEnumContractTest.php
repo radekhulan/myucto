@@ -74,9 +74,23 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Kroky a stavy průvodce měsícem (GET /payroll/month-guide)
+        'payroll.ts::PayrollMonthGuideStepKey'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STEP_KEYS',
+        'payroll.ts::PayrollMonthGuideStepState'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STATES',
+        // Skupiny hodinové evidence, které server umí posoudit automatickou nulou
+        'payroll.ts::PayrollHourlyAutomaticKey'
+            => 'const:MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader::SELECTION_KEYS',
         // Zaokrouhlení krácené mzdy a náhrad v nastavení zaměstnavatele
         'payroll.ts::PayrollWageRounding'
             => 'enum:MyInvoice\Service\Payroll\Calculation\PayrollWageRounding',
+        // Řazení přehledu osob ve spočítaném běhu (`sort` z URL)
+        'payroll.ts::PayrollRunPeopleSortKey'
+            => 'const:MyInvoice\Repository\Payroll\PayrollRunPeopleRepository::SORT_KEYS',
+        // Zaúčtování mzdového předpisu souhrnně, nebo po zaměstnancích
+        'payroll.ts::PayrollPostingGranularity'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator::POSTING_GRANULARITIES',
         // Varianta ručního potvrzení přijetí podání (beze změny / upraveno ČSSZ)
         'payroll.ts::PayrollSubmissionManualAcceptanceVariant'
             => 'const:MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceService::VARIANTS',
@@ -188,16 +202,28 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::ALL',
         'payrollImports.ts::AttendanceMatchStatus'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
+        'payrollImports.ts::AgreementImportStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::STATUSES',
+        'payrollImports.ts::AgreementImportOutcome'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::OUTCOMES',
+        'payrollImports.ts::AgreementRelationType'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::RELATION_TYPES',
         'payroll.ts::PayrollAgreementAnnualHoursStatus'
             => 'const:MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::STATUSES',
         'payroll.ts::PayrollDeclarationSignState'
             => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::STATES',
         'payroll.ts::PayrollDeclarationSignChange'
             => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::CHANGES',
+        'payroll.ts::PayrollDeclarationEffectiveBasis'
+            => 'const:MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEffectiveMonth::BASES',
         'payroll.ts::PayrollBulkClosureGroup'
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::GROUPS',
         'payroll.ts::PayrollBulkClosureAction'
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::ACTIONS',
+        'payroll.ts::PayrollTermsBulkMode'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmploymentTermsBulkEdit::MODES',
+        'payroll.ts::PayrollRunReadinessBulkKind'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::BULK_ACTION_KINDS',
         'payrollImports.ts::AttendanceSampleKey'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles::KEYS',
         'payrollImports.ts::AttendanceProfileComponentKind'
@@ -229,6 +255,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\TaxStatement\TaxStatementService::FORMS',
         'payrollRulesets.ts::PayrollRulesetOutlookSeverity'
             => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook::SEVERITIES',
+        'payrollRulesets.ts::PayrollRulesetReviewCategory'
+            => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRuleParameterCatalog::REVIEW_CATEGORIES',
         'payroll.ts::PayrollForeignPermitKind'
             => 'db:payroll_person_foreign_permits.permit_kind',
         'payroll.ts::PayrollForeignPermitStatus'
@@ -306,6 +334,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'
             => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        'payroll.ts::PayrollRemunerationType'
+            => 'db:payroll_employment_terms.remuneration_type',
+        'payroll.ts::PayrollRemunerationBasisKind'
+            => 'db:payroll_employment_terms.remuneration_basis_kind',
         'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Sloupec z migrace 1403 do výpočtu daně už nevstupuje (§ 6 odst. 4
@@ -362,6 +394,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRecurringCalculationKind' => 'db:payroll_recurring_components.calculation_kind',
         'payroll.ts::PayrollRecurringAllocationRule'  => 'db:payroll_recurring_components.allocation_rule',
         'payroll.ts::PayrollTimeCategory'          => 'db:payroll_time_entries.category',
+        'payroll.ts::PayrollTimeWorkSource'        => 'db:payroll_time_months.work_source',
         // Zákazy a vyrovnávací období u přesčasu (§ 93 odst. 4, § 240 odst. 3).
         // Sloupce jsou VARCHAR s CHECK, ne ENUM, protože doména je právní výčet
         // vázaný na ustanovení — páruje se proto konstanta domény, ne sloupec.
@@ -472,6 +505,8 @@ final class PayrollEnumContractTest extends TestCase
         // Kam UI pošle nález hlášení a stav odloženého vztahu.
         'payroll.ts::PayrollJmhzRemediationKind'
             => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog::KINDS',
+        'payroll.ts::PayrollJmhzExternalRootMode'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCorrectionRootService::MODES',
         'payroll.ts::PayrollJmhzDeferralState'
             => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeferralService::STATES',
         'payroll.ts::PayrollJmhzImportedProtocolKind' => 'db:payroll_imported_jmhz_protocols.protocol_kind',

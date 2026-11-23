@@ -16,6 +16,9 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
 
 const { t } = useI18n()
 const supplierStore = useSupplierStore()
@@ -97,25 +100,43 @@ async function load() {
   }
 }
 
-function selectFiles(event: Event) {
-  files.value = Array.from((event.target as HTMLInputElement).files ?? [])
-}
-
 const ALLOWED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png', 'isdoc', 'xml', 'isdocx']
 
-/** Přetažené soubory se přidají k vybraným; nepodporovaný formát se vynechá nahlas. */
-function onDrop(event: DragEvent) {
-  dragOver.value = false
-  if (uploading.value) return
-  const dropped = Array.from(event.dataTransfer?.files ?? [])
-  if (dropped.length === 0) return
-  const accepted = dropped.filter(file => ALLOWED_EXTENSIONS.includes(file.name.split('.').pop()?.toLowerCase() ?? ''))
-  const rejected = dropped.filter(file => !accepted.includes(file))
+/**
+ * Vybrané, přetažené i vyfocené soubory se PŘIDÁVAJÍ k už vybraným. Na telefonu
+ * se vybírá a fotí po jednom, takže přepsání by víc dokladů najednou předat nedovolilo.
+ * Nepodporovaný formát se vynechá nahlas, stejný soubor se nepřidá dvakrát.
+ */
+function addFiles(incoming: File[]) {
+  if (uploading.value || incoming.length === 0) return
+  const accepted = incoming.filter(file => ALLOWED_EXTENSIONS.includes(file.name.split('.').pop()?.toLowerCase() ?? ''))
+  const rejected = incoming.filter(file => !accepted.includes(file))
   if (rejected.length > 0) {
     toast.warning(t('purchase_submissions.drop_rejected', { names: rejected.map(file => file.name).join(', ') }))
   }
   const known = new Set(files.value.map(file => `${file.name}|${file.size}`))
   files.value = [...files.value, ...accepted.filter(file => !known.has(`${file.name}|${file.size}`))]
+}
+
+/** Vybrané a přetažené fotky projdou ořezem dokladu stejně jako v AI importu. */
+const crop = usePhotoCropQueue(addFiles)
+
+function selectFiles(event: Event) {
+  const input = event.target as HTMLInputElement
+  crop.start(Array.from(input.files ?? []))
+  // Reset, ať jde přidat další soubory i znovu vybrat týž soubor po odebrání.
+  input.value = ''
+}
+
+function removeFile(file: File) {
+  if (uploading.value) return
+  files.value = files.value.filter(item => item !== file)
+}
+
+function onDrop(event: DragEvent) {
+  dragOver.value = false
+  if (uploading.value) return
+  crop.start(Array.from(event.dataTransfer?.files ?? []))
 }
 
 async function submit() {
@@ -245,6 +266,7 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
     <header>
       <h1 class="text-2xl font-semibold">{{ t('purchase_submissions.portal_title') }}</h1>
       <p class="text-sm text-neutral-500 mt-1">{{ t('purchase_submissions.portal_subtitle') }}</p>
+      <p class="text-sm text-neutral-500" data-testid="portal-after-submit">{{ t('purchase_submissions.portal_after_submit') }}</p>
     </header>
 
     <section v-if="auth.canWrite('documents.submit')" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm p-5 space-y-4">
@@ -287,24 +309,28 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
         </label>
       </div>
 
-      <div
-        class="flex flex-col gap-3 rounded-lg border-2 border-dashed px-4 py-4 transition"
-        :class="dragOver ? 'border-primary-500 bg-primary-50' : 'border-neutral-200'"
+      <div class="flex flex-col gap-3">
+      <label
+        class="block cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition"
+        :class="[
+          dragOver ? 'border-primary-500 bg-primary-50' : 'border-neutral-300 hover:border-primary-400 hover:bg-primary-50/30',
+          uploading ? 'pointer-events-none opacity-60' : '',
+        ]"
         data-test="portal-dropzone"
         @dragenter.prevent="dragOver = true"
         @dragover.prevent="dragOver = true"
         @dragleave.prevent="dragOver = false"
         @drop.prevent="onDrop"
       >
-      <p class="text-sm" :class="dragOver ? 'text-primary-700' : 'text-neutral-500'">{{ t('purchase_submissions.drop_hint') }}</p>
+        <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" :disabled="uploading" @change="selectFiles" />
+        <svg class="mx-auto mb-2 h-8 w-8" :class="dragOver ? 'text-primary-500' : 'text-neutral-400'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 0 1-.88-7.9 5 5 0 0 1 9.9-1A5.5 5.5 0 0 1 18.5 16H17m-5-4v9m0-9l-3 3m3-3l3 3" />
+        </svg>
+        <span class="block text-sm font-medium" :class="dragOver ? 'text-primary-700' : 'text-neutral-700'">{{ t('purchase_submissions.drop_title') }}</span>
+        <span class="mt-1 block text-xs text-neutral-500">{{ t('purchase_submissions.drop_hint') }}</span>
+      </label>
       <div class="flex flex-wrap items-center gap-3">
-        <label :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
-          </svg>
-          {{ t('purchase_submissions.choose_files') }}
-          <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" @change="selectFiles" />
-        </label>
+        <CapturePhotoButton :disabled="uploading" @captured="(f: File) => addFiles([f])" />
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}
         </span>
@@ -316,7 +342,14 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
         </button>
       </div>
       <ul v-if="files.length" class="flex flex-wrap gap-2 text-xs text-neutral-600" data-test="portal-selected-files">
-        <li v-for="file in files" :key="`${file.name}|${file.size}`" class="rounded bg-neutral-100 px-2 py-1">{{ file.name }}</li>
+        <li v-for="file in files" :key="`${file.name}|${file.size}`" class="inline-flex items-center gap-1 rounded bg-neutral-100 py-1 pl-2 pr-1">
+          {{ file.name }}
+          <button type="button" class="rounded p-0.5 text-neutral-500 hover:bg-neutral-200 hover:text-danger-600 disabled:opacity-50"
+                  :disabled="uploading" :aria-label="t('purchase_submissions.remove_file', { name: file.name })"
+                  data-test="portal-remove-file" @click="removeFile(file)">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          </button>
+        </li>
       </ul>
       </div>
     </section>
@@ -410,5 +443,8 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
       <SubmissionPreview :src="portalPurchaseInvoiceSubmissionsApi.previewUrl(previewItem.id)"
         :file-name="previewItem.original_name" :doc-type="previewItem.doc_type" />
     </Modal>
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
   </div>
 </template>

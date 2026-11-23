@@ -20,7 +20,8 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
@@ -39,7 +40,7 @@ const filters = reactive({
   to: '',
   analytics: false,
   after_closing: false,
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
@@ -50,14 +51,14 @@ function queryParams() {
     to: filters.to || undefined,
     analytics: filters.analytics ? (1 as const) : undefined,
     after_closing: filters.after_closing ? (1 as const) : undefined,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
   }
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   void load()
 }
 
@@ -77,8 +78,8 @@ async function load() {
       to: filters.to || report.value.to,
       analytics: filters.analytics ? '1' : '0',
       ...(filters.after_closing ? { after_closing: '1' } : {}),
-      ...(filters.dimension_value_id ? {
-        dimension_value_id: String(filters.dimension_value_id),
+      ...(filters.dimension_value_ids.length > 0 ? {
+        dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
         dimension_descendants: filters.dimension_descendants ? '1' : '0',
       } : {}),
     } })
@@ -187,8 +188,7 @@ onMounted(async () => {
     filters.period_id = selectedPeriod.id
     if (fromQuery) filters.from = fromQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : fromQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : fromQuery
     if (toQuery) filters.to = toQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : toQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : toQuery
-    const valueId = Number(q.dimension_value_id)
-    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
     filters.dimension_descendants = q.dimension_descendants !== '0'
     if (q.analytics === '1' || q.analytics === '0') filters.analytics = q.analytics === '1'
     filters.after_closing = q.after_closing === '1'
@@ -254,13 +254,13 @@ onMounted(async () => {
           </label>
         </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
     </div>
 
     <DimensionReportLinks current="trial" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
-      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+      :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants" />
     <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="trial-range-adjusted">{{ t('dimensions.trial_range_adjusted') }}</p>
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">

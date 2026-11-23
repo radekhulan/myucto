@@ -14,7 +14,10 @@ use MyInvoice\Repository\AccountingBackfillJobRepository;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Activation\BackfillService;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceService;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -32,6 +35,7 @@ final class AccountingActivationTest extends TestCase
     private OpeningBalanceService $opening;
     private BackfillService $backfill;
     private AccountingPeriodRepository $periods;
+    private PostingService $posting;
     private int $supplierId = 0;
     private int $userId = 0;
     private bool $inTx = false;
@@ -50,6 +54,7 @@ final class AccountingActivationTest extends TestCase
             $this->jobs = $container->get(AccountingBackfillJobRepository::class);
             $this->opening = $container->get(OpeningBalanceService::class);
             $this->backfill = $container->get(BackfillService::class);
+            $this->posting = $container->get(PostingService::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
             $periods = $container->get(AccountingPeriodRepository::class);
             $this->periods = $periods;
@@ -181,6 +186,255 @@ final class AccountingActivationTest extends TestCase
         self::assertSame('completed', $this->jobs->find($secondId, $this->supplierId)['status']);
         self::assertSame(0, $this->supplierFlag('auto_post_purchases'), 'Opakovaná aktivace přepsala volbu účetní.');
         self::assertSame('suggest', $this->automationLevel(), 'Opakovaná aktivace přepsala preset účetní.');
+    }
+
+    /**
+     * Regrese z reálné aktivace: opakovaný běh nad historií, která už zápisy má, v období
+     * zamčeném podaným přiznáním. Přepis každého zaúčtovaného dokladu skončil „zamčené
+     * období - přeskočeno" a kontrola úplnosti ho započítala jako zpracovaný doklad NAVÍC
+     * proti počítadlu čekajících (to doklady se zápisem nepočítá) — aktivace hlásila stovky
+     * chyb, které nešlo opravit. Kontrola nanečisto přitom prošla, protože na zámek nenarazila.
+     */
+    public function testCoverageIgnoresAlreadyPostedAndLockedDocuments(): void
+    {
+        $clientId = $this->client('Úplnost aktivace s.r.o.');
+        $posted = $this->sale('AKT-2099-1', $clientId, '2099-02-10');
+        $this->posting->postDocument($this->supplierId, 'invoice', $posted,
+            $this->posting->buildFromInvoice($this->supplierId, $posted), ['entry_date' => '2099-02-10']);
+        $lockedPending = $this->sale('AKT-2099-2', $clientId, '2099-02-12');
+        $openPending = $this->sale('AKT-2099-3', $clientId, '2099-03-15');
+        $this->lockUntil('2099-02-28');
+        $hash = $this->opening->draft($this->supplierId)['hash'];
+
+        $dryId = $this->jobs->create($this->supplierId, 'dry_run', [
+            'starts_on' => self::STARTS_ON, 'opening_hash' => $hash, 'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($dryId);
+        $dry = $this->jobs->find($dryId, $this->supplierId)['report_json'];
+        self::assertSame(
+            ['date_locked', 'date_locked'],
+            [$this->issueFor($dry, $posted)['error_code'] ?? null, $this->issueFor($dry, $lockedPending)['error_code'] ?? null],
+            'Kontrola nanečisto musí narazit na zámek k datu stejně jako ostrý běh.',
+        );
+
+        $executeId = $this->jobs->create($this->supplierId, 'execute', [
+            'starts_on' => self::STARTS_ON, 'opening_hash' => $hash, 'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($executeId);
+        $job = $this->jobs->find($executeId, $this->supplierId);
+        $coverage = $job['report_json']['document_coverage']['invoice'];
+
+        self::assertSame(2, $coverage['expected']);
+        self::assertSame(2, $coverage['handled']);
+        self::assertSame(1, $coverage['already_posted']);
+        self::assertSame(0, $coverage['unexpected']);
+        self::assertTrue($coverage['complete']);
+        self::assertSame(0, $job['report_json']['failed_total']);
+        self::assertSame('completed', $job['status']);
+        self::assertSame('completed', $this->supplierActivationStatus());
+        self::assertTrue($this->issueFor($job['report_json'], $posted)['had_posting']);
+        self::assertFalse($this->issueFor($job['report_json'], $lockedPending)['had_posting']);
+        self::assertSame('skipped', $this->issueFor($job['report_json'], $lockedPending)['severity']);
+        self::assertNull($this->issueFor($job['report_json'], $openPending), 'Doklad v otevřeném období se zaúčtoval.');
+    }
+
+    public function testForceCompleteNeedsCompanyAdminConfirmationAndReason(): void
+    {
+        $jobId = $this->failedExecuteWithBrokenDocument();
+        $route = ['id' => (string) $jobId];
+
+        $delegated = $this->request('POST')->withAttribute('auth.effective_role', new EffectiveRole(
+            0, 'Účetní se správou období', 'staff', true, ['accounting.periods.manage' => AccessLevel::WRITE->value], 'custom',
+        ));
+        $forbidden = $this->action->forceComplete(
+            $delegated->withParsedBody(['force' => 1, 'confirm' => true, 'reason' => 'Doklad opravíme později']),
+            new Psr7Response(),
+            $route,
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+
+        $unconfirmed = $this->action->forceComplete($this->request('POST')->withParsedBody(['force' => 1]), new Psr7Response(), $route);
+        self::assertSame(422, $unconfirmed->getStatusCode());
+        self::assertSame('force_confirmation_required', $this->json($unconfirmed)['error']['code']);
+
+        $noReason = $this->action->forceComplete(
+            $this->request('POST')->withParsedBody(['force' => 1, 'confirm' => true]),
+            new Psr7Response(),
+            $route,
+        );
+        self::assertSame('force_reason_required', $this->json($noReason)['error']['code']);
+        self::assertSame('failed', $this->supplierActivationStatus());
+        self::assertSame('tax_evidence', $this->supplierMode());
+
+        $ok = $this->action->forceComplete(
+            $this->request('POST')->withParsedBody(['force' => 1, 'confirm' => true, 'reason' => 'Doklad opravíme později']),
+            new Psr7Response(),
+            $route,
+        );
+        self::assertSame(200, $ok->getStatusCode(), (string) $ok->getBody());
+        self::assertSame('completed', $this->supplierActivationStatus());
+        self::assertSame('double_entry', $this->supplierMode());
+        $report = $this->jobs->find($jobId, $this->supplierId)['report_json'];
+        self::assertSame('Doklad opravíme později', $report['forced']['reason']);
+        self::assertGreaterThan(0, $report['forced']['failed_total']);
+        self::assertSame(1, $this->activityCount('supplier.accounting_activation_forced'));
+    }
+
+    public function testForceCompleteKeepsUnbalancedJournalAsHardBlock(): void
+    {
+        $jobId = $this->failedExecuteWithBrokenDocument();
+        $saleId = $this->sale('AKT-2099-NEV', $this->client('Nevyrovnaný deník s.r.o.'), '2099-03-10');
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $saleId,
+            $this->posting->buildFromInvoice($this->supplierId, $saleId), ['entry_date' => '2099-03-10']);
+        $broken = $this->db->pdo()->prepare(
+            'UPDATE journal_entry_lines SET amount = amount + 1 WHERE entry_id = ? ORDER BY id LIMIT 1'
+        );
+        $broken->execute([$entryId]);
+        self::assertSame(1, $broken->rowCount());
+
+        $response = $this->action->forceComplete(
+            $this->request('POST')->withParsedBody(['force' => 1, 'confirm' => true, 'reason' => 'Doklad opravíme později']),
+            new Psr7Response(),
+            ['id' => (string) $jobId],
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('journal_unbalanced', $this->json($response)['error']['code']);
+        self::assertSame('failed', $this->supplierActivationStatus());
+        self::assertSame('tax_evidence', $this->supplierMode());
+    }
+
+    /** Vynucení potvrzené při spuštění doúčtování dokončí aktivaci rovnou v běhu. */
+    public function testForcedExecuteCompletesDespiteDocumentErrors(): void
+    {
+        $vendorId = $this->client('Dodavatel s chybou s.r.o.');
+        $this->brokenPurchase($vendorId);
+        $hash = $this->opening->draft($this->supplierId)['hash'];
+
+        $dryId = $this->jobs->create($this->supplierId, 'dry_run', [
+            'starts_on' => self::STARTS_ON, 'opening_hash' => $hash, 'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($dryId);
+        self::assertSame('failed', $this->jobs->find($dryId, $this->supplierId)['status']);
+
+        $plain = $this->action->execute($this->request('POST'), new Psr7Response());
+        self::assertSame('dry_run_required', $this->json($plain)['error']['code']);
+        $unconfirmed = $this->action->execute($this->request('POST')->withParsedBody(['force' => 1]), new Psr7Response());
+        self::assertSame('force_confirmation_required', $this->json($unconfirmed)['error']['code']);
+
+        $executeId = $this->jobs->create($this->supplierId, 'execute', [
+            'starts_on' => self::STARTS_ON, 'opening_hash' => $hash, 'with_rules' => false,
+            'force' => ['by' => $this->userId, 'reason' => 'Doklad opravíme později'],
+        ], $this->userId);
+        $this->backfill->run($executeId);
+        $job = $this->jobs->find($executeId, $this->supplierId);
+
+        self::assertSame('completed', $job['status']);
+        self::assertGreaterThan(0, $job['report_json']['forced']['failed_total']);
+        self::assertSame('completed', $this->supplierActivationStatus());
+    }
+
+    private function failedExecuteWithBrokenDocument(): int
+    {
+        $this->brokenPurchase($this->client('Dodavatel s chybou s.r.o.'));
+        $jobId = $this->jobs->create($this->supplierId, 'execute', [
+            'starts_on' => self::STARTS_ON,
+            'opening_hash' => $this->opening->draft($this->supplierId)['hash'],
+            'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($jobId);
+        self::assertSame('failed', $this->jobs->find($jobId, $this->supplierId)['status']);
+        self::assertSame('failed', $this->supplierActivationStatus());
+        return $jobId;
+    }
+
+    /** Přijatý DDKP s přenesenou daňovou povinností předpis sestavit neumí — chyba položky. */
+    private function brokenPurchase(int $vendorId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, vat_deduction,
+                 issue_date, tax_date, due_date, received_at, currency_id, reverse_charge, is_fixed_asset,
+                 total_without_vat, total_vat, total_with_vat, status, created_by)
+             VALUES (?, ?, "AKT-ERR-2099", ?, "tax_document", "full", "2099-03-01", "2099-03-01", "2099-03-01",
+                     "2099-03-01", ?, 1, 0, 1000, 210, 1210, "received", ?)'
+        )->execute([$this->supplierId, $vendorId, json_encode(['company_name' => 'Dodavatel s chybou s.r.o.']), $this->currencyId(), $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+             VALUES (?, "Test položka", 1, "ks", 1000, ?, 21, 1000, 210, 1210, 0, "40")'
+        )->execute([$id, $this->vatRateId()]);
+        return $id;
+    }
+
+    private function client(string $name): int
+    {
+        $pdo = $this->db->pdo();
+        $czId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO clients
+                (supplier_id, company_name, street, city, zip, country_id, dic, main_email,
+                 language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, ?, "Test 1", "Praha", "11000", ?, "CZ12345678", "test@example.com", "cs", ?, 1, 1)'
+        )->execute([$this->supplierId, $name, $czId, $this->currencyId()]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function sale(string $number, int $clientId, string $date): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
+                 status, vat_classification_code, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, 1000, 210, 1210, "issued", "1", ?)'
+        )->execute([$this->supplierId, $number, $clientId, $date, $date, $date, $this->currencyId(), $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+             VALUES (?, "Test položka", 1, "ks", 1000, ?, 21, 1000, 210, 1210, 0, "1")'
+        )->execute([$id, $this->vatRateId()]);
+        return $id;
+    }
+
+    private function currencyId(): int
+    {
+        return (int) $this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+    }
+
+    private function vatRateId(): int
+    {
+        return (int) $this->db->pdo()->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+    }
+
+    private function lockUntil(string $date): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        )->execute([$this->supplierId, $date]);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function issueFor(array $report, int $invoiceId): ?array
+    {
+        foreach ((array) ($report['document_issues'] ?? []) as $issue) {
+            if ($issue['source_type'] === 'invoice' && $issue['source_id'] === $invoiceId) return $issue;
+        }
+        return null;
+    }
+
+    private function activityCount(string $action): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM activity_log WHERE action = ? AND entity_id = ?');
+        $stmt->execute([$action, $this->supplierId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function supplierFlag(string $column): int

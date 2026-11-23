@@ -411,11 +411,16 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         if ($direction === '') {
             return $amount;
         }
-        // Moneta Info Servis: předmět/nadpis „Odešly peníze" (ne „odchozí").
-        if (preg_match('/odchoz|ode[sš]l|výdej|vydej|výdaj|vydaj|debet|odepsán|odepsan|outgoing/u', $direction) === 1) {
-            return -abs($amount);
-        }
-        return abs($amount);
+        return $this->isOutgoingDirection($direction) ? -abs($amount) : abs($amount);
+    }
+
+    /** Moneta Info Servis píše „Odešly peníze" (ne „odchozí"), Česká spořitelna u karty „platbu kartou". */
+    protected function isOutgoingDirection(string $direction): bool
+    {
+        return preg_match(
+            '/odchoz|ode[sš]l|výdej|vydej|výdaj|vydaj|debet|odepsán|odepsan|outgoing|platb[aeuy]\s+kartou/u',
+            mb_strtolower(trim($direction), 'UTF-8'),
+        ) === 1;
     }
 
     abstract protected function parserLabel(): string;

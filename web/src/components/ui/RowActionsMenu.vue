@@ -182,7 +182,12 @@ function onMenuKey(e: KeyboardEvent) {
   else if (e.key === 'Tab') close(true)
 }
 
-function onKey(e: KeyboardEvent) { if (paneActive.value && e.key === 'Escape') close(true) }
+// Capture na dokumentu: rozbalenou nabídku zavře dřív, než Escape dojde k oknu (Modal), a okno tak zůstane.
+function onKey(e: KeyboardEvent) {
+  if (!paneActive.value || e.key !== 'Escape') return
+  if (open.value) e.preventDefault()
+  close(true)
+}
 // Posluchač musí být TÁŽ funkce při přidání i odebrání; `close` sama bere
 // argument, takže by jí prohlížeč jako „vrať ohnisko" podstrčil Event.
 function closeOnViewportChange() { close() }
@@ -197,14 +202,14 @@ function closeOnNavigationCapture(event: MouseEvent) {
 onMounted(() => {
   window.addEventListener('click', closeOnNavigationCapture, true)
   window.addEventListener('auxclick', closeOnNavigationCapture, true)
-  window.addEventListener('keydown', onKey)
+  document.addEventListener('keydown', onKey, true)
   window.addEventListener('scroll', closeOnViewportChange, true)
   window.addEventListener('resize', closeOnViewportChange)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeOnNavigationCapture, true)
   window.removeEventListener('auxclick', closeOnNavigationCapture, true)
-  window.removeEventListener('keydown', onKey)
+  document.removeEventListener('keydown', onKey, true)
   window.removeEventListener('scroll', closeOnViewportChange, true)
   window.removeEventListener('resize', closeOnViewportChange)
 })
@@ -223,7 +228,7 @@ onBeforeUnmount(() => {
     </component>
 
     <button v-if="hasMenu" ref="triggerRef" type="button" @click.stop="toggle" @keydown="onTriggerKey"
-      :class="['cursor-pointer w-7 h-7 shrink-0 inline-flex items-center justify-center rounded-md ring-1 ring-inset transition-colors',
+      :class="['cursor-pointer w-7 h-7 max-md:w-10 max-md:h-10 shrink-0 inline-flex items-center justify-center rounded-md ring-1 ring-inset transition-colors',
                open ? 'bg-neutral-100 text-neutral-700 ring-neutral-400'
                     : 'text-neutral-500 ring-neutral-300 hover:bg-neutral-100 hover:text-neutral-700']"
       aria-haspopup="menu" :aria-expanded="open" :title="triggerLabel" :aria-label="triggerLabel">
@@ -238,7 +243,7 @@ onBeforeUnmount(() => {
           :style="{ top: pos.top + 'px', left: pos.left + 'px' }">
           <component :is="menuTagOf(a)" v-for="a in menu" :key="a.key" v-bind="a.disabled ? { 'aria-disabled': 'true' } : attrsOf(a)"
             data-menu-item role="menuitem" :tabindex="a.disabled ? -1 : 0"
-            :class="['w-full flex items-start gap-2.5 px-3 py-2 text-left',
+            :class="['w-full flex items-start gap-2.5 px-3 py-2 max-md:min-h-11 max-md:py-3 text-left',
                      a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                      a.disabled ? 'opacity-70 cursor-default' : 'cursor-pointer']"
             :title="a.title || undefined" :data-workspace-open="a.workspaceOpen" :data-action="a.key"

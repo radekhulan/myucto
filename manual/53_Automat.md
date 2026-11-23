@@ -368,6 +368,7 @@ dokladu bez ztráty rozepracované fronty.
 |---|---|---|
 | Doklad není zaúčtovaný | Faktura nebo přijatý doklad nemá předpis v deníku | Otevřete doklad, zkontrolujte jej a použijte **Zaúčtovat doklad** |
 | Období je uzavřené | Datum spadá mimo otevřené období nebo pod měkký zámek | Ověřte správnost data; období otevírejte jen podle interního postupu |
+| Chybí povinná dimenze | Pravidlo v režimu Automaticky by vytvořilo zápis bez dimenze povinné podle pravidla dimenzí | Doplňte dimenzi u pohybu (akce **Dimenze**) nebo v pravidle a návrh schvalte, viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze) |
 | Konflikt pravidel | Stejné platbě odpovídá více stejně silných pravidel | Porovnejte pravidla, jedno zpřesněte nebo snižte jeho prioritu |
 | Podezření na duplicitu | Podobný zápis už v deníku existuje | Otevřete porovnání a ověřte doklad, částku, datum a protistranu |
 | Chybí doklad | K bankovní platbě není účetní podklad | Vyžádejte doklad od klienta a zaúčtování dokončete až po jeho kontrole |

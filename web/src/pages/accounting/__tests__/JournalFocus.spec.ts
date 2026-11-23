@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   listPeriods: vi.fn(),
   listAccounts: vi.fn(),
   listJournal: vi.fn(),
+  ensurePrefsLoaded: vi.fn(),
   exportReport: vi.fn(),
   getEntry: vi.fn(),
   replace: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/accounting', () => ({
     listJournal: m.listJournal,
     exportReport: m.exportReport,
     getEntry: m.getEntry,
+    getEntryForm: vi.fn().mockResolvedValue({ entry_form: 'composite', history: [] }),
   },
 }))
 vi.mock('vue-router', () => ({
@@ -46,7 +48,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, c
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatDateTime: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: m.ensurePrefsLoaded, getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({
   useTablePrefs: (_key: string, columns: unknown[]) => ({
     columns, orderedColumns: ref(columns), ready: ref(true), isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
@@ -62,7 +64,7 @@ vi.mock('@/composables/useSavedFilters', () => ({
 }))
 
 import Journal from '@/pages/accounting/Journal.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
 
 const FilterBarStub = {
   name: 'FilterBar',
@@ -86,7 +88,7 @@ function mountJournal() {
       directives: { 'column-labels': {} },
       stubs: {
         FilterBar: FilterBarStub,
-        DimensionReportFilter: true,
+        DimensionReportFilters: true,
         ActivationBanner: true,
         SavedFiltersMenu: true,
         ColumnPicker: true,
@@ -120,15 +122,32 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.routeQuery = reactive({})
   m.listPeriods.mockResolvedValue([])
+  m.ensurePrefsLoaded.mockResolvedValue(undefined)
   m.listAccounts.mockResolvedValue([])
   m.getEntry.mockImplementation(async (id: number) => entry(id))
   m.listJournal.mockImplementation(async (params: { entry_id?: number }) => ({
     items: params.entry_id ? [entry(params.entry_id)] : [], total: params.entry_id ? 1 : 0, page: 1, per_page: 50,
   }))
-  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scroll })
 })
 
 describe('journal entry focus', () => {
+  it('loads periods while waiting for saved preferences before querying the journal', async () => {
+    let finishPreferences!: () => void
+    m.ensurePrefsLoaded.mockReturnValueOnce(new Promise<void>(resolve => { finishPreferences = resolve }))
+    const wrapper = mountJournal()
+    try {
+      await flushPromises()
+      expect(m.listPeriods).toHaveBeenCalledTimes(1)
+      expect(m.listJournal).not.toHaveBeenCalled()
+      finishPreferences()
+      await flushPromises()
+      expect(m.listJournal).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it.each(['desktop', 'mobile'])('opens the exact historical entry and scrolls the visible %s row inside its pane', async layout => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) {
       const visible = layout === 'desktop' ? this.tagName === 'TR' : this.tagName === 'DIV'
@@ -203,11 +222,11 @@ describe('journal entry focus', () => {
     m.routeQuery = reactive({ entry_id: '7' })
     const wrapper = mountJournal()
     await flushPromises()
-    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:valueId', 5)
+    wrapper.findComponent(DimensionReportFilters).vm.$emit('update:valueIds', [5])
     await flushPromises()
     finish(entry(7))
     await flushPromises()
-    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, entry_id: undefined })
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5', entry_id: undefined })
     expect(wrapper.findAll('journal-entry-detail-panel-stub')).toHaveLength(0)
     expect(scroll).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('common.loading')

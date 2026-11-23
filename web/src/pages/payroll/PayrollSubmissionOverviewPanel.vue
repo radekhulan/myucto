@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
@@ -13,6 +13,7 @@ import {
 import {
   payrollApi,
   type PayrollHealthPaymentOverview,
+  type PayrollJmhzPreparationGate,
   type PayrollJmhzPvpojOffice,
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
@@ -39,6 +40,7 @@ import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/bu
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import { healthOverviewRemediation } from './payrollRemediation'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -56,7 +58,9 @@ import { healthPaymentStatus, localToday } from './healthPaymentStatus'
  */
 const props = defineProps<{
   mode: PayrollSubmissionAgendaGroup
+  submissionId?: number | null
 }>()
+const emit = defineEmits<{ 'close-submission': [] }>()
 
 const { locale, t } = useI18n()
 const {
@@ -79,6 +83,10 @@ const {
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
+// Proklik k chybě přípravy přehledu ZP (číslo plátce, platební účet pojišťovny).
+const healthErrorCode = ref<string | null>(null)
+const healthErrorRemediation = computed(() =>
+  healthError.value === '' ? null : healthOverviewRemediation(healthErrorCode.value))
 
 /**
  * Nadpis karty je název pojišťovny, ne její kód — „111" účetní s pojišťovnou
@@ -120,6 +128,12 @@ const EMPTY_DEADLINE_SUMMARY: Record<PayrollSubmissionDeadlinePhase, number> = {
 const deadlineSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
   ...EMPTY_DEADLINE_SUMMARY,
 })
+/** Povinnosti období, které ještě nemají řádek v evidenci (měsíční přehled je hlásí „Nepřipraveno"). */
+const unpreparedSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
+  ...EMPTY_DEADLINE_SUMMARY,
+})
+/** Proč hlášení JMHZ za zvolené období teď nejde zmrazit ani odeslat (ze serveru). */
+const jmhzPreparationGate = ref<PayrollJmhzPreparationGate | null>(null)
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
@@ -155,6 +169,7 @@ const jmhzBlockedOffices = ref<Array<{
   message: string
 }>>([])
 const detail = ref<PayrollSubmissionDetail | null>(null)
+const detailPanel = ref<HTMLElement | null>(null)
 const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
 /* Detail se kreslí u svého řádku, takže je potřeba vědět, který to je. */
@@ -191,13 +206,30 @@ const detailHost = computed<HTMLElement | null>(
  */
 const counts = computed(() => {
   const phases = deadlineSummary.value
+  const unprepared = unpreparedSummary.value
+  // Nepřipravená povinnost (bez řádku v evidenci) je taky povinnost období.
+  // Bez ní souhrn ukazoval „Celkem 0", zatímco řádek nad ním hlásil měsíc
+  // jako „Nepřipraveno".
+  const unpreparedOpen = unprepared.not_open + unprepared.open + unprepared.due_soon + unprepared.due_today
+  const unpreparedAttention = unprepared.overdue + unprepared.action_required
   return {
-    total: total.value,
-    open: phases.not_open + phases.open + phases.due_soon + phases.due_today,
+    total: total.value + unpreparedOpen + unpreparedAttention,
+    open: phases.not_open + phases.open + phases.due_soon + phases.due_today + unpreparedOpen,
     submitted: phases.awaiting_result,
     fulfilled: phases.fulfilled,
-    attention: phases.overdue + phases.action_required,
+    attention: phases.overdue + phases.action_required + unpreparedAttention,
   }
+})
+
+// Souhrn po termínu platí za celé období, stránka nese jen 50 řádků.
+function unpreparedOverdue(item: PayrollSubmissionOverviewItem): boolean {
+  return item.latest_submission === null
+    && (item.deadline?.is_overdue === true || item.deadline?.phase === 'overdue')
+}
+
+const unpreparedOverdueCount = computed(() => {
+  const onPage = items.value.filter(unpreparedOverdue).length
+  return onPage === 0 ? 0 : Math.max(deadlineSummary.value.overdue, onPage)
 })
 
 function statusClass(status: string): string {
@@ -385,16 +417,25 @@ function readableBytes(bytes: number): string {
 async function openDetail(item: PayrollSubmissionOverviewItem) {
   if (!item.latest_submission || detailLoadingId.value !== null) return
   if (expandedId.value === item.id) {
-    closeDetail()
+    closeDetail(true)
     return
   }
+  await openSubmission(item.latest_submission.id, item.id)
+}
+
+async function openSubmission(submissionId: number, obligationId: number | null = null) {
   detailError.value = ''
   artifactDownloadError.value = ''
-  expandedId.value = item.id
+  expandedId.value = obligationId
   detail.value = null
-  detailLoadingId.value = item.latest_submission.id
+  detailLoadingId.value = submissionId
   try {
-    detail.value = await payrollApi.submissionDetail(item.latest_submission.id)
+    detail.value = await payrollApi.submissionDetail(submissionId)
+    expandedId.value = detail.value.submission.obligation_id
+    if (obligationId === null) {
+      await nextTick()
+      detailPanel.value?.scrollIntoView?.({ block: 'start' })
+    }
   } catch (exception) {
     detail.value = null
     detailError.value = apiErrorMessage(
@@ -409,10 +450,11 @@ async function openDetail(item: PayrollSubmissionOverviewItem) {
 /** Detail podání po ručním přijetí: přenačte se seznam i otevřený detail. */
 async function afterManualAcceptance(item: PayrollSubmissionOverviewItem | undefined) {
   await load()
-  if (item) await openDetail(item)
+  if (item && expandedId.value !== item.id) await openDetail(item)
 }
 
-function closeDetail() {
+function closeDetail(clearRequest = false) {
+  if (clearRequest) emit('close-submission')
   expandedId.value = null
   detail.value = null
   detailError.value = ''
@@ -443,6 +485,7 @@ async function downloadArtifact(
 async function loadHealthOverviews() {
   healthOverviews.value = []
   healthError.value = ''
+  healthErrorCode.value = null
   if (props.mode !== 'health') return
   try {
     const runs = await payrollApi.runs(period.value)
@@ -562,6 +605,11 @@ async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
   }
 }
 
+function healthErrorCodeOf(exception: unknown): string | null {
+  const code = (exception as { response?: { data?: { error?: { code?: unknown } } } })?.response?.data?.error?.code
+  return typeof code === 'string' ? code : null
+}
+
 async function prepareHealth(overview: PayrollHealthPaymentOverview): Promise<HealthPreparedOverview> {
   return payrollHealthNotificationApi.preparePaymentOverview(
     overview.revision_id,
@@ -587,6 +635,7 @@ async function officialHealthArtifact(prepared: HealthPreparedOverview) {
 
 async function downloadHealth(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchError.value = ''
   downloadingHealthKey.value = healthOverviewKey(overview)
   try {
@@ -598,6 +647,7 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
       exception,
       t('payroll.submissions.overview.health_download_failed'),
     )
+    healthErrorCode.value = healthErrorCodeOf(exception)
   } finally {
     downloadingHealthKey.value = null
   }
@@ -612,6 +662,7 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
   // Jednotlivé a dávkové odeslání jsou dvě větve téhož; kdyby si každá držela
   // vlastní hlášku, zůstaly by na stránce viset dvě identické červené lišty.
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchError.value = ''
   const key = healthOverviewKey(overview)
   sendingHealthKey.value = key
@@ -638,6 +689,7 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
       exception,
       t('payroll.submissions.overview.health_send_failed'),
     )
+    healthErrorCode.value = healthErrorCodeOf(exception)
   } finally {
     sendingHealthKey.value = null
   }
@@ -671,6 +723,7 @@ async function sendSelectedHealthViaDataBox() {
   if (!confirmed) return
   healthBatchError.value = ''
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchQueuedIds.value = []
   healthBatchTransport.value = null
   healthBatchSentResults.value = null
@@ -726,6 +779,8 @@ async function load() {
     items.value = response.items
     total.value = response.total
     deadlineSummary.value = response.deadline_summary
+    unpreparedSummary.value = { ...EMPTY_DEADLINE_SUMMARY, ...(response.unprepared_deadline_summary ?? {}) }
+    jmhzPreparationGate.value = response.jmhz_preparation_gate ?? null
     await Promise.all([
       loadHealthOverviews(),
       loadJmhzPreviews(),
@@ -734,6 +789,8 @@ async function load() {
     items.value = []
     total.value = 0
     deadlineSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
+    unpreparedSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
+    jmhzPreparationGate.value = null
     healthOverviews.value = []
     jmhzPreviews.value = []
     jmhzApprovedRuns.value = []
@@ -745,6 +802,7 @@ async function load() {
     loading.value = false
     loadedOnce.value = true
   }
+  if (props.submissionId) await openSubmission(props.submissionId)
 }
 
 function goToPage(nextPage: number) {
@@ -757,12 +815,15 @@ watch([environment, period, () => props.mode], () => {
   offset.value = 0
   void load()
 })
+watch(() => props.submissionId, id => {
+  if (id && !loading.value) void openSubmission(id)
+})
 onMounted(load)
 // Po odeslání v jiném okně (datová schránka, fronta) se obsah jen zašedne
 // a přepíše; rozbalený detail ani rozdělaná akce se nezavírají.
 useWindowRefresh(load, () => !loading.value && expandedId.value === null && settlingId.value === null
   && sendingHealthKey.value === null && !healthBatchBusy.value && externalFilingItem.value === null
-  && healthBatchTransport.value === null)
+  && healthBatchTransport.value === null, { partial: true })
 </script>
 
 <template>
@@ -849,14 +910,26 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
           </p>
         </div>
 
-        <p
+        <div
           v-if="healthError"
           class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
           role="alert"
           data-test="health-overview-error"
         >
-          {{ healthError }}
-        </p>
+          <p>{{ healthError }}</p>
+          <RouterLink
+            v-if="healthErrorRemediation"
+            :to="healthErrorRemediation.path"
+            class="mt-2 whitespace-nowrap"
+            :class="btnOutlineSm('warning')"
+            data-test="health-overview-error-remediation"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t(healthErrorRemediation.actionKey) }}
+          </RouterLink>
+        </div>
 
         <div v-if="healthOverviews.length === 0 && !healthError" class="p-6 text-sm text-neutral-500">
           {{ t('payroll.submissions.overview.health_empty') }}
@@ -1066,11 +1139,27 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
           <dt class="text-xs font-medium text-neutral-500">
             {{ t(`payroll.submissions.overview.summary.${entry}`) }}
           </dt>
-          <dd class="mt-1 text-2xl font-semibold text-neutral-900">
+          <dd class="mt-1 text-2xl font-semibold text-neutral-900" :data-test="`submission-summary-${entry}`">
             {{ counts[entry] }}
           </dd>
         </div>
       </dl>
+
+      <!--
+        Desítky povinností po termínu bez podání (typicky přihlášky dohod
+        podané dřív jiným programem) se po jedné neodškrtávají: hromadné
+        „vyřízeno mimo aplikaci" je v panelu Zákonné termíny na přehledu mezd.
+      -->
+      <p
+        v-if="unpreparedOverdueCount > 1"
+        class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
+        data-test="submission-bulk-external-hint"
+      >
+        <span>{{ t('payroll.submissions.overview.bulk_external_hint', { count: unpreparedOverdueCount }) }}</span>
+        <RouterLink :to="{ name: 'payroll-dashboard', hash: '#payroll-deadlines' }" :class="btnOutlineSm('neutral')" data-test="submission-bulk-external-link">
+          {{ t('payroll.submissions.overview.bulk_external_action') }}
+        </RouterLink>
+      </p>
 
       <p
         v-if="settleError"
@@ -1132,7 +1221,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                       {{ t('payroll.submissions.overview.no_authority_result') }}
                     </span>
                   </td>
-                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</td>
+                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.dispatch_channel ?? item.planned_channel ?? item.preferred_channel) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                       {{ submissionStatusLabel(item.status) }}
@@ -1198,7 +1287,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                       -->
                       <RouterLink
                         v-else
-                        :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+                        :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period } }"
                         :class="btnOutlineSm('neutral')"
                         data-test="submission-not-prepared"
                       >
@@ -1265,7 +1354,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.dispatch_channel ?? item.planned_channel ?? item.preferred_channel) }}</dd>
               </div>
             </dl>
             <button
@@ -1315,7 +1404,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
             </button>
             <RouterLink
               v-else
-              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period } }"
               class="mt-4"
               :class="btnOutline('neutral')"
               data-test="submission-not-prepared"
@@ -1350,6 +1439,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
 
       <section
         v-if="detail"
+        ref="detailPanel"
         class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
         data-test="submission-detail"
       >
@@ -1391,7 +1481,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
               />
             </div>
           </div>
-          <button type="button" :class="btnOutline('neutral')" @click="closeDetail">
+          <button type="button" :class="btnOutline('neutral')" @click="closeDetail(true)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.x" />
             </svg>
@@ -1520,7 +1610,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                   class="mt-2 text-xs text-neutral-600"
                   data-test="submission-issue-remediation"
                 >
-                  {{ submissionIssueRemediation(issue.validation_stage) }}
+                  {{ submissionIssueRemediation(issue.validation_stage, issue.issue_code) }}
                 </p>
                 <details class="mt-2 text-xs text-neutral-500" data-test="submission-issue-technical">
                   <summary class="cursor-pointer">{{ t('payroll.submissions.overview.issue_technical') }}</summary>
@@ -1695,6 +1785,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
         :environment="environment"
         :previews="jmhzPreviews"
         :obligations="items"
+        :preparation-gate="jmhzPreparationGate"
         @refresh="load"
       />
 

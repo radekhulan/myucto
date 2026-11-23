@@ -75,7 +75,11 @@ final class FxSettlementEvidenceRepository
                 $findings[] = 'payment_posting_reversed';
             }
             if (array_key_exists('document_amount', $member)) {
-                if ($member['included_as_of'] && $member['representation'] === 'payment_match' && !in_array(strtoupper((string) $member['currency']), [strtoupper((string) $document['currency_code']), 'CZK'], true)) $findings[] = 'legacy_payment_currency_unproven';
+                if ($member['included_as_of'] && $member['representation'] === 'payment_match'
+                    && !in_array(strtoupper((string) $member['currency']), [strtoupper((string) $document['currency_code']), 'CZK'], true)
+                    && !self::postedInDocumentCurrency($source, $item, (string) $document['currency_code'], $type, $member['document_amount'])) {
+                    $findings[] = 'legacy_payment_currency_unproven';
+                }
                 $member['document_amount'] = JournalLineAmount::decimal($member['document_amount']);
                 if (isset($member['status']) && !in_array($member['status'], ['confirmed', 'posted'], true)) {
                     $member['included_as_of'] = $member['included_as_of'] && $member['reversed_on'] !== null && $member['reversed_on'] > $asOf;
@@ -192,6 +196,26 @@ final class FxSettlementEvidenceRepository
             $evidence['closed_home_position_proven'] = true;
         }
         return $evidence;
+    }
+
+    /**
+     * Platba v jiné cizí měně než doklad (karta z EUR účtu na fakturu v USD): párování částku
+     * v měně dokladu nenese, ale bankovní zápis ano. Jediný řádek na saldokontě v měně dokladu
+     * se stejnou částkou úhradu dokládá, převod měn udělala banka.
+     *
+     * @param array<string,mixed>|null $source {@see postedSource()}
+     * @param array<string,mixed> $item
+     */
+    private static function postedInDocumentCurrency(?array $source, array $item, string $documentCurrency, string $type, mixed $documentAmount): bool
+    {
+        if ($source === null || $documentAmount === null) return false;
+        $side = $type === 'invoice' ? 'credit' : 'debit';
+        $lines = array_values(array_filter($source['lines'], static fn (array $line): bool =>
+            (int) $line['account_id'] === (int) $item['account_id'] && $line['side'] === $side));
+        return count($lines) === 1
+            && strtoupper((string) $lines[0]['currency_code']) === strtoupper($documentCurrency)
+            && $lines[0]['signed_amount_foreign'] !== null
+            && bccomp(JournalLineAmount::decimal($lines[0]['signed_amount_foreign']), JournalLineAmount::decimal($documentAmount), 2) === 0;
     }
 
     private function manualLifecycle(int $supplierId, string $type, int $id, int $accountId, bool $currentRead): array

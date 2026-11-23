@@ -50,6 +50,12 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
  * stranách (základ SP, záloha, zdravotní pojistné); rozdíl v příjmu se k němu
  * přidá do rozpadu jako vysvětlení.
  *
+ * ── Neúplná převzatá mzda ───────────────────────────────────────────────────
+ * Ručně nebo tabulkou převzatý měsíc (zdroj `other`), kterému v rozdílných
+ * veličinách prostě chybí číslo (nula), není hlášení podané před opravou mzdy.
+ * Nález pak nese `takeover_incomplete`: má se doplnit mzda, opravné hlášení by
+ * ČSSZ poslalo znovu to, co už má.
+ *
  * ── Kdy se nic nehlásí ─────────────────────────────────────────────────────
  *  - za osobu a měsíc není přijatý formulář nebo převzatá mzda (chybějící hlášení
  *    hlídá {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService}),
@@ -85,7 +91,8 @@ final class PayrollTakeoverJmhzFormCheck
     /**
      * @return list<array{employee_id:int,employee_name:string,period:string,employment_ids:list<int>,
      *   submission_id:int,submission_type:?string,submitted_at:?string,
-     *   differences:list<array{metric:string,takeover_minor:int,jmhz_minor:int,difference_minor:int}>}>
+     *   differences:list<array{metric:string,takeover_minor:int,jmhz_minor:int,difference_minor:int}>,
+     *   takeover_incomplete:bool}>
      */
     public function check(int $supplierId, int $year): array
     {
@@ -120,11 +127,12 @@ final class PayrollTakeoverJmhzFormCheck
      *   employee_id:?int,employment_id:int,form:JmhzReportForm}> $forms účinné formuláře (vztah × měsíc)
      * @return list<array{employee_id:int,employee_name:string,period:string,employment_ids:list<int>,
      *   submission_id:int,submission_type:?string,submitted_at:?string,
-     *   differences:list<array{metric:string,takeover_minor:int,jmhz_minor:int,difference_minor:int}>}>
+     *   differences:list<array{metric:string,takeover_minor:int,jmhz_minor:int,difference_minor:int}>,
+     *   takeover_incomplete:bool}>
      */
     public static function compare(array $months, array $forms): array
     {
-        /** @var array<string,array{employee_id:int,period:string,employments:array<int,true>,values:array<string,int>,health:array{employee:int,employer:int}}> $takeover */
+        /** @var array<string,array{employee_id:int,period:string,employments:array<int,true>,values:array<string,int>,health:array{employee:int,employer:int},entered:bool}> $takeover */
         $takeover = [];
         foreach ($months as $month) {
             if ($month->employeeId === null || $month->employmentId === null
@@ -139,7 +147,9 @@ final class PayrollTakeoverJmhzFormCheck
                 'employments' => [],
                 'values' => array_fill_keys(self::METRIC_NAMES, 0),
                 'health' => ['employee' => 0, 'employer' => 0],
+                'entered' => true,
             ];
+            $takeover[$key]['entered'] = $takeover[$key]['entered'] && $month->source === 'other';
             $takeover[$key]['employments'][$month->employmentId] = true;
             $takeover[$key]['values']['gross'] += $month->grossMinor;
             $takeover[$key]['values']['social_base'] += $month->socialBaseMinor;
@@ -240,6 +250,10 @@ final class PayrollTakeoverJmhzFormCheck
                 'submission_type' => $other['submission']['submission_type'],
                 'submitted_at' => $other['submission']['submitted_at'],
                 'differences' => $differences,
+                'takeover_incomplete' => $side['entered'] && array_filter(
+                    $decisive,
+                    static fn (array $difference): bool => $difference['takeover_minor'] !== 0,
+                ) === [],
             ];
         }
         usort($out, static fn (array $left, array $right): int

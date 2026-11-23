@@ -32,6 +32,7 @@ import { codebooksApi, type Currency } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
+import { unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -127,7 +128,7 @@ function startEdit(o: VendorOffer) {
   editingId.value = o.id
   original = o
   draft.vendor_sku = o.vendor_sku ?? ''
-  draft.purchase_price = o.purchase_price ?? ''
+  draft.purchase_price = unitPriceText(o.purchase_price) ?? ''
   draft.currency_code = o.currency_code
   draft.delivery_days = o.delivery_days === null ? '' : String(o.delivery_days)
   draft.stock_qty = o.stock_qty ?? ''
@@ -379,7 +380,7 @@ function qty(v: string | null): string {
 function price(o: VendorOffer): string {
   if (o.purchase_price === null || o.purchase_price === '') return '—'
   const n = Number(o.purchase_price)
-  return `${Number.isFinite(n) ? n.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : o.purchase_price} ${o.currency_code}`
+  return `${Number.isFinite(n) ? n.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: unitPriceDecimals(n) }) : o.purchase_price} ${o.currency_code}`
 }
 function availabilityClass(s: VendorAvailabilityState): string {
   switch (s) {

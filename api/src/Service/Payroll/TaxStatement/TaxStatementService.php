@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 
 /**
  * Sestaví roční vyúčtování daně ze závislé činnosti (DPZVD6) a daně vybírané
@@ -34,6 +35,7 @@ final class TaxStatementService
         private readonly TaxStatementXmlBuilder $xmlBuilder,
         private readonly JmhzExternalCodebookCatalog $codebook,
         private readonly PayrollTakeoverCoverage $takeover,
+        private readonly TaxRepresentationService $representation,
     ) {}
 
     /**
@@ -60,7 +62,7 @@ final class TaxStatementService
     /**
      * XML jedné písemnosti.
      *
-     * @param array{variant?:string,verze_sw?:string,verze_pis?:string,d_zjist?:string} $meta
+     * @param array{variant?:string,verze_sw?:string,verze_pis?:string,d_zjist?:string,representation_date?:string} $meta
      * @return array{xml:string,summary:array<string,mixed>,warnings:list<string>}
      */
     public function build(
@@ -79,6 +81,7 @@ final class TaxStatementService
             throw new \DomainException(implode(' ', $basis->blockers));
         }
         $supplier = EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        $meta['representation'] = $this->representation->atSubmissionDate($supplierId, $meta);
 
         if ($formCode === self::FORM_DEPENDENT_ACTIVITY) {
             $statement = $this->calculator->dependentActivity($basis, $meta);

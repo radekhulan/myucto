@@ -24,6 +24,7 @@
 | Varování v administraci o konfiguraci | Klíč, MFA, zámek session | [§ 999.5.1.9](#999519-varovani-secretencryptionkey-spatna-delka-klice) až [§ 999.5.1.12](#9995112-varovani-sessionlockconfiguration) |
 | Nejde upravit vystavená faktura, chybí QR, špatné údaje v PDF | Vystavený doklad je neměnný | [§ 999.5.2](#99952-faktury) |
 | Faktura klientovi nedorazila | Záznam o odeslání, SMTP, SPF a DKIM | [§ 999.5.3](#99953-e-maily) |
+| Microsoft 365 odmítá připojení přes IMAP | Kód z testu MyÚčta, oprávnění aplikace a schránky v Exchange | [Diagnostika Microsoft 365 IMAP](96_Nastaveni.md#96715-diagnostika-pripojeni) |
 | Výpis se nenahrál, nesedí zůstatek, nepáruje se platba | Import výpisů a párování | [§ 999.5.4](#99954-banka) |
 | Import do Pohody hlásí chybu | Kódy pro export | [§ 999.5.5](#99955-exporty) |
 | Plánovaná úloha neběží | Systém → Diagnostika, Systém → Plánované úlohy | [§ 999.5.6](#99956-cron-a-automatika) |
@@ -38,8 +39,8 @@
 Připravte si:
 
 1. **Přesný text hlášky** a čas, kdy se objevila.
-2. **Oprávnění správce** pro kroky označené jako správcovské (Diagnostika,
-   Plánované úlohy, Aktualizace, konfigurace). Běžný uživatel se při problému obrací
+2. **Roli Superadmin** pro Diagnostiku, Plánované úlohy a Aktualizace.
+   Přístup ke konfiguraci na serveru vyžaduje oprávnění správce serveru. Běžný uživatel se při problému obrací
    na správce.
 3. **Přístup k serveru** u příkazů příkazové řádky: soubory `cfg.php`
    a `cfg.local.php`, adresář `log/` a spouštění skriptů `php api/bin/…`.
@@ -136,9 +137,15 @@ php api/bin/setup.php                # interaktivní náhrada z příkazové ř�
 
 #### 999.5.1.4 Lockout po brute-force
 
-Po 10 neúspěšných pokusech za 15 minut jste zablokovaní na 15 minut. Po 30 za hodinu
-na 24 hodin. Počkejte, nebo požádejte správce o reset z databáze:
-`DELETE FROM login_attempts WHERE bucket_key LIKE '%vas_email%';`
+Při výchozím nastavení následuje po 10 neúspěšných pokusech za 15 minut
+blokace na 15 minut, po 30 za hodinu na 24 hodin. Počkejte podle hlášky
+nebo požádejte správce o prověření konkrétního účtu a sítě.
+
+Čítač používá hash normalizovaného e-mailu a síťový prefix, nikoli čitelný
+e-mail. Při dostupném Redisu je uložený v Redisu, jinak v `login_attempts`.
+Smazání řádků podle e-mailu ani samotná změna hesla blokaci neodstraní.
+Správce musí nejprve zjistit použitý backend a příslušný čítač; nemažte
+plošně historii pokusů ostatních uživatelů.
 
 #### 999.5.1.5 Passkey nefunguje nebo se nezobrazuje systémový dialog
 
@@ -375,7 +382,7 @@ Otisk SHA-256 souboru se shoduje s dříve importovaným výpisem. Buď:
 #### 999.5.4.2 PDF výpis se nenahraje nebo nesedí zůstatek
 
 PDF import je deterministický a podporuje aktuální rozvržení výpisů **Banky CREDITAS,
-ČSOB a KB**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky nebo nové neznámé
+ČSOB, České spořitelny, KB, MONETA Money Bank, Raiffeisenbank a Revolut Business**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky nebo nové neznámé
 rozvržení se neodhaduje pomocí AI a import se odmítne.
 
 - Ověřte, že jde o originální PDF stažené z bankovnictví, ne tisk do PDF nebo sken.
@@ -542,9 +549,12 @@ faktury ve stavu „nezaplaceno".
 #### 999.5.6.6 Valutová pokladna nenabízí úhradu faktury nebo převod
 
 Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
-Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes 311/321
-a valutový převod přes 261 nejsou podporované a systém je záměrně blokuje. Proveďte
-doložený ruční zápis v deníku. V daňové evidenci je pokladna pouze korunová.
+Nákup/Ostatní s kurzem a CZK protihodnotou. Úhradu faktury ani valutový převod přes 261
+nepodporuje a systém je záměrně blokuje. Cizoměnovou fakturu nebo účtenku uhraďte
+z korunové pokladny korunami, rozdíl proti kurzu dokladu se zaúčtuje jako kurzový
+(563/663, viz [§ 32.6](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny)).
+Valutový převod zaúčtujte doloženým ručním zápisem v deníku. V daňové evidenci je
+pokladna pouze korunová.
 
 #### 999.5.6.7 AI kontace nic nenavrhla
 
@@ -587,6 +597,23 @@ Možná chybí cache statistik. Spusťte `php api/bin/recompute-stats.php`, pře
 - Zkontrolujte `cfg.php → app.debug => false` v produkci (ladicí logy jsou drahé).
 - Sledujte `log/app-RRRR-MM-DD.log` (pomalé dotazy jsou v logu jako `slow_query`).
 
+#### 999.5.7.3 Po obnově databáze z jiného serveru zápis hlásí „Databáze odmítla zápis…“
+
+Triggery databáze běží pod účtem, který je vytvořil (DEFINER). Po obnově dumpu
+z jiného serveru buď tento účet na novém serveru neexistuje, nebo existuje, ale práva
+má jen k původní databázi. Zápis, typicky výpočet mezd, pak skončí touto hláškou
+(v logu chyba databáze 1142 nebo 1449).
+
+```bash
+php api/bin/migrate.php --repair-definers          # náhled: kolik triggerů a proč
+php api/bin/migrate.php --repair-definers --apply  # znovu vytvoří triggery pod aktuálním účtem
+```
+
+Náhled rozliší účet, který neexistuje, od účtu bez práv k databázi. U účtu bez práv
+navíc vypíše příkaz `GRANT SELECT, INSERT, UPDATE, DELETE ON …`, kterým mu práva může
+přidělit správce databáze místo opravy triggerů. Těla triggerů ani jejich SQL mode se
+opravou nemění.
+
 ### 999.5.8 Multi-supplier
 
 #### 999.5.8.1 Po přepnutí dodavatele vidím prázdný seznam klientů
@@ -604,14 +631,15 @@ vytvořte téhož klienta (data jsou oddělená).
 
 ### 999.6.1 Diagnostika
 
-`Systém → Diagnostika` je první místo, kam se podívat, když se aplikace chová divně
+`Systém → Diagnostika` je dostupná jen **Superadminovi instalace**. Je to
+první místo, kam se podívat, když se aplikace chová divně
 a není jasné proč. Nejde o výpis hodnot, ale o verdikt (**vyhovuje**, **vyhovuje s
 výhradami**, **nevyhovuje**) a u každého nálezu je dopad, náprava a odkaz do příslušné
 kapitoly manuálu.
 
 Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini` (`memory_limit`,
 limity nahrávání, časové pásmo, OPcache), verze a nastavení MariaDB, dostupnost Redisu,
-volné místo a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
+volné a celkové místo na disku (na spravované instalaci ho hlídá provozovatel a kontrola se nezobrazuje) a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
 databáze proti migracím ([§ 999.6.1.3](#999613-struktura-databaze)), poslední běhy
 plánovaných úloh, stav licence, dostupnost novější verze aplikace a šifrování mzdového
 archivu ([§ 999.6.1.4](#999614-sifrovani-mzdoveho-archivu-a-rotace-klice)).
@@ -657,9 +685,10 @@ informace, jestli jsou nastavené (`<set>` / `<empty>`), nikdy hodnota.
 
 #### 999.6.1.2 Logy v balíčku
 
-Logy aplikace v balíčku **ve výchozím stavu nejsou** a přidávají se zaškrtnutím. Před
-vytvořením balíčku si jejich obsah můžete přímo na stránce prohlédnout, den po dni
-a po stránkách.
+Ve webovém formuláři je zahrnutí logů **předem zaškrtnuté**. Nechcete-li
+je přibalit, volbu vypněte. Při zapnuté volbě musíte před vytvořením
+samostatně potvrdit seznámení s obsahem. Obsah si lze přímo na stránce
+prohlédnout den po dni a po stránkách.
 
 Z výřezu se odstraňují navázané parametry databázových dotazů, stack trace a záznamy
 o komunikaci se SMTP serverem. **Zbytek se neupravuje**, logy proto mohou obsahovat

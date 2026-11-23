@@ -116,9 +116,17 @@ onBeforeUnmount(() => { if (locked) unlockBodyScroll() })
                role="dialog" aria-modal="true" :aria-label="t('workspace.windows')" @keydown="onKey">
         <header class="flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3">
           <h2 class="font-semibold text-neutral-900">{{ t('workspace.windows') }} <span class="ml-1 text-xs font-normal text-neutral-500">{{ workspace.windows.length }}/{{ MAX_WORKSPACE_WINDOWS }}</span></h2>
+          <span class="flex items-center gap-1">
+          <button type="button" class="hidden h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-primary-400 md:inline-flex"
+                  :class="workspace.windowTabsHidden ? 'border-primary-200 bg-primary-50 text-primary-700 hover:bg-primary-100' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-100'"
+                  :aria-pressed="!workspace.windowTabsHidden" data-toggle-window-tabs @click="workspace.setWindowTabsHidden(!workspace.windowTabsHidden)">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2.5 16.5v-9a1 1 0 0 1 1-1h4l1-2h3l1 2h3.5a1 1 0 0 1 1 1v9M2.5 16.5h15M7.5 6.5h5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            {{ t(workspace.windowTabsHidden ? 'workspace.tabs_show' : 'workspace.tabs_hide') }}
+          </button>
           <button type="button" class="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100" :aria-label="t('common.close')" @click="close">
             <svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
           </button>
+          </span>
         </header>
         <div class="px-4 py-3">
           <input ref="input" v-model="search" class="w-full rounded-lg border border-neutral-200 bg-surface px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"

@@ -65,7 +65,7 @@ final class VatCoefficientAction
     public function setProvisional(Request $request, Response $response): Response
     {
         if (!$this->allowed($request, AccessLevel::WRITE)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);

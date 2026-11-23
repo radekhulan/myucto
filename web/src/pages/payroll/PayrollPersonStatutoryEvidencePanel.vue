@@ -8,10 +8,11 @@ import {
   type PayrollStatutoryEvidenceFrozenRun,
   type PayrollStatutoryEvidenceRow,
   type PayrollStatutoryEvidenceSection,
+  type PayrollTaxDeclarationStart,
 } from '@/api/payroll'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
-import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import { useAuthStore } from '@/stores/auth'
@@ -311,6 +312,21 @@ function derivedTaxpayerCredit(section: StatutorySectionSpec): boolean {
     && !effectiveRows(section).some(row => statutoryText(row, 'credit_kind') === 'taxpayer')
 }
 
+/**
+ * Upozornění k uložené větě prohlášení, jejíž začátek neodpovídá dni podpisu
+ * podle § 38k ZDP. Posuzuje server (TaxDeclarationEffectiveMonth); uložení
+ * neblokuje, účetní může mít doklad, který server nezná.
+ */
+function declarationCheckText(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): string {
+  if (section.key !== 'tax_declarations' || typeof row.id !== 'number') return ''
+  const check = evidence.value?.derived?.tax_declaration_checks?.find(item => item.id === row.id)
+  if (!check) return ''
+  if (check.legal_from === null) return t('payroll.people.statutory_evidence.declaration_check.next_year')
+  return t(`payroll.people.statutory_evidence.declaration_check.${check.warning}`, {
+    month: formatPeriod(check.legal_from.slice(0, 7)),
+  })
+}
+
 function summaryLabel(section: StatutorySectionSpec): string {
   const rows = effectiveRows(section)
   if (derivedTaxpayerCredit(section)) {
@@ -323,6 +339,22 @@ function summaryLabel(section: StatutorySectionSpec): string {
     ].join(', ')
   }
   if (rows.length === 0) {
+    // Záznam je, jen k vybranému měsíci už neplatí (typicky zadaný jen na
+    // měsíc brigády u trvající dohody). „Nezadáno" by tvrdilo, že se uložení
+    // nepovedlo.
+    const endedOn = section.kind === 'month' || section.optional === true
+      ? null
+      : rowsOf(section)
+        .map(row => statutoryText(row, 'effective_to'))
+        .filter(to => /^\d{4}-\d{2}-\d{2}$/.test(to) && to < effectiveOn.value)
+        .sort()
+        .at(-1) ?? null
+    if (endedOn !== null) {
+      return t('payroll.people.statutory_evidence.current_ended', {
+        day: formatDate(endedOn),
+        month: formatDate(effectiveOn.value),
+      })
+    }
     return t(section.optional === true
       ? `payroll.people.statutory_evidence.${section.emptyKey ?? 'current_none_claimed'}`
       : 'payroll.people.statutory_evidence.current_missing')
@@ -645,6 +677,7 @@ function onSelect(
   event: Event,
 ) {
   setField(section, row, key, (event.target as HTMLSelectElement).value)
+  if (section.key === 'tax_declarations' && key === 'status') void applyDeclarationStart(row)
 }
 
 function onInput(
@@ -669,6 +702,85 @@ function onDateChange(
   value: string,
 ) {
   setField(section, row, key, value)
+  if (section.key === 'tax_declarations' && key === 'signed_on') void applyDeclarationStart(row)
+}
+
+/*
+ * Začátek prohlášení poplatníka podle dne podpisu (§ 38k ZDP).
+ *
+ * Formulář dřív předvyplnil „Platí od" prvním neuzavřeným měsícem a den podpisu
+ * ho nezměnil: prohlášení podepsané v lednu do 30 dnů po prosincovém nástupu
+ * začínalo až v únoru. Měsíc teď odvodí server (nástupy osoby, lhůta 30 dnů,
+ * 15. únor, hranice schválené mzdy); tady se jen dosadí do nového záznamu
+ * a vysvětlí. Uloženému záznamu se začátek nepřepisuje, tam rozpor hlásí
+ * kontrola po uložení.
+ */
+const declarationStarts = ref<Record<string, PayrollTaxDeclarationStart>>({})
+
+async function applyDeclarationStart(row: PayrollStatutoryEvidenceRow) {
+  const signedOn = statutoryText(row, 'signed_on')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(signedOn)) return
+  let start = declarationStarts.value[signedOn]
+  if (start === undefined) {
+    try {
+      start = await payrollApi.taxDeclarationStart(props.personId, signedOn)
+    } catch {
+      // Bez odpovědi zůstává začátek, jak ho účetní zadala; kontrola po uložení rozpor ohlásí.
+      return
+    }
+    declarationStarts.value = { ...declarationStarts.value, [signedOn]: start }
+  }
+  // Mezitím mohl den podpisu někdo přepsat; starší odpověď už neplatí.
+  if (statutoryText(row, 'signed_on') !== signedOn) return
+  if (typeof row.id !== 'number') row.effective_from = start.open_from
+}
+
+function declarationStart(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): PayrollTaxDeclarationStart | null {
+  if (section.key !== 'tax_declarations' || !isEditing(section) || typeof row.id === 'number') return null
+  if (statutoryText(row, 'status') !== 'signed') return null
+  return declarationStarts.value[statutoryText(row, 'signed_on')] ?? null
+}
+
+/** Proč vyšel daný měsíc: lhůta po nástupu, roční lhůta, nebo měsíc po podpisu. */
+function declarationStartText(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): string {
+  const start = declarationStart(section, row)
+  if (start === null) return ''
+  const basis = start.basis === 'after_frozen_period' ? 'following_month' : start.basis
+  return t(`payroll.people.statutory_evidence.declaration_start.${basis}`, {
+    signed: formatDate(start.signed_on),
+    entry: start.entry === null ? '' : formatDate(start.entry),
+    month: formatPeriod(start.legal_from.slice(0, 7)),
+  })
+}
+
+/** Zákonný měsíc je uzavřený schválenou mzdou: co je předvyplněno a co se slevou za uzavřené měsíce. */
+function declarationStartFrozenText(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): string {
+  const start = declarationStart(section, row)
+  if (start === null || !start.frozen || start.frozen_through === null) return ''
+  return t('payroll.people.statutory_evidence.declaration_start.frozen', {
+    day: formatDate(start.frozen_through),
+    open: formatPeriod(start.open_from.slice(0, 7)),
+    month: formatPeriod(start.legal_from.slice(0, 7)),
+  })
+}
+
+/**
+ * Nový záznam prohlášení začíná v období uzavřeném schválenou mzdou. Uložit
+ * jde (schválená revize si drží vlastní snímek), jenže schválená mzda se sama
+ * nepřepočítá: bez opravy běhu se sleva za ty měsíce neprojeví.
+ */
+function declarationInClosedPeriod(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): boolean {
+  return section.key === 'tax_declarations'
+    && isEditing(section)
+    && typeof row.id !== 'number'
+    && statutoryText(row, 'status') === 'signed'
+    && isFrozen(section, row)
 }
 
 const customReferenceEditors = reactive(
@@ -1038,7 +1150,7 @@ onMounted(() => {
           v-if="frozenThrough"
           class="mb-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
           data-test="statutory-evidence-frozen"
-        >{{ t('payroll.people.statutory_evidence.frozen_hint', { day: frozenThrough }) }}</p>
+        >{{ t('payroll.people.statutory_evidence.frozen_hint', { day: formatDate(frozenThrough) }) }}</p>
 
         <div class="space-y-6">
           <div
@@ -1395,6 +1507,30 @@ onMounted(() => {
                           {{ issueText(issue) }}
                         </li>
                       </ul>
+                      <p
+                        v-if="declarationCheckText(section, row)"
+                        class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
+                        :data-test="`declaration-check-${index}`"
+                      >{{ declarationCheckText(section, row) }}</p>
+                      <!-- Proč „Platí od" vyšlo na daný měsíc (§ 38k ZDP); měsíc odvodil server ze dne podpisu. -->
+                      <div
+                        v-if="declarationStartText(section, row)"
+                        class="mt-2 rounded-md border border-primary-500/30 bg-primary-50 px-2 py-1.5 text-xs text-primary-800"
+                        :data-test="`declaration-start-${index}`"
+                      >
+                        <p>{{ declarationStartText(section, row) }}</p>
+                        <p
+                          v-if="declarationStartFrozenText(section, row)"
+                          class="mt-1"
+                          :data-test="`declaration-start-frozen-${index}`"
+                        >{{ declarationStartFrozenText(section, row) }}</p>
+                      </div>
+                      <p
+                        v-if="declarationInClosedPeriod(section, row) && frozenThrough"
+                        class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
+                        role="alert"
+                        :data-test="`declaration-closed-period-${index}`"
+                      >{{ t('payroll.people.statutory_evidence.declaration_start.closed_period', { day: formatDate(frozenThrough) }) }}</p>
 
                       <!--
                         Zamčený řádek dostane AKCI, ne jen konstatování. Bez ní si

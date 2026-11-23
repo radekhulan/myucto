@@ -26,9 +26,15 @@ final class ImportOptions
      * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      * @param bool $relinkOnly opravný převod vazeb už převedené firmy: projde zálohu, ale nic
      *                         nového nezaloží (zápis, doklad, pohyb, výpis, partnera, kartu, období) -
-     *                         jen u převzatých záznamů znovu dopočítá úhrady, zápočty a zálohy.
+     *                         jen u převzatých záznamů znovu dopočítá úhrady, zápočty a zálohy
+     *                         a doplní valuty valutových pokladen, jejich dokladů a řádků deníku
+     *                         otevřených let.
      *                         Firma se po převodu účtuje v MyÚčtu a novější doklady z Money by se
      *                         zdvojily s tím, co uživatel zadal.
+     * @param int|null $toYear poslední převáděný účetní rok (volba „Převést do roku"); pozdější
+     *                         adresáře zálohy se nepřevádějí a protokol je vyjmenuje. Null =
+     *                         výchozí podle firmy: poslední rok, za kterým už v MyÚčtu běží
+     *                         rok s vlastními zápisy ({@see MoneyS3Importer::withDefaultToYear()}).
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -41,6 +47,7 @@ final class ImportOptions
         public readonly string $disposalYearTax = self::DISPOSAL_YEAR_TAX_HALF,
         public readonly bool $acceptDifferences = false,
         public readonly bool $relinkOnly = false,
+        public readonly ?int $toYear = null,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -54,6 +61,19 @@ final class ImportOptions
         if ($fromYear !== null && ($fromYear < 1990 || $fromYear > 2100)) {
             throw new MoneyS3Exception('invalid_from_year', 'První převáděný rok musí být mezi lety 1990 a 2100.');
         }
+        if ($toYear !== null && ($toYear < 1990 || $toYear > 2100)) {
+            throw new MoneyS3Exception('invalid_to_year', 'Poslední převáděný rok musí být mezi lety 1990 a 2100.');
+        }
+        if ($toYear !== null && $fromYear !== null && $toYear < $fromYear) {
+            throw new MoneyS3Exception('invalid_to_year', "Převést do roku {$toYear} nejde, když převod začíná rokem {$fromYear}.");
+        }
+    }
+
+    /** Tytéž volby s posledním převáděným rokem (výchozí „Převést do roku" určený podle firmy). */
+    public function withToYear(?int $toYear): self
+    {
+        return new self($this->mode, $this->closeHistory, $this->firstPeriodStart, $this->relatedPartyIcos, $this->moneyReports,
+            $this->confirmedIco, $this->fromYear, $this->disposalYearTax, $this->acceptDifferences, $this->relinkOnly, $toYear);
     }
 
     public function isDryRun(): bool
@@ -72,6 +92,7 @@ final class ImportOptions
             'money_reports' => array_map('intval', array_keys($this->moneyReports)),
             'confirmed_ico' => $this->confirmedIco,
             'from_year' => $this->fromYear,
+            'to_year' => $this->toYear,
             'disposal_year_tax' => $this->disposalYearTax,
         ] + ($this->acceptDifferences && !$this->isDryRun() ? ['accept_differences' => true] : [])
           + ($this->relinkOnly ? ['relink_only' => true] : []);

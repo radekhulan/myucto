@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -872,7 +873,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('eshop.pricing.date') }}
-            <input v-model="rateForm.rate_date" :class="FIELD_CLASS" :disabled="!!rateForm.id" data-test="rate-date" type="date" required>
+            <DateInput v-model="rateForm.rate_date" :class="FIELD_CLASS" :disabled="!!rateForm.id" data-test="rate-date" required />
           </label>
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('eshop.pricing.source') }}

@@ -16,6 +16,7 @@
     "jointAllocations",
     "keyboard_shortcuts",
     "license",
+    "maintenance_notice",
     "nav",
     "nonprofitCapital",
     "nonprofitDppo",
@@ -28,6 +29,7 @@
     "search",
     "securitiesDebt",
     "session_lock",
+    "sso",
     "status",
     "supplier",
     "support",
@@ -41,6 +43,7 @@
     "abra_flexi",
     "accrual_period",
     "accrual_suggest",
+    "accruals",
     "activation",
     "activity_log",
     "aiGateway",
@@ -54,6 +57,7 @@
     "bank_accounts",
     "bank_connection",
     "bank_template_admin",
+    "bulk_actions",
     "capture_photo",
     "cash",
     "cash_settlement",
@@ -93,6 +97,7 @@
     "integrations",
     "internal_documents",
     "invoice_default_note",
+    "isdsAccess",
     "kb_plus",
     "linked_documents",
     "list_nav",
@@ -103,14 +108,18 @@
     "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
+    "migrationChecks",
     "migration_nonprofit_notice",
     "migration_overview",
+    "migration_payroll_notice",
     "money_s3",
     "monthly_report",
     "myucto_import",
     "nonprofitTax",
     "nonprofitTaxJ6",
     "nonprofitTaxNative",
+    "number_series",
+    "number_template",
     "oss_rates",
     "other_items",
     "pamica",
@@ -122,10 +131,13 @@
     "payroll_absence",
     "payroll_bank",
     "payroll_imports",
+    "payroll_posting_import",
     "payroll_travel",
+    "pending_documents",
     "period_filter",
     "permissions",
     "pohoda",
+    "pohodaSchedule",
     "portal",
     "portfolio",
     "premier",
@@ -145,6 +157,7 @@
     "propertySetup",
     "publicReceipt",
     "public_holidays",
+    "purchase_email",
     "purchase_invoice",
     "purchase_submissions",
     "recovery_codes",
@@ -155,6 +168,7 @@
     "revenue_categories",
     "roles",
     "sales_orders",
+    "sales_quotes",
     "securities504",
     "sent_emails",
     "settings",
@@ -170,11 +184,14 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
     "vendor",
-    "workReportTracking"
+    "workReportDisplay",
+    "workReportTracking",
+    "work_report_billing"
   ],
   "routes": {
     "instance-admin": [
@@ -213,8 +230,13 @@
       "app",
       "errors"
     ],
+    "approval": [
+      "workReportDisplay",
+      "work_report_billing"
+    ],
     "work-report-tracking": [
-      "workReportTracking"
+      "workReportTracking",
+      "work_report_billing"
     ],
     "payroll-document-access": [
       "payrollDocumentAccess"
@@ -232,7 +254,9 @@
       "dashboard",
       "errors",
       "taxReturn",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "portal-mcp": [
       "client_mcp",
@@ -247,13 +271,17 @@
       "portal"
     ],
     "portal-purchase-invoice-submissions": [
+      "capture_photo",
       "purchase_invoice",
       "purchase_submissions"
     ],
     "portal-company-settings": [
       "company_email_templates",
+      "invoice_default_note",
       "settings",
-      "users"
+      "stock",
+      "users",
+      "workReportDisplay"
     ],
     "clients": [
       "purchase_invoice"
@@ -261,6 +289,7 @@
     "client-new": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings"
@@ -272,11 +301,13 @@
       "project",
       "purchase_invoice",
       "recurring",
+      "sales_quotes",
       "workReportTracking"
     ],
     "client-edit": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings"
@@ -287,21 +318,25 @@
     "project-new": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "project-detail": [
       "dimensions",
       "documents",
       "linked_documents",
       "project",
+      "sales_quotes",
       "workReportTracking"
     ],
     "project-edit": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "invoices": [
+      "bulk_actions",
       "dimensions",
       "documents",
       "linked_documents",
@@ -310,10 +345,26 @@
       "other_items",
       "payment_method",
       "project",
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
+    ],
+    "sales-quotes": [
+      "sales_quotes"
+    ],
+    "sales-quote-new": [
+      "markdown_editor",
+      "sales_quotes",
+      "time_billing"
+    ],
+    "sales-quote-detail": [
+      "markdown_editor",
+      "sales_quotes",
       "time_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",
+      "capture_photo",
       "integrations"
     ],
     "invoice-new": [
@@ -324,6 +375,8 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
+      "number_template",
       "payment_method",
       "price_list",
       "project",
@@ -331,11 +384,14 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-detail": [
       "accrual_period",
       "accrual_suggest",
+      "accruals",
       "activation",
       "automation",
       "bank",
@@ -356,7 +412,9 @@
       "settings",
       "smtp_logs",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-edit": [
       "accrual_period",
@@ -366,6 +424,8 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
+      "number_template",
       "payment_method",
       "price_list",
       "project",
@@ -373,13 +433,17 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoices-export": [
       "aiGateway",
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "invoices-import": [
@@ -387,9 +451,12 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "purchase-invoices": [
+      "bulk_actions",
       "dimensions",
       "documents",
       "linked_documents",
@@ -404,11 +471,16 @@
       "purchase_invoice",
       "purchase_submissions"
     ],
+    "purchase-invoices-email": [
+      "purchase_email"
+    ],
     "purchase-invoices-export": [
       "aiGateway",
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "purchase-invoices-import": [
@@ -416,6 +488,8 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "imports-overview": [
@@ -426,6 +500,12 @@
       "imports",
       "migration_nonprofit_notice",
       "myucto_import"
+    ],
+    "imports-checks": [
+      "migrationChecks"
+    ],
+    "imports-check-detail": [
+      "migrationChecks"
     ],
     "imports-money-s3": [
       "company_profile",
@@ -438,7 +518,9 @@
       "company_profile",
       "imports",
       "migration_nonprofit_notice",
+      "migration_payroll_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
@@ -446,7 +528,9 @@
       "company_profile",
       "imports",
       "migration_nonprofit_notice",
+      "migration_payroll_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
@@ -479,6 +563,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices-renumber": [
+      "cash",
       "purchase_invoice"
     ],
     "purchase-invoice-ai-import": [
@@ -497,6 +582,8 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -505,10 +592,12 @@
       "vendor"
     ],
     "purchase-invoice-detail": [
+      "accruals",
       "activation",
       "attachment_check",
       "automation",
       "bank",
+      "capture_photo",
       "cash",
       "cash_settlement",
       "credit_note_offset",
@@ -531,6 +620,8 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -543,28 +634,44 @@
       "documents"
     ],
     "scan-attach": [
-      "attachment_check"
+      "attachment_check",
+      "capture_photo"
     ],
     "document-detail": [
       "documents",
       "other_items"
     ],
     "other-items": [
+      "dimensions",
       "other_items"
     ],
     "other-item-new": [
-      "dimensions",
-      "other_items"
-    ],
-    "other-item-detail": [
+      "accrual_period",
+      "accrual_suggest",
       "dimensions",
       "documents",
       "linked_documents",
-      "other_items"
+      "other_items",
+      "pending_documents"
+    ],
+    "other-item-detail": [
+      "accrual_period",
+      "accruals",
+      "dimensions",
+      "documents",
+      "linked_documents",
+      "list_nav",
+      "other_items",
+      "purchase_invoice"
     ],
     "other-item-edit": [
+      "accrual_period",
+      "accrual_suggest",
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "document-requests": [
       "document_requests"
@@ -573,6 +680,9 @@
       "databox",
       "payroll",
       "payroll_absence"
+    ],
+    "payroll-month-guide": [
+      "payroll"
     ],
     "payroll-runs": [
       "databox",
@@ -584,6 +694,9 @@
       "payroll_bank"
     ],
     "payroll-posting-reconciliation": [
+      "payroll"
+    ],
+    "payroll-posting-detail": [
       "payroll"
     ],
     "payroll-people": [
@@ -671,6 +784,7 @@
     "accounting-journal": [
       "activation",
       "automation",
+      "bulk_actions",
       "dimensions",
       "documents",
       "internal_documents",
@@ -685,20 +799,43 @@
     ],
     "accounting-internal-document-new": [
       "dimensions",
-      "internal_documents"
+      "internal_documents",
+      "number_series"
     ],
     "accounting-internal-document-detail": [
+      "accruals",
       "documents",
       "internal_documents",
       "linked_documents"
     ],
     "accounting-internal-document-edit": [
       "dimensions",
-      "internal_documents"
+      "internal_documents",
+      "number_series"
+    ],
+    "accounting-accruals": [
+      "accruals"
+    ],
+    "accounting-accrual-new": [
+      "accruals"
+    ],
+    "accounting-accruals-takeover": [
+      "accruals"
+    ],
+    "accounting-accrual-detail": [
+      "accruals",
+      "list_nav"
+    ],
+    "accounting-accrual-edit": [
+      "accruals"
     ],
     "accounting-ai-assistant": [
       "internal_documents",
       "other_items"
+    ],
+    "accounting-journal-rebook": [
+      "bulk_actions",
+      "dimensions"
     ],
     "accounting-setup-assistant": [
       "dimensions",
@@ -735,8 +872,24 @@
     "accounting-dimension-profit": [
       "dimensions"
     ],
+    "accounting-joint-allocations": [
+      "dimensions"
+    ],
+    "accounting-nonprofit-membership": [
+      "dimensions",
+      "errors",
+      "number_template",
+      "payment_method",
+      "purchase_invoice",
+      "settings"
+    ],
+    "accounting-nonprofit-member-detail": [
+      "dimensions"
+    ],
     "accounting-nonprofit-tax": [
-      "nonprofitTaxJ6"
+      "nonprofitTax",
+      "nonprofitTaxJ6",
+      "nonprofitTaxNative"
     ],
     "accounting-statement-mapping": [
       "settings"
@@ -749,6 +902,7 @@
       "documentCompleteness"
     ],
     "accounting-balance-inventory": [
+      "accruals",
       "activation"
     ],
     "accounting-section18-statements": [
@@ -758,6 +912,7 @@
       "parallelRun"
     ],
     "accounting-monthly-check": [
+      "accruals",
       "checks"
     ],
     "accounting-tax-base-adjustments": [
@@ -783,6 +938,7 @@
       "dimensions"
     ],
     "accounting-period-closing": [
+      "accruals",
       "checks",
       "dimensions",
       "fx504",
@@ -800,13 +956,21 @@
       "linked_documents"
     ],
     "accounting-cash-new": [
+      "capture_photo",
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
+      "number_series",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
+      "capture_photo",
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
+      "number_series",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
@@ -1042,6 +1206,7 @@
       "bank",
       "bank_accounts",
       "bank_connection",
+      "bulk_actions",
       "cash",
       "creditas_bank",
       "dimensions",
@@ -1050,6 +1215,7 @@
       "errors",
       "kb_plus",
       "linked_documents",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings",
@@ -1068,6 +1234,7 @@
       "documents",
       "errors",
       "linked_documents",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings",
@@ -1090,6 +1257,7 @@
       "instance_admin",
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [
@@ -1100,21 +1268,27 @@
     "admin-settings": [
       "activation",
       "automation",
+      "cash",
       "company_email_templates",
       "company_profile",
       "dimensions",
       "domains",
       "invoice_default_note",
+      "number_series",
+      "number_template",
       "refundInvoice",
       "settings",
       "stock",
-      "users"
+      "users",
+      "workReportDisplay"
     ],
     "accounting-activation": [
       "activation"
     ],
     "admin-branding": [
-      "settings"
+      "settings",
+      "stock",
+      "workReportDisplay"
     ],
     "admin-suppliers": [
       "aiGateway",
@@ -1141,6 +1315,7 @@
     ],
     "admin-codebooks": [
       "expense_categories",
+      "number_template",
       "oss_rates",
       "public_holidays",
       "revenue_categories",
@@ -1149,6 +1324,7 @@
     ],
     "admin-tax-constants": [
       "expense_categories",
+      "number_template",
       "oss_rates",
       "public_holidays",
       "revenue_categories",
@@ -1171,6 +1347,10 @@
     "admin-isds-gateway": [
       "databox"
     ],
+    "admin-access-credentials": [
+      "isdsAccess",
+      "reports"
+    ],
     "isds-gateway-callback": [
       "databox"
     ],
@@ -1190,7 +1370,8 @@
     ],
     "tools": [
       "cash",
-      "codebookTransfer"
+      "codebookTransfer",
+      "other_items"
     ],
     "admin-integrations": [
       "aiGateway",
@@ -1209,6 +1390,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "imports",
       "purchase_invoice",
       "settings",
@@ -1221,6 +1403,11 @@
       "reports"
     ],
     "reports-dph-book": [
+      "dimensions",
+      "reports"
+    ],
+    "reports-vat-by-dimension": [
+      "dimensions",
       "reports"
     ],
     "reports-s74b": [
@@ -1287,7 +1474,12 @@
       "errors"
     ],
     "admin-price-list": [
-      "price_list"
+      "price_list",
+      "work_report_billing"
+    ],
+    "admin-work-report-billing-templates": [
+      "price_list",
+      "work_report_billing"
     ],
     "admin-price-list-new": [
       "price_list"
@@ -1304,12 +1496,14 @@
     "recurring-new": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "project",
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "recurring-detail": [
       "payment_method",
@@ -1318,12 +1512,14 @@
     "recurring-edit": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "project",
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "admin-diagnostics": [
       "diagnostics",

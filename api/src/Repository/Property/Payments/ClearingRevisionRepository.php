@@ -58,7 +58,7 @@ final class ClearingRevisionRepository
         $ledger = (new \MyInvoice\Service\Property\Payments\PaymentJournalProof($this->db))->current($supplier, $entry);
         if ($ledger['entry']['source_type'] !== 'unit_payment_revision' || $ledger['entry']['source_id'] !== $id || $ledger['entry']['reversed_by'] !== null
             || $ledger['entry']['entry_date'] !== $proof['header']['entry_date'] || $ledger['entry']['period_id'] !== $proof['header']['period_id']
-            || PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($ledger['lines'])) !== PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($proof['lines']))) PaymentException::reject('source_revision_intent');
+            || !\MyInvoice\Service\Property\Payments\PaymentJournalProof::matches($ledger['lines'], $proof['lines'])) PaymentException::reject('source_revision_intent');
         $q = $this->db->pdo()->prepare('SELECT request_json,revision_no FROM unit_payment_source_revisions WHERE supplier_id=? AND id=? FOR UPDATE'); $q->execute([$supplier, $id]);
         $row = $q->fetch(PDO::FETCH_ASSOC); $request = json_decode($row['request_json'], true, flags: JSON_THROW_ON_ERROR); $number = (int) $row['revision_no'];
         $q = $this->db->pdo()->prepare("UPDATE unit_payment_source_revisions SET status='posted',journal_entry_id=? WHERE supplier_id=? AND id=? AND status='pending' AND journal_entry_id IS NULL");

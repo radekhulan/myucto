@@ -3,6 +3,8 @@ import { computed, onMounted, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
 import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
+import { closesOnEscape, pushModal, removeModal } from './modalStack'
+import { provideModalFooter } from './modalFooter'
 
 /**
  * Generic modal — backdrop, ESC close, click-outside close, sticky header/footer.
@@ -24,9 +26,16 @@ const paneActive = usePaneActivity()
 const titleId = useId()
 const paneId = usePaneId()
 let scrollLocked = false
+/** Pořadí otevřených oken: Escape zavírá jen to nejvrchnější (okno kontaktu nad oknem člena). */
+const stackId = Symbol('modal')
+/** Patička i pro tlačítka formuláře uvnitř okna (DialogActions), nejen pro slot #footer. */
+const footer = provideModalFooter()
+// Zařazení do pořadí oken už při vytvoření: setup rodiče běží před vnořeným oknem, onMounted naopak.
+pushModal(stackId, () => paneId.value, () => paneActive.value)
+function setFooter(el: unknown) { footer.target.value = el instanceof HTMLElement ? el : null }
 
 /**
- * Otevřený náhled originálu vpravo (DocumentSidePreview) modál nezakrývá: backdrop
+ * Otevřený náhled originálu vedle formuláře (DocumentPreviewSplit) modál nezakrývá: backdrop
  * končí na jeho levé hraně a dialog se centruje do zbylé části, aby šel doklad
  * při potvrzování vizuálně kontrolovat.
  */
@@ -49,7 +58,7 @@ function syncBodyScrollLock(active: boolean): void {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (paneActive.value && e.key === 'Escape') emit('close')
+  if (paneActive.value && e.key === 'Escape' && closesOnEscape(stackId, e)) emit('close')
 }
 
 onMounted(() => {
@@ -59,6 +68,7 @@ onMounted(() => {
   syncBodyScrollLock(paneActive.value)
 })
 onBeforeUnmount(() => {
+  removeModal(stackId)
   document.removeEventListener('keydown', onKey)
   window.removeEventListener('resize', measurePreview)
   syncBodyScrollLock(false)
@@ -91,7 +101,7 @@ void props
         <div class="min-h-0 flex-1 overflow-y-auto p-5">
           <slot />
         </div>
-        <footer v-if="$slots.footer" class="shrink-0 border-t border-neutral-200 px-5 py-4">
+        <footer v-show="$slots.footer || footer.claims.value > 0" :ref="setFooter" class="shrink-0 border-t border-neutral-200 px-5 py-4">
           <slot name="footer" />
         </footer>
       </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
@@ -420,7 +421,7 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
           </label>
           <label class="block text-sm">
             <span class="text-xs font-medium text-neutral-700">{{ t('credit_cards.opening_date') }}</span>
-            <input v-model="openingDate" type="date" :class="INPUT" />
+            <DateInput v-model="openingDate" :class="INPUT" />
           </label>
           <div class="text-xs font-mono text-neutral-700">
             <div v-for="l in openingPreview" :key="l.side">{{ l.side === 'debit' ? t('credit_cards.md') : t('credit_cards.d') }} {{ l.account_code }} {{ formatMoney(l.amount) }}</div>

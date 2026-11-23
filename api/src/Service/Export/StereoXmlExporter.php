@@ -221,9 +221,9 @@ final class StereoXmlExporter
             $vatRates[$rate]['total'] += $lineTotal;
 
             $quantity = TimeBillingExport::quantity($item);
-            $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
+            $preciseUnitPrice = TimeBillingExport::usesPreciseUnitPrice($item);
             $unitPrice = (!empty($invoice['prices_include_vat']) && $quantity != 0.0)
-                ? round($lineBase / $quantity, $preciseTimeRate ? 6 : 2)
+                ? round($lineBase / $quantity, $preciseUnitPrice ? 6 : 2)
                 : (float) ($item['unit_price_without_vat'] ?? 0);
 
             $row = $rows->appendChild($xml->createElement('Row'));
@@ -239,7 +239,7 @@ final class StereoXmlExporter
                 $xml,
                 $row,
                 'UnitPrice',
-                TimeBillingExport::usesPreciseHourlyRate($item)
+                TimeBillingExport::usesPreciseUnitPrice($item)
                     ? TimeBillingExport::formatRate($unitPrice)
                     : $this->fmt($unitPrice),
             );

@@ -8,12 +8,15 @@ import { closingApi, periodLockApi, type MonthlyCheckResult, type PrecheckItem }
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
+import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import AccrualAgendaCheckValue from '@/components/accounting/AccrualAgendaCheckValue.vue'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
+const { formatBalance } = useAccountBalance()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -266,7 +269,7 @@ async function saveLock() {
         <h1 class="text-2xl font-semibold">{{ t('accounting.monthly_check.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.monthly_check.subtitle') }}</p>
       </div>
-      <button v-if="auth.canWrite('accounting.periods.close')" :class="btnOutline('primary')" @click="openLockDialog">
+      <button v-if="auth.canWrite('accounting.periods.manage') || auth.canWrite('accounting.period_lock')" :class="btnOutline('primary')" @click="openLockDialog">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
         {{ t('accounting.monthly_check.lock_button') }}
       </button>
@@ -375,13 +378,15 @@ async function saveLock() {
                       <template v-for="e in balanceEntries(c.key, c.value)" :key="e.code">
                         <RouterLink v-if="accountLink(e.code)" :to="accountLink(e.code)!"
                           class="font-mono text-primary-600 hover:underline" :class="{ 'text-neutral-400 hover:no-underline': Math.abs(e.amount) < 0.005 }">
-                          {{ e.code }}: {{ formatMoney(e.amount) }}
+                          {{ e.code }}: {{ formatBalance(e.amount) }}
                         </RouterLink>
-                        <span v-else class="font-mono">{{ e.code }}: {{ formatMoney(e.amount) }}</span>
+                        <span v-else class="font-mono">{{ e.code }}: {{ formatBalance(e.amount) }}</span>
                       </template>
                     </span>
                   </template>
 
+
+                  <AccrualAgendaCheckValue v-else-if="c.key === 'deferrals_agenda_difference'" :value="c.value" />
 
                   <!-- ostatní (info/číselné) -->
                   <template v-else>

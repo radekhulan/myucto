@@ -16,6 +16,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -97,7 +98,7 @@ final class SaveWorkReportMaterialsAction
         }
 
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (materials = jeho řádky).
-        $stored = $this->repo->findByInvoice($invoiceId);
+        $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
 
         $materialTitle = trim((string) (array_key_exists('material_title', $body)
             ? $body['material_title']
@@ -132,6 +133,9 @@ final class SaveWorkReportMaterialsAction
             if ((float) ($m['unit_price'] ?? 0) < 0) {
                 return Json::error($response, 'validation_failed', "Řádek $row: cena nesmí být záporná.", 400);
             }
+            if (!UnitPricePrecision::isWithinPrecision($m['unit_price'] ?? null)) {
+                return Json::error($response, 'validation_failed', "Řádek $row: cena za jednotku smí mít nejvýše šest desetinných míst.", 400);
+            }
         }
 
         // Je-li aspoň jeden materiál, sazba DPH je povinná a musí existovat.
@@ -144,8 +148,8 @@ final class SaveWorkReportMaterialsAction
             }
         }
 
-        $wrId = $this->repo->saveMaterials($invoiceId, $projectId, $materialTitle, $materialVatRateId, $materials);
-        $wr = $this->repo->findByInvoice($invoiceId);
+        $wrId = $this->repo->saveMaterials($invoiceId, SupplierGuard::currentId($request), $projectId, $materialTitle, $materialVatRateId, $materials);
+        $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

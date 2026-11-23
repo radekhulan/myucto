@@ -8,12 +8,13 @@ vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import type { BankTransaction } from '@/api/bank'
 const api = vi.hoisted(() => ({ ignore: vi.fn(), unmatch: vi.fn(), unignore: vi.fn(), toast: vi.fn() }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: api }))
 vi.mock('vue-router', () => ({ useRouter: () => ({}), RouterLink: { props: ['to'], template: '<a><slot /></a>' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: api.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message, apiErrorCode: (e: { code?: string }) => e.code }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} CZK` }))
 vi.mock('@/api/invoices', () => ({ invoicesApi: {} }))
 vi.mock('@/api/documentRequests', () => ({ documentRequestsApi: {} }))
@@ -41,6 +42,15 @@ describe('bank confirmation dialogs', () => {
     expect(actions.ignoreTarget.value).toBeNull()
     expect(refresh).toHaveBeenCalledOnce()
     expect(reload).not.toHaveBeenCalled()
+  })
+  it('translates the membership lock instead of showing the Czech server message', async () => {
+    // Pohyb dokládá členskou úhradu: ignorování odmítne strážce, anglické UI nesmí hlásit česky.
+    const actions = useBankTransactionActions({ reload: vi.fn() }), row = tx()
+    actions.ignoreTx(row)
+    api.ignore.mockRejectedValue(Object.assign(new Error('Bankovní pohyb dokládá úhradu členských příspěvků.'), { code: 'nonprofit_membership_payment_in_use' }))
+    await actions.confirmIgnore()
+    expect(actions.ignoreError.value).toBe('bank.membership_errors.nonprofit_membership_payment_in_use')
+    expect(row.match_status).toBe('unmatched')
   })
   it('keeps note on rejection and blocks duplicate submits', async () => {
     let reject!: (reason: Error) => void

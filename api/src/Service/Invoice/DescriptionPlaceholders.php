@@ -44,6 +44,26 @@ final class DescriptionPlaceholders
         'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec',
     ];
 
+    /** Rozpoznané tokeny; sdílí ho {@see apply()} i {@see unknownTokens()}. */
+    private const PATTERN = '/\{(YYYY|YY)([+-]\d{1,3})M\}|\{(YYYY|YY|MMMM|MM|M|Q|DD|D)([+-]\d{1,3})?\}|\{DATE((?:[+-]\d{1,3}[DMY])*)\}|\{(BOM|EOM)([+-]\d{1,3})?\}/';
+
+    /**
+     * Složené závorky, které {@see apply()} nevyhodnotí ({FOO}, {mm}, osamocená „{“).
+     * Faktury je tiše nechávají v textu; šablona názvu opakování ostatní položky
+     * je odmítne, ať se překlep neobjeví v názvu každého výskytu.
+     *
+     * @return list<string>
+     */
+    public static function unknownTokens(string $text): array
+    {
+        $rest = (string) preg_replace(self::PATTERN, '', $text);
+        if (!str_contains($rest, '{') && !str_contains($rest, '}')) {
+            return [];
+        }
+        preg_match_all('/\{[^{}]*\}|[{}]/u', $rest, $m);
+        return array_values(array_unique($m[0]));
+    }
+
     public static function apply(string $text, DateTimeImmutable $ref, string $lang = 'cs'): string
     {
         if (!str_contains($text, '{')) {
@@ -55,7 +75,7 @@ final class DescriptionPlaceholders
         $monthAnchor = $ref->setDate((int) $ref->format('Y'), (int) $ref->format('n'), 1);
 
         $result = preg_replace_callback(
-            '/\{(YYYY|YY)([+-]\d{1,3})M\}|\{(YYYY|YY|MMMM|MM|M|Q|DD|D)([+-]\d{1,3})?\}|\{DATE((?:[+-]\d{1,3}[DMY])*)\}|\{(BOM|EOM)([+-]\d{1,3})?\}/',
+            self::PATTERN,
             static function (array $m) use ($ref, $monthAnchor, $lang): string {
                 // {YYYY±NM}/{YY±NM} — rok měsíce posunutého o N měsíců, dvojice k {MMMM±N}:
                 // „{MMMM+1} {YYYY+1M}" dá v prosinci „leden" následujícího roku.

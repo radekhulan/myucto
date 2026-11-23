@@ -24,8 +24,16 @@ final class MoneyS3BatchOptions
     public const FROM_YEAR_AUTO = 'auto';
 
     /**
+     * Rok „do" automaticky: u každé firmy poslední rok, který v MyÚčtu nemá vlastní zápisy
+     * ({@see ImportOptions::$toYear} = null). Dávka uložená před zavedením volby ji nemá a
+     * chová se stejně.
+     */
+    public const TO_YEAR_AUTO = 'auto';
+
+    /**
      * @param string|int|null $fromYear `auto`, rok, nebo null = všechny roky zálohy
      * @param list<string> $relatedPartyIcos IČO spřízněných osob (typicky firmy dávky / skupiny)
+     * @param string|int $toYear `auto` nebo poslední převáděný rok všech firem dávky
      */
     public function __construct(
         public readonly string $mode = ImportOptions::MODE_DRY_RUN,
@@ -39,6 +47,7 @@ final class MoneyS3BatchOptions
         public readonly array $relatedPartyIcos = [],
         public readonly bool $useRegistry = true,
         public readonly bool $takeOverFilings = true,
+        public readonly string|int $toYear = self::TO_YEAR_AUTO,
     ) {
         if (!in_array($mode, [ImportOptions::MODE_DRY_RUN, ImportOptions::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -51,6 +60,15 @@ final class MoneyS3BatchOptions
         }
         if (is_int($fromYear) && ($fromYear < 1990 || $fromYear > 2100)) {
             throw new MoneyS3Exception('invalid_from_year', 'První převáděný rok musí být mezi lety 1990 a 2100.');
+        }
+        if (is_string($toYear) && $toYear !== self::TO_YEAR_AUTO) {
+            throw new MoneyS3Exception('invalid_to_year', 'Poslední převáděný rok čeká rok nebo „auto".');
+        }
+        if (is_int($toYear) && ($toYear < 1990 || $toYear > 2100)) {
+            throw new MoneyS3Exception('invalid_to_year', 'Poslední převáděný rok musí být mezi lety 1990 a 2100.');
+        }
+        if (is_int($toYear) && is_int($fromYear) && $toYear < $fromYear) {
+            throw new MoneyS3Exception('invalid_to_year', "Převést do roku {$toYear} nejde, když převod začíná rokem {$fromYear}.");
         }
         if (!in_array($disposalYearTax, [ImportOptions::DISPOSAL_YEAR_TAX_HALF, ImportOptions::DISPOSAL_YEAR_TAX_NONE], true)) {
             throw new MoneyS3Exception('invalid_disposal_year_tax', 'Daňový odpis v roce vyřazení čeká „half" (poloviční) nebo „none" (bez odpisu).');
@@ -71,6 +89,8 @@ final class MoneyS3BatchOptions
         } elseif ($fromYear === '' || $fromYear === 'all') {
             $fromYear = null;
         }
+        $toYear = $data['to_year'] ?? self::TO_YEAR_AUTO;
+        $toYear = is_numeric($toYear) && (int) $toYear > 0 ? (int) $toYear : self::TO_YEAR_AUTO;
         $groupId = (int) ($data['group_id'] ?? 0);
         $groupName = trim((string) ($data['group_name'] ?? ''));
         return new self(
@@ -85,6 +105,7 @@ final class MoneyS3BatchOptions
             array_values(array_map('strval', (array) ($data['related_party_icos'] ?? []))),
             filter_var($data['use_registry'] ?? true, FILTER_VALIDATE_BOOL),
             filter_var($data['take_over_filings'] ?? true, FILTER_VALIDATE_BOOL),
+            $toYear,
         );
     }
 
@@ -103,6 +124,7 @@ final class MoneyS3BatchOptions
             'related_party_icos' => $this->relatedPartyIcos,
             'use_registry' => $this->useRegistry,
             'take_over_filings' => $this->takeOverFilings,
+            'to_year' => $this->toYear,
         ];
     }
 
@@ -110,6 +132,6 @@ final class MoneyS3BatchOptions
     public function withGroup(?int $groupId, array $relatedPartyIcos): self
     {
         return new self($this->mode, $this->fromYear, $this->existing, $this->closeHistory, $this->disposalYearTax,
-            $groupId, null, $this->relatedParties, $relatedPartyIcos, $this->useRegistry, $this->takeOverFilings);
+            $groupId, null, $this->relatedParties, $relatedPartyIcos, $this->useRegistry, $this->takeOverFilings, $this->toYear);
     }
 }

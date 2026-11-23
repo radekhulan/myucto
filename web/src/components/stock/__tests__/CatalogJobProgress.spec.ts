@@ -15,6 +15,7 @@ describe('CatalogJobProgress', () => {
           id: 21,
           supplier_id: 1,
           kind: 'stock_valuation',
+          stock_take_id: 7,
           input_version: 1,
           status: 'running',
           checkpoint: 3,
@@ -58,5 +59,21 @@ describe('CatalogJobProgress', () => {
     expect(wrapper.text()).not.toContain('eshop.jobs.cancel_requested')
     wrapper = shallowMount(CatalogJobProgress, { props: { job: { ...job, status: 'running', cancel_requested: false }, canCancel: false }, global: { stubs } })
     expect(wrapper.text()).not.toContain('eshop.jobs.cancel_boundary')
+  })
+
+  it('hides outcome counters and the saved-changes note for pure computation jobs only', () => {
+    const base: CatalogJob = { id: 30, supplier_id: 1, kind: 'stock_value_trend', input_version: 1, status: 'running', checkpoint: 2, total: 4,
+      report: {}, error_code: null, cancel_requested: false, created_at: '', updated_at: '', finished_at: null, attempts: 1 }
+    const stubs = { ImportJobProgress: { name: 'ImportJobProgress', props: ['job', 'percent', 'showCancel', 'showOutcome'], template: '<div />' } }
+    for (const job of [base, { ...base, kind: 'stock_valuation' }]) {
+      const wrapper = shallowMount(CatalogJobProgress, { props: { job, canCancel: true }, global: { stubs } })
+      expect(wrapper.findComponent({ name: 'ImportJobProgress' }).props('showOutcome')).toBe(false)
+      expect(wrapper.text()).not.toContain('eshop.jobs.cancel_boundary')
+    }
+    for (const job of [{ ...base, kind: 'stock_valuation', stock_take_id: 3 }, { ...base, kind: 'stock_history_import_apply' }]) {
+      const wrapper = shallowMount(CatalogJobProgress, { props: { job, canCancel: true }, global: { stubs } })
+      expect(wrapper.findComponent({ name: 'ImportJobProgress' }).props('showOutcome')).toBe(true)
+      expect(wrapper.text()).toContain('eshop.jobs.cancel_boundary')
+    }
   })
 })

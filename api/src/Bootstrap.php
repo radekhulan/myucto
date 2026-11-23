@@ -125,6 +125,21 @@ final class Bootstrap
             // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
             ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
+            // Limit souběžných relací a licenční brána tokenů jsou v konstruktoru
+            // volitelné (přímo sestavené testy je nepotřebují), a PHP-DI volitelný
+            // parametr nevyplní. Proto explicitní bindy, jinak by v provozu chyběly.
+            \MyInvoice\Service\Auth\SessionManager::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\SessionManager(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(SecurityClock::class),
+                $c->get(\MyInvoice\Service\License\SessionConcurrencyPolicy::class),
+            ),
+            \MyInvoice\Service\Auth\ApiTokenService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\ApiTokenService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\RedisFactory::class),
+                $c->get(\MyInvoice\Service\License\LicenseCapacityGate::class),
+                $c->get(Config::class),
+            ),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {
                 $logger = new Logger('myinvoice');
@@ -233,6 +248,14 @@ final class Bootstrap
                 )->constructorParameter(
                     'people',
                     \DI\get(\MyInvoice\Repository\Payroll\PayrollPeopleRepository::class),
+                )->constructorParameter(
+                    'frozenSource',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenSourceAdvisor::class),
+                ),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeferralService::class =>
+                \DI\autowire()->constructorParameter(
+                    'settlement',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement::class),
                 ),
             // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
             // jednotkovým testům přehledů, v aplikaci se předává výslovně.
@@ -246,6 +269,9 @@ final class Bootstrap
                 )->constructorParameter(
                     'signingProfiles',
                     \DI\get(\MyInvoice\Repository\Payroll\PayrollSigningProfileRepository::class),
+                )->constructorParameter(
+                    'jmhzGate',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService::class =>
                 \DI\autowire()->constructorParameter(
@@ -288,6 +314,11 @@ final class Bootstrap
             \MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationSweepTargets::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollModuleStateRepository::class,
+                ),
+            \MyInvoice\Action\Payroll\PayrollEmploymentAction::class =>
+                \DI\autowire()->constructorParameter(
+                    'rulesets',
+                    \DI\get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
                 ),
             // Runtime registry = ověřený default z kódu (CzechPayrollRulesets2026)
             // sloučený s DB overridem z administrace (migrace 1306), stejně jako
@@ -448,6 +479,7 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
                     ),
+                    $c->get(\MyInvoice\Service\Payroll\PayrollHourlyWageMaterializer::class),
                 ),
             // Překlopení běhu do `paid` ze skutečnosti v platebním ledgeru.
             // Volitelné parametry výš PHP-DI neautowiruje, tady je jen
@@ -486,6 +518,11 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class),
                     $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository::class),
+                ),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService::class =>
+                \DI\autowire()->constructorParameter(
+                    'externalRoots',
+                    \DI\get(\MyInvoice\Repository\Payroll\JmhzExternalRootRepository::class),
                 ),
             // Ruční potvrzení přijetí je u resolveru volitelné (testy ho staví
             // bez něj); autowiring by volitelný parametr nevyplnil spolehlivě.
@@ -538,7 +575,9 @@ final class Bootstrap
                 );
             },
             \MyInvoice\Service\Migration\Myucto\MyuctoImportJobService::class => \DI\autowire()
-                ->constructorParameter('legacy', \DI\get(\MyInvoice\Service\Migration\MyInvoice\MyInvoiceBackupImportBridge::class)),
+                ->constructorParameter('legacy', \DI\get(\MyInvoice\Service\Migration\MyInvoice\MyInvoiceBackupImportBridge::class))
+                // Průběh obnovy po tabulkách se zapisuje vlastním spojením (obnova běží v jedné transakci).
+                ->constructorParameter('config', \DI\get(Config::class)),
             // DPPO podklady: ClosingService (4. arg) je konstrukčně volitelný (unit testy nad SQLite
             // ho nepředávají), ale PHP-DI autowire optional class-param nevyplní → explicitní bind,
             // aby náhled DPPO měl projekci závěrkových operací (Feature 1) i v produkci.
@@ -674,8 +713,18 @@ final class Bootstrap
                 invoiceIsdoc: $c->get(\MyInvoice\Service\Mail\InvoiceIsdocAttachments::class),
                 activity: $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
+            \MyInvoice\Service\Mail\Imap\ImapAuthentication::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\Imap\ImapAuthentication(
+                new \MyInvoice\Service\OAuth\OAuthTokenClient(new \GuzzleHttp\Client(), $c->get(LoggerInterface::class), 'imap_oauth'),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(ClockInterface::class),
+                $c->get(LoggerInterface::class),
+            ),
+            \MyInvoice\Service\Mail\SentMailImapAppender::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\SentMailImapAppender(
+                authentication: $c->get(\MyInvoice\Service\Mail\Imap\ImapAuthentication::class),
+            ),
             \MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\WebklexImapMailboxClient(
                 $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer::class),
+                authentication: $c->get(\MyInvoice\Service\Mail\Imap\ImapAuthentication::class),
             ),
             \MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository(
                 $c->get(Connection::class),
@@ -701,6 +750,16 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemAutoMatcher::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence::class),
+            ),
+            // ?ActivityLogger je optional class-param, autowire ho nevyplní; bez něj by
+            // automatické přiřazení úhrady chybělo v aktivitě položky.
+            \MyInvoice\Service\Accounting\OtherItemAutoMatcher::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Accounting\OtherItemAutoMatcher(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemBankMatchService::class),
+                $c->get(\MyInvoice\Repository\OtherItemRepository::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable
@@ -766,6 +825,8 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\Card\CardSettlementService::class),
                 // Dorovnání zúčtování zálohy na konečné faktuře po změně úhrady zálohy.
                 $c->get(\MyInvoice\Service\Accounting\AdvanceSettlementSync::class),
+                // Pravidlo s cílovou ostatní položkou pohyb zároveň přiřadí položce.
+                $c->get(\MyInvoice\Service\Accounting\OtherItemService::class),
             ),
 
             // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je
@@ -877,12 +938,22 @@ final class Bootstrap
             ),
             \MyInvoice\Action\Mcp\HostedMcpSettingsAction::class => \DI\autowire()->constructorParameter(
                 'resources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
+            )->constructorParameter(
+                'suppliers', \DI\get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class),
             ),
             \MyInvoice\Action\Mcp\HostedMcpEndpointAction::class => \DI\autowire()->constructorParameter(
                 'clientTools', \DI\get(\MyInvoice\Service\Mcp\ClientMcpToolPolicy::class),
+            )->constructorParameter(
+                'staffTools', \DI\get(\MyInvoice\Service\Mcp\StaffMcpToolPolicy::class),
             ),
             AuthMiddleware::class => \DI\autowire()->constructorParameter(
                 'mcpResources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
+            )->constructorParameter(
+                'loginPolicy', \DI\get(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            ),
+            // Vynucený poskytovatel identity omezuje metody step-up ověření.
+            \MyInvoice\Service\Auth\MfaStepUpService::class => \DI\autowire()->constructorParameter(
+                'loginPolicy', \DI\get(\MyInvoice\Service\Auth\LoginPolicyService::class),
             ),
             \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
                 $c->get(Connection::class),
@@ -899,6 +970,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Auth\MfaOfferService::class),
                 $c->get(\MyInvoice\Service\Auth\SessionLockPolicy::class),
                 $c->get(ClockInterface::class),
+                $c->get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
                 $c->get(\MyInvoice\Service\Import\ClientAiExtractionPolicy::class),
             ),
@@ -1164,11 +1236,17 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\RaiffeisenbankCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\CsobCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\ErsteCreditCardStatementPdfParser::class),
+                // Revolut před českými bankami: popis jeho pohybu může nést název nebo BIC
+                // české banky protistrany, jeho vlastní značky (Revolut Bank UAB, sloupec
+                // „Datum (UTC)") výpis české banky nemá.
+                $c->get(\MyInvoice\Service\Bank\Pdf\RevolutStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditasStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CsobStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CeskaSporitelnaStatementPdfParser::class),
                 // Novější layout KB před starším: oba nesou patičku Komerční banky.
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbAccountStatementPdfParser::class),
+                // Výpis vytištěný z internetového bankovnictví („Vytištěno dne … pro účet").
+                $c->get(\MyInvoice\Service\Bank\Pdf\KbPrintedStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\MonetaStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\RaiffeisenbankStatementPdfParser::class),
@@ -1202,6 +1280,10 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->diagnosticLogger()),
             \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Auth\Oidc\OidcHttpClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Auth\Oidc\OidcHttpClient(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Auth\Oidc\JwksCache::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Auth\Oidc\JwksCache($c->get(\MyInvoice\Service\Auth\Oidc\OidcHttpClient::class)),
             // Zdroje automatického stavu tachometru; nový zdroj se přidá sem.
             \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry([
@@ -1331,6 +1413,13 @@ final class Bootstrap
             (bool) $config->get('app.debug', false),
         );
         $errors = $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        // Odpověď na nezachycenou výjimku nikdy nenese soubor, řádek ani trace
+        // (ani s `app.debug`) a chybějící šifrovací klíč hlásí jako stav instance.
+        $errors->setDefaultErrorHandler(new \MyInvoice\Http\ApiErrorHandler(
+            $app->getCallableResolver(),
+            $app->getResponseFactory(),
+            $container->get(LoggerInterface::class),
+        ));
         $errors->setErrorHandler(
             \PDOException::class,
             new \MyInvoice\Http\ForeignKeyConflictHandler($app->getResponseFactory(), $errors->getDefaultErrorHandler()),

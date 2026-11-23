@@ -70,7 +70,9 @@ final class DashboardWidgetAccessTest extends TestCase
         self::assertTrue($this->allowed($this->request(['documents.submit' => 1], 'client'), 'documents.requests'));
         self::assertFalse($this->allowed($this->request(['documents.requests' => 1], 'client'), 'documents.requests'));
         self::assertTrue($this->allowed($this->request(['documents.requests' => 1]), 'documents.requests'));
-        self::assertFalse($this->allowed($this->request(['documents.submit' => 1]), 'documents.requests'));
+        $staffSubmitter = $this->request(['documents.submit' => 1]);
+        self::assertTrue($this->allowed($staffSubmitter, 'documents.requests'));
+        self::assertSame(['clientView' => true, 'internalView' => false], $this->access->capabilities($staffSubmitter, 'documents.requests'));
     }
 
     public function testCatalogFiltersDefinitionsWithoutLayoutOrPersistence(): void

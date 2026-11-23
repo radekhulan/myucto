@@ -28,6 +28,7 @@ import TaxIsdsSendDialog from '@/components/submission/TaxIsdsSendDialog.vue'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useToast } from '@/composables/useToast'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { hasUnresolvedProductionDirectAttempt } from '@/utils/epoAttemptState'
@@ -47,6 +48,9 @@ import {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpReturn } from '@/security/oidc'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 // `tax` je stránka Daně → Podání, `payroll` záložka mzdových vyúčtování pod Mzdami.
 // Archiv je jeden a odesílá se touž cestou; liší se jen tím, co obrazovka ukazuje.
@@ -153,6 +157,16 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { strong: ssoOnly, passwordAllowed, localFactorsAllowed } = ssoEnforcement
+
+// Ověření přes Microsoft vede přes přesměrování; kontext říká, který ze tří
+// dialogů se po návratu otevře. Proof pak jde stejným polem jako passkey proof.
+const SSO_SCOPE = 'tax-submissions'
+const ssoProof = ref('')
+function ssoVerified(token: string): boolean {
+  return token !== '' && token === ssoProof.value
+}
 
 async function verifyEpoPasskey(target: 'step' | 'submit' | 'recovery') {
   if (!passkeySupported) return
@@ -172,27 +186,27 @@ async function verifyEpoPasskey(target: 'step' | 'submit' | 'recovery') {
 }
 
 function stepProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: stepPassword.value || undefined,
     totp_code: stepTotpCode.value.trim() || undefined,
     step_up_token: stepPasskeyToken.value || undefined,
-  }
+  })
 }
 
 function submitProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: submitPassword.value || undefined,
     totp_code: submitTotpCode.value.trim() || undefined,
     step_up_token: submitPasskeyToken.value || undefined,
-  }
+  })
 }
 
 function recoveryProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: recoveryPassword.value || undefined,
     totp_code: recoveryTotpCode.value.trim() || undefined,
     step_up_token: recoveryPasskeyToken.value || undefined,
-  }
+  })
 }
 
 /**
@@ -200,6 +214,10 @@ function recoveryProof() {
  * heslo (+ TOTP, má-li ho účet zapnuté).
  */
 function stepUpReady(password: string, totpCode: string, passkeyToken: string): boolean {
+  // Vynucené přihlášení přes organizaci: heslo se nepoužívá. Silný poskytovatel
+  // potvrzuje jen vlastním ověřením, jinak passkey nebo TOTP kód.
+  if (ssoOnly.value) return ssoVerified(passkeyToken)
+  if (!passwordAllowed.value) return passkeyToken !== '' || (hasTotp.value && /^\d{6}$/.test(totpCode.trim()))
   if (passkeyToken !== '') return true
   if (password === '') return false
   return !hasTotp.value || /^\d{6}$/.test(totpCode.trim())
@@ -235,8 +253,11 @@ const isdsInboxLoading = ref(false)
 const isdsInboxError = ref('')
 const isdsAttachBusy = ref<number | null>(null)
 
+// Rozsah archivu připravených podání: klient, nebo interní role s `reports.submissions`
+// bez agendy výkazů (RequestAuthorization::usesClientTaxSubmissionScope).
+const clientScope = computed(() => auth.isClientRole || (!auth.canRead('reports') && auth.canRead('reports.submissions')))
 const canWrite = computed(() => auth.canWrite('reports.submit'))
-const canManage = computed(() => !auth.isClientRole && (auth.canWrite('reports.submissions.manage') || canWrite.value))
+const canManage = computed(() => !clientScope.value && (auth.canWrite('reports.submissions.manage') || canWrite.value))
 const canDelete = computed(() => canManage.value && auth.canWrite('reports.export'))
 const selected = computed(() => items.value.find(item => item.id === expandedId.value) ?? null)
 const submitEnvironment = computed<'production' | 'test' | null>(() => {
@@ -248,7 +269,11 @@ const enabledCredentials = computed(() =>
   credentials.value.filter(credential => credential.enabled_for_supplier && credential.valid_now),
 )
 const credentialStepUpMissing = computed(() => {
+  if (ssoOnly.value) return ssoVerified(stepPasskeyToken.value) ? '' : t('sso.step_up_enforced_required')
   if (stepPasskeyToken.value) return ''
+  if (!passwordAllowed.value) {
+    return hasTotp.value && /^\d{6}$/.test(stepTotpCode.value.trim()) ? '' : t('sso.step_up_local_factor_required')
+  }
   if (!stepPassword.value) return t('reports.submissions.step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(stepTotpCode.value.trim())) {
     return t('reports.submissions.step_up_totp_missing')
@@ -686,7 +711,7 @@ async function loadVatPayment(item: TaxSubmission) {
 
 watch(expandedId, () => {
   const item = selected.value
-  if (item && !auth.isClientRole && isdsDispatch(item)) void loadIsdsInbox(item)
+  if (item && !clientScope.value && isdsDispatch(item)) void loadIsdsInbox(item)
   if (item) void loadVatPayment(item)
   else vatPayment.value = null
 })
@@ -739,7 +764,7 @@ function canDirectTest(item: TaxSubmission): boolean {
 }
 
 function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
-  if (auth.isClientRole || !canWrite.value) return false
+  if (clientScope.value || !canWrite.value) return false
   if (!attempt || attempt.channel !== 'epo_direct' || attempt.refresh_available) return false
   if (attempt.status === 'uncertain') return true
   if (attempt.status !== 'submitting') return false
@@ -1173,7 +1198,7 @@ async function uploadOwnCredential() {
   credentialBusy.value = true
   try {
     const credential = await epoSubmissionsApi.uploadCredential(
-      credentialFile.value, credentialLabel.value, credentialPfxPassword.value, stepProof(),
+      credentialFile.value, credentialLabel.value, credentialPfxPassword.value, await stepProof(),
     )
     credentialFile.value = null
     credentialLabel.value = ''
@@ -1223,7 +1248,7 @@ async function toggleCredential(credential: EpoSigningCredential) {
     const result = await epoSubmissionsApi.setCredentialSupplier(
       credential.id,
       !credential.enabled_for_supplier,
-      stepProof(),
+      await stepProof(),
     )
     credentials.value = result.credentials
     resetCredentialSecrets()
@@ -1239,7 +1264,7 @@ async function toggleCredential(credential: EpoSigningCredential) {
 }
 
 async function deleteCredential(credential: EpoSigningCredential) {
-  if (auth.isClientRole || !canWrite.value) return
+  if (clientScope.value || !canWrite.value) return
   if (credential.linked_profiles_count > 0) {
     toast.error(t('reports.submissions.credential_used_by_profiles'))
     return
@@ -1250,7 +1275,7 @@ async function deleteCredential(credential: EpoSigningCredential) {
   try {
     await epoSubmissionsApi.deleteCredential(
       credential.id,
-      stepProof(),
+      await stepProof(),
     )
     resetCredentialSecrets()
     await loadCredentials()
@@ -1281,7 +1306,7 @@ async function testDirect() {
     const result = await epoSubmissionsApi.testDirect(
       item.id,
       selectedCredentialId.value,
-      submitProof(),
+      await submitProof(),
     )
     directMessages.value = { ...directMessages.value, [item.id]: result.messages }
     submitModalOpen.value = false
@@ -1327,7 +1352,7 @@ async function submitDirect() {
     const result = await epoSubmissionsApi.submitDirect(
       item.id,
       submitAttemptId.value,
-      submitProof(),
+      await submitProof(),
       submitBlockingHandoff.value !== null && submitSupersedeConfirmed.value,
     )
     submitModalOpen.value = false
@@ -1436,7 +1461,7 @@ async function confirmRecovery() {
       const result = await epoSubmissionsApi.revealStatePassword(
         item.id,
         recoveryAttemptId.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       revealedPassword.value = { ...revealedPassword.value, [item.id]: result.state_password }
       recoveryModalOpen.value = false
@@ -1451,7 +1476,7 @@ async function confirmRecovery() {
         item.id,
         recoveryAttemptId.value,
         recoveryFile.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       toast.success(t('reports.submissions.confirmation_recovered'))
     } else {
@@ -1459,7 +1484,7 @@ async function confirmRecovery() {
         item.id,
         recoveryAttemptId.value,
         recoveryNote.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       toast.success(t('reports.submissions.attempt_released'))
     }
@@ -1591,7 +1616,7 @@ async function saveSettings() {
 }
 
 async function loadEpoEnvironment() {
-  if (auth.isClientRole && !canWrite.value) return
+  if (clientScope.value && !canWrite.value) return
   try {
     const settings = await epoSubmissionsApi.settings()
     epoEnvironment.value = settings.epo_environment
@@ -1663,7 +1688,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       label: t('reports.submissions.isds.open_outbox'),
       icon: 'link',
       tier: 'overflow',
-      show: !auth.isClientRole && isdsDispatch(s) !== null,
+      show: !clientScope.value && isdsDispatch(s) !== null,
       to: isdsDispatch(s) ? isdsOutboxLink(isdsDispatch(s)!) : undefined,
     },
     {
@@ -1690,7 +1715,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'table',
       tier: 'secondary',
       variant: 'neutral',
-      show: !auth.isClientRole && auth.canRead('reports') && s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
+      show: !clientScope.value && auth.canRead('reports') && s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
       to: { name: 'reports-submissions-kh-evidence', params: { id: s.id } },
     },
     {
@@ -1749,10 +1774,54 @@ const submissionActions = computed<ActionItem[]>(() => {
   ]
 })
 
+/** Návrat z ověření přes Microsoft: znovu otevře dialog, ze kterého uživatel odešel. */
+async function resumeSsoStepUp(returned: { token: string; detail: string }) {
+  const [dialog, ...rest] = returned.detail.split(':')
+  const itemId = Number(rest[rest.length - 1])
+  const item = items.value.find(candidate => candidate.id === itemId) ?? null
+  if (dialog === 'credential') {
+    await openCredentialModal()
+    stepPasskeyToken.value = returned.token
+  } else if ((dialog === 'test' || dialog === 'submit') && item) {
+    if (dialog === 'test') openTestModal(item)
+    else openSubmitModal(item)
+    if (!submitModalOpen.value) return
+    submitPasskeyToken.value = returned.token
+  } else if (dialog === 'recovery' && item) {
+    const mode = rest[0]
+    if (mode === 'state_password') openStatePassword(item)
+    else if (mode === 'confirmation' || mode === 'not_submitted') openRecoveryModal(item, mode)
+    if (!recoveryModalOpen.value) return
+    recoveryPasskeyToken.value = returned.token
+  } else {
+    return
+  }
+  ssoProof.value = returned.token
+  toast.info(t('sso.step_up_done'))
+}
+
 onMounted(async () => {
   restoreHandoffLinks()
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
   await Promise.all([load(), loadCredentials(), loadEpoEnvironment()])
+  if (ssoReturn) await resumeSsoStepUp(ssoReturn)
 })
+
+/*
+ * Doručenku k podání odeslanému datovkou stahuje Datová schránka při načtení
+ * schránky, tedy v jiném okně nebo záložce. Bez tiché obnovy tu zůstával stav
+ * „odesláno, bez doručenky", dokud se stránka nenačetla znovu.
+ */
+async function refreshSilently() {
+  await load(false)
+  const item = selected.value
+  if (item && !clientScope.value && isdsDispatch(item)) await loadIsdsInbox(item)
+}
+
+useWindowRefresh(refreshSilently, () => !loading.value
+  && !uploadBusy.value && !manualBusy.value && !manualOpen.value && !directBusy.value
+  && !credentialBusy.value && !settingsSaving.value && !isdsReceiptBusy.value
+  && isdsAttachBusy.value === null && isdsDialogFor.value === null)
 </script>
 
 <template>
@@ -1764,9 +1833,9 @@ onMounted(async () => {
         </h2>
         <h1 v-else class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1 max-w-3xl">
-          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : auth.isClientRole ? 'reports.submissions.client_subtitle' : 'reports.submissions.subtitle') }}
+          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : clientScope ? 'reports.submissions.client_subtitle' : 'reports.submissions.subtitle') }}
         </p>
-        <p v-if="canWrite || !auth.isClientRole" class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
+        <p v-if="canWrite || !clientScope" class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="openCredentialModal">
@@ -1815,7 +1884,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="canWrite || !auth.isClientRole" class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
+    <div v-if="canWrite || !clientScope" class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
       <svg class="w-5 h-5 text-primary-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/>
       </svg>
@@ -2063,7 +2132,7 @@ onMounted(async () => {
 
           <!-- U MOSS/OSS písemností panel nesvítí vůbec: sliboval by cestu, kterou
                portál odmítne, a přitom hned nad ním stojí opačné sdělení. -->
-          <div v-if="!isMossOssForm(selected) && (canWrite || !auth.isClientRole)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
+          <div v-if="!isMossOssForm(selected) && (canWrite || !clientScope)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 class="font-medium text-sm text-primary-900">{{ t('reports.submissions.direct_panel_title') }}</h3>
@@ -2239,7 +2308,7 @@ onMounted(async () => {
                   {{ isdsReceiptBusy ? t('common.loading') : t('reports.submissions.isds.upload_receipt') }}
                 </button>
               </template>
-              <RouterLink v-if="!auth.isClientRole" :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
+              <RouterLink v-if="!clientScope" :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link"/>
                 </svg>
@@ -2247,7 +2316,7 @@ onMounted(async () => {
               </RouterLink>
             </div>
 
-            <div v-if="!auth.isClientRole" class="mt-4 border-t border-neutral-100 pt-3">
+            <div v-if="!clientScope" class="mt-4 border-t border-neutral-100 pt-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h4 class="font-medium text-sm">{{ t('reports.submissions.isds.inbox_title') }}</h4>
                 <button type="button" class="whitespace-nowrap" :class="btnOutlineSm('neutral')" :disabled="isdsInboxLoading" @click="loadIsdsInbox(selected)">
@@ -2484,7 +2553,7 @@ onMounted(async () => {
 
             <!-- Heslo pro dotaz na stav: bez něj se na Daňovém portálu nedá stáhnout opis.
                  Odhaluje se vědomě, přes step-up a se záznamem v auditu. -->
-            <div v-if="(canWrite || !auth.isClientRole) && statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
+            <div v-if="(canWrite || !clientScope) && statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
               <div class="text-xs text-neutral-500">{{ t('reports.submissions.state_password') }}</div>
               <div class="mt-1 flex items-center gap-2">
                 <code v-if="revealedPassword[selected.id]" class="rounded bg-neutral-50 px-2 py-1 text-xs tracking-wider">{{ revealedPassword[selected.id] }}</code>
@@ -2647,7 +2716,7 @@ onMounted(async () => {
     <TaxIsdsSendDialog
       v-if="canWrite && isdsDialogFor"
       :submission-id="isdsDialogFor.id"
-      :client-mode="auth.isClientRole"
+      :client-mode="clientScope"
       :title="`${formCodeLabel(isdsDialogFor.form_code)} · ${periodLabel(isdsDialogFor)}`"
       @close="isdsDialogFor = null"
       @changed="load(false)"
@@ -2674,7 +2743,7 @@ onMounted(async () => {
           </div>
 
           <div class="grid sm:grid-cols-2 gap-3 rounded-lg border border-neutral-200 p-4">
-            <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+            <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(stepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
               <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">
                 ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
               </div>
@@ -2686,23 +2755,27 @@ onMounted(async () => {
                   </svg>
                   {{ passkeyBusy === 'step' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
                 </button>
-                <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+                <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
               </template>
               <p v-else class="text-xs text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
             </div>
+            <SsoStepUpOption v-if="ssoVerified(stepPasskeyToken) || !stepPasskeyToken" class="sm:col-span-2"
+              operation="epo.certificate" :context="`${SSO_SCOPE}:credential`"
+              :verified="ssoVerified(stepPasskeyToken)" :disabled="credentialBusy || passkeyBusy !== ''"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
             <template v-if="!stepPasskeyToken">
-              <label class="text-xs text-neutral-600">
+              <label v-if="passwordAllowed" class="text-xs text-neutral-600">
                 {{ t('reports.submissions.current_password') }}
                 <input v-model="stepPassword" type="password" autocomplete="current-password"
                   class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
               </label>
-              <label class="text-xs text-neutral-600">
+              <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="text-xs text-neutral-600">
                 {{ t('reports.submissions.totp_optional') }}
                 <input v-model="stepTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                   class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
               </label>
             </template>
-            <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('reports.submissions.step_up_hint') }}</p>
+            <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('reports.submissions.step_up_hint') }}</p>
             <p v-if="credentialStepUpMissing" class="sm:col-span-2 text-xs text-warning-700">
               {{ credentialStepUpMissing }}
             </p>
@@ -2758,7 +2831,7 @@ onMounted(async () => {
                     @click="toggleCredential(credential)">
                     {{ credential.enabled_for_supplier ? t('reports.submissions.disable_for_company') : t('reports.submissions.enable_for_company') }}
                   </button>
-                  <button v-if="!auth.isClientRole" type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
+                  <button v-if="!clientScope" type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
                     {{ t('common.delete') }}
                   </button>
                 </div>
@@ -2766,7 +2839,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <form v-if="auth.isClientRole" class="border-t border-neutral-200 pt-5 space-y-3" @submit.prevent="uploadOwnCredential">
+          <form v-if="clientScope" class="border-t border-neutral-200 pt-5 space-y-3" @submit.prevent="uploadOwnCredential">
             <h3 class="font-medium text-sm">{{ t('reports.submissions.own_certificate_title') }}</h3>
             <p class="text-xs text-neutral-500">{{ t('reports.submissions.own_certificate_hint') }}</p>
             <label class="block text-sm">
@@ -2846,7 +2919,7 @@ onMounted(async () => {
               <span>{{ t('reports.submissions.resolve_not_submitted_check') }}</span>
             </label>
           </template>
-          <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(recoveryPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="recoveryPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -2858,16 +2931,20 @@ onMounted(async () => {
                 </svg>
                 {{ passkeyBusy === 'recovery' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified(recoveryPasskeyToken) || !recoveryPasskeyToken"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:recovery:${recoveryMode}:${expandedId}`"
+            :verified="ssoVerified(recoveryPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { recoveryPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!recoveryPasskeyToken">
-            <label class="block text-sm">
+            <label v-if="passwordAllowed" class="block text-sm">
               {{ t('reports.submissions.current_password') }}
               <input v-model="recoveryPassword" type="password" autocomplete="current-password" class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
-            <label class="block text-sm">
+            <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-sm">
               {{ t('reports.submissions.totp_optional') }}
               <input v-model="recoveryTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
@@ -2951,7 +3028,7 @@ onMounted(async () => {
           <div v-else class="rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800">
             {{ t('reports.submissions.direct_test_signature_warning') }}
           </div>
-          <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(submitPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="submitPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -2963,17 +3040,21 @@ onMounted(async () => {
                 </svg>
                 {{ passkeyBusy === 'submit' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified(submitPasskeyToken) || !submitPasskeyToken"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:${submitMode}:${expandedId}`"
+            :verified="ssoVerified(submitPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { submitPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!submitPasskeyToken">
-            <label class="block text-sm">
+            <label v-if="passwordAllowed" class="block text-sm">
               {{ t('reports.submissions.current_password') }}
               <input v-model="submitPassword" type="password" autocomplete="current-password"
                 class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
-            <label class="block text-sm">
+            <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-sm">
               {{ t('reports.submissions.totp_optional') }}
               <input v-model="submitTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                 class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">

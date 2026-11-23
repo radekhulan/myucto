@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 use PDO;
@@ -114,7 +115,7 @@ final class SmallAssetImporter
                 $card['acquired'],
                 $card['in_use'],
                 $card['quantity'],
-                round($card['price'] / $card['quantity'], 2),
+                UnitPricePrecision::normalize($card['price'] / $card['quantity']),
                 $card['price'],
                 $card['location'],
                 $disposed,

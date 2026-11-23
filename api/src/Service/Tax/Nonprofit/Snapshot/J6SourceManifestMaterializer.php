@@ -24,6 +24,7 @@ final readonly class J6SourceManifestMaterializer
         $spool = SnapshotChunkSpool::create();
         try {
             $root = $this->hasher->startRoot();
+            $content = $this->hasher->startContent();
             $ordinal = $rowCount = $findingCount = $membershipFactCount = 0;
             foreach ($pages as $page) {
                 if (!$page instanceof SnapshotPageV2 || count($page->rows) > 500 || count($page->findings) > 4500) {
@@ -33,6 +34,7 @@ final readonly class J6SourceManifestMaterializer
                 $chunk = $this->hasher->chunk($ordinal, $page);
                 $chunkId = $this->manifests->putChunk($supplierId, $chunk);
                 $this->hasher->updateRoot($root, $chunk['descriptor']);
+                $this->hasher->updateContent($content, $page->rows, $page->findings);
                 $spool->append($chunkId, $chunk['descriptor']);
                 $rowCount += $chunk['descriptor']['row_count'];
                 $findingCount += $chunk['descriptor']['finding_count'];
@@ -41,7 +43,7 @@ final readonly class J6SourceManifestMaterializer
             }
             $rootHash = $this->hasher->finishRoot($root, $ordinal);
             $headerHash = $this->hasher->header($header);
-            $inputHash = $this->hasher->input($header, $headerHash, $rootHash, $rowCount, $findingCount, $ordinal);
+            $inputHash = $this->hasher->contentInput($header, $headerHash, $this->hasher->finishContent($content), $rowCount, $findingCount);
             $existing = $this->manifests->findByInputHash($supplierId, $inputHash, $currentRead);
             if ($existing !== null) return $this->manifests->verify($supplierId, $existing->id, $currentRead);
             $reference = $this->manifests->appendManifest(['supplier_id' => $supplierId, 'period_id' => $periodId,

@@ -28,6 +28,48 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[AllowMockObjectsWithoutExpectations]
 final class MeActionTest extends TestCase
 {
+    private function supplierAccess(): \MyInvoice\Service\Tenant\SupplierAccessResolver
+    {
+        $access = $this->createStub(\MyInvoice\Service\Tenant\SupplierAccessResolver::class);
+        $access->method('filterAllowedSupplierIds')->willReturnArgument(1);
+        return $access;
+    }
+
+    public function testProfileOmitsCompaniesRejectedByLoginPolicyAndKeepsTheUserProfile(): void
+    {
+        $statement = $this->createStub(\PDOStatement::class);
+        $statement->method('fetchAll')->willReturn([['id' => 12]]);
+        $pdo = $this->createStub(\PDO::class);
+        $pdo->method('prepare')->willReturn($statement);
+        $db = $this->createStub(Connection::class);
+        $db->method('hasColumn')->willReturn(true);
+        $db->method('pdo')->willReturn($pdo);
+        $memberships = $this->createStub(UserSupplierRepository::class);
+        $memberships->method('allowedSupplierIds')->willReturn([12]);
+        $access = $this->createMock(\MyInvoice\Service\Tenant\SupplierAccessResolver::class);
+        $access->expects(self::once())->method('filterAllowedSupplierIds')->with(self::anything(), [12])->willReturn([]);
+        $role = new EffectiveRole(2, 'Synthetic staff', 'staff', true);
+        $permissions = $this->createMock(PermissionResolver::class);
+        $permissions->expects(self::never())->method('resolve');
+        $permissions->method('resolveDefault')->willReturn($role);
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-11-06 12:00:00 UTC'));
+        $config = new Config([]);
+        $action = new MeAction($db, $config, $memberships, $permissions,
+            $this->createStub(LicenseService::class), $this->createStub(PasskeyCredentialRepository::class),
+            new MfaPolicyService($config), $this->createStub(MfaOfferService::class),
+            new SessionLockPolicy($config), $clock, $access);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'name' => 'Synthetic user', 'email' => 'synthetic@example.invalid'])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 12);
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], $body['suppliers']);
+        self::assertSame(0, $body['current_supplier_id']);
+        self::assertSame(10, $body['user']['id']);
+    }
+
     public function testTechnicalProfileDoesNotReadMembershipOrExposeCommercialOrTenantData(): void
     {
         $db = $this->createMock(Connection::class);
@@ -49,7 +91,7 @@ final class MeActionTest extends TestCase
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-10-23 12:00:00 UTC'));
         $config = new Config([]);
         $action = new MeAction($db, $config, $memberships, $permissions, $license, $credentials,
-            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $clock);
+            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $clock, $this->supplierAccess());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 19, 'name' => 'Synthetic technician', 'email' => 'tech@example.invalid',
@@ -81,12 +123,18 @@ final class MeActionTest extends TestCase
         // Instalace bez sloupce rozpisu slevy (2035) dostane volbu vypnutou, dotaz nespadne.
         $pdo->expects(self::once())
             ->method('prepare')
-            ->with(self::stringContains('0 AS invoice_pdf_show_line_discount'))
+            ->with(self::logicalAnd(
+                self::stringContains('0 AS invoice_pdf_show_line_discount'),
+                self::stringContains('NULL AS work_report_display_options'),
+                self::stringContains('0 AS default_hourly_rate'),
+                self::stringContains('1 AS dashboard_work_reports'),
+            ))
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
         // Sloupce kontrolované kvůli instalacím pozadu s migrací: OSS, zjednodušený doklad (2037)
-        // a rozpis slevy na PDF (2035, tady záměrně chybí).
-        $db->expects(self::exactly(3))->method('hasColumn')
+        // rozpis slevy na PDF (2035), zobrazení výkazu (2229) a výkazy práce na úvodní stránce
+        // (2312, tři tady záměrně chybí).
+        $db->expects(self::exactly(6))->method('hasColumn')
             ->willReturnCallback(static fn (string $table, string $column): bool =>
                 $table === 'supplier' && in_array($column, ['oss_enabled', 'simplified_hide_customer_default'], true));
         $db->expects(self::once())->method('pdo')->willReturn($pdo);
@@ -128,6 +176,7 @@ final class MeActionTest extends TestCase
             $offers,
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')
@@ -144,6 +193,8 @@ final class MeActionTest extends TestCase
             ->withAttribute(AuthMiddleware::ATTR_SESSION, [
                 'csrf_token' => str_repeat('b', 64),
                 'assurance_level' => 'strong',
+                'auth_method' => 'oidc:entra',
+                'expires_at' => (string) (new \DateTimeImmutable('2026-07-24 20:00:00 UTC'))->getTimestamp(),
                 'last_user_activity_at' => '2026-07-24 11:58:00.000000',
             ])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
@@ -186,6 +237,8 @@ final class MeActionTest extends TestCase
         self::assertSame('2026-07-24T12:03:00.000000Z', $body['idle_expires_at']);
         self::assertSame(str_repeat('b', 64), $body['csrf_token']);
         self::assertSame('past_due', $body['license']['subscription_state']);
+        // Podle tohohle frontend po vypršení sezení z Entra tiše obnoví přihlášení.
+        self::assertSame(['provider' => 'entra', 'expires_at' => '2026-07-24T20:00:00.000000Z'], $body['sso_session']);
     }
 
     /**
@@ -231,6 +284,7 @@ final class MeActionTest extends TestCase
             $offers,
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')
@@ -256,6 +310,7 @@ final class MeActionTest extends TestCase
         // Nabídka NIC neblokuje — `must_setup_mfa` musí zůstat false i pro setup session.
         self::assertFalse($body['user']['must_setup_mfa']);
         self::assertFalse($body['require_mfa']);
+        self::assertNull($body['sso_session'], 'Sezení bez poskytovatele identity se tiše neobnovuje.');
     }
 
     public function testClientAccountDoesNotReceiveSubscriptionState(): void
@@ -285,6 +340,36 @@ final class MeActionTest extends TestCase
         self::assertFalse($disabled['invoice_public_links_enabled']);
     }
 
+    /** Tlačítko Uložit a zaúčtovat v editorech faktur: výchozí vypnuto, zapíná ho volba instalace. */
+    public function testSaveAndPostFlagFollowsInstallationConfig(): void
+    {
+        $default = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+        $enabled = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+            'accounting' => ['save_and_post' => true],
+        ]));
+
+        self::assertFalse($default['save_and_post_enabled']);
+        self::assertTrue($enabled['save_and_post_enabled']);
+    }
+
+    /** Automatický export do Pohody: výchozí vypnuto, zapíná ho volba instalace export.scheduled_pohoda. */
+    public function testScheduledPohodaExportFlagFollowsInstallationConfig(): void
+    {
+        $default = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+        $enabled = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+            'export' => ['scheduled_pohoda' => true],
+        ]));
+
+        self::assertFalse($default['scheduled_pohoda_export_enabled']);
+        self::assertTrue($enabled['scheduled_pohoda_export_enabled']);
+    }
+
     /** @return array<string,mixed> */
     private function meBodyForClient(Config $config): array
     {
@@ -310,6 +395,7 @@ final class MeActionTest extends TestCase
             $this->createMock(MfaOfferService::class),
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $state = new LicenseState(
             state: LicenseState::ACTIVE,

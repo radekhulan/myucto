@@ -162,6 +162,7 @@ final class OutboxBatchSendMethodsTest extends TestCase
             $this->createStub(MobileKeyIsdsAuthenticator::class),
             $this->createStub(IsdsMobileCredentialService::class),
             (new \ReflectionClass(SmsIsdsAuthenticator::class))->newInstanceWithoutConstructor(),
+            (new \ReflectionClass(\MyInvoice\Service\Submission\IsdsAccessService::class))->newInstanceWithoutConstructor(),
         );
     }
 

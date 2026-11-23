@@ -30,6 +30,13 @@ final class BankApiMonthlyStatements
     /** Výpis, který je stavebním kamenem měsíčního výpisu. */
     private const PROJECTABLE = '(' . self::FEED_SOURCES . ' OR ' . self::DAILY_PDF . ')';
 
+    /**
+     * Část SET při odpojení PDF: zůstatky měsíce z feedu dokládalo jen ono. Výpis s vlastním
+     * souborem (GPC, stažený výpis banky) má zůstatky ze souboru a ty zůstávají.
+     */
+    public const DROP_PDF_BALANCES = "prev_balance = CASE WHEN source = 'bank_api' AND file_content IS NULL THEN NULL ELSE prev_balance END,
+                curr_balance = CASE WHEN source = 'bank_api' AND file_content IS NULL THEN NULL ELSE curr_balance END";
+
     public function __construct(private readonly PDO $pdo) {}
 
     public function pendingBackfillAccounts(): array
@@ -55,13 +62,14 @@ final class BankApiMonthlyStatements
         $key = AuthoritativeTransactionReconciler::account($account, $bank);
         if ($key === null) throw new \InvalidArgumentException('Invalid monthly statement account.');
         if (!$this->aggregatesMonthly($supplierId, $account, $bank, $currency)) return [];
-        $query = $this->pdo->prepare('SELECT bs.id, bs.account_number, bs.bank_code, bs.statement_date
+        $query = $this->pdo->prepare('SELECT bs.id, bs.account_number, bs.bank_code, bs.statement_date, bs.file_hash
             FROM bank_statements bs WHERE bs.supplier_id = ? AND bs.currency = ? AND ' . self::PROJECTABLE . '
             AND NOT EXISTS (SELECT 1 FROM bank_api_months m WHERE m.statement_id = bs.id)
             AND ' . self::visibleSql() . ' ORDER BY bs.id');
         $query->execute([$supplierId, $currency]);
-        $evidence = array_filter($query->fetchAll(PDO::FETCH_ASSOC), static fn (array $row): bool =>
-            AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key);
+        $evidence = array_filter($query->fetchAll(PDO::FETCH_ASSOC), fn (array $row): bool =>
+            AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key
+            && !$this->adoptOrphanMonth($supplierId, $key, $currency, $row));
         $link = $this->pdo->prepare('INSERT INTO bank_api_evidence_months (evidence_statement_id, monthly_statement_id, supplier_id) VALUES (?, ?, ?)');
         $hasTx = $this->pdo->prepare('SELECT 1 FROM bank_transaction_imports WHERE statement_id = ? AND bank_transaction_id = ?');
         $linkTx = $this->pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id) VALUES (?, ?, ?, ?, ?)');
@@ -250,7 +258,13 @@ final class BankApiMonthlyStatements
         }
         $month = substr((string) $this->pdo->query('SELECT month_start FROM bank_api_months WHERE statement_id = ' . $monthId)->fetchColumn(), 0, 7);
         if ($this->useDailyDocuments($monthId, $supplierId, $month)) return;
-        $this->pdo->prepare("UPDATE bank_statements SET source = 'bank_api', file_name = ?, file_content = NULL, statement_number = NULL, prev_balance = NULL, curr_balance = NULL WHERE id = ?")
+        // Zůstatky z přiloženého PDF přežijí přepočet z nočního stažení feedu, jiné ne.
+        // MariaDB vyhodnocuje SET zleva, proto se source přepisuje až za nimi.
+        $this->pdo->prepare("UPDATE bank_statements SET
+                prev_balance = CASE WHEN source = 'bank_api' AND OCTET_LENGTH(pdf_content) > 0 THEN prev_balance END,
+                curr_balance = CASE WHEN source = 'bank_api' AND OCTET_LENGTH(pdf_content) > 0 THEN curr_balance END,
+                source = 'bank_api', file_name = ?, file_content = NULL, statement_number = NULL
+              WHERE id = ?")
             ->execute(['API-' . $month, $monthId]);
     }
 
@@ -311,7 +325,7 @@ final class BankApiMonthlyStatements
         $copied->execute([$monthId, $monthHash]);
         if ($copied->fetchColumn() === false) return;
         $this->pdo->prepare('UPDATE bank_statements
-                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL
+                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL, ' . self::DROP_PDF_BALANCES . '
               WHERE id = ? AND supplier_id = ?')
             ->execute([$monthId, $supplierId]);
     }
@@ -342,14 +356,51 @@ final class BankApiMonthlyStatements
         $query->execute([$supplierId, $key, $currency, $month]);
         $id = $query->fetchColumn();
         if ($id !== false) return (int) $id;
-        $hash = hash('sha256', json_encode(['bank-api-month', $supplierId, $key, $currency, $month], JSON_THROW_ON_ERROR));
+        $hash = self::monthHash($supplierId, $key, $currency, $month);
+        $existing = $this->pdo->prepare('SELECT id FROM bank_statements WHERE supplier_id = ? AND file_hash = ?');
+        $existing->execute([$supplierId, $hash]);
+        $id = $existing->fetchColumn();
+        if ($id !== false) {
+            $this->registerMonth($supplierId, $key, $currency, $month, (int) $id);
+            return (int) $id;
+        }
         $number = 'API-' . substr($month, 0, 7);
         $insert = $this->pdo->prepare("INSERT INTO bank_statements
             (source, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_number, statement_date, transaction_count, matched_count, imported_by)
             VALUES ('bank_api', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)");
         $insert->execute([$number, $hash, $supplierId, $account, $bank, $currency, null, $month, $userId]);
         $id = (int) $this->pdo->lastInsertId();
-        $this->pdo->prepare('INSERT INTO bank_api_months (supplier_id, account_key, currency, month_start, statement_id) VALUES (?, ?, ?, ?, ?)')->execute([$supplierId, $key, $currency, $month, $id]);
+        $this->registerMonth($supplierId, $key, $currency, $month, $id);
         return $id;
+    }
+
+    private static function monthHash(int $supplierId, string $key, string $currency, string $month): string
+    {
+        return hash('sha256', json_encode(['bank-api-month', $supplierId, $key, $currency, $month], JSON_THROW_ON_ERROR));
+    }
+
+    private function registerMonth(int $supplierId, string $key, string $currency, string $month, int $statementId): void
+    {
+        $this->pdo->prepare('INSERT INTO bank_api_months (supplier_id, account_key, currency, month_start, statement_id) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$supplierId, $key, $currency, $month, $statementId]);
+    }
+
+    /**
+     * Měsíční výpis bez záznamu v `bank_api_months`: výpisy přenáší převod firmy
+     * (import z MyÚčta), evidenci měsíců ne. Takový výpis se pozná podle otisku
+     * měsíce a vrátí se do evidence, aby ho projekce nebrala jako podklad sám sebe
+     * a založení měsíce neskončilo na duplicitním otisku.
+     */
+    private function adoptOrphanMonth(int $supplierId, string $key, string $currency, array $row): bool
+    {
+        $date = (string) ($row['statement_date'] ?? '');
+        if ($date === '' || $row['file_hash'] === null) return false;
+        $month = substr($date, 0, 7) . '-01';
+        if (!hash_equals(self::monthHash($supplierId, $key, $currency, $month), (string) $row['file_hash'])) return false;
+        $taken = $this->pdo->prepare('SELECT 1 FROM bank_api_months WHERE supplier_id = ? AND account_key = ? AND currency = ? AND month_start = ?');
+        $taken->execute([$supplierId, $key, $currency, $month]);
+        if ($taken->fetchColumn() !== false) return false;
+        $this->registerMonth($supplierId, $key, $currency, $month, (int) $row['id']);
+        return true;
     }
 }

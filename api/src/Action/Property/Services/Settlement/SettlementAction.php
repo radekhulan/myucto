@@ -169,12 +169,12 @@ final class SettlementAction
     {
         $out = [];
         foreach (['manage','post','reverse'] as $cap) {
-            $out[$cap] = RequestAuthorization::isSessionAuth($q) && RequestAuthorization::allows($q, 'property.settlements.'.$cap, AccessLevel::WRITE);
+            $out[$cap] = RequestAuthorization::actsAsSession($q) && RequestAuthorization::allows($q, 'property.settlements.'.$cap, AccessLevel::WRITE);
         }return $out;
     }
     private function run(Request $q, Response $r, string $permission, bool $write, bool $public, callable $work): Response
     {
-        if (!$public && !RequestAuthorization::isSessionAuth($q)) {
+        if (!$public && !RequestAuthorization::actsAsSession($q)) {
             return Json::sessionRequired($r);
         }if (!RequestAuthorization::allows($q, $permission, $write ? AccessLevel::WRITE : AccessLevel::READ)) {
             return Json::error($r, 'forbidden', 'Pro tuto operaci nemáte oprávnění.', 403);

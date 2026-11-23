@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatPayrollDuration, parsePayrollDuration } from './payrollDuration'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute } from 'vue-router'
 import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
@@ -8,11 +9,12 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatMoneyMinor as money } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
+import PayrollCompensationRecalculationDialog from '@/components/payroll/PayrollCompensationRecalculationDialog.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
@@ -21,8 +23,12 @@ import {
   payrollAbsenceApi,
   type AbsencePayload,
   type AbsenceType,
+  type AverageBulkSkipped,
   type AverageEarningCandidate,
+  type AverageEarningProbableReason,
   type AverageEarningSuggestion,
+  type ProbableBulkResult,
+  type ProbableBulkRow,
   type AverageSnapshot,
   type LeaveEntry,
   type LeaveAbsenceDecision,
@@ -42,7 +48,7 @@ import type { PayrollAbsenceSicknessCaseOutcome } from '@/api/payrollSicknessCas
 import DateInput from '@/components/ui/DateInput.vue'
 import { usePayrollServerMessage } from './payrollServerMessage'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { reasonText } = usePayrollServerMessage()
 const route = useRoute()
 const toast = useToast()
@@ -201,14 +207,116 @@ const selectedReadyCandidates = computed(() => leaveCandidates.value.filter(cand
 const averageCandidatePage = computed(() => Math.floor(
   averageCandidateOffset.value / averageCandidatePageSize,
 ) + 1)
+/**
+ * Neaktuální schválený průměr jde hromadně přepočítat: z dnešních podkladů
+ * vznikne nová schválená revize. Náhrady vyplacené z původní revize se nemění.
+ */
+function averageRecalculable(candidate: AverageEarningCandidate): boolean {
+  return candidate.existing?.status === 'approved'
+    && candidate.existing_outdated === true
+    && candidate.suggested_average_hourly_minor != null
+}
 const selectedReadyAverageCandidates = computed(() => averageCandidates.value.filter(candidate =>
-  candidate.ready && selectedAverageCandidates.value.includes(candidate.employment_id)))
+  (candidate.ready || averageRecalculable(candidate))
+  && selectedAverageCandidates.value.includes(candidate.employment_id)))
+/*
+ * „Nastavit pravděpodobný výdělek vybraným" zapisuje i podmínky vztahu, takže
+ * vyžaduje i právo na pracovní vztahy (server: canSetProbableEarningInBulk).
+ * Vybrat jde pak i řádek bez připraveného návrhu, právě ten se tím opraví.
+ */
+const canSetProbable = computed(() => canWrite.value && auth.canWrite('payroll.employment.write'))
+const canRecalculateCompensations = computed(() => auth.canWrite('payroll.inputs.write'))
+const compensationRecalculation = ref<{ periods: string[], employmentIds: number[] | null } | null>(null)
+
+function quarterPeriods(year: number, quarter: number): string[] {
+  return [0, 1, 2].map(offset => `${year}-${String((quarter - 1) * 3 + 1 + offset).padStart(2, '0')}`)
+}
+
+function openCompensationRecalculation(year: number, quarter: number, employmentIds: number[] | null) {
+  if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) return
+  compensationRecalculation.value = { periods: quarterPeriods(year, quarter), employmentIds }
+}
+const probableForm = reactive({ amount_czk: '' as string | number, rationale: '' })
+const probableError = ref('')
+const probableResult = ref<ProbableBulkResult | null>(null)
+const averageSkipped = ref<AverageBulkSkipped[]>([])
+
+/**
+ * Věta „proč pravděpodobný výdělek" z důvodů, které poslal server (§ 355
+ * odst. 1 ZP). Hláška dřív řekla jen, že skutečný průměr odvodit nelze.
+ */
+function probableReasonText(reason: AverageEarningProbableReason | null | undefined): string {
+  if (!reason || reason.codes.length === 0) return ''
+  const parts = reason.codes.map(code => t(`payroll_absence.averages.probable_reason.${code}`, {
+    months: reason.missing_run_periods.map(period => formatPeriod(period)).join(', '),
+    days: reason.worked_days,
+    minimum: reason.minimum_worked_days,
+  }, code === 'run_missing' ? reason.missing_run_periods.length : reason.worked_days))
+  return t('payroll_absence.averages.probable_reason.intro', { reasons: parts.join('; ') })
+}
+
+function belowMinimumWageText(item: Pick<AverageEarningCandidate, 'below_minimum_wage' | 'probable_unusable'> | null | undefined): string {
+  const parts: string[] = []
+  const unusable = item?.probable_unusable
+  if (unusable) {
+    parts.push(t('payroll_absence.averages.probable_unusable', {
+      monthly: money(unusable.monthly_gross_minor),
+      hourly: money(unusable.hourly_minor),
+      minimum: money(unusable.minimum_hourly_minor),
+    }))
+  }
+  const below = item?.below_minimum_wage
+  if (below) {
+    parts.push(t('payroll_absence.averages.below_minimum_wage', {
+      raw: money(below.raw_hourly_minor),
+      minimum: money(below.minimum_hourly_minor),
+    }))
+  }
+  return parts.join(' ')
+}
+
+function averageCandidateSelectable(candidate: AverageEarningCandidate): boolean {
+  return candidate.ready || averageRecalculable(candidate) || canSetProbable.value
+}
+
+/** Průměr (nebo návrh) jen z hodinové minimální mzdy, typicky brigádník bez sazby. */
+function minimumWageCandidate(candidate: AverageEarningCandidate): boolean {
+  return candidate.existing
+    ? candidate.existing.source_kind === 'probable' && candidate.existing.probable_source === 'minimum_wage'
+    : candidate.probable_source === 'minimum_wage'
+}
+
+function selectAverageCandidatesWhere(predicate: (candidate: AverageEarningCandidate) => boolean) {
+  selectedAverageCandidates.value = averageCandidates.value
+    .filter(candidate => averageCandidateSelectable(candidate) && predicate(candidate))
+    .map(candidate => candidate.employment_id)
+}
+
+function averageRowTarget(row: { employment_id: number, employee_id: number | null }) {
+  return {
+    name: 'payroll-people',
+    query: {
+      ...(row.employee_id ? { person: String(row.employee_id) } : {}),
+      employment: String(row.employment_id),
+    },
+  }
+}
+
+function probableFailureText(row: ProbableBulkRow): string {
+  const key = `payroll_absence.averages.probable_bulk.failure.${row.code}`
+  return row.code && te(key) ? t(key, row.params ?? {}) : (row.message ?? '')
+}
+
+function probableWarningText(warning: { code: string, params: Record<string, string>, message: string }): string {
+  const key = `payroll_absence.averages.probable_bulk.warning.${warning.code}`
+  return warning.code !== 'terms_not_updated' && te(key) ? t(key, warning.params) : warning.message
+}
 const fieldClass = 'mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'compensatory_time_off', 'unexcused',
+  'employer_obstacle', 'compensatory_time_off', 'holiday_compensatory_time_off', 'unexcused',
   'public_function', 'employee_obstacle_unpaid', 'invalid_termination', 'other',
 ]
 /*
@@ -258,8 +366,8 @@ const averageForm = reactive({
   decisive_to: decisiveTo,
   gross_earnings_czk: 0,
   longer_period_allocated_czk: 0,
-  worked_hours: 0,
-  worked_days: 0,
+  worked_hours: '' as string | number,
+  worked_days: '' as string | number,
   probable_hourly_czk: null as number | null,
   rationale: '',
 })
@@ -279,7 +387,8 @@ const bulkAverageQuarter = ref(applicationQuarter)
 const averageSuggestion = ref<AverageEarningSuggestion | null>(null)
 const averageSuggestionLoading = ref(false)
 const averageSuggestionError = ref('')
-const averagePrefill = ref<{ gross: number, hours: number, days: number } | null>(null)
+const averagePrefill = ref<{ gross: number, hours: string | number, days: string | number } | null>(null)
+const averageOriginalDuration = ref<{ raw: string, units: number } | null>(null)
 const entitlementForm = reactive({
   employment_id: 0,
   leave_year: periodYear,
@@ -1129,21 +1238,26 @@ async function loadAverageSuggestion() {
 }
 
 /*
- * Nedá-li se odvodit, formulář se VYPRÁZDNÍ (nuly, tedy výchozí stav) — nechat
+ * Nedá-li se doba odvodit, zůstane prázdná — nechat
  * v něm čísla z předchozího vztahu nebo čtvrtletí by bylo horší než prázdno.
  */
 function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averageForm.decisive_from = suggestion.decisive_from
   averageForm.decisive_to = suggestion.decisive_to
   const gross = (suggestion.gross_earnings_minor ?? 0) / 100
-  const hours = (suggestion.worked_minutes ?? 0) / 60
-  const days = suggestion.worked_days ?? 0
+  // Vztah, který v rozhodném období ještě netrval, v něm prokazatelně
+  // neodpracoval nic: 0 h a 0 dnů, ne prázdná pole s obecnou chybou čísla.
+  const notEmployed = suggestion.employment_started_after_decisive_period === true
+  const units = suggestion.worked_duration_units
+    ?? (suggestion.worked_minutes == null ? (notEmployed ? 0 : null) : suggestion.worked_minutes * 50)
+  const hours = units == null ? '' : units % 50 === 0 ? String(units / 3000) : formatPayrollDuration(units)
+  const days = suggestion.worked_days ?? (notEmployed ? 0 : '')
+  averageOriginalDuration.value = units == null ? null : { raw: hours, units }
   averageForm.gross_earnings_czk = gross
   averageForm.worked_hours = hours
   averageForm.worked_days = days
-  // § 355 ZP — skutečný průměr nevznikne, průměr se STANOVUJE z pravděpodobného
-  // výdělku zmrazeného v podmínkách vztahu. Účetní ho tady nepřepisuje, jen
-  // potvrzuje; přepsat ho jde na kartě vztahu, kde ho i odůvodnila.
+  // § 355 ZP — návrh pravděpodobného výdělku účetní posoudí a může upravit,
+  // zejména vychází-li pouze ze sjednané sazby bez obvyklých složek mzdy.
   averageForm.probable_hourly_czk = suggestion.source_kind === 'probable'
     ? (suggestion.probable_hourly_minor ?? 0) / 100
     : null
@@ -1153,21 +1267,46 @@ function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averagePrefill.value = suggestion.ready ? { gross, hours, days } : null
 }
 
+function averageWorkedTimePayload(): { worked_minutes: number } | { worked_duration_units: number } {
+  const raw = String(averageForm.worked_hours)
+  const original = averageOriginalDuration.value
+  const units = original?.raw === raw ? original.units : parsePayrollDuration(raw)
+  if (units == null) throw new Error(t('payroll_absence.validation.exact_hours'))
+  return units % 50 === 0 ? { worked_minutes: units / 50 } : { worked_duration_units: units }
+}
+
+/**
+ * Chyba vstupu se jménem pole. Obecné „Zadejte platné číslo" u formuláře
+ * s pěti čísly neříkalo, které z nich je špatně.
+ */
+function averageField<T>(labelKey: string, read: () => T): T {
+  try {
+    return read()
+  } catch (error) {
+    if (error instanceof Error) throw new Error(`${t(labelKey)}: ${error.message}`)
+    throw error
+  }
+}
+
 async function createAverage() {
   averageError.value = ''
   saving.value = true
   try {
+    const workedDays = averageField('payroll_absence.averages.worked_days', () => {
+      if (averageForm.worked_days === '') throw new Error(t('payroll_absence.validation.number'))
+      return wholeNumber(averageForm.worked_days)
+    })
     await payrollAbsenceApi.createAverage({
       employment_id: averageForm.employment_id,
       applicable_year: wholeNumber(averageForm.applicable_year, true),
       applicable_quarter: wholeNumber(averageForm.applicable_quarter, true),
       decisive_from: averageForm.decisive_from,
       decisive_to: averageForm.decisive_to,
-      gross_earnings_minor: toMinor(averageForm.gross_earnings_czk),
-      longer_period_allocated_minor: toMinor(averageForm.longer_period_allocated_czk),
-      worked_minutes: hoursToMinutes(averageForm.worked_hours),
-      worked_days: wholeNumber(averageForm.worked_days),
-      probable_hourly_minor: toMinor(averageForm.probable_hourly_czk, true, true),
+      gross_earnings_minor: averageField('payroll_absence.averages.gross_minor', () => toMinor(averageForm.gross_earnings_czk)),
+      longer_period_allocated_minor: averageField('payroll_absence.averages.allocated_minor', () => toMinor(averageForm.longer_period_allocated_czk)),
+      ...averageField('payroll_absence.averages.worked_minutes', averageWorkedTimePayload),
+      worked_days: workedDays,
+      probable_hourly_minor: averageField('payroll_absence.averages.probable_minor',() => toMinor(averageForm.probable_hourly_czk, true, true)),
       rationale: averageForm.rationale || null,
     })
     toast.success(t('payroll_absence.messages.average_created'))
@@ -1298,7 +1437,7 @@ async function loadAverageCandidates() {
     averageCandidates.value = page.items
     averageCandidateTotal.value = page.total
     selectedAverageCandidates.value = selectedAverageCandidates.value.filter(id =>
-      page.items.some(candidate => candidate.ready && candidate.employment_id === id))
+      page.items.some(candidate => averageCandidateSelectable(candidate) && candidate.employment_id === id))
   } catch (error: any) {
     averageCandidateError.value = exactError(error, 'payroll_absence.averages.bulk_load_failed')
   } finally {
@@ -1318,22 +1457,36 @@ function selectAllReadyAverageCandidates() {
     .map(candidate => candidate.employment_id)
 }
 
+/** Vybere schválené průměry, které neodpovídají dnešním podkladům. */
+function selectOutdatedAverageCandidates() {
+  selectedAverageCandidates.value = averageCandidates.value
+    .filter(averageRecalculable)
+    .map(candidate => candidate.employment_id)
+}
+
 async function createAveragesBulk() {
   if (selectedReadyAverageCandidates.value.length === 0) return
   saving.value = true
   averageCandidateError.value = ''
+  averageSkipped.value = []
+  probableResult.value = null
   try {
-    const created = await payrollAbsenceApi.createAveragesBulk({
+    const result = await payrollAbsenceApi.createAveragesBulk({
       year: bulkAverageYear.value,
       quarter: bulkAverageQuarter.value,
       items: selectedReadyAverageCandidates.value.map(candidate => ({
         employment_id: candidate.employment_id,
         input_version: candidate.input_version,
+        // Neaktuální schválený průměr: výslovně žádáme novou revizi.
+        ...(averageRecalculable(candidate) ? { recalculate_outdated: true } : {}),
       })),
     })
-    toast.success(t('payroll_absence.averages.bulk_created', { count: created.length }))
+    toast.success(t('payroll_absence.averages.bulk_created', { count: result.averages.length }))
     selectedAverageCandidates.value = []
     await loadAverageCandidates()
+    // Přeskočené vztahy (návrh mezitím přestal být připravený) se ukážou
+    // jménem a důvodem, ostatní se schválily.
+    averageSkipped.value = result.skipped
   } catch (error: any) {
     // Podklady se mezitím změnily (nový/opravený běh) — návrh už neplatí,
     // znovunačtení ukáže aktuální stav místo tichého založení na starých číslech.
@@ -1345,6 +1498,48 @@ async function createAveragesBulk() {
     } else {
       averageCandidateError.value = exactError(error, 'payroll_absence.messages.save_failed')
     }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function setProbableBulk() {
+  if (selectedAverageCandidates.value.length === 0) return
+  probableError.value = ''
+  let amount: number | null
+  try {
+    amount = toMinor(probableForm.amount_czk, false, true)
+  } catch (error) {
+    probableError.value = `${t('payroll_absence.averages.probable_bulk.amount')}: ${(error as Error).message}`
+    return
+  }
+  const rationale = probableForm.rationale.trim()
+  if (rationale === '') {
+    probableError.value = t('payroll_absence.averages.probable_bulk.rationale_required')
+    return
+  }
+  saving.value = true
+  averageSkipped.value = []
+  try {
+    const result = await payrollAbsenceApi.setProbableBulk({
+      year: bulkAverageYear.value,
+      quarter: bulkAverageQuarter.value,
+      probable_hourly_minor: amount!,
+      rationale,
+      employment_ids: [...selectedAverageCandidates.value],
+    })
+    if (result.counts.applied + result.counts.unchanged > 0) {
+      toast.success(t('payroll_absence.averages.probable_bulk.done', {
+        applied: result.counts.applied,
+        unchanged: result.counts.unchanged,
+      }))
+    }
+    // Úspěšné řádky z výběru zmizí, chybné zůstanou vybrané k dalšímu kroku.
+    selectedAverageCandidates.value = result.failed.map(row => row.employment_id)
+    await loadAverageCandidates()
+    probableResult.value = result
+  } catch (error: any) {
+    probableError.value = exactError(error, 'payroll_absence.messages.save_failed')
   } finally {
     saving.value = false
   }
@@ -1376,7 +1571,8 @@ async function createEntry() {
   }
 }
 
-function minutes(value: number) {
+function minutes(value: number | null) {
+  if (value === null) return t('payroll.worked_hours.unknown')
   const sign = value < 0 ? '−' : ''
   const absolute = Math.abs(value)
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`
@@ -1513,7 +1709,7 @@ onMounted(async () => {
       :data-test="`absence-approval-warning-${warning.code}`"
     >
       <span class="min-w-0 flex-1">
-        <strong>{{ warning.name }}:</strong> {{ warning.message }}
+        <strong>{{ warning.name }}:</strong> {{ warning.code === 'absence_manual_work_time_unverifiable' ? t('payroll_absence.manual_work_time_unverifiable') : warning.message }}
       </span>
       <RouterLink :to="warning.path" :class="[btnOutline('warning'), 'whitespace-nowrap']">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
@@ -1662,6 +1858,7 @@ onMounted(async () => {
               accent="payroll"
               :aria-label="t('payroll_absence.absences.type')"
             />
+            <p v-if="absenceForm.absence_type === 'holiday_compensatory_time_off'" class="mt-1 text-xs text-neutral-500" data-test="absence-holiday-time-off-hint">{{ t('payroll_absence.absences.holiday_time_off_hint') }}</p>
             <p
               v-if="isUnpaidExcused"
               data-test="absence-unpaid-excused-hint"
@@ -2186,6 +2383,18 @@ onMounted(async () => {
                 {{ t('payroll_absence.leave.select_ready') }}
               </button>
               <button
+                v-if="averageCandidates.some(averageRecalculable)"
+                type="button"
+                :class="btnOutline('warning')"
+                class="whitespace-nowrap"
+                data-test="bulk-average-select-outdated"
+                :disabled="averageCandidateLoading"
+                @click="selectOutdatedAverageCandidates"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
+                {{ t('payroll_absence.averages.bulk_select_outdated') }}
+              </button>
+              <button
                 type="button"
                 :class="btnFilled('success')"
                 :disabled="saving || selectedReadyAverageCandidates.length === 0"
@@ -2198,6 +2407,99 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+        <div
+          v-if="canRecalculateCompensations"
+          class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+          data-test="compensation-recalculation-bulk"
+        >
+          <div class="min-w-0 flex-1">
+            <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll.compensation_recalculation.title') }}</h3>
+            <p class="mt-1 max-w-prose text-xs text-neutral-500">{{ t('payroll.compensation_recalculation.bulk_hint', { quarter: `Q${bulkAverageQuarter}/${bulkAverageYear}` }) }}</p>
+          </div>
+          <button
+            type="button"
+            :class="btnOutline('warning')"
+            class="whitespace-nowrap"
+            data-test="compensation-recalculation-open"
+            @click="openCompensationRecalculation(bulkAverageYear, bulkAverageQuarter, null)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.compensation_recalculation.open') }}
+          </button>
+        </div>
+        <div v-if="canSetProbable" class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3" data-test="probable-bulk">
+          <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll_absence.averages.probable_bulk.title') }}</h3>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll_absence.averages.probable_bulk.hint') }}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <span class="text-xs font-medium text-neutral-600">{{ t('payroll_absence.averages.probable_bulk.quick_select') }}</span>
+            <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="probable-select-dpp" :disabled="averageCandidateLoading" @click="selectAverageCandidatesWhere(candidate => candidate.relation_type === 'dpp')">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
+              {{ t('payroll_absence.averages.probable_bulk.select_dpp') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="probable-select-minimum" :disabled="averageCandidateLoading" @click="selectAverageCandidatesWhere(minimumWageCandidate)">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
+              {{ t('payroll_absence.averages.probable_bulk.select_minimum_wage') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="selectedAverageCandidates.length === 0" @click="selectedAverageCandidates = []">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('payroll_absence.averages.probable_bulk.clear_selection') }}
+            </button>
+          </div>
+          <div class="mt-3 flex flex-wrap items-end gap-3">
+            <label class="w-40">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.averages.probable_bulk.amount') }}</span>
+              <input v-model="probableForm.amount_czk" data-test="probable-amount" type="number" min="0.01" step="0.01" inputmode="decimal" :class="fieldClass">
+            </label>
+            <label class="min-w-[16rem] flex-1">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.averages.probable_bulk.rationale') }}</span>
+              <input v-model="probableForm.rationale" data-test="probable-rationale" type="text" maxlength="1000" :placeholder="t('payroll_absence.averages.probable_bulk.rationale_placeholder')" :class="fieldClass">
+            </label>
+            <button
+              type="button"
+              :class="btnFilled('primary')"
+              class="whitespace-nowrap"
+              data-test="probable-apply"
+              :disabled="saving || selectedAverageCandidates.length === 0"
+              @click="setProbableBulk"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll_absence.averages.probable_bulk.apply', { count: selectedAverageCandidates.length }) }}
+            </button>
+          </div>
+          <p v-if="probableError" class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ probableError }}</p>
+        </div>
+        <div v-if="probableResult" class="mt-3 rounded-lg border border-neutral-200 p-3 text-sm" data-test="probable-bulk-result">
+          <p class="font-medium text-neutral-900">
+            {{ t('payroll_absence.averages.probable_bulk.summary', {
+              applied: probableResult.counts.applied,
+              unchanged: probableResult.counts.unchanged,
+              failed: probableResult.counts.failed,
+            }) }}
+          </p>
+          <ul v-if="probableResult.failed.length > 0" class="mt-2 space-y-1" data-test="probable-bulk-failed">
+            <li v-for="row in probableResult.failed" :key="`f-${row.employment_id}`" class="text-danger-700">
+              <RouterLink :to="averageRowTarget(row)" class="font-medium underline">{{ row.employee_name ?? `#${row.employment_id}` }}</RouterLink>
+              · {{probableFailureText(row) }}
+            </li>
+          </ul>
+          <ul class="mt-2 space-y-1">
+            <template v-for="row in [...probableResult.applied, ...probableResult.unchanged]" :key="`w-${row.employment_id}`">
+              <li v-for="warning in row.warnings ?? []" :key="`${row.employment_id}-${warning.code}`" class="text-warning-700">
+                <RouterLink :to="averageRowTarget(row)" class="font-medium underline">{{ row.employee_name }}</RouterLink>
+                · {{probableWarningText(warning) }}
+              </li>
+            </template>
+          </ul>
+        </div>
+        <div v-if="averageSkipped.length > 0" class="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700" data-test="bulk-average-skipped">
+          <p class="font-medium">{{ t('payroll_absence.averages.bulk_skipped', { count: averageSkipped.length }) }}</p>
+          <ul class="mt-2 space-y-1">
+            <li v-for="row in averageSkipped" :key="row.employment_id">
+              <RouterLink :to="averageRowTarget(row)" class="font-medium underline">{{ row.employee_name }}</RouterLink>
+              · {{row.blockers.map(blocker => t(`payroll_absence.averages.blockers.${blocker}`)).join(' · ') }}
+            </li>
+          </ul>
+        </div>
         <p v-if="averageCandidateError" class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ averageCandidateError }}</p>
         <p v-if="averageCandidateLoading" class="mt-4 text-sm text-neutral-500">{{ t('common.loading') }}</p>
         <div v-else class="mt-4 divide-y divide-neutral-200 rounded-lg border border-neutral-200">
@@ -2205,14 +2507,15 @@ onMounted(async () => {
             v-for="candidate in averageCandidates"
             :key="candidate.employment_id"
             class="flex items-start gap-3 p-3"
-            :class="candidate.ready ? 'cursor-pointer' : 'bg-neutral-50'"
+            :class="averageCandidateSelectable(candidate) ? 'cursor-pointer' : 'bg-neutral-50'"
           >
             <input
               v-if="canWrite"
               v-model="selectedAverageCandidates"
               type="checkbox"
+              :data-test="`bulk-average-select-${candidate.employment_id}`"
               :value="candidate.employment_id"
-              :disabled="!candidate.ready"
+              :disabled="!averageCandidateSelectable(candidate)"
               class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
             >
             <span class="min-w-0 flex-1">
@@ -2225,14 +2528,24 @@ onMounted(async () => {
                   status: t(`payroll_absence.average_status.${candidate.existing.status}`),
                 }) }}
               </span>
-              <span v-if="candidate.existing && candidate.existing_outdated" class="mt-1 block text-xs text-warning-700">
-                {{ t('payroll_absence.averages.bulk_existing_outdated') }}
+              <span v-if="candidate.existing && candidate.existing_outdated" class="mt-1 block text-xs text-warning-700" :data-test="`bulk-average-outdated-${candidate.employment_id}`">
+                {{ t(`payroll_absence.averages.bulk_outdated_reason.${candidate.existing_outdated_reason ?? 'earnings'}`) }}
+                <template v-if="candidate.suggested_average_hourly_minor != null">
+                  {{ t('payroll_absence.averages.bulk_outdated_difference', {
+                    suggested: money(candidate.suggested_average_hourly_minor),
+                    existing: money(candidate.existing.average_hourly_minor),
+                    difference: money(candidate.suggested_average_hourly_minor - candidate.existing.average_hourly_minor),
+                  }) }}
+                </template>
+                {{ t(averageRecalculable(candidate)
+                  ? 'payroll_absence.averages.bulk_outdated_action'
+                  : 'payroll_absence.averages.bulk_outdated_manual') }}
               </span>
               <span v-else-if="candidate.ready && candidate.source_kind === 'actual'" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.averages.bulk_actual_summary', {
                   gross: money(candidate.gross_earnings_minor ?? 0),
-                  hours: minutes(candidate.worked_minutes ?? 0),
-                  days: candidate.worked_days ?? 0,
+                  hours: candidate.worked_duration_units == null ? minutes(candidate.worked_minutes) : formatPayrollDuration(candidate.worked_duration_units),
+                  days: candidate.worked_days ?? t('payroll.worked_hours.unknown'),
                 }) }}
               </span>
               <span v-else-if="candidate.ready && candidate.source_kind === 'probable'" class="mt-1 block text-xs text-neutral-500">
@@ -2240,10 +2553,20 @@ onMounted(async () => {
                   amount: money(candidate.probable_hourly_minor ?? 0),
                   source: t(`payroll_absence.averages.probable_source.${candidate.probable_source}`),
                 }) }}
+                <span
+                  v-if="probableReasonText(candidate.probable_reason)"
+                  class="block"
+                  :data-test="`average-candidate-probable-reason-${candidate.employment_id}`"
+                >{{ probableReasonText(candidate.probable_reason) }}</span>
               </span>
               <span v-else class="mt-1 block text-xs text-warning-700">
                 {{ candidate.blockers.map(blocker => t(`payroll_absence.averages.blockers.${blocker}`)).join(' · ') }}
               </span>
+              <span
+                v-if="belowMinimumWageText(candidate)"
+                class="mt-1 block text-xs font-medium text-warning-800"
+                :data-test="`average-candidate-below-minimum-${candidate.employment_id}`"
+              >{{ belowMinimumWageText(candidate) }}</span>
             </span>
             <span
               class="rounded-full px-2 py-1 text-xs font-medium"
@@ -2301,8 +2624,8 @@ onMounted(async () => {
         >
           <p>
             {{ t('payroll_absence.averages.suggestion_ready', {
-              from: averageSuggestion.decisive_from,
-              to: averageSuggestion.decisive_to,
+              from: formatDate(averageSuggestion.decisive_from),
+              to: formatDate(averageSuggestion.decisive_to),
             }) }}
           </p>
           <p
@@ -2310,9 +2633,24 @@ onMounted(async () => {
             data-test="average-suggestion-probable"
             class="mt-1 text-xs text-success-700"
           >
-            {{ t('payroll_absence.averages.suggestion_probable') }}
+            {{ t(averageSuggestion.probable_source === 'agreed_hourly_rate' ? 'payroll_absence.averages.hourly_rate_review' : 'payroll_absence.averages.suggestion_probable') }}
+          </p>
+          <!-- Proč pravděpodobný výdělek: chybějící běhy rozhodného období, nebo méně než 21 odpracovaných dnů. -->
+          <p
+            v-if="averageSuggestion.source_kind === 'probable' && probableReasonText(averageSuggestion.probable_reason)"
+            data-test="average-suggestion-probable-reason"
+            class="mt-1 text-xs text-success-700"
+          >
+            {{ probableReasonText(averageSuggestion.probable_reason) }}
           </p>
           <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
+          <p
+            v-if="belowMinimumWageText(averageSuggestion)"
+            data-test="average-suggestion-below-minimum"
+            class="mt-2 rounded-md bg-warning-50 px-2 py-1 text-xs font-medium text-warning-800"
+          >
+            {{ belowMinimumWageText(averageSuggestion) }}
+          </p>
           <!--
             Převzatá hrubá mzda není započitatelná mzda § 354 ZP — náhrady mzdy
             (dovolená, svátek) do průměru nepatří. Účetní to musí vidět dřív,
@@ -2355,6 +2693,9 @@ onMounted(async () => {
           <ul class="mt-2 list-disc space-y-1 pl-5 text-xs">
             <li v-for="(reason, index) in averageSuggestionBlockers" :key="index">{{ reason }}</li>
           </ul>
+          <p v-if="belowMinimumWageText(averageSuggestion)" data-test="average-suggestion-blocked-below-minimum" class="mt-2 text-xs font-medium">
+            {{ belowMinimumWageText(averageSuggestion) }}
+          </p>
         </div>
         <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
           <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
@@ -2373,7 +2714,8 @@ onMounted(async () => {
           </label>
           <label>
             <span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span>
-            <input v-model.number="averageForm.worked_hours" data-test="average-worked-hours" min="0" step="0.25" type="number" :class="fieldClass">
+            <input v-model="averageForm.worked_hours" data-test="average-worked-hours" type="text" :class="fieldClass">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.exact_hours_hint') }}</span>
             <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_worked_hours') }}</span>
           </label>
           <label>
@@ -2384,7 +2726,7 @@ onMounted(async () => {
           <label v-if="averageProbableApplies" data-test="average-probable-field">
             <span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span>
             <input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass">
-            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_probable') }}</span>
+            <span class="mt-1 block text-xs text-neutral-500">{{ t(averageSuggestion?.probable_source === 'agreed_hourly_rate' ? 'payroll_absence.averages.hourly_rate_review' : 'payroll_absence.averages.source_probable') }}</span>
           </label>
           <label class="sm:col-span-2 lg:col-span-3"><span class="form-label">{{ t('payroll_absence.averages.rationale') }}</span><input v-model="averageForm.rationale" maxlength="1000" type="text" :class="fieldClass"></label>
           <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
@@ -2405,7 +2747,19 @@ onMounted(async () => {
           <div class="flex justify-between gap-3"><h3 class="font-semibold text-neutral-900">{{ item.applicable_year }}/Q{{ item.applicable_quarter }}</h3><span class="text-xs text-neutral-500">{{ t(`payroll_absence.average_source.${item.source_kind}`) }}</span></div>
           <p class="mt-3 text-2xl font-semibold text-payroll-600">{{ money(item.average_hourly_minor) }}</p>
           <p class="mt-1 text-sm text-neutral-500">{{ t(`payroll_absence.average_status.${item.status}`) }}</p>
+          <p v-if="item.worked_duration_units !== undefined || item.worked_minutes !== undefined" class="mt-1 text-sm text-neutral-500" data-test="average-snapshot-worked">{{ t('payroll_absence.averages.worked_minutes') }}: {{ item.worked_duration_units == null ? minutes(item.worked_minutes ?? null) : formatPayrollDuration(item.worked_duration_units) }}</p>
           <button v-if="canWrite && item.status === 'manual_review'" :class="btnFilled('success')" class="mt-4" :disabled="saving" @click="approveAverage(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll_absence.actions.approve') }}</button>
+          <button
+            v-if="canRecalculateCompensations && item.status === 'approved'"
+            type="button"
+            :class="btnOutline('warning')"
+            class="mt-4 whitespace-nowrap"
+            data-test="average-compensation-recalculation"
+            @click="openCompensationRecalculation(item.applicable_year, item.applicable_quarter, [item.employment_id])"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.compensation_recalculation.open') }}
+          </button>
         </article>
       </section>
     </template>
@@ -2636,6 +2990,13 @@ onMounted(async () => {
       </section>
     </template>
     </template>
+
+    <PayrollCompensationRecalculationDialog
+      v-if="compensationRecalculation"
+      :periods="compensationRecalculation.periods"
+      :employment-ids="compensationRecalculation.employmentIds"
+      @close="compensationRecalculation = null"
+    />
 
     <Modal
       v-if="bulkApprovalOpen"

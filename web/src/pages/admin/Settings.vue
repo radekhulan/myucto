@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PdfAppearanceSettings from '@/components/settings/PdfAppearanceSettings.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -12,8 +13,9 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
-import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from '@/utils/varsymbol'
-import { DEFAULT_NOTE_MAX_LENGTH } from '@/pages/invoices/invoiceDefaultNote'
+import { templatesCollide } from '@/utils/varsymbol'
+import { normalizeInputBrackets, numberTemplateState, type NumberTemplateOptions } from '@/utils/numberTemplate'
+import InvoiceDefaultsFields from '@/components/settings/InvoiceDefaultsFields.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import CompanyEmailTemplates from '@/components/settings/CompanyEmailTemplates.vue'
@@ -22,7 +24,9 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
+import NumberSeriesSettings from '@/components/settings/NumberSeriesSettings.vue'
 import AccountingFrameworkSettings from '@/components/settings/AccountingFrameworkSettings.vue'
+import TaxOfficeFields from '@/components/settings/TaxOfficeFields.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
@@ -91,10 +95,10 @@ function updateAccountingFramework(state: Pick<Supplier, 'id' | 'accounting_fram
 const TAXPAYER_CODES = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
 const ACCOUNTING_DECREES = ['500', '501', '502', '503', '504', '325', '410'] as const
 const ENTITY_STATUSES = ['normal', 'liquidation', 'insolvency', 'transformation'] as const
-type SettingsTab = 'company' | 'documents' | 'numbering' | 'accounting' | 'email-templates'
+type SettingsTab = 'company' | 'documents' | 'numbering' | 'number-series' | 'accounting' | 'email-templates'
 const tabs = computed<SettingsTab[]>(() => auth.canWrite('settings.email_templates')
-  ? ['company', 'documents', 'numbering', 'accounting', 'email-templates']
-  : ['company', 'documents', 'numbering', 'accounting'])
+  ? ['company', 'documents', 'numbering', 'number-series', 'accounting', 'email-templates']
+  : ['company', 'documents', 'numbering', 'number-series', 'accounting'])
 // Na záložku se dá odkázat zvenčí (?tab=accounting) — odjinud v aplikaci sem
 // vedou rady typu „zapněte účetnictví v Nastavení", a ty musí skončit u toho
 // přepínače, ne na první záložce.
@@ -174,51 +178,18 @@ async function loadCommercialRegister() {
   }
 }
 
-// Live preview pro číslování faktur — okamžitá zpětná vazba pod každým polem.
-// Chybějící counter → červený error; jinak „Náhled: JD2026-01".
-function validateAndPreview(template: string | null) {
-  const tmpl = (template ?? '').trim()
-  if (tmpl === '') return { error: '', preview: '' }
-  if (!hasCounterPlaceholder(tmpl)) return { error: t('settings.numbering_must_have_counter'), preview: '' }
-  return { error: '', preview: renderVarsymbolTemplate(tmpl, new Date(), 1) }
+const PP: NumberTemplateOptions = { allowPp: true }
+// Live validace a náhled tvaru čísla pod každým polem (sdílená pravidla z utils/numberTemplate,
+// zrcadlo backendu): chyba červeně, u platného tvaru náhled čísla pro dnešek a čítač 1.
+function validateAndPreview(template: string | null, opts: NumberTemplateOptions = {}) {
+  const r = numberTemplateState(t, template, opts)
+  return { error: r.error, preview: r.preview, warning: r.warning }
 }
-// Výchozí splatnost — UI preset ('7' / '14' / 'month' / 'custom') je odvozen z dvojice
-// (default_payment_due_days, default_payment_due_unit). 'month' znamená přesně 1 kalendářní
-// měsíc (days=1, unit='month'); 'custom' nechá volný číselný input v dnech.
-type DuePreset = '7' | '14' | 'month' | 'custom'
-// 'custom' musí být „sticky" i když hodnota náhodou odpovídá presetu (7/14) — jinak
-// by getter spadl zpět na preset a číselný input by se nikdy neukázal.
-const dueCustom = ref(false)
-const dueSelectValue = computed<DuePreset>({
-  get() {
-    if (!supplier.value) return '7'
-    if (dueCustom.value) return 'custom'
-    const d = supplier.value.default_payment_due_days
-    const u = supplier.value.default_payment_due_unit
-    if (u === 'month' && d === 1) return 'month'
-    if (u === 'days' && d === 7)  return '7'
-    if (u === 'days' && d === 14) return '14'
-    return 'custom'
-  },
-  set(v: DuePreset) {
-    if (!supplier.value) return
-    dueCustom.value = (v === 'custom')
-    if (v === '7') {
-      supplier.value.default_payment_due_days = 7
-      supplier.value.default_payment_due_unit = 'days'
-    } else if (v === '14') {
-      supplier.value.default_payment_due_days = 14
-      supplier.value.default_payment_due_unit = 'days'
-    } else if (v === 'month') {
-      supplier.value.default_payment_due_days = 1
-      supplier.value.default_payment_due_unit = 'month'
-    } else {
-      supplier.value.default_payment_due_unit = 'days'
-      // days zachovat — pokud byl 7/14 user dostane editovatelnou hodnotu k úpravě
-    }
-  },
-})
-
+const issuedPeriod = computed<NumberTemplateOptions>(() => ({ period: supplier.value?.invoice_number_period ?? null }))
+/** Rok či měsíc chybí k období řady: u vydaných dokladů jen varování, období se může měnit zvlášť. */
+function issuedWarning(template: string | null | undefined): string {
+  return validateAndPreview(template ?? null, issuedPeriod.value).warning
+}
 const invoicePreview        = computed(() => validateAndPreview(supplier.value?.invoice_number_format ?? null).preview)
 const invoiceFormatError    = computed(() => validateAndPreview(supplier.value?.invoice_number_format ?? null).error)
 const proformaPreview       = computed(() => validateAndPreview(supplier.value?.proforma_number_format ?? null).preview)
@@ -231,9 +202,9 @@ const simplifiedFormatError = computed(() => validateAndPreview(supplier.value?.
 const hasSimplifiedSeries   = computed(() => (supplier.value?.simplified_number_format ?? '').trim() !== '')
 // Přijaté faktury nemají cfg fallback: prázdné pole = vestavěná šablona (náhled ji ukáže).
 const purchasePreview       = computed(() => validateAndPreview(
-  (supplier.value?.purchase_invoice_number_format ?? '').trim() || supplier.value?.cfg_varsymbol_fallback?.purchase || '{PP}{YY}{MM}{CCC}',
+  (supplier.value?.purchase_invoice_number_format ?? '').trim() || supplier.value?.cfg_varsymbol_fallback?.purchase || '{PP}{YY}{MM}{CCC}', PP,
 ).preview)
-const purchaseFormatError   = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).error)
+const purchaseFormatError   = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null, PP).error)
 
 // Řady přijatých dokladů podle typu (migrace 2001). Výchozí šablony zrcadlí
 // PurchaseNumberSeries::KIND_DEFAULT_TEMPLATES na backendu.
@@ -244,12 +215,21 @@ const PURCHASE_SERIES_KINDS = [
   { kind: 'tax_document', field: 'purchase_tax_document_number_format', fallback: 'DZ{YY}{MM}{CCC}' },
 ] as const
 type PurchaseSeriesField = typeof PURCHASE_SERIES_KINDS[number]['field']
+// Datum pro měsíc a rok čísla přijatých dokladů (PurchaseNumberingDate::BASES na backendu).
+const PURCHASE_NUMBERING_BASES = ['issue', 'received', 'tax'] as const
 const purchaseByKind = computed(() => supplier.value?.purchase_invoice_numbering === 'by_kind')
 function purchaseSeriesCheck(field: PurchaseSeriesField, fallback: string) {
   const own = (supplier.value?.[field] ?? '').trim()
-  const result = validateAndPreview(own === '' ? fallback : own)
+  const result = validateAndPreview(own === '' ? fallback : own, PP)
   return { error: own === '' ? '' : result.error, preview: result.preview }
 }
+
+/** Chyby tvaru čísla ve všech polích číslování; dokud nějaká je, nejde uložit. */
+const numberingErrors = computed(() => [
+  invoiceFormatError.value, proformaFormatError.value, creditNoteFormatError.value, simplifiedFormatError.value,
+  purchaseFormatError.value,
+  ...(purchaseByKind.value ? PURCHASE_SERIES_KINDS.map((s) => purchaseSeriesCheck(s.field, s.fallback).error) : []),
+].filter(Boolean))
 
 // Navázání na rozjetou číselnou řadu (issue #74) — kdo přechází z jiného software,
 // potřebuje, aby první doklad tady dostal číslo, kterým jeho řada pokračuje. Samotné
@@ -363,6 +343,12 @@ function selfCopyFallbackLabel(ct: SelfCopyType): string {
 const originalAccountingMode = ref<'tax_evidence' | 'double_entry' | null>(null)
 // Začátek účetního roku se posílá jen při změně: backend změnu proti existujícím obdobím odmítne.
 const originalFiscalStartMonth = ref<number>(1)
+// Podoba výkazu práce se posílá jen při změně: server vrací výsledné volby, a kdyby je
+// formulář posílal pokaždé, z firmy bez nastavení (NULL) by se stala výslovná hodnota.
+const originalWorkReportDisplay = ref('')
+const workReportDisplayKey = (options: Supplier['work_report_display_options']) =>
+  JSON.stringify((['compact', 'date', 'hours', 'rate', 'amount'] as const)
+    .map(key => options?.[key] ?? (key !== 'compact')))
 const FISCAL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const
 
 // ── CZ-NACE našeptávač nad číselníkem ČINNOSTI ─────────────────────────────
@@ -413,6 +399,7 @@ async function load() {
     naceResolved.value = supplier.value.cz_nace_resolved ?? null
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
     originalFiscalStartMonth.value = supplier.value.fiscal_year_start_month ?? 1
+    originalWorkReportDisplay.value = workReportDisplayKey(supplier.value.work_report_display_options)
   } finally { loading.value = false }
   loadSampleStatus()
   loadVatRegistrationCheck()
@@ -560,7 +547,7 @@ async function saveSupplier() {
   if (!supplier.value) return
   // Klient-side guard pro varsymbol formáty — stejná pravidla jako backend, ale uživatel
   // dostane okamžitou zpětnou vazbu (hláška u pole) místo toastu, který zmizí.
-  const errs = [invoiceFormatError.value, proformaFormatError.value, creditNoteFormatError.value].filter(Boolean)
+  const errs = numberingErrors.value
   if (errs.length > 0) {
     toast.error(errs[0])
     return
@@ -598,17 +585,17 @@ async function saveSupplier() {
       web: supplier.value.web,
       tagline: supplier.value.tagline,
       commercial_register: supplier.value.commercial_register,
-      default_payment_due_days: supplier.value.default_payment_due_days,
-      default_payment_due_unit: supplier.value.default_payment_due_unit,
       default_prices_include_vat: supplier.value.default_prices_include_vat,
       default_rounding_mode: supplier.value.default_rounding_mode ?? 'auto',
       allow_refund_invoices: supplier.value.allow_refund_invoices ?? false,
-      invoice_pdf_show_issued_by: supplier.value.invoice_pdf_show_issued_by ?? false,
-      // Výchozí poznámka pod položkami (#79) — prázdné pole ukládá server jako NULL.
-      default_note_below_items_enabled: supplier.value.default_note_below_items_enabled ?? false,
-      default_note_below_items_cs: supplier.value.default_note_below_items_cs ?? null,
-      default_note_below_items_en: supplier.value.default_note_below_items_en ?? null,
-      default_hourly_rate: supplier.value.default_hourly_rate,
+      ...(auth.canWrite('settings.invoice_defaults') ? {
+        default_payment_due_days: supplier.value.default_payment_due_days,
+        default_payment_due_unit: supplier.value.default_payment_due_unit,
+        default_hourly_rate: supplier.value.default_hourly_rate,
+        default_note_below_items_enabled: supplier.value.default_note_below_items_enabled ?? false,
+        default_note_below_items_cs: supplier.value.default_note_below_items_cs ?? null,
+        default_note_below_items_en: supplier.value.default_note_below_items_en ?? null,
+      } : {}),
       auto_send_reminders: supplier.value.auto_send_reminders,
       reminder_days_after_due: supplier.value.reminder_days_after_due,
       payment_thanks_enabled: supplier.value.payment_thanks_enabled,
@@ -651,15 +638,26 @@ async function saveSupplier() {
         purchase_advance_number_format: supplier.value.purchase_advance_number_format ?? null,
         purchase_tax_document_number_format: supplier.value.purchase_tax_document_number_format ?? null,
       } : {}),
+      // Chybějící hodnota (nedoběhlá migrace 2336) se neposílá.
+      ...(supplier.value.purchase_numbering_date_basis !== undefined ? {
+        purchase_numbering_date_basis: supplier.value.purchase_numbering_date_basis,
+      } : {}),
       invoice_number_period: supplier.value.invoice_number_period,
       // Sklad (Epic SKLAD) — nezávislé na accounting_mode.
       stock_enabled: supplier.value.stock_enabled ?? false,
       stock_auto_issue: supplier.value.stock_auto_issue ?? true,
       stock_in_transit_from: supplier.value.stock_in_transit_from ?? 'sent',
-      invoice_pdf_show_base_qty: supplier.value.invoice_pdf_show_base_qty ?? true,
-      invoice_pdf_show_line_discount: supplier.value.invoice_pdf_show_line_discount ?? false,
-      invoice_pdf_compact_items: supplier.value.invoice_pdf_compact_items ?? false,
-      invoice_pdf_bank_in_footer: supplier.value.invoice_pdf_bank_in_footer ?? false,
+      ...(auth.canWrite('settings.branding') ? {
+        invoice_pdf_monochrome: supplier.value.invoice_pdf_monochrome ?? false,
+        invoice_pdf_show_issued_by: supplier.value.invoice_pdf_show_issued_by ?? false,
+        invoice_pdf_show_base_qty: supplier.value.invoice_pdf_show_base_qty ?? true,
+        invoice_pdf_show_line_discount: supplier.value.invoice_pdf_show_line_discount ?? false,
+        invoice_pdf_compact_items: supplier.value.invoice_pdf_compact_items ?? false,
+        invoice_pdf_bank_in_footer: supplier.value.invoice_pdf_bank_in_footer ?? false,
+        ...(workReportDisplayKey(supplier.value.work_report_display_options) !== originalWorkReportDisplay.value
+          ? { work_report_display_options: supplier.value.work_report_display_options ?? null }
+          : {}),
+      } : {}),
       // Tax settings (EPO výkazy DPH/KH)
       // Účetní režim posíláme jen když ho uživatel opravdu přepnul. Server na
       // něm má navěšenou historii režimu i kontrolu právní formy, takže
@@ -677,6 +675,7 @@ async function saveSupplier() {
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,
+      auto_match_other_items: supplier.value.auto_match_other_items ?? false,
       // Účet závazku pro účtenky (2204) — jen v podvojném účetnictví, kde ho pole ukazuje.
       ...(supplier.value.accounting_mode === 'double_entry'
         ? { receipt_payable_account_code: (supplier.value.receipt_payable_account_code ?? '').trim() || null }
@@ -733,6 +732,7 @@ async function saveSupplier() {
     await saveReporting()
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
     originalFiscalStartMonth.value = supplier.value.fiscal_year_start_month ?? 1
+    originalWorkReportDisplay.value = workReportDisplayKey(supplier.value.work_report_display_options)
     if (handOffToActivation) {
       // Uloženo je vše kromě režimu; ten přepne až průvodce po doúčtování.
       toast.info(t('activation.error.backfill_required'))
@@ -1077,7 +1077,7 @@ async function confirmTaxRepDelete() {
         <h1 class="text-2xl font-semibold">{{ t('settings.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('settings.subtitle') }}</p>
       </div>
-      <button v-if="!loading && supplier && tab !== 'email-templates'" type="button" @click="saveSupplier" :class="btnFilled('primary')">
+      <button v-if="!loading && supplier && tab !== 'email-templates' && tab !== 'number-series'" type="button" @click="saveSupplier" :disabled="numberingErrors.length > 0" :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
         {{ t('settings.save_supplier') }}
       </button>
@@ -1102,6 +1102,7 @@ async function confirmTaxRepDelete() {
 
     <div v-else-if="supplier" class="space-y-6">
       <CompanyEmailTemplates v-if="tab === 'email-templates' && auth.canWrite('settings.email_templates')" />
+      <NumberSeriesSettings v-if="tab === 'number-series'" />
       <!-- Supplier -->
       <section v-if="tab === 'company' || tab === 'documents'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">
@@ -1171,22 +1172,7 @@ async function confirmTaxRepDelete() {
           </div>
           </template>
           <template v-else>
-          <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.default_due_label') }}</label>
-            <div class="flex gap-2">
-              <select v-model="dueSelectValue" class="h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface" :class="dueSelectValue === 'custom' ? 'w-40' : 'w-full'">
-                <option value="7">{{ t('settings.default_due_preset_7') }}</option>
-                <option value="14">{{ t('settings.default_due_preset_14') }}</option>
-                <option value="month">{{ t('settings.default_due_preset_month') }}</option>
-                <option value="custom">{{ t('settings.default_due_preset_custom') }}</option>
-              </select>
-              <div v-if="dueSelectValue === 'custom'" class="flex items-center gap-2 flex-1">
-                <input v-model.number="supplier.default_payment_due_days" type="number" min="0" class="w-24 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-                <span class="text-sm text-neutral-500">{{ t('settings.default_due_custom_days_suffix') }}</span>
-              </div>
-            </div>
-            <p v-if="dueSelectValue === 'month'" class="text-xs text-neutral-500 mt-1">{{ t('settings.default_due_month_hint') }}</p>
-          </div>
+          <InvoiceDefaultsFields v-if="auth.canWrite('settings.invoice_defaults')" class="md:col-span-2" :model-value="supplier" />
           <div v-if="supplier.is_vat_payer" class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">
               <input v-model="supplier.default_prices_include_vat" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
@@ -1219,62 +1205,13 @@ async function confirmTaxRepDelete() {
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">
-              <input v-model="supplier.invoice_pdf_show_issued_by" type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="invoice-pdf-show-issued-by" />
-              <span class="font-medium">{{ t('settings.invoice_pdf_show_issued_by') }}</span>
+              <input v-model="supplier.dashboard_work_reports" type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="dashboard-work-reports" />
+              <span class="font-medium">{{ t('settings.dashboard_work_reports') }}</span>
             </label>
-            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_show_issued_by_hint') }}</p>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.dashboard_work_reports_hint') }}</p>
           </div>
-          <div class="md:col-span-2">
-            <label class="flex items-center gap-2 text-sm">
-              <input :checked="supplier.invoice_pdf_show_line_discount ?? false" @change="supplier.invoice_pdf_show_line_discount = ($event.target as HTMLInputElement).checked"
-                type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="invoice-pdf-line-discount" />
-              <span class="font-medium">{{ t('settings.invoice_pdf_line_discount') }}</span>
-            </label>
-            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_line_discount_hint') }}</p>
-          </div>
-          <div class="md:col-span-2">
-            <label class="flex items-center gap-2 text-sm">
-              <input :checked="supplier.invoice_pdf_compact_items ?? false" @change="supplier.invoice_pdf_compact_items = ($event.target as HTMLInputElement).checked"
-                type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="invoice-pdf-compact-items" />
-              <span class="font-medium">{{ t('settings.invoice_pdf_compact_items') }}</span>
-            </label>
-            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_compact_items_hint') }}</p>
-          </div>
-          <div class="md:col-span-2">
-            <label class="flex items-center gap-2 text-sm">
-              <input :checked="supplier.invoice_pdf_bank_in_footer ?? false" @change="supplier.invoice_pdf_bank_in_footer = ($event.target as HTMLInputElement).checked"
-                type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="invoice-pdf-bank-in-footer" />
-              <span class="font-medium">{{ t('settings.invoice_pdf_bank_in_footer') }}</span>
-            </label>
-            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_bank_in_footer_hint') }}</p>
-          </div>
-          <div class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
-            <div>
-              <h3 class="text-sm font-semibold text-neutral-700">{{ t('invoice_default_note.title') }}</h3>
-              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice_default_note.hint') }}</p>
-            </div>
-            <label class="flex items-start gap-2 text-sm">
-              <input v-model="supplier.default_note_below_items_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
-              <span>
-                <span class="font-medium text-neutral-700">{{ t('invoice_default_note.enabled') }}</span>
-                <span class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice_default_note.enabled_hint') }}</span>
-              </span>
-            </label>
-            <div v-if="supplier.default_note_below_items_enabled" class="ml-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice_default_note.text_cs') }}</label>
-                <textarea v-model="supplier.default_note_below_items_cs" rows="3" :maxlength="DEFAULT_NOTE_MAX_LENGTH"
-                          :placeholder="t('invoice_default_note.placeholder')"
-                          class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm resize-y"></textarea>
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice_default_note.text_en') }}</label>
-                <textarea v-model="supplier.default_note_below_items_en" rows="3" :maxlength="DEFAULT_NOTE_MAX_LENGTH"
-                          class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm resize-y"></textarea>
-              </div>
-              <p class="md:col-span-2 text-xs text-neutral-500">{{ t('invoice_default_note.language_hint') }}</p>
-            </div>
-          </div>
+          <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2" :model-value="supplier" part="main"
+            @change="Object.assign(supplier, $event)" />
           <div v-if="auth.canWrite('settings.payment_qr')" class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
             <div>
               <h3 class="text-sm font-semibold text-neutral-700">{{ t('settings.payment_qr_due_date_title') }}</h3>
@@ -1294,10 +1231,6 @@ async function confirmTaxRepDelete() {
                 <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.purchase_invoice_qr_include_due_date_hint') }}</span>
               </span>
             </label>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.default_hourly_rate') }} ({{ supplier.default_currency }})</label>
-            <input v-model.number="supplier.default_hourly_rate" type="number" step="0.000001" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">
@@ -1434,6 +1367,9 @@ async function confirmTaxRepDelete() {
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.proforma_payment_document_hint') }}</p>
           </div>
+          <!-- Nestandardní vzhled PDF až na úplném konci záložky. -->
+          <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2 border-t border-neutral-200 pt-4" :model-value="supplier" part="nonstandard"
+            @change="Object.assign(supplier, $event)" />
           </template>
         </div>
 
@@ -1486,7 +1422,7 @@ async function confirmTaxRepDelete() {
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.invoice_number_format') }}</label>
-              <input v-model="supplier.invoice_number_format" type="text"
+              <input :value="supplier.invoice_number_format" @input="supplier.invoice_number_format = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false"
                 :placeholder="supplier.cfg_varsymbol_fallback?.invoice || '{YY}{MM}{CCC}'" maxlength="60"
                 class="w-full h-9 px-3 border rounded-md text-sm font-mono"
                 :class="invoiceFormatError ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'" />
@@ -1494,6 +1430,7 @@ async function confirmTaxRepDelete() {
               <p v-else-if="invoicePreview" class="text-xs text-success-600 mt-1">
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ invoicePreview }}</code>
               </p>
+              <p v-if="invoicePreview && issuedWarning(supplier.invoice_number_format)" class="text-xs text-warning-600 mt-1">{{ issuedWarning(supplier.invoice_number_format) }}</p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
               <InvoiceCounterField type="invoice" :template="counterTemplate('invoice')"
                 :period="supplier.invoice_number_period" />
@@ -1509,7 +1446,7 @@ async function confirmTaxRepDelete() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.proforma_number_format') }}</label>
-              <input v-model="supplier.proforma_number_format" type="text"
+              <input :value="supplier.proforma_number_format" @input="supplier.proforma_number_format = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false"
                 :placeholder="supplier.cfg_varsymbol_fallback?.proforma || '9{YY}{MM}{CCC}'" maxlength="60"
                 class="w-full h-9 px-3 border rounded-md text-sm font-mono"
                 :class="proformaFormatError ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'" />
@@ -1517,13 +1454,14 @@ async function confirmTaxRepDelete() {
               <p v-else-if="proformaPreview" class="text-xs text-success-600 mt-1">
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ proformaPreview }}</code>
               </p>
+              <p v-if="proformaPreview && issuedWarning(supplier.proforma_number_format)" class="text-xs text-warning-600 mt-1">{{ issuedWarning(supplier.proforma_number_format) }}</p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
               <InvoiceCounterField type="proforma" :template="counterTemplate('proforma')"
                 :period="supplier.invoice_number_period" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.credit_note_number_format') }}</label>
-              <input v-model="supplier.credit_note_number_format" type="text"
+              <input :value="supplier.credit_note_number_format" @input="supplier.credit_note_number_format = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false"
                 :placeholder="supplier.cfg_varsymbol_fallback?.credit_note || '7{YY}{MM}{CCC}'" maxlength="60"
                 class="w-full h-9 px-3 border rounded-md text-sm font-mono"
                 :class="creditNoteFormatError ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'" />
@@ -1531,13 +1469,14 @@ async function confirmTaxRepDelete() {
               <p v-else-if="creditNotePreview" class="text-xs text-success-600 mt-1">
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ creditNotePreview }}</code>
               </p>
+              <p v-if="creditNotePreview && issuedWarning(supplier.credit_note_number_format)" class="text-xs text-warning-600 mt-1">{{ issuedWarning(supplier.credit_note_number_format) }}</p>
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
               <InvoiceCounterField type="credit_note" :template="counterTemplate('credit_note')"
                 :period="supplier.invoice_number_period" />
             </div>
             <div data-test="simplified-number-format">
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.simplified_number_format') }}</label>
-              <input v-model="supplier.simplified_number_format" type="text"
+              <input :value="supplier.simplified_number_format" @input="supplier.simplified_number_format = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false"
                 :placeholder="supplier.invoice_number_format || supplier.cfg_varsymbol_fallback?.invoice || ''" maxlength="60"
                 :disabled="supplier.simplified_hide_customer_default === undefined"
                 class="w-full h-9 px-3 border rounded-md text-sm font-mono disabled:opacity-60"
@@ -1546,6 +1485,7 @@ async function confirmTaxRepDelete() {
               <p v-else-if="simplifiedPreview" class="text-xs text-success-600 mt-1">
                 {{ t('settings.numbering_preview') }}: <code class="font-mono font-semibold">{{ simplifiedPreview }}</code>
               </p>
+              <p v-if="simplifiedPreview && issuedWarning(supplier.simplified_number_format)" class="text-xs text-warning-600 mt-1">{{ issuedWarning(supplier.simplified_number_format) }}</p>
               <p class="text-xs text-neutral-400 mt-1">{{ t('settings.simplified_number_format_hint') }}</p>
               <InvoiceCounterField v-if="hasSimplifiedSeries" type="simplified" :template="counterTemplate('simplified')"
                 :period="supplier.invoice_number_period" />
@@ -1574,7 +1514,7 @@ async function confirmTaxRepDelete() {
               <label class="block text-xs font-medium text-neutral-700 mb-1">
                 {{ purchaseByKind ? t('settings.purchase_numbering.kind.invoice') : t('settings.purchase_invoice_number_format') }}
               </label>
-              <input v-model="supplier.purchase_invoice_number_format" type="text"
+              <input :value="supplier.purchase_invoice_number_format" @input="supplier.purchase_invoice_number_format = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false"
                 :placeholder="supplier.cfg_varsymbol_fallback?.purchase || '{PP}{YY}{MM}{CCC}'" maxlength="60"
                 class="w-full h-9 px-3 border rounded-md text-sm font-mono"
                 :class="purchaseFormatError ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'" />
@@ -1585,10 +1525,19 @@ async function confirmTaxRepDelete() {
               <p v-else class="text-xs text-neutral-400 mt-1">{{ t('settings.numbering_preview') }}: {{ t('settings.numbering_preview_fallback') }}</p>
               <p class="text-xs text-neutral-400 mt-1">{{ t('settings.purchase_invoice_number_format_hint') }}</p>
             </div>
+            <div class="md:col-span-2" data-test="purchase-numbering-date">
+              <label class="block text-xs font-medium text-neutral-700 mb-1" for="purchase-numbering-date-basis">{{ t('settings.purchase_numbering.date_basis') }}</label>
+              <select id="purchase-numbering-date-basis" v-model="supplier.purchase_numbering_date_basis" data-test="purchase-numbering-date-basis"
+                :disabled="supplier.purchase_numbering_date_basis === undefined"
+                class="w-full md:w-1/2 h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface disabled:opacity-60">
+                <option v-for="b in PURCHASE_NUMBERING_BASES" :key="b" :value="b">{{ t(`settings.purchase_numbering.date_basis_option.${b}`) }}</option>
+              </select>
+              <p class="text-xs text-neutral-400 mt-1">{{ t('settings.purchase_numbering.date_basis_hint') }}</p>
+            </div>
             <template v-if="purchaseByKind">
               <div v-for="s in PURCHASE_SERIES_KINDS" :key="s.kind" :data-test="`purchase-series-${s.kind}`">
                 <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t(`settings.purchase_numbering.kind.${s.kind}`) }}</label>
-                <input v-model="supplier[s.field]" type="text" :placeholder="s.fallback" maxlength="60"
+                <input :value="supplier[s.field]" @input="supplier[s.field] = normalizeInputBrackets($event)" type="text" autocomplete="off" spellcheck="false" :placeholder="s.fallback" maxlength="60"
                   class="w-full h-9 px-3 border rounded-md text-sm font-mono"
                   :class="purchaseSeriesCheck(s.field, s.fallback).error ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'" />
                 <p v-if="purchaseSeriesCheck(s.field, s.fallback).error" class="text-xs text-danger-500 mt-1">{{ purchaseSeriesCheck(s.field, s.fallback).error }}</p>
@@ -1736,14 +1685,6 @@ async function confirmTaxRepDelete() {
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.auto_issue_hint') }}</p>
             </span>
           </label>
-          <label v-if="supplier.stock_enabled" class="flex items-start gap-2 cursor-pointer ml-6">
-            <input :checked="supplier.invoice_pdf_show_base_qty ?? true" @change="supplier.invoice_pdf_show_base_qty = ($event.target as HTMLInputElement).checked"
-              type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
-            <span>
-              <span class="font-medium">{{ t('stock.settings.pdf_base_qty_label') }}</span>
-              <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.pdf_base_qty_hint') }}</p>
-            </span>
-          </label>
           <div v-if="supplier.stock_enabled" class="ml-6">
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('stock.settings.in_transit_from_label') }}</label>
             <select v-model="supplier.stock_in_transit_from" class="w-full max-w-sm h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -1825,6 +1766,13 @@ async function confirmTaxRepDelete() {
                 <p class="text-xs text-neutral-500 mt-1">{{ t('settings.receipt_payable_account_hint') }}</p>
               </div>
             </div>
+            <label class="md:col-span-2 flex items-start gap-2 cursor-pointer" data-test="settings-auto-match-other-items">
+              <input v-model="supplier.auto_match_other_items" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                <span class="text-sm text-neutral-800">{{ t('settings.auto_match_other_items') }}</span>
+                <span class="block text-xs text-neutral-500">{{ t('settings.auto_match_other_items_hint') }}</span>
+              </span>
+            </label>
             <AutomationPolicyBox
               v-if="auth.hasCommercialFeatures && supplier.accounting_mode === 'double_entry'"
               class="md:col-span-2"
@@ -1991,17 +1939,7 @@ async function confirmTaxRepDelete() {
               </select>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.flat_tax_hint') }}</p>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.financial_office_code') }}</label>
-              <input v-model="supplier.financial_office_code" type="text" maxlength="8" placeholder="451"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.financial_office_hint') }}</p>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.workplace_code') }}</label>
-              <input v-model="supplier.workplace_code" type="text" maxlength="8"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            </div>
+            <TaxOfficeFields v-model:office="supplier.financial_office_code" v-model:workplace="supplier.workplace_code" />
             <!-- Přiznání k dani z příjmů — údaje, které aplikace z účetnictví odvodit
                  neumí (migrace 1782). Blokují přiznání, které by o poplatníkovi tvrdilo
                  nepravdu; nálezy se ukazují u přiznání (UnsupportedCaseDetector). -->
@@ -2534,8 +2472,8 @@ async function confirmTaxRepDelete() {
         </button>
       </section>
 
-      <div v-if="tab !== 'email-templates'" class="flex flex-wrap justify-end border-t border-neutral-200 pt-4">
-        <button type="button" @click="saveSupplier" :class="btnFilled('primary')">
+      <div v-if="tab !== 'email-templates' && tab !== 'number-series'" class="flex flex-wrap justify-end border-t border-neutral-200 pt-4">
+        <button type="button" @click="saveSupplier" :disabled="numberingErrors.length > 0" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ t('settings.save_supplier') }}
         </button>

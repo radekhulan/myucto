@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   inbox: vi.fn(),
   pollInbox: vi.fn(),
   pollInboxWithPassword: vi.fn(),
+  choices: vi.fn().mockResolvedValue([]),
   startMobileKeyInbox: vi.fn(),
   mobileKeyInboxStatus: vi.fn(),
   mobileKeyProfile: vi.fn(),
@@ -53,6 +54,8 @@ vi.mock('@/api/dataBox', () => ({
     unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
+
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: m.choices } }))
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
@@ -173,6 +176,26 @@ async function mountWith(
 }
 
 describe('DataBox — doručeno vs. zpracováno', () => {
+  it('pro příjem uloženým přístupem vyžaduje volbu účtu i potvrzení právních účinků', async () => {
+    m.choices.mockResolvedValueOnce([{ id: 83, label: 'Kancelář', box_id: 'abcdefg', scope: 'shared', method: 'password' }])
+    const wrapper = await mountWith([])
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await flushPromises()
+    await wrapper.get('input[type="radio"][value="saved"]').setValue(true)
+    await wrapper.get('[data-test="isds-saved-access-select"]').setValue('83')
+    const submit = wrapper.get('[data-test="inbox-poll-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="isds-saved-access-confirm"]').setValue(true)
+    await submit.trigger('click')
+    expect(m.pollInboxWithPassword).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="inbox-poll-acknowledge"]').setValue(true)
+    await submit.trigger('click')
+    await flushPromises()
+
+    expect(m.choices).toHaveBeenCalledWith('production', 'receive')
+    expect(m.pollInboxWithPassword).toHaveBeenCalledWith('production', { access_id: 83, authorized: true })
+  })
+
   it('u doručeného podání ukáže obě osy zvlášť a vyřízení nechá na „nevíme“', async () => {
     const wrapper = await mountWith([submission()])
     await wrapper.findAll('nav button')[1].trigger('click')
@@ -190,6 +213,48 @@ describe('DataBox — doručeno vs. zpracováno', () => {
     await wrapper.findAll('nav button')[1].trigger('click')
 
     expect(wrapper.text()).toContain('databox.outbox.deliveredNotProcessed')
+  })
+
+  it('agendu bez výsledku od úřadu po doručení ukáže jako splněnou, ne jako „nevíme“', async () => {
+    const wrapper = await mountWith([submission({ agenda_code: 'PPZ_2026', settles_on_delivery: true })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const text = wrapper.text()
+    expect(text).toContain('databox.acceptance.settled_by_delivery')
+    expect(text).toContain('databox.outbox.settledByDelivery')
+    expect(text).not.toContain('databox.acceptance.unknown')
+    expect(text).not.toContain('databox.outbox.deliveredNotProcessed')
+  })
+
+  it('agendu bez výsledku před doručením neslibuje odpověď úřadu ani splnění', async () => {
+    const wrapper = await mountWith([submission({
+      agenda_code: 'PPZ_2026',
+      settles_on_delivery: true,
+      dispatch_state: 'sent',
+      delivered_at: null,
+    })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const text = wrapper.text()
+    expect(text).toContain('databox.acceptance.no_authority_result')
+    expect(text).not.toContain('databox.acceptance.settled_by_delivery')
+    expect(text).not.toContain('databox.acceptance.unknown')
+  })
+
+  it('bez nepřečtených zpráv hromadné označení nenabízí', async () => {
+    const wrapper = await mountWith([submission()])
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    const button = wrapper.find('[data-test="inbox-mark-all-read"]')
+    expect(button.exists()).toBe(true)
+    expect(button.attributes('disabled')).toBeDefined()
+  })
+
+  it('čekající doručenky nabídne nahoře nad seznamem', async () => {
+    const wrapper = await mountWith([submission({ dispatch_state: 'sent', delivered_at: null })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    expect(wrapper.find('[data-test="outbox-receipts-batch-jump"]').text()).toContain('(1)')
   })
 
   it('teprve doložené přijetí ukáže „zpracováno“', async () => {

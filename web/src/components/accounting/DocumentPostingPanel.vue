@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { formatDate } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
-import { accountingApi, type JournalDocumentSource, type JournalEntryWithLines } from '@/api/accounting'
+import { accountingApi, type JournalSectionSource, type JournalEntryWithLines } from '@/api/accounting'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 import JournalEntryNotes from '@/components/accounting/JournalEntryNotes.vue'
@@ -27,20 +27,26 @@ import { useWindowRefresh } from '@/composables/useWindowRefresh'
  * jsou pořád položky.
  */
 const props = withDefaults(defineProps<{
-  source: JournalDocumentSource
+  source: JournalSectionSource
   docId: number
   alwaysVisible?: boolean
   /** Popisek dokladu do hlavičky dialogu Přeúčtovat (číslo faktury). */
   docLabel?: string | null
   /** Záloha (zálohová PF / proforma): vlastní zápis nemá, účtuje se její úhrada. */
   advance?: boolean
+  /**
+   * Přeúčtování vlastním dialogem dokladu (ostatní položka): tlačítko u živého zápisu jen
+   * vyšle `repost`. `null` = sdílený RepostModal faktur.
+   */
+  externalRepost?: { disabled?: boolean; reason?: string } | null
 }>(), {
   alwaysVisible: false,
   docLabel: null,
   advance: false,
+  externalRepost: null,
 })
 
-const emit = defineEmits<{ reposted: [] }>()
+const emit = defineEmits<{ reposted: []; repost: [] }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -55,15 +61,30 @@ const originRef = ref<InstanceType<typeof PostingOriginRow> | null>(null)
  * ji může zpřístupnit i bez zápisu, například pro klasifikaci přijaté faktury. */
 const visible = computed(() => props.alwaysVisible || entries.value.length > 0)
 
-async function load(docId: number): Promise<void> {
-  entries.value = []
+/**
+ * Pořadí načtení (přepnutí dokladu, reload po akci): platí jen poslední odpověď. Tichá obnova
+ * pořadí jen čte: nepovedená obnova by jinak zahodila rozběhnuté načtení jiného dokladu
+ * a sekce by zůstala prázdná.
+ */
+let loadSeq = 0
+async function load(docId: number, keep = false): Promise<void> {
+  // Pozdní odpověď k dokladu, ze kterého se mezitím přešlo, nesmí přepsat zápisy nového.
+  const seq = ++loadSeq
+  // Jiný doklad začíná načisto; obnova téhož dokladu nechá zápisy na místě, ať sekce nebliká.
+  if (!keep) entries.value = []
   failed.value = false
   if (!(docId > 0)) return
   try {
-    entries.value = await accountingApi.journalForDocument(props.source, docId)
+    const loaded = await accountingApi.journalForDocument(props.source, docId)
+    if (seq === loadSeq) entries.value = loaded
   } catch {
     // Doplňková informace — když se nenačte, nesmí shodit detail dokladu.
-    failed.value = true
+    // Po nepovedeném reloadu by zůstal starý stav (třeba živý zápis bez protizápisu i s tlačítkem
+    // Přeúčtovat); sekce se proto schová stejně jako při prvním nepovedeném načtení.
+    if (seq === loadSeq) {
+      failed.value = true
+      entries.value = []
+    }
   }
 }
 
@@ -74,8 +95,10 @@ watch(() => props.docId, id => { void load(id) }, { immediate: true })
 useWindowRefresh(async () => {
   const docId = props.docId
   if (!(docId > 0)) return
+  const seq = loadSeq
   const updated = await accountingApi.journalForDocument(props.source, docId)
-  if (docId !== props.docId) return
+  // Mezitím začalo jiné načtení (přepnutí dokladu, reload po akci): má přednost jeho výsledek.
+  if (seq !== loadSeq || docId !== props.docId) return
   entries.value = updated
   failed.value = false
   await originRef.value?.reload()
@@ -93,7 +116,15 @@ function isReversal(entry: JournalEntryWithLines): boolean {
  * zapisuje server novým zápisem, viz DocumentRepostService).
  */
 function canRepost(entry: JournalEntryWithLines): boolean {
-  return auth.canWrite('accounting') && isOwn(entry) && entry.reversed_by === null && !isReversal(entry)
+  const live = isOwn(entry) && entry.reversed_by === null && !isReversal(entry)
+  // U vlastního dialogu rozhoduje o právu volající (předá `externalRepost` jen s ním).
+  if (props.source === 'other-items') return live && props.externalRepost !== null
+  return auth.canWrite('accounting') && live
+}
+
+function startRepost(): void {
+  if (props.source === 'other-items') emit('repost')
+  else repostOpen.value = true
 }
 
 /**
@@ -103,13 +134,17 @@ function canRepost(entry: JournalEntryWithLines): boolean {
  * dvakrát i s rozpadem na účty.
  */
 const entryIds = computed(() => entries.value.map(e => e.id))
-const currentDocument = computed(() => ({
+// Panel Souvisí ostatní položky jako doklad nevrací, u ní není co skrývat.
+const currentDocument = computed(() => props.source === 'other-items' ? null : {
   sourceType: props.source === 'invoices' ? 'invoice' as const : 'purchase_invoice' as const,
   sourceId: props.docId,
-}))
+})
 
 /** Záloha má zaúčtovanou úhradu (banka/pokladna) — jinak se zaúčtuje až při ní. */
 const advancePaid = computed(() => entries.value.some(e => e.relation === 'advance_payment'))
+
+/** Faktura krytá ostatní pohledávkou: vlastní zápis nemá, ukazuje se zápis pohledávky. */
+const coveredByOtherItem = computed(() => entries.value.some(e => e.relation === 'other_item'))
 
 /** Zápis jiného dokladu (úhrada zálohy, konečná faktura) — přeúčtovává se u něj. */
 function isOwn(entry: JournalEntryWithLines): boolean {
@@ -123,7 +158,7 @@ async function onReposted(): Promise<void> {
 }
 
 // Po změně dimenzí dokladu (přerazítkování řádků) si detail sekci obnoví.
-defineExpose({ reload: () => load(props.docId) })
+defineExpose({ reload: () => load(props.docId, true) })
 </script>
 
 <template>
@@ -143,6 +178,9 @@ defineExpose({ reload: () => load(props.docId) })
       <p v-if="advance" class="text-sm text-neutral-600">
         {{ advancePaid ? t('accounting.journal.document_posting.advance_posted') : t('accounting.journal.document_posting.advance_unpaid') }}
       </p>
+      <p v-if="coveredByOtherItem" class="text-sm text-neutral-600">
+        {{ t('accounting.journal.document_posting.other_item_covered') }}
+      </p>
       <div v-for="entry in entries" :key="entry.id">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <span class="flex items-center gap-2 text-xs text-neutral-500">
@@ -151,7 +189,10 @@ defineExpose({ reload: () => load(props.docId) })
             <span v-if="isReversal(entry)" class="px-1.5 py-0.5 rounded bg-danger-50 text-danger-500 font-medium">
               {{ t('accounting.journal.document_posting.reversal') }}
             </span>
-            <span v-if="!isOwn(entry)" class="px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-medium">
+            <span v-if="entry.relation === 'other_item'" class="px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-medium">
+              {{ t('accounting.journal.document_posting.relation_other_item') }}
+            </span>
+            <span v-else-if="!isOwn(entry)" class="px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-medium">
               {{ entry.relation === 'advance_payment'
                 ? t('accounting.journal.document_posting.relation_advance_payment')
                 : t('accounting.journal.document_posting.relation_advance_final') }}
@@ -160,11 +201,17 @@ defineExpose({ reload: () => load(props.docId) })
           </span>
           <span class="flex flex-wrap items-center gap-2">
             <!-- Administrativní zásah do už zaúčtovaného dokladu → warning, ne primary. -->
-            <button v-if="canRepost(entry)" type="button" @click="repostOpen = true"
+            <button v-if="canRepost(entry)" type="button" data-test="posting-panel-repost" @click="startRepost"
+              :disabled="source === 'other-items' && !!externalRepost?.disabled"
+              :title="source === 'other-items' ? externalRepost?.reason : undefined"
               :class="btnOutlineSm('warning')">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
               {{ t('accounting.repost.action') }}
             </button>
+            <RouterLink v-if="entry.relation === 'other_item' && entry.other_item_id"
+              :to="{ name: 'other-item-detail', params: { id: entry.other_item_id } }" :class="btnOutlineSm('primary')">
+              {{ t('accounting.journal.document_posting.open_other_item', { item: entry.other_item_document_no || `#${entry.other_item_id}` }) }}
+            </RouterLink>
             <RouterLink :to="journalEntryLink(entry.id)" :class="btnOutlineSm('neutral')">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
               {{ t('accounting.journal.document_posting.open_in_journal') }}
@@ -186,13 +233,13 @@ defineExpose({ reload: () => load(props.docId) })
         <slot />
         <!-- Podle jaké šablony kontace vznikla (a kde se opraví) — patří k zaúčtování,
              ne mezi údaje dokladu. Sama se schová, když doklad zaúčtovaný není. -->
-        <PostingOriginRow ref="originRef" :source="source" :doc-id="docId" />
+        <PostingOriginRow v-if="source !== 'other-items'" ref="originRef" :source="source" :doc-id="docId" />
       </div>
     </div>
 
     <!-- Teleport: kořen sekce má overflow-hidden (zaoblené rohy boxu), dialog by se v něm ořízl. -->
     <WorkspaceTeleport>
-      <RepostModal v-if="repostOpen" :open="repostOpen" :source="source" :doc-id="docId" :doc-label="docLabel"
+      <RepostModal v-if="repostOpen && source !== 'other-items'" :open="repostOpen" :source="source" :doc-id="docId" :doc-label="docLabel"
         @close="repostOpen = false" @reposted="onReposted" @dimensions-saved="onReposted" />
     </WorkspaceTeleport>
   </div>

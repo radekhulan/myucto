@@ -11,6 +11,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mcp\McpOAuth;
+use MyInvoice\Service\Mcp\McpResourcePolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +27,7 @@ final class McpOAuthGrantsAction
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
         private readonly PermissionResolver $roles,
+        private readonly McpResourcePolicy $resources,
     ) {}
 
     public function listing(Request $request, Response $response): Response
@@ -38,8 +40,20 @@ final class McpOAuthGrantsAction
         if ($all && ($bound || !$this->isSuperadmin($request))) {
             return Json::error($response, 'forbidden', 'Připojení všech uživatelů vidí jen správce instance.', 403);
         }
-        return Json::ok($response, ['grants' => $all ? $this->oauth->listAll() : $this->oauth->listForUser($userId, $bound ? $domain->supplierId : null, $bound ? $domain->origin . '/mcp' : null)])
+        return Json::ok($response, ['grants' => $all ? $this->oauth->listAll() : $this->oauth->listForUser($userId, $bound ? $domain->supplierId : null, $bound ? $this->domainResources($domain) : null)])
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Na klientské doméně jsou vidět připojení její firmy přes tuto doménu
+     * i přes kanonickou adresu instalace (klientské kanonické připojení je
+     * vázané na jednu firmu). Připojení jiných firem a domén zůstávají skrytá.
+     *
+     * @return list<string>
+     */
+    private function domainResources(\MyInvoice\Service\Tenant\TenantDomainContext $domain): array
+    {
+        return [$domain->origin . '/mcp', $this->resources->canonical()];
     }
 
     public function revoke(Request $request, Response $response, array $args): Response
@@ -49,7 +63,7 @@ final class McpOAuthGrantsAction
         $id = (int) ($args['id'] ?? 0);
         $domain = $request->getAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT);
         $bound = $domain instanceof \MyInvoice\Service\Tenant\TenantDomainContext && $domain->locksSupplier();
-        if ($id > 0 && $this->oauth->revokeForUser($id, $userId, $bound ? $domain->supplierId : null, $bound ? $domain->origin . '/mcp' : null)) {
+        if ($id > 0 && $this->oauth->revokeForUser($id, $userId, $bound ? $domain->supplierId : null, $bound ? $this->domainResources($domain) : null)) {
             return Json::ok($response, ['revoked' => true]);
         }
         if ($id > 0 && !$bound && $this->isSuperadmin($request)) {

@@ -26,7 +26,7 @@ final class KbPlusAboBatchMapper
                 'paymentIdentification' => [
                     'instructionIdentification' => sprintf('MU%03d%s', $item['line_no'], substr(hash('sha256', $item['line']), 0, 20)),
                 ],
-                'amount' => ['instructedAmount' => ['value' => $item['amount_minor'] / 100, 'currency' => 'CZK']],
+                'amount' => ['instructedAmount' => ['value' => BankPaymentAmount::fromMinor($item['amount_minor']), 'currency' => 'CZK']],
                 'requestedExecutionDate' => $batch['execution_date'],
                 'debtorAccount' => ['identification' => ['iban' => $batch['payer_iban']], 'currency' => 'CZK'],
                 'creditorAccount' => ['identification' => ['iban' => $item['creditor_iban']], 'currency' => 'CZK'],

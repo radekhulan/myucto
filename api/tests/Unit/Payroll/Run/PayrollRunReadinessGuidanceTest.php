@@ -5,14 +5,65 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\Run\PayrollRunIssueGuidance;
 use MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe;
+use MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessImpact;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotFixableException;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollRunReadinessGuidanceTest extends TestCase
 {
+    public function testReadinessAndPaymentPreparationUseTheSameMissingPayoutRuleSelection(): void
+    {
+        $person = static fn (int $id, array $rules): array => [
+            'employee' => ['id' => $id, 'full_name' => "Syntetická osoba {$id}"],
+            'payout_rules' => $rules,
+        ];
+        $snapshot = ['people' => [
+            $person(1, []),
+            $person(2, []),
+            $person(3, []),
+            $person(4, [['destination_kind' => 'cash']]),
+            $person(5, [['destination_kind' => 'bank']]),
+            $person(6, [['destination_kind' => 'partner_settlement']]),
+        ]];
+        $withoutPayout = [2 => true, 3 => true];
+
+        self::assertSame(
+            [1],
+            array_column(PayrollRunPaymentPreparationService::missingPayoutRules($snapshot, $withoutPayout), 'entity_id'),
+        );
+        try {
+            self::invoke(PayrollRunPaymentPreparationService::class, 'assertPayoutRules', [$snapshot, $withoutPayout]);
+            self::fail('Příprava plateb musí odmítnout stejnou osobu jako předběžná kontrola.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('Syntetická osoba 1 nemá', $exception->getMessage());
+            foreach (range(2, 6) as $id) {
+                self::assertStringNotContainsString("Syntetická osoba {$id}", $exception->getMessage());
+            }
+        }
+        array_shift($snapshot['people']);
+        self::invoke(PayrollRunPaymentPreparationService::class, 'assertPayoutRules', [$snapshot, $withoutPayout]);
+    }
+
+    public function testMissingPayoutRuleWarnsAboutPaymentPreparationAndLinksToAccounts(): void
+    {
+        self::assertSame(
+            ['impact' => 'revision', 'scope' => 'person', 'severity' => 'warning'],
+            PayrollRunReadinessImpact::describe('payout_rule_missing'),
+        );
+        $guidance = PayrollRunIssueGuidance::describe('payout_rule_missing', 42);
+        self::assertSame('/payroll/people?person=42&panel=accounts', $guidance['remediation_path']);
+        self::assertStringContainsString('přípravu plateb', $guidance['message']);
+        self::assertStringContainsString('opravnou revizi', $guidance['message']);
+    }
+
     public function testGroupedFindingsKeepEachAffectedRelationshipAndDestination(): void
     {
         $first = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 11, 'Vztah první nemá docházku.', '/payroll/time?employment=11');
@@ -26,6 +77,22 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertNotSame($first->message, $findings[0]['message']);
     }
 
+    /**
+     * Varování o nepodepsaném prohlášení mluvilo i u ledna 2027 jen o zvláštní
+     * sazbě daně. Zák. č. 360/2025 Sb. srážkovou daň podle § 6 odst. 4 ZDP od
+     * 1. 1. 2027 ruší (samostatný základ zálohy); věta proto jmenuje oba režimy
+     * a platí pro běh kteréhokoli roku.
+     */
+    public function testUnsignedDeclarationSummaryNamesTheRegimeOfBothYears(): void
+    {
+        $message = PayrollRunSnapshotBuilder::unsignedDeclarationsMessage(3);
+
+        self::assertStringContainsString('prohlášením poplatníka k dani: 3', $message);
+        self::assertStringContainsString('§ 6 odst. 4 ZDP', $message);
+        self::assertStringContainsString('do roku 2026 srážková daň', $message);
+        self::assertStringContainsString('od roku 2027 samostatný základ zálohy', $message);
+    }
+
     /** Q8-32: u každého záznamu je jméno, ne jen „Otevřít místo k opravě". */
     public function testGroupedEntitiesCarryTheEmploymentLabel(): void
     {
@@ -37,6 +104,17 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         ]);
         self::assertSame('Syntetická osoba (HPP-1)', $findings[0]['entities'][0]['label']);
         self::assertNull($findings[0]['entities'][1]['label']);
+    }
+
+    public function testOverrideWarningGroupBlocksApprovalAsInRun(): void
+    {
+        $plain = new PayrollRunValidation('warning', 'employment_social_registration_missing', 'employment', 11, 'Přihláška chybí.', '/payroll/people?person=1');
+        $override = new PayrollRunValidation('warning', 'employment_social_registration_missing', 'employment', 22, 'Přihláška chybí.', '/payroll/people?person=2', true);
+        $groups = self::invoke(PayrollRunReadinessService::class, 'groupValidations', [[$plain, $override]]);
+        self::assertCount(1, $groups);
+        self::assertSame('approval', $groups[0]['impact']);
+        self::assertSame('warning', $groups[0]['severity']);
+        self::assertTrue($groups[0]['requires_override']);
     }
 
     public function testSingleFindingKeepsItsDirectDestination(): void
@@ -66,6 +144,79 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertStringNotContainsString($code, $message);
         self::assertStringContainsString('JMHZ', $message);
         self::assertSame('/payroll/submissions/jmhz', self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [$code]));
+    }
+
+    /**
+     * Kód, který katalog JMHZ zná, nevede na obecnou stránku podání, ale na
+     * místo opravy, a to na zpracovávaný měsíc.
+     */
+    public function testCatalogKnownJmhzIssueLinksToItsFixWithThePeriod(): void
+    {
+        self::assertSame(
+            '/payroll/absences?employment=22&tab=absences&period=2026-08',
+            self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [
+                'jmhz_xml_eldp_deducted_days_sum_mismatch', 22, '2026-08-01', 'employment',
+            ]),
+        );
+        self::assertSame(
+            '/payroll/time?employment=22&period=2026-08',
+            self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [
+                'jmhz_eldp_interval_invalid', 22, '2026-08-01', 'employment',
+            ]),
+        );
+    }
+
+    /** Odkazy ze zmrazení hlášení nesou vykazované období, ne dnešní měsíc. */
+    public function testFreezeBlockerLinksCarryTheReportedPeriod(): void
+    {
+        $path = static fn (string $code, string $type, ?int $id): ?string => JmhzBlockerRemediationPath::forBlocker(
+            new JmhzScenario1Blocker($code, $type, $id),
+            '2026-08-01',
+        );
+        self::assertSame('/payroll/runs?period=2026-08', $path('eldp_assessment_base_missing', 'run', null));
+        self::assertSame(
+            '/payroll/absences?employment=22&tab=averages&year=2026&quarter=3',
+            $path('jmhz_average_hourly_earning_missing', 'employment', 22),
+        );
+        self::assertSame('/payroll/time?employment=22&period=2026-08', $path('jmhz_eldp_interval_invalid', 'employment', 22));
+        // Bez známého období zůstává odkaz po staru.
+        self::assertSame('/payroll/runs', JmhzBlockerRemediationPath::forBlocker(
+            new JmhzScenario1Blocker('eldp_assessment_base_missing', 'run', null),
+        ));
+    }
+
+    /** Nález zařazení složky vede do číselníku, ne na výchozí záložku Mzdové vstupy. */
+    public function testComponentFindingsOpenTheCatalogTab(): void
+    {
+        self::assertSame(
+            '/payroll/components?tab=catalog',
+            PayrollRunIssueGuidance::describe('component_treatment_unverified', 7, 9)['remediation_path'],
+        );
+        self::assertSame(
+            '/payroll/components?tab=risky_savings&person=11&employment=22',
+            self::invoke(PayrollRunSnapshotBuilder::class, 'riskySavingsPath', [11, 22]),
+        );
+    }
+
+    /**
+     * Neplatný podíl dimenze opraví účetní na kartě vztahu. Dřív padal jako
+     * UnexpectedValueException, tedy 500 bez odkazu, kam jít.
+     */
+    public function testInvalidDimensionShareIsAFixableFindingWithTheEmploymentLink(): void
+    {
+        foreach (['150.00', 'abc'] as $share) {
+            try {
+                self::invoke(PayrollRunSnapshotBuilder::class, 'shareBasisPoints', [$share, 22, 'STR-01']);
+                self::fail('Neplatný podíl dimenze musí zastavit snímek.');
+            } catch (PayrollRunSnapshotFixableException $e) {
+                self::assertSame('employment_dimension_share_invalid', $e->findingCode);
+                self::assertSame('/payroll/people?employment=22&panel=employment_terms', $e->remediationPath);
+                self::assertStringContainsString('STR-01', $e->getMessage());
+                self::assertStringContainsString('kartě pracovního vztahu', $e->getMessage());
+            }
+        }
+        self::assertSame(2550, self::invoke(PayrollRunSnapshotBuilder::class, 'shareBasisPoints', ['25.5', 22, 'STR-01']));
+        self::assertSame('blocker', PayrollRunReadinessImpact::describe('employment_dimension_share_invalid')['severity']);
     }
 
     public function testDiscountWarningLinksToAnExistingEmployeePage(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
@@ -13,7 +14,10 @@ use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PdfBytes;
@@ -92,12 +96,15 @@ final class AiPdfExtractor
      * @param bool $requireReview Klientská cesta vyžaduje kontrolu i u uhrazené účtenky;
      *        nepovolí přímou úhradu ani kartovou automatiku. ISDOC větve vždy tvoří koncept.
      * @param bool $allowModelUpgrade false zakáže retry dražším modelem; klient zůstává u výchozího modelu firmy.
+     * @param bool $withoutItems Jednorázová volba při nahrání: AI vytěžený doklad se uloží bez
+     *        rozpisu položek, jen s jedním řádkem na sazbu DPH ({@see summaryLinesByRate}).
+     *        Strukturovaný ISDOC se zakládá vždy z vlastních položek.
      *
      * @return array{ok:bool, purchase_invoice_id?:int, vendor_id?:int, source:string,
      *               error?:string, ai_data?:array<string,mixed>, model?:string,
      *               usage?:array<string,int>}
      */
-    public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null, bool $requireReview = false, bool $allowModelUpgrade = true): array
+    public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null, bool $requireReview = false, bool $allowModelUpgrade = true, bool $withoutItems = false): array
     {
         // Hlavička PDF posunutá o prázdný řádek / BOM (dompdf za PHP skriptem s mezerou)
         // — oprav na vstupu, ať ISDOC, AI klienti i archivace dostanou PDF od `%PDF-`.
@@ -244,6 +251,7 @@ final class AiPdfExtractor
             }
         }
         $data = self::withIssueDateFallback($extracted['data'], date('Y-m-d'));
+        $data = (new AiExtractedDataClipper($this->db))->clipPurchase($data);
 
         $validationError = $this->validateAiData($data);
         if ($validationError !== null) {
@@ -352,7 +360,7 @@ final class AiPdfExtractor
         // Create purchase invoice draft
         try {
             $existed = false;
-            $invoiceId = $this->createDraft($data, $supplierId, $userId, $resolved['id'], $resolved['is_vat_payer'] ?? null, $existed, $requireReview);
+            $invoiceId = $this->createDraft($data, $supplierId, $userId, $resolved['id'], $resolved['is_vat_payer'] ?? null, $existed, $requireReview, $withoutItems);
             // Stejná faktura v jiném PDF (jiný hash, stejný dodavatel + číslo + datum) —
             // existující doklad se nesmí měnit: žádné nové PDF ani automatika navíc.
             if ($existed) {
@@ -497,7 +505,14 @@ final class AiPdfExtractor
      */
     public static function withIssueDateFallback(array $data, string $today): array
     {
-        $valid = static fn (mixed $v): bool => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) === 1;
+        // AI umí vrátit i neexistující den (31. 9.): regex ho propustil a zápis pak
+        // spadl na chybě databáze. Takové datum se bere jako nenalezené.
+        $valid = static fn (mixed $v): bool => is_string($v) && IsoDate::isValid($v);
+        foreach (['tax_date', 'due_date', 'delivery_date'] as $key) {
+            if (isset($data[$key]) && !$valid($data[$key])) {
+                $data[$key] = null;
+            }
+        }
         if ($valid($data['issue_date'] ?? null)) {
             return $data;
         }
@@ -538,7 +553,7 @@ final class AiPdfExtractor
         return null;
     }
 
-    private function createDraft(array $data, int $supplierId, int $userId, int $vendorId, ?bool $vendorIsVatPayer = null, bool &$existed = false, bool $requireReview = false): int
+    private function createDraft(array $data, int $supplierId, int $userId, int $vendorId, ?bool $vendorIsVatPayer = null, bool &$existed = false, bool $requireReview = false, bool $withoutItems = false): int
     {
         $existed = false;
         // Datum, ke kterému se páruje sazba — DUZP s fallbackem na vystavení, tedy
@@ -712,6 +727,10 @@ final class AiPdfExtractor
                 'order_index'            => $idx,
                 'accrual_from'           => $accrual['from'] ?? null,
                 'accrual_to'             => $accrual['to'] ?? null,
+                'seller_item_code'       => $line['seller_item_code'] ?? null,
+                'item_ean'               => $line['item_ean'] ?? null,
+                'intrastat_cn8_code'     => $line['intrastat_cn8_code'] ?? null,
+                'intrastat_country_of_origin' => $line['intrastat_country_of_origin'] ?? null,
                 // vat_classification_code tady nesetujeme — PurchaseInvoiceRepository::replaceItems()
                 // auto-derive based on rate + RC + vendor country (lookup z DB). Výjimka:
                 // reverse charge doklady dostanou explicitní kód níže (issue #116).
@@ -780,9 +799,24 @@ final class AiPdfExtractor
             $itemsCollapsed = true;
             // Základ je základ; přesnou daň dle dokladu připne seedVatOverridesFromDocument.
             $pricesIncludeVat = false;
-            $recapOnlyWarning = 'Doklad neuvádí jednotkové ceny — položky nebyly vytěženy. '
+            // Načtení bez položek si vyžádal uživatel, rozpis ručně doplňovat nemá.
+            $recapOnlyWarning = $withoutItems ? null : 'Doklad neuvádí jednotkové ceny — položky nebyly vytěženy. '
                 . 'Doklad je založený ze souhrnné daňové rekapitulace (jeden řádek na sazbu DPH), '
                 . 'takže základ daně i daň odpovídají dokladu. Zkontrolujte a případně rozepište položky ručně.';
+        } elseif ($withoutItems) {
+            // Načtení bez položek: řádky téže sazby se sečtou do jednoho. Částky řádků se
+            // nemění, takže základ, daň i celkem vyjdou stejně jako s rozpisem; přesnou
+            // rekapitulaci dokladu pak dorovnají kroky níž a seeder DPH.
+            $summary = self::summaryLinesByRate($items, $isCredit);
+            if (count($summary) < count($items)) {
+                $this->logger->info('AI extractor: načtení bez položek → jeden řádek na sazbu DPH', [
+                    'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
+                    'lines_before'          => count($items),
+                    'lines_after'           => count($summary),
+                ]);
+                $items = $summary;
+                $itemsCollapsed = true;
+            }
         }
 
         if ((!$vendorNonPayer || $preserveDocumentVat) && $recapOnlyRates === null && $matchedRecapItems === null) {
@@ -882,15 +916,11 @@ final class AiPdfExtractor
         // neplátce sem nespadá: inferReverseCharge je u CZ dodavatele false.)
         if ($reverseCharge) {
             $nature = strtolower(trim((string) ($data['supply_nature'] ?? '')));
-            $isGoods = $nature === 'goods';
             // Přednost prefixu DIČ před zemí sídla jen u SLUŽEB (§ 9 odst. 1 se řídí
             // registrací k DPH). U zboží rozhoduje fyzický pohyb — pořízení z JČS (§ 16)
             // vs. dovoz (§ 20/§ 23) — o kterém registrace dodavatele nevypovídá nic.
-            $country = $this->vendorCountryInfo($vendorId, preferVatIdCountry: !$isGoods);
-            // Služba: EU → 24e (ř.5), 3. země → 24 (ř.12). Zboží: EU → 23 (ř.3), 3. země → 25 (ř.7).
-            $rcClassification = $country['is_eu']
-                ? ($isGoods ? '23' : '24e')
-                : ($isGoods ? '25' : '24');
+            $country = $this->vendorCountryInfo($vendorId, preferVatIdCountry: !in_array($nature, ['goods', 'mixed'], true));
+            $rcClassification = self::reverseChargeClassification($nature, $country['is_eu']);
             // Základní sazba pro rok dokladu z číselníku daňových konstant (ne natvrdo 21).
             $rcDate = (string) ($data['tax_date'] ?? $data['issue_date'] ?? '');
             $rcYear = $rcDate !== '' ? (int) substr($rcDate, 0, 4) : (int) date('Y');
@@ -905,7 +935,7 @@ final class AiPdfExtractor
             unset($it);
 
             $duzpNote = '';
-            if ($rcClassification === '23') {
+            if (in_array($rcClassification, EuAcquisitionTaxDate::GOODS_ACQUISITION_CODES, true)) {
                 // Datum dodání má od migrace 1785 vlastní sloupec. Dokud ho neměl,
                 // sloužilo k tomu vytěžené `tax_date` (které se hned přepsalo dopočteným
                 // DUZP) — fallback zůstává kvůli odpovědím bez `delivery_date`.
@@ -961,6 +991,18 @@ final class AiPdfExtractor
                 'supply_nature' => $nature !== '' ? $nature : null,
                 'tax_date' => $data['tax_date'] ?? null,
             ]);
+        }
+
+        // Náhradní datum vystavení (dnešek) není údaj z dokladu, DUZP se z něj neodvozuje.
+        if (!in_array($rcClassification, EuAcquisitionTaxDate::GOODS_ACQUISITION_CODES, true)
+            && ($data[self::ISSUE_DATE_FALLBACK] ?? false) !== true
+        ) {
+            $data['tax_date'] = ImportedTaxDatePolicy::resolve(
+                $data['tax_date'] ?? null,
+                $data['delivery_date'] ?? null,
+                $data['issue_date'] ?? null,
+                $documentKind,
+            );
         }
 
         // Platební účet dodavatele pro „Zaplatit pomocí QR" — z AI pole `payment`.
@@ -1060,6 +1102,9 @@ final class AiPdfExtractor
             $supplierId, $vendorId, (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
         );
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        // Tentýž doklad už může být v evidenci s jinak přečteným datem vystavení (např.
+        // převzatý z jiného systému). Neblokuje, ale doklad zůstane konceptem s varováním.
+        $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
         // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
         $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
         if ($cardLast4 !== null) {
@@ -1099,7 +1144,7 @@ final class AiPdfExtractor
             // Schvalování manažerem střediska (F6): s ním se účtenka hned neuhradí —
             // skok draft → paid by schválení obešel. Zůstane konceptem a ke schválení
             // ji pošle přijetí po kontrole vytěžení.
-            if (!$requireReview && $this->isCardSettledReceipt($supplierId, $data)
+            if (!$requireReview && $likelyDuplicates === [] && $this->isCardSettledReceipt($supplierId, $data)
                 && (new \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalRequirements($this->db))->approvalTypes($supplierId) === []) {
                 $this->markAlreadyPaid($id, $supplierId);
             } else {
@@ -1200,6 +1245,13 @@ final class AiPdfExtractor
         if ($recapOnlyWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $recapOnlyWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        if ($likelyDuplicates !== []) {
+            try {
+                $this->repo->flagLikelyVendorDuplicate($id, $supplierId, $likelyDuplicates);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }
@@ -1622,6 +1674,15 @@ final class AiPdfExtractor
             return [$qty, $unitPrice]; // 0 částka → nic spolehlivého k dosazení
         }
         if (round($qty * $unitPrice, 2) !== round($lineTotal, 2)) {
+            // Doklad vytiskl jednotkovou cenu zaokrouhlenou na haléře (víčka 0,01 EUR
+            // místo 0,0108 × 250 000 ks). Přesná cena z řádkové částky se od vytištěné
+            // liší méně než o půl haléře → množství zůstane a dosadí se přesná cena.
+            if ($qty != 0.0) {
+                $exact = UnitPricePrecision::normalize($lineTotal / $qty);
+                if (abs($exact - $unitPrice) < 0.005 && round($qty * $exact, 2) === round($lineTotal, 2)) {
+                    return [$qty, $exact];
+                }
+            }
             return [1.0, $lineTotal];
         }
         return [$qty, $unitPrice];
@@ -1811,11 +1872,96 @@ final class AiPdfExtractor
         if ($names === []) {
             return $base;
         }
+        return $base . ' (' . self::joinedNames($names) . ')';
+    }
+
+    /** @param list<string> $names */
+    private static function joinedNames(array $names): string
+    {
         $joined = implode(', ', $names);
         if (mb_strlen($joined) > 300) {
             $joined = mb_substr($joined, 0, 297) . '…';
         }
-        return $base . ' (' . $joined . ')';
+        return $joined;
+    }
+
+    /**
+     * Načtení dokladu bez položek (jednorázová volba při nahrání k vytěžení): řádky téže
+     * sazby DPH sečte do jednoho řádku `1 ks × součet`. Součet bere řádkové částky
+     * zaokrouhlené na haléře stejně jako výpočet dokladu, takže základ, daň i celkem
+     * zůstávají jako u rozpisu. Popis drží názvy sloučených plnění, podle nich se dál
+     * rozpoznává PHM i druh nákladu.
+     *
+     * Odpočet zdaněné zálohy (záporný řádek se sazbou, viz {@see InvoiceExtractionPrompt})
+     * zůstává samostatným řádkem, jako bez volby. Sleva se do řádku své sazby započte.
+     * Skupina, která se sečte na nulu, odpadne, pokud nějaká nenulová zbude.
+     *
+     * @param list<array<string,mixed>> $items řádky po převodu z AI (s `vat_rate_id`)
+     * @return list<array<string,mixed>>
+     */
+    public static function summaryLinesByRate(array $items, bool $isCredit): array
+    {
+        /** @var array<string, list<array<string,mixed>>> $groups */
+        $groups = [];
+        foreach (array_values($items) as $i => $item) {
+            $amount = round((float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0), 2);
+            $key = !$isCredit && $amount < 0.0 && self::isAdvanceDeductionText((string) ($item['description'] ?? ''))
+                ? 'advance-' . $i
+                : 'rate-' . (int) ($item['vat_rate_id'] ?? 0);
+            $groups[$key][] = $item;
+        }
+
+        $lines = [];
+        foreach ($groups as $group) {
+            if (count($group) === 1) {
+                $lines[] = $group[0];
+                continue;
+            }
+            $sum = 0.0;
+            $names = [];
+            foreach ($group as $item) {
+                $sum += round((float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0), 2);
+                $desc = trim((string) ($item['description'] ?? ''));
+                if ($desc !== '' && !in_array($desc, $names, true)) {
+                    $names[] = $desc;
+                }
+            }
+            $sum = round($sum, 2);
+            $accrualFrom = array_unique(array_map(static fn (array $it): ?string => $it['accrual_from'] ?? null, $group));
+            $accrualTo = array_unique(array_map(static fn (array $it): ?string => $it['accrual_to'] ?? null, $group));
+            $lines[] = [
+                'description'            => self::joinedNames($names),
+                'quantity'               => $isCredit ? -1.0 : 1.0,
+                'unit'                   => 'ks',
+                'unit_price_without_vat' => $isCredit ? -$sum : $sum,
+                'vat_rate_id'            => $group[0]['vat_rate_id'] ?? null,
+                'order_index'            => 0,
+                // Období plnění přežije jen tehdy, když ho sdílejí všechny sloučené řádky.
+                'accrual_from'           => count($accrualFrom) === 1 ? reset($accrualFrom) : null,
+                'accrual_to'             => count($accrualTo) === 1 ? reset($accrualTo) : null,
+                'seller_item_code'       => null,
+                'item_ean'               => null,
+                'intrastat_cn8_code'     => null,
+                'intrastat_country_of_origin' => null,
+            ];
+        }
+
+        $nonZero = array_values(array_filter(
+            $lines,
+            static fn (array $l): bool => round((float) $l['quantity'] * (float) $l['unit_price_without_vat'], 2) !== 0.0,
+        ));
+        $lines = $nonZero !== [] ? $nonZero : $lines;
+        foreach ($lines as $idx => &$line) {
+            $line['order_index'] = $idx;
+        }
+        unset($line);
+        return $lines;
+    }
+
+    /** Text řádku odpočtu zálohy (záloha, proforma, daňový doklad k platbě). */
+    private static function isAdvanceDeductionText(string $text): bool
+    {
+        return preg_match('/z[aá]loh|proform|advance|prepayment|da[nň]ov\S* doklad k (p[rř]ijat\S* )?platb/iu', $text) === 1;
     }
 
     public static function authoritativeRecapBaseLine(array $items, array $data, bool $isCredit): ?array
@@ -2563,7 +2709,24 @@ final class AiPdfExtractor
      */
     public static function euAcquisitionTaxDate(?string $deliveryDate, string $issueDate): ?string
     {
-        return \MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate::for($deliveryDate, $issueDate);
+        return EuAcquisitionTaxDate::for($deliveryDate, $issueDate);
+    }
+
+    /**
+     * Klasifikace RC dokladu podle povahy plnění (AI pole supply_nature) a země dodavatele.
+     *
+     * Služba: EU → 24e (ř. 5), 3. země → 24 (ř. 12). Zboží: EU → 23 (ř. 3), 3. země → 25
+     * (ř. 7). Smíšené plnění z EU je pořízení zboží: vedlejší náklady jako doprava jsou
+     * součástí základu daně zboží (§ 36 odst. 3 ZDPH) a sdílí jeho režim včetně DUZP
+     * dle § 25. U 3. země zůstává smíšené plnění službou — dovoz zboží (§ 23) se řídí
+     * propuštěním celním úřadem a samovyměření z faktury ho nevystihne.
+     */
+    public static function reverseChargeClassification(string $supplyNature, bool $vendorIsEu): string
+    {
+        if ($vendorIsEu) {
+            return in_array($supplyNature, ['goods', 'mixed'], true) ? '23' : '24e';
+        }
+        return $supplyNature === 'goods' ? '25' : '24';
     }
 
     /**

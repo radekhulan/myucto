@@ -34,7 +34,8 @@ Kapitolu otevřete, když:
 ## 104.2 Než začnete
 
 - **Role.** Správu licence (stránku **Zakoupení**) vidí a ovládá jen
-  administrátor. Běžný uživatel stránku otevře, ale operace nejsou dostupné.
+  **Superadmin instalace**. Správce firmy ani role Správce instance tímto
+  oprávněním automaticky nedisponují.
 - **Internet.** Instalace musí být online, aby mohla ověřit licenci na
   myucto.cz.
 - **Platební karta** pro předplatné a pro změny rozsahu za běhu.
@@ -291,7 +292,7 @@ a komerční nadstavba se vypne.
 > Bezplatná část zůstává plně funkční. Lze dál vystavovat a přijímat doklady,
 > spravovat kontakty, importovat bankovní výpisy, vést základní daňovou
 > evidenci a používat ostatní funkce převzaté z MyInvoice. Nedostupný je celý
-> **Sklad**, **Účetnictví** a **Nástroje**, evidence majetku, EPO podání a
+> **Sklad**, **Účetnictví** a **Nástroje**, [Nabídky](124_Nabidky.md), evidence majetku, EPO podání a
 > archív a opravy DPH podle § 74b, § 43, § 46 a § 79. Tyto komerční stránky
 > nejdou bez licence ani zobrazit, exportovat nebo volat přes API. Data
 > komerčních modulů se nemažou ani nemění; zůstávají ve vlastní databázi

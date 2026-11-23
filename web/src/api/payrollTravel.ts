@@ -191,7 +191,7 @@ export interface TravelMaterialization {
   created: { part: string; component_code: string; input_id: number; amount_minor: number }[]
   replayed: { part: string; component_code: string; input_id: number; amount_minor: number }[]
   settlement?: TravelSettlement
-  posting?: { status: string; journal_entry_id: number | null; reason: string | null } | null
+  posting?: { status: string; journal_entry_id: number | null; reason: string | null; message?: string | null } | null
 }
 
 export interface TravelTripsPage {

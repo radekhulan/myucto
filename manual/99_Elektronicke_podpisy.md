@@ -32,9 +32,19 @@ e-mail nešifruje.
 
 Kde funkci najdete, závisí na roli:
 
-- **admin**: správu podpisů najdete jako záložku **Certifikáty a elektronické podpisy** uvnitř stránky `Systém → E-maily a certifikáty` (vedle záložek **Odeslané e-maily**, **E-mail šablony**, **Odesílací profily** a **SMTP log analýza**).
-- **accountant** (účetní): pokud admin zapnul přepínač **Povolit uživatelům správu vlastních podpisových profilů**, objeví se účetnímu v postranním menu samostatná položka `Systém → Certifikáty a elektronické podpisy`. Bez zapnutého přepínače účetní tuto položku v menu nevidí a přímý přístup na adresu ho přesměruje na úvodní stránku.
-- **Klientský správce**: uživatel s klientskou rolí, který má pro danou firmu **Firemní podpisové profily a PDF podpisy – Zápis**, spravuje firemní podpisové profily v nastavení firmy na klientském portálu. Tato cesta je určená pro provozní správu podpisu dané firmy; osobní profily ani certifikáty v osobním trezoru zde nejsou dostupné.
+- **Superadmin instalace**: správa podpisů je záložka **Certifikáty
+  a elektronické podpisy** uvnitř `Systém → E-maily a certifikáty`.
+- **Správce firmy (Admin nebo Admin Plus)**: používá samostatnou stránku
+  `Systém → Certifikáty a elektronické podpisy`. Pokud položka při vypnutých
+  uživatelských profilech v menu chybí, otevře
+  [samostatnou správu podpisů](/admin/electronic-signatures) přímo.
+  Oprávnění správce stránky tím není omezené; zapnutí uživatelských profilů
+  zpřístupní i položku menu.
+- **Další interní role**: potřebuje zápis do **Elektronické podepisování**
+  (`settings.signing`) a povolení **Povolit uživatelům správu vlastních
+  podpisových profilů**. Pak na stejné samostatné stránce spravuje vlastní
+  profily. Rozhoduje oprávnění, nejen název role účetní.
+- **Klientský správce**: uživatel s klientskou nebo interní rolí, který má pro danou firmu **Firemní podpisové profily a PDF podpisy – Zápis**, spravuje firemní podpisové profily v nastavení firmy na klientském portálu. Tato cesta je určená pro provozní správu podpisu dané firmy; osobní profily ani certifikáty v osobním trezoru zde nejsou dostupné.
 
 <!-- cols: 22 78 -->
 | Role | Co může |
@@ -44,9 +54,10 @@ Kde funkci najdete, závisí na roli:
 | **Klientský správce** | Se zápisem do nastavení firmy může spravovat firemní profily, jejich certifikáty a použití pro PDF; podpis e-mailu zapojí přes firemní odesílací profil. Nemůže spravovat osobní profily, trezor ani jiné backendy. |
 | **readonly** | Může číst a stahovat doklady podle běžných oprávnění, ale nemůže měnit podpisové profily, mapování ani výběr podpisu na dokladu. Přímý přístup na stránku elektronických podpisů ho přesměruje pryč. |
 
-Admin povolí uživatelské profily přepínačem **Povolit uživatelům správu vlastních podpisových profilů** (na záložce
-Certifikáty a elektronické podpisy v `Systém → E-maily a certifikáty`). Tím zpřístupní účetním jejich vlastní profily.
-Klientský správce toto povolení nepotřebuje; rozhoduje jeho klientská role a přístup **Firemní podpisové profily a PDF podpisy – Zápis** pro
+Správce firmy povolí uživatelské profily přepínačem **Povolit uživatelům
+správu vlastních podpisových profilů** ve správě podpisů. Tím zpřístupní
+vlastní profily interním rolím s příslušným oprávněním.
+Klientský správce toto povolení nepotřebuje; rozhoduje jeho role a přístup **Firemní podpisové profily a PDF podpisy – Zápis** pro
 aktuální firmu.
 
 Základní pojmy:
@@ -69,7 +80,7 @@ Sekce **Certifikáty** na stránce Certifikáty a elektronické podpisy je jedin
 nahrává. Certifikát patří uživateli, ne firmě: v trezoru je uložený jednou a šifrovaně, firma k němu dostává jen
 povolení. Odtud si ho berou podpisové profily, podání EPO i mzdová podání.
 
-1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**, sekci **Certifikáty**.
+1. Otevřete správu podpisů podle [§ 99.2](#992-nez-zacnete), sekci **Certifikáty**.
 2. V části **Nahrát certifikát** klikněte na **Vybrat soubor** a vyberte soubor P12/PFX (se soukromým klíčem).
 3. Zadejte **Heslo k certifikátu**. To je heslo, kterým je chráněný samotný soubor, ne heslo do MyÚčta.
 4. Ověřte se: tlačítkem **Ověřit passkey** (po ověření se zobrazí **Passkey ověřeno**), nebo vyplněním pole **Heslo do MyÚčta** a při zapnutém 2FA také **Kódem z autentikátoru**. Ověření platí jen pro toto jedno nahrání a nikam se neukládá.
@@ -99,20 +110,26 @@ Firmy, kde nejste členem, se akce nedotkne. Výjimkou je správce systému, kte
 všechny: u něj se akce týká všech firem. Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané
 firmě skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí v příslušném nastavení té firmy.
 
+**Použití ve firmách.** U uloženého certifikátu rozbalte **Použití ve firmách**. V přehledu vidíte firmy,
+kde máte oprávnění číst nastavení elektronických podpisů. Sloupce ukazují, jestli je certifikát dostupný pro výběr
+v EPO, jestli je vybraný pro mzdová podání v produkčním nebo testovacím prostředí a k jakým datovým schránkám
+je nastavený. U mzdových podání přehled porovná sériové číslo certifikátu s číslem zadaným podle oznámení ČSSZ.
+U datové schránky je vidět ID schránky, druh přístupu a povolené operace.
+
 **Nahradit certifikát ve všech firmách.** Když certifikát obnovíte, vyberte v poli **Nahradit certifikát** ten starý
 a nový nahrajte, nebo u už nahraného nového klikněte na **Povolit v dalších firmách**. Aplikace se jednou zeptá na
 potvrzení a pak:
 
 - nový certifikát povolí ve všech firmách, kam akce dosáhne, i v aktuální firmě a i tam, kde už platný certifikát je
   (volba **Jen do firem bez platného certifikátu** se při náhradě nepoužije),
-- přepojí na něj přístup k datové schránce, osobní podpisové profily a volbu certifikátu pro mzdová podání, které
+- přepojí na něj firemní přístup k datové schránce, osobní podpisové profily a volbu certifikátu pro mzdová podání, které
   používaly starý certifikát.
 
 V přehledu po firmách je u takové firmy **Nahrazeno** a počet přepojených míst. Starý certifikát zůstane v trezoru
 a když ho už nic nepoužívá, smažete ho běžně. Nemění se odesílací brána ISDS (je společná pro celou instalaci
 a registrovaná přímo v ISDS) ani registrace certifikátu u ČSSZ: nový certifikát je potřeba u ČSSZ zaregistrovat
-a obrazovka mezd to do té doby hlásí. Přístup k datové schránce bude po náhradě potřeba znovu ověřit přihlášením.
-Dříve podepsaná PDF zůstávají podepsaná starým certifikátem.
+a obrazovka mezd to do té doby hlásí. Firemní přístup k datové schránce bude po náhradě potřeba znovu ověřit přihlášením.
+Certifikát pro sdílený přístup aktualizujte v **Systém → Přístupové údaje**. Dříve podepsaná PDF zůstávají podepsaná starým certifikátem.
 
 **Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména z Windows a od některých autorit, jsou
 chráněné zastaralou šifrou RC2, kterou server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá
@@ -129,7 +146,7 @@ Nový soubor PFX pak nahrajte do trezoru stejným postupem.
 
 ## 99.4 Krok za krokem: založit podpisový profil
 
-1. Admin otevře `Systém → E-maily a certifikáty` a záložku **Certifikáty a elektronické podpisy**. Účetní (má-li povoleno) otevře rovnou `Systém → Certifikáty a elektronické podpisy`.
+1. Otevřete správu podpisů podle [§ 99.2](#992-nez-zacnete): superadmin v E-mailech a certifikátech, ostatní oprávněné role na samostatné stránce podpisů.
 2. V sekci **Podpisové profily** klikněte na **Nový profil**.
 3. Vyplňte **Název** a **Kód**. Kód je technický identifikátor profilu a musí být unikátní v rámci dodavatele.
 4. Vyberte **Vlastník profilu**:
@@ -217,7 +234,7 @@ beze změny). Certifikát z profilu odeberete s potvrzením dialogu.
 Sekci **Konfigurace podpisů** vidí admin na záložce Certifikáty a elektronické podpisy. Každý řádek nastavuje jeden
 typ výstupu: buď PDF, nebo S/MIME e-mail.
 
-1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**, sekci **Konfigurace podpisů**.
+1. Otevřete správu podpisů podle [§ 99.2](#992-nez-zacnete), sekci **Konfigurace podpisů**.
 2. U výstupu (například **Vydaná faktura**, **Výkaz práce**, **E-mail s fakturou**) zapněte **Podepisovat**.
 3. V poli **Výběr profilu** zvolte **Profil dodavatele**, nebo **Přihlášený uživatel**. Při profilu dodavatele vyberte konkrétní aktivní **Profil**.
 4. Při volbě **Přihlášený uživatel** nastavte **Fallback uživatele** (co se stane, když uživatel nemá použitelný vlastní profil).
@@ -240,7 +257,7 @@ provede jen po zaškrtnutí volby v exportu; bez ní zůstane sloučené PDF nep
 
 Certifikát, který už nepotřebujete (například po obnově), smažete takto:
 
-1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**.
+1. Otevřete správu podpisů podle [§ 99.2](#992-nez-zacnete).
 2. V sekci **Certifikáty** se ověřte stejně jako při nahrání: **Ověřit passkey**, nebo **Heslo do MyÚčta** a případně **Kód z autentikátoru**.
 3. U certifikátu klikněte na **Smazat** a smazání potvrďte v dialogu s názvem certifikátu.
 
@@ -303,7 +320,7 @@ Když máte zapnutý podpis výstupu **Vydaná faktura**, podepíše se stejným
 
 Co pro to musíte udělat:
 
-1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**.
+1. Otevřete správu podpisů podle [§ 99.2](#992-nez-zacnete).
 2. V **Konfiguraci podpisů** zapněte u výstupu **Vydaná faktura** volbu **Podepisovat** a vyberte profil s certifikátem.
 3. Klikněte na **Uložit konfiguraci podpisů**.
 4. V detailu faktury vygenerujte PDF znovu (starší PDF zůstávají tak, jak byla vydána).

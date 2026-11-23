@@ -6,12 +6,14 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -38,7 +40,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_employment_terms')) {
             $this->markTestSkipped('Migrace 1195 neproběhla.');
@@ -293,6 +295,82 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(422, $invalid->getStatusCode());
     }
 
+    public function testRelationTypeCorrectionTurnsEmploymentIntoAgreement(): void
+    {
+        $employment = $this->create($this->employeeId, 'REG-1', 'small_scale_employment', true);
+        self::assertSame('1', $employment['terms'][0]['activity_code']);
+
+        $response = $this->changeRelationType($employment, 'dpp', 'Převzato z registrace omylem jako ZMR.');
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $changed = $this->json($response)['employment'];
+        self::assertSame('dpp', $changed['relation_type']);
+        self::assertSame('T', $changed['terms'][0]['activity_code'], 'Druh činnosti ZMR k dohodě nepatří, nahradí ho kód první DPP.');
+        self::assertSame($employment['row_version'] + 1, $changed['row_version']);
+
+        $event = $this->db->pdo()->query(
+            "SELECT note, diff_json FROM payroll_employment_events WHERE event_type = 'relation_type_changed'"
+            . ' AND employment_id = ' . (int) $employment['id'],
+        )->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($event, 'Oprava druhu má vlastní událost na časové ose.');
+        self::assertSame('Převzato z registrace omylem jako ZMR.', $event['note']);
+        $diff = json_decode((string) $event['diff_json'], true);
+        self::assertSame(['from' => 'small_scale_employment', 'to' => 'dpp'], $diff['relation_type']);
+        self::assertSame(['from' => '1', 'to' => 'T'], $diff['activity_code']);
+        self::assertSame('dpp', $this->db->pdo()->query(
+            'SELECT employment_type FROM payroll_employees WHERE id = ' . $this->employeeId,
+        )->fetchColumn(), 'Osoba s jediným vztahem dostane i souhrnný druh dohody.');
+
+        $same = $this->changeRelationType($changed, 'dpp');
+        self::assertSame(422, $same->getStatusCode());
+        $stale = $this->changeRelationType($employment, 'employment');
+        self::assertSame(409, $stale->getStatusCode(), 'Zastaralá verze vztahu se odmítne.');
+        $unsupported = $this->changeRelationType($changed, 'statutory_body');
+        self::assertSame(422, $unsupported->getStatusCode());
+    }
+
+    public function testRelationTypeCorrectionIsRefusedAfterApprovedAttendance(): void
+    {
+        $employment = $this->create($this->employeeId, 'REG-2', 'employment', true);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, approved_at)
+             VALUES (?, ?, '2026-02-01', 'approved', NOW())"
+        )->execute([$this->supplierId, $employment['id']]);
+
+        $response = $this->changeRelationType($employment, 'dpp');
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('payroll_relation_type_has_approved_time', $this->json($response)['error']['code']);
+        self::assertSame('employment', $this->db->pdo()->query(
+            'SELECT relation_type FROM payroll_employments WHERE id = ' . (int) $employment['id'],
+        )->fetchColumn());
+    }
+
+    public function testRelationTypeCorrectionCannotReachAnotherTenant(): void
+    {
+        $foreign = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, is_primary, row_version)
+             VALUES (?, ?, 'CIZI', 'employment', 'planned', 0, 1)"
+        );
+        $foreign->execute([$this->otherSupplierId, $this->otherEmployeeId]);
+        $foreignId = (int) $this->db->pdo()->lastInsertId();
+
+        $response = $this->changeRelationType(['id' => $foreignId, 'row_version' => 1], 'dpp');
+        self::assertSame(404, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    /** @param array<string,mixed> $employment */
+    private function changeRelationType(array $employment, string $relationType, ?string $note = null): Response
+    {
+        return $this->action->changeRelationType(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/relation-type",
+                ['row_version' => $employment['row_version'], 'relation_type' => $relationType, 'note' => $note],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+    }
+
     public function testMealEntitlementBasisIsExplicitAndEditable(): void
     {
         $employment = $this->create($this->employeeId, 'STRAVNE-1', 'employment', true);
@@ -472,6 +550,21 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(422, $newTermsAttack->getStatusCode());
 
+        foreach (['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'] as $field => $value) {
+            $response = $this->action->addTerms(
+                $this->request('PUT', "/api/payroll/employments/{$employment['id']}/terms", [
+                    'row_version' => $employment['row_version'],
+                    'effective_from' => '2026-03-01',
+                    'monthly_gross_minor' => 4_600_000,
+                    'change_reason' => 'Neoprávněný zápis',
+                    $field => $value,
+                ], authMethod: 'bearer'),
+                new Response(),
+                ['id' => (string) $employment['id']],
+            );
+            self::assertSame(422, $response->getStatusCode(), $field);
+        }
+
         $correctionAttack = $this->action->correctTerms(
             $this->request(
                 'PATCH',
@@ -587,6 +680,27 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(403, $bearer->getStatusCode());
         self::assertSame('session_required', $this->json($bearer)['error']['code']);
+    }
+
+    public function testRemunerationOptionsUseRulesetAndRequirePayrollRead(): void
+    {
+        $reader = new EffectiveRole(42, 'Čtení mezd', 'staff', true, ['payroll' => AccessLevel::READ->value]);
+        $request = $this->request('GET', '/api/payroll/employments/remuneration-options')
+            ->withAttribute('auth.effective_role', $reader);
+        $valid = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(200, $valid->getStatusCode(), (string) $valid->getBody());
+        self::assertSame(13440, $this->json($valid)['minimum_hourly_40h_minor']);
+        self::assertNotEmpty($this->json($valid)['ruleset_id']);
+        $missing = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '1900-01-01']), new Response());
+        self::assertSame(200, $missing->getStatusCode());
+        self::assertNull($this->json($missing)['minimum_hourly_40h_minor']);
+        self::assertNull($this->json($missing)['ruleset_id']);
+        $invalid = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '2026-02-30']), new Response());
+        self::assertSame(422, $invalid->getStatusCode());
+        $denied = $this->action->remunerationOptions($request->withAttribute('auth.effective_role', EffectiveRole::denied())->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(403, $denied->getStatusCode());
+        $bearer = $this->action->remunerationOptions($request->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(403, $bearer->getStatusCode());
     }
 
     private function effectiveSalary(int $employmentId, string $effectiveOn): ?int
@@ -715,6 +829,41 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'change_reason' => 'Kód z číselníku',
         ]);
         self::assertSame('24111', $accepted['terms'][0]['cz_isco_code']);
+    }
+
+    /**
+     * Vyřazený kód CZ-ISCO ČSSZ v registraci nepřijme: nově zadat ho nejde,
+     * uložený historický kód uložení podmínek nezablokuje (jen varuje).
+     */
+    public function testCzIscoRejectsNewlyEnteredRetiredCodeButKeepsStoredOne(): void
+    {
+        $employment = $this->create($this->employeeId, 'ISCO-2', 'employment', true);
+        $rejected = $this->action->addTerms(
+            $this->request(
+                'PUT',
+                "/api/payroll/employments/{$employment['id']}/terms",
+                [
+                    'row_version' => $employment['row_version'],
+                    ...$this->termsPayload(true, '2026-03-01'),
+                    'cz_isco_code' => '32114',
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertStringContainsString('vyřazený', $this->json($rejected)['error']['message']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET cz_isco_code = ?
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute(['32114', $this->supplierId, (int) $employment['id']]);
+        $kept = $this->terms($employment, [
+            ...$this->termsPayload(true, '2026-04-01'),
+            'cz_isco_code' => '32114',
+            'change_reason' => 'Změna bez CZ-ISCO',
+        ]);
+        self::assertSame('32114', $kept['terms'][0]['cz_isco_code']);
     }
 
     /**
@@ -940,25 +1089,151 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertContains('terms_changed', array_column($changed['timeline'], 'event_type'));
     }
 
-    /** Ukončený vztah je archiv — opravovat se v něm nedá stejně jako verzovat. */
-    public function testCorrectionIsRefusedOnAClosedEmployment(): void
+    /**
+     * Nová verze od září 2026 (pokrytí CISOB) s místem výkonu „Praha" se uloží
+     * a vrátí varování u pole; nový neznámý druh činnosti vrátí 422 s polem.
+     * Dřív obojí končilo 422 bez vazby na pole a neshodný název blokoval
+     * každou novou verzi podmínek.
+     */
+    public function testTermsSaveReturnsFieldWarningsAndFieldErrors(): void
+    {
+        $employment = $this->create($this->employeeId, 'VAROVANI-1', 'employment', true);
+        $payload = [
+            'jmhz_workplace_municipality_code' => '554782',
+            'jmhz_workplace_country_code' => 'CZ',
+        ] + $this->termsPayload(true, '2026-09-01');
+
+        $response = $this->action->addTerms(
+            $this->request('PUT', "/api/payroll/employments/{$employment['id']}/terms", ['row_version' => $employment['row_version'], ...$payload]),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame(['work_place'], array_column($body['warnings'], 'field'));
+        self::assertSame('workplace_name_mismatch', $body['warnings'][0]['code']);
+        self::assertSame('Praha', $body['employment']['terms'][0]['work_place']);
+
+        $response = $this->action->correctTerms(
+            $this->request('PATCH', "/api/payroll/employments/{$employment['id']}/terms/current", [
+                'row_version' => $body['employment']['row_version'],
+                'activity_code' => 'ZZ',
+            ] + $payload),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(['field' => 'activity_code'], $this->json($response)['error']['details']);
+    }
+
+    /**
+     * Ukončený vztah jde opravit v údajích pro JMHZ (CZ-ISCO, pracoviště),
+     * dokud z hlášení za jeho měsíc nevzniklo podání: „Ukončit skončené
+     * dohody“ běží často dřív, než je hlášení za poslední měsíc hotové.
+     * Jiná změna podmínek (úvazek) patří k vrácení ukončení. Jakmile je
+     * hlášení za měsíc vztahu zmrazené, oprava skončí 409 a hláška řekne,
+     * za který měsíc a co dál.
+     */
+    public function testEndedEmploymentIsCorrectableForJmhzUntilSubmissionExists(): void
     {
         $employment = $this->create($this->employeeId, 'OPRAVA-4', 'employment', true);
         $employment = $this->transition($employment, 'active', '2026-01-01');
         $employment = $this->transition($employment, 'ended', '2026-02-28');
+        $path = "/api/payroll/employments/{$employment['id']}/terms/current";
+        $args = ['id' => (string) $employment['id']];
 
-        $response = $this->action->correctTerms(
-            $this->request(
-                'PATCH',
-                "/api/payroll/employments/{$employment['id']}/terms/current",
-                ['row_version' => $employment['row_version']]
-                    + $this->termsPayload(true, '2026-01-01'),
-            ),
+        $corrected = $this->action->correctTerms(
+            $this->request('PATCH', $path, ['row_version' => $employment['row_version'], 'cz_isco_code' => '93291']
+                + $this->termsPayload(true, '2026-01-01')),
             new Response(),
-            ['id' => (string) $employment['id']],
+            $args,
         );
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        $employment = $this->json($corrected)['employment'];
+        self::assertSame('ended', $employment['status']);
+        self::assertSame('93291', $employment['terms'][0]['cz_isco_code']);
 
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $contract = $this->action->correctTerms(
+            $this->request('PATCH', $path, [
+                'row_version' => $employment['row_version'],
+                'cz_isco_code' => '93291',
+                'weekly_hours' => '20',
+                'workload_basis_points' => 5000,
+            ] + $this->termsPayload(true, '2026-01-01')),
+            new Response(),
+            $args,
+        );
+        self::assertSame(409, $contract->getStatusCode(), (string) $contract->getBody());
+        $message = (string) $this->json($contract)['error']['message'];
+        self::assertStringContainsString('je ukončený', $message);
+        self::assertStringContainsString('po vrácení ukončení', $message);
+
+        $this->freezeJmhzReport((int) $employment['id'], '2026-02-01');
+        $reported = $this->action->correctTerms(
+            $this->request('PATCH', $path, ['row_version' => $employment['row_version'], 'cz_isco_code' => '43111']
+                + $this->termsPayload(true, '2026-01-01')),
+            new Response(),
+            $args,
+        );
+        self::assertSame(409, $reported->getStatusCode(), (string) $reported->getBody());
+        $message = (string) $this->json($reported)['error']['message'];
+        self::assertStringContainsString('hlášení JMHZ za 2/2026', $message);
+        self::assertStringContainsString('Vraťte ukončení vztahu', $message);
+        self::assertStringContainsString('opravné hlášení JMHZ', $message);
+    }
+
+    /**
+     * Schválený běh se vztahem a z něj ostré zmrazené podání JMHZ za měsíc
+     * (příprava + podání se stejným otiskem, jak ho zakládá „Zmrazit“).
+     */
+    private function freezeJmhzReport(int $employmentId, string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs
+                 (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, 'approved', 1, 1)",
+        )->execute([
+            $this->supplierId,
+            $periodStart,
+            (new \DateTimeImmutable($periodStart))->modify('+1 month +14 days')->format('Y-m-d'),
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                  idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)",
+        )->execute([$this->supplierId, $runId, str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_employments
+                 (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, '{}', ?)",
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, $employmentId, str_repeat('c', 64)]);
+        $fingerprint = hash('sha256', 'snapshot' . $revisionId);
+        $pdo->prepare(
+            "INSERT INTO payroll_jmhz_preparation_snapshots
+                (supplier_id, environment, run_id, source_revision_id, period_start, scenario_key,
+                 builder_version, readiness_status, issue_count, source_manifest_json,
+                 source_manifest_sha256, readiness_json, readiness_sha256, snapshot_ciphertext,
+                 snapshot_fingerprint, request_fingerprint, idempotency_key_hash, created_by)
+             VALUES (?, 'production', ?, ?, ?, 'scenario_1', 'jmhz-preparation-source.v1',
+                     'source_ready', 0, '{}', ?, '{}', ?, 'enc:v2:synteticky', ?, ?, ?, ?)",
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $periodStart,
+            hash('sha256', 'manifest'),
+            hash('sha256', 'readiness'),
+            $fingerprint,
+            hash('sha256', 'request' . $revisionId),
+            hash('sha256', 'idempotency' . $revisionId, true),
+            $this->userId,
+        ]);
+        JmhzFrozenSubmissionFixture::freeze($pdo, $this->supplierId, $periodStart, $fingerprint, $this->userId);
     }
 
     /**
@@ -1002,6 +1277,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
                         'relation_type' => $relationType,
                         'monthly_gross_minor' => 4000000,
                         'terms' => $terms,
+                        // Souběžná druhá DPP vedle otevřené jen s výslovným potvrzením.
+                        'confirm_new_agreement' => true,
                     ],
                 ),
                 new Response(),

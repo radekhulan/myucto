@@ -45,7 +45,24 @@ final class ClosingRepository
      */
     private const NO_LATERAL_SPLIT = "SET STATEMENT optimizer_switch='split_materialized=off' FOR ";
 
+    /** @var list<array{pairing_id:int, entry_id:int, line_no:int}> okruhy uvolněné nahrazením zápisů od posledního {@see takeReleasedPairings()} */
+    private array $releasedPairings = [];
+
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Položky okruhů párování, které uvolnily smazané zápisy uzávěrky od posledního volání,
+     * a vynulování počítadla. Volá ho {@see \MyInvoice\Service\Accounting\Closing\ClosingService}
+     * kolem každé akce kroku, aby počet uvolněných párování ukázal v odpovědi.
+     *
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    public function takeReleasedPairings(): array
+    {
+        $released = $this->releasedPairings;
+        $this->releasedPairings = [];
+        return $released;
+    }
 
     public function resultDecisionPeriods(int $supplierId, bool $forUpdate = false): array
     {
@@ -266,9 +283,10 @@ final class ClosingRepository
      *
      * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
      */
-    public function plBalances(int $supplierId, int $periodId, string $startsOn, string $endsOn, bool $currentRead = false): array
+    public function plBalances(int $supplierId, int $periodId, string $startsOn, string $endsOn, bool $currentRead = false, array $excludeEntryIds = []): array
     {
         if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current native balances require caller locks.');
+        $exclude = self::excludeEntriesSql($excludeEntryIds);
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
@@ -279,28 +297,40 @@ final class ClosingRepository
                 AND e.entry_date BETWEEN ? AND ?
                 AND a.account_type IN ('revenue','expense')
                 AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?)
+                {$exclude}
               GROUP BY l.account_id, a.account_code, a.name
              HAVING bal <> 0
               ORDER BY a.account_code" . ($currentRead ? ' FOR UPDATE' : '')
         );
-        $stmt->execute([$supplierId, $startsOn, $endsOn, $periodId, $periodId]);
+        $stmt->execute([$supplierId, $startsOn, $endsOn, $periodId, $periodId, ...$excludeEntryIds]);
         return array_map(self::castBalance(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**
      * Zůstatky rozvahových účtů k ends_on (R9) od kotvy shodné s účetními sestavami,
-     * po účtech a dimenzích, bez vlastního close_books zápisu období
+     * po účtech, dimenzích a měně, bez vlastního close_books zápisu období
      * (source_id = period_id; slotované stock zápisy §3.4 se počítají —
      * viz plBalances).
      *
-     * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
+     * Cizí měna se nese stejně jako u rámce 504 ({@see \MyInvoice\Service\Accounting\Closing\ClosingCurrency504Builder}):
+     * buňka účtu se rozdělí po měnách, korunové řádky (bez měny) zůstávají korunovým
+     * zůstatkem a každá cizí měna má vlastní zůstatek s `currency_code` a `amount_foreign`.
+     * Uzavírací i otevírací zápis tak nesou cizoměnový zůstatek dál a přecenění dalšího
+     * roku ho najde v počátečním stavu. Cizoměnová část, kterou přenést nejde, se vrátí
+     * do korunového zůstatku buňky (dosavadní chování): řádek bez cizí částky, cizí
+     * zůstatek s opačným znaménkem než korunový nebo nulový korunový, převodové účty
+     * skupiny 26 ({@see TRANSFER_ACCOUNT_GROUP}) a účet, jehož
+     * počáteční stav vznikl bez měny ({@see foreignOpeningGaps()}).
+     *
+     * @return list<array{account_id:int, account_code:string, name:string, bal:float, currency_code?:string, amount_foreign?:float, fx_rate?:null}>
      */
-    public function bsBalances(int $supplierId, int $periodId, string $endsOn, bool $currentRead = false): array
+    public function bsBalances(int $supplierId, int $periodId, string $endsOn, bool $currentRead = false, array $excludeEntryIds = []): array
     {
         $anchor = (new LedgerReportRepository($this->db))->openingAnchor($supplierId, $endsOn, $currentRead);
         $where = "e.entry_date <= ? AND a.account_type IN ('asset','liability','equity')
-                  AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?)";
-        $params = [$endsOn, $periodId, $periodId];
+                  AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?) "
+                  . self::excludeEntriesSql($excludeEntryIds);
+        $params = [$endsOn, $periodId, $periodId, ...$excludeEntryIds];
         if ($anchor !== null) {
             $where .= ' AND e.entry_date >= ?';
             $params[] = $anchor;
@@ -310,7 +340,97 @@ final class ClosingRepository
             $where,
             $params,
             $currentRead,
+            $anchor === null ? [] : $this->foreignOpeningGaps($supplierId, $anchor, $endsOn, $currentRead),
         );
+    }
+
+    /**
+     * Účty, jejichž počáteční stav ke kotvě vznikl bez cizí měny, ač účet cizoměnové řádky
+     * před kotvou má: otevírací zápis má na účtu jen korunové řádky. Typicky rok otevřený
+     * před tím, než uzávěrka uměla nést měnu. Cizoměnový zůstatek od kotvy by u nich
+     * zachytil jen pohyby od kotvy, ne celý zůstatek, proto se jim měna nepřenáší
+     * ({@see bsBalances()}) a návrh přecenění je počítá z celého deníku ({@see bankProposals()}).
+     *
+     * @return array<int,true> account_id => true
+     */
+    public function foreignOpeningGaps(int $supplierId, string $anchor, string $asOf, bool $currentRead = false): array
+    {
+        $lock = $currentRead ? ' FOR UPDATE' : '';
+        $foreign = "l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'";
+        $opening = $this->db->pdo()->prepare(
+            "SELECT l.account_id
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.source_type = 'opening' AND e.posted_at IS NOT NULL
+                AND e.entry_date >= ? AND e.entry_date <= ?
+              GROUP BY l.account_id
+             HAVING SUM({$foreign}) = 0{$lock}"
+        );
+        $opening->execute([$supplierId, $anchor, $asOf]);
+        $candidates = array_map('intval', $opening->fetchAll(PDO::FETCH_COLUMN));
+        if ($candidates === []) {
+            return [];
+        }
+        $before = $this->db->pdo()->prepare(
+            "SELECT DISTINCT l.account_id
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date < ? AND {$foreign}
+                AND l.account_id IN (" . implode(',', array_fill(0, count($candidates), '?')) . "){$lock}"
+        );
+        $before->execute([$supplierId, $anchor, ...$candidates]);
+        return array_fill_keys(array_map('intval', $before->fetchAll(PDO::FETCH_COLUMN)), true);
+    }
+
+    /** @param list<int> $entryIds */
+    private static function excludeEntriesSql(array $entryIds): string
+    {
+        return $entryIds === [] ? '' : 'AND e.id NOT IN (' . implode(',', array_fill(0, count($entryIds), '?')) . ')';
+    }
+
+    /**
+     * Uzávěrka převzatá z původního systému (převod z POHODY apod.): zaúčtované zápisy
+     * `closing` období bez source_id, které nejsou stornem jiného zápisu a samy stornované
+     * nejsou. Průvodce je do zůstatků počítá záměrně (jinak by rok uzavřel podruhé), ale
+     * skutečný výsledek hospodaření a očekávané počáteční stavy dalšího roku se počítají
+     * bez nich ({@see \MyInvoice\Service\Accounting\Closing\ClosingService::takenOverClosingEntryIds()}).
+     *
+     * @return list<int>
+     */
+    public function takenOverClosingEntryIds(int $supplierId, int $periodId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.id FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.period_id = ? AND e.source_type = 'closing'
+                AND e.source_id IS NULL AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND NOT EXISTS (SELECT 1 FROM journal_entries o
+                                 WHERE o.supplier_id = e.supplier_id AND o.reversed_by = e.id)
+              ORDER BY e.id"
+        );
+        $stmt->execute([$supplierId, $periodId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Netto zůstatek účtu (prefix kódu, MD kladně) ze zápisů dat období bez vybraných zápisů.
+     * U převzaté uzávěrky jde o haléřový zbytek na počátečním účtu rozvažném, který původní
+     * systém přenáší z roku do roku.
+     *
+     * @param list<int> $excludeEntryIds
+     */
+    public function periodBalanceExcluding(int $supplierId, string $accountCode, string $from, string $to, array $excludeEntryIds): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND a.account_code LIKE CONCAT(?, '%') " . self::excludeEntriesSql($excludeEntryIds)
+        );
+        $stmt->execute([$supplierId, $from, $to, $accountCode, ...$excludeEntryIds]);
+        return round((float) $stmt->fetchColumn(), 2);
     }
 
     public function plBalancesWithDimensions(int $supplierId, int $periodId, string $startsOn, string $endsOn): array
@@ -332,14 +452,24 @@ final class ClosingRepository
         );
     }
 
-    private function balancesWithDimensions(int $supplierId, string $where, array $params, bool $currentRead = false): array
+    /**
+     * @param array<int,true>|null $currencyBlocked null = zůstatky bez měny; pole = rozdělit
+     *     buňky po měnách ({@see bsBalances()}), u vyjmenovaných účtů měnu nenést
+     */
+    private function balancesWithDimensions(int $supplierId, string $where, array $params, bool $currentRead = false, ?array $currencyBlocked = null): array
     {
         if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current native balances require caller locks.');
+        $withCurrency = $currencyBlocked !== null;
+        $currencySelect = $withCurrency
+            ? ", CASE WHEN l.currency_code IS NULL OR l.currency_code = 'CZK' THEN NULL ELSE l.currency_code END AS fx_currency,
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS fx_bal,
+                    SUM(CASE WHEN l.amount_foreign IS NULL THEN 1 ELSE 0 END) AS fx_missing"
+            : '';
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name, l.cost_center, l.project_id,
                     d.dimensions, s.splits,
                     CASE WHEN s.splits IS NULL THEN 0 ELSE l.amount END AS split_amount,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal{$currencySelect}
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -358,13 +488,17 @@ final class ClosingRepository
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND {$where}
               GROUP BY l.account_id, a.account_code, a.name, l.cost_center, l.project_id,
-                       d.dimensions, s.splits, split_amount
+                       d.dimensions, s.splits, split_amount" . ($withCurrency ? ', fx_currency' : '') . "
              HAVING bal <> 0
-              ORDER BY a.account_code, l.cost_center, l.project_id, d.dimensions, s.splits, split_amount" . ($currentRead ? ' FOR UPDATE' : '')
+              ORDER BY a.account_code, l.cost_center, l.project_id, d.dimensions, s.splits, split_amount" . ($withCurrency ? ', fx_currency' : '') . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $supplierId, $supplierId, ...$params]);
+        $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($withCurrency) {
+            $records = self::mergeUncarriedCurrency($records, $currencyBlocked);
+        }
         $balances = [];
-        while ($record = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        foreach ($records as $record) {
             $row = self::castBalance($record);
             foreach (json_decode((string) ($record['dimensions'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR) as [$typeId, $valueId]) {
                 $row['dimensions'][(int) $typeId] = (int) $valueId;
@@ -384,11 +518,60 @@ final class ClosingRepository
             if ($splitCents > 0) {
                 $row['bal'] = ($balanceCents < 0 ? -$splitCents : $splitCents) / 100;
             }
+            $foreignCents = ($record['fx_currency'] ?? null) === null ? null : abs((int) round((float) $record['fx_bal'] * 100));
             for ($i = 0; $i < $count; $i++) {
+                if ($foreignCents !== null) {
+                    // Rozpad na shodné díly (sdílené rozpouštění) dělí i cizí částku, zbytek haléřů jde prvním dílům.
+                    $share = intdiv($foreignCents, $count) + ($i < $foreignCents % $count ? 1 : 0);
+                    $row['currency_code'] = (string) $record['fx_currency'];
+                    $row['amount_foreign'] = $share / 100;
+                    $row['fx_rate'] = null;
+                }
                 $balances[] = $row;
             }
         }
         return $balances;
+    }
+
+    /**
+     * Převodové účty skupiny 26 (261 peníze na cestě a analytiky): peníze přijdou v jedné
+     * měně a odejdou v jiné (konverze). Cizí částka řádků se tam jen hromadí a zůstatek
+     * v cizí měně nemá význam, proto se přenáší jen v korunách ({@see bsBalances()}).
+     */
+    private const TRANSFER_ACCOUNT_GROUP = '26';
+
+    /**
+     * Cizoměnové části buněk, které přenést nejde, sečte do korunové části téže buňky
+     * ({@see bsBalances()}). Pořadí záznamů zůstává.
+     *
+     * @param list<array<string,mixed>> $records
+     * @param array<int,true> $blocked
+     * @return list<array<string,mixed>>
+     */
+    private static function mergeUncarriedCurrency(array $records, array $blocked): array
+    {
+        $merged = [];
+        foreach ($records as $record) {
+            $currency = $record['fx_currency'];
+            if ($currency !== null) {
+                $balCents = (int) round((float) $record['bal'] * 100);
+                $fxCents = (int) round((float) $record['fx_bal'] * 100);
+                if (isset($blocked[(int) $record['account_id']]) || (int) $record['fx_missing'] > 0
+                    || ($fxCents !== 0 && ($fxCents < 0) !== ($balCents < 0))
+                    || str_starts_with((string) $record['account_code'], self::TRANSFER_ACCOUNT_GROUP)) {
+                    $currency = null;
+                }
+            }
+            $key = json_encode([$record['account_id'], $record['cost_center'], $record['project_id'], $record['dimensions'],
+                $record['splits'], $record['split_amount'], $currency], JSON_THROW_ON_ERROR);
+            if (!isset($merged[$key])) {
+                $merged[$key] = ['fx_currency' => $currency] + $record;
+                $merged[$key]['bal'] = 0.0;
+                $merged[$key]['fx_bal'] = $currency === null ? null : $record['fx_bal'];
+            }
+            $merged[$key]['bal'] = round((float) $merged[$key]['bal'] + (float) $record['bal'], 2);
+        }
+        return array_values(array_filter($merged, static fn (array $r): bool => (int) round((float) $r['bal'] * 100) !== 0));
     }
 
     /**
@@ -525,6 +708,97 @@ final class ClosingRepository
         $params[] = $accountCode;
         $params[] = $accountCode;
         $stmt->execute($params);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
+     * Netto obrat účtu (prefix kódu, MD kladně) mezi daty BEZ zápisů uzavření knih
+     * ({@see ClosingSourceId::closeBooksSql()}, včetně uzávěrky převzaté z jiného programu).
+     * Podklad kontroly zaúčtované daně z příjmů: uzavření knih převádí 591 na 710, takže
+     * by obrat roku po uzávěrce vyšel nulový.
+     */
+    public function turnoverWithoutCloseBooks(int $supplierId, string $accountCode, string $from, string $to, ?string $excludeSourceType = null, ?int $excludeSourceId = null): float
+    {
+        // excludeSource*: obrat bez vlastního zápisu kroku (např. předpis daně průvodcem),
+        // tedy jen to, co do roku zaúčtovalo něco jiného.
+        $exclude = $excludeSourceType !== null ? ' AND NOT (e.source_type = ? AND e.source_id <=> ?)' : '';
+        return $this->periodTurnover($supplierId, $accountCode, $from, $to, 'NOT (' . ClosingSourceId::closeBooksSql('e') . ')' . $exclude,
+            $excludeSourceType !== null ? [$excludeSourceType, $excludeSourceId] : []);
+    }
+
+    /**
+     * Odklad nákladu na účet časového rozlišení zaúčtovaný v rozsahu zápisy mimo kroky
+     * uzávěrky (ruční interní doklad, deník převzatý z jiného programu): zápis s čistým MD
+     * na účtu odkladu a čistým D na nákladovém účtu (prefixy kódů). Částka zápisu je menší
+     * z obou pohybů. Zápis, který odklad rozpouští (MD náklad / D odklad), se nepočítá,
+     * stejně jako stornovaný zápis a storno samo.
+     *
+     * @param list<string> $excludeSourceTypes zápisy kroků uzávěrky a otevření roku
+     * @return list<array{entry_id:int, document_no:?string, entry_date:string, amount:float}>
+     */
+    public function deferralsByOtherEntries(int $supplierId, string $deferPrefix, string $expensePrefix, string $from, string $to, array $excludeSourceTypes): array
+    {
+        $types = $excludeSourceTypes === [] ? '' : ' AND e.source_type NOT IN (' . implode(',', array_fill(0, count($excludeSourceTypes), '?')) . ')';
+        // Kandidáti jdou od řádků účtu odkladu (381 bývá řídký), ne od všech zápisů roku.
+        $stmt = $this->db->pdo()->prepare(
+            "WITH candidates AS (
+                SELECT DISTINCT l.entry_id
+                  FROM chart_of_accounts a
+                  JOIN journal_entry_lines l ON l.supplier_id = a.supplier_id AND l.account_id = a.id
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                 WHERE a.supplier_id = ? AND a.account_code LIKE CONCAT(?, '%')
+                   AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?{$types}
+                   AND e.reversed_by IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries o WHERE o.supplier_id = e.supplier_id AND o.reversed_by = e.id)
+             )
+             SELECT e.id, e.document_no, e.entry_date,
+                    SUM(CASE WHEN a.account_code LIKE CONCAT(?, '%')
+                             THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS defer_net,
+                    SUM(CASE WHEN a.account_code LIKE CONCAT(?, '%')
+                             THEN CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS expense_net
+               FROM candidates c
+               JOIN journal_entries e ON e.id = c.entry_id AND e.supplier_id = ?
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              GROUP BY e.id, e.document_no, e.entry_date
+             HAVING defer_net > 0.005 AND expense_net > 0.005
+              ORDER BY e.entry_date, e.id"
+        );
+        $stmt->execute([$supplierId, $deferPrefix, $from, $to, ...$excludeSourceTypes, $deferPrefix, $expensePrefix, $supplierId]);
+        return array_map(static fn (array $r): array => [
+            'entry_id' => (int) $r['id'],
+            'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+            'entry_date' => (string) $r['entry_date'],
+            'amount' => round(min((float) $r['defer_net'], (float) $r['expense_net']), 2),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Netto obrat účtu (prefix kódu, MD kladně) mezi daty JEN ze zápisů uzavření knih
+     * (včetně uzávěrky převzaté z jiného programu). Zůstatek účtu před uzávěrkou roku je
+     * zůstatek k rozvahovému dni bez tohoto obratu.
+     */
+    public function closeBooksTurnover(int $supplierId, string $accountCode, string $from, string $to): float
+    {
+        return $this->periodTurnover($supplierId, $accountCode, $from, $to, ClosingSourceId::closeBooksSql('e'));
+    }
+
+    /** @param list<mixed> $params parametry podmínky $where */
+    private function periodTurnover(int $supplierId, string $accountCode, string $from, string $to, string $where, array $params = []): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+               LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND ({$where})
+                AND (a.account_code LIKE CONCAT(?, '%')
+                     OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
+        );
+        $stmt->execute([$supplierId, $from, $to, ...$params, $accountCode, $accountCode]);
         return round((float) $stmt->fetchColumn(), 2);
     }
 
@@ -854,6 +1128,7 @@ final class ClosingRepository
     {
         $prefixes = ForeignCurrencyAccountPolicy::LEDGER_REVALUED_PREFIXES;
         $accountFilter = implode(' OR ', array_fill(0, count($prefixes), "a.account_code LIKE CONCAT(?, '%')"));
+        [$window, $windowParams] = $this->foreignWindow($supplierId, $asOf, 'e', 'l');
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name AS label, l.currency_code,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS foreign_balance,
@@ -865,12 +1140,12 @@ final class ClosingRepository
                 AND e.entry_date <= ?
                 AND NOT (e.source_type = 'fx_revaluation' AND e.source_id = ?)
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                AND ({$accountFilter})
+                AND ({$accountFilter}){$window}
               GROUP BY a.account_code, a.name, l.currency_code
              HAVING ABS(foreign_balance) >= 0.005 OR ABS(czk_balance) >= 0.005
               ORDER BY a.account_code, l.currency_code"
         );
-        $stmt->execute([$supplierId, $asOf, $excludeSourceId, ...$prefixes]);
+        $stmt->execute([$supplierId, $asOf, $excludeSourceId, ...$prefixes, ...$windowParams]);
         return array_map(static function (array $r): array {
             return [
                 'account_code' => (string) $r['account_code'],
@@ -921,7 +1196,8 @@ final class ClosingRepository
      * analytiky (i termínované vklady bez bankovního výpisu) a Kč zůstatek přesně
      * k D, ne k datu posledního výpisu.
      *
-     * Agregace přes CELÝ deník (žádný filtr na reversed_by): storno nese vlastní
+     * Agregace od kotvy počátečních stavů jako u bsBalances ({@see foreignWindow()}),
+     * bez filtru na reversed_by: storno nese vlastní
      * řádky se stejnou částkou na opačné straně (PostingService::reverse), takže
      * se v SUM per (účet, měna) samo vynuluje — stejný vzor jako accountBalance/
      * bsBalances/plBalances. Filtr na source_id (jak to dělá dokladové openFxItems)
@@ -943,6 +1219,8 @@ final class ClosingRepository
      */
     public function bankProposals(int $supplierId, string $asOf): array
     {
+        [$window, $windowParams] = $this->foreignWindow($supplierId, $asOf, 'e', 'l');
+        [$totalWindow, $totalParams] = $this->foreignWindow($supplierId, $asOf, 'et', 'lt');
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name AS label, l.currency_code,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS foreign_balance,
@@ -955,7 +1233,7 @@ final class ClosingRepository
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date <= ?
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                AND (a.account_code LIKE '211%' OR a.account_code LIKE '221%')
+                AND (a.account_code LIKE '211%' OR a.account_code LIKE '221%'){$window}
               GROUP BY a.account_code, a.name, l.currency_code
              HAVING (ABS(foreign_balance) >= 0.005 OR ABS(czk_balance) >= 0.005)
                 AND ABS(czk_balance - (
@@ -963,15 +1241,55 @@ final class ClosingRepository
                       FROM journal_entry_lines lt
                       JOIN journal_entries et ON et.id = lt.entry_id
                      WHERE lt.supplier_id = ? AND lt.account_id = MAX(l.account_id)
-                       AND et.posted_at IS NOT NULL AND et.entry_date <= ?)) < 0.5
+                       AND et.posted_at IS NOT NULL AND et.entry_date <= ?{$totalWindow})) < 0.5
               ORDER BY a.account_code, l.currency_code"
         );
-        $stmt->execute([$supplierId, $asOf, $supplierId, $asOf]);
+        $stmt->execute([$supplierId, $asOf, ...$windowParams, $supplierId, $asOf, ...$totalParams]);
         return array_map(static function (array $r): array {
             $r['foreign_balance'] = round((float) $r['foreign_balance'], 2);
             $r['czk_balance'] = round((float) $r['czk_balance'], 2);
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Okno deníku pro cizoměnové zůstatky peněžních účtů k datu: od kotvy počátečních
+     * stavů jako rozvaha ({@see bsBalances()}). Uzavírací a otevírací zápis nesou měnu,
+     * součet přes celý deník by ji tak počítal znovu za každý rok, ve kterém otevření
+     * měnu neslo a uzavření ne (uzávěrka převzatá z původního systému, převod
+     * s počátečními stavy každého roku).
+     *
+     * Účty, jejichž počáteční stav měnu nenese ({@see foreignOpeningGaps()}), se sčítají
+     * z pohybů celého deníku a počátečního stavu na jeho začátku: roční uzavření (close_books
+     * i převzaté) a otevření, kterému v deníku předcházejí pohyby (přenáší jen jejich
+     * zůstatek), se vynechají. Uzavření s měnou proti převzatému
+     * otevření bez měny by se jinak od cizího zůstatku odečetlo bez protějšku; uzavření
+     * i otevření bez měny se vzájemně ruší, takže jejich vynechání nic nemění.
+     *
+     * @return array{0:string, 1:list<string|int>} SQL podmínka (začíná AND) a parametry
+     */
+    private function foreignWindow(int $supplierId, string $asOf, string $entryAlias, string $lineAlias): array
+    {
+        $anchor = (new LedgerReportRepository($this->db))->openingAnchor($supplierId, $asOf);
+        if ($anchor === null) {
+            return ['', []];
+        }
+        $gaps = array_keys($this->foreignOpeningGaps($supplierId, $anchor, $asOf));
+        if ($gaps === []) {
+            return [" AND {$entryAlias}.entry_date >= ?", [$anchor]];
+        }
+        $first = $this->db->pdo()->prepare(
+            "SELECT MIN(entry_date) FROM journal_entries WHERE supplier_id = ? AND source_type <> 'opening' AND posted_at IS NOT NULL"
+        );
+        $first->execute([$supplierId]);
+        $firstMovement = (string) $first->fetchColumn();
+        $in = implode(',', array_fill(0, count($gaps), '?'));
+        $e = $entryAlias;
+        return [" AND (({$lineAlias}.account_id NOT IN ({$in}) AND {$e}.entry_date >= ?)
+                    OR ({$lineAlias}.account_id IN ({$in})
+                        AND NOT ({$e}.source_type = 'closing' AND ({$e}.source_id IS NULL OR {$e}.source_id = {$e}.period_id))
+                        AND NOT ({$e}.source_type = 'opening' AND {$e}.entry_date > ?)))",
+            [...$gaps, $anchor, ...$gaps, $firstMovement]];
     }
 
     // ── kroky průvodce (accounting_closing_steps) ─────────────────────────────
@@ -1046,6 +1364,25 @@ final class ClosingRepository
             $note,
             $isDone ? date('Y-m-d H:i:s') : null,
             $isDone ? $userId : null,
+        ]);
+    }
+
+    /**
+     * Přepíše jen payload existujícího kroku; stav, poznámka a čas i autor potvrzení
+     * zůstávají (příznak k přepočtu u daně z příjmů po vrácení jiného kroku).
+     *
+     * @param array<string,mixed> $payload
+     */
+    public function updateStepPayload(int $supplierId, int $periodId, string $key, array $payload): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE accounting_closing_steps SET payload = ?
+              WHERE supplier_id = ? AND period_id = ? AND step_key = ?'
+        )->execute([
+            json_encode($payload, JSON_UNESCAPED_UNICODE | ($payload === [] ? JSON_FORCE_OBJECT : 0)),
+            $supplierId,
+            $periodId,
+            $key,
         ]);
     }
 
@@ -1154,6 +1491,8 @@ final class ClosingRepository
         try {
             (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, new JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db))))->assertEntriesMutable($supplierId, [$entryId]);
             (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            // Rozpad saldokonta systém neobnoví (předpis ostatní položky by osiřel), proto blokuje.
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
         } catch (\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e) {
             throw new \MyInvoice\Service\Accounting\Closing\ClosingException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -1168,10 +1507,59 @@ final class ClosingRepository
         $linesStmt->execute([$entryId, $supplierId]);
         $lines = $linesStmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $released = $this->releasePairings($supplierId, $entry);
+
         $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')
             ->execute([$entryId, $supplierId]);
 
-        return ['entry' => $entry, 'lines' => $lines];
+        return ['entry' => $entry, 'lines' => $lines, 'released_pairings' => $released];
+    }
+
+    /**
+     * Systémový přepočet uzávěrky zápis jen nahrazuje (vzetí zpět kroku, opakovaný běh,
+     * náhrada převzatých počátečních stavů). Okruhy párování jeho řádků proto neblokují
+     * jako ruční mazání ({@see \MyInvoice\Service\Accounting\JournalPairingUseGuard}), ale
+     * uvolní se stejně jako při stornu ({@see JournalLinePairingRepository::releaseEntry()})
+     * a do auditu se zapíše, co se uvolnilo: okruhy, zápisy a účty všech jejich řádků.
+     *
+     * @param array<string,mixed> $entry
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    private function releasePairings(int $supplierId, array $entry): array
+    {
+        $entryId = (int) $entry['id'];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.pairing_id, i.entry_id, i.line_no, i.account_id, ca.account_code
+               FROM journal_line_pairing_items i
+               JOIN chart_of_accounts ca ON ca.supplier_id = i.supplier_id AND ca.id = i.account_id
+              WHERE i.supplier_id = ?
+                AND i.pairing_id IN (SELECT o.pairing_id FROM journal_line_pairing_items o
+                                      WHERE o.supplier_id = ? AND o.entry_id = ?)
+              ORDER BY i.pairing_id, i.entry_id, i.line_no'
+        );
+        $stmt->execute([$supplierId, $supplierId, $entryId]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($items === []) {
+            return [];
+        }
+        $released = (new JournalLinePairingRepository($this->db))->releaseEntry($supplierId, $entryId);
+        $this->releasedPairings = [...$this->releasedPairings, ...$released];
+        (new \MyInvoice\Service\ActivityLogger($this->db))->log('accounting.pairing_released', null, 'journal_entry', $entryId, [
+            'reason'        => 'closing_replace',
+            'source_type'   => (string) $entry['source_type'],
+            'source_id'     => $entry['source_id'] === null ? null : (int) $entry['source_id'],
+            'pairing_count' => count(array_unique(array_column($items, 'pairing_id'))),
+            'entry_ids'     => array_values(array_unique(array_map('intval', array_column($items, 'entry_id')))),
+            'accounts'      => array_values(array_unique(array_column($items, 'account_code'))),
+            'items'         => array_map(static fn (array $i): array => [
+                'pairing_id'   => (int) $i['pairing_id'],
+                'entry_id'     => (int) $i['entry_id'],
+                'line_no'      => (int) $i['line_no'],
+                'account_code' => (string) $i['account_code'],
+            ], $items),
+            'released'      => $released,
+        ], null, null, $supplierId);
+        return $released;
     }
 
     /**
@@ -1443,7 +1831,9 @@ final class ClosingRepository
      * místa: mapa transakce → doklad se staví napřed v `bank_target` (dvě disjunktní
      * větve) a teprve ta se joinuje na `bank_credit`. Nový odkaz na `bank_credit`
      * nebo `booked` = další plný průchod deníkem. K rozkladu na LATERAL DERIVED viz
-     * {@see self::NO_LATERAL_SPLIT}.
+     * {@see self::NO_LATERAL_SPLIT}. Bankovní zápisy se berou po idx_je_supplier_source:
+     * bez něj optimizer začínal plným průchodem řádků deníku všech firem instalace.
+     * Konečnou fakturu proformy dává jediná agregace {@see firstFinalInvoiceSql}.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -1469,7 +1859,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -1484,6 +1874,16 @@ final class ClosingRepository
                   FROM invoice_payments ip
                  WHERE ip.supplier_id = ? AND ip.bank_transaction_id IS NOT NULL
                  GROUP BY ip.bank_transaction_id
+            ), final_of AS (
+                " . self::firstFinalInvoiceSql($supplierId) . "
+            ), advance_311 AS (
+                " . self::advancePaidOn311Sql($supplierId) . "
+            ), advance_draw AS (
+                " . self::advanceDrawSql($supplierId) . "
+            ), draw_proforma AS (
+                SELECT DISTINCT proforma_id FROM advance_draw
+            ), draw_final AS (
+                SELECT final_id, SUM(drawn) AS drawn FROM advance_draw GROUP BY final_id
             ), bank_target AS (
                 -- Mapa bankovní transakce → cílový doklad a podíl úhrady (num/den).
                 -- Postavená PŘED sáhnutím na `bank_credit`, aby se deník pro 311
@@ -1501,8 +1901,10 @@ final class ClosingRepository
                 -- fakturou mu dává `doc` níž). Bez konečné faktury úhrada zůstane na
                 -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
                 -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
+                -- Záloha, kterou konečné faktury čerpají odpočtem (`draw_proforma`), zůstává
+                -- na proformě: každá faktura dostane jen svůj díl v `draw_final` níž.
                 SELECT ip.bank_transaction_id,
-                       COALESCE(ch.id, ip.invoice_id) AS invoice_id,
+                       COALESCE(CASE WHEN dp.proforma_id IS NULL THEN ch.final_id END, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
@@ -1512,13 +1914,8 @@ final class ClosingRepository
                   -- Zálohu čerpanou postupně víc fakturami (milníky) nese jen první z nich,
                   -- shodně se skupinou DDKP v `doc` níž; jinak by se úhrada rozpadla na
                   -- každou konečnou fakturu zvlášť a započetla se vícekrát.
-                  LEFT JOIN invoices ch ON ch.id = (
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = ip.supplier_id
-                                   AND fin.parent_invoice_id = pf.id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            )
+                  LEFT JOIN final_of ch ON ch.proforma_id = pf.id
+                  LEFT JOIN draw_proforma dp ON dp.proforma_id = pf.id
                  WHERE ip.supplier_id = ?
                 UNION ALL
                 -- Větev 2 — úhrady spárované jen přes bank_transactions.matched_invoice_id
@@ -1616,20 +2013,18 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id
                             WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
-                            THEN COALESCE((
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = i.supplier_id
-                                   AND fin.parent_invoice_id = i.parent_invoice_id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            ), i.id)
+                            THEN COALESCE(CASE WHEN dpp.proforma_id IS NULL THEN ff.final_id END, i.id)
                             ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
                          + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0)
-                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0) AS settled
+                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0)
+                         + COALESCE(dfin.drawn, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
+                  LEFT JOIN final_of ff ON ff.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_proforma dpp ON dpp.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_final dfin ON dfin.final_id = i.id
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
@@ -1654,6 +2049,14 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = i.client_id
              WHERE i.status = 'paid'
                AND (i.paid_at IS NULL OR i.paid_at <= ?)
+               -- Úhrada zaúčtovaná až po rozvahovém dni, zdůvodnění viz paidPurchasesOpenSaldo.
+               AND NOT (ABS(g.settled) < 0.005 AND EXISTS (
+                   SELECT 1 FROM invoice_payments lip
+                     JOIN journal_entries le ON le.supplier_id = lip.supplier_id
+                      AND le.source_type = 'bank' AND le.source_id = lip.bank_transaction_id
+                    WHERE lip.supplier_id = i.supplier_id AND lip.invoice_id = i.id
+                      AND le.posted_at IS NOT NULL AND le.reversed_by IS NULL AND le.entry_date > ?
+               ))
                -- DDKP bez konečné faktury = čerpání přijaté zálohy, která na 311 čeká na
                -- vyúčtování. Úhradu nese proforma, takže by tu svítil jako nezaplacený.
                AND NOT (i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL)
@@ -1673,9 +2076,105 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_manual (vazba bez částky)
             $supplierId, $asOf, $asOf,          // settled_manual (rozpad řádků)
             $supplierId,                        // doc
-            $supplierId, $asOf,                 // final SELECT
+            $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * První konečná faktura každé proformy firmy: `proforma_id`, `final_id`. Úhradu proformy
+     * i DDKP k ní K3 přiřazuje této faktuře (záloha čerpaná víc fakturami jen té první).
+     *
+     * Jedna agregace místo závislého poddotazu za každou úhradu a každý DDKP: ten na
+     * produkci s neaktuálními statistikami šel po indexu jen na `supplier_id` a za každou
+     * úhradu proformy prošel všechny faktury firmy (desítky milionů řádků, 9 až 26 s).
+     * Agregace jde po idx_inv_supplier_parent. Bez placeholderů, firma literálem.
+     */
+    private static function firstFinalInvoiceSql(int $supplierId): string
+    {
+        // Konečná faktura čerpající víc záloh vazbu dokladu nemá, proformu na ni váže
+        // odpočtový řádek ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}).
+        return "SELECT lnk.proforma_id, MIN(lnk.final_id) AS final_id
+                  FROM (SELECT fin.parent_invoice_id AS proforma_id, fin.id AS final_id
+                          FROM invoices fin
+                         WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
+                           AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                           AND fin.cancelled_at IS NULL
+                        UNION ALL
+                        SELECT fii.advance_invoice_id, fin.id
+                          FROM invoice_items fii
+                          JOIN invoices fin ON fin.id = fii.invoice_id
+                         WHERE fii.advance_invoice_id IS NOT NULL AND fin.supplier_id = {$supplierId}
+                           AND fin.invoice_type = 'invoice' AND fin.cancelled_at IS NULL) lnk
+                 GROUP BY lnk.proforma_id";
+    }
+
+    /**
+     * Proformy firmy, jejichž úhrada (banka nebo pokladna) je zaúčtovaná přímo na 311
+     * (`proforma_id`). Jen u nich se záloha na 311 vypořádává čerpáním konečných faktur;
+     * záloha přes 324 se na 311 nepotká. Bez placeholderů, firma literálem.
+     */
+    private static function advancePaidOn311Sql(int $supplierId): string
+    {
+        $on311 = "JOIN journal_entry_lines l3 ON l3.entry_id = e3.id AND l3.supplier_id = e3.supplier_id AND l3.side = 'credit'
+                  JOIN chart_of_accounts ca3 ON ca3.id = l3.account_id
+                  LEFT JOIN chart_of_accounts pa3 ON pa3.id = ca3.parent_id";
+        $where = "e3.posted_at IS NOT NULL AND e3.reversed_by IS NULL
+                  AND (ca3.account_code LIKE '311%' OR COALESCE(pa3.account_code, '') LIKE '311%')";
+        return "SELECT ip3.invoice_id AS proforma_id
+                  FROM invoice_payments ip3
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = ip3.supplier_id AND e3.source_type = 'bank'
+                                         AND e3.source_id = ip3.bank_transaction_id
+                  {$on311}
+                 WHERE ip3.supplier_id = {$supplierId} AND ip3.bank_transaction_id IS NOT NULL AND {$where}
+                UNION
+                SELECT ip3.invoice_id
+                  FROM cash_documents cd3
+                  JOIN invoice_payments ip3 ON ip3.id = cd3.invoice_payment_id AND ip3.supplier_id = cd3.supplier_id
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = cd3.supplier_id AND e3.source_type = 'cash' AND e3.source_id = cd3.id
+                  {$on311}
+                 WHERE cd3.supplier_id = {$supplierId} AND {$where}";
+    }
+
+    /**
+     * Čerpání zálohy uhrazené na 311 konečnými fakturami: `final_id`, `proforma_id`, `drawn`
+     * (Kč). Faktura s odpočtovými řádky zálohy ubírá jejich základ (daň zálohy z 311 odčerpal
+     * daňový doklad k platbě) a k nim odečet úhrady bez DDKP v hlavičce. Čerpá-li zálohu postupně víc faktur
+     * (milníky) nebo jedna faktura víc záloh, má tak každá faktura vyrovnaný jen svůj díl;
+     * úhrada zálohy a její DDKP pak do skupiny konečné faktury nepatří. Faktura bez odpočtových
+     * řádků zálohy (ručně navázaná, převzatá, vyúčtování jen odečtem v hlavičce) sem nepatří,
+     * zálohu jí dál přiřadí `final_of`.
+     * Vyžaduje CTE `advance_311`. Bez placeholderů, firma literálem.
+     */
+    private static function advanceDrawSql(int $supplierId): string
+    {
+        $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
+        $deduction = \MyInvoice\Support\Sql\AdvanceDrawSql::deductionLine('pii');
+        $lines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
+                   WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
+                     AND {$deduction}";
+        return "SELECT d.final_id, d.proforma_id, SUM(d.drawn) AS drawn
+                  FROM (SELECT f.id AS final_id, f.parent_invoice_id AS proforma_id,
+                               CASE WHEN COALESCE(({$lines}), 0) > 0.005
+                                    THEN ROUND((f.advance_paid_amount + ({$lines})) * {$rate}, 2) ELSE 0 END AS drawn
+                          FROM advance_311 a3
+                          JOIN invoices f ON f.supplier_id = {$supplierId} AND f.parent_invoice_id = a3.proforma_id
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                        UNION ALL
+                        SELECT f.id, pii.advance_invoice_id, ROUND(-SUM(pii.total_without_vat) * {$rate}, 2)
+                          FROM advance_311 a3
+                          JOIN invoice_items pii ON pii.advance_invoice_id = a3.proforma_id
+                          JOIN invoices f ON f.id = pii.invoice_id AND f.supplier_id = {$supplierId}
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                                         AND pii.advance_invoice_id <> COALESCE(f.parent_invoice_id, 0)
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                         WHERE {$deduction}
+                         GROUP BY f.id, pii.advance_invoice_id, fcur.code, f.exchange_rate) d
+                 WHERE d.drawn > 0.005
+                 GROUP BY d.final_id, d.proforma_id";
     }
 
     /**
@@ -1772,7 +2271,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -1872,11 +2371,16 @@ final class ClosingRepository
                 -- Podmínka „záloha nemá vlastní předpis na 321\" brání dvojímu započtení:
                 -- když účetní zálohu na saldokonto předepsala, vyrovná si ji sama ve své
                 -- vlastní skupině a konečná faktura si na ni nesmí sáhnout podruhé.
+                --
+                -- Konečná faktura s víc zálohami (PurchaseAdvanceLinks) přebírá úhrady všech
+                -- svých záloh, proto vazby z linksSql a součet po faktuře.
                 SELECT pi.id AS purchase_invoice_id,
-                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                       SUM(COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)) AS settled
                   FROM purchase_invoices pi
+                  JOIN (" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") lnk
+                    ON lnk.final_id = pi.id
                   JOIN purchase_invoices adv
-                    ON adv.id = pi.advance_purchase_invoice_id AND adv.supplier_id = pi.supplier_id
+                    ON adv.id = lnk.advance_id AND adv.supplier_id = pi.supplier_id
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = adv.id
                   LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = adv.id
                  WHERE pi.supplier_id = ?
@@ -1913,6 +2417,7 @@ final class ClosingRepository
                           AND (ea.reversed_by IS NULL OR reva.entry_date > ?)
                           AND (caa.account_code LIKE '321%' OR COALESCE(paa.account_code, '') LIKE '321%')
                    )
+                 GROUP BY pi.id
             ), settled_manual AS (
                 " . self::linkedManualSettledSql('purchase_invoice', '321', 'debit') . "
             ), doc AS (
@@ -1933,6 +2438,13 @@ final class ClosingRepository
                                  WHERE fin.supplier_id = pi.supplier_id
                                    AND fin.advance_purchase_invoice_id = pi.parent_purchase_invoice_id
                                    AND fin.document_kind NOT IN ('advance', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), (
+                                SELECT MIN(fin.id) FROM purchase_advance_deductions lnk
+                                  JOIN purchase_invoices fin ON fin.id = lnk.final_invoice_id
+                                 WHERE lnk.supplier_id = pi.supplier_id
+                                   AND lnk.advance_invoice_id = pi.parent_purchase_invoice_id
+                                   AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
                                    AND fin.cancelled_at IS NULL
                             ), pi.id)
                             ELSE pi.id END AS group_id,
@@ -1970,6 +2482,15 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = pi.vendor_id
              WHERE pi.status = 'paid'
                AND (pi.paid_at IS NULL OR pi.paid_at <= ?)
+               -- Úhrada zaúčtovaná až po rozvahovém dni, `paid_at` z hlavičky je dřívější (datum
+               -- dokladu). K tomu dni byl doklad prostě nezaplacený, úhrada v deníku nechybí.
+               AND NOT (ABS(g.settled) < 0.005 AND EXISTS (
+                   SELECT 1 FROM payment_matches lpm
+                     JOIN journal_entries le ON le.supplier_id = lpm.supplier_id
+                      AND le.source_type = 'bank' AND le.source_id = lpm.bank_transaction_id
+                    WHERE lpm.supplier_id = pi.supplier_id AND lpm.purchase_invoice_id = pi.id
+                      AND le.posted_at IS NOT NULL AND le.reversed_by IS NULL AND le.entry_date > ?
+               ))
                -- DDKP bez konečné faktury = čerpání poskytnuté zálohy, která na 321 čeká na
                -- vyúčtování; úhradu nese záloha.
                AND NOT (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL)
@@ -1995,9 +2516,41 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_manual (vazba bez částky)
             $supplierId, $asOf, $asOf,          // settled_manual (rozpad řádků)
             $supplierId,                        // doc
-            $supplierId, $asOf,                 // final SELECT
+            $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Je cizoměnový doklad k datu v deníku vyrovnaný? Čistý pohyb na saldokontním účtu ze
+     * zápisů dokladu a bankovních úhrad na něj spárovaných. Platba rozdělená mezi víc dokladů
+     * vyjde nenulově, takže odpověď je konzervativní: „ano" znamená doložené vyrovnání.
+     *
+     * @param 'invoice'|'purchase_invoice'|string $docType
+     */
+    public function fxDocumentSettledInLedger(int $supplierId, string $docType, int $docId, int $accountId, string $asOf): bool
+    {
+        [$link, $column] = $docType === 'invoice'
+            ? ['invoice_payments', 'invoice_id']
+            : ['payment_matches', 'purchase_invoice_id'];
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) AS line_count,
+                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS balance
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               LEFT JOIN journal_entries rev ON rev.id = e.reversed_by AND rev.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND l.account_id = ?
+                AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                AND ((e.source_type = ? AND e.source_id = ?)
+                     OR (e.source_type = 'bank' AND e.source_id IN (
+                         SELECT bank_transaction_id FROM {$link}
+                          WHERE supplier_id = ? AND {$column} = ? AND bank_transaction_id IS NOT NULL)))"
+        );
+        $stmt->execute([$supplierId, $accountId, $asOf, $asOf, $docType, $docId, $supplierId, $docId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return (int) $row['line_count'] > 0 && abs((float) $row['balance']) < 0.005;
     }
 
     /**
@@ -2011,6 +2564,11 @@ final class ClosingRepository
      * Vazba inkasa na proformu: invoice_payments.invoice_id (banka) / cash_documents.invoice_id
      * (pokladna). Konzervativně jen EXISTENČNÍ kontrola (žádný 324 kredit navázaný na
      * doklad) — bez dopočtu částky, ať nevznikají falešné poplachy z částečných záloh.
+     *
+     * Uznává se kredit na účtu přijatých záloh NEBO na saldokontní 311, stejně jako
+     * {@see paidAdvancesWithoutBookedPayment} uznává 314 i 321. Záloha inkasovaná na 311
+     * je legitimní varianta a deník o ní ví. Firma, která z 311 přešla na 324 a staré roky
+     * nechala být, by jinak dostávala nález ke každé proformě z uzavřených let.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -2060,7 +2618,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?
+                            OR ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM cash_documents cd
@@ -2071,7 +2630,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE cd.supplier_id = i.supplier_id AND cd.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?
+                            OR ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                 )
               ORDER BY i.id";
         $adv = $this->advanceReceivedAccount($supplierId) . '%';
@@ -2461,7 +3021,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -2590,7 +3150,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id

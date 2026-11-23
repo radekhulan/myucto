@@ -199,6 +199,42 @@ final class CashBackfillJournalTest extends TestCase
         self::assertNull($this->docJournalEntryId($docId2));
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: stránka Doúčtování hlásila pokladní doklad (nebo bankovní pohyb)
+     * k doúčtování a zároveň „Všechno je zaúčtované" s neaktivním tlačítkem, protože úloha
+     * zpracuje jen faktury. Odpověď rozlišuje, co doúčtuje úloha a co čeká na ruční zaúčtování.
+     */
+    public function testPostingBackfillStatusSeparatesManualQueueFromBackfill(): void
+    {
+        $register = $this->makeRegister();
+        $this->createHistoricalDeDoc($register['id'], 1210.00);
+        $this->setAccountingMode('double_entry');
+
+        $req = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/accounting/posting-backfill')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $resp = Bootstrap::buildContainer()->get(\MyInvoice\Action\Accounting\PostingBackfillAction::class)
+            ->status($req, new Psr7Response());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+
+        $body = json_decode((string) $resp->getBody(), true);
+        $pending = $body['pending'];
+        self::assertSame(1, $pending['cash_documents']);
+        self::assertSame($pending['invoices'] + $pending['purchase_invoices'], $pending['backfill_total']);
+        self::assertSame($pending['cash_documents'] + $pending['bank_transactions'] + $pending['settlements'], $pending['manual_total']);
+        self::assertSame($pending['total'], $pending['backfill_total'] + $pending['manual_total']);
+        self::assertSame($pending['backfill_total'] > 0 ? 'backfill' : 'manual_only', $body['state']);
+
+        // Firma, kde zbývá jen ruční fronta: žádné faktury bez zápisu.
+        $this->db->pdo()->prepare('UPDATE invoices SET status = \'draft\' WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET status = \'draft\' WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $body = json_decode((string) Bootstrap::buildContainer()->get(\MyInvoice\Action\Accounting\PostingBackfillAction::class)
+            ->status($req, new Psr7Response())->getBody(), true);
+        self::assertSame(0, $body['pending']['backfill_total'], json_encode($body['pending']));
+        self::assertSame('manual_only', $body['state']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\SocialInsurance;
 
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
@@ -11,7 +12,8 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  * Založí vztah účast na pojištění už při nástupu — bez spočítané mzdy?
  *
  * Jediné pravidlo pro oznámení nástupu zdravotní pojišťovně (HOZ) i pro
- * varování běhu o chybějící přihlášce. Rozhoduje ÚČAST NA POJIŠTĚNÍ z podmínek
+ * varování běhu o chybějící přihlášce (registraci ČSSZ navíc dluží každá DPP
+ * a DPČ, {@see self::registrationExpected()}). Rozhoduje ÚČAST NA POJIŠTĚNÍ z podmínek
  * vztahu:
  *
  *  - `included` ano, `excluded` a `foreign` ne,
@@ -28,6 +30,33 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 final class PayrollExpectedParticipation
 {
     private const RULESET_KEY = 'participation.small_scale.minimum';
+
+    /** Od JMHZ (zákon č. 323/2025 Sb.) patří do evidence zaměstnanců u ČSSZ každá DPP a DPČ. */
+    public const AGREEMENT_REGISTRATION_FROM = '2026-01-01';
+
+    /**
+     * Dluží vztah registraci zaměstnance u ČSSZ (REGZEC)?
+     *
+     * Od 2026 se do evidence zaměstnanců přihlašuje každá DPP a DPČ bez ohledu
+     * na účast na pojištění, i dohoda pod rozhodným příjmem a zaměstnanec
+     * pojištěný v cizině (§ 3 odst. 1 písm. d) a § 19 zákona č. 323/2025 Sb.).
+     * Ostatní vztahy se řídí účastí na pojištění ({@see self::expected()}).
+     */
+    public static function registrationExpected(
+        ?string $participation,
+        string $relationType,
+        ?int $agreedMonthlyMinor,
+        ?int $smallScaleThresholdMinor,
+        string $onDate,
+    ): bool {
+        if ($onDate >= self::AGREEMENT_REGISTRATION_FROM
+            && in_array($relationType, [PayrollRelationType::Dpp->value, PayrollRelationType::Dpc->value], true)
+        ) {
+            return true;
+        }
+
+        return self::expected($participation, $relationType, $agreedMonthlyMinor, $smallScaleThresholdMinor);
+    }
 
     public static function expected(
         ?string $participation,

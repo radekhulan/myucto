@@ -1,7 +1,8 @@
-{# Poznámka k výkazu s průběžným časovým rozlišením mimo deník (volba výkazu). #}
+{# Poznámka k výkazu s průběžným časovým rozlišením a odpisy mimo deník (volba výkazu). #}
 {% if accrual_spread is defined and accrual_spread and accrual_spread.applied %}
-<div class="header-scope"><strong>Průběžné časové rozlišení mimo deník.</strong>
+<div class="header-scope"><strong>Průběžné časové rozlišení a odpisy mimo deník.</strong>
 Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne, zbytek je vykázán jako
 náklady příštích období ({{ accrual_spread.prepaid_expense|cz_money }} Kč) a výnosy příštích období ({{ accrual_spread.deferred_revenue|cz_money }} Kč).
-Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.</div>
+{% if accrual_spread.depreciation|default(0) != 0 %}Účetní odpisy majetku za uplynulé měsíce, které ještě nejsou zaúčtované: {{ accrual_spread.depreciation|cz_money }} Kč.
+{% endif %}Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.</div>
 {% endif %}

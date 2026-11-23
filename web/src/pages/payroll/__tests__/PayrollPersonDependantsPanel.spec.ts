@@ -128,6 +128,29 @@ function mountWithActions() {
 }
 
 describe('PayrollPersonDependantsPanel', () => {
+  it('posune úpravu nároku do zobrazení i při přepnutí otevřeného editoru', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await wrapper.find('tbody [aria-expanded]').trigger('click')
+      await wrapper.get('[data-test="edit-dependant-7"]').trigger('click')
+      await flushPromises()
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      await wrapper.findAll('tbody button')
+        .find(button => button.text() === 'payroll.people.dependants.edit_claim')!.trigger('click')
+      await flushPromises()
+      expect(scrollIntoView).toHaveBeenCalledTimes(2)
+      expect((scrollIntoView.mock.contexts[1] as HTMLElement).getAttribute('data-test')).toBe('dependant-editor')
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.personDependants.mockResolvedValue(response())
@@ -161,6 +184,32 @@ describe('PayrollPersonDependantsPanel', () => {
     expect(blockers.text()).toContain(
       'payroll.people.dependants.blockers.shared_household_unconfirmed',
     )
+  })
+
+  /**
+   * Otázka „vyživuje tytéž děti i jiná osoba" je označená jako povinná, ale
+   * „Zatím nerozhodnuto" uložit jde. Formulář i seznam nároků proto říkají,
+   * že do rozhodnutí se měsíční hlášení nesestaví; uložení to nebrání.
+   */
+  it('u nerozhodnuté otázky k dětem upozorní, že hlášení nepůjde sestavit, a nechá uložit', async () => {
+    mocks.createPersonDependantClaim.mockResolvedValue(response())
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
+
+    expect(wrapper.get('[data-test="claim-caregiver-undecided-91"]').text())
+      .toContain('payroll.people.dependants.form.other_household_caregiver_undecided')
+
+    await wrapper.find('[data-test="add-claim-7"]').trigger('click')
+    expect(wrapper.get('[data-test="claim-caregiver-undecided"]').text())
+      .toContain('payroll.people.dependants.form.other_household_caregiver_undecided')
+    await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-01-01')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
+      other_household_caregiver_status: 'unknown',
+    }))
   })
 
   it('saves a new claim through a single save button', async () => {

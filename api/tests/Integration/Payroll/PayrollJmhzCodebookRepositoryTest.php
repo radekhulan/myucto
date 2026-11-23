@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TriggerMetadata;
@@ -24,7 +23,7 @@ final class PayrollJmhzCodebookRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Databázové spojení není dostupné.');
@@ -81,7 +80,7 @@ final class PayrollJmhzCodebookRepositoryTest extends TestCase
             if (preg_match('/^myucto_jmhz_install_[0-9a-f]{12}_test$/D', $this->database) !== 1) {
                 throw new \LogicException('Neplatný název izolované testovací DB.');
             }
-            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

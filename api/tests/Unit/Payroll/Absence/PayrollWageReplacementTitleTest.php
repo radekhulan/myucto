@@ -11,6 +11,12 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollWageReplacementTitleTest extends TestCase
 {
+    public function testPaidHolidayTimeOffHasSeparateReplacementTitle(): void
+    {
+        self::assertSame(PayrollWageReplacementTitle::HolidayTimeOff,
+            PayrollWageReplacementTitle::forAbsenceType('holiday_compensatory_time_off'));
+        self::assertFalse(PayrollWageReplacementTitle::holidayCutsMonthlyWage('holiday_compensatory_time_off'));
+    }
     /**
      * Krácení mzdy se ptá jinak než měsíční hlášení: nepotřebuje pro každý druh
      * absence vykazovaný atribut, jen odpověď „zůstává ta doba v základní

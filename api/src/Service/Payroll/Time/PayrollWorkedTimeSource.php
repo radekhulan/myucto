@@ -15,7 +15,7 @@ namespace MyInvoice\Service\Payroll\Time;
  * evidenci jako hodiny" měla vypovídací hodnotu jen do chvíle, kdy se kopie
  * rozejdou.
  *
- * Zdroje jsou dva a vzájemně se vylučují (`payroll_time_months.work_source`):
+ * Zdroje jsou tři a vzájemně se vylučují (`payroll_time_months.work_source`):
  *
  * - `time_entries` — intervaly docházky. Minuty, dny i přesčas vznikají
  *   z téhož průchodu: záznam vyřazený kvůli přesahu měsíce nebo záporné době
@@ -23,16 +23,21 @@ namespace MyInvoice\Service\Payroll\Time;
  * - `import_summary` — měsíční součty z importu docházky v millihodinách.
  *   Dny ani přesčas se z nich NEDOPOČÍTÁVAJÍ; co podklady nenesou, zůstává
  *   `null` = neuvedeno.
+ * - `manual_summary` — doložené úseky v přesných jednotkách 1/3000 h;
+ *   neurčené dny ani přesčas se nenahrazují nulou.
  */
 final class PayrollWorkedTimeSource
 {
     public const KIND_TIME_ENTRIES = 'time_entries';
     public const KIND_IMPORT_SUMMARY = 'import_summary';
+    public const KIND_MANUAL_SUMMARY = 'manual_summary';
 
     /**
      * @param array<string,mixed> $source dekódovaný `source_snapshot_json`
      * @return array{
      *   kind:string,
+     *   worked_duration_units:?int,
+     *   overtime_duration_units:?int,
      *   worked_minutes:?int,
      *   worked_millihours:?int,
      *   worked_days:?int,
@@ -43,10 +48,31 @@ final class PayrollWorkedTimeSource
      */
     public static function fromSnapshot(array $source, string $periodStart): array
     {
+        $kinds = array_values(array_filter(
+            [self::KIND_TIME_ENTRIES, self::KIND_IMPORT_SUMMARY, self::KIND_MANUAL_SUMMARY],
+            static fn (string $kind): bool => array_key_exists($kind, $source),
+        ));
+        $declared = $source['work_source'] ?? null;
+        $expectedKind = $declared === 'entries' ? self::KIND_TIME_ENTRIES : $declared;
+        if (count($kinds) > 1 || ($declared !== null && ($kinds[0] ?? null) !== $expectedKind)) {
+            return self::result('conflict', null, null, null, null, [[
+                'code' => 'work_source_conflict',
+                'message' => 'Souhrn obsahuje více zdrojů téže odpracované doby.',
+            ]]);
+        }
+        if (array_key_exists(self::KIND_MANUAL_SUMMARY, $source)) {
+            return self::fromManualSummary($source[self::KIND_MANUAL_SUMMARY], $periodStart);
+        }
         if (array_key_exists(self::KIND_IMPORT_SUMMARY, $source)) {
             return self::fromImportSummary($source[self::KIND_IMPORT_SUMMARY]);
         }
         $entries = $source[self::KIND_TIME_ENTRIES] ?? null;
+        if (($source['schema_version'] ?? null) === 'payroll-worked-time.v1' && $entries === []) {
+            return self::result(self::KIND_TIME_ENTRIES, null, null, null, null, [[
+                'code' => 'worked_source_missing',
+                'message' => 'Pracovní měsíc nemá doložené hodiny; prázdná evidence není potvrzená nula.',
+            ]]);
+        }
         if (!is_array($entries)) {
             return self::result(self::KIND_TIME_ENTRIES, null, null, null, null, [[
                 'code' => 'worked_source_missing',
@@ -70,6 +96,8 @@ final class PayrollWorkedTimeSource
      * @param array<mixed> $entries
      * @return array{
      *   kind:string,
+     *   worked_duration_units:?int,
+     *   overtime_duration_units:?int,
      *   worked_minutes:?int,
      *   worked_millihours:?int,
      *   worked_days:?int,
@@ -174,6 +202,8 @@ final class PayrollWorkedTimeSource
      *
      * @return array{
      *   kind:string,
+     *   worked_duration_units:?int,
+     *   overtime_duration_units:?int,
      *   worked_minutes:?int,
      *   worked_millihours:?int,
      *   worked_days:?int,
@@ -220,6 +250,8 @@ final class PayrollWorkedTimeSource
 
         return [
             'kind' => self::KIND_IMPORT_SUMMARY,
+            'worked_duration_units' => $worked === null ? null : PayrollDuration::fromMillihours($worked),
+            'overtime_duration_units' => $overtime === null ? null : PayrollDuration::fromMillihours($overtime),
             'worked_minutes' => $worked === null ? null : self::millihoursToMinutes($worked),
             'worked_millihours' => $worked,
             'worked_days' => is_int($days) && $days >= 0 ? $days : null,
@@ -233,6 +265,8 @@ final class PayrollWorkedTimeSource
      * @param list<array{code:string,message:string}> $issues
      * @return array{
      *   kind:string,
+     *   worked_duration_units:?int,
+     *   overtime_duration_units:?int,
      *   worked_minutes:?int,
      *   worked_millihours:?int,
      *   worked_days:?int,
@@ -251,6 +285,8 @@ final class PayrollWorkedTimeSource
     ): array {
         return [
             'kind' => $kind,
+            'worked_duration_units' => $minutes === null ? null : PayrollDuration::fromMinutes($minutes),
+            'overtime_duration_units' => $overtimeMinutes === null ? null : PayrollDuration::fromMinutes($overtimeMinutes),
             'worked_minutes' => $minutes,
             'worked_millihours' => $millihours,
             'worked_days' => $days,
@@ -260,13 +296,78 @@ final class PayrollWorkedTimeSource
         ];
     }
 
+    /** @return array<string,mixed> */
+    public static function fromManualSummary(mixed $summary, string $periodStart): array
+    {
+        $segments = is_array($summary) ? ($summary['segments'] ?? null) : null;
+        if (!is_array($segments) || $segments === []) {
+            return self::result(self::KIND_MANUAL_SUMMARY, null, null, null, null, [[
+                'code' => 'manual_summary_missing',
+                'message' => 'Ruční souhrn neobsahuje podklady odpracované doby.',
+            ]]);
+        }
+        $worked = 0;
+        $overtime = 0;
+        $days = 0;
+        $intervals = [];
+        $issues = [];
+        foreach ($segments as $segment) {
+            $from = is_array($segment) ? ($segment['date_from'] ?? null) : null;
+            $to = is_array($segment) ? ($segment['date_to'] ?? null) : null;
+            $amount = $segment['worked_duration_units'] ?? null;
+            $extra = $segment['overtime_duration_units'] ?? null;
+            $workedDays = $segment['worked_days'] ?? null;
+            if (!is_string($from) || !is_string($to)
+                || !self::validDate($from) || !self::validDate($to)
+                || substr($from, 0, 7) !== substr($periodStart, 0, 7)
+                || substr($to, 0, 7) !== substr($periodStart, 0, 7) || $from > $to
+                || !is_int($amount) || $amount < 0
+                || ($extra !== null && (!is_int($extra) || $extra < 0 || $extra > $amount))
+                || ($workedDays !== null && (!is_int($workedDays) || $workedDays < 0 || (($workedDays === 0) !== ($amount === 0))))
+            ) {
+                $issues[] = ['code' => 'manual_segment_invalid', 'message' => 'Úsek ručně zadané doby není platný.'];
+                continue;
+            }
+            foreach ($intervals as [$seenFrom, $seenTo]) {
+                if ($from <= $seenTo && $to >= $seenFrom) {
+                    $issues[] = ['code' => 'manual_segments_overlap', 'message' => 'Úseky ručně zadané doby se překrývají.'];
+                }
+            }
+            $intervals[] = [$from, $to];
+            $calendarDays = (int) (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to))->days + 1;
+            if ($workedDays !== null && $workedDays > $calendarDays) {
+                $issues[] = ['code' => 'manual_worked_days_invalid', 'message' => 'Odpracované dny přesahují délku úseku.'];
+            }
+            $worked = PayrollDuration::add($worked, $amount);
+            $overtime = $overtime === null || $extra === null ? null : PayrollDuration::add($overtime, $extra);
+            $days = $days === null || $workedDays === null ? null : PayrollDuration::add($days, $workedDays);
+        }
+        return [
+            'kind' => self::KIND_MANUAL_SUMMARY,
+            'worked_duration_units' => $worked,
+            'overtime_duration_units' => $overtime,
+            'worked_minutes' => PayrollDuration::exactMinutes($worked),
+            'worked_millihours' => PayrollDuration::exactMillihours($worked),
+            'worked_days' => $days,
+            'overtime_minutes' => $overtime === null ? null : PayrollDuration::exactMinutes($overtime),
+            'overtime_millihours' => $overtime === null ? null : PayrollDuration::exactMillihours($overtime),
+            'issues' => $issues,
+        ];
+    }
+
+    private static function validDate(string $date): bool
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        return $parsed !== false && $parsed->format('Y-m-d') === $date;
+    }
+
     private static function minutesToMillihours(int $minutes): ?int
     {
-        return ($minutes * 1000) % 60 === 0 ? intdiv($minutes * 1000, 60) : null;
+        return PayrollDuration::exactMillihours(PayrollDuration::fromMinutes($minutes));
     }
 
     private static function millihoursToMinutes(int $millihours): ?int
     {
-        return ($millihours * 60) % 1000 === 0 ? intdiv($millihours * 60, 1000) : null;
+        return PayrollDuration::exactMinutes(PayrollDuration::fromMillihours($millihours));
     }
 }

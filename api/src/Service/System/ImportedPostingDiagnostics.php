@@ -22,14 +22,14 @@ final class ImportedPostingDiagnostics
         if ($supplierId <= 0) return $result;
         // Diagnostika musí zůstat dostupná i před dokončením migrací.
         foreach (['stereo_nx_import_map', 'premier_import_map', 'money_s3_import_map', 'pohoda_import_map',
-            'abra_flexi_import_map', 'journal_entry_document_links', 'journal_entries', 'invoices',
+            'abra_flexi_import_map', 'helios_import_map', 'journal_entry_document_links', 'journal_entries', 'invoices',
             'purchase_invoices', 'journal_document_postings'] as $table) {
             if (!$this->db->hasTable($table)) return $result;
         }
         $result['available'] = true;
         $result['total'] = 0;
         $cte = self::candidatesSql();
-        $params = array_fill(0, 5, $supplierId);
+        $params = array_fill(0, 6, $supplierId);
         $count = $this->db->pdo()->prepare($cte . ' SELECT COUNT(*) FROM ambiguous');
         $count->execute($params);
         $result['total'] = (int) $count->fetchColumn();
@@ -96,6 +96,9 @@ final class ImportedPostingDiagnostics
             UNION
             SELECT supplier_id, target_id, 'Převzato z ABRA Flexi' FROM abra_flexi_import_map FORCE INDEX (PRIMARY)
              WHERE supplier_id = ? AND kind = 'ucetni-denik'
+            UNION
+            SELECT supplier_id, target_id, 'Převzato z Heliosu' FROM helios_import_map FORCE INDEX (idx_helios_map_target)
+             WHERE supplier_id = ? AND kind = 'journal_entry'
         ), candidates AS (
             SELECT DISTINCT dl.entry_id, dl.doc_type, dl.doc_id,
                    CASE WHEN dl.doc_type = 'invoice' THEN i.varsymbol

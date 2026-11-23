@@ -141,5 +141,13 @@ describe('MyÚčto import', () => {
     expect(wrapper.text()).toContain('Synthetic archive rejected')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
   })
-
+  it('warns about number series without counters and lists skipped links and missing files', async () => {
+    m.status.mockResolvedValue({ id: 12, status: 'completed', mode: 'dry_run', result: { ...result(), report: { ...result().report,
+      numbering_check: ['invoice_counters'], dropped: { 'document_links.other_item': 1 }, missing_files: { invoice_pdfs: 2 } } } })
+    const wrapper = page()
+    await preview(wrapper)
+    expect(wrapper.get('[data-testid="myucto-numbering-check"]').text()).toContain('myucto_import.numbering_check')
+    expect(wrapper.text()).toContain('myucto_import.dropped')
+    expect(wrapper.text()).toContain('myucto_import.missing_files')
+  })
 })

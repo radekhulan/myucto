@@ -30,6 +30,7 @@ final readonly class PayrollDeletionDecision
         public array $cascade,
         public ?int $blockedEmploymentId,
         public ?string $blockedEmploymentCode,
+        public ?string $blockerPeriod = null,
     ) {}
 
     /** @param array<string,int> $cascade */
@@ -38,9 +39,13 @@ final readonly class PayrollDeletionDecision
         return new self(true, null, null, $cascade, null, null);
     }
 
-    public static function blocked(string $code, string $message): self
+    /**
+     * `$period` (první den měsíce) pojmenuje období, kterého se blokátor týká,
+     * aby frontend mohl odkázat přímo na ně.
+     */
+    public static function blocked(string $code, string $message, ?string $period = null): self
     {
-        return new self(false, $code, $message, [], null, null);
+        return new self(false, $code, $message, [], null, null, $period);
     }
 
     /**
@@ -68,6 +73,7 @@ final readonly class PayrollDeletionDecision
             'message' => (string) $this->blockerMessage,
             'employment_id' => $this->blockedEmploymentId,
             'employment_code' => $this->blockedEmploymentCode,
+            'period' => $this->blockerPeriod,
         ];
     }
 }

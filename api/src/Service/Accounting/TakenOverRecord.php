@@ -9,7 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 /**
  * Záznam převzatý z jiného účetního programu (SSOT).
  *
- * Převod (Money S3, POHODA, PREMIER, Stereo NX) zapisuje do MyÚčta deník, doklady
+ * Převod (Money S3, POHODA, PREMIER, Stereo NX, Helios) zapisuje do MyÚčta deník, doklady
  * i úhrady tak, jak je zaúčtoval zdroj, a eviduje je v mapě převodu (`*_import_map`).
  * Převzatý záznam je vazba na doklad v původním programu: automatika MyÚčta (dorovnání
  * haléřů, doúčtování dokladů, přeúčtování bankovních pohybů, přečíslování, přeřazení
@@ -41,6 +41,11 @@ final class TakenOverRecord
             self::INVOICE          => ['faktura-vydana', 'prodejka'],
             self::PURCHASE_INVOICE => ['faktura-prijata', 'zavazek'],
         ],
+        'helios_import_map' => [
+            self::JOURNAL_ENTRY    => 'journal_entry',
+            self::INVOICE          => 'invoice',
+            self::PURCHASE_INVOICE => 'purchase_invoice',
+        ],
         'money_s3_import_map' => [
             self::JOURNAL_ENTRY    => 'journal_entry',
             self::INVOICE          => 'invoice',
@@ -69,6 +74,7 @@ final class TakenOverRecord
      */
     private const PERIOD_KINDS = [
         'abra_flexi_import_map' => 'ucetni-obdobi',
+        'helios_import_map'     => 'period',
         'money_s3_import_map'   => 'period',
         'pohoda_import_map'     => 'period',
         'premier_import_map'    => 'period',
@@ -200,6 +206,40 @@ final class TakenOverRecord
             }
         }
         return false;
+    }
+
+    /**
+     * Účet zdroje převzatých výpisů: zkratka účtu v POHODĚ (klíč `stmt|zkratka|rok|výpis`)
+     * nebo v Money S3 (`rok|zkratka|mNN`). Ostatní převody účet zdroje v klíči výpisu nenesou
+     * (null). Rozlišuje výpisy různých účtů zdroje se stejným číslem účtu (víceměnový účet).
+     *
+     * @param list<int> $statementIds bank_statements.id
+     * @return array<int,?string> bank_statements.id => `pohoda:zkratka` / `money:zkratka` / null
+     */
+    public function bankStatementSourceAccounts(int $supplierId, array $statementIds): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $statementIds)));
+        $out = array_fill_keys($ids, null);
+        if ($ids === []) {
+            return $out;
+        }
+        $in = implode(',', $ids);
+        foreach (['pohoda_import_map' => 'pohoda_key', 'money_s3_import_map' => 'money_key'] as $map => $column) {
+            if (!$this->db->hasTable($map)) {
+                continue;
+            }
+            $stmt = $this->db->pdo()->prepare("SELECT target_id, {$column} FROM {$map} WHERE supplier_id = ? AND kind = 'bank_statement' AND target_id IN ({$in})");
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_NUM) as [$id, $key]) {
+                $parts = explode('|', (string) $key);
+                if ($map === 'pohoda_import_map' && count($parts) >= 4 && $parts[0] === 'stmt') {
+                    $out[(int) $id] = 'pohoda:' . implode('|', array_slice($parts, 1, -2));
+                } elseif ($map === 'money_s3_import_map' && count($parts) >= 2) {
+                    $out[(int) $id] = 'money:' . $parts[1];
+                }
+            }
+        }
+        return $out;
     }
 
     public function hasLiveBankEntry(int $supplierId, int $txId): bool

@@ -84,7 +84,7 @@ final class PortalPurchaseInvoiceSubmissionAction
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $submission['can_delete'] = RequestAuthorization::allowsClientDocumentPortal($request, AccessLevel::WRITE)
-            && PurchaseInvoiceSubmissionDeletionService::canDeletePending(
+            && PurchaseInvoiceSubmissionDeletionService::canClientDelete(
                 $submission,
                 RequestAuthorization::isSuperadmin($request) ? null : (int) ($user['id'] ?? 0),
             );

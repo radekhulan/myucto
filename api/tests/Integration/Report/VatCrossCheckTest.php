@@ -13,6 +13,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Report\VatCrossCheckService;
 use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
@@ -396,6 +398,67 @@ final class VatCrossCheckTest extends TestCase
         self::assertSame(12100.0, (float) $finding['counter'], 'precheck má sečíst jen platbu bez DDKP');
     }
 
+    /**
+     * Úhrada minulého roku převzatá z POHODY: daň z ní přiznala POHODA, DDKP v MyÚčtu nemá
+     * a mít nebude. Kontrola DPH za období s datem platby ji jako chybějící DDKP nehlásí.
+     */
+    public function testPriorYearPohodaPaymentIsNotMissingTaxDocument(): void
+    {
+        $cust = $this->client('Odběratel záloha z POHODY', 'CZ11111150');
+        $proformaId = $this->sale('ZAL-POHODA-PRIOR', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $paidOn = sprintf('%04d-%02d-28', self::YEAR, self::MONTH);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET invoice_type = "proforma", status = "paid", tax_date = NULL WHERE id = ?'
+        )->execute([$proformaId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+             VALUES (?, ?, ?, 12100, "CZK", ?, ?, ?)'
+        )->execute([$this->supplierId, $proformaId, $paidOn, PohodaPriorYearPayments::NOTE, PohodaPriorYearPayments::SOURCE, $this->userId]);
+
+        $finding = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'draft_advance_tax_documents',
+        );
+        self::assertNotContains($proformaId, $finding === null ? [] : array_column($finding['documents'], 'invoice_id'));
+    }
+
+    /**
+     * Platba zálohy převzatá z Money S3, kterou kryje DDKP z Money (převod ho k platbě nemusí
+     * umět navázat): daň z ní přiznala Money, kontrola ji jako chybějící DDKP nehlásí.
+     * Nativní platba jiné zálohy ve stejném období dál ano.
+     */
+    public function testMoneyS3PaymentIsNotMissingTaxDocument(): void
+    {
+        $cust = $this->client('Odběratel záloha z Money', 'CZ11111151');
+        $proformaId = $this->sale('ZAL-MONEY', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $nativeId = $this->sale('ZAL-NATIVE', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $paidOn = sprintf('%04d-%02d-27', self::YEAR, self::MONTH);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET invoice_type = "proforma", status = "paid", tax_date = NULL WHERE id IN (?, ?)'
+        )->execute([$proformaId, $nativeId]);
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+             VALUES (?, ?, ?, 12100, "CZK", ?, ?, ?)'
+        );
+        $insert->execute([$this->supplierId, $proformaId, $paidOn, IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001', 'bank', $this->userId]);
+        $insert->execute([$this->supplierId, $nativeId, $paidOn, null, 'manual', $this->userId]);
+        // Záloha i DDKP z mapy převodu Money: DDKP z Money kryje platbu, jen bez vazby platby.
+        $taxDocId = $this->sale('DDKP-MONEY', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $this->db->pdo()->prepare('UPDATE invoices SET invoice_type = "tax_document", parent_invoice_id = ?, status = "sent" WHERE id = ?')
+            ->execute([$proformaId, $taxDocId]);
+        $map = $this->db->pdo()->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', ?, ?)");
+        $map->execute([$this->supplierId, '2025|ZAL-MONEY', $proformaId]);
+        $map->execute([$this->supplierId, '2025|DDKP-MONEY', $taxDocId]);
+
+        $finding = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'draft_advance_tax_documents',
+        );
+        $ids = $finding === null ? [] : array_column($finding['documents'], 'invoice_id');
+        self::assertNotContains($proformaId, $ids);
+        self::assertContains($nativeId, $ids);
+    }
+
     /** Finál s DUZP v jiném období nesmí skrýt povinnost z dřívější přijaté zálohy. */
     public function testFinalInvoiceInLaterPeriodDoesNotHideMissingTaxDocument(): void
     {
@@ -597,6 +660,54 @@ final class VatCrossCheckTest extends TestCase
     }
 
     /**
+     * T2c: výdajový pokladní doklad s posunem odpočtu (§ 73) — účetní případ k DUZP
+     * v září (zápis MD 343), účtenka proplacena a DPH uplatněna v říjnu (tax_date).
+     * Evidence DPH ho dává do října, deník do září. Obě strany jsou časový posun
+     * stejně jako u přijaté faktury a stažení neblokují.
+     */
+    public function testCashPurchaseClaimShiftIsTimingInBothPeriods(): void
+    {
+        $cash = $this->cashPurchase(sprintf('%04d-09-22', self::YEAR), sprintf('%04d-10-06', self::YEAR), 311.33, 65.38);
+        $this->entry343(sprintf('%04d-09-22', self::YEAR), 65.38, 'debit', 'cash', $cash);
+
+        // (a) říjen: přiznáno, zápis 343 v září → zrcadlový timing_73.
+        $oct =$this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 10, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($oct);
+        self::assertFalse($oct['blocking'], 'Posun odpočtu výdajového pokladního dokladu neblokuje.');
+        self::assertSame('info', $oct['severity']);
+        self::assertCount(1, $oct['documents']);
+        self::assertSame($cash, $oct['documents'][0]['invoice_id']);
+        self::assertSame('cash', $oct['documents'][0]['doc_type']);
+        self::assertSame('timing_73', $oct['documents'][0]['reason']);
+        self::assertSame(sprintf('%04d-09-22', self::YEAR), $oct['documents'][0]['entry_date']);
+
+        // (b) září: zápis 343, DPH v říjnu → timing_73 s obdobím odpočtu.
+        $sep = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 9, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($sep);
+        self::assertFalse($sep['blocking']);
+        self::assertCount(1, $sep['documents']);
+        self::assertSame('timing_73', $sep['documents'][0]['reason']);
+        self::assertSame(sprintf('%04d-10', self::YEAR), $sep['documents'][0]['claim_period']);
+    }
+
+    /** T2d: zápis 343 výdajového pokladního dokladu s jinou částkou než DPH dokladu není § 73 posun. */
+    public function testCashPurchaseClaimShiftWithWrongAmountBlocks(): void
+    {
+        $cash = $this->cashPurchase(sprintf('%04d-09-22', self::YEAR), sprintf('%04d-10-06', self::YEAR), 311.33, 65.38);
+        $this->entry343(sprintf('%04d-09-22', self::YEAR), 75.38, 'debit', 'cash', $cash);
+
+        $oct = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 10, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($oct);
+        self::assertTrue($oct['blocking']);
+        self::assertSame('value_mismatch', $oct['documents'][0]['reason'] ?? null);
+
+        $sep = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 9, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($sep);
+        self::assertTrue($sep['blocking']);
+        self::assertSame('extra_entry', $sep['documents'][0]['reason'] ?? null);
+    }
+
+    /**
      * T2b: uzavření a otevření knih (ČÚS 002) NENÍ daňová transakce a do obratu 343 nepatří.
      *
      * K rozvahovému dni se zůstatek 343 převede na 702, k 1. dni dalšího období se přes 701
@@ -717,6 +828,59 @@ final class VatCrossCheckTest extends TestCase
         self::assertEqualsWithDelta((float) $acc['difference'], $sumDiff, 0.005, 'Σ documents.difference == difference.');
         $sumCounter = round(array_sum(array_map(static fn (array $d): float => (float) $d['counter'], $acc['documents'])), 2);
         self::assertEqualsWithDelta((float) $acc['counter'], $sumCounter, 0.005, 'Σ booked per-doklad == headline counter.');
+    }
+
+    /** @return iterable<string, array{0:string, 1:float}> */
+    public static function selfAssessedDeductionCases(): iterable
+    {
+        yield 'bez nároku' => ['none', 100.0];
+        yield 'poměrný nárok 50 %' => ['proportional', 50.0];
+    }
+
+    // Pořízení zboží z JČS bez plného nároku: přiznání odpočet ř. 43 potlačí nebo zkrátí,
+    // předpis 343 tomu odpovídá → rozpis nesmí hlásit falešný extra_entry a Σ == headline.
+    #[DataProvider('selfAssessedDeductionCases')]
+    public function testSelfAssessedEuAcquisitionWithoutFullDeductionReconciles343(string $deduction, float $percent): void
+    {
+        $deId = (int) ($this->db->pdo()->query("SELECT id FROM countries WHERE iso2 = 'DE' LIMIT 1")->fetchColumn() ?: 0);
+        if ($deId === 0) {
+            self::markTestSkipped('Chybí země DE v číselníku.');
+        }
+        $vend = $this->client('Dodavatel RC JČS', 'DE123456789', $deId);
+        $cust = $this->client('Odběratel RC JČS', 'CZ11111118');
+        $sale = $this->sale('FV-2048-RCN', $cust, '1', false, 50000.0, 10500.0, 21.0);
+        $pf = $this->purchase('PF-2048-RCN', $vend, '23', 10000.0, 0.0, 21.0, ['reverse_charge' => 1]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET vat_deduction = ?, vat_deduction_percent = ? WHERE id = ?')
+            ->execute([$deduction, $percent, $pf]);
+        $this->autoPoster->post($this->supplierId, 'invoice', $sale);
+        $this->autoPoster->post($this->supplierId, 'purchase_invoice', $pf);
+
+        $findings = $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        self::assertNull(
+            $this->findingByCheck($findings, 'account_343_vs_return'),
+            'Zaúčtovaný doklad sedí s přiznáním → kontrola 343 bez nálezu.',
+        );
+
+        // Rozpis se počítá jen při rozdílu v headline: ruční zápis ho vyvolá a v rozpisu
+        // smí být jen on, ne samovyměřený doklad.
+        $entryId = $this->manualEntry343(sprintf('%04d-%02d-20', self::YEAR, self::MONTH), 1000.0);
+        $acc = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'account_343_vs_return',
+        );
+        self::assertNotNull($acc);
+        $docs = $acc['documents'];
+        foreach ($docs as $d) {
+            self::assertFalse(
+                (int) $d['invoice_id'] === $pf && $d['source'] === 'purchase',
+                'Samovyměřený doklad bez plného nároku nesmí v rozpisu 343 vyjít jako rozdíl (' . ($d['reason'] ?? '') . ').',
+            );
+        }
+        self::assertCount(1, $docs);
+        self::assertSame($entryId, (int) $docs[0]['invoice_id']);
+        self::assertSame('extra_entry', $docs[0]['reason']);
+        $sumDiff = round(array_sum(array_map(static fn (array $d): float => (float) $d['difference'], $docs)), 2);
+        self::assertEqualsWithDelta((float) $acc['difference'], $sumDiff, 0.005, 'Σ documents.difference == difference.');
     }
 
     // T7: měsíční kontrola — timing-only rozdíl je ✓ (ok=true) s info nálezem v hodnotě.
@@ -1166,6 +1330,27 @@ final class VatCrossCheckTest extends TestCase
         $line->execute([$entryId, $this->supplierId, $acc343, 'credit', $amount, 2]);
         $line->execute([$entryId, $this->supplierId, $acc311, 'debit', $amount, 3]);
         return $entryId;
+    }
+
+    /** Zaúčtovaný výdajový pokladní doklad s DPH (jeden řádek 21 %) bez vazby na fakturu. */
+    private function cashPurchase(string $issueDate, string $taxDate, float $base, float $vat): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO cash_registers (supplier_id, name, account_code) VALUES (?, 'Syntetická pokladna 343', '211')")
+            ->execute([$this->supplierId]);
+        $register = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date, description,
+                 vat_mode, total_amount, currency_code, status, created_by)
+             VALUES (?, ?, 'out', 'purchase', ?, ?, ?, 'Syntetický nákup za hotové', 'vat', ?, 'CZK', 'posted', ?)"
+        )->execute([$this->supplierId, $register, 'VPD-T-' . bin2hex(random_bytes(3)), $issueDate, $taxDate, round($base + $vat, 2), $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount)
+             VALUES (?, 21.00, ?, ?)'
+        )->execute([$id, $base, $vat]);
+        return $id;
     }
 
     private function accountId(string $code): int

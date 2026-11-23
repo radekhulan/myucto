@@ -7,19 +7,28 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Service\Ares\AresClient;
+use MyInvoice\Support\CompanyIdNormalizer;
 
 /**
  * Resolve klienta z importovaného XML/ISDOC:
  *   1. Lookup v `clients` podle (supplier_id, ic) — pokud existuje, vrátí jeho id.
  *   2. Pokud ne, ARES lookup podle IČO — preferovaná fakturační adresa z ARES.
- *   3. Fallback na adresu z XML, pokud ARES IČO nezná (zahraniční, neexistující).
+ *   3. Pokud registr subjekt nepotvrdí, hledá existující kartu podle klíče názvu
+ *      a teprve pak zakládá kartu jen z údajů dokladu (chybějící adresa zůstane
+ *      prázdná) s poznámkou ke kontrole.
  *   4. Vytvoří nový clients row, vrátí id.
  *
  * Vstup: array z parseru (`company_name, ic, dic, street, city, zip, country_iso2, email, phone`).
  * Pokud je email dostupný, použije se jako volitelný `main_email`.
+ *
+ * Doklad bez karty nechat nejde: `invoices.client_id` i `purchase_invoices.vendor_id`
+ * jsou NOT NULL a na kartě stojí párování plateb, saldo i kontrolní hlášení.
  */
 final class ClientResolver
 {
+    public const UNVERIFIED_NOTE = 'Karta založena importem dokladu bez ověření v registru (ARES/VIES). '
+        . 'Zkontrolujte název, IČO, DIČ a adresu, případně doklad přiřaďte ke správné kartě.';
+
     public function __construct(
         private readonly Connection $db,
         private readonly ClientRepository $clients,
@@ -32,7 +41,7 @@ final class ClientResolver
      * Resolve klient pro vydané faktury (default — `is_customer=1, is_vendor=0`).
      *
      * @param array<string,?string> $parsedClient
-     * @return array{id:int, created:bool}
+     * @return array{id:int, created:bool, registry_verified?:bool}
      */
     public function resolve(array $parsedClient, int $supplierId): array
     {
@@ -82,7 +91,7 @@ final class ClientResolver
 
     /**
      * @param array<string,?string> $parsed
-     * @return array{id:int, created:bool}
+     * @return array{id:int, created:bool, registry_verified?:bool}
      */
     private function resolveAny(array $parsed, int $supplierId, bool $isCustomer, bool $isVendor): array
     {
@@ -100,7 +109,7 @@ final class ClientResolver
         // založené před opravou BUG 2/FR 2 mohly mít IČO uložené bez úvodní nuly.
         if ($ic !== null) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id FROM clients WHERE supplier_id = ? AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?" . $preferName
+                'SELECT id FROM clients WHERE supplier_id = ? AND ' . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . ' = ?' . $preferName
             );
             $stmt->execute([$supplierId, $ic, $companyName]);
             $existing = $stmt->fetchColumn();
@@ -148,8 +157,10 @@ final class ClientResolver
 
         // 2. ARES merge — pokud IČO je české (8 číslic) a ARES odpoví
         $aresData = null;
+        $aresUnavailable = false;
         if ($ic !== null && strlen($ic) === 8) {
             $resp = $this->ares->lookup($ic);
+            $aresUnavailable = $resp === null;
             if ($resp !== null && ($resp['found'] ?? false) && isset($resp['data'])) {
                 $aresData = $resp['data'];
             }
@@ -158,15 +169,30 @@ final class ClientResolver
         // 2b. VIES fallback — pokud nemáme IČO ale máme DIČ (zahraniční dodavatel),
         // zkusíme VIES validation pro company_name + adresu z EU registru.
         $viesData = null;
+        $viesValid = false;
         $rawDic = trim((string) ($parsedClient['dic'] ?? ''));
         if ($aresData === null && $ic === null && $rawDic !== '') {
             try {
                 $viesResp = $this->vies->lookup($rawDic);
-                if (!empty($viesResp['valid']) && !empty($viesResp['data'])) {
+                $viesValid = !empty($viesResp['valid']);
+                if ($viesValid && !empty($viesResp['data'])) {
                     $viesData = $viesResp['data'];
                 }
             } catch (\Throwable) {
                 // VIES timeout / network failure — silent fallback na parsedClient data
+            }
+        }
+
+        // Registr subjekt nepotvrdil (IČO není v ARES, typicky špatně přečtené; DIČ
+        // neprošlo VIES). Než se založí karta jen z vytěžených údajů, zkusí se existující
+        // karta podle názvu bez právní formy, diakritiky a interpunkce. Jinak by každé
+        // jinak přečtené IČO nebo název založilo další variantu téže firmy. Při výpadku
+        // ARES se podle názvu nehledá: platné IČO by se přiřadilo stejnojmenné cizí kartě.
+        $registryVerified = $aresData !== null || $viesValid;
+        if (!$registryVerified && !$aresUnavailable) {
+            $byName = $this->findByNameKey($supplierId, $companyName);
+            if ($byName !== null) {
+                return ['id' => $byName, 'created' => false, 'registry_verified' => false];
             }
         }
 
@@ -181,15 +207,17 @@ final class ClientResolver
             $aresData['dic'] = trim((string) ($parsedClient['vat_dic'] ?? '')) ?: (trim((string) ($parsedClient['dic'] ?? '')) ?: null);
         }
 
+        // Adresa jen z registru nebo z dokladu. Chybějící pole zůstávají prázdná: náhrady
+        // „—" a „00000" vypadaly v adresáři jako skutečné údaje.
         $data = [
             'company_name' => $aresData['company_name']
                 ?? $viesData['company_name']
-                ?? ($parsedClient['company_name'] ?? 'Importovaný klient'),
+                ?? (($companyName !== '' ? $companyName : null) ?? $ic ?? ($rawDic !== '' ? $rawDic : null) ?? 'Importovaný klient'),
             'ic'           => $ic,
             'dic'          => $aresData['dic'] ?? $viesData['dic'] ?? ($parsedClient['dic'] ?? null) ?: null,
-            'street'       => $aresData['street'] ?? $viesData['street'] ?? ($parsedClient['street'] ?? '') ?: '—',
-            'city'         => $aresData['city']   ?? $viesData['city']   ?? ($parsedClient['city']   ?? '') ?: '—',
-            'zip'          => $aresData['zip']    ?? $viesData['zip']    ?? ($parsedClient['zip']    ?? '') ?: '00000',
+            'street'       => trim((string) ($aresData['street'] ?? $viesData['street'] ?? ($parsedClient['street'] ?? ''))),
+            'city'         => trim((string) ($aresData['city']   ?? $viesData['city']   ?? ($parsedClient['city']   ?? ''))),
+            'zip'          => trim((string) ($aresData['zip']    ?? $viesData['zip']    ?? ($parsedClient['zip']    ?? ''))),
             'country_iso2' => $aresData['country_iso2'] ?? $viesData['country_iso2']
                 ?? ($parsedClient['country_iso2'] ?? 'CZ') ?: 'CZ',
             'main_email'   => $email,
@@ -199,12 +227,41 @@ final class ClientResolver
             'is_customer'  => $isCustomer,
             'is_vendor'    => $isVendor,
         ];
+        if (!$registryVerified) {
+            $data['note'] = self::UNVERIFIED_NOTE;
+        }
 
         // 4. Create — vytěžené hodnoty nemají zaručenou délku (AI vrátí do PSČ celý
         // řádek „AT-1230 Wien", do DIČ i s popiskem); na sloupce je upraví repository
         // přes ClientFieldLimits::fit().
         $id = $this->clients->create($data, $supplierId);
-        return ['id' => $id, 'created' => true];
+        return ['id' => $id, 'created' => true, 'registry_verified' => $registryVerified];
+    }
+
+    /**
+     * Existující karta firmy se stejným klíčem názvu ({@see CompanyIdNormalizer::nameKey()}).
+     * Kandidáty zúží prefix prvního slova názvu po indexu `company_name` (collation
+     * nerozlišuje velikost písmen ani diakritiku), klíč se porovná v PHP.
+     */
+    private function findByNameKey(int $supplierId, string $companyName): ?int
+    {
+        $key = CompanyIdNormalizer::nameKey($companyName);
+        if ($key === null || !preg_match('/^[\p{L}\p{N}]+/u', $companyName, $m)) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, company_name FROM clients
+              WHERE supplier_id = ? AND company_name LIKE ?
+              ORDER BY archived_at IS NULL DESC, id
+              LIMIT 200'
+        );
+        $stmt->execute([$supplierId, $m[0] . '%']);
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (CompanyIdNormalizer::nameKey((string) $row['company_name']) === $key) {
+                return (int) $row['id'];
+            }
+        }
+        return null;
     }
 
     /**

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
+
 /**
  * Druhý znak kódu ELDP „D": pojištěnec výdělečně činný po splnění podmínky
  * nároku na starobní důchod podle § 29 odst. 1 nebo 3 zákona č. 155/1995 Sb.,
@@ -98,8 +100,7 @@ final class EldpPensionAgeCode
         $fullPaidFrom = $pension['full_pension_paid_from'] ?? null;
 
         return (int) substr($intervalTo, 0, 4) < EldpAnnualStatementBuilder::FULL_PENSION_EXCLUSION_FROM_YEAR
-            || $fullPaidFrom === null
-            || $fullPaidFrom >= substr($intervalFrom, 0, 7);
+            || PayrollPensionStatus::eldpKeptInMonth($fullPaidFrom, $intervalFrom);
     }
 
     /**

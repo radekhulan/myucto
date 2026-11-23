@@ -199,7 +199,7 @@ final readonly class PayrollDeadlineOverviewRepository
      *
      * @return list<array{
      *   item_id:int,employment_id:int,employee_id:int,full_name:string,
-     *   employment_code:?string,phase:string,item_key:string,due_date:string,
+     *   employment_code:?string,employment_end_date:?string,phase:string,item_key:string,due_date:string,
      *   deadline_source:?string,deadline_source_status:?string
      * }>
      */
@@ -215,6 +215,7 @@ final readonly class PayrollDeadlineOverviewRepository
                     employment.employee_id,
                     employee.full_name,
                     employment.code AS employment_code,
+                    employment.end_date AS employment_end_date,
                     item.phase,
                     item.item_key,
                     item.due_date,
@@ -255,7 +256,7 @@ final readonly class PayrollDeadlineOverviewRepository
      *
      * @return list<array{
      *   item_id:int,employment_id:int,employee_id:int,full_name:string,
-     *   employment_code:?string,phase:string,item_key:string,due_date:null,
+     *   employment_code:?string,employment_end_date:?string,phase:string,item_key:string,due_date:null,
      *   deadline_source:?string,deadline_source_status:?string
      * }>
      */
@@ -267,6 +268,7 @@ final readonly class PayrollDeadlineOverviewRepository
                     employment.employee_id,
                     employee.full_name,
                     employment.code AS employment_code,
+                    employment.end_date AS employment_end_date,
                     item.phase,
                     item.item_key,
                     item.due_date,

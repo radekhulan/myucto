@@ -36,6 +36,20 @@ final class ClosingProjectionCalculatorTest extends TestCase
     }
 
     /** Už zaúčtované 381 (existing != null) se do projekce NEzahrne (jinak dvojí započtení). */
+    /** Agenda Časové rozlišení: nezaúčtované rozpuštění výnosu 384 zvýší VH, nákladu 381 sníží. */
+    public function testAccrualAgendaPendingReleaseNetsRevenueAgainstExpense(): void
+    {
+        $r = $this->calc->project(100_000.0, ['accrual_agenda' => ['expense' => 1_500.0, 'revenue' => 4_000.0, 'items' => 3]]);
+        self::assertSame(102_500.0, $r['vh_projected']);
+        self::assertSame('accrual_agenda_release', $r['items'][0]['key']);
+        self::assertSame(1, $r['items'][0]['sign']);
+        self::assertSame(2_500.0, $r['items'][0]['amount']);
+
+        $loss = $this->calc->project(100_000.0, ['accrual_agenda' => ['expense' => 700.0, 'revenue' => 0.0]]);
+        self::assertSame(99_300.0, $loss['vh_projected']);
+        self::assertSame(100_000.0, $this->calc->project(100_000.0, ['accrual_agenda' => ['expense' => 0.0, 'revenue' => 0.0]])['vh_projected']);
+    }
+
     public function testPostedDeferralsAreSkipped(): void
     {
         $r = $this->calc->project(1000000.0, [

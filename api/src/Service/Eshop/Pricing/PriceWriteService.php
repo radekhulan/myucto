@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Eshop\Pricing;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemPriceRepository;
 use MyInvoice\Service\Eshop\EshopException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class PriceWriteService
 {
@@ -95,11 +96,14 @@ final class PriceWriteService
                 throw new \InvalidArgumentException('Neplatné cenové pravidlo.');
             }
             $markup = $this->decimal($row['markup_pct'] ?? null, 4, 3);
-            $fixed = $this->decimal($row['fixed_price'] ?? null, 10, 2);
+            if (!UnitPricePrecision::isWithinPrecision($row['fixed_price'] ?? null)) {
+                throw new \InvalidArgumentException('Pevná cena smí mít nejvýše šest desetinných míst.');
+            }
+            $fixed = $this->decimal($row['fixed_price'] ?? null, 10, UnitPricePrecision::DECIMALS);
             if (!$useRules && $mode === 'fixed' && $fixed === null) {
                 throw new \InvalidArgumentException('Pevná cena musí být zadaná.');
             }
-            if (($fixed !== null && bccomp($fixed, '0', 2) < 0)
+            if (($fixed !== null && bccomp($fixed, '0', UnitPricePrecision::DECIMALS) < 0)
                 || ($markup !== null && bccomp($markup, '-100', 4) < 0)) {
                 throw new \InvalidArgumentException('Cena ani přirážka nesmí vytvářet zápornou cenu.');
             }

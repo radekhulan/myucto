@@ -168,7 +168,7 @@ final class GoPayServiceTest extends TestCase
 
         $invoiceEntry = $this->journal->find($invoiceEntryId, $this->supplierId);
         self::assertIsArray($invoiceEntry);
-        $fromInvoice = $this->links->related($this->supplierId, $invoiceEntry);
+        $fromInvoice = $this->links->related($this->supplierId, $invoiceEntry, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertCount(1, $fromInvoice['items']);
         self::assertSame('gopay', $fromInvoice['items'][0]['source_type']);
         self::assertSame('payment', $fromInvoice['items'][0]['relation']);
@@ -176,13 +176,13 @@ final class GoPayServiceTest extends TestCase
 
         $gopayEntry = $this->journal->find((int) $movements[0]['journal_entry_id'], $this->supplierId);
         self::assertIsArray($gopayEntry);
-        $fromGoPay = $this->links->related($this->supplierId, $gopayEntry);
+        $fromGoPay = $this->links->related($this->supplierId, $gopayEntry, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertCount(1, $fromGoPay['items']);
         self::assertSame('invoice', $fromGoPay['items'][0]['source_type']);
         self::assertSame('document', $fromGoPay['items'][0]['relation']);
         self::assertSame($invoiceEntryId, $fromGoPay['items'][0]['entry_id']);
 
-        $relatedMap = $this->links->hasRelatedMap($this->supplierId, [$invoiceEntry, $gopayEntry]);
+        $relatedMap = $this->links->hasRelatedMap($this->supplierId, [$invoiceEntry, $gopayEntry], \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertArrayHasKey($invoiceEntryId, $relatedMap);
         self::assertArrayHasKey((int) $movements[0]['journal_entry_id'], $relatedMap);
 

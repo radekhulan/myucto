@@ -150,9 +150,10 @@ final class BankPaymentSubmissionService
                     if ($staged && (($result['status'] ?? '') !== 'awaiting_signature' || !is_string($result['sign_hash'] ?? null))) {
                         throw new BankConnectorOperationException('provider_response_invalid');
                     }
+                    $signScope = ($result['sign_scope'] ?? 'batch') === 'payment' ? 'payment' : 'batch';
                     $this->submissions->accept($supplierId, $submissionId, (string) $result['reference'],
                         $staged ? 'awaiting_signature' : (($result['status'] ?? '') === 'import_started' ? 'import_started' : 'accepted_awaiting_authorization'),
-                        $staged ? (string) $result['sign_hash'] : null);
+                        $staged ? (string) $result['sign_hash'] : null, $signScope);
                     if ($staged) {
                         $this->submissions->updateSigning($supplierId, $submissionId, ['awaiting_signature'], ['next_poll_seconds' => self::FIRST_POLL_SECONDS]);
                     }
@@ -160,7 +161,11 @@ final class BankPaymentSubmissionService
                     if ($submissionId === null) {
                         throw new BankConnectorOperationException('submission_failed');
                     }
-                    $status = $e->ambiguousPaymentOutcome || ((int) ($e->acceptedCount ?? 0)) > 0
+                    // Přijaté položky jinde banka zpracuje i bez dalšího kroku, takže částečné přijetí
+                    // je nejasný výsledek. U podpisu z aplikace ({@see SignableBankPaymentConnector})
+                    // se založená platba bez podpisu neprovede: jisté odmítnutí je konečné.
+                    $status = $e->ambiguousPaymentOutcome
+                        || (((int) ($e->acceptedCount ?? 0)) > 0 && !$connector instanceof SignableBankPaymentConnector)
                         ? 'unknown'
                         : 'rejected';
                     $this->submissions->fail(
@@ -171,6 +176,7 @@ final class BankPaymentSubmissionService
                         $e->acceptedCount,
                         $e->rejectedCount,
                         $e->remoteHttpStatus,
+                        $e->bankError,
                     );
                 } catch (BankConnectorOperationException $e) {
                     if ($submissionId === null) {

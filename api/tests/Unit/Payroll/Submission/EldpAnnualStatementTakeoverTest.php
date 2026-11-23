@@ -56,6 +56,41 @@ final class EldpAnnualStatementTakeoverTest extends TestCase
         (new EldpXmlValidator())->validate($statement, $xml);
     }
 
+    /** Společník s.r.o.: převzaté měsíce se nesmí zastavit na druhu vztahu a nesou kód S++. */
+    public function testCompanyPartnerTakeoverMonthsBuildWithCorporateCode(): void
+    {
+        $months = [];
+        for ($month = 1; $month <= 7; ++$month) {
+            $months[] = $this->takeoverMonth($month, ['relation_type' => 'partner_dependent', 'activity_code' => 'S']);
+        }
+        $revisions = array_map(fn (int $month): array => $this->partnerRevision($month), range(8, 12));
+
+        $statement = $this->build($revisions, $this->takeoverYear($months));
+
+        self::assertSame('S++', $statement->sections()[0]['code']);
+    }
+
+    /** @return array<string,mixed> */
+    private function partnerRevision(int $month): array
+    {
+        $revision = $this->revision($month);
+        $input = json_decode((string) $revision['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $input['people'][0]['employments'][0]['employment']['relation_type'] = 'partner_dependent';
+        $input['people'][0]['employments'][0]['term']['activity_code'] = 'S';
+        $inputJson = CanonicalJson::encode($input);
+        $result = json_decode((string) $revision['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result['source_snapshot_hash'] = hash('sha256', $inputJson);
+        $result['people'][0]['statutory']['social_insurance']['relationships'][0]['kind'] = 'corporate_body';
+        $resultJson = CanonicalJson::encode($result);
+
+        return [
+            'input_snapshot_json' => $inputJson,
+            'input_snapshot_hash' => hash('sha256', $inputJson),
+            'result_snapshot_json' => $resultJson,
+            'result_snapshot_hash' => hash('sha256', $resultJson),
+        ] + $revision;
+    }
+
     /** Převzatá část musí být poznat v podkladu i v seznamu zdrojů. */
     public function testTakeoverPartIsVisibleInTheStatementAndItsSources(): void
     {

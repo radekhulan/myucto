@@ -12,7 +12,13 @@ final readonly class XmlzamCooperationRepository
 {
     public function __construct(private Connection $db) {}
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Přijaté XML přílohy, které mohou být požadavkem exekutora. Vlastní odeslané
+     * zprávy a zprávy, u kterých klasifikace poznala protokol ČSSZ, doručenku nebo
+     * odpověď úřadu, to nejsou a nabídka by z nich byla jen dlouhý seznam omylů.
+     *
+     * @return list<array<string,mixed>>
+     */
     public function pendingSourceCandidates(int $supplierId, string $environment): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -35,6 +41,8 @@ final readonly class XmlzamCooperationRepository
               WHERE inbox.supplier_id = ? AND inbox.environment = ?
                 AND inbox.channel = \'isds\' AND inbox.hidden_at IS NULL
                 AND inbox.local_content_state = \'available\'
+                AND (inbox.direction = \'received\' OR inbox.direction IS NULL)
+                AND inbox.classification = \'unclassified\'
                 AND LOWER(file_row.mime_type) LIKE \'%xml%\'
                 AND NOT EXISTS (
                   SELECT 1 FROM payroll_enforcement_xmlzam_requests request_row

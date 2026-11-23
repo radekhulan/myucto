@@ -23,6 +23,8 @@ import {
 const props = defineProps<{
   preview: AttendancePreview
   manualLinks: ManualLinks
+  /** Osoby bez vztahu, které použití samo založí; do součtů patří. */
+  createKeys?: string[]
 }>()
 
 const { t, te, locale } = useI18n()
@@ -33,11 +35,45 @@ const meanings = computed(() => summaryMeanings(props.preview.persons))
 const components = computed(() => summaryComponents(props.preview.persons))
 const deductionMeanings = computed(() => summaryDeductions(props.preview.persons))
 const optionById = computed(() => new Map(props.preview.employment_options.map(option => [option.employment_id, option])))
+const hasWorkedDays = computed(() => props.preview.persons.some(person => typeof person.worked_days === 'number'))
 const hasReference = computed(() => props.preview.persons.some(person =>
   person.reference.gross_minor !== null || person.reference.net_minor !== null || person.reference.hours !== null))
-const skippedCount = computed(() => props.preview.persons.filter(person => employmentOf(person) === null).length)
+const createKeySet = computed(() => new Set(props.createKeys ?? []))
+function isIncluded(person: AttendancePerson): boolean {
+  return employmentOf(person) !== null || createKeySet.value.has(person.key)
+}
+const includedPersons = computed(() => props.preview.persons.filter(isIncluded))
+const skippedCount = computed(() => props.preview.persons.length - includedPersons.value.length)
+function componentsMinor(persons: AttendancePerson[]): number {
+  return persons.reduce((sum, person) => sum + person.components.reduce((total, item) => total + item.amount_minor, 0), 0)
+}
+const includedAmountMinor = computed(() => componentsMinor(includedPersons.value))
+const skippedAmountMinor = computed(() => componentsMinor(props.preview.persons) - includedAmountMinor.value)
 const conflictCount = computed(() => props.preview.persons.filter(personHasConflicts).length)
 const wageChanges = computed(() => props.preview.wage_changes ?? [])
+const rateWages = computed(() => props.preview.summary.rate_wages ?? { computed: 0, amount_minor: 0, no_hours: 0, hourly_terms: 0 })
+// Přeskočená osoba vstup nedostane, do počtu a částky mzdy ze sazby nepatří.
+const includedRateWages = computed(() => {
+  let count = 0
+  let amount = 0
+  for (const person of includedPersons.value) {
+    const wage = person.rate_wage
+    if (!wage || wage.status !== 'computed') continue
+    count++
+    amount += wage.amount_minor
+  }
+  return { count, amount }
+})
+
+/** „30,50 h × 200,00 Kč" u mzdy dopočtené ze sazby a hodin. */
+function rateWageFormula(person: AttendancePerson, code: string): string | null {
+  const wage = person.rate_wage
+  if (!wage || wage.status !== 'computed' || wage.component_code !== code) return null
+  return t('payroll_imports.attendance.summary.rate_wage_formula', {
+    hours: formatHours(wage.hours, locale.value),
+    rate: formatMoneyMinor(wage.hourly_rate_minor),
+  })
+}
 const wageRefreshPeriods = computed(() => previewRefreshRuns(wageChanges.value).map(run => formatPeriod(run.period)).join(', '))
 
 function wageBadgeClass(change: { reason: string | null, mode: string }): string {
@@ -56,7 +92,7 @@ function currentWage(minor: number | null): string {
 }
 
 const visiblePersons = computed(() => onlyIssues.value
-  ? props.preview.persons.filter(person => personHasConflicts(person) || person.warnings.length > 0 || employmentOf(person) === null)
+  ? props.preview.persons.filter(person => personHasConflicts(person) || person.warnings.length > 0 || (person.errors?.length ?? 0) > 0 || employmentOf(person) === null)
   : props.preview.persons)
 
 function employmentOf(person: AttendancePerson): AttendanceEmploymentOption | null {
@@ -112,12 +148,29 @@ function checkClass(check: AttendanceComponentCheck): string {
   <div class="space-y-4">
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.persons') }}</p><p class="mt-1 text-lg font-semibold">{{ preview.summary.persons }}</p></article>
-      <article class="rounded-lg bg-success-50 p-3"><p class="text-xs text-success-700">{{ t('payroll_imports.attendance.summary.linked') }}</p><p class="mt-1 text-lg font-semibold text-success-700">{{ preview.summary.persons - skippedCount }}</p></article>
+      <article class="rounded-lg bg-success-50 p-3"><p class="text-xs text-success-700">{{ t('payroll_imports.attendance.summary.linked') }}</p><p class="mt-1 text-lg font-semibold text-success-700">{{ preview.persons.length - skippedCount }}</p></article>
       <article class="rounded-lg p-3" :class="skippedCount ? 'bg-warning-50' : 'bg-neutral-50'"><p class="text-xs" :class="skippedCount ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll_imports.attendance.summary.skipped') }}</p><p class="mt-1 text-lg font-semibold" :class="skippedCount ? 'text-warning-700' : ''">{{ skippedCount }}</p></article>
       <article class="rounded-lg p-3" :class="conflictCount ? 'bg-warning-50' : 'bg-neutral-50'"><p class="text-xs" :class="conflictCount ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll_imports.attendance.summary.conflicts') }}</p><p class="mt-1 text-lg font-semibold" :class="conflictCount ? 'text-warning-700' : ''">{{ conflictCount }}</p></article>
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.metrics') }}</p><p class="mt-1 text-lg font-semibold">{{ preview.summary.metrics }}</p></article>
-      <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.amount_total') }}</p><p class="mt-1 text-lg font-semibold">{{ formatMoneyMinor(preview.summary.amount_minor_total) }}</p></article>
+      <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.amount_total') }}</p><p class="mt-1 text-lg font-semibold" data-testid="attendance-amount-total">{{ formatMoneyMinor(includedAmountMinor) }}</p><p v-if="skippedAmountMinor > 0" class="mt-0.5 text-xs text-warning-700" data-testid="attendance-amount-skipped">{{ t('payroll_imports.attendance.summary.amount_skipped', { amount: formatMoneyMinor(skippedAmountMinor) }) }}</p></article>
     </div>
+
+    <!-- Podklady jen s hodinami a sazbou: bez tohohle by souhrn ukázal 0 Kč mezd a nikdo by nevěděl proč. -->
+    <section v-if="rateWages.computed || rateWages.no_hours || rateWages.hourly_terms" class="rounded-xl border p-4 text-sm shadow-sm"
+      :class="rateWages.no_hours || rateWages.hourly_terms ? 'border-warning-500/40 bg-warning-50' : 'border-primary-500/30 bg-primary-50'"
+      data-testid="attendance-rate-wages">
+      <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.rate_wages_title') }}</h3>
+      <p v-if="rateWages.computed" class="mt-1 text-neutral-700" data-testid="attendance-rate-wages-computed">
+        {{ t('payroll_imports.attendance.summary.rate_wages_computed', { count: includedRateWages.count, amount: formatMoneyMinor(includedRateWages.amount) }) }}
+        <template v-if="includedRateWages.count < rateWages.computed">{{ t('payroll_imports.attendance.summary.rate_wages_skipped', { count: rateWages.computed - includedRateWages.count }) }}</template>
+      </p>
+      <p v-if="rateWages.no_hours" class="mt-1 font-medium text-warning-700" data-testid="attendance-rate-wages-no-hours">
+        {{ t('payroll_imports.attendance.summary.rate_wages_no_hours', { count: rateWages.no_hours }) }}
+      </p>
+      <p v-if="rateWages.hourly_terms" class="mt-1 font-medium text-warning-700" data-testid="attendance-rate-wages-hourly-terms">
+        {{ t('payroll_imports.attendance.summary.rate_wages_hourly_terms', { count: rateWages.hourly_terms }) }}
+      </p>
+    </section>
 
     <section v-if="preview.component_checks.length" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
       <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.component_checks') }}</h3>
@@ -190,6 +243,7 @@ function checkClass(check: AttendanceComponentCheck): string {
           <thead>
             <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
               <th class="sticky left-0 top-0 z-20 min-w-52 border-b border-neutral-200 bg-surface px-3 py-2">{{ t('payroll_imports.attendance.summary.person') }}</th>
+              <th v-if="hasWorkedDays" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ meaningLabel('worked_days') }}</th>
               <th v-for="meaning in meanings" :key="meaning" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case" :title="meaning">{{ meaningLabel(meaning) }}</th>
               <th v-for="code in components" :key="`c-${code}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right font-mono normal-case">{{ code }}</th>
               <th v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ meaningLabel(meaning) }}</th>
@@ -206,10 +260,14 @@ function checkClass(check: AttendanceComponentCheck): string {
                 <p class="font-medium text-neutral-900">{{ person.display_name }}</p>
                 <p v-if="employmentOf(person)" class="text-xs text-neutral-500">{{ employmentOf(person)?.label }}</p>
                 <span v-else class="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.will_skip') }}</span>
+                <ul v-if="person.errors?.length" class="mt-1 max-w-xs space-y-0.5 text-[11px] font-medium text-danger-600">
+                  <li v-for="error in person.errors" :key="error">{{ error }}</li>
+                </ul>
                 <ul v-if="person.warnings.length" class="mt-1 max-w-xs space-y-0.5 text-[11px] text-warning-700">
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
               </td>
+              <td v-if="hasWorkedDays" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums text-neutral-800" data-testid="attendance-worked-days">{{ person.worked_days ?? '' }}</td>
               <td v-for="meaning in meanings" :key="meaning" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
                 :class="metric(person, meaning)?.conflicts.length ? 'bg-warning-50 font-medium text-warning-700' : 'text-neutral-800'"
                 :title="metric(person, meaning) ? conflictTitle(metric(person, meaning)!.source, metric(person, meaning)!.conflicts) : undefined">
@@ -221,6 +279,8 @@ function checkClass(check: AttendanceComponentCheck): string {
                 :title="component(person, code) ? conflictTitle(component(person, code)!.source, component(person, code)!.conflicts) : undefined">
                 {{ component(person, code) ? formatMoneyMinor(component(person, code)!.amount_minor) : '' }}
                 <span v-if="component(person, code)?.conflicts.length" aria-hidden="true">⚠</span>
+                <span v-if="rateWageFormula(person, code)" class="block text-[11px] text-neutral-500" data-testid="attendance-rate-wage-formula">{{ rateWageFormula(person, code) }}</span>
+                <span v-if="component(person, code)?.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500" data-testid="attendance-rounded-from">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(component(person, code)!.rounded_from_minor!) }) }}</span>
               </td>
               <td v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
                 :class="deduction(person, meaning)?.conflicts.length ? 'bg-warning-50 font-medium text-warning-700' : 'text-neutral-800'"
@@ -244,19 +304,26 @@ function checkClass(check: AttendanceComponentCheck): string {
           <p v-if="employmentOf(person)" class="text-xs text-neutral-500">{{ employmentOf(person)?.label }}</p>
           <span v-else class="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.will_skip') }}</span>
           <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <template v-if="typeof person.worked_days === 'number'">
+              <dt class="text-neutral-500">{{ meaningLabel('worked_days') }}</dt>
+              <dd class="text-right tabular-nums text-neutral-800">{{ person.worked_days }}</dd>
+            </template>
             <template v-for="item in person.metrics" :key="item.meaning">
               <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>
               <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatHours(item.hours, locale) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
             </template>
             <template v-for="item in person.components" :key="`c-${item.component_code}`">
               <dt class="font-mono text-neutral-500">{{ item.component_code }}</dt>
-              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
+              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span><span v-if="rateWageFormula(person, item.component_code)" class="block text-[11px] text-neutral-500">{{ rateWageFormula(person, item.component_code) }}</span><span v-if="item.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(item.rounded_from_minor) }) }}</span></dd>
             </template>
             <template v-for="item in person.deductions ?? []" :key="`d-${item.meaning}`">
               <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>
               <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">−{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
             </template>
           </dl>
+          <ul v-if="person.errors?.length" class="mt-2 space-y-0.5 text-xs font-medium text-danger-600">
+            <li v-for="error in person.errors" :key="error">{{ error }}</li>
+          </ul>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">
             <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
           </ul>

@@ -11,6 +11,13 @@ use PDOException;
 
 final class PayrollRegistrationEventRepository
 {
+    /**
+     * Stavy podání, ve kterých událost u ČSSZ je: odeslané a nezamítnuté.
+     * Připravené, zrušené a zamítnuté podání ČSSZ nezná.
+     */
+    private const SENT_STATUSES_SQL = '"submitted", "processing", "waiting_for_identity",'
+        . ' "accepted", "partially_accepted", "correction_required", "superseded"';
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -148,7 +155,19 @@ final class PayrollRegistrationEventRepository
                          AND part.environment = event.environment
                          AND part.source_entity_type = "payroll_registration_event"
                          AND part.source_entity_reference = CONCAT("payroll_registration_event:", event.id)
-                    ) AS consumed
+                    ) AS consumed,
+                    EXISTS (
+                      SELECT 1 FROM payroll_submission_parts part
+                        JOIN payroll_submissions submission
+                          ON submission.supplier_id = part.supplier_id
+                         AND submission.environment = part.environment
+                         AND submission.id = part.submission_id
+                       WHERE part.supplier_id = event.supplier_id
+                         AND part.environment = event.environment
+                         AND part.source_entity_type = "payroll_registration_event"
+                         AND part.source_entity_reference = CONCAT("payroll_registration_event:", event.id)
+                         AND submission.status IN (' . self::SENT_STATUSES_SQL . ')
+                    ) AS sent
                FROM payroll_registration_event_snapshots event
               WHERE event.supplier_id = ? AND event.environment = ?
                 AND event.employment_id = ?

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
 
 const props = withDefaults(defineProps<{
   uploading?: boolean
@@ -18,6 +20,13 @@ const props = withDefaults(defineProps<{
   sizeHint?: string
   /** Přepis atributu `accept` na file inputu. */
   accept?: string
+  /**
+   * Fotky projdou před vydáním ořezem dokladu ({@link PhotoCropDialog}) — stejná
+   * obrazovka, jakou nabízí „Vyfotit“, jen pro fotku vybranou ze souborů nebo
+   * přetaženou sem. Zapínat tam, kde se čeká doklad vyfocený mobilem; u příloh,
+   * které fotkou být nemusí, zůstává vypnuto.
+   */
+  cropPhotos?: boolean
 }>(), {
   uploading: false,
   maxSizeBytes: 20 * 1024 * 1024,
@@ -25,6 +34,7 @@ const props = withDefaults(defineProps<{
   hideWhenInteracted: false,
   multiple: false,
   extraExtensions: () => [],
+  cropPhotos: false,
 })
 
 const emit = defineEmits<{
@@ -36,6 +46,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const isDragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+/** Výběr se vydá teprve po ořezu, aby PDF a fotky z jednoho dropu šly pohromadě. */
+const crop = usePhotoCropQueue(emitSelection)
 
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
@@ -76,16 +88,17 @@ function onFileInput(e: Event) {
  */
 function handleSelection(selected: File[]): void {
   if (selected.length === 0) return
-  if (!props.multiple) {
-    handleFile(selected[0])
-    return
-  }
-  const accepted = selected.filter(file => validate(file))
-  if (accepted.length > 0) emit('files-dropped', accepted)
+  const candidates = props.multiple ? selected : selected.slice(0, 1)
+  const accepted = candidates.filter(file => validate(file))
+  if (accepted.length === 0) return
+  if (props.cropPhotos) crop.start(accepted)
+  else emitSelection(accepted)
 }
 
-function handleFile(file: File) {
-  if (validate(file)) emit('file-dropped', file)
+function emitSelection(files: File[]): void {
+  if (files.length === 0) return
+  if (props.multiple) emit('files-dropped', files)
+  else emit('file-dropped', files[0])
 }
 
 /** Klient-side validace; server samozřejmě udělá magic-bytes check znovu. */
@@ -166,5 +179,9 @@ const cls = computed(() => {
         ? 'purchase_invoice.pdf.max_size_hint_structured'
         : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>
+
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
   </div>
 </template>

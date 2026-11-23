@@ -16,6 +16,7 @@ final class OperationalSettingsAccessTest extends TestCase
         'emailProfiles' => 'settings.email_profiles',
         'emailTemplates' => 'settings.email_templates',
         'branding' => 'settings.branding',
+        'invoiceDefaults' => 'settings.invoice_defaults',
         'paymentQr' => 'settings.payment_qr',
         'clientSigningProfiles' => 'settings.signing_profiles',
     ];
@@ -40,7 +41,9 @@ final class OperationalSettingsAccessTest extends TestCase
         ]));
         foreach (self::AREAS as $checkedArea => $checkedPermission) {
             self::assertSame(
-                $checkedPermission === $permission && $level === 2 && ($checkedArea !== 'clientSigningProfiles' || $type === 'client'),
+                // Firemní podpisy dostane klient i interní role, a to jen vlastním právem:
+                // široké `settings.signing` ani `settings.company.write` úzký editor neotevřou.
+                $checkedPermission === $permission && $level === 2,
                 OperationalSettingsAccess::$checkedArea($request),
                 $checkedArea,
             );

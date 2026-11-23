@@ -37,7 +37,11 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
 {
-    public function testOpeningWithoutDimensionsIsNotAcceptedEvenWhenAccountTotalsMatch(): void
+    /**
+     * Money převádí počáteční stavy bez středisek a zakázek, zůstatky roku je nesou. Sedí-li
+     * každý účet, historický rok se uzavře a převzatá rozvaha se porovná jen po účtech.
+     */
+    public function testOpeningWithoutDimensionsIsTakenOverWhenAccountTotalsMatch(): void
     {
         $supplierId = $this->supplier();
         SyntheticAgenda::writeLzFiles($this->tmp . '/no-opening-dimensions.lz', SyntheticAgenda::filesWithoutOpeningDimensions());
@@ -45,9 +49,15 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $closing = array_column($protocol->get('closing'), null, 'year')[2024];
-        self::assertSame('mismatch', $closing['status'], $this->explain($protocol));
-        self::assertNotEmpty($closing['diffs']);
-        self::assertSame('open', $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024)['status']);
+        self::assertSame('closed', $closing['status'], $this->explain($protocol));
+        self::assertSame([], $closing['diffs']);
+        $period = $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024);
+        self::assertSame('closed', $period['status']);
+        $step = $this->db->pdo()->prepare("SELECT payload FROM accounting_closing_steps WHERE supplier_id = ? AND period_id = ? AND step_key = 'open_next'");
+        $step->execute([$supplierId, (int) $period['id']]);
+        $payload = json_decode((string) $step->fetchColumn(), true);
+        self::assertSame('taken_over', $payload['opening_source'] ?? null);
+        self::assertSame('opening_without_dimensions', $payload['taken_over_compare_reason'] ?? null);
     }
 
     public function testImportedAccountingPreservesPeriodsBalancesAndClassification(): void
@@ -154,6 +164,15 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         );
         $stmt->execute([$supplierId]);
         self::assertSame(['518' => 'deductible', '568' => 'non_deductible'], $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+
+        // Účetní v MyÚčtu nedaňový typ z Money opravila; opakovaný převod do firmy ho nevrátí.
+        $this->db->pdo()->prepare(
+            "UPDATE chart_of_accounts SET tax_deductibility = 'deductible' WHERE supplier_id = ? AND LEFT(account_code, 3) = '568'"
+        )->execute([$supplierId]);
+        $again = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $stmt->execute([$supplierId]);
+        self::assertSame(['518' => 'deductible', '568' => 'deductible'], $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     /**
@@ -255,10 +274,11 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
 
     /**
      * Agenda vedená v Money jako daňová evidence má místo účetního deníku peněžní deník.
-     * Kontrola před převodem to musí říct, ne jen „záloha neobsahuje účetní deník" - uživatel
-     * jinak hledá chybu v záloze. Platí i pro náhled z meta.json.
+     * Kontrola před převodem ji nehlásí jako „záloha neobsahuje účetní deník" (uživatel by
+     * hledal chybu v záloze), ale projde peněžní deník: deník, jehož řádky nevedou na doklady
+     * banky a pokladny, převod zastaví s vysvětlením. Platí i pro náhled z meta.json.
      */
-    public function testTaxRecordsAgendaIsRejectedWithExplanation(): void
+    public function testTaxRecordsAgendaIsCheckedNotRejectedAsMissingJournal(): void
     {
         $supplierId = $this->supplier();
         SyntheticAgenda::writeLzFiles($this->tmp . '/evidence.lz', SyntheticAgenda::filesWithTaxRecords());
@@ -271,11 +291,13 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
                 new ImportOptions(), $roundTrip($this->importer->journalPreview($backup))),
         ] as $source => $preflight) {
             $byCode = array_column($preflight, null, 'code');
-            self::assertSame('error', $byCode['tax_records_not_supported']['level'] ?? null, $source . ': ' . (json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: ''));
-            self::assertStringContainsString('daňovou evidenci', $byCode['tax_records_not_supported']['message']);
+            $dump = $source . ': ' . (json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: '');
+            self::assertSame('error', $byCode['cashbook_orphan']['level'] ?? null, $dump);
+            self::assertStringContainsString('peněžní deník', $byCode['cashbook_orphan']['message']);
+            self::assertSame('info', $byCode['tax_evidence_kept']['level'] ?? null, $dump);
             self::assertArrayNotHasKey('no_journal', $byCode, $source);
             self::assertArrayNotHasKey('empty_year', $byCode, $source);
-            self::assertSame('warning', $byCode['tax_records_year']['level'] ?? null, $source);
+            self::assertArrayNotHasKey('switch_to_double_entry', $byCode, $source);
         }
 
         // Agenda bez účetního i peněžního deníku dál hlásí obecnou chybu.
@@ -285,7 +307,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         $empty = Ms3Backup::extract($this->tmp . '/empty.lz', $this->tmp . '/empty');
         $codes = array_column($this->importer->preflight($supplierId, $empty, AgendaInfo::fromBackup($empty), new ImportOptions()), 'code');
         self::assertContains('no_journal', $codes);
-        self::assertNotContains('tax_records_not_supported', $codes);
+        self::assertNotContains('tax_evidence_kept', $codes);
     }
 
     /**

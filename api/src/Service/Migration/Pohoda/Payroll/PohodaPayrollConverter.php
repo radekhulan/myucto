@@ -295,7 +295,7 @@ final class PohodaPayrollConverter
             $person = $this->byId['ZAM'][PohodaXml::text($mz, 'RefZAM')] ?? null;
             $relation = $this->byId['ZAMpomer'][PohodaXml::text($mz, 'RefPomer')] ?? null;
             if ($person === null || $relation === null) {
-                throw new PohodaException('payroll_inconsistent', "Mzda za {$period} nemá v exportu zaměstnance nebo pracovní poměr.");
+                throw new PohodaException('payroll_inconsistent', self::inconsistentMessage($period, $mz, $person !== null, count($this->byId['ZAMpomer'] ?? [])));
             }
             $values = [];
             $add = static function (string $header, float $value) use (&$values): void {
@@ -516,12 +516,42 @@ final class PohodaPayrollConverter
     }
 
     /**
+     * Proč mzdu nejde složit: chybí zaměstnanec, nebo pracovní poměr. Mzdy vedené přímo
+     * v POHODĚ pracovní poměry nemají vůbec; takový export převod rozpozná a převede sám
+     * ({@see \MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter}), sem
+     * dojde jen export, ve kterém poměry chybí částečně.
+     *
+     * @param array<string,mixed> $mz
+     */
+    private static function inconsistentMessage(string $period, array $mz, bool $personFound, int $relations): string
+    {
+        $payslip = PohodaXml::text($mz, 'ID');
+        if (!$personFound) {
+            return "Mzda za {$period} (záznam MZ {$payslip}) patří zaměstnanci " . PohodaXml::text($mz, 'RefZAM')
+                . ', který v exportu není (tabulka ZAM). Export je neúplný: vyexportujte mzdy znovu.';
+        }
+        $reference = PohodaXml::text($mz, 'RefPomer');
+        if ($reference === '' && $relations === 0) {
+            return "Mzda za {$period} (záznam MZ {$payslip}) nemá vazbu na pracovní poměr (RefPomer) a export pracovní poměry (ZAMpomer) nenese, "
+                . 'jiné mzdy exportu ji ale mají. Takový export nejde převést jako mzdy PAMICA ani jako mzdy vedené přímo v POHODĚ: vyexportujte mzdy znovu.';
+        }
+        if ($reference === '') {
+            return "Mzda za {$period} (záznam MZ {$payslip}) nemá vazbu na pracovní poměr (RefPomer), přestože export pracovní poměry "
+                . "nese (ZAMpomer: {$relations}). Export míchá mzdy PAMICA a POHODY, nebo je neúplný: vyexportujte mzdy znovu.";
+        }
+
+        return "Mzda za {$period} (záznam MZ {$payslip}) patří pracovnímu poměru {$reference}, který v exportu není "
+            . "(ZAMpomer: {$relations}). Export je neúplný: vyexportujte mzdy znovu.";
+    }
+
+    /**
      * Varování protokolu o položkách, které převod nezná, přes všechny měsíce; `null`,
      * když žádná není. Kód a název položky, počet vstupů, částka a u nepřítomností hodiny.
      *
      * @param list<array{unconverted_items?:array<string,array{code:string,name:string,kind:string,inputs:int,amount:float,hours:float}>}> $months
+     * @param string $program zdroj v 2. pádě („PAMICA", „POHODY")
      */
-    public static function unconvertedItemsMessage(array $months, int $limit = 20): ?string
+    public static function unconvertedItemsMessage(array $months, int $limit = 20, string $program = 'PAMICA'): ?string
     {
         $items = [];
         foreach ($months as $month) {
@@ -551,10 +581,12 @@ final class PohodaPayrollConverter
         }
 
         return sprintf(
-            'Položky mezd PAMICA, které převod nezná: %s. Do mzdových vstupů ani souhrnu hodin se nepřevedly. '
-            . 'V převzatých měsících jsou v úhrnech PAMICA; v měsících, které počítá MyÚčto, je doplňte '
+            'Položky mezd %s, které převod nezná: %s. Do mzdových vstupů ani souhrnu hodin se nepřevedly. '
+            . 'V převzatých měsících jsou v úhrnech %s; v měsících, které počítá MyÚčto, je doplňte '
             . 'v Mzdy → Vstupy (složky) nebo v Mzdy → Absence (nepřítomnosti).',
+            $program,
             implode(', ', $list),
+            $program,
         );
     }
 

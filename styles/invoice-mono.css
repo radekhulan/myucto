@@ -158,7 +158,7 @@ table.czk-recap tr.grand td {
 .footer-dot { color: #000000; }
 .commercial-register { color: #000000; }
 .page-attribution { color: #000000; }
-.page-bank { color: #000000; }
+.page-bank { color: #000000; font-weight: bold; }
 .page-attribution a { color: #000000; }
 
 /* Výkaz víceprací */

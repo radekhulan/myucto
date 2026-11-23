@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Migration\Myucto;
 
 use MyInvoice\Service\Migration\Myucto\MyuctoImporter;
+use MyInvoice\Service\Migration\Myucto\MyuctoRowStore;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use RuntimeException;
@@ -41,6 +42,6 @@ final class MyuctoWorkReportOwnershipTest extends TestCase
             ['TABLE_NAME' => 'work_reports', 'COLUMN_NAME' => 'project_id',
                 'REFERENCED_TABLE_NAME' => 'projects', 'REFERENCED_COLUMN_NAME' => 'id'],
         ]];
-        $reflection->getMethod('validateRows')->invoke($importer, $tables, 1, $schema);
+        $reflection->getMethod('validateRows')->invoke($importer, MyuctoRowStore::fromArrays($tables), 1, $schema);
     }
 }

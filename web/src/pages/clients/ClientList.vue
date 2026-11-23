@@ -242,6 +242,11 @@ function formatPaymentDue(c: Client): string {
     '—',
   )
 }
+
+// Telefon: řádek karty bez posledního dokladu i bez počtu dokladů jen ukazuje „—", skryje se.
+function cardActivityEmpty(c: Client): boolean {
+  return !c.last_invoice_date && !(roleFilter.value === 'vendors' && c.purchase_count) && !c.invoice_count
+}
 useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
 </script>
 
@@ -260,12 +265,13 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
     </div>
 
     <!-- FR 2 — report existujících duplicit (stejné IČO/DIČ v jiném zápisu). -->
-    <div v-if="duplicateGroups.length" class="mb-4 px-4 py-2.5 bg-warning-50 border border-warning-200 rounded-lg flex flex-wrap items-center gap-2 text-sm">
+    <div v-if="duplicateGroups.length" data-test="client-duplicates-banner"
+      class="mb-4 px-4 py-2.5 bg-warning-50 border border-warning-200 rounded-lg flex flex-wrap items-center gap-2 text-sm max-md:flex-nowrap max-md:px-3 max-md:py-2">
       <svg class="w-4 h-4 shrink-0 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
       </svg>
-      <span class="text-warning-800 font-medium">{{ t('client.duplicates.banner_title', { count: duplicateGroups.length }) }}</span>
-      <span class="text-warning-700">{{ t('client.duplicates.banner_hint') }}</span>
+      <span class="text-warning-800 font-medium max-md:truncate max-md:min-w-0">{{ t('client.duplicates.banner_title', { count: duplicateGroups.length }) }}</span>
+      <span class="text-warning-700 max-md:hidden">{{ t('client.duplicates.banner_hint') }}</span>
       <button type="button" @click="showDuplicatesModal = true"
         class="cursor-pointer ml-auto shrink-0 text-warning-800 font-medium underline hover:no-underline whitespace-nowrap">
         {{ t('client.duplicates.view_link') }}
@@ -348,15 +354,15 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
         </button>
       </div>
 
-      <div class="px-4 py-3 border-b border-neutral-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+      <div class="px-4 py-3 border-b border-neutral-200 flex flex-row flex-wrap items-center gap-3">
         <input
           v-model="search"
           type="search"
           :placeholder="t('common.search')"
-          class="flex-1 h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          class="flex-1 h-9 px-3 border border-neutral-300 rounded-md text-sm max-sm:basis-full max-sm:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
         />
-        <label class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+        <label class="flex items-center gap-2 text-sm text-neutral-700 max-sm:order-last max-sm:basis-full max-sm:min-h-10">
+          <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300 text-primary-600 max-sm:w-5 max-sm:h-5" />
           {{ t('client.show_archived') }}
         </label>
         <select v-if="roleFilter === 'vendors'" v-model.number="categoryFilter"
@@ -372,13 +378,13 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
           <option :value="0">{{ t('client.price_level_default') }}</option>
           <option v-for="l in priceLevels.filter(pl => pl.is_active || pl.id === priceLevelFilter)" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
-        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface max-sm:flex-1 max-sm:min-w-0"
           :title="t('common.sort_by')">
           <option value="name">{{ t('common.sort_name') }}</option>
           <option value="revenue">{{ t('common.sort_revenue') }}</option>
           <option value="last_activity">{{ t('common.sort_last_activity') }}</option>
         </select>
-        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
+        <div class="flex flex-wrap items-center gap-2 ml-auto">
           <SavedFiltersMenu :ctrl="saved" />
           <ColumnPicker class="hidden md:block" :ctrl="tbl" />
           <DensityToggle class="hidden md:block" :ctrl="tbl" />
@@ -431,6 +437,9 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
                       :title="t('client.dual_role_tooltip')">K+D</span>
                 <span v-else-if="c.is_vendor === true"
                       class="inline-block px-1.5 py-0 text-[10px] bg-warning-50 text-warning-600 rounded font-medium uppercase tracking-wide">{{ t('client.vendor_badge') }}</span>
+                <span v-if="c.simplified_only === true" data-test="client-simplified-only-badge"
+                      class="inline-block px-1.5 py-0 text-[10px] bg-neutral-100 text-neutral-600 rounded font-medium uppercase tracking-wide"
+                      :title="t('client.simplified_only_hint')">{{ t('client.simplified_only_badge') }}</span>
               </div>
               <div v-if="c.archived_at" class="text-xs text-neutral-400 mt-0.5">{{ t('common.archived') }}</div>
             </td>
@@ -498,19 +507,21 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
             <div class="font-mono text-sm whitespace-nowrap">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.costs && c.costs > 0">{{ formatMoney(c.costs, 'CZK') }}</span>
-                <span v-else class="text-neutral-300">—</span>
+                <span v-else class="text-neutral-300 max-md:hidden">—</span>
               </template>
               <template v-else>
                 <span v-if="c.revenue && c.revenue > 0">{{ formatMoney(c.revenue, c.currency_default) }}</span>
-                <span v-else class="text-neutral-300">—</span>
+                <span v-else class="text-neutral-300 max-md:hidden">—</span>
               </template>
             </div>
           </div>
           <div v-if="c.archived_at" class="text-xs text-neutral-400 mt-0.5">{{ t('common.archived') }}</div>
+          <span v-if="c.simplified_only === true"
+                class="inline-block mt-0.5 px-1.5 py-0 text-[10px] bg-neutral-100 text-neutral-600 rounded font-medium uppercase tracking-wide">{{ t('client.simplified_only_badge') }}</span>
           <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
             <div class="truncate">
-              <span class="font-mono">{{ c.ic || '—' }}</span>
-              <span v-if="c.main_email" class="text-neutral-400"> · </span>
+              <span class="font-mono" :class="c.ic ? '' : 'max-md:hidden'">{{ c.ic || '—' }}</span>
+              <span v-if="c.main_email" class="text-neutral-400" :class="c.ic ? '' : 'max-md:hidden'"> · </span>
               <span v-if="c.main_email" class="truncate">{{ c.main_email }}</span>
             </div>
             <span class="flex items-center gap-1.5 whitespace-nowrap">
@@ -518,10 +529,11 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
               <span class="font-mono">{{ c.currency_default }}</span>
             </span>
           </div>
-          <div class="flex items-center justify-between gap-2 mt-2 text-xs">
+          <div class="flex items-center justify-between gap-2 mt-2 text-xs" data-test="client-card-activity"
+            :class="cardActivityEmpty(c) ? 'max-md:hidden' : ''">
             <span class="text-neutral-600">
               <span v-if="c.last_invoice_date">{{ formatDate(c.last_invoice_date) }}</span>
-              <span v-else class="text-neutral-300">—</span>
+              <span v-else class="text-neutral-300 max-md:hidden">—</span>
             </span>
             <span v-if="roleFilter === 'vendors' && c.purchase_count" class="px-2 py-0.5 bg-warning-50 text-warning-700 rounded">
               {{ t('client.invoice_count_label') }}: {{ c.purchase_count }}

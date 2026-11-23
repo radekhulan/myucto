@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Logbook\Fuel;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+
 /**
  * Doplní vytěženým transakcím chybějící údaje z faktury (page 1) jako fallback,
  * když detailní výpis (page 2) nestačí:
@@ -111,7 +113,7 @@ final class FuelTransactionEnricher
                 $transactions[$i]['unit'] = $pool[$key]['unit'];
                 $base = (float) ($transactions[$i]['amount_without_vat'] ?? 0);
                 if ($base > 0) {
-                    $transactions[$i]['unit_price'] = round($base / $qty, 2);
+                    $transactions[$i]['unit_price'] = UnitPricePrecision::normalize($base / $qty);
                 } elseif ($pool[$key]['unit_price'] !== null) {
                     $transactions[$i]['unit_price'] = $pool[$key]['unit_price'];
                 }

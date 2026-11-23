@@ -180,6 +180,36 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame((float) $preview['result']['tax'], $e['tax']);
     }
 
+    /**
+     * Selhání náhledu jednoho kroku uzávěrky nesmí krok tiše vypustit z projektovaného VH
+     * a daně: projekce ostatních kroků doběhne a vynechaný krok se vrátí jako varování.
+     */
+    public function testFailedClosingPreviewIsReportedAsIncompleteProjection(): void
+    {
+        $vendorId = $this->vendor();
+        for ($month = 1; $month <= 11; $month++) {
+            $this->purchase($vendorId, sprintf('%d-%02d-15', self::YEAR, $month), 10000.0);
+        }
+        // Neplatná politika rozlišení drobného majetku: náhled kroku skončí výjimkou.
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET small_asset_accrual_mode = 'flat_pct', small_asset_accrual_pct = NULL WHERE id = ?")
+            ->execute([$this->periodId]);
+
+        $log = ini_set('error_log', '/dev/null');
+        try {
+            $projection = $this->dppo->gather($this->supplierId, self::YEAR)['closing_projection'];
+            $e = $this->service->estimate($this->supplierId, $this->periodId);
+            $preview = $this->returns->previewReadOnly($this->supplierId, self::YEAR, 'po');
+        } finally {
+            ini_set('error_log', (string) $log);
+        }
+
+        $expected = [['source' => 'small_asset', 'reason' => 'Paušální procento musí být v rozsahu 0–100 %.']];
+        self::assertSame($expected, $projection['warnings']);
+        self::assertArrayHasKey('estimate', array_column($projection['items'], null, 'key'), 'Ostatní kroky se projektují dál.');
+        self::assertSame($expected, $e['projection_warnings']);
+        self::assertSame($expected, $preview['podklady']['closing_projection']['warnings']);
+    }
+
     public function testUnpostedDepreciationIsProjectedOnceAndNeverAddedTwice(): void
     {
         $this->assets->create($this->supplierId, [

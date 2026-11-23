@@ -142,6 +142,75 @@ final class PohodaFiscalYearTest extends TestCase
     }
 
     /**
+     * Agenda v daňové evidenci: POHODA účetní deník nevydá (agendu nepoužívá). Převod ji
+     * převede jako daňovou evidenci, nehlásí chybu souboru ani přepnutí firmy do podvojného
+     * účetnictví a nezaloží deník.
+     */
+    public function testTaxEvidenceAgendaWithJournalErrorIsConvertedAsTaxEvidence(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        file_put_contents($dir . '/01_ucetni_denik.xml', (string) iconv('UTF-8', 'Windows-1250',
+            '<?xml version="1.0" encoding="Windows-1250"?>'
+            . '<rsp:responsePack version="2.0" id="001" state="ok" programVersion="SYNTETICKY 1.0" ico="' . SyntheticPohodaExport::ICO . '"'
+            . ' xmlns:rsp="http://www.stormware.cz/schema/version_2/response.xsd">'
+            . '<rsp:responsePackItem version="2.0" id="001-1" state="error" note="Agenda Účetní deník není v této účetní jednotce dostupná."></rsp:responsePackItem>'
+            . '</rsp:responsePack>'));
+        $export = PohodaExport::open($dir);
+        $supplierId = $this->supplier(1);
+
+        $preflight = $this->importer->preflight($supplierId, $export);
+        $codes = array_column($preflight, 'code');
+        self::assertContains('tax_evidence_kept', $codes, json_encode($preflight, JSON_UNESCAPED_UNICODE));
+        self::assertNotContains('switch_to_double_entry', $codes);
+        self::assertNotContains('file_state', $codes);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $this->entryCount($supplierId));
+        self::assertSame([], $this->periods($supplierId));
+        self::assertSame('tax_evidence', $this->accountingMode($supplierId));
+    }
+
+    /**
+     * Agenda v daňové evidenci, na jejíž export účetního deníku POHODA odpoví prázdným
+     * seznamem se stavem `ok`. Pozná ji jen typ jednotky `singleEntry` z přehledu
+     * jednotek; dřív prošla jako podvojné účetnictví bez zápisů a převod firmu přepnul
+     * do podvojného účetnictví. Převede se jako daňová evidence.
+     */
+    public function testSingleEntryUnitWithEmptyJournalStaysTaxEvidence(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $units = $this->tmp . '/' . PohodaExport::UNITS_FILE;
+        file_put_contents($units, str_replace('<acu:unitType>doubleEntry</acu:unitType>', '<acu:unitType>singleEntry</acu:unitType>', (string) file_get_contents($units)));
+        file_put_contents($dir . '/01_ucetni_denik.xml', (string) iconv('UTF-8', 'Windows-1250',
+            '<?xml version="1.0" encoding="Windows-1250"?>'
+            . '<rsp:responsePack version="2.0" id="001" state="ok" programVersion="SYNTETICKY 1.0" ico="' . SyntheticPohodaExport::ICO . '"'
+            . ' xmlns:rsp="http://www.stormware.cz/schema/version_2/response.xsd">'
+            . '<rsp:responsePackItem version="2.0" id="001-1" state="ok"></rsp:responsePackItem>'
+            . '</rsp:responsePack>'));
+        $export = PohodaExport::open($dir);
+        self::assertSame('singleEntry', $export->unitType());
+        $supplierId = $this->supplier(1);
+
+        $codes = array_column($this->importer->preflight($supplierId, $export), 'code');
+        self::assertContains('tax_evidence_kept', $codes);
+        self::assertNotContains('switch_to_double_entry', $codes);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('tax_evidence', $this->accountingMode($supplierId));
+        self::assertSame([], $this->periods($supplierId));
+        self::assertSame(0, $this->entryCount($supplierId));
+    }
+
+    private function accountingMode(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        return (string) $stmt->fetchColumn();
+    }
+
+    /**
      * Agenda ze {@see SyntheticPohodaExport::write()} posunutá na hospodářský rok od srpna:
      * leden 2026 → srpen 2025 (počáteční stavy 1. 8. 2025), minulý rok prosinec → červenec.
      * Navíc zápis 15. 3. 2026 (stejný hospodářský rok, jiný kalendářní) a 10. 9. 2026

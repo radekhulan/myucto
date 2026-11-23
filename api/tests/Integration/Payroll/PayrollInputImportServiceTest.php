@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
@@ -44,7 +43,7 @@ final class PayrollInputImportServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $imports = $this->container->get(PayrollInputImportService::class);
         if (!$db instanceof Connection || !$imports instanceof PayrollInputImportService) {
@@ -572,6 +571,32 @@ final class PayrollInputImportServiceTest extends TestCase
         self::assertStringContainsString(
             'Jednorázová mzdová složka není v období jednoznačně účinná.',
             PayrollTimeValue::rows($preview['errors'], 'errors')[0]['error_message'],
+        );
+    }
+
+    /**
+     * Kód vyhrazený hodinovému výpočtu zůstává u vztahu bez hodinových podmínek
+     * běžnou vlastní složkou firmy; import ho odmítne jen hodinovému vztahu.
+     */
+    public function testReservedHourlyCodeIsImportedOnlyOutsideHourlyRemuneration(): void
+    {
+        $this->createComponent('DOPLATEK_MINIMALNI_MZDA');
+        $csv = $this->csv([[self::EMPLOYMENT_CODE, 'DOPLATEK_MINIMALNI_MZDA', '25000', 'imp-own-reserved']]);
+
+        $monthly = $this->imports->preview($this->supplierId, self::PERIOD, 'csv', 'odmeny.csv', $csv);
+        self::assertSame(1, $monthly['accepted_count']);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type,
+                 hourly_rate_minor, remuneration_basis_kind, remuneration_basis, weekly_hours, workload_basis_points)
+             VALUES (?, ?, "2026-06-15", "2026-01-01", "hourly", 20000, "contract", "Syntetické podmínky", 40, 10000)'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $hourly = $this->imports->preview($this->supplierId, self::PERIOD, 'csv', 'odmeny.csv', $csv);
+        self::assertSame(0, $hourly['accepted_count']);
+        self::assertStringContainsString(
+            'U hodinového vztahu',
+            PayrollTimeValue::rows($hourly['errors'], 'errors')[0]['error_message'],
         );
     }
 

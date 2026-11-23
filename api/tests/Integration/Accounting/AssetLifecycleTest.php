@@ -332,6 +332,59 @@ final class AssetLifecycleTest extends TestCase
         self::assertNull($this->entries->findYear($assetId, 'accounting', self::YEAR));
     }
 
+    /**
+     * Historická karta z převodu (R23) s technickým zhodnocením z doby před převodem:
+     * počáteční oprávky pokrývají i odpisy zhodnocení, proto smějí přesáhnout cenu zařazení
+     * (ne cenu zvýšenou o zhodnocení) - při založení i při pozdější úpravě karty.
+     */
+    public function testHistoricalCardWithEarlierImprovement(): void
+    {
+        $card = [
+            'inventory_number' => 'M-HIST-TZ',
+            'name' => 'Historická linka',
+            'input_price' => 90000.00,
+            'acquisition_date' => (self::YEAR - 2) . '-01-10',
+            'put_into_use_date' => (self::YEAR - 2) . '-01-10',
+            'status' => 'in_use',
+            'tax_method' => 'straight',
+            'tax_group' => 2,
+            'opening_tax_years' => 2,
+            'opening_tax_amount' => 100000.00,
+            'opening_acc_months' => 23,
+            'opening_acc_amount' => 100000.00,
+            'acc_useful_life_months' => 60,
+        ];
+        try {
+            $this->service->create($this->supplierId, $card, ['user_id' => $this->userId]);
+            self::fail('Bez zhodnocení počáteční oprávky nad vstupní cenou neprojdou.');
+        } catch (AssetException $e) {
+            self::assertSame('validation_failed', $e->errorCode);
+        }
+
+        $created = $this->service->createWithImprovements($this->supplierId, $card,
+            [['completed_on' => (self::YEAR - 1) . '-06-15', 'amount' => 60000, 'description' => 'Přístavba']], ['user_id' => $this->userId]);
+        $asset = $created['asset'];
+        self::assertSame('in_use', $asset['status']);
+        self::assertEqualsWithDelta(60000.0, (float) $asset['improvements_total'], 0.001);
+        self::assertSame([[(self::YEAR - 1) . '-06-15', 'Přístavba']], array_map(static fn (array $i): array => [(string) $i['completed_on'], $i['description']], $asset['improvements']));
+        self::assertEqualsWithDelta(50000.0, (float) $asset['tax_residual'], 0.001);
+
+        $updated = $this->service->update($this->supplierId, (int) $asset['id'], ['name' => 'Historická linka po úpravě'], ['user_id' => $this->userId]);
+        self::assertSame('Historická linka po úpravě', $updated['asset']['name']);
+
+        // Zhodnocení před zařazením karta nepřijme a nezaloží ani kartu.
+        try {
+            $this->service->createWithImprovements($this->supplierId, ['inventory_number' => 'M-HIST-TZ2'] + $card,
+                [['completed_on' => (self::YEAR - 3) . '-06-15', 'amount' => 60000]], ['user_id' => $this->userId]);
+            self::fail('Zhodnocení před zařazením musí být odmítnuto.');
+        } catch (AssetException $e) {
+            self::assertSame('validation_failed', $e->errorCode);
+        }
+        $count = $this->db->pdo()->prepare("SELECT COUNT(*) FROM assets WHERE supplier_id = ? AND inventory_number = 'M-HIST-TZ2'");
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     // ── I5: tenant izolace ─────────────────────────────────────────────────────
 
     public function testI5TenantIsolation(): void

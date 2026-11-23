@@ -38,7 +38,7 @@ describe('závislosti dat mezi okny', () => {
 
   it('výpočty a nastavení uživatele nic nezmění', () => {
     for (const api of ['/invoices/bulk-oss/preview', '/accounting/bank-posting-suggestions/bulk-preview', '/clients/lookup-ares',
-      '/accounting/bank-posting-rules/dry-run', '/stock/items/quote', '/auth/login', '/user/preferences', '/license/tier/quote']) {
+      '/accounting/bank-posting-rules/dry-run', '/stock/items/quote', '/stock/reports/valuation-jobs', '/stock/reports/value-trend-jobs', '/stock/reports/value-trend-jobs/7/cancel', '/auth/login', '/user/preferences', '/license/tier/quote']) {
       expect(changedAreas(api), api).toEqual([])
       expect(affected('/', api), api).toBe(false)
     }
@@ -64,6 +64,24 @@ describe('závislosti dat mezi okny', () => {
     for (const path of ['/', '/invoices', '/invoices/5', '/purchase-invoices', '/accounting/journal', '/accounting/balance-sheet', '/bank']) {
       expect(windowDataProfile(path).mode, path).toBe('auto')
     }
+  })
+
+  it('šablony účtování mají vlastní ručně obnovovanou stránku a změny obnoví i zakázky', () => {
+    expect(windowDataProfile('/admin/work-report-billing-templates')).toEqual({ reads: ['projects'], mode: 'manual' })
+    expect(affected('/admin/work-report-billing-templates', '/work-report-billing-templates/7')).toBe(true)
+    expect(affected('/projects', '/work-report-billing-templates/7')).toBe(true)
+    expect(affected('/payroll/people', '/work-report-billing-templates/7')).toBe(false)
+  })
+
+  it('obnoví přehled čerpání nabídky po změně faktury nebo úhrady', () => {
+    expect(affected('/sales-quotes/42', '/invoices/5/issue')).toBe(true)
+    expect(affected('/sales-quotes', '/bank-transactions/4/match')).toBe(true)
+    expect(affected('/sales-quotes', '/sales-quotes/42/state')).toBe(true)
+    expect(affected('/clients/12', '/sales-quotes/42/state')).toBe(true)
+    expect(affected('/clients', '/sales-quotes/42/state')).toBe(false)
+    expect(affected('/invoices', '/sales-quotes/42/state')).toBe(false)
+    expect(affected('/invoices', '/sales-quotes/42/invoice')).toBe(true)
+    expect(windowDataProfile('/sales-quotes/42').mode).toBe('manual')
   })
 
   it('každá route aplikace je v mapě zařazená', () => {

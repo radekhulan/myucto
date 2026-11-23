@@ -1,8 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { CashDocument } from '@/api/cash'
+import { stubSplitWidth } from '@/components/documents/__tests__/previewSplitTestUtils'
 
-const m = vi.hoisted(() => ({ canRead: vi.fn(), canWrite: vi.fn() }))
+const m = vi.hoisted(() => ({
+  canRead: vi.fn(),
+  canWrite: vi.fn(),
+  prefs: { value: {} as { flags?: Record<string, boolean> } },
+  patchPagePrefs: vi.fn(),
+}))
+
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => m.prefs,
+  patchPagePrefs: m.patchPagePrefs,
+}))
 
 // Dimenze (Firma → Dimenze) jsou u firmy vypnuté — jejich komponenty se nevykreslí.
 vi.mock('@/composables/useDimensions', () => ({
@@ -93,6 +105,59 @@ describe('CashDocumentDetail — přílohy', () => {
       template: '<div @click="outer"><CashDocumentDetail :doc="d" :purpose-label="label" /></div>',
     })
     await wrapper.find('[data-testid="cash-attachments"]').trigger('click')
+    expect(outer).not.toHaveBeenCalled()
+  })
+})
+
+describe('CashDocumentDetail — náhled originálu', () => {
+  const pdf = { id: 7, title: 'uctenka.pdf', doc_type: 'pdf' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.canRead.mockReturnValue(true)
+    m.canWrite.mockReturnValue(true)
+    m.prefs = { value: {} }
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  async function mountWithDocs(docs: Array<Record<string, unknown>>) {
+    const outer = vi.fn()
+    const wrapper = mount({
+      components: { CashDocumentDetail },
+      setup: () => ({ outer, d: doc(), label: (p: string) => p }),
+      template: '<div @click="outer"><CashDocumentDetail :doc="d" :purpose-label="label" /></div>',
+    })
+    await flushPromises()
+    wrapper.findComponent({ name: 'LinkedDocumentsPanel' }).vm.$emit('docs', docs)
+    await flushPromises()
+    return { wrapper, outer }
+  }
+
+  it('bez zobrazitelné přílohy přepínač nenabízí', async () => {
+    stubSplitWidth(976)
+    const { wrapper } = await mountWithDocs([{ id: 8, title: 'smlouva.docx', doc_type: 'docx' }])
+    expect(wrapper.find('[data-test="cash-preview-toggle"]').exists()).toBe(false)
+  })
+
+  it('přepínač ukáže přílohu vedle detailu a volbu uloží do agendy pokladny', async () => {
+    stubSplitWidth(976)
+    const { wrapper } = await mountWithDocs([{ id: 8, title: 'smlouva.docx', doc_type: 'docx' }, pdf])
+
+    await wrapper.get('[data-test="cash-preview-toggle"]').trigger('click')
+
+    expect(wrapper.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
+    expect(wrapper.get('iframe').attributes('src')).toContain('/documents/7/preview')
+    expect(m.patchPagePrefs).toHaveBeenCalledWith('cash_documents', { flags: { preview_open: true } })
+  })
+
+  it('v úzké mobilní kartě je náhled pod detailem a klik v něm kartu nezavře', async () => {
+    stubSplitWidth(360)
+    m.prefs = { value: { flags: { preview_open: true } } }
+    const { wrapper, outer } = await mountWithDocs([pdf])
+
+    expect(wrapper.find('[data-test="document-preview-splitter"]').exists()).toBe(false)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    await wrapper.get('[data-test="document-side-preview"]').trigger('click')
     expect(outer).not.toHaveBeenCalled()
   })
 })

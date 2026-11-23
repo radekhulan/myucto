@@ -54,6 +54,30 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
         }
     }
 
+    /** PREZEC26-nam-1: EDV 1.2 (podání v roce 2026) drží rodné příjmení povinné. */
+    public function testPrezecFiledIn2026StillRequiresTheBirthSurname(): void
+    {
+        try {
+            self::serializePrezec(self::identity(['birth_surname' => null]), '2026-12-20', '2027-01-04');
+            self::fail('Očekávána chyba chybějícího rodného příjmení.');
+        } catch (PayrollRegistrationXmlException $exception) {
+            self::assertSame('registration_identity_invalid', $exception->validationCode);
+            self::assertStringStartsWith('Rodné příjmení', $exception->getMessage());
+        }
+    }
+
+    /** PREZEC26-nam-1: EDV PREZEC 1.5 (podání od 1. 1. 2027) rodné příjmení nevyžaduje. */
+    public function testPrezecFiledFrom2027OmitsAMissingBirthSurname(): void
+    {
+        $xml = self::serializePrezec(self::identity(['birth_surname' => null]), '2027-01-02', '2027-01-04');
+
+        self::assertStringContainsString('<birth cit="Testov"/>', $xml);
+        self::assertStringContainsString(
+            '<birth nam="Nováková" cit="Testov"/>',
+            self::serializePrezec(self::identity(), '2027-01-02', '2027-01-04'),
+        );
+    }
+
     public function testBirthPlaceLongerThanTheSchemaAllowsIsAHumanMessageNotAnXsdDump(): void
     {
         $place = str_repeat('Dlouhé-Město-', 4);
@@ -288,12 +312,16 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
     }
 
     /** @param array<string,mixed> $identity */
-    private static function serializePrezec(array $identity): string
-    {
+    private static function serializePrezec(
+        array $identity,
+        string $preparedOn = '2026-08-04',
+        string $expectedStartOn = '2026-08-05',
+    ): string {
         $payload = self::payload(
             self::snapshot($identity, 'PREZEC26'),
             new PayrollRegistrationInteraction('PREZEC26', 'limited_pre_registration', 9),
-            expectedStartOn: '2026-08-05',
+            expectedStartOn: $expectedStartOn,
+            preparedOn: $preparedOn,
         );
         $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
         (new PayrollRegistrationXmlValidator(new PayrollRegistrationSchemaCatalog()))
@@ -371,13 +399,14 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
         ?string $expectedStartOn = '2026-08-05',
         ?string $actualStartOn = null,
         ?array $eventSnapshot = null,
+        string $preparedOn = '2026-08-04',
     ): PayrollRegistrationXmlPayload {
         return new PayrollRegistrationXmlPayload(
             identity: $snapshot,
             interaction: $interaction,
             sequenceNumber: 1,
             formGuid: '12345678-1234-1234-1234-123456789ABC',
-            preparedOn: '2026-08-04',
+            preparedOn: $preparedOn,
             expectedStartOn: $expectedStartOn,
             actualStartOn: $actualStartOn,
             employerVariableSymbol: '1100000007',

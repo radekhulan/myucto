@@ -71,7 +71,7 @@ final class CsasOnboardingAction
                 'has_code' => is_string($query['code'] ?? null) && $query['code'] !== '',
                 'has_state' => is_string($query['state'] ?? null) && $query['state'] !== '',
             ]);
-            $location = BankOAuthCallbackHandler::csasLocation('error');
+            $location = BankOAuthCallbackHandler::csasLocation('error', null, $e->errorCode);
         }
         return OAuthCallbackAction::redirect($response, $location);
     }

@@ -102,6 +102,17 @@ final class PayrollRegistrationCodebooks
         '1', '2', '3', '4', '5', '6',
     ];
 
+    /**
+     * Kód státu z číselníku států (EDV C_STAT, shodný s CZEM ČSÚ 1186).
+     * Jediné místo pro kartu osoby, zákonnou evidenci i podmínky vztahu:
+     * tvar „dvě písmena" nestačí, „ZZ" by se tiše uložilo a ozvalo se až
+     * v podání.
+     */
+    public static function isCountry(?string $code): bool
+    {
+        return self::contains(self::COUNTRY, $code);
+    }
+
     /** @param list<string> $codebook */
     public static function contains(array $codebook, ?string $code): bool
     {

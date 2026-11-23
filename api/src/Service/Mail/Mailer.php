@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Repository\EmailProfileRepository;
 use MyInvoice\Repository\EmailTemplateRepository;
 use MyInvoice\Repository\SupplierEmailTemplateRepository;
@@ -17,6 +18,8 @@ use MyInvoice\Service\Mail\RateLimit\MailRateLimitEventLog;
 use MyInvoice\Service\Mail\RateLimit\MailRateLimiter;
 use MyInvoice\Service\Mail\RateLimit\MailRecipientBatcher;
 use MyInvoice\Service\Mail\RateLimit\MailSendCounter;
+use MyInvoice\Service\SalesQuote\QuoteDeliveryRecorder;
+use MyInvoice\Service\SalesQuote\QuoteMailer;
 use MyInvoice\Service\Signing\Email\EmailSigningService;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -280,7 +283,7 @@ final class Mailer
 
         $vars['locale'] = $locale;
         $managedSystemMail = (new ManagedModeGuard($this->config))->isManaged()
-            && in_array($code, ['password_reset', 'user_invite', 'login_otp'], true);
+            && in_array($code, ['password_reset', 'user_invite', 'user_sso_invite', 'login_otp'], true);
         if ($managedSystemMail) {
             $vars['supplier'] = null;
         } elseif (!isset($vars['supplier'])) {
@@ -649,63 +652,126 @@ final class Mailer
         $this->draining = true;
         try {
             foreach ($this->outbox()->due($now, $max) as $item) {
-                $payload = $item['payload'];
-                try {
-                    $result = $this->sendTemplateDetailed(
-                        $item['template'],
-                        $item['locale'],
-                        array_values((array) ($payload['to'] ?? [])),
-                        (array) ($payload['vars'] ?? []),
-                        isset($payload['subject_override']) ? (string) $payload['subject_override'] : null,
-                        array_values((array) ($payload['cc'] ?? [])),
-                        array_values((array) ($payload['bcc'] ?? [])),
-                        array_values((array) ($payload['attachments'] ?? [])),
-                        isset($payload['user_id']) ? (int) $payload['user_id'] : null,
-                        is_array($payload['email_profile'] ?? null) ? $payload['email_profile'] : null,
-                        isset($payload['template_supplier_id']) ? (int) $payload['template_supplier_id'] : null,
-                    );
-                } catch (MailDeliveredArchiveException) {
-                    // Zpráva JE doručená, selhalo jen uložení kopie do IMAP —
-                    // opakovat by znamenalo poslat ji příjemci podruhé.
-                    $this->outbox()->markSent($item['id'], $now);
-                    $this->logDeferredPaymentThanks($item, true, null);
-                    $report['sent']++;
-                    continue;
-                } catch (\Throwable $e) {
-                    $this->outbox()->markRetry(
-                        $item['id'],
-                        $now->setTimestamp($now->getTimestamp()
-                            + max(60, (int) $this->config->get('smtp.rate_limit.defer_retry_seconds', 900))),
-                        $e->getMessage(),
-                        $item['attempts'],
-                    );
-                    $this->logDeferredPaymentThanks($item, false, $e->getMessage());
-                    $report['failed']++;
-                    continue;
+                $status = $item['template'] === QuoteMailer::TEMPLATE
+                    ? $this->flushDeferredQuote($item, $now)
+                    : $this->flushDeferredItem($item, $now);
+                if ($status !== null) {
+                    $report[$status]++;
                 }
-
-                if (($result['deferred'] ?? false) === true) {
-                    // Brzda sepla znovu — ve frontě je NOVÝ řádek s pozdějším
-                    // časem, tenhle se uzavírá jako přesunutý (ne odeslaný,
-                    // ne chybný).
-                    $this->outbox()->markRequeued(
-                        $item['id'],
-                        $now,
-                        isset($result['outbox_id']) ? (int) $result['outbox_id'] : null,
-                    );
-                    $report['deferred']++;
-                    continue;
-                }
-
-                $this->outbox()->markSent($item['id'], $now);
-                $this->logDeferredPaymentThanks($item, true, (string) ($result['smtp_response'] ?? ''));
-                $report['sent']++;
             }
         } finally {
             $this->draining = false;
         }
 
         return $report;
+    }
+
+    private function flushDeferredItem(array $item, DateTimeImmutable $now): string
+    {
+        $payload = $item['payload'];
+        try {
+            $result = $this->sendTemplateDetailed(
+                $item['template'],
+                $item['locale'],
+                array_values((array) ($payload['to'] ?? [])),
+                (array) ($payload['vars'] ?? []),
+                isset($payload['subject_override']) ? (string) $payload['subject_override'] : null,
+                array_values((array) ($payload['cc'] ?? [])),
+                array_values((array) ($payload['bcc'] ?? [])),
+                array_values((array) ($payload['attachments'] ?? [])),
+                isset($payload['user_id']) ? (int) $payload['user_id'] : null,
+                is_array($payload['email_profile'] ?? null) ? $payload['email_profile'] : null,
+                isset($payload['template_supplier_id']) ? (int) $payload['template_supplier_id'] : null,
+            );
+        } catch (MailDeliveredArchiveException $e) {
+            $result = ['smtp_response' => $e->smtpResponse(), 'imap_append' => $e->imapAppend()];
+        } catch (\Throwable $e) {
+            $this->outbox()->markRetry(
+                $item['id'],
+                $now->setTimestamp($now->getTimestamp()
+                    + max(60, (int) $this->config->get('smtp.rate_limit.defer_retry_seconds', 900))),
+                $e->getMessage(),
+                $item['attempts'],
+            );
+            $this->logDeferredPaymentThanks($item, false, $e->getMessage());
+            if ($item['attempts'] + 1 >= MailOutbox::MAX_ATTEMPTS) {
+                $this->recordDeferredQuote($item, 'failed', ['error' => mb_substr($e->getMessage(), 0, 1000)]);
+            }
+            return 'failed';
+        }
+
+        if (($result['deferred'] ?? false) === true) {
+            $nextId = isset($result['outbox_id']) ? (int) $result['outbox_id'] : null;
+            $this->outbox()->markRequeued($item['id'], $now, $nextId);
+            $this->recordDeferredQuote($item, 'deferred', ['outbox_id' => $nextId]);
+            return 'deferred';
+        }
+
+        $this->outbox()->markSent($item['id'], $now);
+        $this->logDeferredPaymentThanks($item, true, (string) ($result['smtp_response'] ?? ''));
+        $this->recordDeferredQuote($item, 'sent', $result);
+        return 'sent';
+    }
+
+    private function flushDeferredQuote(array $item, DateTimeImmutable $now): ?string
+    {
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            return null;
+        }
+        $attemptId = (int) ($item['payload']['vars']['quote_delivery_attempt_id'] ?? 0);
+        $supplierId = (int) ($item['payload']['template_supplier_id'] ?? 0);
+        if ($attemptId < 1 || $supplierId < 1) {
+            $this->outbox()->markFailed($item['id'], 'Chybí identifikace odesílání nabídky.');
+            return 'failed';
+        }
+        $name = NamedLockName::for($this->db, 'quote_mail_delivery', $attemptId);
+        $lock = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+        $lock->execute([$name]);
+        if ((int) $lock->fetchColumn() !== 1) {
+            return null;
+        }
+        try {
+            $query = $pdo->prepare(
+                "SELECT m.attempts, e.delivery_status
+                   FROM mail_outbox m
+                   LEFT JOIN sales_quote_events e ON e.supplier_id = ? AND e.id = ?
+                  WHERE m.id = ? AND m.status = 'pending' AND m.not_before <= ?"
+            );
+            $query->execute([$supplierId, $attemptId, $item['id'], $now->format(MailSendCounter::SQL_FORMAT)]);
+            $current = $query->fetch(\PDO::FETCH_ASSOC);
+            if ($current === false) {
+                return null;
+            }
+            if ($current['delivery_status'] === 'sent') {
+                $this->outbox()->markSent($item['id'], $now);
+                return null;
+            }
+            if (!in_array($current['delivery_status'], ['pending', 'deferred'], true)) {
+                $this->outbox()->markFailed($item['id'], 'Pokus o odeslání nabídky už není aktivní.');
+                return 'failed';
+            }
+            $item['attempts'] = (int) $current['attempts'];
+            return $this->flushDeferredItem($item, $now);
+        } finally {
+            $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+        }
+    }
+
+    private function recordDeferredQuote(array $item, string $status, array $details): void
+    {
+        if ($item['template'] !== QuoteMailer::TEMPLATE) {
+            return;
+        }
+        $supplierId = (int) $item['payload']['template_supplier_id'];
+        $attemptId = (int) $item['payload']['vars']['quote_delivery_attempt_id'];
+        try {
+            (new QuoteDeliveryRecorder($this->db))->record($supplierId, $attemptId, $status, $details);
+        } catch (\Throwable $e) {
+            $this->logger->error('quote.mail_delivery_status_failed', [
+                'supplier_id' => $supplierId, 'attempt_id' => $attemptId, 'status' => $status, 'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -1272,10 +1338,15 @@ final class Mailer
             return ['field' => 'subject', 'message' => 'Vykreslený předmět je neplatný.'];
         }
         if ($required !== null) {
-            if (!$this->hasVisibleFunctionalValue($rendered['body_html'], $sentinel, $required !== 'code')) {
-                return ['field' => 'body_html', 'message' => 'Šablona musí zachovat funkční odkaz nebo kód: ' . $required];
+            $message = $required === 'message'
+                ? 'Šablona musí obsahovat text zprávy z nabídky (message).'
+                : 'Šablona musí zachovat funkční odkaz nebo kód: ' . $required;
+            if (!$this->hasVisibleFunctionalValue($rendered['body_html'], $sentinel, !in_array($required, ['code', 'message'], true))) {
+                return ['field' => 'body_html', 'message' => $message];
             }
-            if (!str_contains($rendered['body_text'], $sentinel)) return ['field' => 'body_text', 'message' => 'Šablona musí zachovat funkční odkaz nebo kód: ' . $required];
+            if (!str_contains($rendered['body_text'], $sentinel)) {
+                return ['field' => 'body_text', 'message' => $message];
+            }
         }
         return null;
     }

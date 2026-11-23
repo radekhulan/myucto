@@ -179,6 +179,16 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertTrue(AccountNumberNormalizer::matchesAny('0000192000145399', 'CZ6508000000192000145399', null));
     }
 
+    /** Výpis Revolut nese jen zahraniční IBAN; účet firmy ho má v poli IBAN bez domácího čísla. */
+    public function testMatchesAnyForeignIbanOnly(): void
+    {
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', null, 'LT63 3250 0012 3456 7890'));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', '', 'lt633250001234567890'));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', 'LT63 3250 0012 3456 7890', null));
+        self::assertFalse(AccountNumberNormalizer::matchesAny('LT633250001234567891', null, 'LT633250001234567890'));
+        self::assertFalse(AccountNumberNormalizer::matchesAny('3250001234567890', null, 'LT633250001234567890'));
+    }
+
     public function testMatchesAnyRejectsDifferentAccount(): void
     {
         self::assertFalse(AccountNumberNormalizer::matchesAny('1000000005', '1000000006', 'CZ6508000000192000145399'));
@@ -258,6 +268,15 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertSame('0100', AccountNumberNormalizer::canonicalBankCode('100'));
         self::assertSame('0800', AccountNumberNormalizer::canonicalBankCode(null, 'CZ65 0800 0000 1920 0014 5399'));
         self::assertNull(AccountNumberNormalizer::canonicalBankCode(null, 'DE89370400440532013000'));
+    }
+
+    /** Issue #314: britský sort code se nesmí zkrátit na český kód banky `8464`. */
+    public function testForeignBankCodeIsNotTruncatedToCzechCode(): void
+    {
+        self::assertSame('0800', AccountNumberNormalizer::canonicalBankCode('000800'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('608464'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('60-84-64'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('021000021'));
     }
 
     #[DataProvider('accountPrefixCases')]

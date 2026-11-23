@@ -31,8 +31,18 @@ final class MembershipMemberService
             $q = $this->db->pdo()->prepare('SELECT id FROM clients WHERE supplier_id=? AND id=? FOR UPDATE');
             $q->execute([$supplier, $client]);
             if ($q->fetchColumn() === false) throw new MembershipException('nonprofit_membership_client_not_found', 'Klient nebyl nalezen v této organizaci.', 404);
-            return $this->members->byIdentity($supplier, $client, $memberNumber, true)
-                ?? $this->members->insertMember($supplier, $client, $memberNumber, $actor);
+            $existing = $this->members->byIdentity($supplier, $client, $memberNumber, true);
+            if ($existing !== null) return $existing;
+            // Až po idempotentním návratu: opakované založení člena se starším číslem „VYMAZANO-…“ vrátí jeho samého.
+            MembershipErasureService::assertMemberNumberAllowed($this->db, $memberNumber);
+            try {
+                return $this->members->insertMember($supplier, $client, $memberNumber, $actor);
+            } catch (\PDOException $e) {
+                // Souběžná oprava čísla nebo kontaktu jiného člena (MembershipCorrectionService::updateIdentity)
+                // zámek organizace nebere; při READ COMMITTED doběhne kolize až na unikátní index.
+                if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) !== 1062) throw $e;
+                throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
+            }
         }));
     }
 
@@ -56,12 +66,17 @@ final class MembershipMemberService
                 if (!hash_equals($existing['request_hash'], $requestHash)) throw new MembershipException('nonprofit_membership_idempotency_conflict', 'Klíč požadavku už patří jiné revizi členství.', 409);
                 return $existing;
             }
-            if ($this->members->member($supplier, $member, true) === null) throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+            $row = $this->members->member($supplier, $member, true)
+                ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+            MembershipErasureService::assertNotErased($row);
             $history = $this->members->history($supplier, $member, true);
             $previous = $history === [] ? null : $history[array_key_last($history)];
             if (($previous['revision_no'] ?? 0) !== $input['expected_revision']) throw new MembershipException('nonprofit_membership_revision_changed', 'Historie členství se mezitím změnila.', 409);
-            if ($previous === null && $input['status'] !== 'active') throw new MembershipException('nonprofit_membership_initial_status_invalid', 'První revize členství musí členství aktivovat.');
-            if ($previous !== null && $effective <= $previous['effective_from']) throw new MembershipException('nonprofit_membership_effective_conflict', 'Nová revize musí začít po posledním datu účinnosti.', 409);
+            // Řetěz pokračuje za posledním článkem (i rušícím), datum a první stav se posuzují proti platným revizím.
+            $valid = MembershipRevisionTimeline::effective($history);
+            $lastValid = $valid === [] ? null : $valid[array_key_last($valid)];
+            if ($lastValid === null && $input['status'] !== 'active') throw new MembershipException('nonprofit_membership_initial_status_invalid', 'První revize členství musí členství aktivovat.');
+            if ($lastValid !== null && $effective <= $lastValid['effective_from']) throw new MembershipException('nonprofit_membership_effective_conflict', 'Nová revize musí začít po posledním datu účinnosti.', 409);
             return $this->members->appendRevision([
                 'supplier_id' => $supplier, 'member_id' => $member, 'revision_no' => ($previous['revision_no'] ?? 0) + 1,
                 'previous_id' => $previous['id'] ?? null, 'effective_from' => $effective, 'status' => $input['status'],

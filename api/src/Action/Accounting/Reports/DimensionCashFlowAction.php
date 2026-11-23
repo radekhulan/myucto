@@ -74,7 +74,13 @@ final class DimensionCashFlowAction
             $err = Json::error($response, 'validation_failed', 'from a to (YYYY-MM-DD, from ≤ to) jsou povinné.', 422);
             return null;
         }
-        $valueId = (int) ($q['dimension_value_id'] ?? 0);
+        // Peněžní tok po dimenzi je za jednu hodnotu; seznam ostatních sestav tu neplatí.
+        $rawValue = $q['dimension_value_id'] ?? '';
+        if (!is_string($rawValue) || ($rawValue !== '' && $rawValue !== '0' && preg_match('/^[1-9][0-9]{0,9}$/', $rawValue) !== 1)) {
+            $err = Json::error($response, 'dimension_value_invalid', 'Peněžní tok po dimenzi se počítá za jednu hodnotu dimenze.', 422);
+            return null;
+        }
+        $valueId = (int) $rawValue;
         $descendants = (string) ($q['dimension_descendants'] ?? '1') !== '0';
         $filters = [$supplierId => null];
         $hidden = 0;

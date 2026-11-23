@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
@@ -20,14 +20,24 @@ import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { eetApi, type EetCreditNoteRefundInfo } from '@/api/eet'
+import { documentsApi, type DocItem } from '@/api/documents'
+import { useAuthStore } from '@/stores/auth'
+import { useSidePreview } from '@/composables/useSidePreview'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 // Firma → Dimenze — dimenze hlavičky pokladního dokladu.
 const docDims = useDocumentDimensions('cash-documents')
 const pageId = useId()
@@ -61,6 +71,74 @@ const loadedStatus = ref<CashDocumentStatus | null>(null)
 const isDraft = computed(() => !isEdit.value || loadedStatus.value === 'draft')
 // Plnění formuláře z API nesmí spustit reset-watchery určené pro ruční přepnutí.
 const hydrating = ref(false)
+
+// Originál dokladu: první příloha, kterou prohlížeč umí zobrazit. Nový doklad vazbu
+// mít nemůže, proto drží vybraný sken jen v paměti prohlížeče (blob: URL) a do modulu
+// Dokumenty ho nahraje a připojí až po uložení dokladu, stejně jako přílohy ručního
+// zápisu nebo PDF nové přijaté faktury. Zrušení formuláře na serveru nic nenechá.
+const preview = useSidePreview('cash_documents')
+const linkedDocs = ref<DocItem[]>([])
+const original = computed(() => linkedDocs.value.find(d => d.doc_type === 'pdf' || d.doc_type === 'image') ?? null)
+const canAttachOriginal = computed(() =>
+  auth.canRead('documents') && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
+const pendingOriginal = ref<File | null>(null)
+const pendingOriginalUrl = ref<string | null>(null)
+const originalInput = ref<HTMLInputElement | null>(null)
+
+function setPendingOriginal(file: File | null) {
+  if (pendingOriginalUrl.value) URL.revokeObjectURL(pendingOriginalUrl.value)
+  pendingOriginalUrl.value = file ? URL.createObjectURL(file) : null
+  pendingOriginal.value = file
+}
+function onPickOriginal(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+  if (file.type !== 'application/pdf' && !file.type.startsWith('image/')) {
+    toast.error(t('cash.original.unsupported'))
+    return
+  }
+  setPendingOriginal(file)
+  preview.openTemporarily()
+}
+onBeforeUnmount(() => setPendingOriginal(null))
+
+const previewSource = computed<{ src: string; name: string; docType: string } | null>(() => {
+  if (original.value) {
+    return { src: documentsApi.previewUrl(original.value.id), name: original.value.title, docType: original.value.doc_type }
+  }
+  if (pendingOriginal.value && pendingOriginalUrl.value) {
+    return {
+      src: pendingOriginalUrl.value,
+      name: pendingOriginal.value.name,
+      docType: pendingOriginal.value.type.startsWith('image/') ? 'image' : 'pdf',
+    }
+  }
+  return null
+})
+
+/**
+ * Nahraje originál vybraný před prvním uložením a připojí ho k vytvořenému dokladu.
+ * Doklad už je uložený, takže chyba ho nevrací, jen upozorní. Když se soubor nahraje,
+ * ale vazba selže, nahraný dokument se smaže, ať v Dokumentech nezůstane sirotek.
+ * Upload i vazba běží v kontextu aktivní firmy a server vazbu na doklad cizí firmy odmítne.
+ */
+async function attachPendingOriginal(cashDocumentId: number): Promise<void> {
+  const file = pendingOriginal.value
+  if (!file) return
+  setPendingOriginal(null)
+  let uploadedIds: number[] = []
+  try {
+    const r = await documentsApi.upload([file], { zipMode: 'keep' })
+    uploadedIds = r.root_ids ?? []
+    if (uploadedIds.length === 0) throw new Error('upload_failed')
+    for (const id of uploadedIds) await documentsApi.addLink(id, 'cash_document', cashDocumentId)
+  } catch {
+    await Promise.allSettled(uploadedIds.map(id => documentsApi.remove(id)))
+    toast.warning(t('cash.original.attach_failed'))
+  }
+}
 
 const form = reactive({
   register_id: '' as number | '',
@@ -280,6 +358,13 @@ function vatLinesInDocumentCurrency(doc: CashDocument): CashVatLine[] {
  * pro ruční přepnutí uživatelem a při plnění formuláře by vzápětí vymazaly vazbu
  * na fakturu, kontaci i protiúčet, které se právě načetly.
  */
+// Řada z číselníku (víc řad v jedné pokladně, např. hotovostní účtenky vedle PPD).
+// undefined = beze změny, null = výchozí řada pokladny / uživatele.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+const seriesOption = ref<{ prefix: string | null; name: string } | null>(null)
+// Nápověda pod datem ukazuje vybranou řadu, ne napevno PPD.
+const seriesHintPrefix = computed(() => seriesOption.value ? (seriesOption.value.prefix || seriesOption.value.name || '') : '')
+
 async function loadDocument(id: number): Promise<void> {
   hydrating.value = true
   void docDims.load(id)
@@ -302,6 +387,7 @@ async function loadDocument(id: number): Promise<void> {
     form.purchase_invoice_id = doc.purchase_invoice_id
     form.rule_key = doc.rule_key ?? ''
     form.counter_account_code = doc.counter_account_code ?? ''
+    numberSeriesId.value = doc.doc_number ? undefined : (doc.number_series_id ?? undefined)
     vatLines.value = vatLinesInDocumentCurrency(doc)
     if (doc.status !== 'draft') error.value = t('cash.error.doc_not_draft')
   } catch (e: any) {
@@ -316,6 +402,8 @@ async function loadDocument(id: number): Promise<void> {
 watch([() => form.doc_type, () => form.register_id], () => {
   if (hydrating.value) return
   if (!purposeOptions.value.includes(form.purpose)) form.purpose = purposeOptions.value[0]
+  // Řada patří směru a pokladně.
+  if (numberSeriesId.value != null) numberSeriesId.value = null
   // Předvolby jsou směrové (211 na MD = příjem, na D = výdej) — po přepnutí
   // PPD/VPD by zvolená kontace mířila na opačnou stranu.
   form.rule_key = ''
@@ -380,8 +468,45 @@ function pickUnpaid(o: UnpaidDocumentOption) {
   form.partner_dic = o.partner_dic ?? ''
   form.description = t(`cash.purpose.${form.purpose}`) + ' ' + o.number
   // U vratky nabídni jako výchozí částku to, co je uhrazeno; jinak zbytek k úhradě.
-  form.total_amount = isPurchaseRefund.value ? o.paid : o.remaining
+  // Cizoměnový doklad se hradí korunami: výchozí je zbytek přepočtený kurzem dokladu.
+  form.total_amount = isPurchaseRefund.value ? o.paid : (o.remaining_czk ?? o.remaining)
 }
+
+/**
+ * Korunová úhrada cizoměnového dokladu z korunové pokladny. Pravidla jsou táž jako
+ * na serveru (`FxPaymentSettlement`): koruny v kurzové toleranci uhradí celý zbytek,
+ * menší částka je u vydané faktury částečná úhrada přepočtená kurzem dokladu, přijatý
+ * doklad se hradí jen celý. Rozdíl proti kurzu dokladu je kurzový zisk nebo ztráta;
+ * přesně se zaúčtuje kurzem předpisu, tady jde o náhled.
+ */
+const fxSettlement = computed(() => {
+  const o = selectedUnpaid.value
+  if (!o || isForeign.value || isPurchaseRefund.value || isInvoiceRefund.value) return null
+  if (!(Number(o.exchange_rate) > 0) || o.remaining_czk === undefined || o.currency_code.toUpperCase() === 'CZK') return null
+  const rate = Number(o.exchange_rate)
+  const czk = Number(form.total_amount) || 0
+  const expected = Number(o.remaining_czk)
+  const tolerance = Number(o.czk_tolerance ?? 0)
+  const purchase = form.purpose === 'purchase_payment'
+  const full = czk > 0 && Math.abs(czk - expected) <= tolerance
+  const partialForeign = !full && !purchase && czk > 0 && czk < expected ? Math.round((czk / rate) * 100) / 100 : null
+  const saldoCzk = full ? expected : partialForeign !== null ? Math.round(partialForeign * rate * 100) / 100 : 0
+  // Příjem nad hodnotou dokladu = zisk, výdaj nad hodnotou dokladu = ztráta.
+  const diff = full || partialForeign !== null ? Math.round((czk - saldoCzk) * 100) / 100 : 0
+  return {
+    currency: o.currency_code.toUpperCase(),
+    rate,
+    remaining: Number(o.remaining),
+    expected,
+    tolerance,
+    full,
+    partialForeign,
+    valid: full || partialForeign !== null,
+    saldoCzk,
+    diff: Math.abs(diff),
+    gain: purchase ? diff < 0 : diff > 0,
+  }
+})
 // Korunový ekvivalent jde ukázat jen u ručního kurzu — kurz ČNB zná až backend.
 const czkEquivalent = computed<number | null>(() => {
   if (!isForeign.value) return null
@@ -418,9 +543,10 @@ const eetRefundAmount = computed<number | null>(() => {
 
 // PF: úhrada jen v plné výši (R4) → částka readonly. U vratky se naopak vrací
 // libovolná část, takže částka zůstává editovatelná.
+// Cizoměnový doklad se hradí skutečnými korunami, takže částka zůstává editovatelná.
 const amountReadonly = computed(() =>
   (form.purpose === 'purchase_payment' && !isPurchaseRefund.value || isInvoiceRefund.value)
-  && selectedUnpaid.value !== null,
+  && selectedUnpaid.value !== null && fxSettlement.value === null,
 )
 
 // ── Našeptávač partnera z číselníku klientů ─────────────────────────────────
@@ -511,6 +637,13 @@ const saleOver10k = computed(() =>
 
 // ── Live náhled zaúčtování (MD/D) ────────────────────────────────────────────
 interface PreviewLine { account_code: string; side: 'debit' | 'credit'; amount: number }
+/** Kurzový rozdíl korunové úhrady cizoměnového dokladu: zisk 663 D, ztráta 563 MD. */
+function pushFxDifference(push: (code: string, side: 'debit' | 'credit', amount: number) => void) {
+  const fx = fxSettlement.value
+  if (!fx?.valid || fx.diff <= 0) return
+  if (fx.gain) push(ruleAccount('fx.gain', 'credit', '663'), 'credit', fx.diff)
+  else push(ruleAccount('fx.loss', 'debit', '563'), 'debit', fx.diff)
+}
 const previewLines = computed<PreviewLine[]>(() => {
   const total = Number(form.total_amount) || 0
   const cash = registerAccount.value
@@ -535,7 +668,8 @@ const previewLines = computed<PreviewLine[]>(() => {
         push(cash, 'credit', total)
       } else {
         push(cash, 'debit', total)
-        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', total)
+        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', fxSettlement.value?.valid ? fxSettlement.value.saldoCzk : total)
+        pushFxDifference(push)
       }
       break
     case 'purchase_payment':
@@ -543,8 +677,9 @@ const previewLines = computed<PreviewLine[]>(() => {
         push(cash, 'debit', total)
         push(ruleAccount('payment.payable.cash', 'debit', '321'), 'credit', total)
       } else {
-        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', total)
+        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', fxSettlement.value?.valid ? fxSettlement.value.saldoCzk : total)
         push(cash, 'credit', total)
+        pushFxDifference(push)
       }
       break
     case 'transfer':
@@ -626,6 +761,7 @@ async function save(post = true, next = false) {
   const payload: CreateCashDocumentPayload = {
     register_id: Number(form.register_id),
     doc_type: form.doc_type,
+    number_series_id: numberSeriesId.value,
     purpose: form.purpose,
     issue_date: form.issue_date,
     description: form.description.trim(),
@@ -669,6 +805,7 @@ async function save(post = true, next = false) {
       const res = await cashApi.createDocument(payload)
       // Zaúčtovaný doklad dostane dimenze přerazítkováním (mění se jen analytika).
       await docDims.save(res.id)
+      await attachPendingOriginal(res.id)
       toast.success(post ? t('cash.new_document') + ' ' + (res.doc_number ?? '') : t('common.saved'))
       for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
       if (next) {
@@ -719,16 +856,65 @@ async function startNextDocument(): Promise<void> {
   await nextTick()
   formEl.value?.querySelector<HTMLElement>('input:not([type="hidden"]):not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled])')?.focus()
 }
+
+// Telefon: nejdřív Typ, Pokladna, Datum a Částka; partner a dimenze pod „Další údaje"
+// (otevřené, když už nesou hodnotu nebo formulář hlásí chybu), lišta akcí přilepená
+// dole s Vystavit jako hlavní akcí a náhled zaúčtování sbalitelný. Mimo telefon beze změny.
+const isPhone = useIsPhone()
+const moreDetailsOpen = ref(false)
+const moreDetailsFilled = computed(() =>
+  !!(form.partner_name?.trim() || form.partner_ic?.trim() || form.partner_dic?.trim())
+  || Object.values(docDims.header.value ?? {}).some(v => v != null),
+)
+const moreDetailsNeeded = computed(() => moreDetailsFilled.value || !!error.value || saleOver10k.value)
+const showMoreDetails = computed(() => !isPhone.value || moreDetailsOpen.value || moreDetailsNeeded.value)
+const hasMoreDetails = computed(() => hasPartner.value || docDims.enabled.value)
+const postingPreviewOpen = ref(false)
+const showPostingPreview = computed(() => !isPhone.value || postingPreviewOpen.value)
+const phoneFooterActions = computed<RowAction[]>(() => [
+  {
+    key: 'post-and-next', label: t('cash.post_and_next'), icon: 'plus', variant: 'primary',
+    run: () => { void save(true, true) }, show: !isEdit.value,
+    disabled: !canSubmit.value, disabledReason: blockedReason.value ?? undefined,
+  },
+  {
+    key: 'draft', label: t('cash.save_draft'), icon: 'doc', variant: 'neutral',
+    run: () => { void save(false) },
+    disabled: !canSubmit.value, disabledReason: blockedReason.value ?? undefined,
+  },
+  { key: 'cancel', label: t('common.cancel'), icon: 'x', variant: 'neutral', to: '/accounting/cash' },
+])
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
+  <DocumentPreviewSplit :ctrl="preview" :show="!!previewSource && preview.open.value"
+    :src="previewSource?.src ?? null" :file-name="previewSource?.name" :doc-type="previewSource?.docType">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ isEdit ? t('cash.edit_document') : t('cash.new_document') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ form.doc_type === 'in' ? t('cash.type.in') : t('cash.type.out') }}</p>
       </div>
-      <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      <div class="flex flex-wrap items-center gap-3">
+        <template v-if="!isEdit && canAttachOriginal">
+          <input ref="originalInput" type="file" accept="application/pdf,image/*" class="hidden" data-test="cash-original-file" @change="onPickOriginal" />
+          <span v-if="pendingOriginal" class="text-sm text-neutral-600 truncate max-w-[16rem]" :title="t('cash.original.pending_hint')" data-test="cash-original-name">{{ pendingOriginal.name }}</span>
+          <button v-if="pendingOriginal" type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']" data-test="cash-original-remove" @click="setPendingOriginal(null)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('cash.original.remove') }}
+          </button>
+          <button v-else type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-test="cash-original-pick" @click="originalInput?.click()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('cash.original.pick') }}
+          </button>
+          <CapturePhotoButton v-if="isPhone && !pendingOriginal" data-test="cash-original-capture" @captured="setPendingOriginal" />
+        </template>
+        <button v-if="previewSource" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
+          :aria-pressed="preview.open.value" @click="preview.toggle()">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+          {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+        </button>
+        <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      </div>
     </div>
 
     <datalist :id="`${pageId}-cash-partners`">
@@ -737,9 +923,9 @@ async function startNextDocument(): Promise<void> {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Formulář -->
-      <div ref="formEl" :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
+      <div ref="formEl" :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4 max-md:p-4 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
         <!-- Hlavička -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-md:-order-2">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.type') }}</label>
             <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden w-full">
@@ -766,12 +952,15 @@ async function startNextDocument(): Promise<void> {
             <RouterLink v-if="registers.length === 0" to="/accounting/cash"
               class="text-xs text-primary-600 hover:text-primary-700 mt-1 inline-block">{{ t('cash.registers_manage') }}</RouterLink>
           </div>
+          <NumberSeriesSelect v-if="form.register_id !== '' && loadedStatus !== 'posted' && loadedStatus !== 'reversed'"
+            :scope="{ module: 'cash-documents', docType: form.doc_type, registerId: Number(form.register_id) }"
+            v-model="numberSeriesId" @option="seriesOption = $event" />
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
             <DateInput v-model="form.issue_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <p class="text-xs text-neutral-400 -mt-2">{{ t('cash.form.number_hint') }}</p>
+        <p class="text-xs text-neutral-400 -mt-2 max-md:-order-2" data-test="cash-number-hint">{{ seriesHintPrefix ? t('cash.form.number_hint_series', { series: seriesHintPrefix }) : t('cash.form.number_hint') }}</p>
 
         <!-- Účel -->
         <div>
@@ -805,7 +994,7 @@ async function startNextDocument(): Promise<void> {
                     {{ t('cash.form.proforma_badge') }}
                   </span>
                 </span>
-                <span class="text-neutral-500 font-mono">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining) }}</span>
+                <span class="text-neutral-500 font-mono whitespace-nowrap">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining, o.currency_code) }}</span>
               </li>
               <li v-if="unpaidTruncated" class="px-3 py-2 text-xs text-neutral-500 border-t border-neutral-100 bg-neutral-50">
                 {{ t('cash.form.unpaid_truncated', { count: UNPAID_PAGE_SIZE }) }}
@@ -814,9 +1003,16 @@ async function startNextDocument(): Promise<void> {
           </div>
         </template>
 
+        <button v-if="isPhone && hasMoreDetails" type="button" data-test="cash-more-details-toggle"
+          class="order-1 cursor-pointer min-h-10 inline-flex items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 text-sm font-medium text-neutral-700"
+          :aria-expanded="showMoreDetails" :disabled="moreDetailsNeeded" @click="moreDetailsOpen = !moreDetailsOpen">
+          {{ t('cash.form.more_details') }}
+          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showMoreDetails }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </button>
+
         <!-- Partner: (a) odběratel/dodavatel prodeje a nákupu, (b) plátce faktury (předvyplněný z faktury) -->
-        <template v-if="hasPartner">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <template v-if="hasPartner && showMoreDetails">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-md:order-1" data-test="cash-partner-fields">
             <div class="sm:col-span-1">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.form.partner') }}</label>
               <input v-model="form.partner_name" @input="onPartnerSearch" :list="`${pageId}-cash-partners`" type="text"
@@ -883,20 +1079,21 @@ async function startNextDocument(): Promise<void> {
           <input v-model="form.description" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
 
-        <div v-if="docDims.enabled.value" data-test="cash-header-dimensions">
+        <div v-if="docDims.enabled.value && showMoreDetails" class="max-md:order-1" data-test="cash-header-dimensions">
           <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
           <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
           <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
         </div>
 
         <!-- Částka + DPH přepínač -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end max-md:-order-1">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">
               {{ t('cash.form.total_incl') }}
               <span v-if="isForeign" class="font-mono text-primary-600">({{ registerCurrency }})</span>
             </label>
             <input v-model.number="form.total_amount" type="number" step="0.01" min="0" :readonly="amountReadonly"
+              :inputmode="isPhone ? 'decimal' : undefined" data-test="cash-total-amount"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right"
               :class="{ 'bg-neutral-100': amountReadonly }" />
             <p v-if="isForeign" class="mt-1 text-xs text-neutral-500">{{ t('cash.form.foreign_hint') }}</p>
@@ -916,6 +1113,37 @@ async function startNextDocument(): Promise<void> {
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- Korunová úhrada cizoměnového dokladu: kurz dokladu, přepočet a kurzový rozdíl. -->
+        <div v-if="fxSettlement" class="max-md:-order-1 rounded-md border px-3 py-2 text-sm space-y-1"
+          :class="fxSettlement.valid ? 'border-primary-200 bg-primary-50 text-primary-800' : 'border-warning-200 bg-warning-50 text-warning-800'"
+          data-test="cash-fx-settlement">
+          <p class="font-medium">{{ t('cash.form.fx_settlement_title') }}</p>
+          <p class="font-mono text-xs">
+            {{ t('cash.form.fx_settlement_rate', { rate: fxSettlement.rate, currency: fxSettlement.currency }) }}
+            · {{ t('cash.form.fx_settlement_expected', {
+              foreign: formatMoney(fxSettlement.remaining, fxSettlement.currency),
+              czk: formatMoney(fxSettlement.expected),
+            }) }}
+          </p>
+          <p class="text-xs">
+            {{ form.purpose === 'purchase_payment'
+              ? t('cash.form.fx_settlement_purchase_hint', { tolerance: formatMoney(fxSettlement.tolerance) })
+              : t('cash.form.fx_settlement_invoice_hint', { tolerance: formatMoney(fxSettlement.tolerance) }) }}
+          </p>
+          <p v-if="!fxSettlement.valid" class="text-xs font-medium" data-test="cash-fx-out-of-tolerance">
+            {{ t('cash.form.fx_settlement_out_of_tolerance') }}
+          </p>
+          <p v-else-if="fxSettlement.partialForeign !== null" class="text-xs font-medium">
+            {{ t('cash.form.fx_settlement_partial', { foreign: formatMoney(fxSettlement.partialForeign, fxSettlement.currency) }) }}
+          </p>
+          <p v-else class="text-xs font-medium font-mono" data-test="cash-fx-difference">
+            {{ fxSettlement.diff <= 0
+              ? t('cash.form.fx_settlement_none')
+              : t(fxSettlement.gain ? 'cash.form.fx_settlement_gain' : 'cash.form.fx_settlement_loss', { amount: formatMoney(fxSettlement.diff) }) }}
+          </p>
+          <p v-if="fxSettlement.valid && fxSettlement.diff > 0" class="text-xs opacity-80">{{ t('cash.form.fx_settlement_estimate') }}</p>
         </div>
 
         <!-- Valutová pokladna: ruční kurz. Bez tohohle pole byl doklad s chybějícím
@@ -985,9 +1213,21 @@ async function startNextDocument(): Promise<void> {
           {{ t('cash.eet.refund_info', { amount: formatMoney(eetRefundAmount) }) }}
         </div>
 
-        <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
+        <div v-if="error" class="text-sm text-danger-500 max-md:order-2">{{ error }}</div>
 
-        <div class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
+        <div v-if="isPhone" data-test="cash-phone-footer"
+          class="order-2 sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 -mx-1 rounded-lg border border-neutral-200 bg-surface p-3 shadow-lg flex flex-col gap-1.5">
+          <div class="flex items-center gap-2 [&_button]:min-h-10">
+            <button @click="save(true)" :disabled="!canSubmit" :class="btnFilled('primary')" class="flex-1 justify-center"
+              :title="disabledTitle(!canSubmit, blockedReason)" data-test="cash-phone-post">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ saving ? t('common.saving') : t('cash.post_document') }}
+            </button>
+            <RowActionsMenu :actions="phoneFooterActions" :inline-count="0" />
+          </div>
+          <p v-if="blockedReason" :class="BTN_DISABLED_NOTE">{{ blockedReason }}</p>
+        </div>
+        <div v-else class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
           <div class="flex flex-wrap justify-end gap-2">
             <RouterLink to="/accounting/cash" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
             <button @click="save(false)" :disabled="!canSubmit" :class="btnOutline('neutral')"
@@ -1013,8 +1253,14 @@ async function startNextDocument(): Promise<void> {
       <!-- Live náhled zaúčtování (jen podvojné účetnictví — v daňové evidenci není journal) -->
       <div v-if="!isTaxEvidence" class="lg:col-span-1">
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 lg:sticky lg:top-20">
-          <h3 class="text-sm font-semibold text-neutral-700 mb-3">{{ t('cash.preview.title') }}</h3>
-          <table class="w-full text-sm">
+          <button v-if="isPhone" type="button" data-test="cash-preview-posting-toggle" :aria-expanded="postingPreviewOpen"
+            class="cursor-pointer w-full min-h-10 -my-2 flex items-center justify-between gap-2 text-sm font-semibold text-neutral-700"
+            @click="postingPreviewOpen = !postingPreviewOpen">
+            {{ t('cash.preview.title') }}
+            <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': postingPreviewOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <h3 v-else class="text-sm font-semibold text-neutral-700 mb-3">{{ t('cash.preview.title') }}</h3>
+          <table v-if="showPostingPreview" class="w-full text-sm max-md:mt-3" data-test="cash-preview-posting">
             <thead class="text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="text-left font-medium py-1">{{ t('cash.col.number') }}</th>
@@ -1047,5 +1293,8 @@ async function startNextDocument(): Promise<void> {
         </div>
       </div>
     </div>
-  </div>
+
+    <LinkedDocumentsPanel v-if="isEdit && auth.canRead('documents')" class="mt-4 block" entity-type="cash_document"
+      :entity-id="editId" uploadable :title="t('linked_documents.title')" @docs="linkedDocs = $event" />
+  </DocumentPreviewSplit>
 </template>

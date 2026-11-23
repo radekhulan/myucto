@@ -1,6 +1,6 @@
 # 52. Účetní deník
 
-> Chronologický seznam všech účetních zápisů firmy v podvojném účetnictví. Kapitola je návod, jak v deníku zápis najít, založit ruční zápis, opravit nebo stornovat chybný zápis, doúčtovat doklady z jiného systému, vést ostatní pohledávky a závazky a interní doklady.
+> Chronologický seznam všech účetních zápisů firmy v podvojném účetnictví. Kapitola je návod, jak v deníku zápis najít, založit ruční zápis, opravit nebo stornovat chybný zápis, hromadně přeúčtovat doklady, doúčtovat doklady z jiného systému, vést ostatní pohledávky a závazky a interní doklady.
 
 ## 52.1 Kdy to potřebujete
 
@@ -9,8 +9,12 @@ Kapitolu otevřete, když:
 - hledáte zápis ke konkrétní faktuře, platbě nebo dokladu,
 - potřebujete zaúčtovat něco, co nevzniklo z faktury, banky ani pokladny (ruční zápis),
 - jste zjistili chybný zápis a potřebujete ho opravit nebo stornovat,
+- stejný účet je chybně na mnoha dokladech a chcete ho změnit najednou,
+- potřebujete na mnoha dokladech nebo zápisech najednou nastavit dimenze (středisko, zakázku, činnost), změnit předkontaci nebo je smazat,
 - do MyÚčta přišly doklady z jiného systému a nejsou v deníku,
+- máte mnoho nespárovaných bankovních pohybů stejného druhu (výplaty mezd, platby z terminálu),
 - potřebujete deník vytisknout nebo předat auditorovi (PDF, XLSX),
+- potřebujete soupisku dokladů k vyúčtování dotace nebo projektu (XLSX),
 - potřebujete zamknout účtování po podání DPH,
 - evidujete nájemné, kauci, půjčku, pojistné nebo jinou pohledávku či závazek bez faktury.
 
@@ -26,14 +30,17 @@ Deník je dostupný jen firmám v podvojném účetnictví. Firmy na [daňové e
 | při přesunu peněz mezi účty | Převod přes 261 | **Převod banka ↔ pokladna**, [§ 52.5](#525-krok-za-krokem-prevod-mezi-ucty-pres-261) |
 | u opakovaných zápisů | Použít šablonu, importovat CSV | **Nový ze šablony**, [§ 52.6](#526-krok-za-krokem-rucni-zapis-ze-sablony-a-import-z-csv) |
 | když je zápis špatně | Opravit, stornovat, přeúčtovat | [§ 52.7](#527-krok-za-krokem-oprava-nebo-storno-zapisu) a [§ 52.8](#528-krok-za-krokem-preuctovani-z-dokladu) |
+| když se mění mnoho dokladů najednou | Přeúčtovat, nastavit dimenze, změnit předkontaci nebo poznámku, smazat vybrané záznamy, opravit VS bankovních pohybů | **…** → **Hromadné akce** v seznamu, [§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech) |
+| když je stejný účet špatně na mnoha dokladech | Hromadně přeúčtovat podle filtru | `Účetnictví → Přeúčtovat doklady`, [§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu) |
 | po importu z jiného systému | Doúčtovat doklady | `Účetnictví → Doúčtovat doklady`, [§ 52.9](#529-krok-za-krokem-douctovani-dokladu-z-jineho-systemu) |
+| u mnoha nespárovaných bankovních pohybů | Zaúčtovat na protiúčet nebo spárovat s jedním dokladem | box **Bankovní pohyby podle filtru**, [§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru) |
 | po podání DPH | Zamknout účtování k datu | [§ 52.11](#5211-krok-za-krokem-zamek-uctovani-k-datu) |
 | u nájemného, kauce, půjčky | Vést ostatní pohledávky a závazky | `Účetnictví → Ostatní pohledávky a závazky`, [§ 52.12](#5212-krok-za-krokem-ostatni-pohledavky-a-zavazky) |
 
 ## 52.2 Než začnete
 
 1. **Podvojné účetnictví.** Deník je jen pro podvojné účetnictví. Firmy na daňové evidenci modul v menu nevidí.
-2. **Právo zápisu.** Ruční zápis, storno, úprava popisu a přílohy vyžadují právo zápisu (role účetní nebo administrátor). Role jen pro čtení vidí vše, ale nic nemění. Znovuotevření období a zámek účtování k datu smí jen administrátor ([§ 52.14.12.1](#5214121-kdo-smi-co)).
+2. **Právo zápisu.** Ruční zápis, storno, úprava popisu a přílohy vyžadují právo zápisu (role účetní nebo administrátor). Role jen pro čtení vidí vše, ale nic nemění. Znovuotevření období vyžaduje právo **Spravovat období** a přihlášení v aplikaci; změna zámku toto právo nebo interní **Posunout zámek účtování k datu** ([§ 52.14.12.1](#5214121-kdo-smi-co)).
 3. **Otevřené účetní období.** Zaúčtovat, stornovat ani přepsat zápis lze jen do otevřeného období. Existenci a stav období ověříte v [Uzávěrce](72_Uzaverka.md).
 4. **Předkontace.** Deník nepředkontovává. Které účty se doklad zaúčtuje, určují předkontace ([Účtový rozvrh](66_Ucetni_osnova.md), [Předkontace](73_Ucetni_nastroje.md#735-krok-za-krokem-predkontace)).
 
@@ -47,11 +54,12 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 1. Otevřete `Účetnictví → Účetní deník`. Zápisy jsou seřazené od nejnovějších a načítají se po 50 (další při posunu dolů, nebo tlačítkem **Načíst další**).
 2. Nad tabulkou zúžte výběr filtry: **Číslo dokladu**, **Hledat** (hledá v čísle dokladu, popisu a údajích zdroje, kód účtu jako `221.400` omezí výsledky na pohyby účtu), **Období**, **Datum od / Datum do**, **Zdroj**, **Původ**, **Účet od / Účet do**, **Částka od / Částka do**, **Stav**, **Storno** a **Nesrovnalosti doklad ↔ deník**. Filtry zrušíte odkazem **Zrušit filtry**.
 3. Řadit lze kliknutím na záhlaví sloupce. První kliknutí řadí sestupně, druhé vzestupně a třetí vrátí výchozí pořadí.
-4. Kliknutím na řádek zápis rozbalte. Uvidíte řádky MD a Dal, součet **Celkem**, popis, přílohy, poznámky, historii a u automatických zápisů panel **Proč se to stalo**.
+4. Kliknutím na řádek zápis rozbalte. Po řádcích se pohybujete i klávesnicí: šipkou dolů a nahoru (nebo **J** a **K**) přejdete na další a předchozí zápis, **Enter** ho rozbalí nebo sbalí, **X** ho při zapnutých hromadných akcích zaškrtne a **Esc** zruší výběr. Uvidíte řádky MD a Dal, součet **Celkem**, popis, přílohy, poznámky, historii a u automatických zápisů panel **Proč se to stalo**.
 5. Kliknutím na **Zdroj** otevřete postranní souhrn zdrojového dokladu. Z něj přejdete do plného detailu faktury, bankovního výpisu, pokladny, karty majetku nebo vypořádání.
 6. V panelu **Souvisí** vidíte protějšek (faktura a její úhrada) a můžete přejít na **Náhled**, **Zápis #…** nebo **Otevřít doklad**.
 7. Kliknutím na kód nebo název účtu v rozbaleném zápisu otevřete opis pohybů účtu.
 8. Chcete-li deník předat, klikněte na **Export PDF** nebo **Export XLSX**. Export respektuje aktuální filtry a je omezený na 5 000 zápisů.
+9. Potřebujete-li seznam dokladů k vyúčtování (například dotace podle dimenze), nastavte filtr, v nabídce **…** vyberte **Soupiska dokladů**, zkontrolujte rozsah účtů soupisky (bez rozsahu ve filtru se nabídne 5 až 5, tedy nákladové účty) a klikněte na **Stáhnout XLSX** nebo stiskněte Enter. Co soupiska obsahuje, popisuje [§ 52.14.3.4](#521434-export-pdf-xlsx).
 
 **Jak poznáte, že je hotovo:** Vidíte hledaný zápis se stavem **Zaúčtováno** a jeho zdroj. Koncept se označí badge **Koncept**.
 
@@ -61,7 +69,7 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 ## 52.4 Krok za krokem: ruční zápis
 
 1. Na hlavní stránce deníku klikněte na **Ruční zápis**. Otevře se formulář **Ruční účetní zápis**.
-2. Vyplňte **Datum zápisu**. Musí spadat do existujícího a otevřeného účetního období.
+2. Vyplňte **Datum zápisu**. Musí spadat do otevřeného účetního období. Chybějící období může aplikace založit automaticky podle pravidel [§ 72.12.2](72_Uzaverka.md#72122-automaticky-doplnena-obdobi); uzavřené období tím neotevře.
 3. Volitelně vyplňte **Číslo dokladu** (prázdné pole se doplní z číselné řady, je-li zapnutá volba **Automatická čísla dokladů ručních zápisů (řada ID)** na stránce `Nástroje → Uzávěrka`) a **Popis** (nejvýš 255 znaků).
 4. V tabulce řádků vyplňte **Kód účtu** (našeptávač nabízí aktivní účty firemní osnovy), stranu **MD** nebo **Dal** a kladnou **Částku** v Kč. Volitelně zvolte **Středisko**.
 5. Další řádek přidáte tlačítkem **+ Přidat řádek**, řádek odeberete křížkem.
@@ -72,6 +80,10 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 10. Zapisujete-li víc podobných zápisů za sebou, klikněte místo toho na **Uložit a nový**. Řádky se vyčistí, datum a popis zůstanou.
 
 **Jak poznáte, že je hotovo:** Zápis je v seznamu deníku se stavem **Zaúčtováno**. Tlačítko **Zaúčtovat** je aktivní, až když je zápis vyrovnaný a žádný řádek nemá prázdný účet nebo nekladnou částku.
+
+> [!NOTE]
+> Má-li firma k datu zápisu zapnutý jednoduchý zápis, místo tabulky řádků zadáváte dvojice Účet MD, Účet Dal a Částka
+> ([§ 52.14.16.2](#5214162-krok-za-krokem-rucni-zapis-po-dvojicich)). Firma se složeným zápisem vidí formulář beze změny.
 
 > [!TIP]
 > Opakuje-li se zápis, klikněte v rozbaleném zápisu na **Kopírovat jako nový**. Otevře se formulář s týmiž řádky a dnešním datem. Příklad ručního zápisu je v [§ 52.14.5.5](#521455-priklad-rucni-zapis-se-dvema-radky).
@@ -118,11 +130,16 @@ U aktivního zápisu ostatní pohledávky nebo závazku lze v otevřeném obdob�
 Zdrojová položka se vrátí do konceptu, její dokumenty a splátkový kalendář zůstanou připojené.
 Případné opakování se pozastaví. Spárované úhrady je nutné před smazáním odpojit.
 Akce vyžaduje oprávnění k zápisu do deníku, ostatním položkám a jejich účtování.
+Chybnou ostatní položku nebo interní doklad i se zápisem smažete za stejných pravidel přímo
+v detailu dokladu akcí **Smazat i se zápisem** ([§ 52.14.14.6](#5214146-storno-a-preuctovani),
+[§ 52.14.15.7](#5214157-smazani-zauctovaneho-dokladu-a-uprava-poznamky)).
 
 **Jak poznáte, že je hotovo:** Původní zápis má badge **Stornováno** a odkaz na stornující zápis, nebo je nahrazený opraveným zápisem. Doklad lze opět zaúčtovat.
 
 > [!WARNING]
 > Do uzavřeného účetního období nelze stornovat ani přepsat zápis. Opravu řeší znovuotevření knih v [Uzávěrce](72_Uzaverka.md) (do schválení závěrky), ne přímé storno. Zápis lze stornovat jen jednou.
+>
+> Zápisy uzávěrky a otevření účtů, které založila aplikace (krok Otevření nového roku, počáteční stavy), deník stornovat nenabízí a ruční storno přes API se odmítne. Vrací je průvodce v [Uzávěrce](72_Uzaverka.md) tlačítkem **Vzít krok zpět** (u otevření roku **Vzít zpět otevření roku**). Otevírací zápis převzatý z jiného programu stornovat jde, chybně převzatý počáteční stav tak opravíte stornem a novým zápisem.
 
 ## 52.8 Krok za krokem: přeúčtování z dokladu
 
@@ -136,9 +153,111 @@ Přeúčtování změní jen kontaci. DPH se jím nemění, daňový režim se o
 
 **Jak poznáte, že je hotovo:** Zápis má novou kontaci. V otevřeném období se přepsal na místě, v uzavřeném nebo zamčeném vznikl storno a nový zápis. Oba zůstanou v deníku kvůli auditu.
 
+U faktury se změněný účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet vedly, takže ho další úprava faktury nevrátí. Platí to pro výměnu jednoho účtu za jiný se stejnou částkou. Protiúčet (311, 321), DPH a zaokrouhlení se na položky nepřenášejí. Stejný účet na mnoha dokladech najednou změníte hromadně, viz [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
+
 Doklad převzatý z jiného programu má skupinu jednoho nebo více vlastních účetních zápisů, například zvlášť základ a DPH. Tato skupina je oddělená od informativních vazeb **Souvisí**. Opakované automatické zaúčtování převzatou skupinu nepřepisuje. Při **Přeúčtování** dialog vypíše všechny její členy a předvyplní řádky, které jsou právě v deníku. Po potvrzení vzniknou protizápisy ke všem původním členům a jeden nový předpis. Úhrady a pouze související zápisy zůstanou zachované. Změní-li se některý člen během otevřeného dialogu, obnovte náhled. Storno nebo smazání zdrojového dokladu rovněž zruší celou skupinu zaúčtování.
 
 Po ručním stornu jednoho člena zůstává doklad zaúčtovaný, dokud má skupina alespoň jeden aktivní zaúčtovaný zápis. Kontroly integrity a doúčtování proto neoznačují takový doklad za nezaúčtovaný. Automatická reklasifikace nebo dorovnání zúčtování zálohy rozdělenou skupinu nepřepíše po jednom členu; opravu proveďte přes **Přeúčtovat** na detailu celého dokladu.
+
+### 52.8.1 Krok za krokem: hromadné přeúčtování dokladů
+
+Použijte, když je stejný účet chybně na desítkách až stovkách dokladů. Například přijaté faktury jednoho dodavatele se celý rok účtovaly na 518100 a patří na 518300, nebo platby zaúčtované z banky na 315001 patří na 315002. Stránka dělá totéž co **Přeúčtovat** na jednom dokladu, jen pro všechny doklady podle filtru najednou. DPH se nemění.
+
+1. Otevřete `Účetnictví → Přeúčtovat doklady`. Z účetního deníku vyfiltrovaného na jeden účet se sem dostanete tlačítkem **Přeúčtovat podle filtru…**, které předvyplní účet a období.
+2. V části **Co přeúčtovat** vyplňte **Účet z** a **Účet na** (musí se lišit), **Strana** (**Obě strany**, **Má dáti** nebo **Dal**) a **Období**.
+3. V poli **Zdroj** nechte zaškrtnuté agendy, kterých se oprava týká: **Vydané faktury**, **Přijaté faktury**, **Bankovní pohyby**, **Ruční a interní zápisy**, **Pokladna**. Výběr můžete zúžit polem **Text** (hledá v čísle dokladu a popisu), rozsahem **Částka řádku**, polem **Odběratel nebo dodavatel** (jen faktury a přijaté faktury), **Předkontace na dokladu** (doklad má položku s touto předkontací), rozsahem **Číslo dokladu** od-do a hodnotou dimenze (zápis má řádek s touto hodnotou nebo s hodnotou pod ní).
+4. Zvolte **Způsob**:
+   - **Opravit zápis (jen kde to jde)** přepíše zápis na místě se stejným číslem. Doklady, u kterých to období nedovolí, se vynechají s důvodem.
+   - **Opravit, jinak storno a nový zápis** takové doklady stornuje a zaúčtuje znovu.
+5. Pod formulářem se průběžně ukazuje **Odpovídá N zápisům** s rozpisem podle zdroje. Nad limit 500 dokladů stránka hlásí **Nad limit 500, zužte výběr.** a běh nanečisto nejde spustit. Zápisy na účtu z jiných agend (mzdy, majetek, uzávěrka, zápočty) se jen spočítají, přeúčtování je nemění.
+6. Klikněte na **Zkusit nanečisto**. Úloha běží na pozadí a nic nezapíše. **Výsledek nanečisto** má záložky **Změní se**, **Vynechané** a **Beze změny**. U každého dokladu vidíte ve sloupci **Změna** původní a nový účet, ve sloupci **Způsob** opravu, nebo storno a nový zápis i s datem, a u vynechaných **Důvod**.
+7. Doklady, které přeúčtovat nechcete, odškrtněte v záložce **Změní se**. Políčko v záhlaví tabulky zahrne nebo vyřadí celou stránku. Souhrn ukazuje **vyřazeno ručně: N**.
+8. Klikněte na **Přeúčtovat** a potvrďte dialog **Přeúčtovat zápisy**, který vypíše počet, oba účty a způsob. Přeúčtuje se přesně výsledek běhu nanečisto bez odškrtnutých dokladů. Úloha běží na pozadí a stránku můžete zavřít. Tlačítkem **Zastavit** běh ukončíte, doklady přeúčtované do té chvíle zůstanou.
+9. Projděte **Výsledek přeúčtování** v záložkách **Provedené**, **Chyby**, **Vynechané**, **Vyřazené** (ručně odškrtnuté) a **Beze změny**. Výsledek kteréhokoli běhu stáhnete tlačítkem **Export CSV**. Soubor má sloupce doklad, datum, popis, částka, stav, původní a nový účet, způsob a důvod.
+10. Přeúčtovali jste omylem? V **Posledních bězích** klikněte u přeúčtování na **Vrátit**. Ostrý běh jde vrátit jednou. Doklady, které od přeúčtování někdo změnil, se nevrátí a vypíšou se s důvodem.
+
+**Co se s dokladem stane:**
+
+<!-- cols: 34 33 33 -->
+| Doklad a stav | Opravit zápis (jen kde to jde) | Opravit, jinak storno a nový zápis |
+|---|---|---|
+| Vydaná nebo přijatá faktura, bankovní pohyb v otevřeném období a nezamčeném datu | Oprava na místě. Zápis má stejné číslo, původní podoba zůstane v historii zápisu. | Stejně, oprava na místě. |
+| Totéž v zamčeném datu, přesun mezi účty bez daňového dopadu | Oprava na místě. | Stejně, oprava na místě. |
+| Uzavřené období, zamčené datum se změnou s daňovým dopadem, nebo už stornovaný zápis | Vynechá se s důvodem. | Storno a nový zápis. K původnímu datu, kde to jde, jinak k dnešnímu dni, datum je vidět ve sloupci **Způsob**. |
+| Jako výše, ale do dnešního data účtovat nejde (zamčené datum nebo uzavřené období) | Vynechá se. | Vynechá se s důvodem **Zamčené datum** nebo **Uzavřené účetní období**. |
+| Doklad převzatý z jiného programu s více zápisy | Vynechá se s důvodem **Doklad má více zápisů, jde jen stornem**. | Storno všech zápisů skupiny a jeden nový zápis. |
+| Ruční zápis, interní doklad, pokladní doklad | Oprava na místě, jen v otevřeném období. | Stejně, oprava na místě. Storno se u nich nepoužije. |
+
+Spolu se zápisem se změní i zdrojový doklad, aby změnu nevrátila jeho další úprava:
+
+- U vydané a přijaté faktury se nový účet zapíše na položky dokladu, které vedly na původní účet.
+- U interního dokladu se nový účet zapíše do jeho řádků na téže straně.
+- U pokladního dokladu se změní jeho protiúčet.
+- U bankovního pohybu zůstává bankovní účet pohybu (221) beze změny.
+
+**Proč se doklad vynechá** (sloupec **Důvod**):
+
+<!-- cols: 38 62 -->
+| Důvod | Co to znamená |
+|---|---|
+| **Uzavřené účetní období** | Zápis leží v uzavřeném období. Zvolte **Opravit, jinak storno a nový zápis**, nebo období znovu otevřete v [Uzávěrce](72_Uzaverka.md). U ručních, interních a pokladních zápisů storno nepomůže. |
+| **Zamčené datum** | Datum je za zámkem účtování a změna by měla daňový dopad ([§ 52.11](#5211-krok-za-krokem-zamek-uctovani-k-datu)). |
+| **Zápis už je stornovaný** | Zápis někdo stornoval, nebo interní doklad už není zaúčtovaný. |
+| **Doklad má více zápisů, jde jen stornem** | Doklad převzatý z jiného programu má skupinu zápisů (například zvlášť základ a DPH). Zvolte storno a nový zápis. Ruční zápis, který do takové skupiny patří, se hromadně nepřeúčtuje. |
+| **Opravit na místě nejde, zvolte storno** | Zápis nejde přepsat na místě a vybrali jste jen opravu. |
+| **Účet není na položkách ani v protiúčtu dokladu, změna by vydržela jen do další úpravy dokladu** | U faktury jde měnit jen účet z položek (výnos, náklad, majetek), ne 311/321, DPH ani zaokrouhlení. U pokladního dokladu jen jeho protiúčet, a to jen u dokladu, který neuhrazuje fakturu. |
+| **Bankovní účet pohybu se měnit nedá** | Účet z nebo na je 221, nebo jde o avízo či ignorovaný pohyb. |
+| **Pokladní účet 211 se nemění** | Pokladní účet se hromadně nepřeúčtovává. |
+| **Zápis se po běhu nanečisto změnil** | Mezi během nanečisto a ostrým během doklad někdo upravil. Spusťte nový běh nanečisto. |
+| **Zápis už není zaúčtovaný** | Zápis mezitím někdo smazal nebo vrátil do konceptu. |
+
+**Jak poznáte, že je hotovo:** Ostré přeúčtování má v **Posledních bězích** stav **Hotovo** a záložka **Chyby** je prázdná. Skončil-li některý doklad chybou, má běh stav **Hotovo s upozorněními**. V deníku mají zápisy nový účet a každý přeúčtovaný doklad má v historii záznam s číslem běhu.
+
+Spustit přeúčtování smí jen správce firmy (a superadmin). Žádná jiná role ho nedostane, ani v editoru rolí. Ostatní uživatelé stránku vidí s neaktivním formulářem a bez tlačítek **Zkusit nanečisto** a **Přeúčtovat**. Pravidla jsou v [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
+
+Doklady nebo zápisy, které máte vybrané v seznamu, přeúčtujete stejně z nabídky **Hromadné akce** přímo v seznamu ([§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech)).
+
+### 52.8.2 Krok za krokem: hromadné akce v seznamech
+
+Použijte, když chcete změnit mnoho záznamů, které máte před sebou v seznamu: například všem fakturám jednoho dodavatele nastavit středisko, stovkám zápisů v deníku doplnit zakázku, změnit předkontaci přijatých faktur, doplnit poznámku na faktury, opravit variabilní symbol nespárovaných bankovních pohybů, nebo smazat doklady po zkušebním importu. Akce je v seznamech **Účetní deník**, **Vydané faktury**, **Přijaté faktury** a v bance na záložkách **Všechny pohyby** a **K zaúčtování**.
+
+1. V seznamu nastavte filtr tak, aby ukazoval jen záznamy, které chcete změnit. Případně je zaškrtněte. V účetním deníku zaškrtávací políčka zapnete v nabídce **…** volbou **Zapnout hromadné akce**. Pak má každý řádek zaškrtávací políčko a v záhlaví tabulky se zaškrtnou všechny načtené řádky. Volba **Vypnout hromadné akce** políčka skryje a výběr zruší.
+2. Otevřete nabídku **…** v záhlaví seznamu a zvolte **Hromadné akce**. Máte-li zaškrtnuté řádky, stejné tlačítko **Hromadné akce s vybranými (N)** je i v liště výběru dole.
+3. V části **Na co akci použít** zvolte **Vybrané (N)**, nebo **Všech N podle filtru**. Volba podle filtru vezme přesně to, co seznam s aktuálním filtrem ukazuje. Nad 500 záznamů akce nejde spustit, zužte filtr.
+4. Zvolte **Operaci**. Nedostupná operace ukáže důvod (například chybí právo nebo firma nemá zapnuté dimenze).
+   - **Přeúčtovat účet**: **Z účtu**, **Na účet**, **Strana** a **Způsob změny** jako na stránce Přeúčtovat doklady ([§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu)), jen nad vybranými záznamy.
+   - **Nastavit dimenze**: u každého typu dimenze (Středisko, Zakázka, Činnost a další typy firmy) zvolte **Beze změny**, **Přepsat**, **Jen kde je prázdné** nebo **Vymazat** a u prvních dvou hodnotu. Najednou jde změnit víc typů. U faktur zvolte, **Kam dimenze zapsat**: **Hlavička dokladu** (platí pro všechny řádky zápisu), nebo **Jen položky** (v deníku jen nákladové a výnosové řádky). V deníku můžete změnu omezit polem **Jen řádky na účtech začínajících**, například `5, 6`.
+   - **Změnit předkontaci**: zvolte **Novou předkontaci** a **Způsob změny**. Jen u vydaných a přijatých faktur.
+   - **Smazat**: v deníku zvolte, co se stane se zápisem, který smazat nejde: **Přeskočit**, nebo **Stornovat**.
+   - **Změnit poznámku**: zvolte **Poznámka nad položkami** nebo **Poznámka pod položkami**, způsob **Přepsat**, **Připojit na konec** nebo **Vymazat** a text. Doklady, které už nejsou koncept, změní jen zaškrtnutá volba **Upravit i vystavené doklady**. Jen u vydaných a přijatých faktur.
+   - **Opravit variabilní symbol**: zadejte **Stálou hodnotu**, nebo zvolte **Podle vzoru** a zadejte **Vzor** se značkami, které se doplní z pohybu ([§ 52.14.18](#521418-hromadne-akce-v-seznamech)). Jen u bankovních pohybů.
+5. Klikněte na **Spustit nanečisto**. Úloha běží na pozadí a nic nezmění. Výsledek má záložky **Změní se**, **Vynechané** a **Beze změny**. Sloupec **Před a po** ukazuje původní a nový stav (účty, hodnoty dimenzí na hlavičce, položkách a řádcích zápisu, předkontaci), u vynechaných je **Důvod**.
+6. Záznamy, které měnit nechcete, odškrtněte v záložce **Změní se**.
+7. Klikněte na **Provést** a potvrďte. U operace **Smazat** napište do pole počet záznamů, které se smažou; tlačítko **Smazat N záznamů** se odemkne, až počet sedí. Provede se přesně výsledek běhu nanečisto bez odškrtnutých záznamů a jen u záznamů, které se od té doby nezměnily.
+8. Projděte výsledek v záložkách **Provedené**, **Chyby**, **Vynechané**, **Vyřazené** a **Beze změny**. Tlačítkem **Stáhnout CSV** si výsledek kteréhokoli běhu uložíte.
+9. Omyl? V části **Poslední běhy** klikněte u provedení na **Vrátit**. Vrátit jde přeúčtování, dimenze, předkontaci, poznámku i variabilní symbol, smazání ne. Záznamy, které od provedení někdo změnil, se nevrátí a vypíšou se s důvodem.
+
+**Jak poznáte, že je hotovo:** Provedení má v **Posledních bězích** stav **Hotovo** a záložka **Chyby** je prázdná. Každý změněný záznam má v auditní stopě záznam s číslem úlohy a stavem před a po. Pravidla jednotlivých operací jsou v [§ 52.14.18](#521418-hromadne-akce-v-seznamech).
+
+Nespárované bankovní pohyby se hromadně zaúčtují v boxu **Bankovní pohyby podle filtru** ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)), odkaz na něj je v seznamu nezaúčtovaných pohybů banky. **Hromadné akce** v seznamu bankovních pohybů nabízejí opravu variabilního symbolu ([Banka](29_Banka.md)).
+
+### 52.8.3 Krok za krokem: členění DPH a položky dokladů
+
+Použijte, když import (iDoklad, ISDOC, e-shop) přinesl stovky faktur se špatným zařazením do přiznání k DPH a kontrolního hlášení, typicky položku **Místní poplatek z pobytu**, která předmětem DPH není, nebo e-shopové doklady s chybným kódem. Změní se jen položky, které vyberete; ostatní položky týchž faktur (ubytování, parkování) zůstanou, jak jsou.
+
+1. Otevřete **Vydané faktury**, nebo **Přijaté faktury**, v nabídce **…** zvolte **Hromadné akce** a nahoře přepněte z **Doklady** na **Položky dokladů**.
+2. Vyplňte filtr položek: **Text** (část popisu, například `místní poplatek`; velikost písmen ani diakritika nehrají roli), **Odběratel** nebo **Dodavatel**, **Období** podle DUZP nebo data vystavení, současné **Členění DPH**, **Sazbu DPH**, **Účet**, **Kód zboží** a **Číslo dokladu**. Seznam ukáže číslo dokladu, partnera, datum, text, částku a současné členění.
+3. Zaškrtněte položky, které chcete změnit, nebo zvolte **Všech N podle filtru**. Najednou jde zpracovat nejvýš 500 položek, víc filtr zúžte (například po měsících).
+4. Zvolte operaci:
+   - **Změnit členění DPH**: vyberte kód členění. Tlačítko **Mimo předmět DPH** nastaví kód `mimo` a sazbu 0 %, položka pak nejde do přiznání ani do kontrolního hlášení. Sazbu DPH můžete u položek změnit i samostatně.
+   - **Přeúčtovat účet**: položky dostanou zvolený účet výnosu, resp. nákladu.
+   - **Nastavit dimenze**: dimenze dostanou jen vybrané položky.
+5. Klikněte na **Spustit nanečisto**. Výsledek je po dokladech: u každého vidíte měněné položky před a po (kód, sazba, částka s DPH) a součet dokladu. Doklad v podaném období DPH, uzavřeném období nebo zamčeném datu je v záložce **Vynechané** s důvodem.
+6. Klikněte na **Provést** a potvrďte. Provedení i vrácení probíhá stejně jako u ostatních hromadných akcí ([§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech)).
+
+Členění DPH všech položek vybraných dokladů změníte i v režimu **Doklady** operací **Změnit členění DPH**, sazbu tam měnit nejde.
+
+**Jak poznáte, že je hotovo:** Provedení má v **Posledních bězích** stav **Hotovo**. Položky mají nové členění v detailu faktury, přiznání k DPH a kontrolní hlášení za otevřené období je vykazují podle nového kódu a zaúčtované doklady mají přepočtený zápis. Pravidla jsou v [§ 52.14.19](#521419-cleneni-dph-a-polozky-dokladu).
 
 ## 52.9 Krok za krokem: doúčtování dokladů z jiného systému
 
@@ -154,6 +273,27 @@ Automatika účtování se spouští při vzniku dokladu. Doklad, který už v s
 
 Podrobnosti jsou v [§ 52.14.13](#521413-douctovani-nezauctovanych-dokladu).
 
+Doúčtování účtuje jen vydané a přijaté faktury. Nespárované bankovní pohyby zpracujete v boxu **Bankovní pohyby podle filtru** na téže stránce ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)).
+
+### 52.9.1 Krok za krokem: bankovní pohyby podle filtru
+
+Box **Bankovní pohyby podle filtru** pod doúčtováním pracuje s pohyby z výpisů, které jsou nespárované a nezaúčtované. Odkaz **Zpracovat hromadně podle filtru** u počtu čekajících bankovních pohybů na box odskroluje.
+
+1. V poli **Akce** zvolte:
+   - **Zaúčtovat na protiúčet** pro pohyby, které nemají s čím se spárovat, typicky výplaty mezd zaúčtovaných interním dokladem 521/331,
+   - **Spárovat s dokladem** pro pohyby patřící k jednomu dokladu, typicky platby z karetního terminálu k měsíční tržbě.
+2. Vyplňte **Období** a výběr zužte polem **Účet výpisu**, **Směr** (**Výdej**, **Příjem**, **Obojí**), **Text**, **Účet protistrany**, **VS** a **Částka (absolutní hodnota)**.
+3. U zaúčtování zadejte **Protiúčet** a volitelně **Popis zápisu**, jinak se do zápisu převezme text pohybu. Výdej se zaúčtuje MD protiúčet / Dal banka, příjem obráceně.
+4. U párování zvolte **Druh dokladu** (**Vydaná faktura** nebo **Přijatá faktura**) a vyhledejte **Doklad**. Směr se pak řídí dokladem a u dokladu vidíte, kolik zbývá uhradit.
+5. Zkontrolujte souhrn **Odpovídá N pohybům** s celkovou částkou, příjmy a výdaji. Najednou jde zaúčtovat nejvýš 500 pohybů a spárovat nejvýš 100.
+6. Klikněte na **Zkusit nanečisto**. U každého pohybu uvidíte zaúčtování nebo doklad a u vynechaných důvod. Pohyby, které zpracovat nechcete, odškrtněte v záložce **Změní se**.
+7. Klikněte na **Zaúčtovat** nebo **Spárovat** a potvrďte počet. Zpracují se přesně pohyby z běhu nanečisto, které mezitím nikdo jiný nespároval ani nezaúčtoval. Výsledek stáhnete tlačítkem **Export CSV**.
+8. Ostrý běh jde jednou vrátit tlačítkem **Vrátit** v **Posledních bězích**. Zaúčtování se stornuje, párování se zruší.
+
+**Jak poznáte, že je hotovo:** Běh má v **Posledních bězích** stav **Hotovo** a pohyby jsou v záložce **Provedené**. Počet čekajících bankovních pohybů v přehledu doúčtování klesl. Spárovaný doklad je uhrazený, nebo zůstal částečně uhrazený o poplatky terminálu, které vyřešíte zápočtem.
+
+Co obě akce dělají a kdo je smí spustit, je v [§ 52.14.13.2](#5214132-bankovni-pohyby-podle-filtru).
+
 ## 52.10 Krok za krokem: přílohy, poznámky a vazba na doklad
 
 1. Rozbalte zápis. V sekci **Přílohy** klikněte na **Přidat přílohu**, nebo soubory přetáhněte do vyznačené zóny. Jeden soubor smí mít nejvýš 20 MiB, všechny přílohy zápisu dohromady 100 MiB.
@@ -167,7 +307,7 @@ Podrobnosti jsou v [§ 52.14.13](#521413-douctovani-nezauctovanych-dokladu).
 
 Po podání přiznání k DPH zamkněte minulost, aby se omylem nezaúčtoval doklad zpátky do podaného období.
 
-1. Zámek smí nastavit jen administrátor. Otevřete `Účetnictví → Měsíční kontrola`.
+1. S právem **Spravovat období** nebo interním **Posunout zámek účtování k datu** otevřete `Účetnictví → Měsíční kontrola`.
 2. Klikněte na **Uzamknout k datu**, zadejte datum a zdůvodnění (nejméně 5 znaků) a klikněte na **Uložit zámek**. Postup je v [§ 62.4](62_Mesicni_kontrola.md#624-krok-za-krokem-zamek-uctovani-k-datu).
 3. Po skutečném podání můžete zámek posunout také v Archivu podání tlačítkem **Označit jako podané**.
 
@@ -183,14 +323,18 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 1. V podvojném účetnictví otevřete `Účetnictví → Ostatní pohledávky a závazky`. V daňové evidenci `Daňová evidence → Ostatní pohledávky a závazky`.
 2. Klikněte na **Nová ostatní položka**. Vyplňte směr, druh, položku, protistranu, datum vzniku, splatnost a částku v Kč.
 3. V podvojném účetnictví zvolte v části **Účtování** účet pohledávky nebo závazku a protiúčet. Chybí-li volba, použije se 315 nebo 325.
-4. Klikněte na **Zaúčtovat**. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky) a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
+4. Klikněte na **Zaúčtovat** (v daňové evidenci **Potvrdit**) a akci potvrďte; v podvojném účetnictví dialog ukáže, na které účty se položka zaúčtuje. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky), u druhu s vlastní řadou z řady druhu, a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
 5. Po uhrazení klikněte na **Hledat volnou platbu**, vyberte bankovní pohyb nebo pokladní doklad a přiřaďte úhradu.
-6. Opakuje-li se položka, nastavte v části **Opakování položky** četnost. Rozkládá-li se úhrada, nastavte splátkový kalendář.
+6. Opakuje-li se položka, zvolte v nabídce **…** detailu pod nadpisem **Plány** **Nastavit opakování** a četnost. Rozkládá-li se úhrada, zvolte tamtéž **Rozložit na splátky**.
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
+Přehled vybraných položek k tisku nebo do tabulky (Kniha ostatních pohledávek a závazků) stáhnete tlačítkem **Kniha položek** nad seznamem ([§ 52.14.14.1](#5214141-prehled)).
+
 > [!WARNING]
 > Zdanitelné plnění se sem nezadává. Patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkazů.
+
+**Faktura k už zaúčtované pohledávce.** Prodej se někdy zaúčtuje ostatní pohledávkou už při podpisu smlouvy (například prodej pozemku, 311 / 641) a úhrada se spáruje na ni. Fakturu bez DPH, kterou vystavíte později na stejnou částku, v detailu faktury navažte akcí **Navázat na ostatní pohledávku**. Odpovídá-li faktuře jediná pohledávka se stejným VS i částkou, nabídne ji detail faktury sám. Navázaná faktura nemá vlastní zápis, výnos se podruhé neúčtuje a v sekci Zaúčtování je vidět zápis pohledávky. Úhrady pohledávky se na fakturu převezmou, takže je uhrazená, jakmile je uhrazená pohledávka. Banka ani pokladna navázanou fakturu k párování nenabízí, platba patří pohledávce. Měla-li faktura vlastní zaúčtování, navázání ho stornuje. Po odpojení zůstane faktura nezaúčtovaná a bez úhrad pohledávky a zaúčtujete ji běžně. Storno faktury vazbu zruší. Kniha DPH a výkazy berou fakturu stejně jako dřív.
 
 Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 
@@ -210,10 +354,24 @@ Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 | Popis nejde upravit, vidíte text **Popis se edituje na zdrojovém dokladu** | Popis patří k dokladu (faktura, banka, pokladna, majetek) | Upravte popis na zdrojovém dokladu. Inline upravit lze jen ruční zápisy a zápisy uzavření a otevření knih. |
 | Příloha se nenahraje, **Tato příloha už je u zápisu evidována** | Stejný obsah nejde k témuž zápisu nahrát dvakrát | Příloha už u zápisu je. |
 | Export hlásí překročení limitu | Export je omezený na 5 000 zápisů | Zúžte filtr (typicky **Datum od / Datum do**) a export zopakujte po částech. |
+| Soupiska dokladů hlásí **Zadejte rozsah účtů** | Soupiska počítá částky jen z účtů v rozsahu | V dialogu vyplňte **Účet od** a **Účet do** (například 5 až 5 pro náklady). |
+| V soupisce chybí doklad, který v deníku vidíte | Doklad nemá řádek v rozsahu účtů soupisky s dimenzí filtru (typicky úhrada na 321 nebo 221 při rozsahu 5 až 5), je celý stornovaný, nebo jde o uzavření či otevření knih | Jde o záměr: soupiska dokládá částky na zvolených účtech a doklad s nulovou částkou vynechává. Potřebujete-li jiné účty, změňte rozsah v dialogu. |
 | Zaúčtování faktury se odmítne s rozpisem částek | Celková částka dokladu se liší od základu a DPH z položek o víc než 2 Kč | Opravte doklad (klasifikaci DPH, základ nebo DPH v rekapitulaci). Rozdíl do 2 Kč se doúčtuje na 648 nebo 548. |
 | Pro cizoměnový doklad vidíte kurzový rozdíl na 663 nebo 563 | Přecenění k rozvahovému dni | Nejde o chybu ([§ 52.14.6.1](#521461-kurzove-preceneni-a-kurzove-rozdily)). |
 | Karta **Zkontroluj integritu deníku** na přehledu | Noční kontrola našla nesrovnalost | Klikněte na kartu, nebo v deníku nastavte filtr **Nesrovnalosti doklad ↔ deník** na **Částka zápisu nesedí na doklad** ([§ 52.14.11](#521411-kontrola-integrity-deniku-nocni-job)). |
 | Doklad po importu není v deníku | Automatika účtování neprojde doklady, které už v systému leží | Viz [§ 52.9](#529-krok-za-krokem-douctovani-dokladu-z-jineho-systemu). |
+| Na stránce **Přeúčtovat doklady** je formulář neaktivní a chybí tlačítko **Zkusit nanečisto** | Nejste správce firmy, přeúčtování smí jen on | Požádejte správce firmy, ať přeúčtování spustí ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)). API token hromadné přeúčtování nespustí. |
+| **Nad limit 500, zužte výběr.** | Filtru odpovídá víc než 500 dokladů | Rozdělte výběr podle období, zdroje nebo částky a přeúčtujte po částech. |
+| **Filtru neodpovídá žádný zaúčtovaný doklad.** | Na účtu v období nejsou žádné zaúčtované doklady vybraných zdrojů | Zkontrolujte účet, stranu, období a zaškrtnuté zdroje. Zápisy mezd, majetku, uzávěrky a zápočtů se hromadně nepřeúčtovávají. |
+| **Přeúčtovat jde jen podle dokončeného běhu nanečisto, který se ještě neprovedl.** | Vybraný běh nanečisto ještě běží, už se provedl, nebo jste vybrali jiný druh běhu | Spusťte nový běh nanečisto a v **Posledních bězích** otevřete jeho **Výsledek**. |
+| **Přeúčtování už běží** | Ve firmě právě běží jiný běh přeúčtování | Počkejte na jeho dokončení, nebo ho zastavte tlačítkem **Zastavit**. |
+| Doklad je v záložce **Vynechané** s důvodem **Uzavřené účetní období**, **Zamčené datum** nebo **Opravit na místě nejde, zvolte storno** | Zápis nejde přepsat na místě | Spusťte nový běh nanečisto se způsobem **Opravit, jinak storno a nový zápis**. Ostatní důvody jsou v [§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu). |
+| Doklad z běhu nanečisto se při přeúčtování vynechal s důvodem **Zápis se po běhu nanečisto změnil** | Doklad mezitím někdo upravil nebo přeúčtoval | Spusťte nový běh nanečisto. |
+| Tlačítko **Vrátit** u přeúčtování chybí | Běh se už vracel, ještě běží, nebo nic nezměnil | Vrátit jde jen jednou. Další opravu udělejte novým přeúčtováním opačným směrem. |
+| V boxu **Bankovní pohyby podle filtru** se pohyb vynechá s důvodem **Nevejde se do zbytku k úhradě dokladu** | Součet pohybů je vyšší než zbývá uhradit | Doklad zůstane částečně uhrazený. Zbylé pohyby a poplatky terminálu vyřešte zápočtem nebo ručně ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)). |
+| V boxu **Bankovní pohyby podle filtru** se pohyb vynechá s důvodem **Pohyb je v jiné měně** nebo **Avízo nebo ignorovaný pohyb** | Pohyb je v jiné měně než doklad nebo cizoměnový a hromadně se zpracovat nedá, případně jde o avízo nebo pohyb označený jako ignorovaný | Zpracujte pohyb jednotlivě v [Bance](29_Banka.md). |
+| Hláška o dvojici (chybí účet, stejné účty, nekladná částka) nebo že zápis nejde rozdělit na dvojice | Firma účtuje jednoduchým zápisem a dvojice neprošla kontrolou | Opravte uvedenou dvojici, zápis s více účty na obou stranách zadejte po dvojicích ([§ 52.14.16.2](#5214162-krok-za-krokem-rucni-zapis-po-dvojicich)). |
+| U zápisu je odznak **M : N** | Zápis má víc účtů na obou stranách a nejde jednoznačně rozdělit na dvojice | Přeúčtujte jeho dvojice po jedné ([§ 52.14.16.5](#5214165-storno-a-preuctovani-dvojice)). |
 
 ## 52.14 Podrobnosti a pravidla
 
@@ -357,7 +515,7 @@ další se načte při posunu dolů nebo tlačítkem **Načíst další**; zápi
 zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 
 - **Datum** - datum účetního případu (datum účetního případu),
-- **Doklad** - číslo dokladu/zápisu,
+- **Doklad** - číslo dokladu/zápisu; které číslo nese přijatá faktura, popisuje [§ 23.11.5](23_Prijate_faktury.md#23115-povinna-pole),
 - **Datum dokladu** *(skryto ve výchozím zobrazení)* - datum vyhotovení, pokud se liší od data zápisu,
 - **Popis**,
 - **Zdroj** - typ a číslo zdrojového dokladu; odznak **Automaticky** se u
@@ -433,19 +591,24 @@ resp. 5xx/321) a úhradu (221/311, resp. 321/221). Účetní je ale řeší jako
 případ, proto má každý takový zápis panel **Souvisí**: v rozbaleném řádku deníku
 i v postranním náhledu zdrojového dokladu.
 
-Panel u každého protějšku ukazuje typ (banka, pokladna, zápočet, faktura), číslo,
-datum, částku a nabízí tři cesty:
+Stejně funguje i ostatní pohledávka nebo závazek a jeho úhrady
+([52.14.14](#521414-ostatni-pohledavky-a-zavazky)).
+
+Panel u každého protějšku ukazuje typ (banka, pokladna, zápočet, faktura, ostatní
+pohledávka či závazek), číslo, datum, částku a nabízí tři cesty:
 
 - **Náhled** - přepne postranní panel na *zaúčtování protějšku*, aniž byste opustili
   deník; zpět se vrátíte šipkou v hlavičce panelu,
 - **Zápis #…** - odskok na protějšek přímo v deníku (deep-link `?entry_id=`),
-- **Otevřít doklad** - detail faktury, bankovní výpis s danou transakcí nebo
-  předfiltrovaná pokladna.
+- **Otevřít doklad** - detail faktury nebo ostatní položky, bankovní výpis s danou
+  transakcí nebo předfiltrovaná pokladna.
 
 Vazby se hledají přes evidenci plateb, párování bankovních transakcí (včetně
-souhrnných plateb pokrývajících víc dokladů), pokladní doklady navázané na fakturu
-a zápočty. Když transakce pokryla jen část dokladu nebo naopak víc dokladů najednou,
-panel vedle celkové částky pohybu uvádí i **částku připadající na tento doklad**.
+souhrnných plateb pokrývajících víc dokladů), pokladní doklady navázané na fakturu,
+zápočty a úhrady přiřazené ostatním položkám. Když transakce pokryla jen část
+dokladu nebo naopak víc dokladů najednou, panel vedle celkové částky pohybu uvádí
+i **částku připadající na tento doklad** (u zápisu s více ostatními položkami jejich
+součet).
 
 Protějšek, který ještě **není zaúčtovaný**, je označený štítkem *Nezaúčtováno* -
 je to typický důvod, proč saldo nesedí s deníkem, takže se záměrně nezamlčuje.
@@ -475,7 +638,11 @@ Nad tabulkou je filtrační lišta:
   typu zdroje),
 - **Původ** - jen zápisy vytvořené **automaticky**, po **ručním potvrzení**, nebo
   **ručně** bez automatického návrhu,
-- **Účet od / Účet do** - omezí deník na rozsah kódů účtů,
+- **Účet od / Účet do** - omezí deník na zápisy s pohybem na účtech v rozsahu včetně krajů.
+  Zadat jde i začátek kódu: **5 až 5** vybere všechny nákladové účty, **501 až 518** rozsah
+  včetně analytik (i **518.100**) a **501.100 až 501.100** jednu analytiku. Mez je začátek
+  kódu, takže **311.1 až 311.1** zahrne i analytiky **311.10** až **311.19**, pokud je osnova má.
+  Neplatný rozsah (např. **6 až 5**) deník odmítne s hláškou,
 - **Částka od / Částka do** - omezí celkovou částku zápisu,
 - **Stav** - jen zaúčtované, jen koncepty, nebo vše,
 - **Storno** - stav stornování: **Stornované zápisy** (zápis, ke kterému existuje
@@ -508,6 +675,51 @@ pravidlem jako sloupec Částka v seznamu: bez filtru na účet je to celková �
 na účet naopak jen částka připadající na filtrovaný rozsah účtů, ve sloupci MD nebo Dal
 podle strany. PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
 - při větším rozsahu zužte filtr (typicky Datum od/do) a export zopakujte po částech.
+
+Volba **Soupiska dokladů** v nabídce **…** otevře dialog pro stažení XLSX se seznamem prvotních dokladů, typicky jako podklad
+k vyúčtování dotace nebo projektu podle dimenze. Soupiska vezme zápisy **přesně podle aktuálního
+filtru** Deníku (včetně hledání podle kódu účtu a filtru účtů) a z nich jen **zaúčtované řádky
+v rozsahu účtů soupisky**; koncepty nepočítá, stejně jako výsledovka po dimenzi, a jejich počet uvede v hlavičce. Ten zadáte v dialogu a je povinný: předvyplní se z filtru **Účet od / Účet do**, pokud
+jsou vyplněné obě meze, jinak 5 až 5 (nákladové účty). Při filtru dimenze se berou jen řádky
+s hodnotou filtru, včetně podřízených hodnot, pokud je nevypnete; u rozpadu řádku mezi více hodnot
+se započte jen díl filtrované hodnoty, stejně jako ve výsledovce po dimenzi. V nákladovém rozsahu
+se úhrada nesoucí stejnou dimenzi nezapočte, protože je na účtech 321 a 221.
+
+Řádky se sečtou po **prvotním dokladu**: přijatá a vydaná faktura, pokladní doklad, interní doklad,
+ostatní pohledávka nebo závazek, bankovní pohyb. Doklad se tak objeví jednou, i když má víc zápisů,
+včetně převzatého dokladu zaúčtovaného několika zápisy. Zápočet proti účtu patří vyrovnané faktuře;
+úhrada bankou i pokladnou je vlastní doklad. Částka **K doložení** je u výnosových účtů Dal minus MD
+vybraných řádků, u ostatních MD minus Dal (stejně jako ve výsledovce po dimenzi), takže
+vratka a storno ji u nákladů i výnosů snižují. Vyberte proto rozsah jednoho druhu (například
+5 až 5, nebo 6 až 6); doklad, který má v rozsahu účty různých druhů (náklady, výnosy, rozvaha),
+je označený k ověření a zůstane v soupisce i tehdy, když se jeho řádky vyrovnají na nulu. Storno, storno storna i opravný zápis dvojice patří dokladu, který
+opravují, a doklad, který po stornu vyjde na nulu, soupiska vynechá. Leží-li storno nebo oprava
+mimo filtr (typicky v dalším období nebo jako koncept), doklad zůstane v plné výši a sloupec
+**K ověření** na to upozorní. Vynechává uzavření a otevření knih, protože jen převádějí zůstatky; zápisy zásob
+z uzávěrky (způsob B) náklady mění, proto v soupisce jsou jako **Uzávěrka zásob**. Ruční zápis bez
+interního dokladu je samostatný řádek; mzdy, odpisy a časové rozlišení tvoří řádek bez celkové
+částky dokladu.
+
+Každý řádek nese pořadí, druh dokladu, **naše číslo**, **číslo dokladu protistrany**, datum (DUZP,
+u zápisu bez dokladu datum zápisu), protistranu a IČO, popis, účty, čísla zápisů, měnu,
+**celkovou částku dokladu** a **částku k doložení**. U bankovního pohybu je datem datum zápisu,
+celková částka pokladního dokladu je v Kč. Sloupec **K ověření** upozorní na zápis bez dokladu,
+chybějící celkovou částku, storno nebo opravu mimo filtr, doklad v cizí měně,
+zápornou částku a částku k doložení vyšší než celý doklad. U přijaté faktury v režimu přenesené
+daňové povinnosti (reverse charge), kde náklad obsahuje DPH přiznanou odběratelem (neplátce,
+identifikovaná osoba nebo neodpočtená část), uvádí sloupec **DPH reverse charge** díl částky
+k doložení připadající na tuto DPH v Kč podle zaúčtování, i když byl doklad vystaven v cizí měně.
+Pokud zápis nedokládá přesný podíl daně pro vybrané účty či dimenzi nebo kombinuje daň
+dodavatele a samovyměření, zůstane buňka prázdná a důvod najdete ve sloupci **K ověření**.
+Celková částka faktury samovyměřenou daň neobsahuje. Faktura ji proto
+nedokládá a sloupec **K ověření** připomene: doložte ji výpočtem DPH k faktuře
+(například interním dokladem) a rekapitulací přiznání a úhrady daně za období, protože přiznání
+i platba finančnímu úřadu jsou součtem více položek. Vyšší částka k doložení o přiznanou DPH se
+jako převýšení dokladu neoznačuje. Hlavička uvádí firmu, období, rozsah účtů soupisky,
+dimenzi, všechny další použité filtry Deníku, datum a čas vytvoření a autora. Soupiska je pracovní
+podklad ke dni vytvoření: pozdější přeúčtování nebo změna dimenzí ji změní. Když filtru nic
+neodpovídá, soubor to uvede. Soupiska je omezená na **5 000 dokladů** a stáhne ji každý, kdo
+smí číst účetnictví.
 
 #### 52.14.3.5 Rozklik na detail zápisu
 
@@ -556,8 +768,10 @@ administrátor) otevřete formulář **Ruční účetní zápis** (`/accounting/
 
 #### 52.14.5.1 Hlavička
 
-- **Datum zápisu** - povinné, datum účetního případu; musí spadat do **existujícího a
-  otevřeného** účetního období, jinak zaúčtování selže s chybou o chybějícím/uzavřeném období,
+- **Datum zápisu** - povinné, datum účetního případu v **otevřeném** účetním období.
+  Chybějící období se při účtování může automaticky založit, pokud datum odpovídá
+  hranicím vedení podvojného účetnictví a nevznikne překryv; jinak je nutná oprava
+  období nebo data. Uzavřené období zaúčtování vždy blokuje,
 - **Číslo dokladu** - volitelné; necháte-li prázdné a firma má na stránce
   [Účetní období](72_Uzaverka.md) zapnutou volbu **„Automatická čísla dokladů ručních
   zápisů (řada ID)"**, systém číslo přidělí automaticky z číselné řady vedené pro ruční
@@ -617,7 +831,7 @@ všechny hlídá server bez ohledu na to, co propustí formulář:
 | Žádný řádek nemá vyplněný účet nebo částku | „Vyplňte všechny řádky" |
 | Součet MD ≠ součet Dal | „Zápis není vyrovnaný" + konkrétní rozdíl |
 | Zadaný kód účtu není v účtové osnově firmy | Účet ✱ není v účtové osnově - zkontrolujte kód |
-| Pro datum zápisu neexistuje založené účetní období | Pro zadané datum neexistuje účetní období |
+| Období pro datum zápisu nelze automaticky založit | Zkontrolujte datum zahájení účetnictví, účetní kalendář a překryvy období ([§ 72.12.2](72_Uzaverka.md#72122-automaticky-doplnena-obdobi)) |
 | Účetní období pro dané datum je uzavřené / uzavírá se | Do uzavřeného období nelze účtovat (§35 ZoÚ) |
 
 #### 52.14.5.5 Příklad: ruční zápis se dvěma řádky
@@ -964,7 +1178,11 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
   stav vrátí na **Přijatá**, platební stav zůstane zachovaný); bankovní pohyb se vrátí
   mezi nezaúčtované položky, takže jej lze zkontovat znovu. Tato možnost není dostupná
   v období, které se uzavírá, je uzavřené či schválené, ani u již stornovaného zápisu
-  nebo jeho protizápisu. Zápis v **části účetnictví uzamčené k datu** (typicky po podání
+  nebo jeho protizápisu. Smazání se odmítne také, když je řádek zápisu spárovaný
+  s jiným zápisem v okruhu otevřených položek (nejdřív ho z okruhu odeberte nebo okruh
+  zrušte v opisu účtu na záložce **Otevřené položky - párování**, viz
+  [kap. 55.8.5.1](55_Hlavni_kniha.md)) nebo rozepsaný na doklady v saldokontu
+  (přiřazení nejdřív zrušte v saldokontu). Zápis v **části účetnictví uzamčené k datu** (typicky po podání
   přiznání k DPH) smazat jde, ale až po potvrzení velkého varování: smazání změní údaje,
   které už mohly být vykázané finančnímu úřadu, a zásah je na odpovědnost účetního
   (zaškrtávací potvrzení). Přehlasovaný zámek se zapíše do auditního logu. Smazání se zaznamená
@@ -1103,9 +1321,10 @@ projde uložení). Buď napíše, že se zápis přepíše na místě k původn�
 proč to nejde (mění se DPH, saldokontní účet, po podání DPPO výsledek nebo uznatelnost),
 a teprve pak si vyžádá potvrzení posunu data.
 Kontrolu dělá server ještě jednou těsně před zápisem. Když oprava podmínky nesplní,
-postupuje se stornem a novým zápisem jako v tabulce výše. U přijaté faktury se nový
-nákladový účet zapíše i na položku dokladu, pokud se celý náklad přesunul z jednoho
-účtu na jiný. Jinak by ho další úprava dokladu vrátila zpět.
+postupuje se stornem a novým zápisem jako v tabulce výše. U vydané i přijaté faktury
+se nový účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet
+vedly (i když ho měly z druhu výdaje, produktu nebo předkontace), pokud se celá částka
+přesunula z jednoho účtu na jiný. Jinak by ho další úprava dokladu vrátila zpět.
 
 Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá z řádků
 dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.
@@ -1162,7 +1381,10 @@ Smazání se odmítne, když:
   nebo schválené),
 - na dvojici **navazuje další storno** (storno storna) - řetěz se rozplétá odzadu, od
   posledního protizápisu,
-- se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace).
+- se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace),
+- je řádek některé strany **spárovaný s jiným zápisem** v okruhu otevřených položek
+  nebo **rozepsaný na doklady v saldokontu**. Okruh, ve kterém je jen původní zápis se
+  svým stornem, smazání nebrání a zmizí s dvojicí.
 
 Spadá-li datum některé strany do **uzamčené části účetnictví**
 (viz [§ 52.14.10](#521410-zamek-uctovani-k-datu)), smazání se provede až po potvrzení varování
@@ -1195,19 +1417,27 @@ měsících funguje beze změny, chráněná je jen minulost před zamčeným da
 explicitním označení validního snapshotu za skončené období jako **odeslaného**, a to
 jen **dopředu** (nikdy ho automaticky nezmenší). V Archivu podání tuto akci
 spustíte tlačítkem **Označit jako podané**; zámek lze alternativně nastavit ručně
-administrátorem.
+(viz níže).
 
 **Co uvidíte.** Pokus o zaúčtování, přeúčtování nebo storno dokladu s datem v zamčeném
 rozsahu skončí chybou, že datum je zamčené. Storno zaúčtovaného zápisu, jehož datum už
 je zamčené, samo o sobě projde, ale protizápis se automaticky zaúčtuje k dnešnímu
 (otevřenému) datu, ne k datu originálu.
 
-**Ruční nastavení a posun.** Zámek může nastavit, posunout dopředu i vrátit zpátky jen
-**administrátor** - na stránce [**Účetnictví → Měsíční kontrola**](62_Mesicni_kontrola.md)
-tlačítkem „Uzamknout k datu", vždy s
-povinným písemným zdůvodněním (min. 5 znaků); změna se zaznamená do auditní stopy
-(hodnota před/po + důvod). Stejná akce je dostupná i přímo přes administrátorské API
+**Ruční nastavení a posun.** Zámek nastavuje, posouvá dopředu i vrací zpátky
+uživatel s právem **„Spravovat období"** nebo interní role s právem **„Posunout zámek účtování
+k datu"**, které správce přidělí v editoru rolí třeba roli hlavní účetní. Slouží k tomu
+stránka [**Účetnictví → Měsíční kontrola**](62_Mesicni_kontrola.md), tlačítko
+„Uzamknout k datu", vždy s povinným písemným zdůvodněním (min. 5 znaků); změna se
+zaznamená do auditní stopy (hodnota před/po + důvod). Stejná akce je dostupná i přes API
 (`PUT /api/accounting/period-lock`).
+
+Role, která má jen právo posunout zámek, ho nevrátí zpátky přes **podané období DPH**
+(přiznání, kontrolní hlášení nebo OSS ve stavu podáno) ani přes **uzavřené účetní
+období**; to vyžaduje správu období nebo oprávnění správce firmy a relaci
+přihlášenou v aplikaci. Ani token s plným zápisem tuto ochranu nepřebije.
+Podané se opravuje opravným zápisem do otevřeného
+data. Zámek platí stejně pro složený i jednoduchý zápis (dvojice).
 
 ### 52.14.11 Kontrola integrity deníku (noční job)
 
@@ -1258,8 +1488,9 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 | Upravit popis zápisu | - | ✓ |
 | Nahrát / smazat / popsat přílohu | - | ✓ |
 | Stornovat zaúčtovaný zápis | - | ✓ |
-| Znovuotevřít uzavřené období (pro opravu) | - | jen administrátor |
-| Nastavit/posunout zámek účtování k datu | - | jen administrátor |
+| Znovuotevřít uzavřené období (pro opravu) | - | právo Spravovat období, přihlášení v aplikaci a splněné ochrany uzávěrky |
+| Nastavit/posunout zámek účtování k datu | - | právo Spravovat období nebo interní Posunout zámek účtování k datu; ochrana podaných a uzavřených období platí dál |
+| Hromadné akce v seznamech (dimenze, předkontace, poznámka, smazání, VS pohybů) | - | správce firmy nebo právo Hromadné změny dokladů a zápisů, k tomu právo dané akce na jednom záznamu |
 
 - Deník je **jen pro podvojné účetnictví** - firmy na daňové evidenci modul v menu
   vůbec nevidí.
@@ -1286,7 +1517,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
   předchozí verzi - spárování s konkrétním uživatelem je orientační (časová blízkost
   v auditním logu), ne přesná vazba.
 - Kromě otevřenosti období hlídá zaúčtování/přeúčtování/storno i **zámek k datu**
-  ([§ 52.14.10](#521410-zamek-uctovani-k-datu)). Ručně jej nastaví administrátor; po
+  ([§ 52.14.10](#521410-zamek-uctovani-k-datu)). Ručně jej nastaví administrátor nebo role s právem posunout zámek; po
   doloženém podání jej posune i označení snapshotu DPH nebo KH tlačítkem **Označit jako
   podané** v `Daně → EPO podání a archív`.
 
@@ -1352,6 +1583,29 @@ Co se nikdy nepřepíše:
 Mění se **jen text popisu**. Částky, účty, data, období ani čísla dokladů zůstávají, takže
 se sestavy ani výkazy nezmění. Opakované spuštění už nic nepřepíše.
 
+#### 52.14.13.2 Bankovní pohyby podle filtru
+
+Box **Bankovní pohyby podle filtru** na téže stránce pracuje s pohyby z výpisů, které
+jsou **nespárované a nezaúčtované**. Má dvě akce:
+
+- **Zaúčtovat na protiúčet** - pro pohyby, které nemají s čím se spárovat a pravidlo
+  účtování se na ně nehodí, typicky výplaty mezd zaúčtovaných interním dokladem 521/331.
+  Výdej se zaúčtuje MD protiúčet / Dal banka, příjem obráceně. Bankovní noha jde na
+  analytiku účtu výpisu stejně jako při ručním zaúčtování z fronty.
+- **Spárovat s dokladem** - pro pohyby patřící k jednomu dokladu, typicky platby
+  z karetního terminálu k měsíční tržbě. Každý pohyb se spáruje stejně jako výběr úhrady
+  na detailu dokladu a zaúčtuje se podle pravidel párování. Pohyb, který se nevejde do
+  zbytku k úhradě, se vynechá, doklad zůstane částečně uhrazený a rozdíl (poplatky
+  terminálu) vyřešíte zápočtem.
+
+Postup krok za krokem je v [§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru). Zpracují se
+jen pohyby z běhu nanečisto, které mezitím nikdo jiný nespároval ani nezaúčtoval. Při
+vrácení se pohyb, který se od ostrého běhu změnil, nevrátí a vypíše se s důvodem.
+
+Najednou jde zaúčtovat nejvýš 500 pohybů a spárovat nejvýš 100. Spustit to smí správce
+firmy a role s právem **Hromadně doúčtovat bankovní pohyby** spolu s právem zaúčtovat doklad
+(účetní a vlastní role ho dostanou v editoru rolí), párování navíc vyžaduje právo párovat banku.
+
 ### 52.14.14 Ostatní pohledávky a závazky
 
 Agenda **Ostatní pohledávky a závazky** slouží pro peněžní nároky a dluhy, které
@@ -1365,22 +1619,115 @@ nezadává; patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkaz�
 #### 52.14.14.1 Přehled
 
 Seznam ukazuje ruční položky a pod nimi položky z jiných modulů. U ruční položky
-vidíte název se směrem a druhem, protistranu, splatnost, zdroj s počtem
-připojených dokumentů, částku, **zbývá uhradit** a stav. Z řádku otevřete detail;
-rozpracovaný koncept lze také upravit nebo smazat.
+vidíte číslo dokladu (koncept ho ještě nemá), název, druh, protistranu,
+splatnost, částku, **zbývá uhradit**, stav a ve sloupci **Zápis** u zaúčtované
+položky ikonu **Zaúčtováno**, která otevře její zápis v deníku. Stav uhrazené, částečně
+uhrazené nebo přeplacené položky (štítek **Přeplaceno** jako u faktur) má přednost před stavem
+Zaúčtováno. Stav se řídí tím, kolik zbývá zaplatit, u úvěru s rozdělenými splátkami tedy i úrokem
+a poplatkem, takže seznam i detail ukazují u položky stejný stav. Otevřená položka po splatnosti
+má zvýrazněný řádek i datum splatnosti. Pod nadpisem je počet ručně zadaných
+položek ve výběru (při filtru zdroje mzdy nebo daně se neukazuje).
+
+Sloupce se nastavují stejně jako u faktur: tlačítko **Sloupce** je zapíná a vypíná
+(navíc směr, datum vzniku a zaúčtování, uhrazeno, variabilní symbol, s právem číst
+dokumenty počet dokumentů a poznámka), přetažením záhlaví změníte jejich pořadí
+a přepínač hustoty zmenší řádky. Sloupec **Zápis** je jen v podvojném účetnictví
+pro role, které smí číst účetnictví. Účty zaúčtování ukazuje detail položky.
+Na telefonu je seznam v kartách s pevným obsahem (název, částka, číslo dokladu, u konceptu
+místo něj **Rozpracováno**, druh, odznak **Zaúčtováno**, stav, protistrana a splatnost;
+u částečně uhrazené položky navíc uhrazeno a zbývá), proto se tam sloupce ani hustota
+nenastavují. Sloupec i řádek **zbývá** ukazují totéž, podle čeho se řídí stav: zbývající
+platbu včetně úroku a poplatku splátek. Podle čísla, položky, protistrany, splatnosti, částky a zbývající částky
+jde seznam řadit; řazení si seznam pamatuje a tlačítko **×** v záhlaví vrátí výchozí
+řazení podle splatnosti.
+
+Kliknutím na řádek otevřete detail, s Ctrl (nebo prostředním tlačítkem myši)
+v novém panelu; řádek jde do panelu také přetáhnout za úchyt na jeho začátku.
+Klávesami `j` a `k` se pohybujete po řádcích a `Enter` otevře detail. Rozpracovaný
+koncept upravíte nebo smažete z nabídky **…** na konci řádku. Odkaz **Zpět na seznam**
+v detailu vrátí seznam se stejnými filtry a šipkami (nebo klávesami `[` a `]`)
+přejdete na předchozí či další položku téhož výběru.
+
+Detail položky je uspořádaný jako detail přijaté faktury. V záhlaví je číslo dokladu
+se stavem, štítkem **Po splatnosti**, směrem s druhem a u zaúčtované položky odznakem
+**Zaúčtováno** s odkazem na její zápis (jen pro role, které smí číst účetnictví); akce jsou
+vpravo. **Upravit** otevře editor konceptu; u potvrzené, zaúčtované, stornované či zrušené
+položky je zamčené v nabídce **…** a řekne proč, stejně jako zamčené **Stornovat**. Plány položky jsou v nabídce **…**
+pod nadpisem **Plány** ([§ 52.14.14.7](#5214147-opakovani-a-splatkovy-kalendar)). Pod
+záhlavím je název položky a protistrana (s odkazy na kartu klienta, je-li vybraná
+z adresáře). Tři karty ukazují data (vznik, v podvojném účetnictví i datum zaúčtování,
+splatnost), **Stav úhrady** a údaje položky (variabilní symbol, účet protistrany, u cizí
+měny kurz, navázaná faktura). Pak následuje **Zaúčtování** (jen v podvojném účetnictví
+a pro role, které smí číst účetnictví), dimenze, jsou-li zapnuté (v podvojném účetnictví
+i v daňové evidenci), **Účtování** (jen v podvojném účetnictví), **Přiřazené úhrady**,
+karty opakování a splátek, poznámka a nakonec připojené dokumenty. Na telefonu je nahoře souhrn (zbývá uhradit, stav úhrady, splatnost a datum
+vzniku); karty, zaúčtování, dimenze a účtování rozbalí tlačítko **Podrobnosti**.
+
+Nad seznamem je součet **zbývá uhradit** za celý výběr (všechny stránky, ne jen
+zobrazené řádky), zvlášť pro pohledávky a závazky a zvlášť pro každou měnu. Počítá
+jen ručně zadané potvrzené a zaúčtované položky ve zvoleném rozmezí splatnosti;
+koncepty (stav **Rozpracováno**), storna ani položky z mezd a daní ne; že rozpracované položky
+v součtu nejsou, říká popisek **(bez rozpracovaných)** přímo u něj. Přeplatek jedné položky
+nesnižuje dluh ostatních. Součet je saldo, tedy zbývající jistina: úrok a poplatek splátek
+úvěru do něj nepatří, i když se podle nich řídí stav a výběr **Otevřené**.
+
+Filtry rozbalíte tlačítkem **Filtry** vedle hledání (stejně jako u přijatých faktur)
+a zvolené se ukazují jako štítky, které jde jednotlivě zrušit i se sbalenou lištou.
+Věta o výchozím okně splatnosti zůstává pod lištou vidět vždy. Filtry se ukládají
+do adresy stránky, takže je zachová obnovení stránky, odkaz i návrat z detailu;
+kliknutí na položku v menu na otevřeném seznamu je vrátí na základní nastavení (stav
+**Otevřené**, bez dalších filtrů). Často používaný výběr uložíte v nabídce **Uložené filtry**
+jako pohled; uložené pohledy jsou nad seznamem jako záložky. Pohled označený jako výchozí
+se použije, když seznam otevřete bez filtrů odjinud (z menu na jiné stránce, z detailu
+přes menu), stejně jako u faktur. Řazení se do pohledu ani do adresy neukládá, pamatují si ho
+předvolby tabulky stejně jako u přijatých faktur. **Zrušit vše** vrátí základní nastavení
+jedním načtením i s vyplněným hledáním. Neplatné datum nebo obrácené rozmezí splatnosti
+v ručně upravené adrese se vynechá. Když se
+seznam nepodaří obnovit, zůstanou zobrazená poslední načtená data s upozorněním
+a tlačítkem **Zkusit znovu**.
 
 Filtry:
 
 - **Směr**: vše, pohledávky, nebo závazky.
+- **Druh**: vestavěné i vlastní druhy, rozdělené na závazky a pohledávky; se zvoleným
+  směrem jen jeho druhy. Výběr druhu filtruje i jeho stranu. Nabízejí se i skryté druhy,
+  aby šly dohledat jejich starší doklady.
 - **Stav**: výchozí **Otevřené** ukazuje koncepty, potvrzené a zaúčtované
-  položky, u kterých ještě zbývá něco uhradit; **Vše** ukáže i uhrazené,
+  položky, u kterých ještě zbývá něco uhradit (u úvěru s rozdělenými splátkami i úrok
+  nebo poplatek splátky); **Vše** ukáže i uhrazené,
   stornované a zrušené.
 - **Zdroj**: ručně zadané, mzdy, nebo daně.
 - **Hledat**: název, protistrana, číslo dokladu a variabilní symbol.
-- **Splatnost od / do**: bez zadaného rozmezí se ukáží položky se splatností
-  rok zpět až rok dopředu.
+- **Splatnost od / do**: bez zadaného rozmezí se ukáží ručně zadané položky
+  i předpisy ze mezd a daní se splatností rok zpět až rok dopředu; ve stejném
+  okně se počítají i součty. Výjimkou je stav **Otevřené**: ruční položky v něm
+  dolní mez nemají, takže neuhrazený dluh zůstane vidět i víc než rok po splatnosti
+  (horní mez rok dopředu platí). Vyplněné **Hledat** bez data okno u ručních položek
+  nepoužije, takže najde i starý doklad. Předpisy z mezd a daní mají okno vždy. Výchozí
+  okno připomíná věta pod filtry. Starší nebo vzdálenější
+  položky najdete zadáním data; vyplněné jen **od** nebo jen **do** okno na druhé straně
+  neomezí.
+
+**Kniha ostatních pohledávek a závazků.** Tlačítko **Kniha položek** vpravo nahoře v seznamu (vlevo od
+tlačítek **Druhy** a **Složka dokumentů**, na telefonu **Kniha**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
+nebo tabulku XLSX, bez stránkování. Seřazená je stejně jako seznam, když v něm řazení zvolíte
+kliknutím na záhlaví sloupce; jinak podle čísla dokladu (koncepty bez čísla první). Čísla se řadí
+podle hodnoty, ne jako text: OP-2026-9 je před OP-2026-10, stejně jako v seznamu. Výběr je stejný jako v seznamu
+včetně výchozího okna splatnosti a jeho výjimek pro stav **Otevřené** a hledání; hlavička uvádí
+firmu, použitou splatnost, nastavení výběru a řazení. Předpisy z mezd a daní kniha neobsahuje (říká to
+její hlavička), proto při filtru zdroje mzdy nebo daně tlačítko není. Sloupce: číslo dokladu,
+směr, druh, položka, protistrana, datum vzniku, splatnost, částka, uhrazeno, zbývá uhradit, měna,
+stav jako v seznamu a v podvojném účetnictví pro role, které smí číst účetnictví, datum zaúčtování.
+Koncepty, storna a zrušené položky jsou šedě. Tabulka XLSX má za nimi navíc sloupce s uloženými
+kódy směru, druhu a stavu (`side`, `kind`, `kind_id`, `status`), podle kterých jde dál filtrovat
+i párovat. Součty jsou po straně a měně jako součet nad seznamem: jen potvrzené a zaúčtované
+položky, zbývá uhradit jako saldo jistiny a přeplatek jedné položky nesnižuje jinou; navíc
+počet položek v součtu, částka a uhrazeno. Pohledávky a závazky se nesčítají dohromady. U úvěru
+s rozdělenými splátkami ukazuje řádek ve sloupci zbývá uhradit i nezaplacený úrok a poplatek (jako
+seznam), součet ale jen zbývající jistinu, takže se součet sloupce může od řádku Součty lišit.
 
 Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
+Tlačítko **Druhy** otevře nastavení druhů: skrytí a vlastní číselné řady ([§ 52.14.14.11](#52141411-druhy-a-ciselne-rady)).
 
 #### 52.14.14.2 Založení položky
 
@@ -1389,7 +1736,7 @@ V konceptu vyplníte:
 | Pole | Význam |
 |---|---|
 | Směr | pohledávka (vám někdo dluží) nebo závazek (dlužíte vy) |
-| Druh | nájemné, kauce, půjčka nebo splátka, pojistné, poplatek, náhrada, jiné |
+| Druh | nájemné, kauce, půjčka nebo splátka, pojistné, poplatek, náhrada, jiné, nebo vlastní druh firmy |
 | Položka | stručný název, například „Nájemné kancelář říjen" |
 | Protistrana | výběr z adresáře (u závazku dodavatelé, u pohledávky odběratelé), nebo ruční text |
 | Datum vzniku | den, kdy nárok nebo dluh vznikl; výchozí dnešek |
@@ -1400,27 +1747,41 @@ V konceptu vyplníte:
 | Poznámka | volný text k položce |
 
 Názvy druhů se mění podle směru, aby například kauce k vrácení nezněla jako
-přijatá kauce. Druh je jen popisný: neurčuje účty ani daňovou povahu. Změnou směru
-se druh a zadané účty vymažou. Dokumenty připojíte až po uložení položky v jejím
-detailu. Upravovat lze jen koncept.
+přijatá kauce. Vlastní druhy se nabízejí jen u směru, ke kterému patří, skryté druhy
+se nenabízejí vůbec. Druh neurčuje účty ani daňovou povahu; může určit číselnou řadu. Změnou směru
+se druh a zadané účty vymažou; když už jsou vyplněné, aplikace se nejdřív zeptá.
+Dokumenty můžete připojit hned v novém konceptu, uloží se spolu s položkou; v rozepsaném konceptu se nahrají rovnou.
+Upravovat lze jen koncept.
+
+Povinná pole mají hvězdičku. Chybějící nebo neplatný údaj se ukáže přímo u pole
+a nad formulářem zůstane hláška, dokud chybná pole neopravíte; stejně zůstane vidět
+i důvod, proč uložení odmítl server. Formulář uložíte také klávesou **Ctrl+S**.
 
 #### 52.14.14.3 Účtování v podvojném účetnictví
 
 V části **Účtování** zvolíte:
 
 - **Účet pohledávky nebo závazku**: u pohledávky se nabízejí aktivní účty,
-  u závazku pasivní. Nevyberete-li žádný, při zaúčtování se použije 315
-  (pohledávka) nebo 325 (závazek).
+  u závazku pasivní. Nevyberete-li žádný, při zaúčtování se použije účet
+  z účetního profilu druhu ([52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)),
+  bez profilu 315 (pohledávka) nebo 325 (závazek).
 - **Protiúčet**: skutečný účetní případ. Účet 5xx znamená náklad, 6xx výnos;
   rozvahový protiúčet (například kauce nebo jistina půjčky) zisk nemění.
+  Prázdný protiúčet doplní profil druhu; bez profilu ho před zaúčtováním vyberte.
+
+Když druh profil má, pole ukazují zděděný účet šedě („Z druhu: 378“) a pod nimi
+je poznámka, že je zaúčtování doplní. Vyplněný účet má vždy přednost.
 
 Tlačítkem **Rozdělit kontaci** rozdělíte protiúčet až na 50 řádků, například
 nájemné na nájem a zálohy na služby. Součet řádků musí přesně odpovídat částce
 položky. Účet pohledávky nebo závazku zůstává jeden v celé částce kvůli saldu
 a párování úhrad; protiúčet nesmí být shodný s ním ani začínat 315 nebo 325.
 
-**Zaúčtovat** přidělí položce číslo z řady OP (pohledávky) nebo OZ (závazky)
-podle roku data vzniku a vytvoří zápis k datu zaúčtování:
+**Zaúčtovat** nejdřív ukáže dialog s řádky budoucího zápisu (MD a D s účty
+a částkami po doplnění z profilu druhu); chybí-li protiúčet, dialog na to upozorní.
+Po potvrzení přidělí položce číslo z řady OP (pohledávky) nebo OZ (závazky),
+u druhu s vlastní řadou z řady druhu, podle roku data vzniku a vytvoří zápis
+k datu zaúčtování:
 
 | Směr | Zápis |
 |---|---|
@@ -1429,6 +1790,11 @@ podle roku data vzniku a vytvoří zápis k datu zaúčtování:
 
 Zaúčtování vyžaduje oprávnění zaúčtovat v deníku. Zápis nejde stornovat přímo
 v deníku; storno i opravy dělejte v detailu položky.
+
+Účtuje-li položka na 381 nebo 384 (předplacený náklad či výnos příštích období), ukáže detail panel
+**Časové rozlišení**. Z něj založíte položku agendy, která zůstatek rozpouští podle plánu, viz
+[Časové rozlišení](125_Casove_rozliseni.md#12542-z-dokladu). Období na položce
+([§ 50.10.4](50_Pruvodce_ucetniho.md#50104-ostatni-pohledavky-a-zavazky)) je druhá cesta, kterou spravuje uzávěrka.
 
 #### 52.14.14.4 Daňová evidence
 
@@ -1452,12 +1818,44 @@ pohledávky nebo závazku (u pohledávky na straně D, u závazku MD); jinak ji
 aplikace odmítne s výzvou platbu nejdřív takto zaúčtovat. Přiřazení samo nic
 znovu nezaúčtuje.
 
+Nezaúčtovaný bankovní pohyb, který položce přiřadíte z dialogu **Spárovat** u pohybu,
+aplikace zaúčtuje sama: banka (221 s analytikou podle účtu výpisu) proti účtu položky.
+Peněžní účet a popis zápisu může určit kontace úhrady z banky v profilu druhu nebo
+vlastní kontace položky ([52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)),
+strana položky je vždy účet položky.
+
 Nabídnutá částka je menší z volné části platby a zbývajícího dluhu. Jedna
 položka může mít více dílčích úhrad a jedna platba se může rozdělit mezi více
-položek. Jakmile zbývá uhradit nula, položka z filtru Otevřené zmizí.
+položek. Jakmile zbývá uhradit nula, položka z filtru Otevřené zmizí. Když
+hledání žádnou volnou platbu nenajde, detail to napíše.
+
+V seznamu **Přiřazené úhrady** vede bankovní pohyb na svůj výpis a pokladní doklad
+(s číslem dokladu) do pokladny. Je-li platba zaúčtovaná a smíte číst účetnictví,
+odkaz **Otevřít účetní zápis** přejde na její zápis v deníku. Bankovní a pokladní
+úhrady vidí jen ten, kdo smí číst banku, resp. pokladnu. Karta **Stav úhrady** ukazuje
+u potvrzené či zaúčtované položky, zda je otevřená, částečně uhrazená, uhrazená, nebo
+po splatnosti.
 Přiřazení zrušíte tlačítkem **Odpojit úhradu**. Stornovaný bankovní zápis
 přiřazení označí jako stornované; pokladní doklad přiřazený k položce stornovat
 nejde, nejdřív ho odpojte.
+
+Přiřazené úhrady vidíte i v deníku v panelu **Souvisí**
+([52.14.3.2](#521432-souvisi-doklad-a-jeho-uhrada)): u zápisu položky jako bankovní
+pohyby a pokladní doklady, u zápisu banky nebo pokladny jako položky, které platba
+hradí. Rozdělená platba ukáže všechny své položky, každou s částkou, která na ni připadá
+(u splátky úvěru včetně úroku a poplatku). Stornované přiřazení se neukazuje.
+
+- **Položka převzatá ze zůstatku** nemá vlastní zápis. Jako její zaúčtování panel ukáže
+  zápis, ve kterém leží její předpis. V tom zápisu naopak ukáže položku se štítkem
+  *Zaúčtováno tímto zápisem* a její úhrady s odkazem na jejich vlastní zápisy. Platí-li
+  jedna platba víc položek téhož zápisu, panel u ní uvede jejich součet.
+- **Faktura krytá pohledávkou** se v panelu ukáže u zápisu položky (se štítkem
+  *Zaúčtováno tímto zápisem*) i u platby, která položku hradí. Ze stornovaného zápisu
+  faktury vede panel na položku, která fakturu účtuje; úhrady ukazuje zápis položky.
+  Bez práva k ostatním pohledávkám a závazkům tuto vazbu neuvidíte.
+
+Položky v panelu vidí jen uživatel s právem k ostatním pohledávkám a závazkům, jejich
+bankovní úhrady jen s právem k bance a pokladní úhrady jen s právem k pokladně.
 
 #### 52.14.14.6 Storno a přeúčtování
 
@@ -1466,8 +1864,10 @@ položky bez přiřazených úhrad; úhrady nejdřív odpojte. Zadáte důvod a 
 účetnictví datum storna. Vznikne protizápis „Storno číslo: důvod" a položka
 přejde do stavu Stornováno. Storno zároveň pozastaví opakování položky.
 
-**Přeúčtovat** (jen podvojné účetnictví, zaúčtovaná položka bez úhrad) opraví
-chybné účty. Dialog ukáže dosavadní kontaci; zadáte nový účet pohledávky nebo
+**Přeúčtovat** (jen podvojné účetnictví, zaúčtovaná položka bez úhrad; tlačítko je
+u živého zápisu v sekci **Zaúčtování**, pro role bez práva číst účetnictví v části
+**Účtování**) opraví chybné účty. U položky s úhradou je
+tlačítko neaktivní a po najetí myší řekne proč. Dialog ukáže dosavadní kontaci; zadáte nový účet pohledávky nebo
 závazku, protiúčet nebo rozdělenou kontaci, datum a důvod. Aspoň jeden účet se
 musí změnit. Původní zápis se stornuje a vznikne nový se **stejným číslem
 dokladu** k datu přeúčtování.
@@ -1476,27 +1876,114 @@ Koncept se maže tlačítkem **Smazat**. Koncept vytvořený opakováním se mí
 smazání zruší, aby v rozvrhu zůstalo vidět, že termín byl vyřešen. Zdrojový
 koncept opakování smazat nejde.
 
+**Smazat i se zápisem** (v nabídce **…** detailu zaúčtované položky) odstraní chybnou
+položku i její zápis v deníku bez storna, jako by nikdy nebyla zaúčtovaná. Platí stejná
+pravidla jako pro **Smazat** v deníku:
+
+- zápis leží v **otevřeném** účetním období; po uzávěrce položku stornujte,
+- spadá-li zápis do **uzamčeného** data (typicky po podání přiznání k DPH), aplikace
+  před smazáním ukáže varování a smazání proběhne až po vědomém potvrzení účetního,
+- položka nemá spárované úhrady, není v platebním příkazu, neúčtuje navázanou fakturu,
+  není zdrojem opakování a nebyla přeúčtovaná,
+- řádky zápisu nejsou rozepsané na doklady v saldokontu ani spárované v okruhu párování.
+
+Když některé pravidlo smazání nedovolí, je akce neaktivní a po najetí myší ukáže důvod.
+Pak zbývá **Stornovat**, nebo nejdřív zrušit to, co na položce stojí (například odpojit
+úhradu). Výskyt opakování se po smazání zápisu zruší místo smazání, aby ho opakování
+nevytvořilo znovu. Číslo položky se do řady nevrací. Smazání se zapíše do historie
+položky i do auditu deníku.
+
+**Poznámku** vystavené položky (potvrzené, zaúčtované i stornované) doplníte v detailu
+odkazem **Upravit poznámku** u pole Poznámka. Poznámka se nepromítá do zaúčtování ani
+saldokonta, proto ji jde změnit i po uzávěrce. Změna se zapíše do historie položky
+s hodnotou před a po. Ostatní údaje zůstávají zamčené, proto je **Upravit** u vystavené
+položky neaktivní: název tvoří popis zápisu v deníku, účty mění **Přeúčtovat**, částky
+a data storno. Účet protistrany má vlastní
+úpravu u svého pole.
+
 #### 52.14.14.7 Opakování a splátkový kalendář
 
-V detailu v části **Opakování položky** nastavíte měsíční, čtvrtletní nebo roční
-opakování a případně datum konce. Každá kopie dostane datum vzniku posunuté
+Plány položky jsou v nabídce **…** detailu pod nadpisem **Plány**: **Nastavit opakování**
+a **Rozložit na splátky**. Obě akce stojí vždy pohromadě, bez ohledu na šířku okna; každá
+se nabízí jen tehdy, když jde plán založit. Oba plány se zakládají i upravují ve stejném
+dialogu, detail ukazuje jen jejich přehled v kartě. Existující plán upravíte tlačítkem
+**Upravit** v záhlaví jeho karty. Když se opakování a splátky nepodaří načíst, detail to
+napíše a nabídne **Zkusit znovu**.
+
+**Nastavit opakování** otevře dialog, ve kterém nastavíte měsíční, čtvrtletní nebo roční
+opakování, případně datum konce a automatické účtování vzniklých položek. Akce se nabízí
+jen uživateli s právem zápisu u konceptu, potvrzené nebo zaúčtované položky, která ještě
+nemá rozvrh a sama nevznikla opakováním. Každá kopie dostane datum vzniku posunuté
 o dané období (u kratšího měsíce na jeho poslední den) a stejný odstup splatnosti
 jako zdrojová položka. Přebírá směr, druh, název, protistranu, částku,
 variabilní symbol, účty včetně rozdělené kontace, poznámku i připojené dokumenty.
 
-Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
-Ručně je vytvoříte polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš 120 najednou). Vzniklé koncepty se nikdy nezaúčtují samy. Pod rozvrhem
-se vypisují vytvořené položky s datem a stavem. Opakování lze **Pozastavit**
-a **Obnovit**; po stornu zdrojové položky se pozastaví natrvalo a už vytvořené
-koncepty zůstávají samostatnými položkami k posouzení.
+Název kopií může obsahovat měsíc, čtvrtletí nebo rok podle výskytu. Do pole **Šablona názvu
+položek** napište název se zástupnými znaky, například `Nájem {MM}/{YYYY}` nebo
+`Pojistné Q{Q}/{YYYY}`. Platí stejné znaky jako u pravidelné fakturace: `{YYYY}`, `{YY}`,
+`{M}`, `{MM}`, `{MMMM}` (český název měsíce), `{Q}`, `{D}`, `{DD}`, `{DATE}`, `{BOM}`
+a `{EOM}`, včetně posunu, například `{MM+1}/{YYYY+1M}` pro nájem placený na příští
+měsíc. Seznam s příklady ukáže odkaz **Zástupné znaky** v dialogu. Hodnoty se dosazují
+podle data vzniku každé kopie, které je zároveň jejím datem zaúčtování. Volba **Srovnat období
+v názvu s datem položky** navíc přepíše měsíc a rok zapsaný v názvu (například `03/2027`
+nebo `2027-03`) na měsíc kopie. Pod poli je náhled názvu další vytvořené položky. Neznámý
+zástupný znak nebo název delší než 255 znaků (u kterékoli z dvanácti příštích kopií do konce
+opakování) dialog odmítne a chybu ukáže u pole.
+Prázdná šablona znamená, že kopie dostanou název zdrojové položky. Doslovné složené
+závorky šablona nepřijme, protože je bere jako zástupný znak. Zdrojová položka
+si svůj název nechává a zástupné znaky se ukládají jen v nastavení opakování.
+Šablonu změníte v dialogu **Upravit opakování**; u stornované zdrojové
+položky a po konci opakování se nenabízí. Změna platí pro kopie vytvořené po uložení;
+už vytvořené položky se nepřejmenují. Denní úloha chystá koncepty až 90 dní dopředu, proto
+dialog upozorní, do kterého data položky už vznikly. Koncepty můžete přejmenovat ručně
+v detailu položky, potvrzené a zaúčtované položky zůstanou beze změny. Smazaná položka
+se znovu nevytvoří.
+U opakování s automatickým účtováním jde název
+změnit jen ve webovém rozhraní, ne přes API token. Dosazený název se použije
+i jako popis účetního zápisu automaticky zaúčtované položky.
 
-**Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
-s rostoucími daty (ne dřívějšími než datum vzniku). Součet splátek musí odpovídat
-částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží očekávané
-platby v cash-flow; úhrady se započítávají od nejstarší splátky. Po přiřazení
-první úhrady už kalendář měnit nejde. Koncept se splátkovým kalendářem lze dál
-upravovat, dokud částka odpovídá součtu splátek a datum vzniku není pozdější než
-první splátka; před změnou částky kalendář zrušte tlačítkem **Zrušit kalendář**.
+Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
+Ručně je vytvoříte v kartě polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš
+120 najednou). Bez volby **Automaticky účtovat vzniklé položky**, kterou přepnete také
+přímo v kartě, se vzniklé koncepty nezaúčtují samy.
+
+Detail zdrojové položky ukazuje kartu **Opakování položky**: četnost, stav (aktivní nebo
+pozastavené), datum a název další vytvořené položky, konec opakování, automatické účtování, kdo a kdy rozvrh
+založil a seznam vytvořených položek s číslem, datem a stavem. **Upravit** v záhlaví karty
+otevře dialog **Upravit opakování**, ve kterém změníte název budoucích položek, opakování
+**Pozastavíte**, **Obnovíte** nebo **Zrušíte opakování**. Četnost ani konec existujícího opakování změnit nejde; pro jiné
+nastavení opakování zrušte a založte nové. Po stornu zdrojové položky se opakování pozastaví
+natrvalo a už vytvořené koncepty zůstávají samostatnými položkami k posouzení.
+
+**Zrušit opakování** odstraní rozvrh, nové položky už nevznikají. Už vytvořené položky
+zůstávají samostatnými doklady a svůj původ si drží: dál mají štítek **Vytvořeno
+opakováním** s odkazem na zdrojovou položku a poznámkou, že opakování bylo zrušeno,
+a nové opakování se u nich nenabízí. Zdrojová položka se uvolní, jde ji znovu naplánovat
+a koncept i smazat; vytvořená položka pak štítek zachová, jen bez odkazu na zdroj.
+Nové opakování téže zdrojové položky naváže na položky zrušeného opakování: první termín
+je až po poslední z nich, už vytvořené termíny nevzniknou podruhé.
+
+Položka, kterou vytvořilo opakování, má pod záhlavím štítek **Vytvořeno opakováním**
+s pořadím výskytu, odkazem na zdrojovou položku a s tím, kdo a kdy rozvrh založil.
+Nové opakování se u ní nenabízí.
+
+**Rozložit na splátky** otevře dialog **Rozložit na splátky** (u uloženého kalendáře **Upravit
+splátky**), který rozloží jednu pohledávku
+nebo závazek na 2 až 120 splátek s rostoucími daty (ne dřívějšími než datum vzniku). Součet
+splátek musí odpovídat částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží
+očekávané platby v cash-flow; úhrady se započítávají od nejstarší splátky. Splátky úvěru
+nebo leasingu lze rozdělit na jistinu, úrok a poplatek a nechat si je spočítat
+(viz [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek)). Po uložení se
+dialog zavře a karta **Splátkový kalendář** ukáže tabulku splátek se stavem každé z nich
+a součtem; bez uložených splátek se karta neukazuje. Uložený kalendář změníte tlačítkem
+**Upravit** v záhlaví karty, v dialogu ho také zrušíte tlačítkem **Zrušit kalendář**.
+Neuložené úpravy zahodí tlačítko **Zrušit**; karta se změní až uložením. Po přiřazení
+první úhrady už kalendář měnit nejde, ani když úhrada pokryla jen úrok: **Upravit** je pak
+zamčené a karta řekne proč. U stornované či zrušené položky se kalendář už jen zobrazuje. Koncept se splátkovým kalendářem lze dál upravovat, dokud částka
+odpovídá součtu splátek a datum vzniku není pozdější než první splátka; před změnou částky
+kalendář zrušte. Úvěr s rozdělenými splátkami, jehož jistinu převod z jiného programu
+označil za uhrazenou mimo aplikaci, ukazuje dál zbývající plánovaný úrok a poplatek splátek:
+zůstává ve stavu **Částečně uhrazeno** a ve výběru **Otevřené**, dokud se úrok neuhradí.
 
 #### 52.14.14.8 Dokumenty a vazba na deník
 
@@ -1505,9 +1992,14 @@ dokumentů. Nově nahraný sken se uloží do složky **Ostatní pohledávky a z
 rok / měsíc** podle data vzniku. Originál zůstává ve skladu a stejná smlouva
 může být podkladem více položek či období.
 
-U zaúčtované položky ukazuje část **Účtování** účty a rozdělenou kontaci
-a tlačítkem **Otevřít účetní zápis** přejde na zápis v deníku, včetně jeho
-vlastních poznámek a příloh. Obráceně v deníku otevřete náhled položky (směr,
+U zaúčtované položky ukazuje sbalená sekce **Zaúčtování** zápis v deníku stejně jako
+detail faktury: řádky s účty a jejich názvy, po stornu nebo přeúčtování i protizápis,
+poznámky zápisu a jeho přílohy. Úhrady položky jsou v seznamu **Přiřazené úhrady**
+([§ 52.14.14.5](#5214145-uhrady)). Tlačítko **Otevřít v deníku** přejde na zápis
+a **Přeúčtovat** u živého zápisu otevře dialog přeúčtování položky. Sekce Zaúčtování
+čte deník, proto ji vidí jen role s právem číst účetnictví; role bez něj vidí vznik
+zaúčtované položky a tlačítko **Přeúčtovat** v části **Účtování**.
+Část **Účtování** ukazuje, jak se budou účtovat úhrady. Obráceně v deníku otevřete náhled položky (směr,
 druh, protistrana, data, částka, uhrazeno, zbývá, variabilní symbol, účty
 a poznámka) i s jejími dokumenty a přejdete na detail.
 
@@ -1537,11 +2029,230 @@ i zpětně k rozvahovému dni.
 #### 52.14.14.10 Oprávnění
 
 Agendu vidí uživatelé s oprávněním **Ostatní pohledávky a závazky** (čtení);
-zakládání, úpravy a úhrady vyžadují zápis. Zaúčtování a storno v podvojném
-účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat v deníku.
+zakládání, úpravy, poznámka vystavené položky a úhrady vyžadují zápis. Zaúčtování
+a storno v podvojném účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat
+v deníku. **Smazat i se zápisem** potřebuje stejná oprávnění jako smazání zápisu
+v deníku: zápis do agendy, do účetnictví, do deníku a zaúčtování v deníku.
 Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřazení
 pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
-s přístupem k dokumentům.
+s přístupem k dokumentům. Druhy zakládá, skrývá a přejmenovává uživatel se zápisem
+do agendy; zapnutí a vypnutí vlastní řady navíc potřebuje oprávnění upravovat
+účetnictví, stejně jako úprava číselných řad v Nástrojích. Účetní profil druhu
+a vlastní kontaci úhrad položky mění uživatel se zápisem do agendy; profily vidí
+každý, kdo agendu čte.
+
+#### 52.14.14.11 Druhy a číselné řady
+
+Všechny položky jedné strany mají jinak čísla ze společné řady OP (pohledávky) nebo
+OZ (závazky). Chcete-li agendy rozlišit podle čísla, například nájemné, nároky na
+dotace a registrace, dejte druhu vlastní řadu. Platí to pro vestavěné druhy (nájemné,
+kauce, půjčka…) i pro vlastní druhy, které si firma založí.
+
+V přehledu klikněte na **Druhy**. Okno ukazuje druhy závazků a pohledávek zvlášť,
+protože každá strana čísluje svou řadou.
+
+| Akce | Co dělá |
+|---|---|
+| **Vlastní řada** | zapne druhu vlastní řadu; poprvé se zeptá na prefix, například `NJ` pro nájemné |
+| **Společná řada** | vrátí druh na OP nebo OZ; jeho řada zůstane a po opětovném zapnutí čísluje dál |
+| **Skrýt** / **Zobrazit** | skrytý druh se nenabízí novým položkám; koncept, který ho už má, si ho ponechá a opakování z něj dál vydává doklady |
+| Úprava (tužka) | přejmenuje vlastní druh; vestavěný druh se jmenuje podle překladu |
+| Smazání (koš) | jen vlastní druh bez položek a bez opakování; s ním zmizí i jeho prázdná řada |
+
+Vlastní druh založíte v dolní části okna: zvolte směr a název, případně zaškrtněte
+**Číslovat doklady vlastní řadou** a zadejte prefix. Druh se nabídne v poli **Druh**
+u položek stejného směru. Směr druhu se po založení nemění.
+
+Vlastní druh je pro aplikaci „jiná pohledávka“ nebo „jiný závazek“. Daňová evidence
+zařadí úhradu přijaté půjčky a kauce jako nedaňovou jen u vestavěného druhu
+([§ 74](74_Danova_evidence.md)), proto půjčky a kauce veďte pod vestavěným druhem
+a chcete-li je číslovat zvlášť, zapněte vlastní řadu jemu.
+
+Prefix musí být jiný než OP, OZ a prefixy ostatních druhů a nesmí ho nést čísla už
+existujících položek (například převzatých z jiného programu), jinak by dvě řady
+vydaly stejné číslo.
+
+Položka druhu s vlastní řadou dostane číslo `NJ-2026-0001`, `NJ-2026-0002`… Řada
+pokračuje i v dalším roce se stejným prefixem a tvarem čísla. Prefix, tvar čísla
+a další číslo upravíte v `Nástroje → Číselné řady`, kde je řada označená názvem druhu.
+
+Zapnutí nebo vypnutí vlastní řady platí od dalšího potvrzeného dokladu, vydaná čísla
+zůstávají. Aby agenda měla v roce souvislou řadu, přepněte ji nejlépe k začátku
+účetního období.
+
+Opakování položky si druh pamatuje, takže další doklady dostanou čísla ze stejné
+řady. Pokud číslo z řady už nese jiný doklad (například po snížení čítače nebo
+u tvaru čísla bez prefixu), potvrzení skončí hláškou a položka zůstane konceptem;
+upravte čítač nebo prefix řady.
+
+Druh **Jiná pohledávka** / **Jiný závazek** je výchozí: nabízí se vždy a čísluje
+společnou řadou. Proto i položka založená ze zůstatku zápisu v saldokontu
+([§ 60](60_Saldokonto.md)) má číslo vždy z řady OP nebo OZ.
+
+Běžným API tokenem a přes MCP server se druhy jen čtou (`kind`, `kind_id`, `kind_name`, seznam
+druhů); nastavují se ve webovém rozhraní nebo tokenem s
+[Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite). Úprava konceptu, která pošle druh `other`
+bez `kind_id`, vlastní druh ponechá; zruší ho jiný vestavěný druh nebo `kind_id: null`.
+
+#### 52.14.14.12 Účetní profily druhů a vlastní kontace
+
+Firma v podvojném účetnictví může každému druhu nastavit **účetní profil**, tedy
+kontaci, kterou dostanou jeho položky, pokud nemají vlastní. Daňová evidence profily
+nemá: položku jen potvrzuje a úhradu zařazuje v peněžním deníku.
+
+V přehledu klikněte na **Druhy** a u druhu na **Účtování**. Profil má pět událostí:
+
+| Událost | Co se nastavuje | Zápis |
+|---|---|---|
+| **Vznik** | účet položky a protiúčet, popis zápisu, výchozí dimenze nového dokladu | pohledávka MD účet položky / D protiúčet, závazek MD protiúčet / D účet položky |
+| **Úhrada z banky** | peněžní účet (221 nebo jeho analytika) a popis zápisu | pohledávka MD banka / D účet položky, závazek MD účet položky / D banka |
+| **Úhrada z pokladny** | peněžní účet (211 nebo jeho analytika) a popis zápisu | pohledávka MD pokladna / D účet položky, závazek obráceně |
+| **Úrok splátky** | účet úroku (náklad u závazku, výnos u pohledávky) a popis | závazek MD úrok / D banka, pohledávka MD banka / D úrok; jen u rozdělené splátky |
+| **Poplatek splátky** | účet poplatku (náklad u závazku, výnos u pohledávky) a popis | jako úrok |
+
+Úrok a poplatek nemají peněžní stranu: peníze jdou podle kontace úhrady z banky.
+Prázdný účet úroku a poplatku znamená výchozí účty 562 a 568 u závazku a 662 a 668
+u pohledávky, v rámci pro nevýdělečné organizace 544 a 549, respektive 644 a 649.
+Profil s účtem jiného typu (například výnos u závazku) aplikace odmítne. Podrobnosti
+o rozdělených splátkách jsou v [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
+
+U úhrad je strana položky vždy účet položky, jinak by úhrada minula saldokonto;
+aplikace jiný účet na této straně odmítne už při uložení profilu. Prázdný peněžní účet
+znamená účet banky podle výpisu (221 s analytikou banky) nebo účet pokladny.
+
+Účty musí být aktivní v účtové osnově a účtovatelné: syntetický účet s více
+analytikami profil odmítne, vyberte analytiku. Účet položky u vzniku musí odpovídat
+směru druhu (aktiva u pohledávky, pasiva u závazku) a protiúčet nesmí být saldokontní
+účet 315 nebo 325.
+
+Popis zápisu může obsahovat zástupné znaky `{title}` (popis položky), `{document_no}`
+(číslo dokladu), `{partner}` (protistrana) a `{variable_symbol}`. Bez šablony má zápis
+vzniku popis položky a zápis úhrady obvyklý popis bankovního pohybu.
+
+Profil jde vypnout volbou **Profil platí**; vypnutý profil se neuplatní a položky
+účtují jako bez profilu.
+
+**Návrhy.** U vestavěných druhů okno nabízí nezávazný návrh kontace vzniku, například
+nájemné závazek MD 518 / D 325, přijatá půjčka MD 261 / D 461, poskytnutá půjčka
+MD 378 / D 261, kauce MD 378 / D 261 nebo MD 261 / D 379. Peníze půjčky a kauce jdou
+přes 261 (peníze na cestě), bankovní pohyb pak zaúčtujete 261 proti 221. Návrh se
+uloží, jen když kliknete na **Použít návrh** a profil uložíte; účty a analytiky se
+mezi firmami liší, proto ho aplikace sama nikdy nepoužije. Chybí-li účty návrhu
+v osnově nebo mají více analytik, okno na to upozorní.
+
+**Odkud se kontace bere.** Pořadí je vlastní kontace položky, profil druhu, výchozí
+kontace aplikace:
+
+- **Vznik** se skládá po částech. Vyplněný účet položky a protiúčet na položce mají
+  přednost, prázdné doplní profil druhu, bez profilu platí 315 nebo 325 a protiúčet
+  je povinný. Položka bez profilu druhu proto účtuje stejně jako dřív.
+- **Úhrady** se přebírají celé: vlastní kontace úhrady položky, jinak profil druhu,
+  jinak 221 nebo 211.
+- **Úrok a poplatek** stejně: vlastní účet položky, jinak profil druhu, jinak výchozí
+  účet podle strany a účetního rámce.
+
+Detail položky ukazuje v bloku **Účtování** pro každou událost, co se zaúčtuje,
+s označením **Vlastní**, **Zděděno z druhu** (s odkazem na nastavení druhu) nebo
+**Výchozí**. U konceptu je tam i náhled zápisu vzniku. Tlačítkem **Vlastní kontace**
+nastavíte položce peněžní účet a popis úhrady z banky či z pokladny, u půjčky
+a u položky s rozdělenými splátkami také účet úroku a poplatku. **Vrátit na
+zděděnou** vlastní kontaci zruší. Vlastní kontaci úhrad jde nastavit konceptu
+i potvrzené nebo zaúčtované položce, platí pro další úhrady. Kontaci vzniku nese
+koncept v polích účtu a protiúčtu; zaúčtovanou položku mění **Přeúčtovat**, a to jen
+dokud nemá úhradu.
+
+Při zaúčtování z profilu si položka uloží účet a protiúčet, které se opravdu
+zaúčtovaly, takže přeúčtování i saldokonto pracují se zaúčtovaným stavem. Změna
+profilu nebo vlastní kontace platí jen pro další zaúčtování; existující zápisy se
+nepřeúčtovávají. Do historie změn se zapisuje uložení profilu, změna vlastní kontace
+a každé zaúčtování, které kontaci převzalo z profilu druhu nebo z vlastní kontace
+úhrady (akce `other_item.posting_profile_applied` s událostí, druhem a zápisem).
+
+Úhradu z pokladny zaúčtuje pokladní doklad s účelem Ostatní a protiúčtem na účet
+položky; kontace úhrady z pokladny ukazuje účty, které má doklad použít.
+
+Opakování přenáší vlastní kontaci úhrad zdrojové položky na každý vygenerovaný
+koncept. Výchozí dimenze z profilu dostane jen nově pořízený doklad a jen u typů,
+které ještě nemá vyplněné.
+
+Běžným API tokenem a přes MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`,
+`posting_suggestion` a `posting_component_defaults`, detail položky `posting_rules`
+a `posting_overrides`). MCP server smí nastavit vlastní kontaci úhrad jen konceptu
+(`posting_overrides` v založení nebo úpravě); profily druhů a kontace potvrzené
+položky vyžadují webové rozhraní nebo API token s Plným zápisem a příslušnými právy.
+
+#### 52.14.14.13 Úvěry a leasing: jistina, úrok a poplatek
+
+Splátka úvěru, půjčky nebo leasingu obvykle obsahuje jistinu, úrok a případně poplatek.
+Účetně jde o různé věci: jistina snižuje dluh, úrok a poplatek jsou náklad (u přijatého
+úvěru) nebo výnos (u poskytnuté půjčky) období, kdy se platí.
+
+**Částka položky je jistina.** Přijatý úvěr 100 000 Kč založte jako závazek druhu
+Půjčka s částkou 100 000 Kč, například s účtem položky 461 (dlouhodobý úvěr) nebo 231
+(krátkodobý) a protiúčtem 261 nebo 221. Vznik se zaúčtuje jen v jistině, úroky
+a poplatky do předpisu nepatří. Poskytnutou půjčku vedete stejně jako pohledávku
+(například MD 378 / D 261).
+
+**Rozdělení splátek.** Akcí **Rozložit na splátky** (u uloženého kalendáře **Upravit** v jeho kartě) otevřete dialog splátek a zaškrtněte **Rozdělit splátky
+na jistinu, úrok a poplatek**. Každá splátka pak má jistinu, úrok a poplatek a její
+částka je jejich součet. Součet jistiny všech splátek musí odpovídat částce položky.
+Rozdělit jde i jen některé splátky; nerozdělená splátka je celá jistinou.
+
+**Výpočet splátek.** Zadejte roční úrokovou sazbu, počet splátek, četnost (měsíčně
+nebo čtvrtletně), způsob splácení a první splatnost, případně poplatek ke každé
+splátce, a klikněte na **Spočítat splátky**:
+
+- **Anuitní** splácení má stejnou splátku jistiny a úroku, podíl úroku postupně klesá.
+- **Lineární** splácení má stejnou jistinu, úrok klesá se zůstatkem.
+
+Úrok období je zůstatek jistiny krát roční sazba děleno 12 (čtvrtletně 4), zaokrouhlený
+na haléře. Součet jistiny vychází vždy přesně na částku položky; zaokrouhlení vyrovná
+poslední splátka. Výpočet je jen návrh: řádky můžete upravit podle splátkového
+kalendáře banky a kalendář pak uložte.
+
+**Úhrada splátky.** Platba se rozdělí podle splátek: nejdřív úrok, potom poplatek
+a nakonec jistina. Platba vyšší než splátka pokryje stejným pořadím další splátky,
+platba nad zbytek všech splátek je přeplatek a aplikace ji odmítne. Párování z banky
+zaúčtuje pohyb jedním zápisem se dvojicí řádků za každou složku. Pro přijatý úvěr
+s výchozími účty:
+
+| Složka | MD | D |
+|---|---|---|
+| Jistina | 461 (účet položky) | 221 |
+| Úrok | 562 | 221 |
+| Poplatek | 568 | 221 |
+
+U poskytnuté půjčky je banka na straně MD a na straně D účet položky, 662 a 668.
+Účty úroku a poplatku určuje vlastní kontace položky, účetní profil druhu nebo výchozí
+účet ([§ 52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+
+Pohyb, který už je zaúčtovaný, musí odpovídat rozdělení: jistina na účtu položky
+a úrok a poplatek na jejich účtech aspoň ve výši úhrady. Jinak aplikace přiřazení
+odmítne a ve zprávě uvede, kolik patří na který účet. Pokladní doklad nese jediný
+protiúčet, proto úhradu rozdělené splátky přiřadíte z banky; hotovostní splátky veďte
+jako nerozdělené.
+
+**Saldo a stav splátek.** Saldo položky (Zbývá jistina) snižuje jen jistina, takže
+odpovídá zůstatku účtu položky v deníku a v saldokontu. Detail ukazuje navíc **Zbývá
+zaplatit vč. úroku a poplatku** a u každé úhrady její rozdělení. Stav splátky je
+Uhrazeno, až když je zaplacený i úrok a poplatek. Výhled cash-flow počítá s celou
+částkou splátky.
+
+**Co aplikace neúčtuje.** Úrok se účtuje dnem úhrady. Úrok za období do rozvahového
+dne, který se platí až po něm, zaúčtujte k uzávěrce ručně (například interním dokladem
+jako dohadnou položku). Přeúčtování části dlouhodobého úvěru splatné do roka na
+krátkodobý účet aplikace sama nedělá.
+
+**Daňová evidence.** Rozdělení splátek slouží jen k přehledu splátek a výhledu cash-flow,
+nic se neúčtuje. Úhrada přiřazená k položce snižuje zůstatek jen o jistinu; pohyb, který
+nese i úrok, zůstává v peněžním deníku k zařazení
+([§ 74](74_Danova_evidence.md)).
+
+**API a MCP.** Splátky v API nesou `principal_amount`, `interest_amount` a `fee_amount`
+a stav splátky zbytky po složkách. Úhrada nese jistinu v `amount`, úrok a poplatek
+v `interest_amount` a `fee_amount` a celou platbu v `total_amount`, detail položky
+`remaining_payment` a `has_split_installments`. MCP server zapíše rozdělený kalendář
+nástrojem `set_other_item_installments`; úhrady a účtování se dělají ve webovém rozhraní.
 
 ### 52.14.15 Interní doklady
 
@@ -1594,6 +2305,10 @@ podle zápisu.
 
 DPH řádky interní doklad nemá, stejně jako ruční zápis. Zdanitelné plnění patří do faktur.
 
+Účtuje-li zaúčtovaný interní doklad na účty 381 až 385, ukáže detail panel **Časové rozlišení**. Z něj
+založíte položku agendy [Časové rozlišení](125_Casove_rozliseni.md), která zápis naváže jako vznik a rozpouští
+ho podle plánu.
+
 #### 52.14.15.3 Seznam, filtry a export
 
 Seznam ukazuje číslo, datum dokladu, popis s druhem, partnera, částku (součet strany MD)
@@ -1607,6 +2322,8 @@ Tlačítko **Export CSV** stáhne doklady podle aktuálních filtrů.
 - **Zaúčtovaný doklad** stornujete v jeho detailu tlačítkem **Stornovat**. Vznikne
   protizápis k zápisu dokladu a doklad přejde do stavu **Stornováno**. Do zamčeného nebo
   uzavřeného období storno nepůjde, zvolte datum v otevřeném období.
+- **Chybný zaúčtovaný doklad** jde v otevřeném období smazat i se zápisem bez storna
+  (viz [§ 52.14.15.7](#5214157-smazani-zauctovaneho-dokladu-a-uprava-poznamky)).
 - Zápis interního dokladu nejde stornovat přímo v deníku, deník odkáže na detail dokladu.
   Smažete-li zápis v deníku, doklad se vrátí do konceptu a při novém zaúčtování dostane
   své původní číslo.
@@ -1625,8 +2342,10 @@ Přílohy (dohodu o zápočtu, podklad k odpisu) připojíte v detailu dokladu v
 **Přílohy**. Ukládají se do Dokumentů ve složce *Interní doklady/rok/měsíc*.
 
 Seznam a detail vidí uživatel s přístupem k účetnictví. Koncept zakládá a upravuje,
-kdo smí zapisovat ruční zápisy. Zaúčtování, storno a vytvoření dokladu nad ručním
-zápisem vyžadují oprávnění zaúčtovat v deníku.
+kdo smí zapisovat ruční zápisy; stejné oprávnění stačí na poznámku vystaveného dokladu,
+změna popisu potřebuje navíc zápis do účetnictví. Zaúčtování, storno a vytvoření dokladu
+nad ručním zápisem vyžadují oprávnění zaúčtovat v deníku. **Smazat i se zápisem** potřebuje
+stejná oprávnění jako smazání zápisu v deníku.
 
 #### 52.14.15.6 Návrh od AI asistenta
 
@@ -1637,6 +2356,291 @@ Po potvrzení vznikne koncept, nebo rovnou zaúčtovaný doklad, stejnou cestou 
 **Nový interní doklad**. Podrobnosti v
 [AI extrakci, § 25.3](25_AI_extrakce.md#253-krok-za-krokem-nastavit-poskytovatele-ai).
 
+#### 52.14.15.7 Smazání zaúčtovaného dokladu a úprava poznámky
+
+**Smazat i se zápisem** (v nabídce **…** detailu zaúčtovaného dokladu) odstraní chybný
+doklad i jeho zápis v deníku. Storno ani protizápis nevznikne, doklad z účetnictví zmizí,
+jako by nikdy nebyl zaúčtovaný. Smazání proběhne celé, nebo vůbec. Platí stejná pravidla
+jako pro **Smazat** v deníku:
+
+- zápis leží v **otevřeném** účetním období; po uzávěrce doklad stornujte,
+- spadá-li zápis do **uzamčeného** data (typicky po podání přiznání k DPH), aplikace
+  před smazáním ukáže varování a smazání proběhne až po vědomém potvrzení účetního,
+- doklad není stornovaný a nevznikl nad existujícím ručním zápisem,
+- řádky zápisu nejsou rozepsané na doklady v saldokontu ani spárované v okruhu párování
+  a na zápis nenavazuje jiná agenda (například předpis nebo platba SVJ, společná alokace).
+
+Když některé pravidlo smazání nedovolí, je akce neaktivní a po najetí myší ukáže důvod.
+Pak doklad stornujte, nebo nejdřív zrušte to, co na něm stojí. Navázané doklady zápočtu
+po smazání v saldokontu znovu ukážou původní zůstatek. Číslo z řady číselníku se vrátí
+do řady, je-li poslední vydané. Číslo z řady ID, kterou sdílí i ruční zápisy, se nevrací
+a v řadě zůstane mezera, stejně jako po smazání číslovaného ručního zápisu v deníku.
+Smazání se zapíše do historie dokladu i do auditu deníku.
+
+**Upravit poznámku** v detailu vystaveného dokladu doplní nebo změní poznámku u
+zaúčtovaného i stornovaného dokladu, také po uzávěrce: poznámka se do účetnictví nepromítá.
+U zaúčtovaného dokladu jde ve stejném dialogu změnit i **popis**. Popis je zároveň popisem
+zápisu v deníku a změní se i tam, proto to jde jen v otevřeném období (stejně jako úprava
+popisu zápisu tužkou v deníku). Řádky kontace, částky a data zůstávají zamčené, jejich
+opravu řeší storno nebo smazání. Každá změna se zapíše do historie dokladu s hodnotou
+před a po.
+
+### 52.14.16 Jednoduchý zápis po dvojicích
+
+Firma si může zvolit **jednoduchý (párový) zápis**. Deník pak neukládá jeden zápis se všemi účty, ale zápis složený
+z **dvojic**: každá dvojice je jeden účet MD proti jednomu účtu Dal se stejnou částkou. Faktura se sazbami 21 % a 12 %
+se tak zapíše jako čtyři dvojice (311/602, 311/343.200, 311/604, 311/343.200) a hromadná platba jako dvojice
+321/221 za každou uhrazenou fakturu. Obraty účtů, rozvaha, výsledovka, předvaha a přiznání k DPH vycházejí stejně jako
+při složeném zápisu, mění se jen tvar zápisu a jeho zobrazení. Firma, která volbu nezapne, účtuje složeným zápisem
+a nepozná žádnou změnu.
+
+#### 52.14.16.1 Krok za krokem: zapnout jednoduchý zápis
+
+Formu zápisu mění **správce firmy** na stránce `Nástroje → Uzávěrka` v bloku **Forma účetního zápisu**
+([§ 72.8](72_Uzaverka.md#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky)).
+
+1. Klikněte na **Změnit formu zápisu**.
+2. Zvolte **Jednoduchý zápis (po dvojicích)** a datum **Platí od**. Datum musí ležet v otevřeném a nezamčeném účetním
+   období, předvyplněný je první den období. Rozhoduje datum zápisu, ne datum jeho pořízení.
+3. Klikněte na **Spustit náhled**. Náhled převodu nanečisto spočítá, kolik zápisů od zvoleného data se rozdělí na dvojice
+   automaticky, kolik se zobrazí po dvojicích beze změny dat, kolik zůstane složených (M : N) a kolik se nezmění vůbec
+   (uzavřené období, vazby na úhrady, mzdy). Náhled nic nezapisuje.
+4. Klikněte na **Uložit změnu formy**. Změna je v auditním logu (`accounting.entry_form_changed`) a v historii formy.
+
+Zpět na složený zápis jde přejít stejným postupem. Zápisy, které už jsou po dvojicích, zůstanou po dvojicích.
+
+Tlačítko **Uložit a zaúčtovat** v editorech vydané a přijaté faktury je volba instalace (konfigurace
+`accounting.save_and_post`, proměnná prostředí `MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`), ve výchozím stavu vypnutá.
+Zaúčtování z detailu dokladu funguje vždy.
+
+Instalace může mít jednoduchý zápis jako **výchozí formu nových firem** (konfigurace `accounting.default_entry_form`,
+proměnná prostředí `MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single`). Firma, která pak vstoupí do podvojného
+účetnictví (založení, převod z jiného programu, aktivace účetnictví), účtuje po dvojicích od začátku, pro všechna
+data. Stávající firmy a firmy, které už mají zápisy v deníku, se nezmění.
+Obnova firmy z Kompletního exportu dat MyÚčta se výchozí formou instalace neřídí: zachová formu zápisu zdroje
+včetně historie formy, čísel dvojic, storen dvojic a posouzení zápisů bez dvojic. Export bez historie formy je
+celý ve složeném zápisu. Má-li cílová firma vlastní, jinou volbu formy, obnova skončí chybou a nic nezapíše.
+Jednoduchý zápis mají obchodní společnosti, podnikatelé a společenství vlastníků jednotek. Spolky a ostatní neziskové organizace ho zatím nemají.
+
+#### 52.14.16.2 Krok za krokem: ruční zápis po dvojicích
+
+Má-li firma k datu zápisu jednoduchý zápis, místo tabulky řádků vidíte **Dvojice**.
+
+1. V ručním zápisu vyplňte **Účet MD**, **Účet Dal**, **Částku** a volitelně **Text** dvojice a středisko.
+2. Další dvojici přidáte tlačítkem **Přidat dvojici**, dvojici odeberete křížkem.
+3. Zápis je vyrovnaný vždy, takže se nezobrazuje rozdíl stran, jen součet dvojic.
+4. Klikněte na **Zaúčtovat**.
+
+Změníte-li datum na období s jinou formou zápisu, rozepsané řádky se převedou na dvojice a zpět, kde je převod
+jednoznačný. Středisko a dimenze dvojice se zapíší na oba její řádky, i na saldokontní účet (311, 321, 331, 211…),
+takže předvaha a rozvaha po středisku jsou po dvojicích vyrovnané. Totéž platí pro automatické zápisy z dokladů:
+saldokontní strana dvojice nese středisko, zakázku a dimenze řádku dokladu, ke kterému patří. **Kopírovat jako nový**, **Uložit a nový** i nový
+zápis ze šablony nesou dvojice.
+
+Server odmítne dvojici, která nemá účet MD, nemá účet Dal, má oba účty stejné nebo má nulovou či zápornou částku.
+Hláška ukazuje číslo dvojice:
+
+<!-- cols: 34 66 -->
+| Hláška | Význam |
+|---|---|
+| Dvojici chybí účet MD / Dal | Doplňte chybějící účet. |
+| Účet MD a účet Dal dvojice musí být různé | Dvojice se stejnými účty nemá účetní smysl. |
+| Částka dvojice musí být kladná | Zápornou částku vyjádřete červeným stornem, nikoli znaménkem. |
+| Zápis nejde jednoznačně rozdělit na dvojice | Řádky s více účty na obou stranách zadejte po dvojicích. |
+| Firma k datu zápisu účtuje složeným zápisem | Zápis nemůže mít dvojice, použijte řádky. |
+
+Interní doklad ve firmě s jednoduchým zápisem posílá řádky jako dnes a server je při zaúčtování rozdělí na dvojice,
+kde je rozdělení jednoznačné (jedna strana má jediný řádek, nebo si částky odpovídají). Zápis s více účty na obou
+stranách odmítne a doklad je třeba rozdělit.
+
+#### 52.14.16.3 Šablony po dvojicích
+
+V `Účetnictví → Šablony` firma s jednoduchým zápisem edituje šablonu po dvojicích: **Účet MD**, **Účet Dal**,
+výchozí částka, text a středisko. Starší řádkovou šablonu převede tlačítko **Převést na dvojice**, pokud je párování
+jednoznačné. Šablona po dvojicích vloží do ručního zápisu rovnou dvojice. CSV import mzdové rekapitulace
+vyplní řádky a v jednoduchém zápisu se převedou na dvojice podle stejného pravidla.
+
+#### 52.14.16.4 Deník, opis účtu a export
+
+- V rozbaleném zápisu je tabulka **Dvojice zápisu** s číslem, účty, částkou a textem. Stornovaná nebo přeúčtovaná
+  dvojice odkazuje na opravný zápis.
+- Automatický zápis dokladu, který nejde jednoznačně rozdělit na dvojice, se do deníku nezapíše: doklad zůstane
+  nezaúčtovaný v [K doúčtování](54_Rucni_fronta_doctovani.md) s chybou, že zápis nejde rozložit na dvojice, a zaúčtujete
+  ho ručně po dvojicích nebo upravíte předkontaci. Ostatní doklady téhož běhu automatiky se zaúčtují.
+- Starší zápis, který nejde jednoznačně rozdělit (M : N), má v seznamu odznak **M : N**. Filtr **Dvojice** vybere jen
+  tyto zápisy k ruční úpravě. Filtr se nabízí jen firmě, která jednoduchý zápis používá.
+- **Opis účtu** ukazuje u řádku z dvojice jediný protiúčet. Starší složený zápis 1 : N se v opisu zobrazí rozložený na
+  pohyby (odznak **rozloženo**) a data zůstanou beze změny; zápis M : N zůstane v původním tvaru s odznakem **M : N**.
+  Podle protiúčtu jde opis filtrovat a sčítat ([§ 55.8.5](55_Hlavni_kniha.md#5585-opis-uctu)).
+- **Export deníku** má ve firmě s jednoduchým zápisem jeden řádek na dvojici (číslo, účet MD, účet Dal, částka, text).
+  Zápisy M : N zůstávají v původním tvaru s označením. Limit 5 000 zápisů se nemění.
+- **Cash flow** počítá u zápisů po dvojicích tok podle protiúčtu dvojice ([§ 70.5.2](70_Vykazy_podle_paragrafu_18.md#7052-prehled-o-peneznich-tocich)).
+
+#### 52.14.16.5 Storno a přeúčtování dvojice
+
+V tabulce **Dvojice zápisu** zaškrtněte dvojice a použijte lištu akcí:
+
+- **Přeúčtovat dvojici** (právě jedna vybraná dvojice) změní účty MD a Dal při zachované částce. V otevřeném
+  nezamčeném období se dvojice přepíše na místě a původní obsah zůstane v historii zápisu. V zamčeném datu s daňově
+  neutrální změnou se použije stejná cesta jako u přeúčtování dokladu. Jinak vznikne opravný zápis se stornem dvojice
+  a novou dvojicí. Po uložení aplikace řekne, která cesta se použila.
+- **Storno dvojice** (jedna nebo víc vybraných dvojic) vytvoří opravný zápis se zrcadlem dvojic. Původní zápis zůstane
+  nestornovaný. Pozdější storno celého zápisu zrcadlí jen dvojice, které ještě stornované nejsou, a stornuje i nové
+  dvojice z přeúčtování opravným zápisem, takže storno vždy zruší celý doklad.
+
+U zápisů vzniklých zaúčtováním dokladu (faktura, banka, pokladna) jde dvojici **jen přeúčtovat**, protože čisté
+storno dvojice by rozešlo zápis s dokladem. Čisté storno dvojice je jen u ručních a interních zápisů. U mzdových
+zápisů, stornovaných zápisů a protizápisů se obě akce nenabízejí.
+
+### 52.14.17 Hromadné přeúčtování dokladů
+
+**Účetnictví → Přeúčtovat doklady.**
+
+Kdy to potřebujete: stejný účet je chybně na desítkách až stovkách dokladů. Například
+přijaté faktury jednoho dodavatele se celý rok účtovaly na 518100 a patří na 518300,
+část tržeb má být místo na 602100 na 602200, nebo platby zaúčtované z banky přímo na
+315001 patří na 315002. Hromadné přeúčtování dělá totéž co **Přeúčtovat** na jednom
+dokladu ([§ 52.8](#528-krok-za-krokem-preuctovani-z-dokladu)), jen pro všechny doklady
+podle filtru najednou.
+
+Postup krok za krokem, co se stane s jednotlivými druhy dokladů a proč se doklad vynechá,
+je v [§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu). Přeúčtovat jde jen
+výsledek dokončeného běhu nanečisto, který se ještě neprovedl. Doklad, jehož zaúčtování
+se od běhu nanečisto změnilo, se vynechá.
+
+Pravidla:
+
+- Najednou jde přeúčtovat nejvýš 500 dokladů. Větší výběr rozdělte podle období.
+- U vydaných a přijatých faktur jde měnit jen účet, na který vedou položky dokladu
+  (výnos, náklad, majetek). Nový účet se zapíše i na položky, takže ho další úprava
+  faktury nevrátí. Protiúčet 311/321, DPH a zaokrouhlení se mění úpravou dokladu
+  nebo předkontace.
+- U bankovního pohybu se nemění bankovní účet pohybu (221).
+- Ruční zápisy, interní doklady a pokladní doklady se přeúčtují **jen opravou zápisu**,
+  i když zvolíte storno: mění se jen účet na řádcích, částky, dvojice, texty i dimenze
+  řádků zůstávají. U interního dokladu se nový účet zapíše i do jeho řádků. U pokladního
+  dokladu jde měnit jen jeho protiúčet (ne pokladní účet 211 ani účty z předkontace)
+  a jen u dokladu, který neuhrazuje fakturu. Zápis v uzavřeném období, zápis patřící ke
+  skupině zaúčtování dokladu a v zamčeném datu změna s daňovým dopadem se vynechají.
+- DPH se přeúčtováním nemění, stejně jako u jednotlivého **Přeúčtovat**.
+- Spustit přeúčtování smí jen správce firmy (a superadmin), na stránce **Přeúčtovat doklady**
+  i operací **Přeúčtovat účet** v hromadných akcích, nad doklady i nad položkami. Přepisuje
+  už zaúčtované zápisy, proto ho žádná jiná role nedostane, ani v editoru rolí. API token
+  hromadné přeúčtování nespustí.
+- Každý přeúčtovaný doklad má v historii záznam s číslem běhu.
+
+### 52.14.18 Hromadné akce v seznamech
+
+**Účetní deník, Vydané faktury, Přijaté faktury, Banka → Všechny pohyby nebo K zaúčtování → … → Hromadné akce.**
+
+Postup je v [§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech). Všechny operace běží stejně: běh nanečisto, provedení přesně jeho výsledku bez ručně vyřazených záznamů a vrácení. Každý záznam se mění touž cestou jako úprava jednoho záznamu v aplikaci, se stejnými kontrolami.
+
+Pravidla společná všem operacím:
+
+- Najednou jde zpracovat nejvýš 500 záznamů, ručně vybraných nebo všech podle filtru seznamu. Větší výběr akce odmítne.
+- Výběr platí jen pro aktuální firmu. Obsahuje-li záznam jiné firmy, akce se nespustí.
+- Ve firmě běží najednou jen jedna hromadná akce nebo hromadné přeúčtování.
+- Provedení zpracuje jen záznamy, které se od běhu nanečisto nezměnily. Vrácení vrátí jen záznamy, které od provedení nikdo nezměnil.
+- Úloha běží za uživatele, který ji spustil, a s jeho právy. Ztratí-li mezitím právo nebo přístup k firmě, úloha se nespustí.
+- Každá provedená změna i vrácení má v auditní stopě záznam s číslem úlohy, operací a stavem před a po.
+
+**Přeúčtovat účet** se řídí pravidly hromadného přeúčtování ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)), jen zápisy vybírá z vybraných dokladů nebo zápisů.
+
+**Nastavit dimenze:**
+
+<!-- cols: 26 74 -->
+| Režim | Co udělá |
+|---|---|
+| **Přepsat** | Nastaví zvolenou hodnotu. Na hlavičce dokladu zruší i vlastní hodnoty a rozpad téhož typu na položkách, takže celý doklad nese jednu hodnotu. |
+| **Jen kde je prázdné** | Doplní hodnotu jen tam, kde typ nemá hodnotu ani rozpad. Vyplněnou hodnotu ponechá. |
+| **Vymazat** | Hodnotu i rozpad typu odebere. |
+| **Beze změny** | Typ se nemění. |
+
+- **Hlavička dokladu** se do deníku promítne na všechny řádky zápisu dokladu i na zápisy jeho úhrad a zápočtů, stejně jako panel **Dimenze** na detailu dokladu. **Jen položky** se v deníku promítnou jen na nákladové a výnosové řádky. Rozvahové řádky (311, 321, 343) hodnotu položek nedostanou.
+- U zápisů v deníku se dimenze mění přímo na řádcích, jako úprava dimenzí řádků v detailu zápisu. Pole **Jen řádky na účtech začínajících** omezí změnu na řádky s účtem začínajícím některým ze zadaných čísel.
+- Vynechá se záznam, jehož zápis leží v uzavřeném účetním období nebo v období se zmrazenými dimenzemi (uzavřené knihy), a změna, po které by řádek porušil pravidlo povinné dimenze ([Dimenze](114_Dimenze.md)). Povinné dimenze se ověřují na řádcích zápisu dokladu i na zápisech jeho úhrad a zápočtů, které změna hlavičky přepíše. Běh nanečisto takové záznamy ukáže s důvodem, provedení je nezmění.
+- Změna účtotvorné dimenze, která by přesunula řádek na jiný analytický účet, se vynechá. Doklad je potřeba přeúčtovat.
+- Vrácení obnoví přesně předchozí hodnoty, i to, že typ hodnotu neměl, a rozpady.
+
+**Změnit předkontaci:**
+
+- Nastaví předkontaci všem běžným položkám vydaných a přijatých faktur. Účet položky a protiúčet, které předkontace určuje, se z položky odeberou, aby předkontace platila. Stranu, kterou předkontace neurčuje, položka ponechá.
+- Zaúčtovaný doklad se zaúčtuje znovu z dokladu, stejně jako **Přeúčtovat** na detailu ([§ 52.14.9.2](#521492-preuctovani-z-dokladu-sekce-zauctovani)): v otevřeném období oprava na místě, v uzavřeném nebo zamčeném podle **Způsobu změny** vynechání, nebo storno a nový zápis. Nezaúčtovaný doklad dostane jen novou předkontaci.
+- Stornovaný doklad a nezaúčtovaný doklad v uzavřeném období se vynechají. Vystavenou fakturu mění jen role s právem upravit vystavenou fakturu, znovu zaúčtovat jen role s právem zaúčtovat.
+- DPH se nemění. V období, za které je podané přiznání k DPH nebo kontrolní hlášení (u přijaté faktury období odpočtu), se zápis přepíše na místě jen jako přesun mezi účty bez daňového dopadu, stejně jako při přeúčtování v zamčeném datu. Jinak se doklad vynechá s důvodem **Podané období DPH**, i když zámek k datu někdo posunul zpět.
+
+**Změnit poznámku:**
+
+- Mění poznámku nad položkami nebo pod položkami vydaných a přijatých faktur. **Přepsat** nahradí celý text, **Připojit na konec** přidá text na nový řádek za stávající, **Vymazat** text odebere. Text má nejvýš 2 000 znaků.
+- Každý doklad se uloží jako tlačítkem **Uložit** v editoru, se stejnými kontrolami a záznamem v historii dokladu. Částky, položky ani zaúčtování se nemění.
+- Koncept změní každý, kdo smí doklad upravit. Doklad mimo koncept se změní jen se zaškrtnutou volbou **Upravit i vystavené doklady** a se stejnými právy jako **Upravit vystavený doklad**: vydanou fakturu správce firmy nebo role s právem upravit vystavenou fakturu, přijatou jen správce. Úprava vystavené faktury, stejně jako v editoru, obnoví údaje odběratele a dodavatele na dokladu a vytvoří nové PDF. Stornovaný doklad se nemění.
+- Doklad v uzavřeném účetním období se vynechá. Přebití uzavřeného období hromadná akce nenabízí, takový doklad upravte jednotlivě.
+- Vrácení obnoví původní text, jen když poznámku ani stav dokladu od provedení nikdo nezměnil.
+
+**Opravit variabilní symbol:**
+
+- Mění variabilní symbol bankovních pohybů, například když plátce symbol nezadal a číslo faktury napsal do zprávy pro příjemce. Nový symbol je **Stálá hodnota**, nebo **Podle vzoru** z číslic a značek:
+
+<!-- cols: 22 78 -->
+| Značka | Co se doplní |
+|---|---|
+| `{ss}` | specifický symbol pohybu |
+| `{ks}` | konstantní symbol pohybu |
+| `{vs}` | dosavadní variabilní symbol |
+| `{zprava}` | první skupina 2 až 10 číslic ve zprávě pro příjemce |
+
+- Výsledek musí být platný variabilní symbol: jen číslice, nejvýš 10. Jinak se pohyb vynechá s důvodem.
+- Symbol se změní jen u pohybu, který ještě nic nevyřídil: nespárovaný, neignorovaný, bez úhrady faktury, přijaté faktury, ostatní položky nebo mzdy a bez zápisu v deníku. Spárovaný nebo zaúčtovaný pohyb se vynechá, nejdřív zrušte spárování nebo zaúčtování.
+- Po změně symbolu se pohyb hned znovu automaticky páruje, stejně jako tlačítkem **Přepárovat** u výpisu, a podle nastavení firmy se po spárování zaúčtuje. Sloupec **Před a po** ukazuje nový symbol i stav spárování.
+- Vrácení obnoví původní symbol, jen když pohyb zůstal nespárovaný. Spárovaný pohyb vrácení vynechá, nejdřív zrušte spárování.
+- Výběr podle filtru i ručně vybrané pohyby platí jen pro výpisy aktuální firmy.
+- Variabilní symbol faktur hromadné akce nemění: u vydané faktury je to číslo dokladu, u přijaté interní číslo z číselné řady.
+
+**Smazat:**
+
+<!-- cols: 30 70 -->
+| Záznam | Co se stane |
+|---|---|
+| Koncept vydané nebo přijaté faktury | Smaže se jako tlačítkem **Smazat** na dokladu. |
+| Vystavená vydaná faktura | Smaže ji jen správce firmy a jen mimo zákonnou lhůtu archivace; zaúčtovaný zápis se přitom stornuje. Jinak se vynechá s důvodem. |
+| Přijatá faktura mimo koncept | Vynechá se. Přijatý nebo zaúčtovaný doklad se stornuje na detailu. |
+| Zápis v deníku v otevřeném a nezamčeném období | Smaže se jako v detailu zápisu. Zápis faktury nebo přijaté faktury tím vrátí doklad mezi nezaúčtované. |
+| Zápis v uzavřeném období, v zamčeném datu nebo stornovaný | Podle volby **Přeskočit** se vynechá, podle volby **Stornovat** se stornuje, když to období dovolí. |
+
+- Hromadné smazání nikdy nepřebije ochranu, kterou u jednoho záznamu přebíjí jen vědomé potvrzení: vynucené smazání správcem, zásah do zamčeného období ani zákonnou lhůtu archivace. Takové záznamy smažte jednotlivě.
+- Převzaté doklady (import z jiného programu) se mažou podle stejných pravidel jako ostatní.
+- Smazání vrátit nejde. Provedení vyžaduje opsat počet záznamů, které se smažou.
+
+**Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace a poznámky právo upravovat doklady, k opravě variabilního symbolu právo párovat bankovní pohyby. Operaci **Přeúčtovat účet** smí jen správce firmy ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)). Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
+
+### 52.14.19 Členění DPH a položky dokladů
+
+Postup je v [§ 52.8.3](#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu). Platí pravidla společná všem hromadným akcím ([§ 52.14.18](#521418-hromadne-akce-v-seznamech)) a k nim:
+
+**Položky dokladů:**
+
+- Seznam ukazuje položky vydaných, resp. přijatých faktur aktuální firmy napříč doklady, nejnovější doklady první. Stornované doklady, textové řádky a slevové řádky v něm nejsou.
+- Text se hledá jako souvislá část popisu bez ohledu na velikost písmen a diakritiku. Ve velkém množství dokladů se slova hledaného textu dohledávají v rejstříku slov, proto text zadávejte od začátku slova (`poplatek`, ne `platek`). Slova kratší než tři znaky rejstřík nezná, ta se porovnají jen jako část popisu.
+- Filtr **Členění DPH** porovnává vlastní kód položky. **Bez vlastního kódu** najde položky, které přebírají kód hlavičky dokladu.
+- Výběr je ruční seznam položek, nebo všechny položky podle filtru, nejvýš 500. Položka jiné firmy výběr odmítne.
+- Záznamem hromadné akce je doklad: změní se na něm všechny vybrané položky najednou a doklad se jednou uloží, přepočte a případně přeúčtuje. Ostatní položky dokladu se nemění. Vyřadit z provedení jde celý doklad.
+
+**Změnit členění DPH:**
+
+- Mění kód členění DPH položky. Podle něj evidence DPH zařadí položku na řádek přiznání a do oddílu kontrolního hlášení ([§ 41.13.11](41_Vykazy_DPH.md#411311-rucni-volba-klasifikace)). Kód hlavičky dokladu se dopočítá z položek stejně jako při uložení faktury.
+- Kód `mimo` (mimo předmět DPH) nemá řádek přiznání ani oddíl KH. Platí pro vydané i přijaté doklady.
+- Sazbu DPH jde měnit jen nad vybranými položkami. Částky se přepočtou jako při změně sazby v editoru faktury: u dokladu s cenami s DPH zůstane cena s DPH a dopočítá se základ, jinak zůstane základ a dopočítá se daň. Běh nanečisto ukáže částky položek i součet dokladu před a po.
+- Doklad se uloží touž cestou jako tlačítko **Uložit** v editoru, s právy uživatele, který akci spustil: přepočtou se položky, součty a rekapitulace DPH, vystavené faktuře se znovu vytvoří PDF a zaúčtovaný doklad se přeúčtuje v otevřeném období. Vystavenou fakturu mění jen role s právem upravit vystavenou fakturu, přeúčtování vyžaduje právo zaúčtovat. U přijaté faktury se změna samotného kódu provede opravou DPH zařazení (právo **Změnit DPH zařazení přijaté faktury**), změna sazby nebo účtu vynucenou úpravou dokladu, kterou smí jen správce firmy.
+- **Podané období DPH se nemění nikdy.** Doklad, jehož období (u vydaného dokladu DUZP, u přijatého období odpočtu) pokrývá podané přiznání k DPH nebo kontrolní hlášení, u dokladu s OSS položkou i podané OSS přiznání, se vynechá s důvodem **Období DPH je podané**, a to i pro správce firmy. Právo správce měnit jednotlivý doklad v podaném období pro hromadnou akci neplatí. Opravu podaného období řešte opravným nebo dodatečným tvrzením. Koncept do výkazů nevstupuje, proto se mění.
+- Vynechá se také doklad v uzavřeném účetním období nebo v zamčeném datu ([§ 52.14.10](#521410-zamek-uctovani-k-datu)), přijatý doklad s rozpisem DPH (zařazení určují části rozpisu, změňte ho v detailu dokladu) a položka v režimu OSS (do tuzemského přiznání nevstupuje, zařazení se mění hromadnou změnou OSS).
+- Vrácení obnoví u položek předchozí kód, sazbu i částky a doklad znovu uloží a přeúčtuje. Kdyby uložení předchozí stav přesně neobnovilo, doklad zůstane beze změny a vrácení ho vypíše jako chybu.
+
+**Přeúčtovat účet nad položkami** nastaví vybraným položkám vlastní účet výnosu (vydaná faktura) nebo nákladu (přijatá faktura) a doklad uloží touž cestou jako editor, zaúčtovaný doklad se přeúčtuje. Volitelné pole **Z účtu** omezí změnu na položky, jejichž účet tímto číslem začíná. DPH se nemění.
+
+**Nastavit dimenze nad položkami** změní dimenze jen vybraným položkám, stejně jako volba **Jen položky** nad doklady. Rozpad dimenze na vybrané položce volba **Vymazat** neodebere, upravte ho v detailu dokladu.
+
+**Oprávnění:** stejná jako u ostatních hromadných akcí. Kromě práva **Hromadné změny dokladů a zápisů** je potřeba právo upravovat vydané, resp. přijaté faktury (u přijatých stačí právo opravit DPH zařazení). Seznam položek vidí, kdo smí číst vydané, resp. přijaté faktury.
+
 ## 52.15 Související kapitoly
 
 - [Průvodce účetního](50_Pruvodce_ucetniho.md) - jak se zápisy tvoří a kdy co dělat
@@ -1646,3 +2650,4 @@ Po potvrzení vznikne koncept, nebo rovnou zaúčtovaný doklad, stejnou cestou 
 - [Uzávěrka](72_Uzaverka.md) - období a znovuotevření knih
 - [Účtový rozvrh](66_Ucetni_osnova.md) a [Předkontace](73_Ucetni_nastroje.md#735-krok-za-krokem-predkontace)
 - [Banka](29_Banka.md), [Pokladna](32_Pokladna.md), [Faktury](14_Faktury.md), [Přijaté faktury](23_Prijate_faktury.md) - zdroje zápisů
+- [Forma účetního zápisu](72_Uzaverka.md#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky) - zapnutí jednoduchého zápisu od data

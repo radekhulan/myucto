@@ -66,10 +66,7 @@ final class ScanBatchService
         }
         // Připojený sken se hned porovná s dokladem (sekce Rozpory). Selhání kontroly
         // nesmí vrátit připojení — to už proběhlo.
-        try {
-            $this->attachmentChecks->recheckEntity($supplierId, $targetType, $targetId);
-        } catch (\Throwable) {
-        }
+        $this->attachmentChecks->recheckEntityAfterCommit($supplierId, $targetType, $targetId);
         // Účtenka s koncovkou karty: koncovka přejde na doklad (ruční hodnotu nepřepíše)
         // a doklad se spáruje s pohybem karty a vypořádá. Nadstavba — chyba nevrací připojení.
         if ($targetType === 'purchase_invoice') {

@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollFoodServiceTipService;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory;
 use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -586,7 +587,24 @@ final class PayrollInputRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function create(int $supplierId, array $data, ?int $userId): array
+    public function create(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false): array
+    {
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
+        try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
+            $result = $this->createUnchecked($supplierId, $data, $userId);
+            if ($owns) $pdo->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private function createUnchecked(int $supplierId, array $data, ?int $userId): array
     {
         $this->assertValidReferences($supplierId, $data);
         try {
@@ -636,7 +654,25 @@ final class PayrollInputRepository
         int $id,
         array $data,
         int $expectedVersion,
+        bool $sourceAlreadyGuarded = false,
     ): ?array {
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
+        try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
+            $result = $this->updateUnchecked($supplierId, $id, $data, $expectedVersion);
+            if ($owns) $pdo->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed>|null */
+    private function updateUnchecked(int $supplierId, int $id, array $data, int $expectedVersion): ?array
+    {
         $this->assertValidReferences($supplierId, $data);
         $current = $this->find($supplierId, $id);
         if ($current === null) {
@@ -879,15 +915,16 @@ final class PayrollInputRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function createApproved(int $supplierId, array $data, ?int $userId): array
+    public function createApproved(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false, bool $internalStandby = false, bool $internalTermination = false): array
     {
-        $this->assertValidReferences($supplierId, $data);
+        $this->assertValidReferences($supplierId, $data, $internalStandby, $internalTermination);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
             $pdo->beginTransaction();
         }
         try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
             $employeeId = PayrollTimeValue::int($data['employee_id'] ?? null, 'employee_id');
             $componentId = PayrollTimeValue::int($data['component_id'] ?? null, 'component_id');
             $amountMinor = PayrollTimeValue::int($data['amount_minor'] ?? null, 'amount_minor');
@@ -968,6 +1005,67 @@ final class PayrollInputRepository
     }
 
     /**
+     * Interní hromadný zápis chráněných výsledků hodinové mzdy. Volající drží
+     * v jedné transakci zámky vztahů a vlastní nároky za příslušné období.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,int> externí identifikátor => id vstupu
+     */
+    public function createApprovedHourlyBatch(int $supplierId, string $periodStart, array $rows, ?int $userId): array
+    {
+        if ($rows === []) return [];
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) throw new \LogicException('Hodinové mzdové vstupy vyžadují transakci.');
+        $codes = array_values(array_unique(array_map(static fn (array $row): string => (string) $row['component_code'], $rows)));
+        foreach ($codes as $code) {
+            if (!in_array($code, \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::GENERATED, true)) throw new \InvalidArgumentException('Neznámá složka hodinového výpočtu.');
+        }
+        $codeIn = implode(',', array_fill(0, count($codes), '?'));
+        $stmt = $pdo->prepare("SELECT *, id AS component_id, row_version AS component_row_version FROM payroll_component_definitions WHERE supplier_id = ? AND code IN ($codeIn) AND is_active = 1 AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?) ORDER BY code, valid_from DESC FOR UPDATE");
+        $stmt->execute([$supplierId, ...$codes, $periodStart, $periodStart]);
+        $components = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) $row['code'];
+            if (isset($components[$code])) throw new \InvalidArgumentException('Mzdová složka nemá jednoznačnou účinnou verzi.');
+            if (!\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isUsableDefinition($row)) {
+                throw new \InvalidArgumentException('Chráněná složka hodinové mzdy nemá platnou klasifikaci.');
+            }
+            $components[$code] = $row;
+        }
+        $values = [];
+        $params = [];
+        $externalIds = [];
+        $employmentIds = [];
+        foreach ($rows as $row) {
+            $code = (string) ($row['component_code'] ?? '');
+            if (!isset($components[$code]) || !in_array($code, \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::GENERATED, true)) {
+                throw new \InvalidArgumentException('Chybí chráněná mzdová složka pro hodinový výpočet.');
+            }
+            $component = $components[$code];
+            $plan = $this->approvalPlan($pdo, $supplierId, $component, (int) $row['employee_id'], (int) $row['amount_minor'], $periodStart);
+            $snapshot = (string) $row['source_snapshot_json'];
+            $external = (string) $row['external_id'];
+            $externalIds[] = 'time:' . $external;
+            $employmentIds[(int) $row['employment_id']] = true;
+            $values[] = '(?, ?, ?, ?, ?, ?, ?, NULL, "time", ?, ?, ?, ?, "approved", ?, ?, ?, ?, ?, ?, ?, NOW())';
+            array_push($params, $supplierId, $row['employee_id'], $row['employment_id'], $component['component_id'],
+                $periodStart, $row['source_period_start'], $row['amount_minor'], $external, $snapshot,
+                hash('sha256', $snapshot, true), $userId);
+            array_push($params, ...$plan['columns']);
+            $params[] = $userId;
+        }
+        $pdo->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, source_period_start, amount_minor, quantity_milliunits, source_kind, external_id, source_snapshot_json, source_snapshot_hash, created_by, status, component_snapshot_json, component_snapshot_hash, benefit_basket, benefit_exempt_minor, benefit_taxable_minor, benefit_allocation_json, approved_by, approved_at) VALUES ' . implode(',', $values))->execute($params);
+        $employeeIn = implode(',', array_fill(0, count($employmentIds), '?'));
+        $externalIn = implode(',', array_fill(0, count($externalIds), '?'));
+        $select = $pdo->prepare("SELECT id, external_id FROM payroll_inputs FORCE INDEX (uq_payroll_input_external) WHERE supplier_id = ? AND employment_id IN ($employeeIn) AND period_start = ? AND external_dedupe_key IN ($externalIn)");
+        $select->execute([$supplierId, ...array_keys($employmentIds), $periodStart, ...$externalIds]);
+        $ids = [];
+        foreach ($select->fetchAll(PDO::FETCH_ASSOC) as $item) $ids[(string) $item['external_id']] = (int) $item['id'];
+        if (count($ids) !== count($rows)) throw new \RuntimeException('Vložené hodinové mzdové vstupy se nepodařilo jednoznačně načíst.');
+        return $ids;
+    }
+
+    /**
      * Přepíše mzdový vstup a schválí ho — opět JEDNÍM zápisem, jeden bump verze.
      *
      * Bere koncept i vlastní dosud nezamčený schválený vstup. Vracet schválený
@@ -987,6 +1085,7 @@ final class PayrollInputRepository
         array $data,
         int $expectedVersion,
         ?int $userId,
+        bool $sourceAlreadyGuarded = false,
     ): ?array {
         $this->assertValidReferences($supplierId, $data);
         $pdo = $this->db->pdo();
@@ -995,6 +1094,7 @@ final class PayrollInputRepository
             $pdo->beginTransaction();
         }
         try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
             $stmt = $pdo->prepare(
                 'SELECT id, status, row_version, period_start
                    FROM payroll_inputs
@@ -1016,9 +1116,13 @@ final class PayrollInputRepository
                 'row_version',
             );
             if (!in_array($status, ['draft', 'approved'], true)) {
-                throw new \DomainException(
-                    'Přepsat lze jen rozpracovaný nebo dosud nezamčený schválený mzdový vstup.',
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $pdo,
+                    $supplierId,
+                    $status,
+                    PayrollTimeValue::string($current['period_start'] ?? null, 'period_start'),
+                    'přepsat',
+                ));
             }
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollInputConflictException($currentVersion);
@@ -1278,11 +1382,38 @@ final class PayrollInputRepository
                     $entitlements,
                 );
             } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
+                /*
+                 * Stravné na nový rok ještě nevyšlo, takže osvobozenou část
+                 * příspěvku na stravování (§ 6 odst. 9 písm. b) ZDP) nelze
+                 * určit. Bezpečná cesta: celé plnění se zdaní a pojistí jako
+                 * mzda (nic se neosvobodí bez doloženého limitu) s poznámkou
+                 * v rozpadu; po vyhlášení se osvobozená část dorovná opravou.
+                 */
+                if ($this->baskets->limitAwaitsPublication($definition->exemptionBasket, $periodStart)) {
+                    $taxed = $this->baskets->splitWithLimit($definition->exemptionBasket, 0, 0, $amountMinor);
+                    $split = new \MyInvoice\Service\Payroll\Component\PayrollBenefitBasketSplit(
+                        basket: $taxed->basket,
+                        limitMinor: null,
+                        usedBeforeMinor: 0,
+                        amountMinor: $taxed->amountMinor,
+                        exemptMinor: 0,
+                        taxableMinor: $taxed->amountMinor,
+                        shiftEntitlements: $entitlement?->count(),
+                        allocation: [
+                            'exemption_deferred' => 'limit_awaits_publication',
+                            'note' => 'Limit osvobození za směnu (stravné MPSV) pro rok '
+                                . substr($periodStart, 0, 4) . ' ještě nebyl vyhlášen. Plnění je celé'
+                                . ' zdaněno a pojištěno jako mzda; osvobozenou část dorovnejte'
+                                . ' opravou po vyhlášení vyhlášky.',
+                        ],
+                    );
+                } else {
                 throw new PayrollInputApprovalException(
                     'benefit_basket_limit_unavailable',
                     'Limit koše osvobození není pro rozhodné období k dispozici, '
                     . 'rozpad plnění proto nelze určit: ' . $e->getMessage(),
                 );
+                }
             }
         }
         $snapshot = [
@@ -1888,10 +2019,17 @@ final class PayrollInputRepository
                 $row['row_version'] ?? null,
                 'row_version',
             );
+            if ($status === 'draft') {
+                throw new \DomainException('Mzdový vstup už je koncept; opravte ho přímo.');
+            }
             if ($status !== 'approved') {
-                throw new \DomainException(
-                    'Do konceptu lze vrátit jen schválený, dosud nezamčený mzdový vstup.',
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $pdo,
+                    $supplierId,
+                    $status,
+                    PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+                    'vrátit do konceptu',
+                ));
             }
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollInputConflictException($currentVersion);
@@ -2169,6 +2307,172 @@ final class PayrollInputRepository
     }
 
     /**
+     * Zrušení SCHVÁLENÉHO vstupu, který ještě nevstoupil do mzdového běhu.
+     *
+     * Kontrola před během posílá vstup na skončeném vztahu „zrušit, nebo zadat
+     * na trvající vztah" — schválený vstup ale `cancel()` odmítal a výpis vstupů
+     * u něj nenabízel žádnou akci. Jedinou cestou bylo vyprázdnit pole
+     * v rychlém zadávání, na které kontrola neodkazuje. Tady se to děje
+     * v jedné transakci týmiž kroky jako tam: návrat do konceptu
+     * ({@see revertToDraft()} hlídá zmrazenou revizi, vyúčtování cesty, import
+     * i benefit) a zrušení konceptu.
+     *
+     * @return array<string,mixed>|null null, když vstup neexistuje
+     */
+    public function cancelApproved(int $supplierId, int $id, int $expectedVersion): ?array
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->revertToDraft($supplierId, $id, $expectedVersion);
+            $input = $this->cancel($supplierId, $id, $expectedVersion + 1);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $input;
+    }
+
+    /**
+     * Hromadně zaokrouhlí haléřové vstupy období nahoru na celé koruny
+     * ({@see PayrollWholeCrowns}), aby je přijalo měsíční hlášení.
+     *
+     * Bere jen vstupy, které by hlášení zablokovaly (stejné pravidlo jako
+     * kontrola běhu), a opravuje je týmiž cestami jako ruční úprava: koncept
+     * přes {@see update()}, schválený přes {@see updateApproved()} se všemi jejich
+     * zábranami (zmrazená revize běhu, vyúčtování cesty, benefit). Uzamčený
+     * vstup, vstup s otiskem podkladu (pravidelná složka, hodinová mzda,
+     * náhrada) a schválený vstup bez práva schvalovat se nemění a vrátí se
+     * s důvodem. Každý vstup ve vlastní transakci, jeden nezdar dávku nezastaví.
+     *
+     * @return array{rounded:list<array{id:int,employee_name:string,component_name:string,from_minor:int,to_minor:int}>,
+     *   skipped:list<array{id:int,employee_name:string,component_name:string,amount_minor:int,reason:string}>}
+     */
+    public function roundUpToWholeCrowns(
+        int $supplierId,
+        string $periodStart,
+        ?int $employmentId,
+        bool $includeApproved,
+        ?int $userId,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.id, input.status, input.row_version, input.amount_minor,
+                    input.employee_id, input.employment_id, input.component_id,
+                    input.period_start, input.source_period_start, input.quantity_milliunits,
+                    input.source_kind, input.external_id,
+                    input.source_snapshot_json IS NOT NULL AS has_source_snapshot,
+                    input.benefit_taxable_minor,
+                    component.jmhz_treatment, component.tax_treatment, component.exemption_basket,
+                    employee.full_name AS employee_name, component.name AS component_name
+               FROM payroll_inputs input
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = input.supplier_id
+                AND employee.id = input.employee_id
+              WHERE input.supplier_id = ? AND input.period_start = ?
+                AND (? IS NULL OR input.employment_id = ?)
+                AND input.status IN ("draft", "approved", "locked")
+                AND MOD(input.amount_minor, 100) <> 0
+              ORDER BY employee.full_name, input.id'
+        );
+        $stmt->execute([$supplierId, $periodStart, $employmentId, $employmentId]);
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            // Osvobozený benefit v koši (stravenkový paušál na zákonném limitu)
+            // haléře nést smí; zaokrouhlení nahoru by z něj udělalo přebytek
+            // nad limit.
+            if (PayrollWholeCrowns::required(
+                $row,
+                $row['benefit_taxable_minor'] === null ? null : (int) $row['benefit_taxable_minor'],
+            )) {
+                $rows[] = $row + [
+                    'group' => $row['employment_id'] . ':' . $row['component_id'],
+                    'amount_minor' => (int) $row['amount_minor'],
+                ];
+            }
+        }
+
+        $rounded = [];
+        $skipped = [];
+        foreach (PayrollWholeCrowns::blockingInputs($rows) as $key) {
+            $row = $rows[$key];
+            $id = (int) $row['id'];
+            $from = (int) $row['amount_minor'];
+            $status = (string) $row['status'];
+            $describe = [
+                'id' => $id,
+                'employee_name' => (string) $row['employee_name'],
+                'component_name' => (string) $row['component_name'],
+            ];
+            $reason = match (true) {
+                $status === 'locked' => PayrollInputLockGuidance::message(
+                    $this->db->pdo(),
+                    $supplierId,
+                    $status,
+                    $periodStart,
+                    'zaokrouhlit',
+                ),
+                (int) $row['has_source_snapshot'] === 1
+                    => 'Částka vzniká výpočtem nebo z pravidelné složky; opravte ji tam, odkud vstup vznikl.',
+                $status === 'approved' && !$includeApproved
+                    => 'Schválený vstup smí zaokrouhlit jen uživatel s právem schvalovat vstupy.',
+                default => null,
+            };
+            if ($reason !== null) {
+                $skipped[] = $describe + ['amount_minor' => $from, 'reason' => $reason];
+                continue;
+            }
+            $to = PayrollWholeCrowns::roundUpMinor($from);
+            $data = [
+                'employee_id' => (int) $row['employee_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'component_id' => (int) $row['component_id'],
+                'period_start' => (string) $row['period_start'],
+                'source_period_start' => $row['source_period_start'],
+                'amount_minor' => $to,
+                'quantity_milliunits' => $row['quantity_milliunits'] === null
+                    ? null
+                    : (int) $row['quantity_milliunits'],
+                'source_kind' => (string) $row['source_kind'],
+                'external_id' => $row['external_id'],
+                'source_snapshot_json' => null,
+                'source_snapshot_hash' => null,
+            ];
+            try {
+                $updated = $status === 'approved'
+                    ? $this->updateApproved($supplierId, $id, $data, (int) $row['row_version'], $userId)
+                    : $this->update($supplierId, $id, $data, (int) $row['row_version']);
+            } catch (PayrollInputConflictException) {
+                $skipped[] = $describe + [
+                    'amount_minor' => $from,
+                    'reason' => 'Vstup mezitím změnil někdo jiný; načtěte vstupy znovu.',
+                ];
+                continue;
+            } catch (\DomainException|\InvalidArgumentException $e) {
+                $skipped[] = $describe + ['amount_minor' => $from, 'reason' => $e->getMessage()];
+                continue;
+            }
+            if ($updated === null) {
+                continue;
+            }
+            $rounded[] = $describe + ['from_minor' => $from, 'to_minor' => $to];
+        }
+
+        return ['rounded' => $rounded, 'skipped' => $skipped];
+    }
+
+    /**
      * Důkaz pohybu, který zrušení konceptu zakazuje.
      *
      * Materializace pracovní cesty a import si drží vazbu na řádek zdroje
@@ -2197,7 +2501,8 @@ final class PayrollInputRepository
         if ($travel->fetchColumn() !== false) {
             throw new PayrollInputCancellationException(
                 'input_has_movement',
-                'Vstup je navázaný na vyúčtování pracovní cesty; zrušit ho nelze.',
+                'Vstup je navázaný na vyúčtování pracovní cesty, proto ho tady nelze změnit ani zrušit. '
+                . 'Opravte vyúčtování cesty; vstup se podle něj upraví.',
             );
         }
 
@@ -2232,6 +2537,12 @@ final class PayrollInputRepository
               WHERE revision.supplier_id = ?
                 AND run.period_start = ?
                 AND revision.status <> "abandoned"
+                -- Nikdy neschválená revize ZRUŠENÉHO běhu vstup nedrží: zrušení
+                -- vstupy odemyká a hláška zamčeného vstupu radí „Zrušit běh,
+                -- vstup opravit, Začít z opravených vstupů". Bez téhle výjimky
+                -- oprava po zrušení skončila na „zmrazený v revizi" a cesta
+                -- ven nevedla.
+                AND NOT (run.status = "cancelled" AND revision.status IN ("snapshot", "calculated", "reviewed"))
                 AND NOT EXISTS (
                     SELECT 1
                       FROM payroll_run_revisions open_correction
@@ -2255,9 +2566,12 @@ final class PayrollInputRepository
         );
         $frozen->execute([$supplierId, $periodStart, (string) $id]);
         if ($frozen->fetchColumn() !== false) {
+            // Zábranu sdílí zrušení, oprava, zaokrouhlení i vrácení do konceptu.
+            // Věta „zrušit ho nelze" se ukazovala i tomu, kdo vstup jen opravoval
+            // nebo zaokrouhloval; teď říká obojí a vede na běh, který vstup drží.
             throw new PayrollInputCancellationException(
                 'input_has_movement',
-                'Vstup je zmrazený v revizi mzdového běhu; zrušit ho nelze.',
+                PayrollInputLockGuidance::message($pdo, $supplierId, 'locked', $periodStart, 'změnit ani zrušit'),
             );
         }
     }
@@ -2535,8 +2849,17 @@ final class PayrollInputRepository
      *
      * @param array<string,mixed> $data
      */
-    public function assertValidReferences(int $supplierId, array $data): void
+    public function assertValidReferences(int $supplierId, array $data, bool $internalStandby = false, bool $internalTermination = false): void
     {
+        if (!$internalTermination && str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'termination:')) {
+            throw new \InvalidArgumentException('Identifikátor termination: je vyhrazen nároku při skončení pracovního vztahu.');
+        }
+        if (!$internalStandby && str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'standby:')) {
+            throw new \InvalidArgumentException('Identifikátor standby: je vyhrazen výpočtu pracovní pohotovosti.');
+        }
+        if (str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'hourly-wage:')) {
+            throw new \InvalidArgumentException('Identifikátor hourly-wage: je vyhrazen výpočtu hodinové mzdy.');
+        }
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.status, component.code
                FROM payroll_employments employment
@@ -2568,6 +2891,9 @@ final class PayrollInputRepository
             throw new \InvalidArgumentException(
                 'Pracovní vztah je archivovaný nebo nenastoupil; mzdový vstup na něj založit nelze.'
             );
+        }
+        if ((new PayrollHourlyWageCollisionGuard($this->db))->reservedForCalculation($supplierId, (int) $data['employment_id'], (string) $data['period_start'], (string) $row['code'])) {
+            throw new \InvalidArgumentException('U hodinového vztahu tato složka vzniká pouze výpočtem hodinové mzdy a nelze ji zadat ručně ani importem.');
         }
         if (in_array((string) $row['code'], self::ABSENCE_ONLY_CODES, true)
             && !in_array((string) ($data['source_kind'] ?? ''), ['absence', 'correction'], true)

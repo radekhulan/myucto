@@ -932,6 +932,7 @@ final readonly class PayrollDeadlineOverviewService
             'employment_id' => (int) $row['employment_id'],
             'employee_id' => (int) $row['employee_id'],
             'checklist_phase' => (string) $row['phase'],
+            'employment_end_date' => $row['employment_end_date'] ?? null,
             'deadline_source' => $row['deadline_source'],
             'deadline_source_status' => $row['deadline_source_status'],
             // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná

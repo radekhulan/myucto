@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Accounting;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Repository\UserSupplierRepository;
@@ -36,6 +37,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/accounting/dimensions/responsible-candidates   — uživatelé firmy (odpovědná osoba)
  *   GET|PUT /api/accounting/dimensions/documents/{doc}/{id}    — dimenze dokladu (hlavička + položky)
  *   POST   /api/accounting/dimensions/documents/{doc}/{id}/preview — náhled dimenzí zaúčtovaných řádků
+ *   POST   /api/accounting/dimensions/documents/invoices/bulk  — hromadná změna dimenzí hlavičky vydaných faktur
  *   GET|PUT /api/accounting/dimensions/journal/{id}            — dimenze řádků účetního zápisu
  *   GET|POST|PUT|DELETE /api/accounting/dimensions/group       — skupina firem (globální dimenze)
  *   GET|POST /api/accounting/dimensions/rules, PUT|DELETE …/rules/{id} — pravidla dimenzí podle účtu
@@ -75,6 +77,8 @@ final class DimensionAction
         private readonly DimensionAccountMapService $accountMap,
         private readonly OtherItemRepository $otherItems,
         private readonly OtherItemService $otherItemService,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
+        private readonly Connection $db,
     ) {}
 
     // ── účtotvorná dimenze ──────────────────────────────────────────────────
@@ -332,23 +336,142 @@ final class DimensionAction
         });
     }
 
+    /** Nejvýš tolik dokladů v jedné hromadné úpravě dimenzí. */
+    private const BULK_LIMIT = 500;
+
+    /**
+     * POST …/documents/invoices/bulk — hromadná změna dimenzí hlavičky vydaných faktur
+     * ze seznamu. Tělo `{ids: [...], dimensions: {typ: hodnota | null}}`: hodnota typ
+     * nastaví, null ho odebere, typ mimo mapu zůstane beze změny. Každý doklad se ukládá
+     * zvlášť stejnou cestou jako panel Dimenze na detailu (zámky období, promítnutí do
+     * zaúčtovaných řádků, audit), odmítnutý se přeskočí s důvodem a ostatní to nezastaví.
+     * Přes API token se hromadná úprava nepouští (token smí jen koncept, viz níže).
+     */
+    public function bulkDocuments(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $docType = self::DOCUMENTS[(string) ($args['doc'] ?? '')] ?? '';
+            if ($docType !== 'invoice') {
+                throw new DimensionException('not_found', 'Neznámý typ dokladu.', 404);
+            }
+            if (RequestAuthorization::isRestrictedBearer($request)) {
+                throw new DimensionException('token_write_forbidden', 'Hromadnou úpravu dimenzí nelze provést přes API token.', 403);
+            }
+            $this->dimensions->requireEnabledFor($supplierId);
+            $body = (array) ($request->getParsedBody() ?? []);
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', is_array($body['ids'] ?? null) ? $body['ids'] : []),
+                static fn (int $id): bool => $id > 0,
+            )));
+            if ($ids === []) {
+                throw new DimensionException('no_items', 'Vyberte alespoň jeden doklad.', 400);
+            }
+            if (count($ids) > self::BULK_LIMIT) {
+                throw new DimensionException('too_many_items', 'Najednou lze upravit nejvýše ' . self::BULK_LIMIT . ' dokladů.', 413);
+            }
+            [$set, $remove] = $this->bulkChanges($supplierId, is_array($body['dimensions'] ?? null) ? $body['dimensions'] : []);
+
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare("SELECT id, varsymbol FROM invoices WHERE supplier_id = ? AND id IN ({$marks})");
+            $stmt->execute([$supplierId, ...$ids]);
+            $numbers = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $numbers[(int) $row['id']] = $row['varsymbol'] === null ? null : (string) $row['varsymbol'];
+            }
+
+            $updated = [];
+            $unchanged = [];
+            $needsRepost = [];
+            $skipped = [];
+            foreach ($ids as $id) {
+                if (!array_key_exists($id, $numbers)) {
+                    $skipped[] = ['id' => $id, 'varsymbol' => null, 'code' => 'not_found', 'message' => 'Doklad nenalezen.'];
+                    continue;
+                }
+                try {
+                    $result = $this->dimensions->patchDocumentHeader($supplierId, $docType, $id, $set, $remove);
+                } catch (DimensionException $e) {
+                    $skipped[] = ['id' => $id, 'varsymbol' => $numbers[$id], 'code' => $e->errorCode, 'message' => $e->getMessage()];
+                    continue;
+                }
+                if (!$result['changed']) {
+                    $unchanged[] = $id;
+                    continue;
+                }
+                $this->logDocument($request, $id, $docType, $result, 'bulk');
+                $updated[] = $id;
+                if ($result['restamp']['needs_repost']) {
+                    $needsRepost[] = $id;
+                }
+            }
+            return [
+                'updated' => $updated,
+                'unchanged' => $unchanged,
+                'needs_repost' => $needsRepost,
+                'skipped' => $skipped,
+            ];
+        });
+    }
+
+    /**
+     * Mapa typ => hodnota | null z těla hromadné úpravy: hodnoty ověří číselník firmy
+     * (aktivní hodnota správného typu), odebírané typy musí patřit firmě.
+     *
+     * @param array<int|string,mixed> $raw
+     * @return array{0:array<int,int>, 1:list<int>}
+     */
+    private function bulkChanges(int $supplierId, array $raw): array
+    {
+        $toSet = [];
+        $remove = [];
+        foreach ($raw as $typeId => $valueId) {
+            $typeId = (int) $typeId;
+            if ($typeId <= 0) {
+                continue;
+            }
+            if ($valueId === null || $valueId === '' || (int) $valueId <= 0) {
+                $remove[] = $typeId;
+            } else {
+                $toSet[$typeId] = (int) $valueId;
+            }
+        }
+        $set = $this->dimensions->normalize($supplierId, $toSet);
+        $known = array_fill_keys(array_map(static fn (array $t): int => (int) $t['id'], $this->repo->listTypes($supplierId)), true);
+        foreach ($remove as $typeId) {
+            if (!isset($known[$typeId])) {
+                throw new DimensionException('invalid_dimension', 'Neplatný typ dimenze #' . $typeId . '.', 400);
+            }
+        }
+        if ($set === [] && $remove === []) {
+            throw new DimensionException('no_dimensions', 'Zvolte alespoň jednu dimenzi, kterou chcete nastavit nebo odebrat.', 400);
+        }
+        return [$set, $remove];
+    }
+
     /**
      * API token smí dimenze (středisko, projekt…) zapsat jen ke KONCEPTU ostatní
-     * pohledávky nebo závazku (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS).
-     * U zaúčtovaného dokladu by uložení přerazítkovalo řádky deníku a koncept
-     * z opakování s automatickým účtováním zaúčtuje cron bez dalšího potvrzení;
-     * obojí zůstává webovému rozhraní. Middleware pouští jen cestu other-items,
-     * tady se to hlídá znovu, aby výjimka nezávisela jen na regexu cesty.
+     * pohledávky nebo závazku, vydané faktury a přijaté faktury
+     * (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS). Koncept nemá řádky v deníku,
+     * takže se nic nepřerazítkuje. U zaúčtovaného dokladu by uložení přerazítkovalo
+     * řádky deníku a koncept z opakování s automatickým účtováním zaúčtuje cron bez
+     * dalšího potvrzení; obojí zůstává webovému rozhraní. Middleware pouští jen tyto
+     * cesty, tady se to hlídá znovu, aby výjimka nezávisela jen na regexu cesty.
      */
     private function assertTokenMayTagDocument(Request $request, int $supplierId, string $docType, int $docId): void
     {
-        if (!RequestAuthorization::isBearerAuth($request)) {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
             return;
         }
-        if ($docType !== 'other_item') {
-            throw new DimensionException('token_write_forbidden',
-                'Přes API token lze dimenze zapsat jen ke konceptu ostatní pohledávky nebo závazku.', 403);
-        }
+        match ($docType) {
+            'other_item' => $this->assertTokenMayTagOtherItem($request, $supplierId, $docId),
+            'invoice', 'purchase_invoice' => $this->assertTokenMayTagInvoiceDraft($request, $supplierId, $docType, $docId),
+            default => throw new DimensionException('token_write_forbidden',
+                'Přes API token lze dimenze zapsat jen ke konceptu ostatní pohledávky nebo závazku, vydané nebo přijaté faktury.', 403),
+        };
+    }
+
+    private function assertTokenMayTagOtherItem(Request $request, int $supplierId, int $docId): void
+    {
         if (!RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
             throw new DimensionException('forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
         }
@@ -363,6 +486,31 @@ final class DimensionAction
         if ($this->otherItemService->belongsToAutoPostSchedule($supplierId, $docId)) {
             throw new DimensionException('token_write_forbidden',
                 'Koncept patří do opakování s automatickým účtováním. Dimenze mu lze změnit jen ve webovém rozhraní.', 403);
+        }
+    }
+
+    /**
+     * Koncept faktury: vydaný doklad se účtuje až vystavením, přijatý až přijetím, takže
+     * koncept nemá v deníku nic. Právo upravovat doklad musí token mít stejně jako na
+     * editaci konceptu (dimenze jsou součástí formuláře dokladu).
+     */
+    private function assertTokenMayTagInvoiceDraft(Request $request, int $supplierId, string $docType, int $docId): void
+    {
+        [$module, $table, $label] = $docType === 'invoice'
+            ? ['invoices', 'invoices', 'vydané faktury']
+            : ['purchase_invoices', 'purchase_invoices', 'přijaté faktury'];
+        if (!RequestAuthorization::allows($request, $module, AccessLevel::WRITE)) {
+            throw new DimensionException('forbidden', 'Chybí oprávnění upravovat ' . $label . '.', 403);
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT status, booked_at FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt->execute([$docId, $supplierId]);
+        $doc = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($doc === false) {
+            throw new DimensionException('not_found', 'Doklad nebyl nalezen.', 404);
+        }
+        if ((string) $doc['status'] !== 'draft' || $doc['booked_at'] !== null) {
+            throw new DimensionException('token_write_forbidden',
+                'Přes API token lze dimenze faktury zapsat jen ke konceptu; u vystaveného, přijatého nebo zaúčtovaného dokladu je změňte ve webovém rozhraní.', 403);
         }
     }
 
@@ -502,7 +650,7 @@ final class DimensionAction
             $accessible = $this->accessibleSupplierIds($request);
             if (isset($body['group_id'])) {
                 $groupId = (int) $body['group_id'];
-                $this->dimensions->joinGroup($supplierId, $groupId, $accessible, RequestAuthorization::isSuperadmin($request));
+                $this->dimensions->joinGroup($supplierId, $groupId, $accessible, false);
                 $this->log($request, 'dimension.group_joined', $groupId, []);
             } elseif (isset($body['name'])) {
                 $this->dimensions->renameGroup($supplierId, (string) $body['name']);
@@ -561,10 +709,9 @@ final class DimensionAction
      */
     private function accessibleSupplierIds(Request $request): array
     {
-        if (RequestAuthorization::isSuperadmin($request)) {
-            return $this->repo->allSupplierIds();
-        }
-        return $this->userSuppliers->allowedSupplierIds((int) ($this->userId($request) ?? 0));
+        $ids = RequestAuthorization::isSuperadmin($request) ? $this->repo->allSupplierIds()
+            : $this->userSuppliers->allowedSupplierIds((int) ($this->userId($request) ?? 0));
+        return $this->supplierAccess->filterAllowedSupplierIds($request, $ids);
     }
 
     /** @param array<string,mixed> $payload */

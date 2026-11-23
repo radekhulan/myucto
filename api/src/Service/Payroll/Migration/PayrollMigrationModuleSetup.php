@@ -30,7 +30,7 @@ use PDO;
  *  1. zapne modul Mzdy (`supplier.payroll_enabled`) stejnou licenční branou jako
  *     Nastavení → Moduly ({@see LicenseCapacityGate::mutateSeats()}),
  *  2. nastaví začátek vedení mezd v MyÚčtu na měsíc po posledních převzatých mzdách
- *     (stav modulu `setup`, jako uložení v Mzdy → Nastavení → Aktivace),
+ *     (stav modulu `setup`, jako aktivace na přehledu Mezd),
  *  3. když firma nastavení zaměstnavatele nemá, založí ho s výchozí mzdovou účtárnou
  *     a výchozími předkontacemi ({@see PayrollEmployerSettingsRepository::save()}),
  *  4. převezme z Nastavení firmy VS ČSSZ, kód OSSZ a číslo plátce zdravotního
@@ -286,7 +286,7 @@ final class PayrollMigrationModuleSetup
         if ($result['start_unsupported'] !== null) {
             $protocol->warn($step, 'payroll_start_unsupported', sprintf(
                 'Začátek vedení mezd v MyÚčtu by po posledních mzdách z %s připadl na %s, MyÚčto ale pro rok %s mzdová pravidla '
-                . 'zatím nemá. Začátek se nenastavil; nastavte ho v Mzdy → Nastavení → Aktivace, až bude rok podporovaný.',
+                . 'zatím nemá. Začátek se nenastavil; nastavte ho na přehledu Mezd (Aktivovat mzdovou agendu), až bude rok podporovaný.',
                 $program,
                 self::monthLabel((string) $result['start_unsupported']),
                 substr((string) $result['start_unsupported'], 0, 4),
@@ -457,6 +457,57 @@ final class PayrollMigrationModuleSetup
     }
 
     /**
+     * Proč první mzdové období NEjde při nastavení mezd změnit na `$target`
+     * (`YYYY-MM`), nebo `null`, když jde.
+     *
+     * Volně se dá měnit jen během nastavení (stav `setup`). Pak už ho jde jen
+     * posunout dopředu za měsíce zpracované předchozím programem
+     * ({@see advanceStartProblem()}). Ani během nastavení nesmí změna schovat
+     * existující běh: posun zpět nesmí přesunout převzatý běh mezi měsíce, které
+     * počítá MyÚčto, posun dopředu nesmí odsunout spočítaný běh do převzaté části.
+     */
+    public function startChangeProblem(int $supplierId, string $target): ?string
+    {
+        $target = self::period($target);
+        $state = $this->state->get($supplierId);
+        $current = $state['start_period'];
+        if (!is_string($current) || $current === '' || $state['status'] === 'disabled') {
+            return null;
+        }
+        $from = self::period($current);
+        if ($target === $from) {
+            return null;
+        }
+        if ($state['status'] !== 'setup') {
+            return 'První mzdové období jde měnit jen během nastavení mezd. Teď už ho jde jen posunout '
+                . 'dopředu za měsíce zpracované předchozím programem (Mzdy → Mzdové běhy).';
+        }
+        [$low, $high, $kind] = $target < $from
+            ? [$target, $from, '= "takeover"']
+            : [$from, $target, '<> "takeover"'];
+        $runs = $this->db->pdo()->prepare(
+            'SELECT DISTINCT DATE_FORMAT(period_start, "%Y-%m")
+               FROM payroll_runs
+              WHERE supplier_id = ?
+                AND run_kind ' . $kind . '
+                AND status <> "cancelled"
+                AND period_start >= ? AND period_start < ?
+              ORDER BY 1'
+        );
+        $runs->execute([$supplierId, $low . '-01', $high . '-01']);
+        $blocking = array_map(static fn (mixed $p): string => (string) $p, $runs->fetchAll(PDO::FETCH_COLUMN));
+        if ($blocking === []) {
+            return null;
+        }
+        $months = implode(', ', array_map(self::monthLabel(...), $blocking));
+
+        return $target < $from
+            ? sprintf('Za %s je převzatý mzdový běh z předchozího programu. Zrušte ho v Mzdy → Mzdové běhy, '
+                . 'jinak by se měsíc vedl dvakrát.', $months)
+            : sprintf('MyÚčto už má vlastní mzdové běhy za %s. Zrušte je, nebo první období neposouvejte.', $months);
+    }
+
+    /**
      * Proč začátek vedení mezd NEjde posunout na `$target` (`YYYY-MM`), nebo `null`,
      * když jde. Jediné pravidlo pro nabídku na obrazovce běhů i pro samotný posun.
      */
@@ -466,7 +517,7 @@ final class PayrollMigrationModuleSetup
         $state = $this->state->get($supplierId);
         $current = $state['start_period'];
         if (!is_string($current) || $current === '' || $state['status'] === 'disabled') {
-            return 'Firma nemá nastavený začátek vedení mezd; nastavte ho v Mzdy → Nastavení → Aktivace.';
+            return 'Firma nemá nastavený začátek vedení mezd; nastavte ho na přehledu Mezd (Aktivovat mzdovou agendu).';
         }
         $from = self::period($current);
         if ($target <= $from) {

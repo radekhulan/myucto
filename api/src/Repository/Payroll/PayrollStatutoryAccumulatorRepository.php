@@ -662,6 +662,50 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Počáteční stav smí pokrývat jen měsíce PŘED počítaným obdobím.
+     *
+     * Převod z předchozího programu zapisuje počáteční stav za měsíce před
+     * prvním mzdovým obdobím. Když firma první období posune zpět (rozpracovaný
+     * měsíc má přepočítat MyÚčto), zůstane v počátečním stavu i měsíc, který
+     * teď počítá běh, a započetl by se do kumulace dvakrát. Pozná se to podle
+     * rozpisu měsíců v dokladu počátečního stavu a u daně i podle počtu
+     * uzavřených měsíců, který před měsícem M nemůže přesáhnout M − 1.
+     *
+     * @param array<string,mixed> $opening
+     */
+    private static function assertOpeningPrecedesPeriod(
+        array $opening,
+        string $periodStart,
+        string $calculationKind,
+    ): void {
+        $month = (int) substr($periodStart, 5, 2);
+        $covered = [];
+        $months = $opening['evidence']['months'] ?? [];
+        foreach (is_array($months) ? $months : [] as $row) {
+            if (is_array($row) && is_int($row['month'] ?? null) && $row['month'] >= $month) {
+                $covered[] = $row['month'];
+            }
+        }
+        $completed = $calculationKind === 'income_tax'
+            ? (int) ($opening['values']['completed_months'] ?? 0)
+            : 0;
+        if ($covered === [] && $completed <= $month - 1) {
+            return;
+        }
+        sort($covered);
+        $through = $covered === [] ? $completed : max($covered);
+
+        throw new PayrollStatutoryAccumulatorUnavailableException(sprintf(
+            'Počáteční stav kumulací pokrývá měsíce až do %d., ale MyÚčto počítá už %d. měsíc, '
+            . 'takže by se započetl dvakrát. Opravte počáteční stav na kartě pracovního vztahu '
+            . 'tak, aby končil %d. měsícem, nebo zopakujte převod z předchozího programu.',
+            $through,
+            $month,
+            $month - 1,
+        ));
+    }
+
+    /**
      * Sečte kumulaci a zapečetí ji otiskem.
      *
      * Sdílené jádro dotazované i dávkové cesty — kdyby existovalo dvakrát, mohly
@@ -682,6 +726,9 @@ final class PayrollStatutoryAccumulatorRepository
         array $entries,
         bool $wholeYear = false,
     ): array {
+        if (!$wholeYear) {
+            self::assertOpeningPrecedesPeriod($opening, $periodStart, $calculationKind);
+        }
         $totals = $opening['values'];
         foreach ($entries as $entry) {
             foreach ($entry['values'] as $field => $value) {
@@ -1089,6 +1136,49 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Osoby, které mají za rok aktuální (nenahrazený) počáteční stav aspoň
+     * jednoho z uvedených druhů kumulace. Dávková obdoba {@see openingBalance()}.
+     *
+     * @param list<string> $calculationKinds
+     * @param list<int> $employeeIds
+     * @return list<int>
+     */
+    public function employeesWithCurrentOpening(
+        int $supplierId,
+        int $year,
+        array $calculationKinds,
+        array $employeeIds,
+    ): array {
+        $found = [];
+        if ($calculationKinds === []) {
+            return [];
+        }
+        $kinds = implode(', ', array_fill(0, count($calculationKinds), '?'));
+        foreach (array_chunk(array_values(array_unique($employeeIds)), 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT opening.employee_id
+                   FROM payroll_statutory_accumulator_openings opening
+                  WHERE opening.supplier_id = ?
+                    AND opening.tax_year = ?
+                    AND opening.calculation_kind IN (' . $kinds . ')
+                    AND opening.employee_id IN (' . implode(', ', array_fill(0, count($chunk), '?')) . ')
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_statutory_accumulator_openings successor
+                       WHERE successor.supplier_id = opening.supplier_id
+                         AND successor.replaces_opening_id = opening.id
+                    )'
+            );
+            $stmt->execute([$supplierId, $year, ...$calculationKinds, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $employeeId) {
+                $found[] = (int) $employeeId;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
      * Období roku, za která už zaměstnanec má schválený zákonný výsledek.
      *
      * Není to zámek — je to seznam měsíců, které se počítaly NAD tehdejším
@@ -1157,6 +1247,41 @@ final class PayrollStatutoryAccumulatorRepository
                 AND submission.status <> 'cancelled_in_time'
                 AND run.period_start BETWEEN ? AND ?
               ORDER BY run.period_start, submission.id
+              LIMIT 1"
+        );
+        $stmt->execute([$employeeId, $supplierId, $from, $to]);
+        $period = $stmt->fetchColumn();
+        if (is_string($period) && $period !== '') {
+            return ['kind' => 'submission', 'reference' => substr($period, 0, 7)];
+        }
+        // Měsíční hlášení vazbu na revizi nenese, běh zná jeho povinnost
+        // (`payroll_run:<id>:…`). Bez toho by zámek po podání JMHZ nezabral.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT obligation.period_start
+               FROM payroll_obligations obligation
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = obligation.supplier_id
+                AND submission.environment = obligation.environment
+                AND submission.obligation_id = obligation.id
+               JOIN payroll_runs run
+                 ON run.supplier_id = obligation.supplier_id
+                AND run.id = CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(obligation.subject_reference, ':', 2), ':', -1) AS UNSIGNED)
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+               JOIN payroll_run_persons person
+                 ON person.supplier_id = revision.supplier_id
+                AND person.revision_id = revision.id
+                AND person.employee_id = ?
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = 'production'
+                AND obligation.agenda_code = 'JMHZ25'
+                AND obligation.subject_type = 'payroll_run'
+                AND obligation.period_start BETWEEN ? AND ?
+                AND submission.submitted_at IS NOT NULL
+                AND submission.status <> 'cancelled_in_time'
+              ORDER BY obligation.period_start, submission.id
               LIMIT 1"
         );
         $stmt->execute([$employeeId, $supplierId, $from, $to]);

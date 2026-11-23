@@ -126,8 +126,10 @@ final class QrPaymentGenerator
         $iban          = trim(str_replace(' ', '', (string) ($bank['iban'] ?? '')));
 
         // Preferuj explicitní účet+kód; když máme jen IBAN (typicky přijatá faktura
-        // s jen IBANem), použij IBAN přímo.
-        if ($accountNumber !== '' && $bankCode !== '') {
+        // s jen IBANem), použij IBAN přímo. Účet+kód skládá český IBAN, proto jen
+        // s českým kódem banky; u zahraničního (sort code) rozhoduje IBAN.
+        if ($accountNumber !== '' && $bankCode !== ''
+            && \MyInvoice\Service\Bank\AccountNumberNormalizer::canonicalBankCode($bankCode) !== null) {
             $payment = new CzQrPayment(new CzechIbanAdapter($accountNumber, $bankCode));
         } elseif ($iban !== '') {
             $payment = new CzQrPayment(new \Rikudou\Iban\Iban\IBAN($iban));

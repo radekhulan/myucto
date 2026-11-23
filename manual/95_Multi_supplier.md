@@ -26,7 +26,7 @@ variabilních symbolů, číselné cykly, e-mailové šablony a další nastaven
 
 ## 95.2 Než začnete
 
-1. **Oprávnění.** Novou firmu může založit superadmin nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen s firmami, které jí přidělí superadmin. Smazat firmu smí superadmin. Údaje v detailu firmy smí měnit admin; jedinou výjimkou je zapnutí skladu, které smí přepnout i role **účetní**.
+1. **Oprávnění.** Novou firmu může založit superadmin nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen s firmami, které jí přidělí superadmin. Smazat firmu smí superadmin. Údaje firmy upravuje interní role se zápisem do **Nastavení firmy**. Další oblasti mají samostatná oprávnění, například sklad nebo nastavení mezd; rozhoduje konkrétní právo, ne jen název role.
 2. **Přístup k firmám.** Ke každému uživateli lze v `Systém → Uživatelé` v editaci účtu v části **Přístup k firmám** zaškrtnout, ke kterým firmám smí. Uživatel bez zaškrtnuté firmy nemá přístup k žádné firmě; systémový superadmin vidí všechny.
 3. **Pro přehled firem** potřebujete přístup k více než jedné firmě. Role klient k přehledu nemá přístup vůbec.
 4. **ARES a registr plátců DPH** pro automatické předvyplnění údajů nové firmy (volitelně).
@@ -83,7 +83,9 @@ předem zaškrtnuté:
   z `Firma → AI nastavení`, [§ 25](25_AI_extrakce.md)). Nabízí se jen tehdy, když mají všechny vaše firmy s nastavenou AI totéž nastavení
   včetně stejného klíče. Firmy bez AI nevadí. Liší-li se klíč nebo nastavení mezi firmami, AI se nepřebírá
   a formulář to oznámí; v nové firmě ho pak nastavte ručně. Klíč se do prohlížeče nikdy neposílá, porovnává
-  ho jen server.
+  ho jen server. Má-li zdrojová firma (ta s nejnižším interním číslem mezi firmami s nastavenou AI) zapnutou
+  **AI asistenci účtování** s potvrzeným DPA téhož poskytovatele, převezme se i ta: zapnutí, rozsah (bankovní
+  transakce, přijaté faktury) a potvrzení DPA na vaše jméno. Pseudonymizační klíč dostane nová firma vlastní.
 - **Certifikát** z vašeho osobního trezoru (`Systém → Elektronické podpisy`), který je platný a povolený ve
   všech firmách, kde smíte spravovat podpisy. Certifikát se nekopíruje, nová firma k němu jen dostane
   přístup stejně jako při ručním povolení v dalších firmách. Převzetí certifikátu potvrďte stejně jako jeho
@@ -145,6 +147,7 @@ pořadové číslo resetuje.
 1. Otevřete `Firma → Nastavení`, záložku **Číslování faktur**.
 2. Vyplňte šablonu pro fakturu, zálohovou fakturu a dobropis. Pod každým polem je živý náhled příštího čísla (například „Náhled: `JD2026-001`"). Chcete-li číslovat zjednodušené daňové doklady zvlášť, vyplňte i **Šablonu pro zjednodušený daňový doklad**; prázdná znamená, že se číslují řadou faktur.
 3. V poli **Reset číselné řady** zvolte **Roční (1. ledna)**, **Měsíční (1. dne v měsíci)**, nebo **Bez resetu (souvislá řada)**.
+   U přijatých dokladů zvolte v části **Přijaté doklady** i pole **Číslovat přijaté doklady podle data** (datum vystavení, přijetí nebo DUZP), z kterého data dostane číslo měsíc a rok (viz „Číslování podle data“ v [§ 23.11.7](23_Prijate_faktury.md#23117-danova-uznatelnost-a-narok-na-odpocet)).
 4. Uložte nastavení.
 5. Navazujete-li na rozjetou číselnou řadu (typicky při přechodu z jiného programu), zadejte do pole **Příští číslo** číslo, kterým má řada pokračovat, a klikněte na **Nastavit počítadlo**. Ukáže se náhled výsledného čísla. Šablonu uložte před nastavením počítadla.
 
@@ -157,6 +160,22 @@ pořadové číslo resetuje.
 
 Podrobnosti o šablonách, placeholderech, prioritě úrovní a mezerách v číslování jsou v [§ 95.13.3](#95133-ciselne-rady-faktur).
 
+### 95.6.1 Číselník řad: víc řad pro jeden druh dokladu
+
+Záložka **Číselník řad** v `Firma → Nastavení` ukazuje všechny číselné řady firmy na jednom místě: řady vydaných faktur, záloh, dobropisů a zjednodušených dokladů, řady zákazníků a kategorií tržby, přijaté doklady, pokladní doklady (PPD a VPD firmy i vlastní řady pokladen), interní doklady, sklad, objednávky, ostatní položky, zápočty, uzávěrkové řady a řady bankovních účtů. Řady, které firma už má, jsou v číselníku od aktualizace aplikace, se stejnými čísly a se stejným příštím číslem jako dřív (pod názvem mají označení *převedená*).
+
+Další řadu založíte pro vydané faktury, zálohové faktury, dobropisy, přijaté doklady, příjmové a výdajové pokladní doklady a interní doklady:
+
+1. Otevřete `Firma → Nastavení`, záložku **Číselník řad**, a klikněte na **Nová řada**.
+2. Zvolte **Druh dokladu**. U pokladních dokladů vyberte i **Pokladnu**, nebo nechte **Všechny pokladny**.
+3. Vyplňte **Název řady** (například *Hotovostní účtenky*), **Prefix** (například `HP`) a **Tvar čísla**. Výchozí tvar `{PREFIX}{YY}{CCCC}` dá `HP260001`. Pod formulářem je náhled příštího čísla.
+4. Zvolte, kdy se má řada číslovat znovu od jedničky (**Každý rok**, **Každý měsíc**, **Bez resetu**). Navazujete-li na řadu z jiného programu, vyplňte **Příští číslo**.
+5. Chcete-li, aby nové doklady daného druhu dostávaly číslo z této řady automaticky, zaškrtněte **Výchozí řada pro tento druh dokladu**, a klikněte na **Uložit**.
+
+**Jak poznáte, že je hotovo:** Řada je v číselníku ve skupině svého druhu a v editoru dokladu toho druhu se v hlavičce objeví pole **Číselná řada** s výběrem.
+
+Pravidla výběru, ukončení řady a kontroly úplnosti jsou v [§ 95.13.3](#95133-ciselne-rady-faktur) v části *Číselník řad*.
+
 ## 95.7 Krok za krokem: branding e-mailů a PDF
 
 V e-mailech klientům se jako **From** zobrazí název dodavatele (místo technické adresy) a jako **Reply-To** e-mail
@@ -167,7 +186,7 @@ dodavatele, takže odpovědi klientů jdou rovnou na firemní poštu. Vlastní l
 3. Nahrajte **Logo** (PNG, JPG nebo SVG, nejvýše 1 MiB, ideálně do 200 KiB). Logo vyměníte tlačítkem **Nahradit logo**, odstraníte tlačítkem **Odebrat**.
 4. Zvolte **Akcent barvu** (hex `#RRGGBB`, color picker nebo textové pole; odkaz **↺ default** vrací výchozí).
 5. Zkontrolujte živý náhled e-mailu (přepínač jazyka **CS / EN**, tlačítko **↻** pro ruční obnovení).
-6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (PDF)**. PDF faktury a výkazu pak
+6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (nestandardní vzhled)**. PDF faktury a výkazu pak
    nemá barevné ani tmavé plochy a akcent barvu nahradí černá ([§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
    Volba je na brandingu nezávislá, funguje i při vypnutém **Použít vlastní branding**.
 
@@ -273,6 +292,13 @@ v [Platebních příkazech](26_Platebni_prikazy.md) a doklad placený hotově se
 výdajovým pokladním dokladem; v [Pokladně](32_Pokladna.md) jde výdajový doklad s účelem „Úhrada faktury"
 navázat na doklad k vyplacení. Bez volby se nic z toho nenabízí a editor dál vyžaduje kladnou částku k úhradě.
 
+**Výkazy práce na úvodní stránce** (ve výchozím stavu zapnuté):
+
+1. Na záložce **Fakturace** v sekci **Fakturace a e-maily** vypněte **Zobrazovat na úvodní stránce Výkazy práce**, pokud koncepty vystavených faktur nepoužíváte jako rozpracované výkazy.
+2. Uložte.
+
+Se zapnutou volbou ukazuje [Přehled](10_Prehled.md) blok **Výkazy práce** s rozpracovanými koncepty vystavených faktur za poslední dva měsíce, které stačí doplnit a vystavit. Vypnutí blok jen skryje, koncepty zůstávají v seznamu vydaných faktur.
+
 **Kdo fakturu vystavil** (ve výchozím stavu vypnuté):
 
 1. Na záložce **Fakturace** zapněte **Tisknout na faktuře, kdo ji vystavil**.
@@ -318,23 +344,37 @@ vidíte v přehledu jen ty. Systémový superadmin vidí všechny firmy v instal
 ## 95.11 Krok za krokem: smazat firmu
 
 1. Otevřete `Systém → Firmy`.
-2. Jako superadmin klikněte u firmy na **Smazat** a potvrďte.
+2. Jako superadmin klikněte u firmy na **Smazat**.
+3. Přečtěte si varování a náhled: kolik řádků v kolika evidencích a kolik souborů se smaže.
+4. Do pole opište IČO firmy (firma bez IČO: její přesný název) a klikněte na **Nevratně smazat firmu**.
+   Tlačítko je aktivní až po přesné shodě.
 
-**Jak poznáte, že je hotovo:** Firma zmizí ze seznamu.
-
-Firmu, která žádná data nemá (čerstvě založená, nikdy nepoužitá), aplikace smaže rovnou. Posledního zbývajícího
-dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat", vždy musí zůstat aspoň jeden).
+**Jak poznáte, že je hotovo:** Firma zmizí ze seznamu a aplikace ohlásí „Firma … byla smazána".
 
 > [!WARNING]
-> Firmu s účetními daty aplikace nedovolí smazat. Před smazáním zkontroluje čtrnáct tabulek (klienti, vydané
-> i přijaté faktury, účetní deník, pokladní doklady a pokladny, majetek, sklad - karty, doklady i sklady,
-> dokumenty, přiznání k dani z příjmů, podané daňové výkazy, příkazy k úhradě). Má-li firma v kterékoli z nich
-> data, smazání skončí chybou s výčtem, co brání: „Firmu nelze smazat - obsahuje účetní data: vydané faktury,
-> účetní deník. Data nejdřív odstraňte, nebo firmu archivujte." Žádné tlačítko „archivovat" ve skutečnosti
-> neexistuje, text v hlášce je jen doporučení nechat firmu neaktivní. Jediná reálná cesta ke smazání firmy
-> s účetní historií je napřed fyzicky odstranit její data ve všech kontrolovaných tabulkách (typicky přes
-> IT nebo podporu), ne přes aplikaci. Bankovní výpisy a transakce se nekontrolují (nemají přímou vazbu na
-> firmu), ale u firmy s bankovními daty prakticky existují i zaúčtované doklady, takže na ně blok narazí stejně.
+> Smazání firmy je nevratné a může zahrnout i firmu, která má doklady, účetní deník, mzdy a personalistiku,
+> exekuce, podání, SVJ, dokumenty nebo bankovní výpisy. Smaže se všechno, co firma v aplikaci má, včetně
+> evidencí jen pro přidávání (mzdy, podání, SVJ) a souborů firmy v úložišti (PDF faktur, přílohy, archivy,
+> podpisové profily, loga). Zákonné archivační povinnosti (účetní záznamy, mzdové listy, podání) tím
+> nezanikají: odpovědnost za to, že data máte uložená jinde (záloha, export, archiv), nesete vy.
+
+Co ještě platí:
+
+- Posledního zbývajícího dodavatele instalace smazat nejde („Posledního supplier nelze smazat", vždy musí
+  zůstat aspoň jeden).
+- Databázové řádky se mažou v jedné transakci. Chyba uvnitř této transakce
+  mazání vrátí zpět. Obnova databázových ochran a mazání souborů ale probíhají
+  samostatně; dokončovací chyba proto neznamená, že se firma nesmazala.
+- Evidence jen pro přidávání chrání triggery. Aplikace je na dobu mazání dočasně
+  odstraní a poté obnovuje. Databázový účet potřebuje právo `TRIGGER`.
+  Při chybě `trigger_restore_failed` správce serveru nejprve prověří stav firmy
+  a obnoví ochrany podle zálohy definic v runtime úložišti
+  `storage/company-purge/triggers-<schema>.json`. Operaci neopakujte naslepo.
+- Zůstane jen auditní stopa: v auditním logu instance záznam `supplier.deleted` (kdo, kdy, IČO, název, počty
+  řádků) a dřívější auditní záznamy firmy, protože auditní log je zřetězený a jeho řádky se nemažou. Smazané
+  zápisy verzovaného účetního deníku zůstávají jen v historii verzí databáze, aplikace je nezobrazuje.
+- Správce serveru může totéž udělat z příkazové řádky: `php api/bin/delete-company.php --id=<id>` (náhled),
+  pak `--confirm=<IČO> --immutable --files`.
 
 ## 95.12 Když něco nejde
 
@@ -343,9 +383,10 @@ dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat",
 |---|---|---|
 | Přepínač dodavatele chybí | Máte přístup k jediné firmě | Požádejte admina o přístup k dalším firmám (`Systém → Uživatelé`). |
 | Položka **Přehled firem** v menu chybí | Přístup jen k jedné firmě, nebo role klient | Viz [§ 95.2](#952-nez-zacnete). |
-| Firmu nelze smazat, hláška vyjmenuje účetní data | Firma má data v některé z kontrolovaných tabulek | Viz varování v [§ 95.11](#9511-krok-za-krokem-smazat-firmu). |
-| Tlačítko **Smazat** je neaktivní | Firma má klienty nebo vydané faktury | Data nejprve odstraňte. |
-| Potvrzovací dialog tvrdí „Lze jen pokud nemá klienty ani faktury", ale smazání přesto selže | Dialog je zjednodušený a neúplný: i firma bez klientů a faktur může mít pokladnu, majetek nebo sklad | Zkontrolujte také pokladny, majetek a sklad. |
+| Tlačítko **Nevratně smazat firmu** je neaktivní | Opsané IČO (název) se neshoduje, nebo jde o poslední firmu | Opište IČO přesně; firmu bez IČO potvrďte přesným názvem včetně velikosti písmen. |
+| „Databázový účet aplikace nemá právo TRIGGER…" | Bez práva `TRIGGER` nejde dočasně vypnout ochranu evidencí jen pro přidávání | Požádejte správce databáze o přidělení práva `TRIGGER`. Nic se nesmazalo. |
+| „Smazání nejde dokončit, na data firmy stále odkazují záznamy…" | Na data firmy odkazuje záznam jiné firmy (např. klient jiné firmy s měnou smazávané firmy) | Odkaz v druhé firmě změňte a smazání zopakujte. Nic se nesmazalo. |
+| „Právě probíhá mazání jiné firmy" | Firmy se mažou jedna po druhé | Zkuste to za chvíli znovu. |
 | Posledního dodavatele nelze smazat | Musí zůstat aspoň jeden | Založte jinou firmu a smažte původní. |
 | Nahrání SVG loga selže: „SVG konverze není dostupná" | Server nemá PHP rozšíření `imagick` ani `rsvg-convert` | Viz [§ 95.13.4](#95134-branding-podrobnosti), nebo nahrajte PNG či JPG. |
 | Vystavení hlásí chybu 409 po změně číselného cyklu | Číslo už v evidenci existuje | Upravte šablonu, viz varování v [§ 95.13.3](#95133-ciselne-rady-faktur). |
@@ -412,7 +453,9 @@ posouvá po letech, měsíc po měsících včetně přetečení roku (`{MM+8}` 
 
 Pole nechte **prázdné** a aplikace použije výchozí hodnotu z konfigurace instalace (`cfg.varsymbol.templates`:
 `{YY}{MM}{CCC}` pro fakturu, `9{YY}{MM}{CCC}` pro proformu, `7{YY}{MM}{CCC}` pro dobropis). Vyplňte, jen když
-chcete vlastní řadu. Chybí-li counter (`{C+}`), pole je červené s chybou „Chybí counter".
+chcete vlastní řadu. Tvar se kontroluje už při psaní, viz *Kontrola tvaru čísla* níže.
+
+**Kontrola tvaru čísla.** Stejně se kontrolují tvary čísel v nastavení firmy (vydané i přijaté doklady), na kartě klienta, u kategorie tržby i v dialogu nové řady číselníku. Kulaté a hranaté závorky `()` a `[]` se při psaní samy převedou na složené `{}`, takže `(YY)[CCCC]` se uloží jako `{YY}{CCCC}`. Pole se označí červeně a pod ním je hláška, když tvar obsahuje neznámý zástupný symbol (například `{YYx}` nebo `{1YY}`), mezeru, nemá právě jeden čítač (chybí, nebo jsou dva) nebo je delší než 60 znaků. Je-li tvar v pořádku, ukáže se náhled vzorového čísla pro dnešní datum a čítač 1. Dokud je některý tvar chybný, tlačítko **Uložit** je neaktivní. Stejná pravidla hlídá i server, takže neplatný tvar odmítne i při uložení přes API.
 
 **Reset číselné řady:**
 
@@ -480,6 +523,20 @@ ani kategorie, které ještě nebyly uložené.
 > variabilní symbol normalizuje na číslice. Kolizi hlásí kontrola v nastavení dodavatele (pokrývá řady
 > dodavatele, zákazníků i kategorií tržeb).
 
+#### Číselník řad
+
+**Výběr řady v editoru.** Pole **Číselná řada** se v hlavičce dokladu ukáže jen tehdy, když má druh dokladu víc než jednu řadu. Firma, která si v číselníku žádnou řadu nepřidá, editory vidí beze změny. Předvybraná je výchozí řada a doklad dostane číslo z vybrané řady až při vystavení (pokladní a interní doklad při zaúčtování, přijatý doklad při přijetí). Ruční číslo dokladu má přednost a výběr řady pak skryje. U pokladních dokladů se nabízejí řady zvolené pokladny a řady pro všechny pokladny; víc řad v jedné pokladně sdílí jednu pokladní knihu i zůstatek, liší se jen číslem dokladu.
+
+**Výchozí řada.** Platí v tomto pořadí: řada vybraná na dokladu, **moje výchozí** řada uživatele (nabídka řádku *Nastavit jako moji výchozí*, u pokladních dokladů pro danou pokladnu), výchozí řada pokladny a výchozí řada druhu dokladu. Převedená řada faktur zůstává výchozí, dokud výchozí nenastavíte jinou řadu. Když se doklad čísluje převedenou řadou faktur, platí dál řady zákazníků a kategorií tržby (tabulka výše). Řada založená v číselníku má přednost před řadou zákazníka i kategorie, pokud ji na dokladu vyberete nebo je výchozí. Zjednodušený daňový doklad bez výběru řady zůstává ve vlastní řadě firmy, má-li ji.
+
+**Tvar čísla nové řady.** Placeholdery `{PREFIX}`, `{YYYY}`, `{YY}`, `{MM}` (i s posunem), `{C…}` a u přijatých dokladů `{PP}` (daňový prefix). Řada se resetem nesmí opakovat, proto roční řada musí mít v čísle rok a měsíční rok i měsíc; jinak je pole červené a řadu nejde uložit. U tvarů čísel vydaných dokladů v nastavení firmy, klienta a kategorie chybějící rok či měsíc k zvolenému období jen varuje (období se může dědit). Čísla nové řady se nesmí plést s jinou řadou téhož druhu dokladů (vydané faktury, zálohy a dobropisy jsou jeden prostor čísel), takovou šablonu číselník odmítne. Liší-li se řady vydaných dokladů jen písmenem, číselník na to upozorní, protože bankovní párování bere z variabilního symbolu jen číslice. Tvar čísla a prefix jde měnit, dokud z řady nevzniklo žádné číslo. Tvar převedené řady se mění tam, kde dosud (záložka Číslování faktur, karta zákazníka, kategorie tržby, **Nástroje → Účetní nastavení → Číselné řady**, bankovní účet); příští číslo převedené řady vydaných dokladů a řad účetních dokladů jde nastavit i v číselníku.
+
+**Výdej čísla.** Číslo nové řady se přiděluje ve stejném kroku, který ho zapíše na doklad. Když vystavení neprojde, číslo se vrátí do řady, a smazaný poslední doklad řady vrátí své číslo stejně jako u dosavadních řad. Dvě souběžná vystavení z jedné řady dostanou dvě po sobě jdoucí čísla.
+
+**Ukončení řady.** Nabídka řádku **Ukončit řadu** nastaví datum, po kterém řada žádné číslo nevydá; v editorech se pak nenabízí. Výchozí řadu ukončit nejde, nejdřív nastavte výchozí jinou řadu. Smazat jde jen nová řada, ze které ještě nevzniklo žádné číslo; převedenou řadu ani řadu s doklady smazat nejde.
+
+**Kontrola úplnosti po řadách.** Pod číselníkem je **Kontrola úplnosti po řadách**: pro zvolený rok ukáže u každé řady počet dokladů a chybějící čísla. Převedené řady vydaných daňových dokladů se kontrolují stejně jako v sestavě [Úplnost číselné řady](46_Ucetni_kontroly_a_inventarizace.md#466-krok-za-krokem-uplnost-ciselne-rady-vydanych-dokladu), nové řady podle dokladů, které z nich dostaly číslo, s ohledem na ručně nastavené příští číslo. Doklady nových řad faktur a dobropisů se v sestavě Úplnost číselné řady ukazují jako samostatná řada.
+
 **Kde se to projeví.** V editoru konceptu vidíte placeholder s předpokládaným číslem. Při vystavení se atomicky
 vezme další counter z databáze a uloží jako neměnný variabilní symbol. V editoru konceptu můžete číslo přepsat
 ručně, viz [Číslo dokladu - ruční zadání](15_Faktura_editor.md#cislo-dokladu-rucni-zadani-volitelne).
@@ -492,7 +549,7 @@ ručně, viz [Číslo dokladu - ruční zadání](15_Faktura_editor.md#cislo-dok
 | **Použít vlastní branding** | Přepínač vpravo nahoře (výchozí vypnuto = MyÚčto branding). Pokud je zapnutý, hlavička e-mailů i PDF se sestaví z polí níže. |
 | **Logo** | Nahrání PNG / JPG / SVG (nejvýše 1 MiB, ideálně do 200 KiB). Pro raster je ideální výška 240 px (v e-mailu se zobrazí jako 48 px pro 5× retinu). SVG: originál se uloží pro PDF (vektor = ostré v libovolném zoomu), pro e-mail se na serveru převede na průhledné PNG (Outlook a Gmail SVG odstraňují), primárně přes PHP rozšíření `Imagick` (Windows i Linux), záložně přes nástroj `rsvg-convert` (`librsvg2-bin`). Logo se v e-mailu připojí jako CID inline obrázek, takže se zobrazí bez výzvy „Display images" v Gmailu a Outlooku. |
 | **Akcent barva** | Hex `#RRGGBB`: akcentová barva celého e-mailu (částky, tlačítka, odkazy, náhradní „M" box) i PDF faktury (linka pod hlavičkou, hlavička tabulky položek, řádky „Celkem" a „K úhradě", popisky, QR a banky, nadpis a odkaz výkazu víceprací). Uplatní se jen při zapnutém brandingu; jinak výchozí `#3B2D83` (fialová MyÚčto). Sémantické barvy (dobropis červená, zelené „Schválit" a „Uhrazeno", oranžová „po splatnosti") zůstávají. Color picker, textové pole a odkaz **↺ default**. |
-| **Úsporná černobílá faktura (PDF)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
+| **Úsporná černobílá faktura (nestandardní vzhled)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
 
 V hlavičce se pak vykreslí logo vlevo (místo fialového „M" boxu, `max-height: 48px`), **název** dodavatele
 (zobrazované jméno, záložně název firmy) a **podtitulek** (tagline dodavatele, pokud je vyplněn).
@@ -540,8 +597,8 @@ zápis v deníku, uzávěrka nebo ho založil převod, uložit pole nejde, proto
 úkon s přechodným obdobím. Fyzická osoba vede vždy kalendářní rok.
 
 U podvojného účetnictví je na stejné záložce samostatná karta **Účetní rámec**. Ukazuje rámec platný
-k dnešku a jeho historii. Výchozí je **Podnikatelé (vyhláška 500)**. Rámec podle vyhlášky 504 zatím nelze
-aktivovat. Změna rámce se ukládá samostatným tlačítkem s datem prvního dne existujícího účetního období.
+k dnešku a jeho historii. Výchozí je **Podnikatelé (vyhláška 500)**. Nevýdělečné organizace zvolí rámec
+podle vyhlášky 504, viz kapitola [Nastavení](96_Nastaveni.md). Změna rámce se ukládá samostatným tlačítkem s datem prvního dne existujícího účetního období.
 Pokud jsou v dotčeném intervalu zaúčtované zápisy, aplikace změnu odmítne. Ostatní rozpracované údaje
 ve formuláři toto tlačítko neukládá.
 
@@ -601,6 +658,12 @@ Aktuální dodavatel se posílá v každém API požadavku v hlavičce `X-Suppli
 úložiště prohlížeče (`myinvoice.current_supplier_id`). Pokud hlavička chybí, server použije výchozí firmu
 uživatele ([§ 95.3](#953-krok-za-krokem-prepnout-firmu)). Ukládá ji `PUT /api/auth/default-supplier` s tělem
 `{"supplier_id": N}`, které volá přepínač firem.
+
+Přednost má vazba vlastní klientské domény na firmu a potom vazba API tokenu
+na konkrétní firmu. Takový token se hlavičkou na jinou firmu nepřesměruje,
+ani s příznakem Plný zápis. U požadavku bez těchto vazeb má hlavička
+přednost před parametrem `supplier_id`; teprve bez výslovného výběru se
+použije výchozí firma. Každý výběr dál vyžaduje oprávnění k dané firmě.
 
 ### 95.13.7 Tipy
 

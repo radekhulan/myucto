@@ -193,6 +193,10 @@ final class AdvanceDeductionService
             $created = [];
             foreach ($rows as $r) {
                 $pair = $this->repo->pair($supplierId, $docType, $r['final_id'], $r['advance_id']);
+                if ($pair !== null && $pair['source'] === 'document') {
+                    throw new JournalSettlementException('pair_document',
+                        'Zálohu ' . $docs[$r['advance_id']]['doc_no'] . ' vyúčtovává faktura ' . $docs[$r['final_id']]['doc_no'] . ' přímo na dokladu, upravte ji v detailu faktury.', 409);
+                }
                 if ($pair !== null && $pair['source'] !== 'saldo') {
                     throw new JournalSettlementException('pair_imported',
                         'Čerpání zálohy ' . $docs[$r['advance_id']]['doc_no'] . ' fakturou ' . $docs[$r['final_id']]['doc_no'] . ' je převzaté z převodu, upravte ho opravou převodu.', 409);
@@ -228,6 +232,10 @@ final class AdvanceDeductionService
         try {
             $row = $this->repo->find($supplierId, $docType, $id, true)
                 ?? throw new JournalSettlementException('not_found', 'Čerpání zálohy nenalezeno.', 404);
+            if ($row['source'] === 'document') {
+                throw new JournalSettlementException('deduction_document',
+                    'Čerpání nese faktura vyúčtovávající víc záloh, zálohu od ní odpojíte v detailu faktury.', 409);
+            }
             if ($row['source'] !== 'saldo') {
                 throw new JournalSettlementException('deduction_imported', 'Čerpání převzaté z převodu zrušíte opravou převodu, ne v saldokontu.', 409);
             }

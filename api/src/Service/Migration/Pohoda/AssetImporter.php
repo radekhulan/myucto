@@ -19,9 +19,16 @@ use MyInvoice\Service\Migration\Shared\MigratedDisposal;
  * Počáteční stavy odpisů počítá {@see PohodaAssetPlan} tak, aby další odpis v MyÚčtu
  * připadl na první měsíc, který POHODA ještě nezaúčtovala.
  *
+ * Technická zhodnocení z pohybů karty (`IMpohyb`) se převedou na kartu se svým datem, karta
+ * se vede od ceny zařazení. Zaúčtování zhodnocení nese převedený deník.
+ *
  * Účty karta v POHODĚ nenese, bere je převod z deníku: oprávky z odpisových zápisů karty
  * (zdroj „Dlouhodobý majetek", číslo karty), majetkový účet z počátečního stavu účtu
- * 01x-03x ve výši vstupní ceny (při shodě více účtů podle analytiky oprávek).
+ * 01x-03x ve výši vstupní ceny (při shodě více účtů podle analytiky oprávek, u účtu více
+ * karet podle analytiky oprávek karty).
+ *
+ * Po založení se zůstatky karty ke konci roku agendy porovnají s POHODOU; rozdíl je
+ * varování v protokolu a karta zůstane koncept ke kontrole.
  */
 final class AssetImporter
 {
@@ -63,6 +70,10 @@ final class AssetImporter
                 $p->count(self::STEP, 'existing');
                 continue;
             }
+            if ($ctx->skipsDate(PohodaXml::date($row, 'DatZar') ?? PohodaXml::date($row, 'Datum'))) {
+                $p->count(self::STEP, 'later_year_skipped');
+                continue;
+            }
             $disposal = PohodaXml::date($row, 'DatLikv');
             if ($disposal !== null && $disposal < $periodStart) {
                 $p->count(self::STEP, 'disposed_before');
@@ -72,9 +83,22 @@ final class AssetImporter
             // Daňové odpisy (`IModpis.Rok`) čísluje POHODA roky svých agend - zdaňovací období
             // právnické osoby s hospodářským rokem je ten hospodářský rok - proto rok agendy
             // z exportu, ne label období firmy.
-            $plan = PohodaAssetPlan::build($row, $taxRows[$id] ?? [], $ownPlan[$id] ?? $spreadPlan[$id] ?? [], $ctx->export->year, $booked['last'] ?? $defaultLastBooked, $movements[$id] ?? []);
+            $monthRows = $ownPlan[$id] ?? $spreadPlan[$id] ?? [];
+            $plan = PohodaAssetPlan::build($row, $taxRows[$id] ?? [], $monthRows, $ctx->export->year, $booked['last'] ?? $defaultLastBooked, $movements[$id] ?? []);
             $card = $plan['card'];
             $review = $plan['review'];
+            $improvements = $plan['improvements'];
+            if (array_any($improvements, static fn (array $improvement): bool => $ctx->skipsDate($improvement['completed_on']))) {
+                $p->warn(self::STEP, 'asset_improvement_outside_selection', "Karta majetku {$number} obsahuje technické zhodnocení mimo vybrané roky. Ověřte ji samostatně.", ['document_no' => $number]);
+                continue;
+            }
+            // Počáteční stav majetkového účtu obsahuje zhodnocení dokončená před obdobím agendy.
+            $openingPrice = (float) $card['input_price'];
+            foreach ($improvements as $imp) {
+                if ($imp['completed_on'] < $periodStart) {
+                    $openingPrice += $imp['amount'];
+                }
+            }
             // Vyřazení v převáděných letech zaúčtoval převedený deník: karta se vyřadí bez
             // zaúčtování (MigratedDisposal). Ke kontrole zůstává jen vyřazení mimo ně.
             $disposedInJournal = $disposal !== null && $disposal <= ($ctx->lastPeriodEnd() ?? $disposal) && !$ctx->skipsDate($disposal);
@@ -84,7 +108,7 @@ final class AssetImporter
             }
 
             $accumulated = $journal['accumulated'][$number] ?? null;
-            $assetAccount = $this->assetAccount($journal['opening'], (float) $card['input_price'], $accumulated);
+            $assetAccount = $this->assetAccount($journal['opening'], round($openingPrice, 2), $accumulated);
             if ($assetAccount === null) {
                 $review[] = 'majetkový účet se z počátečních stavů nepodařilo určit';
                 $card['status'] = 'draft';
@@ -110,19 +134,80 @@ final class AssetImporter
             $card['description'] = $review === [] ? null : 'Převod z POHODY - ke kontrole: ' . implode('; ', $review) . '.';
 
             try {
-                $created = $this->assets->create($ctx->supplierId, $card, ['user_id' => $ctx->userOrNull()]);
+                $created = $this->assets->createWithImprovements($ctx->supplierId, $card, $improvements, ['user_id' => $ctx->userOrNull()]);
             } catch (AssetException $e) {
                 $p->warn(self::STEP, 'asset_rejected', "Karta majetku {$number} nepřevzata: " . $e->getMessage(), ['document_no' => $number]);
                 continue;
             }
-            $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_ASSET, $key, (int) $created['asset']['id'], $ctx->runId);
+            $assetId = (int) $created['asset']['id'];
+            $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_ASSET, $key, $assetId, $ctx->runId);
+            if ($improvements !== []) {
+                $p->count(self::STEP, 'improvements', count($improvements));
+            }
+
+            // Kontrola zůstatků proti POHODĚ ke konci roku agendy. Vyřazenou kartu POHODA
+            // dopočítává k vyřazení, porovnání by nesedělo.
+            $mismatch = [];
+            if ($disposal === null) {
+                $mismatch = $this->balanceMismatch($ctx, $assetId, PohodaAssetPlan::balances($row, $monthRows, isset($ownPlan[$id]), $ctx->periodEnd()));
+                $p->count(self::STEP, $mismatch === [] ? 'balances_match' : 'balances_differ');
+            }
+            if ($mismatch !== []) {
+                $note = 'zůstatky k ' . $ctx->periodEnd() . ' nesedí s POHODOU: ' . implode(', ', $mismatch);
+                $p->warn(self::STEP, 'asset_balance_mismatch', "Karta majetku {$number}: {$note}.", ['document_no' => $number]);
+                if ($review === []) {
+                    $this->disposals->toReview($ctx->supplierId, $assetId, 'Převod z POHODY - ke kontrole: ' . $note . '.');
+                    $card['status'] = 'draft';
+                }
+            }
             $p->count(self::STEP, $card['status'] === 'draft' ? 'drafts' : 'created');
             if ($review !== []) {
                 $p->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: " . implode('; ', $review) . '.', ['document_no' => $number]);
             } elseif ($disposedInJournal) {
-                $this->disposeMigrated($ctx, (int) $created['asset']['id'], (string) $disposal, $number);
+                $this->disposeMigrated($ctx, $assetId, (string) $disposal, $number);
             }
         }
+    }
+
+    /**
+     * Vstupní cena, daňová a účetní zůstatková cena karty v MyÚčtu ke konci roku agendy
+     * (počáteční stavy + plán odpisů) proti hodnotám karty v POHODĚ.
+     *
+     * @param array{input_price:float, tax_residual:?float, acc_residual:?float} $pohoda
+     * @return list<string> popis rozdílů, prázdný = sedí
+     */
+    private function balanceMismatch(PohodaContext $ctx, int $assetId, array $pohoda): array
+    {
+        $plan = $this->assets->plan($ctx->supplierId, $assetId);
+        $summary = $plan['asset_summary'];
+        $asset = $this->assets->get($ctx->supplierId, $assetId) ?? [];
+        $increased = (float) $summary['increased_input_price'];
+        $tax = $increased - (float) ($asset['opening_tax_amount'] ?? 0);
+        foreach ($plan['tax'] as $row) {
+            if ((int) $row['fiscal_year'] <= $ctx->year()) {
+                $tax -= (float) $row['full_amount'];
+            }
+        }
+        $endMonth = substr($ctx->periodEnd(), 0, 7);
+        $acc = $increased - (float) ($asset['opening_acc_amount'] ?? 0);
+        foreach ($plan['accounting'] as $row) {
+            foreach ((array) ($row['months'] ?? []) as $month) {
+                if ((string) $month['month'] <= $endMonth) {
+                    $acc -= (float) $month['amount'];
+                }
+            }
+        }
+        $out = [];
+        foreach ([
+            'vstupní cena' => [$increased, $pohoda['input_price']],
+            'daňová zůstatková cena' => [$tax, $pohoda['tax_residual']],
+            'účetní zůstatková cena' => [$acc, $pohoda['acc_residual']],
+        ] as $label => [$myucto, $source]) {
+            if ($source !== null && abs($myucto - $source) >= 1.0) {
+                $out[] = $label . ' MyÚčto ' . number_format($myucto, 2, ',', ' ') . ' Kč, POHODA ' . number_format($source, 2, ',', ' ') . ' Kč';
+            }
+        }
+        return $out;
     }
 
     /**
@@ -188,11 +273,28 @@ final class AssetImporter
 
     /**
      * Majetkový účet: počáteční stav 01x-03x ve výši vstupní ceny. Shoduje-li se víc účtů,
-     * rozhodne analytika shodná s účtem oprávek (022007 ↔ 082007).
+     * rozhodne analytika shodná s účtem oprávek (022007 ↔ 082007). Vede-li účet víc karet
+     * (počáteční stav je jejich součet), určí ho účet oprávek z odpisů karty: majetkový účet
+     * se stejnou analytikou, je-li v počátečních stavech a pokryje vstupní cenu.
      *
      * @param array<string,float> $opening
      */
     private function assetAccount(array $opening, float $inputPrice, ?string $accumulated): ?string
+    {
+        $matched = $this->matchingOpening($opening, $inputPrice, $accumulated);
+        if ($matched !== false || $accumulated === null || preg_match('/^0[78]/', $accumulated) !== 1) {
+            return $matched === false ? null : $matched;
+        }
+        $derived = '0' . ((int) substr($accumulated, 1, 1) - 6) . substr($accumulated, 2);
+        return isset($opening[$derived]) && $opening[$derived] + 1.0 >= $inputPrice ? $derived : null;
+    }
+
+    /**
+     * Účet s počátečním stavem ve výši vstupní ceny; null = víc kandidátů, false = žádný.
+     *
+     * @param array<string,float> $opening
+     */
+    private function matchingOpening(array $opening, float $inputPrice, ?string $accumulated): string|false|null
     {
         // Nejdřív přesná shoda; karta v POHODĚ může mít vstupní cenu zaokrouhlenou na koruny
         // proti haléřovému zůstatku účtu, proto pak shoda do 1 Kč - vždy jen jednoznačná.
@@ -208,7 +310,7 @@ final class AssetImporter
                 return null;
             }
         }
-        return null;
+        return false;
     }
 
     /** Účet oprávek se stejnou analytikou jako majetkový účet (`022007` → `082007`), existuje-li. */

@@ -32,6 +32,20 @@ final class PayrollSubmissionTransportAttemptRepository
     private const DUE_POLL_CONDITION = 'status IN ("awaiting_protocol", "possibly_delivered")'
         . ' AND correlation_reference IS NOT NULL';
 
+    private const REGISTRATION_DUE_POLL_CONDITION = 'status = "awaiting_protocol"'
+        . ' AND correlation_reference IS NOT NULL';
+
+    /** @var list<string> */
+    private const JMHZ_AGENDAS = ['JMHZ', 'JMHZ25'];
+
+    /**
+     * Agendy registrací, které odesílá
+     * {@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService}.
+     *
+     * @var list<string>
+     */
+    public const REGISTRATION_AGENDAS = ['PREZEC26', 'REGZEC25'];
+
     /**
      * Tvrdý strop stránky historie přenosů. Ledger je append-only, takže roste
      * s každým pokusem o odeslání a nikdy se nezmenší.
@@ -1087,9 +1101,10 @@ final class PayrollSubmissionTransportAttemptRepository
      * založené před migrací 1379 termín nemají a vynechat je by znamenalo, že
      * na ně automatika nikdy nesáhne.
      *
-     * Fronta je záměrně jen JMHZ: její worker čte JMHZ identitu a používá
-     * třídu CSSZ_JMHZ. Registrační PREZEC/REGZEC pokusy sdílejí ledger, ale
-     * dotaz na jejich výsledek spouští účetní explicitní transportní akcí.
+     * Fronta je jen JMHZ: její worker čte JMHZ identitu a používá třídu
+     * CSSZ_JMHZ. Registrační PREZEC/REGZEC pokusy sdílejí ledger, ale mají
+     * vlastní frontu {@see self::listDueRegistrationPolls()}, protože se na
+     * výsledek ptají přes registrační transport.
      *
      * @return list<array<string,mixed>>
      */
@@ -1098,6 +1113,38 @@ final class PayrollSubmissionTransportAttemptRepository
         return $this->listDue(
             self::DUE_POLL_CONDITION,
             $limit,
+        );
+    }
+
+    /**
+     * Registrační pokusy (PREZEC/REGZEC), které čekají na protokol.
+     *
+     * Bere jen `awaiting_protocol`, stejně jako ruční „Zjistit výsledek":
+     * registrační transport se u jiného stavu na ČSSZ neptá, takže by pokus
+     * „možná doručeno" padal v každém běhu znovu.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listDueRegistrationPolls(int $limit = 50): array
+    {
+        return $this->listDue(
+            self::REGISTRATION_DUE_POLL_CONDITION,
+            $limit,
+            self::REGISTRATION_AGENDAS,
+        );
+    }
+
+    /**
+     * Dotažené registrační pokusy s neuzavřenou transakcí.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listDueRegistrationCloses(int $limit, int $maxCloseAttempts): array
+    {
+        return $this->listDue(
+            self::dueCloseCondition($maxCloseAttempts),
+            $limit,
+            self::REGISTRATION_AGENDAS,
         );
     }
 
@@ -1118,10 +1165,17 @@ final class PayrollSubmissionTransportAttemptRepository
     public static function hasDueWork(PDO $pdo, int $maxCloseAttempts): bool
     {
         $statement = $pdo->query(
-            'SELECT 1 FROM ' . self::TABLE . ' WHERE '
+            'SELECT 1 FROM ' . self::TABLE . ' WHERE ('
             . self::dueCondition('(' . self::DUE_POLL_CONDITION . ') OR ('
                 . self::dueCloseCondition($maxCloseAttempts) . ')')
-            . ' LIMIT 1',
+            . ') OR ('
+            . self::dueCondition(
+                '(' . self::REGISTRATION_DUE_POLL_CONDITION . ') OR ('
+                    . self::dueCloseCondition($maxCloseAttempts) . ')',
+                true,
+                self::REGISTRATION_AGENDAS,
+            )
+            . ') LIMIT 1',
         );
 
         return $statement === false || $statement->fetchColumn() !== false;
@@ -1129,10 +1183,13 @@ final class PayrollSubmissionTransportAttemptRepository
 
     public static function hasUnfinishedJmhzTransport(PDO $pdo): bool
     {
+        $condition = 'status = "awaiting_protocol" OR (status = "completed" AND closed_at IS NULL)';
         $statement = $pdo->query(
-            'SELECT 1 FROM ' . self::TABLE . ' WHERE '
-            . self::dueCondition('status = "awaiting_protocol" OR (status = "completed" AND closed_at IS NULL)', false)
-            . ' LIMIT 1',
+            'SELECT 1 FROM ' . self::TABLE . ' WHERE ('
+            . self::dueCondition($condition, false)
+            . ') OR ('
+            . self::dueCondition($condition, false, self::REGISTRATION_AGENDAS)
+            . ') LIMIT 1',
         );
 
         return $statement === false || $statement->fetchColumn() !== false;
@@ -1145,8 +1202,11 @@ final class PayrollSubmissionTransportAttemptRepository
                AND close_attempts < ' . max(1, $maxCloseAttempts);
     }
 
-    /** @return list<array<string,mixed>> */
-    private function listDue(string $condition, int $limit): array
+    /**
+     * @param list<string> $agendas
+     * @return list<array<string,mixed>>
+     */
+    private function listDue(string $condition, int $limit, array $agendas = self::JMHZ_AGENDAS): array
     {
         if (!$this->isAvailable()) {
             return [];
@@ -1155,7 +1215,7 @@ final class PayrollSubmissionTransportAttemptRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . '
                FROM ' . self::TABLE . '
-              WHERE ' . self::dueCondition($condition) . '
+              WHERE ' . self::dueCondition($condition, true, $agendas) . '
               ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
               LIMIT ' . $limit,
         );
@@ -1170,8 +1230,12 @@ final class PayrollSubmissionTransportAttemptRepository
         return $rows;
     }
 
-    private static function dueCondition(string $condition, bool $respectSchedule = true): string
-    {
+    /** @param list<string> $agendas */
+    private static function dueCondition(
+        string $condition,
+        bool $respectSchedule = true,
+        array $agendas = self::JMHZ_AGENDAS,
+    ): string {
         return '(' . $condition . ') AND EXISTS (
                     SELECT 1
                       FROM payroll_submissions due_submission
@@ -1185,7 +1249,8 @@ final class PayrollSubmissionTransportAttemptRepository
                         . self::TABLE . '.environment
                        AND due_submission.id = '
                         . self::TABLE . '.submission_id
-                       AND due_obligation.agenda_code IN ("JMHZ", "JMHZ25")
+                       AND due_obligation.agenda_code IN ("'
+                        . implode('", "', $agendas) . '")
                 )' . ($respectSchedule
                     ? ' AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())'
                     : '');

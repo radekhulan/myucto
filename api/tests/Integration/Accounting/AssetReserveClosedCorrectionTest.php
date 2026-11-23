@@ -50,7 +50,7 @@ final class AssetReserveClosedCorrectionTest extends TestCase
     private static function deleteSupplier(\PDO $pdo, int $supplier): void
     {
         foreach (['activity_log', 'journal_entries', 'document_dimensions', 'document_dimension_splits', 'assets'] as $table) $pdo->prepare('DELETE FROM ' . $table . ' WHERE supplier_id=?')->execute([$supplier]);
-        $pdo->prepare('DELETE FROM supplier WHERE id=?')->execute([$supplier]);
+        \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($pdo, $supplier);
     }
 
     private function ownSupplier(): void

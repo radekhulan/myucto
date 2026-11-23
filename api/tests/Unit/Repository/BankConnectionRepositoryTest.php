@@ -43,6 +43,7 @@ final class BankConnectionRepositoryTest extends TestCase
                 payment_order_id INTEGER, payroll_batch_id INTEGER, connection_id INTEGER, provider TEXT NOT NULL,
                 payload_hash TEXT NOT NULL, submitted_by_user_id INTEGER, status TEXT NOT NULL,
                 provider_reference TEXT, error_code TEXT, accepted_count INTEGER,
+                provider_error_code TEXT, provider_error_scope TEXT, provider_error_message TEXT,
                 rejected_count INTEGER, remote_http_status INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 submitted_at TEXT, UNIQUE (supplier_id, payment_order_id), UNIQUE (supplier_id, payroll_batch_id)
             )'
@@ -152,5 +153,28 @@ final class BankConnectionRepositoryTest extends TestCase
         self::assertFalse($saved['has_token']);
         self::assertFalse($saved['enabled']);
         self::assertNotNull($submissions->find(1, 501));
+    }
+
+    public function testTakenOverThroughFindsOnlyImportedStatementsOfTheSameAccount(): void
+    {
+        $this->pdo->exec(
+            'CREATE TABLE bank_statements (
+                id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, source TEXT NOT NULL,
+                account_number TEXT, bank_code TEXT, currency TEXT, statement_date TEXT
+            )'
+        );
+        $this->pdo->exec("INSERT INTO bank_statements VALUES
+            (1, 1, 'import', '1000000005', '0800', 'CZK', '2026-09-30'),
+            (2, 1, 'import', '000000-1000000005', '0800', 'CZK', '2026-10-29'),
+            (3, 1, 'bank_api', '1000000005', '0800', 'CZK', '2026-11-03'),
+            (4, 1, 'import', '2000000018', '0800', 'CZK', '2026-11-02'),
+            (5, 1, 'import', '1000000005', '0100', 'CZK', '2026-11-02'),
+            (6, 1, 'import', '1000000005', '0800', 'EUR', '2026-11-02'),
+            (7, 2, 'import', '1000000005', '0800', 'CZK', '2026-11-02')");
+        $connections = new BankConnectionRepository($this->db);
+
+        self::assertSame('2026-10-29', $connections->takenOverThrough(1, 'CZK', 'CZ6508000000001000000005', '0800', '2026-10-22'));
+        self::assertNull($connections->takenOverThrough(1, 'CZK', '1000000005', '0800', '2026-10-30'));
+        self::assertNull($connections->takenOverThrough(3, 'CZK', '1000000005', '0800', '2026-01-01'));
     }
 }

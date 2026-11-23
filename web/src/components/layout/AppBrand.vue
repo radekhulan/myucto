@@ -10,6 +10,6 @@ defineExpose({ text })
 <template>
   <img src="/styles/logo.svg" alt="MyÚčto" class="w-7 h-7" />
   <span ref="text" class="text-sm font-semibold leading-tight select-none" :class="textClass">
-    My<span class="text-primary-600">Účto</span><span class="text-neutral-400 font-normal">.cz</span>
+    My<span class="text-primary-600">Účto</span><span class="brand-tld">.cz</span>
   </span>
 </template>

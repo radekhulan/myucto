@@ -100,48 +100,23 @@ final class SmallAssetReportService
      * ROK BERE Z DATA PLNĚNÍ (fallback vystavení), shodně s ExpenseClassificationService
      * a se zaúčtováním — doklad se běžně účtuje za loňsko.
      *
-     * STORNOVANÉ DOKLADY VEN: `status='cancelled'` se neúčtuje, takže do rozpisu 501
-     * nepatří — jinak by sestava ukazovala náklad, který v hlavní knize není.
+     * DO 501 JEN TO, CO SE NA 501 ÚČTUJE ({@see expenseRows()}): stornovaný doklad, koncept,
+     * zálohová výzva ani daňový doklad k záloze náklad neúčtují, náklad nese až konečná
+     * faktura. Částky jsou v Kč kurzem dokladu jako náklad v hlavní knize. Z rozpisu bere
+     * bázi i paušál časového rozlišení drobného majetku a kontrola karet v uzávěrce.
      *
      * @return array<string,mixed>
      */
     public function expenseBreakdown(int $supplierId, string $from, string $to): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.expense_kind,
-                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date,
-                    pi.id AS purchase_invoice_id,
-                    pi.vendor_invoice_number,
-                    pi.status,
-                    c.company_name AS vendor_name,
-                    pii.description,
-                    pii.quantity,
-                    pii.total_without_vat
-               FROM purchase_invoice_items pii
-               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-               LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
-              WHERE pi.supplier_id = ?
-                AND pii.expense_kind IN (?, ?)
-                AND pi.status <> \'cancelled\'
-                AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
-              ORDER BY pii.expense_kind, doc_date, pi.id, pii.order_index'
-        );
-        $stmt->execute([
-            $supplierId,
-            ExpenseKind::Material->value,
-            ExpenseKind::SmallAsset->value,
-            $from,
-            $to,
-        ]);
-
         $groups = [
             ExpenseKind::Material->value => ['expense_kind' => ExpenseKind::Material->value, 'rows' => [], 'total' => 0.0, 'document_ids' => []],
             ExpenseKind::SmallAsset->value => ['expense_kind' => ExpenseKind::SmallAsset->value, 'rows' => [], 'total' => 0.0, 'document_ids' => []],
         ];
         $total = 0.0;
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
             $kind = (string) $row['expense_kind'];
-            $amount = round((float) $row['total_without_vat'], 2);
+            $amount = self::amountCzk($row);
             $groups[$kind]['rows'][] = [
                 'doc_date' => (string) $row['doc_date'],
                 'purchase_invoice_id' => (int) $row['purchase_invoice_id'],
@@ -170,6 +145,95 @@ final class SmallAssetReportService
             'groups' => $out,
             'total' => $total,
         ];
+    }
+
+    /**
+     * Řádky drobného majetku z rozpisu 501 ({@see expenseBreakdown()}): přijatá faktura,
+     * položka a částka. Stejný výběr jako rozpis, ze kterého paušál časového rozlišení
+     * bere bázi, takže se podle nich báze dělí po dimenzích zápisů faktur.
+     *
+     * `weight_czk` i `amount` jsou částka v Kč kurzem dokladu, stejně jako báze rozpisu;
+     * podle ní se paušál dělí po dimenzích.
+     *
+     * @return list<array{purchase_invoice_id:int, item_id:int, vendor_invoice_number:?string, vendor_name:?string, amount:float, weight_czk:float}>
+     */
+    public function smallAssetExpenseItems(int $supplierId, string $from, string $to): array
+    {
+        $out = [];
+        foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
+            if ((string) $row['expense_kind'] === ExpenseKind::SmallAsset->value) {
+                $amount = self::amountCzk($row);
+                $out[] = [
+                    'purchase_invoice_id' => (int) $row['purchase_invoice_id'],
+                    'item_id' => (int) $row['item_id'],
+                    'vendor_invoice_number' => $row['vendor_invoice_number'] === null ? null : (string) $row['vendor_invoice_number'],
+                    'vendor_name' => $row['vendor_name'] === null ? null : (string) $row['vendor_name'],
+                    'amount' => $amount,
+                    'weight_czk' => $amount,
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Základ řádku v Kč kurzem dokladu (§ 4/12 ZoÚ), jak ho nese zápis faktury. Doklad v Kč
+     * má kurz 1; zaúčtovaný doklad v cizí měně kurz má vždy (bez něj zaúčtovat nejde).
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function amountCzk(array $row): float
+    {
+        $rate = (float) ($row['exchange_rate'] ?? 0);
+        $rate = (string) ($row['currency_code'] ?? 'CZK') === 'CZK' || $rate <= 0.0 ? 1.0 : $rate;
+        return round((float) $row['total_without_vat'] * $rate, 2);
+    }
+
+    /**
+     * Řádky faktur materiálu a drobného majetku za období (výběr {@see expenseBreakdown()}).
+     * Jen doklady, které náklad na 501 účtují: bez stornovaných a konceptů (zaúčtování je
+     * vynechává) a bez zálohových výzev a daňových dokladů k záloze (účtují jen zálohu
+     * a DPH, náklad nese konečná faktura). Jinak by se záloha i konečná faktura započetly
+     * dvakrát a rozpis by se rozešel s obratem 501.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function expenseRows(int $supplierId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pii.expense_kind,
+                    pii.id AS item_id,
+                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date,
+                    pi.id AS purchase_invoice_id,
+                    pi.vendor_invoice_number,
+                    pi.status,
+                    pi.document_kind,
+                    c.company_name AS vendor_name,
+                    pii.description,
+                    pii.quantity,
+                    pii.total_without_vat,
+                    pi.exchange_rate,
+                    cur.code AS currency_code
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+               LEFT JOIN currencies cur ON cur.id = pi.currency_id
+               LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
+              WHERE pi.supplier_id = ?
+                AND pii.expense_kind IN (?, ?)
+                AND pi.status NOT IN (\'cancelled\', \'draft\')
+                AND pi.document_kind NOT IN (\'advance\', \'tax_document\')
+                AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
+              ORDER BY pii.expense_kind, doc_date, pi.id, pii.order_index'
+        );
+        $stmt->execute([
+            $supplierId,
+            ExpenseKind::Material->value,
+            ExpenseKind::SmallAsset->value,
+            $from,
+            $to,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /** @param list<array<string,mixed>> $rows */

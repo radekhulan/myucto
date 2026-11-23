@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\TaxEvidence\TransitionReportService;
 use PDO;
@@ -209,7 +210,7 @@ final class OpeningBalanceService
             $existingStmt->execute([$supplierId, (int) $period['id']]);
             $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
             $documentNo = $existing['document_no'] ?? $this->series->next($supplierId, 'opening', (int) $period['fiscal_year']);
-            $entryId = $this->posting->postDocument($supplierId, 'opening', (int) $period['id'], $lines, [
+            $entryId = $this->posting->postDocument($supplierId, 'opening', (int) $period['id'], PairGroups::consecutive($lines, 'opening'), [
                 'entry_date' => $startsOn,
                 'document_date' => $startsOn,
                 'document_no' => $documentNo,

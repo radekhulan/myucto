@@ -21,6 +21,7 @@ import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { manualMovementDimensions } from './ruleDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import type { DimensionMap } from '@/api/dimensions'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
@@ -30,6 +31,7 @@ import type { BankTransactionActions } from '@/composables/useBankTransactionAct
 import { useSupplierStore } from '@/stores/supplier'
 import { hasFrameworkScope } from '@/security/frameworkScope'
 import { usePropertyBankLinks } from './usePropertyBankLinks'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 /** Náš zdrojový účet (jen scope='all' u „Všechny pohyby" — viz UnpostedBankTransaction). */
 type RowTx = BankTransaction & {
@@ -53,17 +55,24 @@ const props = withDefaults(defineProps<{
   /** Počet sloupců tabulky (desktop) pro colspan expand řádků. */
   colspan?: number
   actions: BankTransactionActions
+  /** Zaškrtávátko výběru pro hromadné akce (seznam pohybů): první buňka řádku, na kartě před částkou. */
+  selectable?: boolean
+  selectionDisabled?: boolean
+  selected?: boolean
 }>(), {
   fallbackCurrency: null,
   showAccount: false,
   showCounterAccount: false,
   showStatementLink: false,
   colspan: 7,
+  selectable: false,
+  selected: false,
 })
 
 const emit = defineEmits<{
   posted: [payload: { result: PostResult; debit: string; credit: string }, tx: BankTransaction]
   changed: []
+  'toggle-select': [id: number]
 }>()
 
 const { t } = useI18n()
@@ -118,9 +127,15 @@ const outsideSaldo = computed(() => props.tx.match_status === 'unmatched'
 const supersededNotice = computed(() => props.tx.notice_superseded === true)
 // Pohyb přiřazený ostatní pohledávce či závazku: doklad má, jen to není faktura.
 const otherItems = computed(() => props.tx.match_status === 'unmatched' ? props.tx.matched_other_items ?? [] : [])
+const hasDistinctInvoiceClients = computed(() => new Set(props.tx.matched_invoices?.map(invoice => invoice.client_name)).size > 1)
 const otherItemMatched = computed(() => otherItems.value.length > 0)
 const otherItemLinks = computed(() => auth.canRead('other_items') ? otherItems.value : [])
-const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value || otherItemMatched.value)
+const membershipMatched = computed(() => props.tx.resolution === 'membership' || (props.tx.matched_membership_claims?.length ?? 0) > 0)
+// Přehled příspěvků najde člena podle čísla; titul bez roku ukáže předpis z kteréhokoli roku.
+const membershipLink = (claim: { member_number: string; title_key: string }) =>
+  ({ name: 'accounting-nonprofit-membership', query: { search: claim.member_number, title_key: claim.title_key, year: '' } })
+const membershipLinks = computed(() => !auth.isClientRole && auth.canRead('accounting') ? props.tx.matched_membership_claims ?? [] : [])
+const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value || otherItemMatched.value || membershipMatched.value)
 // Úhrady jednotek SVJ: řádek se jen přihlásí o vazbu, dotaz jde jednou za dávku řádků.
 // Firma bez profilu SVJ se neptá vůbec, SVJ bez povolených vazeb jen jednou (usePropertyBankLinks).
 const supplierStore = useSupplierStore()
@@ -138,9 +153,9 @@ const statusText = computed(() => supersededNotice.value
   ? t('bank.match_status.superseded')
   : payrollMatched.value ? t('bank.match_status.payroll')
     : ownTransfer.value ? t('bank.match_status.transfer')
-      : otherItemMatched.value ? t('bank.match_status.other_item')
+      : membershipMatched.value ? t('bank.match_status.membership') : otherItemMatched.value ? t('bank.match_status.other_item')
         : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
-const statusBadgeClass = computed(() => statusBadge(otherItemMatched.value
+const statusBadgeClass = computed(() => statusBadge(otherItemMatched.value || membershipMatched.value
   ? 'manual'
   : supersededNotice.value || outsideSaldo.value
   ? 'ignored'
@@ -180,6 +195,9 @@ const rulePrefill = computed<BankPostingRulePayload>(() => ({
   credit_account_code: props.tx.posting?.credit_account_code || (props.tx.amount > 0 ? '' : '221'),
   description: null,
   mode: 'suggest',
+  // Omezení na vlastní účet je volba ve formuláři, ne výchozí stav.
+  bank_account_id: null,
+  dimensions: manualMovementDimensions(props.tx),
 }))
 
 const {
@@ -358,6 +376,27 @@ function matchActions(tx: BankTransaction): RowAction[] {
   ]
 }
 
+// Telefon: karta má jeden pruh akcí — jedna hlavní akce (u podvojného účetnictví
+// zaúčtování z PostingRowActions, jinak první stavová akce) a zbytek včetně odkazu
+// do deníku a textu pohybu v „…". Úzký desktopový panel drží původní pruh.
+const isPhone = useIsPhone()
+const phoneActions = computed<RowAction[]>(() => {
+  const tx = props.tx
+  const journalTo = journalNavigation.entryTarget(tx.posting?.journal_entry_id)
+  return [
+    ...matchActions(tx),
+    {
+      key: 'open-journal', label: t('bank.open_accounting_journal'), icon: 'doc', variant: 'neutral',
+      to: journalTo ?? undefined, show: !!journalTo, menuOnly: true, workspaceOpen: 'beside',
+      onNavigate: event => { void journalNavigation.open(event, journalTo) },
+    },
+    {
+      key: 'show-text', label: t('bank.show_transaction_text'), icon: 'eye', variant: 'neutral',
+      run: () => { props.actions.textDetail.value = tx }, menuOnly: true,
+    },
+  ]
+})
+
 function candidateAccept(candidateIndex: number) {
   acceptTxSuggestion(props.tx.id, candidateIndex)
 }
@@ -369,6 +408,10 @@ function candidateReject() {
 <template>
   <template v-if="layout === 'desktop'">
     <tr :data-tx-id="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
+      <td v-if="selectable" class="pl-3 py-2 w-6">
+        <input v-if="!selectionDisabled" type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selected"
+          :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-row-select" @change="emit('toggle-select', tx.id)" />
+      </td>
       <td class="px-3 py-2 whitespace-nowrap">
         {{ formatDate(tx.posted_at) }}
         <RouterLink v-if="showStatementLink" :to="`/bank/${tx.statement_id}?posting_status=unposted`"
@@ -412,11 +455,13 @@ function candidateReject() {
       </td>
       <td class="px-3 py-2">
         <template v-if="(tx.matched_invoices?.length ?? 0) > 1 && auth.canRead('invoices')">
-          <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-            class="text-primary-600 hover:underline block">
-            {{ mi.varsymbol || `#${mi.invoice_id}` }}
-          </RouterLink>
-          <div v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
+          <div v-for="mi in tx.matched_invoices" :key="mi.invoice_id">
+            <RouterLink :to="`/invoices/${mi.invoice_id}`" class="text-primary-600 hover:underline">
+              {{ mi.varsymbol || `#${mi.invoice_id}` }}
+            </RouterLink>
+            <span v-if="hasDistinctInvoiceClients && mi.client_name" class="text-neutral-500 text-xs"> · {{ mi.client_name }}</span>
+          </div>
+          <div v-if="!hasDistinctInvoiceClients && tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
         </template>
         <template v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1 && auth.canRead('purchase_invoices')">
           <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
@@ -435,6 +480,11 @@ function candidateReject() {
             class="text-primary-600 hover:underline">
             {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
           </RouterLink>
+          <template v-else-if="membershipLinks.length > 0">
+            <div v-for="claim in membershipLinks" :key="claim.claim_id" data-test="tx-membership-claim">
+              <RouterLink :to="membershipLink(claim)" class="text-primary-600 hover:underline">{{ claim.title_key }}</RouterLink>
+            </div>
+          </template>
           <template v-else-if="otherItemLinks.length > 0">
             <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">
               <RouterLink :to="`/other-items/${item.other_item_id}`" class="text-primary-600 hover:underline">
@@ -492,7 +542,8 @@ function candidateReject() {
         {{ tx.posting?.counter_account_codes?.join(', ') || '-' }}
       </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-        <div class="flex flex-wrap items-center justify-end gap-1">
+        <!-- Šířka pro „Zrušit zaúčtování" a dvě ikony na jednom řádku: akce zaberou nejvýš dva řádky. -->
+        <div class="flex flex-wrap items-center justify-end gap-1 min-w-60">
           <BankTransactionJournalLink :tx="tx" />
           <PostingRowActions v-if="isDoubleEntry"
             :tx="tx" :currency="currency()"
@@ -529,9 +580,13 @@ function candidateReject() {
 
   <div v-else class="p-3 space-y-2" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
     <div class="flex items-baseline justify-between gap-2">
-      <div class="font-mono text-sm font-semibold whitespace-nowrap"
-        :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
-        {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
+      <div class="flex items-baseline gap-2 min-w-0">
+        <input v-if="selectable && !selectionDisabled" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer self-center" :checked="selected"
+          :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-card-select" @change="emit('toggle-select', tx.id)" />
+        <div class="font-mono text-sm font-semibold whitespace-nowrap"
+          :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
+          {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
+        </div>
       </div>
       <div class="flex flex-col items-end gap-1">
         <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"
@@ -614,11 +669,13 @@ function candidateReject() {
       </button>
     </div>
     <div v-if="(tx.matched_invoices?.length ?? 0) > 1 && auth.canRead('invoices')" class="text-xs">
-      <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-        class="text-primary-600 hover:underline font-mono mr-2">
-        {{ mi.varsymbol || `#${mi.invoice_id}` }}
-      </RouterLink>
-      <span v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
+      <span v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :class="hasDistinctInvoiceClients ? 'block' : 'mr-2'">
+        <RouterLink :to="`/invoices/${mi.invoice_id}`" class="text-primary-600 hover:underline font-mono">
+          {{ mi.varsymbol || `#${mi.invoice_id}` }}
+        </RouterLink>
+        <span v-if="hasDistinctInvoiceClients && mi.client_name" class="text-neutral-500"> · {{ mi.client_name }}</span>
+      </span>
+      <span v-if="!hasDistinctInvoiceClients && tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
     </div>
     <div v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1 && auth.canRead('purchase_invoices')" class="text-xs">
       <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
@@ -641,6 +698,11 @@ function candidateReject() {
         {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
       </RouterLink>
       <span v-if="tx.matched_vendor_name" class="text-neutral-500 ml-2">{{ tx.matched_vendor_name }}</span>
+    </div>
+    <div v-else-if="membershipLinks.length > 0" class="text-xs">
+      <div v-for="claim in membershipLinks" :key="claim.claim_id" data-test="tx-membership-claim">
+        <RouterLink :to="membershipLink(claim)" class="text-primary-600 hover:underline">{{ claim.title_key }}</RouterLink>
+      </div>
     </div>
     <div v-else-if="otherItemLinks.length > 0" class="text-xs">
       <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">
@@ -674,7 +736,14 @@ function candidateReject() {
          Při dvou se pruh zalomil. První akce v `matchActions` je vždycky ta
          stavově relevantní — Otevřít u spárovaného pohybu, Spárovat u ostatních
          — takže na očích zůstane to, co uživatel na daném řádku opravdu chce. -->
-    <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+    <div v-if="isPhone" data-test="tx-phone-actions"
+      class="flex flex-wrap items-center justify-end gap-1.5 pt-1 [&_button]:min-h-10 [&_a]:min-h-10 [&_button]:min-w-10">
+      <PostingRowActions v-if="isDoubleEntry"
+        :tx="tx" :currency="currency()"
+        @changed="emit('changed')" @posted="onPosted" />
+      <RowActionsMenu :actions="phoneActions" :inline-count="isDoubleEntry ? 0 : 1" />
+    </div>
+    <div v-else class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
       <BankTransactionJournalLink :tx="tx" />
       <PostingRowActions v-if="isDoubleEntry"
         :tx="tx" :currency="currency()"

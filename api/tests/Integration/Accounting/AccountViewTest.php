@@ -243,7 +243,7 @@ final class AccountViewTest extends TestCase
     public function testExportsRender(): void
     {
         $this->seedScenario();
-        $view = $this->statements->accountView($this->supplierId, $this->periodId, self::AS_OF);
+        $view = $this->statements->accountView($this->supplierId, $this->periodId, self::AS_OF, null, ['hide_zero' => true, 'analytics' => true]);
 
         foreach (['balance', 'profit_loss'] as $part) {
             foreach (['czk', 'thousands'] as $unit) {

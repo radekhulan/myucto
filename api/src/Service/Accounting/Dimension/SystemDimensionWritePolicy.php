@@ -144,7 +144,9 @@ final class SystemDimensionWritePolicy
         if ($types === [] || !$this->is504($supplierId, (string) $header['entry_date'])) {
             return;
         }
-        $this->assignments($supplierId, $lines, $types, $previousLines, $carried, $fxRetained);
+        // Převzetí z dokladu (časové rozlišení) se ověřuje až tady: jen 504 se systémovými typy
+        // uzavřenou hodnotu odmítá, jinde by důkaz jen zbytečně zamykal zdrojové řádky.
+        $this->assignments($supplierId, $lines, $types, $previousLines, $carried, $fxRetained, $this->carriedAccrualAssignments($header, $lines));
         $stmt = $this->db->pdo()->prepare("SELECT r.id, r.dimension_type_id, r.account_mask, r.enforcement, r.valid_from, r.valid_to
             FROM dimension_account_rules r JOIN dimension_types t ON t.id = r.dimension_type_id
             WHERE r.supplier_id = ? AND r.is_active = 1 AND t.system_key IS NOT NULL ORDER BY r.id FOR UPDATE");
@@ -174,9 +176,29 @@ final class SystemDimensionWritePolicy
             )));
             $result = DimensionRuleEngine::apply($selected, [$line + ['account_code' => $account['account_code']]], (string) $header['entry_date'], null, false);
             if ($result['violations'] !== []) {
-                throw new PostingException('dimension_required', 'Zápis nelze zaúčtovat bez povinných systémových dimenzí.', 422, ['violations' => $result['violations']]);
+                throw new PostingException('dimension_required', $this->requiredMessage($supplierId, $result['violations']), 422, ['violations' => $result['violations']]);
             }
         }
+    }
+
+    /**
+     * Hláška chybějící systémové dimenze: účet, dimenze a co s tím udělat. Automatický zápis
+     * (poplatek, uzavření platby, cestovní náhrada) tak neskončí jen obecným odmítnutím.
+     *
+     * @param list<array{account_code:string, type_id:int}> $violations
+     */
+    private function requiredMessage(int $supplierId, array $violations): string
+    {
+        $ids = array_values(array_unique(array_map(static fn (array $v): int => (int) $v['type_id'], $violations)));
+        $stmt = $this->db->pdo()->prepare('SELECT id, name FROM dimension_types WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $parts = [];
+        foreach ($violations as $v) {
+            $parts[] = sprintf('řádek %s nemá dimenzi „%s"', $v['account_code'], (string) ($names[$v['type_id']] ?? ('#' . $v['type_id'])));
+        }
+        return 'Zápis nelze zaúčtovat bez povinných systémových dimenzí: ' . implode('; ', array_unique($parts))
+            . '. Doplňte dimenzi na doklad nebo zápis, nebo nastavte výchozí hodnotu v pravidle dimenze (Firma → Dimenze → Pravidla).';
     }
 
     public function assertAssignments(int $supplierId, array $lines, ?string $date = null, array $previousLines = []): void
@@ -249,9 +271,10 @@ final class SystemDimensionWritePolicy
         return (new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db)))->forDateForUpdate($supplierId, $date) === AccountingFrameworkService::CZ_504;
     }
 
-    private function assignments(int $supplierId, array $lines, array $types, array $previousLines, array $carried = [], array $fxRetained = []): void
+    private function assignments(int $supplierId, array $lines, array $types, array $previousLines, array $carried = [], array $fxRetained = [], array $carriedAccrual = []): void
     {
-        $retained = $fxRetained + self::retainedAssignments($lines, $previousLines);
+        // Převzetí z dokladu (časové rozlišení) se slučuje po dvojicích, ostatní zdroje jako dosud.
+        $retained = self::mergeRetained($fxRetained + self::retainedAssignments($lines, $previousLines), $carriedAccrual);
         $requested = [];
         foreach ($lines as $index => $line) {
             $fractional = 0;
@@ -295,6 +318,115 @@ final class SystemDimensionWritePolicy
                 throw new PostingException('dimension_closed', 'Uzavřenou hodnotu systémové dimenze nelze nově přiřadit.', 422);
             }
         }
+    }
+
+    /**
+     * Přiřazení, která zápis časového rozlišení (odklad a rozpuštění 381/384, drobný majetek 381/501) převzal ze
+     * živých výsledkových řádků dokladu ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::dimensionAllocations()}).
+     * Platí jako zachovaná: hodnotu uzavřenou až po zaúčtování dokladu smí odklad nést dál,
+     * protože jen zrcadlí řádek, který ji už nese. Uznává se jen u zdrojů uzávěrky, a jen
+     * pro dvojici typ–hodnota, kterou některý z uvedených řádků prokazatelně nese
+     * (řádek firmy, zaúčtovaný, nestornovaný, na účtu 5xx/6xx). Výjimkou je zápis ostatní
+     * položky: zůstává zdrojem i po stornu či přeúčtování z pozdějšího období (storno je
+     * samostatný záporný zdroj, jako dobropis, {@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService}),
+     * takže rozpuštění jeho odkladu nese hodnoty stornovaného řádku.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return array<int,array{dimensions:array<int,int>,dimension_splits:array<int,array<int,true>>}> index řádku => převzaté hodnoty
+     */
+    private function carriedAccrualAssignments(array $header, array $lines): array
+    {
+        if (!in_array((string) ($header['source_type'] ?? ''), ['deferred_revenue_accrual', 'prepaid_expense_accrual', 'small_asset_accrual'], true)) {
+            return [];
+        }
+        $ids = [];
+        foreach ($lines as $line) {
+            foreach ($line['dimension_carry_lines'] ?? [] as $id) {
+                $ids[(int) $id] = (int) $id;
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+        $supplierId = (int) $header['supplier_id'];
+        $ids = array_values($ids);
+        sort($ids, SORT_NUMERIC);
+        $live = [];
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT l.id
+                   FROM journal_entry_lines l
+                   JOIN journal_entries e    ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                   JOIN chart_of_accounts a  ON a.id = l.account_id
+                  WHERE l.supplier_id = ? AND l.id IN ({$marks})
+                    AND e.posted_at IS NOT NULL AND (e.reversed_by IS NULL OR e.source_type = 'other_item')
+                    AND (a.account_code LIKE '5%' OR a.account_code LIKE '6%')
+                  ORDER BY l.id
+                  LOCK IN SHARE MODE"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            array_push($live, ...array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
+        }
+        $repo = new DimensionAssignmentRepository($this->db);
+        $carriedDims = $repo->lineDimensions($supplierId, $live, true);
+        $carriedSplits = $repo->lineSplits($supplierId, $live, true);
+        $out = [];
+        foreach ($lines as $index => $line) {
+            $pairs = [];
+            foreach ($line['dimension_carry_lines'] ?? [] as $id) {
+                foreach ($carriedDims[(int) $id] ?? [] as $typeId => $valueId) {
+                    $pairs[(int) $typeId][(int) $valueId] = true;
+                }
+                foreach ($carriedSplits[(int) $id] ?? [] as $typeId => $shares) {
+                    foreach (array_keys($shares) as $valueId) {
+                        $pairs[(int) $typeId][(int) $valueId] = true;
+                    }
+                }
+            }
+            if ($pairs === []) {
+                continue;
+            }
+            $kept = ['dimensions' => [], 'dimension_splits' => []];
+            foreach ($line['dimensions'] ?? [] as $typeId => $valueId) {
+                if (isset($pairs[(int) $typeId][(int) $valueId])) {
+                    $kept['dimensions'][(int) $typeId] = (int) $valueId;
+                }
+            }
+            foreach ($line['dimension_splits'] ?? [] as $typeId => $shares) {
+                foreach (array_keys($shares) as $valueId) {
+                    if (isset($pairs[(int) $typeId][(int) $valueId])) {
+                        $kept['dimension_splits'][(int) $typeId][(int) $valueId] = true;
+                    }
+                }
+            }
+            $out[$index] = $kept;
+        }
+        return $out;
+    }
+
+    /**
+     * Přidá k zachovaným přiřazením převzetí z dokladu (časové rozlišení) po dvojicích
+     * typ–hodnota (ne po celém řádku), aby nepřebilo hodnoty zachované z předchozí podoby
+     * zápisu. Jiné zdroje (kurzový důkaz 504) se tím nemění.
+     *
+     * @param array<int,array<string,mixed>> $a
+     * @param array<int,array<string,mixed>> $b
+     * @return array<int,array<string,mixed>>
+     */
+    private static function mergeRetained(array $a, array $b): array
+    {
+        foreach ($b as $index => $kept) {
+            foreach ($kept['dimensions'] ?? [] as $typeId => $valueId) {
+                $a[$index]['dimensions'][$typeId] ??= $valueId;
+            }
+            foreach ($kept['dimension_splits'] ?? [] as $typeId => $values) {
+                foreach ($values as $valueId => $flag) {
+                    $a[$index]['dimension_splits'][$typeId][$valueId] = $flag;
+                }
+            }
+        }
+        return $a;
     }
 
     private static function requestValue(array &$requested, int $typeId, int $valueId, bool $retained): void

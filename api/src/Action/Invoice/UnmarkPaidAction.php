@@ -16,6 +16,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eet\EetHistoryExistsException;
 use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\TakenOverFillerGuard;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -46,6 +48,7 @@ final class UnmarkPaidAction
         private readonly InvoicePaymentService $payments,
         private readonly DocumentLockService $locks,
         private readonly EetHistoryGuard $eetHistory,
+        private readonly TakenOverFillerGuard $fillerGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -62,6 +65,10 @@ final class UnmarkPaidAction
         }
         if ($invoice['status'] !== 'paid') {
             return Json::error($response, 'invalid_state', 'Lze vrátit zpět jen zaplacenou fakturu.', 409);
+        }
+        if (!empty($invoice['other_item_id'])) {
+            return Json::error($response, 'other_item_linked',
+                'Faktura je uhrazená úhradami navázané ostatní pohledávky. Úhradu odpojte v detailu pohledávky, nebo fakturu od pohledávky odpojte.', 409);
         }
 
         // Zámek dokladu (Epic F6): unmark-paid mění účetní fakt — v zavřeném období
@@ -106,6 +113,31 @@ final class UnmarkPaidAction
             );
         }
 
+        // Guard #3: úhrada převzatá z POHODY bez protějšku v MyÚčtu se nemaže
+        // (deleteAllForInvoice ji ponechá). Výplň Money S3 smaže oprávněný uživatel, když
+        // žádná z výplní dokladu neleží v zamčeném ani podaném období (TakenOverFillerGuard).
+        // Pokrývá-li doklad sama ponechaná úhrada, vrátit ho na neuhrazený nejde; jinak se
+        // smažou jen platby, které smazat jde.
+        $fillers = $this->db->pdo()->prepare('SELECT p.id, p.paid_on, p.amount, p.note FROM invoice_payments p WHERE p.invoice_id = ? AND ' . TakenOverPayment::moneyS3FillerSql('p'));
+        $fillers->execute([$id]);
+        $fillerRows = $fillers->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        $allowFiller = $fillerRows !== [] && RequestAuthorization::canDeleteTakenOverFiller($request);
+        foreach ($allowFiller ? $fillerRows : [] as $f) {
+            $allowFiller = $allowFiller && $this->fillerGuard->blockedReason((int) $invoice['supplier_id'], $f) === null;
+        }
+        $keptStmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(p.amount), 0) AS kept, COALESCE(SUM(CASE WHEN ' . TakenOverPayment::moneyS3FillerSql('p') . ' THEN 0 ELSE p.amount END), 0) AS pohoda
+               FROM invoice_payments p WHERE p.invoice_id = ? AND ' . TakenOverPayment::isProtectedSql('p', $allowFiller)
+        );
+        $keptStmt->execute([$id]);
+        $keptRow = $keptStmt->fetch(\PDO::FETCH_ASSOC) ?: ['kept' => 0, 'pohoda' => 0];
+        $kept = (float) $keptRow['kept'];
+        if ($kept > 0 && $kept >= (float) $invoice['amount_to_pay'] - InvoicePaymentService::TOLERANCE) {
+            return Json::error($response, TakenOverPayment::ERROR_CODE, (float) $keptRow['pohoda'] >= 0.01
+                ? 'Doklad je uhrazený úhradou převzatou z POHODY, která se nemaže. Vrátit ho na neuhrazený nejde; opravte převod opakovaným převodem.'
+                : 'Doklad je uhrazený úhradou převzatou z Money S3 bez dokladu úhrady. Smazat ji smí správce nebo role s právem upravit vystavenou fakturu, jen v nezamčeném a nepodaném období.', 409);
+        }
+
         if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note'
             && ($eetConflict = $this->eetHistory->creditNoteRefundConflict((int) $invoice['supplier_id'], $id)) !== null) {
             return Json::error($response, EetHistoryGuard::ERROR_CODE, $eetConflict, 409);
@@ -116,7 +148,7 @@ final class UnmarkPaidAction
         // Smaže evidované platby + přepočítá paid_total; u dokladu s kladnou částkou
         // k úhradě tím service rovnou revertuje status (sent/issued) a vyčistí paid_at.
         try {
-            $this->payments->deleteAllForInvoice($id);
+            $this->payments->deleteAllForInvoice($id, $allowFiller);
         } catch (EetHistoryExistsException $e) {
             return Json::error($response, EetHistoryGuard::ERROR_CODE, $e->getMessage(), 409);
         } catch (\RuntimeException $e) {
@@ -140,6 +172,11 @@ final class UnmarkPaidAction
         $this->logger->log('invoice.unmark_paid', $user['id'] ?? null, 'invoice', $id, [
             'previous_paid_at' => $previousPaidAt ?: null,
         ], $ip, $request->getHeaderLine('User-Agent'));
+        foreach ($allowFiller ? $fillerRows : [] as $f) {
+            $this->logger->log(DeletePaymentAction::FILLER_AUDIT_ACTION, $user['id'] ?? null, 'invoice', $id, [
+                'payment_id' => (int) $f['id'], 'amount' => $f['amount'], 'paid_on' => $f['paid_on'], 'note' => $f['note'], 'trigger' => 'unmark_paid',
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         $this->stats->recomputeForInvoiceId($id);
 

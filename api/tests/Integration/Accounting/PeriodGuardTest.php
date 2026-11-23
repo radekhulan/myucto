@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -42,6 +43,7 @@ final class PeriodGuardTest extends TestCase
     private PostingService $posting;
     private JournalEntryRepository $journal;
 
+    private EntityCategoryService $categories;
     private int $supplierId = 0;
     private int $userId = 0;
     private int $periodId = 0;
@@ -61,6 +63,7 @@ final class PeriodGuardTest extends TestCase
             $this->closing = $container->get(ClosingService::class);
             $this->posting = $container->get(PostingService::class);
             $this->journal = $container->get(JournalEntryRepository::class);
+            $this->categories = $container->get(EntityCategoryService::class);
             $seeder        = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -162,6 +165,40 @@ final class PeriodGuardTest extends TestCase
         self::assertSame('approved', $res['body']['status']);
         self::assertNotNull($res['body']['approved_at']);
         self::assertSame($this->userId, (int) $res['body']['approved_by']);
+    }
+
+    /**
+     * Zmražení automatických sekcí přílohy k závěrce při uzavření knih mohlo selhat
+     * (varování kroku close_books). Schválení ho stejně jako u kategorie ÚJ zopakuje,
+     * a když ani teď nejde, schválení odmítne. Po nápravě podkladů projde a příloha
+     * nese vyhodnocenou kategorii.
+     */
+    public function testApprovalRetriesStatementNotesFreezeAndBlocksWhenItFails(): void
+    {
+        $this->setStatusRaw('closed');
+        // Kategorie ÚJ je zmražená z uzavření knih, příloha ne.
+        $this->categories->freeze($this->supplierId, $this->periodId);
+        $pdo = $this->db->pdo();
+        $versions = $pdo->query("SELECT id, valid_from FROM statement_versions WHERE statement_type = 'balance_sheet' AND framework = 'cz_500'")
+            ->fetchAll(\PDO::FETCH_KEY_PAIR);
+        $pdo->exec("UPDATE statement_versions SET valid_from = '2999-01-01' WHERE statement_type = 'balance_sheet' AND framework = 'cz_500'");
+
+        $res = $this->postStatus(['status' => 'approved', 'row_version' => $this->rv(), 'confirm' => true]);
+
+        self::assertSame(422, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('statement_notes_not_frozen', $res['body']['error']['code']);
+        self::assertSame('closed', $this->periods->findById($this->supplierId, $this->periodId)['status']);
+
+        $restore = $pdo->prepare('UPDATE statement_versions SET valid_from = ? WHERE id = ?');
+        foreach ($versions as $id => $validFrom) {
+            $restore->execute([$validFrom, $id]);
+        }
+        $res = $this->postStatus(['status' => 'approved', 'row_version' => $this->rv(), 'confirm' => true]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        $stored = $pdo->prepare("SELECT content FROM statement_notes WHERE supplier_id = ? AND fiscal_year = ? AND section_key = 'entity_category'");
+        $stored->execute([$this->supplierId, self::YEAR]);
+        self::assertNotFalse($stored->fetchColumn(), 'Schválení dozmrazí sekci s kategorií.');
     }
 
     /**

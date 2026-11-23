@@ -6,9 +6,11 @@ namespace MyInvoice\Tests\Unit\Action\Invoice;
 
 use MyInvoice\Action\Invoice\DownloadImportedPdfAction;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\IssuedInvoiceOriginalPdfStore;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -56,7 +58,9 @@ final class DownloadImportedPdfActionTest extends TestCase
         $ip = $this->createStub(IpMatcher::class);
         $ip->method('clientIpFromRequest')->willReturn('127.0.0.1');
 
-        return new DownloadImportedPdfAction($repo, $config, $logger, $ip);
+        $store = new IssuedInvoiceOriginalPdfStore($this->createStub(Connection::class), $config);
+
+        return new DownloadImportedPdfAction($repo, $store, $logger, $ip);
     }
 
     private function request(string $query = ''): \Psr\Http\Message\ServerRequestInterface

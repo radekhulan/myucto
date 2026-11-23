@@ -163,6 +163,8 @@ Write-Host "    (prebit lze pres MYINVOICE_UPDATE_MODE=registry|source)"
 if ($composeArgs.Count -gt 0) { Write-Host "    compose: $($composeArgs[1])" }
 
 # --- 1. fetch new code/image ---------------------------------------------
+$tagBump = $null
+$pinCompose = $null
 if ($mode -eq 'source') {
     $dirty = & git status --porcelain
     if ($dirty) {
@@ -177,9 +179,44 @@ if ($mode -eq 'source') {
     & docker compose @composeArgs build --pull app
     if ($LASTEXITCODE -ne 0) { Write-Error "docker compose build failed" }
 } else {
-    Write-Host "==> Pulling latest image from registry..."
-    & docker compose @composeArgs pull app
-    if ($LASTEXITCODE -ne 0) { Write-Error "docker compose pull failed" }
+    $requestedVersion = $env:MYINVOICE_TARGET_VERSION
+    if ($requestedVersion -cmatch '\Av?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}\z') {
+        $imageTagLib = Join-Path $PSScriptRoot 'lib\image-tag.ps1'
+        if (-not (Test-Path -LiteralPath $imageTagLib)) {
+            Write-Error "Chybi cmd\lib\image-tag.ps1, dotahni repo."
+        }
+        . $imageTagLib
+        $resolvedConfig = & docker compose @composeArgs config
+        if ($LASTEXITCODE -ne 0) { Write-Error "docker compose config failed" }
+        $tagBump = Get-ImageTagBump -Lines $resolvedConfig -Target $requestedVersion
+        if ($tagBump) {
+            if ($composeArgs.Count -gt 0) {
+                $pinCompose = $composeArgs[1]
+            } elseif (-not ($env:COMPOSE_FILE -or $envVars.COMPOSE_FILE)) {
+                $composeFiles = @(('compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml',
+                    'compose.override.yaml', 'compose.override.yml', 'docker-compose.override.yaml', 'docker-compose.override.yml') |
+                    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+                if ($composeFiles.Count -eq 1 -and $composeFiles[0] -notlike '*.override.*') {
+                    $pinCompose = $composeFiles[0]
+                }
+            }
+            if (-not $pinCompose -or (Get-Item -LiteralPath $pinCompose).LinkType) {
+                Write-Error "Pripnuty image sluzby app nelze jednoznacne zmenit v souboru Compose. Nastav cilovou verzi rucne."
+            }
+            $literalBump = Get-ImageTagBump -Compose $pinCompose -Target $requestedVersion
+            if ($literalBump.Old -cne $tagBump.Old -or $literalBump.New -cne $tagBump.New) {
+                Write-Error "Pripnuty image sluzby app nelze jednoznacne zmenit v souboru Compose. Nastav cilovou verzi rucne."
+            }
+            Write-Host "==> Pripnuta verze $($tagBump.Old.Split(':')[-1]) -> cilova $($tagBump.New.Split(':')[-1])"
+            & docker pull $tagBump.New
+            if ($LASTEXITCODE -ne 0) { Write-Error "docker pull $($tagBump.New) failed" }
+        }
+    }
+    if (-not $tagBump) {
+        Write-Host "==> Pulling latest image from registry..."
+        & docker compose @composeArgs pull app
+        if ($LASTEXITCODE -ne 0) { Write-Error "docker compose pull failed" }
+    }
 }
 
 # --- 1b. detect legacy 3-volume layout and auto-migrate (3.5.x -> 3.6.0) --
@@ -279,6 +316,25 @@ if (-not $ready) {
 
 # App az po zdrave DB. Novy image -> compose app tak jako tak rekreuje; s
 # --remove-orphans + auto-recovery nize je restart odolny proti kolizi portu/site.
+if ($tagBump) {
+    $pinPath = (Resolve-Path -LiteralPath $pinCompose).Path
+    $composeBefore = (Get-FileHash -LiteralPath $pinPath).Hash
+    $composeStage = "$pinPath.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        Copy-Item -LiteralPath $pinPath -Destination $composeStage
+        Set-ImageTag -Compose $composeStage -Old $tagBump.Old -New $tagBump.New
+        $resolvedConfig = & docker compose -f $composeStage config
+        if ($LASTEXITCODE -ne 0) { Write-Error "docker compose config failed" }
+        if ((Find-AppImageLine -Lines $resolvedConfig).Image -cne $tagBump.New -or
+            (Get-FileHash -LiteralPath $pinPath).Hash -cne $composeBefore) {
+            Write-Error "Zmenu pripnute verze sluzby app v $pinCompose se nepodarilo overit."
+        }
+        [System.IO.File]::Move($composeStage, $pinPath, $true)
+        Write-Host "    ${pinCompose}: $($tagBump.New)"
+    } finally {
+        Remove-Item -LiteralPath $composeStage -Force -ErrorAction SilentlyContinue
+    }
+}
 Write-Host "==> Restarting app..."
 & docker compose @composeArgs up -d --remove-orphans app
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
@@ -321,6 +377,14 @@ if (-not $appReady) {
     Write-Host "    --- posledni radky 'docker compose logs app' ---" -ForegroundColor Yellow
     Write-Host (Get-AppLogTail -ComposeArgs $composeArgs -Lines 25)
     Write-Error "App failed to respond in time. Check 'docker compose logs app'."
+}
+
+if ($tagBump) {
+    $expectedVersion = $tagBump.New.Split(':')[-1]
+    $actualVersion = & docker compose @composeArgs exec -T app cat /var/www/html/VERSION
+    if ($LASTEXITCODE -ne 0 -or $actualVersion -cne $expectedVersion) {
+        Write-Error "Sluzba app hlasi verzi '$actualVersion', ocekavana je '$expectedVersion'."
+    }
 }
 
 # --- 3c. uklid osirelych vrstev po updatu (bezpecne - jen dangling) -------

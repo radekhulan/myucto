@@ -22,6 +22,7 @@ import {
 } from '@/api/payrollInsurance'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
+import { formatDate } from '@/composables/useFormat'
 
 const props = withDefaults(defineProps<{
   revisionId: number | null
@@ -314,7 +315,7 @@ watch(
           <p class="text-sm text-neutral-600">
             {{ t('payroll.runs.insurance.ruleset_note', {
               id: social.ruleset_id,
-              date: social.calculation_date,
+              date: formatDate(social.calculation_date),
             }) }}
           </p>
 
@@ -554,7 +555,7 @@ watch(
           <p class="text-sm text-neutral-600">
             {{ t('payroll.runs.insurance.ruleset_note', {
               id: health.ruleset_id,
-              date: health.calculation_date,
+              date: formatDate(health.calculation_date),
             }) }}
           </p>
 

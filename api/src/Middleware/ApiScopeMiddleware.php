@@ -25,9 +25,15 @@ use Slim\Psr7\Factory\ResponseFactory;
  *      GET / HEAD                 → vyžaduje `read` (každý token splňuje)
  *      POST / PUT / PATCH / DELETE → vyžaduje `read_write`
  *    Nad rámec toho je účetní a daňová vrstva ({@see self::BEARER_READ_ONLY})
- *    pro token jednosměrná — zápis odmítne i `read_write`. Výjimkou jsou
+ *    pro token jednosměrná — zápis odmítne i `read_write` (`token_write_forbidden`,
+ *    i u zápisové cesty mimo allowlist, např. SVJ). Výjimkou jsou
  *    koncepty ostatních pohledávek a závazků a analytické účty osnovy
  *    ({@see self::BEARER_WRITE_EXCEPTIONS}).
+ *
+ * Token s plným zápisem (`system_write`, #371, jen na instanci s
+ * `api.allow_system_write_tokens`) allowlist, read-only vrstvu ani výjimky nepoužívá:
+ * smí všechny cesty kromě {@see self::SYSTEM_WRITE_FORBIDDEN} a platí jen oprávnění
+ * jeho uživatele (PermissionMiddleware a akce), stejně jako v přihlášené relaci.
  *
  * Session auth (browser SPA) tímto MW není dotčen — uživatel má plná práva své role.
  *
@@ -94,6 +100,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/catalog/exports/[0-9]+/download$#',
         '#^/api/catalog/changes$#',
         '#^/api/price-list-items(/|$)#',
+        '#^/api/work-report-billing-templates$#',
         // EET a mobilní aplikace: čtení evidence (Domů, Tržby, detail tržby) a se scope
         // `read_write` přijetí platby, QR záměr, opakování, oprava a rychlá účtenka.
         // Nastavení, jednotky, zařízení, certifikáty, diagnostika a export zůstávají
@@ -117,6 +124,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/payroll/inputs/[0-9]+$#',
         '#^/api/payroll/runs$#',
         '#^/api/payroll/runs/[0-9]+$#',
+        '#^/api/payroll/runs/[0-9]+/people(/[0-9]+)?$#',
         '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#',
         '#^/api/payroll/time/month$#',
         '#^/api/payroll/time/entries$#',
@@ -183,6 +191,13 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/accounting/periods/[0-9]+/closing/(asset-reserve|legal-provisions)/workspace$#',
         // Přečíslování přijatých dokladů přepisuje čísla i v deníku — jen účetní v aplikaci.
         '#^/api/purchase-invoices/renumber$#',
+        '#^/api/accounting/(cash-documents|other-items|internal-documents)/renumber$#',
+        // Agenda Časové rozlišení: veřejné API čte seznam, detail, plán a odsouhlasení;
+        // pracovní náhledy, export, převzetí a krok uzávěrky jsou jen pro aplikaci.
+        '#^/api/accounting/accruals/(unallocated|projection|book|source-candidates|closing|takeover|plan-preview)(/|$)#',
+        '#^/api/accounting/accruals/[0-9]+/(activity|links|schedule/[0-9]+|termination-preview)(/|$)#',
+        // Výchozí číselná řada je volba přihlášeného uživatele v editoru, ne integrace.
+        '#^/api/(invoices|purchase-invoices|accounting/(cash|internal)-documents)/number-series/default$#',
     ];
 
     /**
@@ -202,16 +217,24 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      */
     private const BEARER_READ_ONLY = [
         '#^/api/property(/|$)#',
+        // Integrace vybírá existující šablonu výkazu; její správu provádí uživatel v aplikaci.
+        '#^/api/work-report-billing-templates$#',
         // Účetní mutace, které historicky leží mimo /api/accounting. Široký
         // allowlist faktur a banky je nesmí omylem zpřístupnit read_write PAT.
         '#^/api/invoices/[0-9]+/book$#',
         '#^/api/invoices/[0-9]+/rebuild-snapshots$#',
         '#^/api/bank-transactions/[0-9]+/(post|unpost)$#',
+        // Vazba dokladu na otevírací zápis (převzato z počátečních stavů) mění, co deník
+        // a saldokonto považují za zaúčtované. Čtení stavu smí každý token, změnu jen
+        // token s plným zápisem (system_write) nebo člověk v aplikaci.
+        '#^/api/(invoices|purchase-invoices)/[0-9]+/opening-balance$#',
         // Měnové účty nesou bankovní spojení firmy (číslo účtu, IBAN, BIC), které
         // se tiskne na faktury a do QR platby. Token je smí jen číst; změnu
         // příjemce plateb dělá správce ve webovém rozhraní (openapi: mutace jen přes UI).
         '#^/api/settings/currencies(/|$)#',
-        '#^/api/bank-transactions/[0-9]+/unmatch$#',
+        // Párování a jeho zrušení (`match`, `unmatch`, přijetí návrhu) token smí, ale do
+        // deníku nezasáhne: BankStatementAction pohyb po spárování nezaúčtuje a pohyb se
+        // zápisem v deníku tokenu nepřepáruje ani neodpáruje (403 token_write_forbidden).
         '#^/api/accounting(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
@@ -243,17 +266,23 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * Ostatní pohledávky a závazky (nájem, půjčka, leasing, pojistné, kauce) se
      * pořizují ze smluv a ty má integrace nebo AI asistent v ruce dřív než účetní.
      * Token proto smí založit a upravit KONCEPT, smazat koncept, nastavit splátkový
-     * kalendář a založit nebo pozastavit opakování. Nic z toho nezapisuje do deníku:
+     * kalendář, založit nebo pozastavit opakování a změnit šablonu názvu jeho budoucích
+     * konceptů. Nic z toho nezapisuje do deníku:
      * koncept nemá zápis, splátky slouží jen k plánu cashflow a opakování bez
      * automatiky vyrábí zase jen koncepty. Úprava a smazání nekonceptu odmítne
      * služba (409 `not_draft`). Automatické účtování opakování token nezapne ani
-     * neobnoví a koncept z automaticky účtovaného opakování neupraví ani nesmaže
-     * (smazáním by potlačil jeho zaúčtování); to hlídá akce, protože závisí na
+     * neobnoví, koncept z automaticky účtovaného opakování neupraví ani nesmaže
+     * (smazáním by potlačil jeho zaúčtování) a u takového opakování nezmění název
+     * (OtherItemScheduleService::setTitle); to hlídá akce a služba, protože závisí na
      * těle požadavku a stavu rozvrhu. Vypnout automatiku token smí, účtování
      * tím jen zastaví.
      *
-     * Zakázané zůstává vše, co účtuje nebo páruje: `post`, `reverse`, `repost`,
-     * alokace úhrad i `schedules/{id}/generate` (u rozvrhu s automatikou by
+     * Přiřazení úhrady (`POST /allocations`) smí token provést: spáruje existující bankovní
+     * nebo pokladní platbu s potvrzenou položkou a nezapíše zápis do deníku (službu a práva
+     * k bance či pokladně hlídá akce). Odpárování (`DELETE`) zůstává v UI.
+     *
+     * Zakázané zůstává vše, co účtuje: `post`, `reverse`, `repost`, odpárování úhrad
+     * i `schedules/{id}/generate` (u rozvrhu s automatikou by
      * vzniklé koncepty rovnou zaúčtoval). Oprávnění uživatele (`other_items`
      * write) se dál ověřuje v PermissionMiddleware i v akci, výjimka ruší jen
      * read-only blokaci tokenu.
@@ -265,9 +294,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * deaktivace) je jen pro analytiku; syntetiku z šablony osnovy token jen čte,
      * což hlídá akce. Mazání účtu zůstává ve webovém rozhraní.
      *
-     * Ke konceptu ostatní položky smí token zapsat i dimenze (středisko, projekt).
-     * Koncept nemá řádky v deníku, takže se nic nepřerazítkuje; zaúčtovaný doklad
-     * a koncept z automaticky účtovaného opakování odmítne DimensionAction.
+     * Ke konceptu ostatní položky, vydané a přijaté faktury smí token zapsat i dimenze
+     * (středisko, projekt). Koncept nemá řádky v deníku, takže se nic nepřerazítkuje;
+     * vystavený, přijatý a zaúčtovaný doklad a koncept z automaticky účtovaného
+     * opakování odmítne DimensionAction.
      *
      * @var list<array{0:string,1:string}>
      */
@@ -276,11 +306,36 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/other-items/[0-9]+$#'],
         ['DELETE', '#^/api/accounting/other-items/[0-9]+$#'],
         ['PUT', '#^/api/accounting/other-items/[0-9]+/installments$#'],
+        ['POST', '#^/api/accounting/other-items/[0-9]+/allocations$#'],
         ['POST', '#^/api/accounting/other-items/[0-9]+/schedule$#'],
         ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/status$#'],
+        ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/title$#'],
         ['POST', '#^/api/accounting/accounts$#'],
         ['PATCH', '#^/api/accounting/accounts/[0-9]+$#'],
-        ['PUT', '#^/api/accounting/dimensions/documents/other-items/[0-9]+$#'],
+        ['PUT', '#^/api/accounting/dimensions/documents/(other-items|invoices|purchase-invoices)/[0-9]+$#'],
+    ];
+
+    /**
+     * Cesty nedostupné ani tokenu s plným zápisem (`system_write`): přihlášení, MFA,
+     * heslo, relace a správa tokenů (`/api/auth/*` kromě `api-me`), správa uživatelů,
+     * rolí a instance, licence, připojení MCP a úložiště přístupových údajů firmy
+     * (podpisové certifikáty, datové schránky, napojení bank, přihlašovací domény,
+     * SMTP profily, klíče AI). Token nesmí rozšířit vlastní přístup ani bezpečnostní
+     * nastavení účtu; to dělá člověk v aplikaci.
+     *
+     * @var list<string>
+     */
+    private const SYSTEM_WRITE_FORBIDDEN = [
+        '#^/api/auth(?!/api-me$)(/|$)#',
+        '#^/api/admin(/|$)#',
+        '#^/api/instance-admin(/|$)#',
+        '#^/api/license(/|$)#',
+        '#^/api/managed(/|$)#',
+        '#^/api/maintenance(/|$)#',
+        '#^/api/mcp(/|$)#',
+        '#^/api/oauth(/|$)#',
+        '#^/api/settings/(domains|signing|pdf-signing|certificates|email-profiles|databox|isds-gateway|bank-connections|ai-assist)(/|$)#',
+        '#^/api/settings/client/signing(/|$)#',
     ];
 
     public function __construct(
@@ -307,10 +362,27 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        if (RequestAuthorization::isSystemWriteToken($request)) {
+            if (self::isSystemWriteForbidden($path)) {
+                return Json::error(
+                    $this->responseFactory->createResponse(403),
+                    'token_endpoint_forbidden',
+                    'Přihlášení, MFA, heslo, správa tokenů, licence, správa instance a přístupové údaje '
+                        . 'jsou dostupné jen z webového rozhraní, ani token s plným zápisem k nim nemá přístup.',
+                    403,
+                );
+            }
+
+            return $handler->handle($request);
+        }
+
         // 1) Path allowlist — token mimo veřejný subset → 403 (vrací se 403, ne 404,
         //    aby integrátor dostal jasný signál; samotná existence interních cest
         //    není tajemství — jsou zdokumentované jako session-only).
         if (!$this->isBearerAllowed($path)) {
+            if (!in_array($method, self::READ_METHODS, true) && $this->isReadOnlyForBearer($path) && !$this->isSessionOnly($path)) {
+                return $this->writeForbidden();
+            }
             $response = $this->responseFactory->createResponse(403);
             return Json::error(
                 $response,
@@ -338,14 +410,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         //     Kontrola je PŘED scope kontrolou schválně: token s právem zápisu by
         //     jinak prošel a hláška „nemáte scope" by lhala o důvodu odmítnutí.
         if ($this->isReadOnlyForBearer($path) && !$this->isBearerWriteException($method, $path)) {
-            $response = $this->responseFactory->createResponse(403);
-            return Json::error(
-                $response,
-                'token_write_forbidden',
-                'Tato část API je přes token dostupná pouze ke čtení. '
-                . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní.',
-                403,
-            );
+            return $this->writeForbidden();
         }
 
         $apiToken = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
@@ -364,12 +429,42 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         return $handler->handle($request);
     }
 
-    private function isBearerAllowed(string $path): bool
+    public static function isSystemWriteForbidden(string $path): bool
+    {
+        foreach (self::SYSTEM_WRITE_FORBIDDEN as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function writeForbidden(): Response
+    {
+        return Json::error(
+            $this->responseFactory->createResponse(403),
+            'token_write_forbidden',
+            'Tato část API je přes token dostupná pouze ke čtení. '
+            . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní '
+            . 'nebo tokenem s plným zápisem (system_write).',
+            403,
+        );
+    }
+
+    private function isSessionOnly(string $path): bool
     {
         foreach (self::BEARER_SESSION_ONLY as $pattern) {
             if (preg_match($pattern, $path) === 1) {
-                return false;
+                return true;
             }
+        }
+        return false;
+    }
+
+    private function isBearerAllowed(string $path): bool
+    {
+        if ($this->isSessionOnly($path)) {
+            return false;
         }
 
         foreach (self::BEARER_ALLOWED as $pattern) {

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -41,7 +40,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_obligations')) {
             $this->markTestSkipped('Migrace 1279 neproběhla.');
@@ -354,7 +353,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
             'inbox-no-mutation',
         );
 
-        $submissionRepository = Bootstrap::buildContainer()
+        $submissionRepository = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ->get(PayrollSubmissionRepository::class);
         self::assertInstanceOf(
             PayrollSubmissionRepository::class,

@@ -42,7 +42,7 @@ function submission(id: number, status: PurchaseInvoiceSubmission['status'] = 's
 async function mountPage(items: PurchaseInvoiceSubmission[]) {
   m.list.mockResolvedValueOnce({ items })
   const wrapper = shallowMount(PurchaseInvoiceSubmissions, {
-    global: { stubs: { SubmissionPreview: false, Modal: { template: '<div role="dialog"><slot /></div>' } } },
+    global: { stubs: { SubmissionPreview: false, PdfFrame: false, Modal: { template: '<div role="dialog"><slot /></div>' } } },
   })
   await flushPromises()
   return wrapper
@@ -85,6 +85,51 @@ describe('Předání dokladů: smazání a odmítnutí', () => {
     await submit.trigger('click')
     await flushPromises()
     expect(m.upload).toHaveBeenCalledWith([pdf], '', null, {})
+  })
+
+  it('přetažená fotka projde ořezem dokladu a do výběru jde výřez', async () => {
+    m.list.mockResolvedValue({ items: [] })
+    const wrapper = await mountPage([])
+    const photo = new File(['jpg'], 'sken.jpg', { type: 'image/jpeg' })
+    const pdf = new File(['%PDF'], 'faktura.pdf', { type: 'application/pdf' })
+    await wrapper.get('[data-test="portal-dropzone"]').trigger('drop', { dataTransfer: { files: [pdf, photo] } })
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'PhotoCropDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(wrapper.find('[data-test="portal-selected-files"]').exists()).toBe(false)
+    const cropped = new File(['crop'], 'sken.jpg', { type: 'image/jpeg' })
+    dialog.vm.$emit('done', cropped)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'PhotoCropDialog' }).exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="portal-selected-files"] li').map(li => li.text())).toEqual(['faktura.pdf', 'sken.jpg'])
+  })
+
+  it('další výběr a fotka soubory přidají k vybraným, odebraný soubor se neodešle', async () => {
+    m.upload.mockResolvedValueOnce({ created: 2, duplicates: 0, errors: [] })
+    m.list.mockResolvedValue({ items: [] })
+    const wrapper = await mountPage([])
+    const first = new File(['%PDF'], 'faktura-1.pdf', { type: 'application/pdf' })
+    const second = new File(['%PDF-2'], 'faktura-2.pdf', { type: 'application/pdf' })
+    const photo = new File(['jpg'], 'foto-20261106-170000.jpg', { type: 'image/jpeg' })
+
+    // Celá plocha pro přetažení je zároveň klikací výběr souborů (jako v AI importu).
+    const dropzone = wrapper.get('[data-test="portal-dropzone"]')
+    expect(dropzone.element.tagName).toBe('LABEL')
+    expect(dropzone.find('input[type="file"][multiple]').exists()).toBe(true)
+    const input = wrapper.get('input[type="file"][multiple]')
+    for (const file of [first, second]) {
+      Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+      await input.trigger('change')
+    }
+    wrapper.findComponent({ name: 'CapturePhotoButton' }).vm.$emit('captured', photo)
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="portal-selected-files"] li').map(li => li.text()))
+      .toEqual(['faktura-1.pdf', 'faktura-2.pdf', 'foto-20261106-170000.jpg'])
+
+    await wrapper.findAll('[data-test="portal-remove-file"]')[1]!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'purchase_submissions.submit_action')!.trigger('click')
+    await flushPromises()
+    expect(m.upload.mock.calls[0]![0]).toEqual([first, photo])
   })
 
   it('na úzkém displeji otevře náhled v dialogu a při změně firmy ho zavře', async () => {

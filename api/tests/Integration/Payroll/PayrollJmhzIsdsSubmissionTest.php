@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Submission\IsdsGatewayAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -75,7 +74,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);
         $outbox = $container->get(SubmissionOutboxService::class);
@@ -528,7 +527,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 return $bytes;
             }
         };
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $processor = new JmhzIsdsInboxProcessor(
             $outbox,
             new PayrollSubmissionRepository($this->db),
@@ -700,7 +699,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
     private function inboxProcessor(): JmhzIsdsInboxProcessor
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $signatures = new class implements JmhzProtocolSignatureVerifierInterface {
             public function verifiedProtocolXml(string $bytes, string $environment): string
             {

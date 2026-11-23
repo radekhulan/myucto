@@ -111,6 +111,35 @@ final class SmallAssetRepository
     }
 
     /**
+     * Karty, jejichž cena je nákladem rozsahu: pořízené v rozsahu, bez karet vrácených
+     * dodavateli dobropisem zaúčtovaným ve STEJNÉM rozsahu (karta vyřazená v rozsahu,
+     * k jejíž faktuře existuje dobropis s datem plnění v rozsahu). Takový nákup a vratka
+     * se v obratu 501 vyruší, karta zůstává jen evidencí. Karta vyřazená jinak (rozbitá,
+     * prodaná, zlikvidovaná) svůj náklad v roce pořízení měla, proto v sadě zůstává.
+     * Stejnou sadu bere kontrola úplnosti evidence i náhled časového rozlišení drobného
+     * majetku, aby se jejich součty karet neliší.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function costAdditionsBetween(int $supplierId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT " . $this->prefixedCols() . ", c.company_name AS vendor_client_name
+               FROM small_assets a
+               LEFT JOIN clients c ON c.id = a.vendor_client_id AND c.supplier_id = a.supplier_id
+              WHERE a.supplier_id = ? AND a.acquisition_date BETWEEN ? AND ?
+                AND NOT (a.status = 'disposed' AND a.disposed_at BETWEEN ? AND ? AND a.purchase_invoice_id IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM purchase_invoices cn
+                                      WHERE cn.supplier_id = a.supplier_id AND cn.parent_purchase_invoice_id = a.purchase_invoice_id
+                                        AND cn.document_kind = 'credit_note' AND cn.status NOT IN ('cancelled', 'draft')
+                                        AND COALESCE(cn.tax_date, cn.issue_date) BETWEEN ? AND ?))
+              ORDER BY a.acquisition_date, a.id"
+        );
+        $stmt->execute([$supplierId, $from, $to, $from, $to, $from, $to]);
+        return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Úbytky za období — karty vyřazené v rozsahu.
      *
      * @return list<array<string,mixed>>

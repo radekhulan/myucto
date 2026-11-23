@@ -21,6 +21,7 @@ use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\CatalogFilter;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
@@ -766,6 +767,13 @@ final class StockItemAction
             $intrastat = $this->intrastat->normalize($body, $existing);
         } catch (\InvalidArgumentException $e) {
             return [[], Json::error($response, 'validation_failed', $e->getMessage(), 400)];
+        }
+
+        $salePrice = $body['sale_price_without_vat'] ?? null;
+        if ($salePrice !== null && $salePrice !== ''
+            && (!is_numeric($salePrice) || preg_match('/^-?\d{1,10}(?:\.\d+)?$/D', trim((string) $salePrice)) !== 1
+                || !UnitPricePrecision::isWithinPrecision($salePrice))) {
+            return [[], Json::error($response, 'validation_failed', 'Prodejní cena musí být číslo s nejvýše šesti desetinnými místy.', 400)];
         }
 
         $data = [

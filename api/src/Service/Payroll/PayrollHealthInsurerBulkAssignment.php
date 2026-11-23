@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollHealthCoverageLaterRecord;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSchemaCatalog;
 use PDO;
@@ -33,7 +34,7 @@ final class PayrollHealthInsurerBulkAssignment
     ) {}
 
     /**
-     * @return array{period_start:string,people:list<array{employee_id:int,full_name:string,suggested_from:string}>}
+     * @return array{period_start:string,people:list<array{employee_id:int,full_name:string,suggested_from:string,known_insurer_code:?string,known_from:?string}>}
      */
     public function preview(int $supplierId, string $periodStart): array
     {
@@ -61,8 +62,17 @@ final class PayrollHealthInsurerBulkAssignment
               ORDER BY employee.full_name, employee.id"
         );
         $statement->execute([$supplierId, $monthEnd, $monthStart, $monthStart, $monthStart]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        // Pojišťovna zapsaná až od pozdějšího měsíce (typicky s pozdějším
+        // vztahem) se nabídne předvyplněná; účetní ji jen potvrdí.
+        $later = (new PayrollHealthCoverageLaterRecord($this->db))->firstAfter(
+            $supplierId,
+            $monthStart,
+            array_map(static fn (array $row): int => (int) $row['employee_id'], $rows),
+        );
         $people = [];
-        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
+            $known = $later[(int) $row['employee_id']] ?? null;
             $first = is_string($row['first_start']) ? substr($row['first_start'], 0, 7) . '-01' : $monthStart;
             $people[] = [
                 'employee_id' => (int) $row['employee_id'],
@@ -70,6 +80,8 @@ final class PayrollHealthInsurerBulkAssignment
                 // Pojišťovna platí od nástupu; ohlášení pojišťovnám i roční
                 // doklady ji čtou i za převzaté měsíce.
                 'suggested_from' => $first,
+                'known_insurer_code' => $known['insurer_code'] ?? null,
+                'known_from' => $known['effective_from'] ?? null,
             ];
         }
 
@@ -97,8 +109,16 @@ final class PayrollHealthInsurerBulkAssignment
                     $userAgent,
                 );
                 $applied[] = $item['employee_id'];
-            } catch (\Throwable $e) {
+            } catch (\InvalidArgumentException|\DomainException $e) {
                 $failed[] = ['employee_id' => $item['employee_id'], 'message' => $e->getMessage()];
+            } catch (\Throwable $e) {
+                // Chyba databáze (SQLSTATE …) do dialogu nepatří: účetní s ní nic nenadělá.
+                error_log('payroll.health_insurer_bulk: ' . $e->getMessage());
+                $failed[] = [
+                    'employee_id' => $item['employee_id'],
+                    'message' => 'Pojišťovnu se nepodařilo uložit kvůli chybě serveru. Zkuste to znovu; '
+                        . 'pokud se chyba opakuje, kontaktujte podporu.',
+                ];
             }
         }
         $this->activityLogger->log(

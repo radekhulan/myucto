@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Slim\Factory\AppFactory;
+use Slim\App;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
@@ -73,7 +73,7 @@ final class SubmissionEnvironmentMiddlewareTest extends TestCase
      */
     public function testRouteArgumentIsCheckedBehindRouting(): void
     {
-        $app = AppFactory::create();
+        $app = new App(new ResponseFactory());
         $app->put('/api/settings/databox/inbox-storage/{environment:production|test}', static function ($request, $response) {
             return $response->withStatus(204);
         });

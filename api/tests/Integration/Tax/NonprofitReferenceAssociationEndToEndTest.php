@@ -182,6 +182,178 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         }
     }
 
+    public function testPagedConfirmationKeepsConfirmedGiftElection(): void
+    {
+        // #399: stránkované potvrzení musí držet potvrzenou volbu osvobození daru stejně
+        // jako původní cesta (nonprofit_tax_gift_election_locked).
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-gift'), $this->actor);
+        $first = $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-gift-1-' . $this->supplier);
+
+        $changed = $this->referenceAssessment();
+        $changed['decisions'][$this->lines['O-05']] = ['title' => 'gift', 'evidence' => 'Syntetický doklad etalonu TJ Příklad',
+            'legal_basis' => 'zdp_18a', 'deductible_cents' => 0, 'facts' => ['claim_exemption' => false,
+                'income_treatment' => 'nonbusiness_activity', 'income_attribution_evidence' => 'Syntetické zařazení daru do nepodnikatelské činnosti']];
+        [$status, $body] = $this->confirmPagedRaw($this->period, $changed, 'tj-gift-2-' . $this->supplier, (int) $first['assessment_id']);
+        self::assertSame(409, $status, json_encode($body));
+        self::assertSame('nonprofit_tax_gift_election_locked', $body['error']['code'] ?? null, json_encode($body));
+
+        // Stejná volba jako v potvrzené revizi projde.
+        [$status, $body] = $this->confirmPagedRaw($this->period, $this->referenceAssessment(), 'tj-gift-3-' . $this->supplier, (int) $first['assessment_id']);
+        self::assertSame(200, $status, json_encode($body));
+    }
+
+    public function testStockSlotsTakeRuleDefaultsAndDoNotFreezeDimensions(): void
+    {
+        // #398: zápis zásob (slot `closing`) dostane výchozí dimenze pravidel na 5xx a dimenze
+        // období zmrazí až uzavření knih, ne skladový slot.
+        $this->postReferenceYear();
+        $this->pdo->prepare('UPDATE supplier SET dimensions_enabled = 1 WHERE id = ?')->execute([$this->supplier]);
+        $regime = $this->catalog['tax_regime']['values'];
+        $rules = $this->container->get(\MyInvoice\Service\Accounting\Dimension\DimensionRuleService::class);
+        foreach (['activity' => $this->catalog['activity']['values']['main'], 'activity_kind' => $this->kinds['sport'], 'tax_regime' => $regime['subject']] as $type => $value) {
+            $rules->create($this->supplier, ['dimension_type_id' => $this->catalog[$type]['id'], 'account_mask' => '501',
+                'default_value_id' => $value, 'enforcement' => 'warning']);
+        }
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?)')
+            ->execute([$this->supplier, '112', 'Syntetický materiál na skladě', 'asset']);
+        $stock = $this->container->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'closing',
+            \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->period),
+            [['account_code' => '112', 'side' => 'debit', 'amount' => 5000.0], ['account_code' => '501', 'side' => 'credit', 'amount' => 5000.0]],
+            ['entry_date' => '2025-12-31', 'posted' => true, 'user_id' => $this->actor, 'description' => 'Syntetický konečný stav zásob']);
+        $dims = $this->pdo->prepare('SELECT COUNT(*) FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id
+            WHERE l.entry_id = ? AND l.account_id = ?');
+        $dims->execute([$stock, $this->accounts['501']]);
+        self::assertSame(3, (int) $dims->fetchColumn(), 'Řádek 501 zápisu zásob nemá výchozí dimenze pravidel.');
+
+        $guard = new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db);
+        $regular = $this->lineEntry($this->lines['O-09']);
+        $frozen = fn (): bool => (bool) $guard->transaction(fn (): array => $guard->lockEntries($this->supplier, [$regular]))[$regular]['dimensions_frozen'];
+        self::assertFalse($frozen(), 'Skladový slot zmrazil dimenze období.');
+
+        // Uzávěrka převzatá z jiného programu nemá source_id, období ale uzavírá stejně.
+        $this->pdo->prepare("INSERT INTO journal_entries(supplier_id,period_id,entry_date,source_type,source_id,description,posted_at)
+            VALUES(?,?,'2025-12-31','closing',NULL,'Syntetické převzaté uzavření knih',NOW())")->execute([$this->supplier, $this->period]);
+        self::assertTrue($frozen(), 'Uzavření knih dimenze období nezmrazilo.');
+    }
+
+    public function testIncomeTaxStepSuggestsTaxFromConfirmedAssessmentAfterStock(): void
+    {
+        // #400: krok Daň z příjmů u 504 navrhne daň z výpočtu nad potvrzeným posouzením,
+        // bez posouzení řekne proč. #401: u 504 jde krok Zásoby před daní.
+        $this->postReferenceYear();
+        $closing = $this->container->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        $before = $closing->incomeTaxPreview($this->supplier, $this->period);
+        self::assertNull($before['suggested_amount']);
+        self::assertNotEmpty($before['suggested_unavailable']['code'] ?? null, json_encode($before));
+
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-tax'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-tax-confirm-' . $this->supplier);
+        $preview = $closing->incomeTaxPreview($this->supplier, $this->period);
+        self::assertSame(21000.0, $preview['suggested_amount'], json_encode($preview));
+        self::assertSame('computed_from_assessment', $preview['suggested_source']);
+        self::assertNull($preview['suggested_unavailable']);
+
+        $order = \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_504');
+        self::assertLessThan(array_search('income_tax', $order, true), array_search('stock', $order, true));
+        self::assertSame(['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'],
+            \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_500'), 'Mimo 504 jde volitelná odložená daň hned po splatné dani, zásoby zůstávají za daní.');
+
+        $this->pdo->prepare("UPDATE supplier SET stock_enabled = 1 WHERE id = ?")->execute([$this->supplier]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);
+        $version = (int) $this->pdo->query('SELECT row_version FROM accounting_periods WHERE id = ' . $this->period)->fetchColumn();
+        try {
+            $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version, ['user_id' => $this->actor]);
+            self::fail('Daň 504 šla zaúčtovat před krokem Zásoby.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('stock_step_first', $e->errorCode);
+        }
+        // Ani ruční potvrzení kroku (cesta převodů z jiných systémů) pořadí neobejde.
+        try {
+            $closing->confirmStep($this->supplier, $this->period, 'income_tax', 'done', null, $version, ['user_id' => $this->actor]);
+            self::fail('Krok daně 504 šel potvrdit před krokem Zásoby.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('stock_step_first', $e->errorCode);
+        }
+    }
+
+    public function testBalanceSheetEntriesDoNotStaleConfirmedAssessment(): void
+    {
+        // #397: otisk podkladů závisí jen na řádcích, které do posouzení vstupují, ne na
+        // stránkování deníku. Rozvahový zápis potvrzené posouzení nezneplatní, výnos ano.
+        $this->postReferenceYear();
+        $main = $this->catalog['activity']['values']['main'];
+        $subject = $this->catalog['tax_regime']['values']['subject'];
+        // Víc než jedna stránka deníku (500 řádků): 300 nákladových zápisů po dvou řádcích.
+        $expense = [];
+        for ($i = 0; $i < 300; ++$i) {
+            $expense[] = $this->entry('X-' . $i, '2025-06-01', [['518', 'debit', '10.00', [$main, $this->kinds['sport'], $subject]], ['221', 'credit', '10.00']]);
+        }
+        $assessment = $this->referenceAssessment();
+        foreach (range(0, 299) as $i) {
+            $assessment['decisions'][$this->lines['X-' . $i]] = ['title' => 'nonbusiness_cost', 'evidence' => 'Syntetický doklad etalonu TJ Příklad',
+                'legal_basis' => 'zdp_24_25', 'deductible_cents' => 1000];
+        }
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-stale'), $this->actor);
+        $this->confirmPaged($this->period, $assessment, 'tj-stale-' . $this->supplier);
+        $guard = $this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentGuard::class);
+        $fingerprint = fn (): string => $this->container->get(\MyInvoice\Service\Tax\Nonprofit\Authoritative\J6CurrentProviderFactory::class)
+            ->fingerprint($this->supplier, $this->period)->inputHash;
+        self::assertTrue($guard->closingCheck($this->supplier, $this->period)['complete']);
+        $hash = $fingerprint();
+
+        // Úhrada závazku v lednu posune hranice všech stránek.
+        $this->entry('B-01', '2025-01-15', [['321', 'debit', '50.00'], ['221', 'credit', '50.00']]);
+        self::assertSame($hash, $fingerprint(), 'Rozvahový zápis změnil otisk podkladů.');
+        // Zápis daně 591/341 k poslednímu dni období (řádky 59x se z podkladů vyřazují).
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?),(?,?,?,?)')
+            ->execute([$this->supplier, '591', 'Syntetická daň', 'expense', $this->supplier, '341', 'Syntetický závazek daně', 'liability']);
+        $this->accounts['591'] = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplier} AND account_code='591'")->fetchColumn();
+        $this->accounts['341'] = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplier} AND account_code='341'")->fetchColumn();
+        $this->entry('T-01', '2025-12-31', [['591', 'debit', '21000.00'], ['341', 'credit', '21000.00']]);
+        self::assertSame($hash, $fingerprint(), 'Zápis daně změnil otisk podkladů.');
+        self::assertTrue($guard->closingCheck($this->supplier, $this->period)['complete'], 'Rozvahové zápisy zneplatnily posouzení.');
+
+        // Nový výnos do posouzení vstupuje: posouzení zastará.
+        $this->entry('R-01', '2025-07-01', [['602', 'credit', '1.00', [$main, $this->kinds['education'], $subject]], ['221', 'debit', '1.00']]);
+        self::assertNotSame($hash, $fingerprint());
+        self::assertSame('assessment_stale', $guard->closingCheck($this->supplier, $this->period)['findings'][0]['code'] ?? null);
+    }
+
+    public function testIncomeTaxStepPostsTaxWithChosenActivity(): void
+    {
+        // Krok Daň z příjmů u 504: zápis 591/341 nese zvolenou činnost (systémové pravidlo
+        // činnosti i výkaz zisku a ztráty 504 ji vyžadují); bez volby se odmítne s důvodem.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-post'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-post-' . $this->supplier);
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?),(?,?,?,?)')
+            ->execute([$this->supplier, '591', 'Syntetická daň', 'expense', $this->supplier, '341', 'Syntetický závazek daně', 'liability']);
+        $this->pdo->prepare('UPDATE supplier SET stock_enabled = 0 WHERE id = ?')->execute([$this->supplier]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);
+        $version = fn (): int => (int) $this->pdo->query('SELECT row_version FROM accounting_periods WHERE id = ' . $this->period)->fetchColumn();
+        $closing = $this->container->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        self::assertTrue($closing->incomeTaxPreview($this->supplier, $this->period)['activity_required']);
+        try {
+            $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version(), ['user_id' => $this->actor]);
+            self::fail('Daň 504 se zaúčtovala bez činnosti.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('income_tax_activity_required', $e->errorCode);
+        }
+
+        $result = $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version(), ['user_id' => $this->actor], null, 'economic');
+        $line = $this->pdo->prepare('SELECT v.semantic_key FROM journal_entry_lines l
+            JOIN chart_of_accounts a ON a.id = l.account_id AND a.account_code = \'591\'
+            JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = ?
+            JOIN dimension_values v ON v.id = d.dimension_value_id WHERE l.entry_id = ?');
+        $line->execute([$this->catalog['activity']['id'], $result['entry_id']]);
+        self::assertSame('economic', $line->fetchColumn());
+        self::assertSame('economic', $closing->incomeTaxPreview($this->supplier, $this->period)['existing_activity']);
+        // Daň 591 do podkladů posouzení nevstupuje: posouzení zůstává aktuální.
+        self::assertTrue($this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentGuard::class)
+            ->closingCheck($this->supplier, $this->period)['complete']);
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();
@@ -332,6 +504,14 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
 
     private function confirmPaged(int $period, array $assessment, string $key): array
     {
+        [$status, $confirmed] = $this->confirmPagedRaw($period, $assessment, $key, null);
+        self::assertSame(200, $status, json_encode($confirmed));
+        return $confirmed;
+    }
+
+    /** @return array{0:int, 1:array<string,mixed>} */
+    private function confirmPagedRaw(int $period, array $assessment, string $key, ?int $expectedAssessmentId): array
+    {
         $base = '/periods/' . $period . '/nonprofit-tax';
         [$status, $opened] = $this->http('POST', $base . '/draft', ['profile' => $assessment['profile']]);
         self::assertSame(200, $status, json_encode($opened));
@@ -352,10 +532,8 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
             self::assertSame(200, $status, $collection . ': ' . json_encode($changed));
             $revision = $changed['draft']['revision_no'];
         }
-        [$status, $confirmed] = $this->http('POST', $path . '/confirm', ['expected_revision' => $revision, 'expected_assessment_id' => null,
+        return $this->http('POST', $path . '/confirm', ['expected_revision' => $revision, 'expected_assessment_id' => $expectedAssessmentId,
             'reason' => 'Syntetické stránkované posouzení', 'idempotency_key' => $key]);
-        self::assertSame(200, $status, json_encode($confirmed));
-        return $confirmed;
     }
 
     private function http(string $method, string $path, array $body = []): array

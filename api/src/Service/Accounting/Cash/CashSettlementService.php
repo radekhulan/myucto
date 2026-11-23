@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -240,6 +241,10 @@ final class CashSettlementService
             $purchaseInvoiceId,
             $existing !== null ? (int) $existing['id'] : null,
         );
+        // Cizoměnový doklad: pokladna platí korunami. Vyrovnání z editoru proběhne ke dni
+        // dokladu, takže koruny jsou zbytek přepočtený kurzem dokladu (bez kurzového
+        // rozdílu); pokladní doklad ho uhradí celý ({@see CashDocumentService}).
+        $total = self::localAmount($total, (string) ($pf['currency'] ?? 'CZK'), (float) ($pf['exchange_rate'] ?? 0));
         $issueDate = (string) $pf['issue_date'];
 
         if (self::cents($total) <= 0) {
@@ -329,11 +334,15 @@ final class CashSettlementService
             $docType = 'in';
             // Doklad už jednou vyrovnaný drží svou vlastní úhradu v `paid_total`, takže
             // „zbývá" by u něj vyšlo 0 a přepočet částky by ho chtěl zrušit. Zbytek se proto
-            // počítá BEZ vlastní úhrady vyrovnání.
-            $ownPaid = $existing !== null ? round((float) $existing['total_amount'], 2) : 0.0;
-            $remaining = round(
-                (float) $invoice['amount_to_pay'] - (float) $invoice['paid_total'] + $ownPaid,
-                2,
+            // počítá BEZ vlastní úhrady vyrovnání (v měně faktury, tedy u cizoměnové
+            // faktury částka uhrazená v její měně, ne koruny pokladního dokladu).
+            $ownPaid = $existing !== null
+                ? round((float) ($existing['settled_document_amount'] ?? $existing['total_amount']), 2)
+                : 0.0;
+            $remaining = self::localAmount(
+                round((float) $invoice['amount_to_pay'] - (float) $invoice['paid_total'] + $ownPaid, 2),
+                (string) ($invoice['currency'] ?? 'CZK'),
+                (float) ($invoice['exchange_rate'] ?? 0),
             );
         }
 
@@ -396,7 +405,7 @@ final class CashSettlementService
     private function existingSettlement(int $supplierId, string $column, int $documentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, register_id, doc_type, total_amount, issue_date, doc_number, status
+            "SELECT id, register_id, doc_type, total_amount, settled_document_amount, issue_date, doc_number, status
                FROM cash_documents
               WHERE supplier_id = ? AND {$column} = ? AND auto_settlement = 1 AND status <> 'reversed'
               ORDER BY id DESC LIMIT 1"
@@ -457,7 +466,13 @@ final class CashSettlementService
             // Koncept ještě není závazek; volba se uloží a vyrovná se při přijetí dokladu.
             return 'document_not_payable';
         }
-        if ((string) ($pf['currency'] ?? 'CZK') !== 'CZK') {
+        // Cizoměnovou fakturu a účtenku pokladna uhradí korunami s kurzovým rozdílem;
+        // zálohu a daňový doklad k platbě v cizí měně ne (nemají předpis na závazku,
+        // {@see CashDocumentService} je odmítne stejně jako banka).
+        if ((string) ($pf['currency'] ?? 'CZK') !== 'CZK'
+            && (!in_array((string) ($pf['document_kind'] ?? ''), ['invoice', 'receipt'], true)
+                || (float) ($pf['exchange_rate'] ?? 0) <= 0.0)
+        ) {
             return 'foreign_currency';
         }
         // DDKP navázaný na zálohovou fakturu není platební cíl (§ 28) — peníze odešly
@@ -497,11 +512,15 @@ final class CashSettlementService
         if ($status === 'draft') {
             return 'document_not_payable';
         }
-        if ((string) ($invoice['currency'] ?? 'CZK') !== 'CZK') {
-            return 'foreign_currency';
-        }
         if (in_array((string) ($invoice['invoice_type'] ?? 'invoice'), self::NON_SETTLEABLE_INVOICE_TYPES, true)) {
             return 'document_type_not_settleable';
+        }
+        // Cizoměnovou fakturu pokladna uhradí korunami s kurzovým rozdílem; bez kurzu
+        // dokladu nejde koruny určit. Doklad k vyplacení v cizí měně pokladna nevyplácí.
+        if ((string) ($invoice['currency'] ?? 'CZK') !== 'CZK'
+            && ((float) ($invoice['exchange_rate'] ?? 0) <= 0.0 || RefundDocument::isRefundDocument($invoice))
+        ) {
+            return 'foreign_currency';
         }
         // Doklad označený za uhrazený mimo pokladnu (bankou, ručně) — hotovostní
         // vyrovnání by tu vyrobilo druhou úhradu. Vlastní vyrovnání je z toho vyňaté.
@@ -573,6 +592,18 @@ final class CashSettlementService
             && self::cents($existing['total_amount']) === self::cents($total)
             && substr((string) $existing['issue_date'], 0, 10) === substr($issueDate, 0, 10)
             && (string) $existing['status'] === 'posted';
+    }
+
+    /**
+     * Koruny pokladního dokladu pro zbytek v měně dokladu: u cizoměnového dokladu
+     * přepočet kurzem dokladu ({@see FxPaymentSettlement::expectedLocalAmount()}).
+     */
+    private static function localAmount(float $remaining, string $currency, float $rate): float
+    {
+        if (strtoupper($currency) === FxPaymentSettlement::LOCAL_CURRENCY || $rate <= 0.0) {
+            return round($remaining, 2);
+        }
+        return FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
     }
 
     private static function description(string $prefix, string $number): string

@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Mcp\McpInternalRequest;
 use MyInvoice\Service\Mcp\McpOAuth;
@@ -122,6 +123,53 @@ final class ClientDomainMcpTest extends TestCase
         $this->pdo->prepare('INSERT INTO user_suppliers (user_id,supplier_id) VALUES (?,?)')->execute([$this->user,$this->otherSupplier]);
         $companies = self::json($this->rpc($token, 'tools/call', ['name'=>'list_suppliers']))['result']['structuredContent']['result'];
         self::assertSame([$this->supplier], array_column($companies, 'id'));
+    }
+
+    public function testEntraOriginSurvivesConsentExchangeRefreshAndTokenUseOnCustomDomain(): void
+    {
+        $canonical = (string) preg_replace('#^http://#', 'https://', $this->canonical);
+        $environment = [
+            'MYINVOICE_APP_URL' => $canonical,
+            'MYINVOICE_OIDC_ENABLED' => '1', 'MYINVOICE_OIDC_ENTRA_ENABLED' => '1',
+            'MYINVOICE_OIDC_ENTRA_TENANT_ID' => '11111111-1111-1111-1111-111111111111',
+            'MYINVOICE_OIDC_ENTRA_CLIENT_ID' => '22222222-2222-2222-2222-222222222222',
+            'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET' => 'synthetic-unused',
+            'MYINVOICE_OIDC_REQUIRED' => 'entra',
+        ];
+        $priorEnvironment = [];
+        foreach ($environment as $key => $value) {
+            $priorEnvironment[$key] = getenv($key);
+            putenv($key . '=' . $value);
+        }
+        try {
+            self::assertNotNull(Bootstrap::buildContainer()->get(OidcProviderRegistry::class)->get('entra'),
+                'Entra se zapne jen s https app.url; bez ní vynucené SSO instalace neplatí a test by nic neověřil.');
+            $this->pdo->prepare("UPDATE sessions SET auth_method='oidc:entra' WHERE id=?")
+                ->execute([$this->session['token']]);
+            // Token z přihlášení přes Entra ID platí, jen dokud se uživatel přes
+            // Entra ID ověřil v rámci stropu sezení (ApiTokenService::issuingIdentityFresh).
+            $this->pdo->prepare(
+                "INSERT INTO user_external_identities (user_id, provider, issuer, tenant_id, subject, linked_by, last_used_at)
+                 VALUES (?, 'entra', 'https://login.example.test/v2.0', 'synthetic-tenant', ?, 'admin', UTC_TIMESTAMP(6))"
+            )->execute([$this->user, 'synthetic-oid-' . bin2hex(random_bytes(6))]);
+            $consent = $this->request('GET', $canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
+            self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
+
+            $oauth = Bootstrap::buildContainer()->get(McpOAuth::class);
+            $params = $this->params();
+            $code = $oauth->createCode($this->client, $this->user, $this->supplier, $params['redirect_uri'],
+                $params['code_challenge'], 'read', $params['resource'], 'password');
+            self::assertNull($oauth->exchange($code, $this->client, $params['redirect_uri'], str_repeat('a', 64), $params['resource']));
+            $grant = $this->grantFor($params['resource'], $this->supplier, 'read', 'oidc:entra');
+            self::assertSame(200, $this->rpc($grant['access_token'], 'tools/list')->getStatusCode());
+            $refreshed = $oauth->refresh($grant['refresh_token'], $this->client, $params['resource']);
+            self::assertIsArray($refreshed);
+            $result = self::json($this->rpc($refreshed['access_token'], 'tools/call', ['name' => 'whoami']));
+            self::assertArrayHasKey('result', $result);
+            self::assertFalse($result['result']['isError'] ?? false, json_encode($result));
+        } finally {
+            foreach ($priorEnvironment as $key => $value) putenv($value === false ? $key : $key . '=' . $value);
+        }
     }
 
     public function testTokenCannotBeReplayedOnAnotherHostOrPublicApi(): void
@@ -250,6 +298,8 @@ final class ClientDomainMcpTest extends TestCase
     public function testClientCanRevokeOwnConnectionAfterLosingMcpPermission(): void
     {
         $grant=$this->grant();
+        // Kanonické klientské připojení vyžaduje členství ve firmě, ke které se váže.
+        $this->pdo->prepare('INSERT INTO user_suppliers (user_id,supplier_id) VALUES (?,?)')->execute([$this->user,$this->otherSupplier]);
         $foreign=$this->grantFor($this->canonical.'/mcp',$this->otherSupplier);
         $this->pdo->prepare('INSERT INTO users (email,password_hash,name,role_id,is_active) VALUES (?,?,?,?,1)')
             ->execute(['other-mcp-'.bin2hex(random_bytes(6)).'@example.test','synthetic-unused-hash','Jiný syntetický klient',$this->role]);
@@ -278,7 +328,11 @@ final class ClientDomainMcpTest extends TestCase
         self::assertSame(200,$this->request('DELETE',$this->origin.'/api/mcp/grants/'.$rows[0]['id'],session:true)->getStatusCode());
         self::assertNull(Bootstrap::buildContainer()->get(ApiTokenService::class)->validate($grant['access_token']));
         self::assertNull(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($grant['refresh_token'],$this->client));
-        self::assertIsArray(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($foreign['refresh_token'],$this->client));
+        // Odvolání na doméně se připojení jiné firmy nedotklo; obnovu mu ale
+        // zablokuje odebrané profile.mcp.
+        self::assertNull($this->pdo->query("SELECT revoked_at FROM mcp_oauth_grants WHERE id={$foreignId}")->fetchColumn());
+        self::assertIsArray(Bootstrap::buildContainer()->get(ApiTokenService::class)->validate($foreign['access_token']));
+        self::assertNull(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($foreign['refresh_token'],$this->client));
     }
 
     public function testWriteToolsRequireBothMcpAndAgendaPermission(): void
@@ -296,6 +350,17 @@ final class ClientDomainMcpTest extends TestCase
         self::assertSame(401,$this->rpc($grant['access_token'],'tools/list')->getStatusCode());
     }
 
+    public function testLocallyHandledSupplierListCannotBypassToolPolicy(): void
+    {
+        $grant = $this->grant();
+        $this->pdo->prepare("DELETE FROM role_permissions WHERE role_id=? AND permission_key='profile'")->execute([$this->role]);
+        $names = array_column(self::json($this->rpc($grant['access_token'], 'tools/list'))['result']['tools'], 'name');
+        self::assertContains('whoami', $names);
+        self::assertNotContains('list_suppliers', $names);
+        $blocked = self::json($this->rpc($grant['access_token'], 'tools/call', ['name' => 'list_suppliers']));
+        self::assertTrue($blocked['result']['isError']);
+    }
+
     private function params(): array
     {
         return ['client_id'=>$this->client,'redirect_uri'=>'https://assistant.example.test/callback','response_type'=>'code',
@@ -308,11 +373,11 @@ final class ClientDomainMcpTest extends TestCase
         return $this->grantFor($this->origin.'/mcp',$this->supplier);
     }
 
-    private function grantFor(string $resource,?int $supplier,string $scope='read'): array
+    private function grantFor(string $resource,?int $supplier,string $scope='read',?string $issuedAuthMethod=null): array
     {
         $oauth=Bootstrap::buildContainer()->get(McpOAuth::class);
         $p=$this->params();
-        $code=$oauth->createCode($this->client,$this->user,$supplier,$p['redirect_uri'],$p['code_challenge'],$scope,$resource);
+        $code=$oauth->createCode($this->client,$this->user,$supplier,$p['redirect_uri'],$p['code_challenge'],$scope,$resource,$issuedAuthMethod);
         $grant=$oauth->exchange($code,$this->client,$p['redirect_uri'],str_repeat('a',64),$resource);
         self::assertIsArray($grant);
         return $grant;

@@ -6,17 +6,30 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\TimeBilling;
+use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
+use MyInvoice\Service\WorkReport\WorkReportBilling;
 use PDO;
 
 final class WorkReportRepository
 {
     public function __construct(private readonly Connection $db) {}
 
-    public function findByInvoice(int $invoiceId): ?array
+    public function findByInvoice(int $invoiceId, int $supplierId): ?array
     {
         $pdo = $this->db->pdo();
-        $stmt = $pdo->prepare('SELECT * FROM work_reports WHERE invoice_id = ?');
-        $stmt->execute([$invoiceId]);
+        $stmt = $pdo->prepare('SELECT wr.*, s.work_report_display_options AS display_defaults,
+                    i.status AS billing_invoice_status, cur.code AS billing_currency, i.prices_include_vat AS billing_gross,
+                    i.reverse_charge AS billing_reverse_charge, p.name AS billing_project_name,
+                    COALESCE(wr.vat_rate_id, s.default_vat_rate_id) AS billing_vat_rate_id,
+                    vr.rate_percent AS billing_vat_percent
+               FROM invoices i
+               JOIN work_reports wr ON wr.invoice_id = i.id
+               JOIN supplier s ON s.id = i.supplier_id
+               JOIN currencies cur ON cur.id = i.currency_id
+               LEFT JOIN projects p ON p.id = wr.project_id
+               LEFT JOIN vat_rates vr ON vr.id = COALESCE(wr.vat_rate_id, s.default_vat_rate_id)
+              WHERE i.supplier_id = ? AND i.id = ?');
+        $stmt->execute([$supplierId, $invoiceId]);
         $wr = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($wr === false) return null;
 
@@ -43,21 +56,24 @@ final class WorkReportRepository
             }
         }
 
+        $wr = self::withDisplayOptions($wr);
         $wr['items']                = $this->itemsFor((int) $wr['id']);
         $wr['materials']            = $this->materialsFor((int) $wr['id']);
-        return $wr;
+        $billingItems = $wr['billing_invoice_status'] !== 'draft' && ($wr['billing_snapshot'] ?? null) !== null
+            ? $this->billingItemsForInvoices([$invoiceId], $supplierId) : [];
+        return self::withBilling($wr, $billingItems[(int) $wr['id']] ?? []);
     }
 
     /**
      * Batch varianta findByInvoice() — načte výkazy pro dané ID faktur v jednom
      * dotazu (+ dávkově items, materials, sazby DPH), keyed by invoice_id. Nahrazuje
-     * N+1 smyčku `foreach ($rows as $row) findByInvoice($row['id'])` v buildPreview.
+     * N+1 smyčku `foreach ($rows as $row) findByInvoice($row['id'], $supplierId)` v buildPreview.
      * Transformace per-výkaz jsou identické s findByInvoice().
      *
      * @param list<int> $invoiceIds
      * @return array<int, array<string,mixed>> invoice_id → výkaz (jako findByInvoice)
      */
-    public function findByInvoiceIds(array $invoiceIds): array
+    public function findByInvoiceIds(array $invoiceIds, int $supplierId): array
     {
         $invoiceIds = array_values(array_unique(array_map('intval', $invoiceIds)));
         if ($invoiceIds === []) {
@@ -66,8 +82,19 @@ final class WorkReportRepository
         $pdo = $this->db->pdo();
         $place = implode(',', array_fill(0, count($invoiceIds), '?'));
 
-        $stmt = $pdo->prepare("SELECT * FROM work_reports WHERE invoice_id IN ($place)");
-        $stmt->execute($invoiceIds);
+        $stmt = $pdo->prepare("SELECT wr.*, s.work_report_display_options AS display_defaults,
+                    i.status AS billing_invoice_status, cur.code AS billing_currency, i.prices_include_vat AS billing_gross,
+                    i.reverse_charge AS billing_reverse_charge, p.name AS billing_project_name,
+                    COALESCE(wr.vat_rate_id, s.default_vat_rate_id) AS billing_vat_rate_id,
+                    vr.rate_percent AS billing_vat_percent
+               FROM invoices i
+               JOIN work_reports wr ON wr.invoice_id = i.id
+               JOIN supplier s ON s.id = i.supplier_id
+               JOIN currencies cur ON cur.id = i.currency_id
+               LEFT JOIN projects p ON p.id = wr.project_id
+               LEFT JOIN vat_rates vr ON vr.id = COALESCE(wr.vat_rate_id, s.default_vat_rate_id)
+              WHERE i.supplier_id = ? AND i.id IN ($place)");
+        $stmt->execute([$supplierId, ...$invoiceIds]);
         $reports = [];        // invoice_id → wr
         $wrIds = [];          // work_report id list (pro items/materials)
         $rateIds = [];        // material_vat_rate_id set (pro batched ratePercent)
@@ -150,6 +177,9 @@ final class WorkReportRepository
             $matsBy[$wrid][] = $r;
         }
 
+        $issuedBillingIds = array_keys(array_filter($reports, static fn (array $wr): bool => $wr['billing_invoice_status'] !== 'draft' && ($wr['billing_snapshot'] ?? null) !== null));
+        $billingItems = $this->billingItemsForInvoices($issuedBillingIds, $supplierId);
+
         // Dopočet sazby materiálu + items/materials per výkaz (identicky s findByInvoice).
         foreach ($reports as $invoiceId => $wr) {
             $wrid = (int) $wr['id'];
@@ -163,10 +193,118 @@ final class WorkReportRepository
             }
             $wr['items']     = $itemsBy[$wrid] ?? [];
             $wr['materials'] = $matsBy[$wrid] ?? [];
-            $reports[$invoiceId] = $wr;
+            $reports[$invoiceId] = self::withBilling(self::withDisplayOptions($wr), $billingItems[$wrid] ?? []);
         }
 
         return $reports;
+    }
+
+    /** Fakturované rekapitulace vystavených výkazů dávkově, bez dotazu pro každý doklad. */
+    private function billingItemsForInvoices(array $invoiceIds, int $supplierId): array
+    {
+        if ($invoiceIds === [] || !$this->db->hasColumn('invoice_items', 'work_report_billing_key')) return [];
+        $place = implode(',', array_fill(0, count($invoiceIds), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT ii.linked_work_report_id, ii.work_report_billing_key,
+                    ii.description, ii.quantity, ii.duration_minutes, ii.unit, ii.unit_price_without_vat,
+                    ii.vat_rate_id, ii.vat_rate_snapshot, ii.item_kind,
+                    ii.total_without_vat, ii.total_vat, ii.total_with_vat
+               FROM invoices i
+               JOIN work_reports wr ON wr.invoice_id = i.id
+               JOIN invoice_items ii ON ii.invoice_id = i.id AND ii.linked_work_report_id = wr.id
+              WHERE i.supplier_id = ? AND i.id IN ($place) AND i.status <> 'draft'
+                AND ii.work_report_billing_key IS NOT NULL
+              ORDER BY ii.invoice_id, ii.order_index, ii.id");
+        $stmt->execute([$supplierId, ...$invoiceIds]);
+        $items = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) $items[(int) $item['linked_work_report_id']][] = $item;
+        return $items;
+    }
+
+    /**
+     * Neplatné uložené ujednání (např. hodiny přidané mimo editor nad zahrnutý limit bez
+     * neomezeného pásma, změna měny faktury jinou cestou) nesmí shodit detail, PDF ani
+     * schvalování. Výkaz se pak vrací bez rekapitulace, jako zastaralý a s důvodem
+     * v `billing_error`; uložená data zůstávají beze změny a vystavení blokuje
+     * {@see \MyInvoice\Service\WorkReport\WorkReportBillingService::assertCurrent()}.
+     */
+    private static function withBilling(array $report, array $storedItems = []): array
+    {
+        $snapshot = $report['billing_snapshot'] ?? null;
+        $report['billing_template_id'] = isset($report['billing_template_id']) ? (int) $report['billing_template_id'] : null;
+        $report['billing_preview'] = null;
+        $report['billing_stale'] = false;
+        $report['billing_error'] = null;
+        try {
+            $report['billing_snapshot'] = is_string($snapshot) ? json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR) : $snapshot;
+            if ($report['billing_snapshot'] !== null && !is_array($report['billing_snapshot'])) throw new \InvalidArgumentException('Neplatné cenové ujednání.');
+            $report = self::billingPreview($report, $storedItems);
+        } catch (\InvalidArgumentException | \JsonException $e) {
+            // Prázdné pole drží výkaz v režimu ujednání, aby částečné uložení otisk nesmazalo.
+            if (!is_array($report['billing_snapshot'] ?? null)) $report['billing_snapshot'] = [];
+            $report['billing_preview'] = null;
+            $report['billing_stale'] = true;
+            $report['billing_error'] = $e instanceof \JsonException ? 'Uložené cenové ujednání výkazu je poškozené.' : $e->getMessage();
+            error_log(sprintf('Výkaz práce #%d: cenové ujednání nelze vyhodnotit (%s).', (int) ($report['id'] ?? 0), $report['billing_error']));
+        }
+        foreach (['billing_invoice_status', 'billing_currency', 'billing_gross', 'billing_reverse_charge', 'billing_project_name', 'billing_vat_rate_id', 'billing_vat_percent'] as $key) unset($report[$key]);
+        return $report;
+    }
+
+    private static function billingPreview(array $report, array $storedItems): array
+    {
+        if ($report['billing_snapshot'] !== null && $report['billing_invoice_status'] !== 'draft') {
+            $report['billing_preview'] = WorkReportBilling::fromInvoiceItems($report, $storedItems, (bool) $report['billing_gross']);
+            $report['total_amount'] = $report['billing_preview']['total_amount'];
+        } elseif ($report['billing_snapshot'] !== null) {
+            $input = $report;
+            $input['project_name'] = $report['billing_project_name'] ?? '';
+            $input['vat_rate_id'] = (int) $report['billing_vat_rate_id'];
+            $report['billing_preview'] = WorkReportBilling::calculate($input, [
+                'currency' => $report['billing_currency'], 'prices_include_vat' => $report['billing_gross'],
+                'reverse_charge' => $report['billing_reverse_charge'],
+            ], (float) $report['billing_vat_percent']);
+            $report['total_amount'] = $report['billing_preview']['total_amount'];
+            $report['total_hours'] = $report['billing_preview']['total_hours'];
+            $report['billing_stale'] = $report['billing_preview']['fingerprint'] !== ($report['billing_transferred_fingerprint'] ?? null);
+        }
+        return $report;
+    }
+
+    /**
+     * Kopie nese jen hlavičku cenového ujednání. Minulá práce ani materiál do nového období nepatří.
+     * Období účtování se posouvá s DUZP kopie ({@see WorkReportBilling::shiftPeriod()}).
+     */
+    public function cloneForInvoice(int $sourceInvoiceId, int $targetInvoiceId, int $supplierId, ?string $sourceDate = null, ?string $targetDate = null): ?int
+    {
+        if (!$this->db->hasColumn('work_reports', 'billing_snapshot')) return null;
+        $source = $this->findByInvoice($sourceInvoiceId, $supplierId);
+        if ($source === null || $source['billing_snapshot'] === null) return null;
+        $pdo = $this->db->pdo();
+        $columns = 'project_id, title, vat_rate_id, display_options, billing_template_id, billing_snapshot, billing_period';
+        $pdo->prepare('INSERT INTO work_reports (invoice_id, ' . $columns . ') SELECT ?, ' . $columns . ' FROM work_reports WHERE id = ?')
+            ->execute([$targetInvoiceId, $source['id']]);
+        $id = (int) $pdo->lastInsertId();
+        if ($sourceDate !== null && $targetDate !== null && $source['billing_period'] !== null) {
+            $period = WorkReportBilling::shiftPeriod($source['billing_period'], $sourceDate, $targetDate);
+            if ($period !== $source['billing_period']) $pdo->prepare('UPDATE work_reports SET billing_period = ? WHERE id = ?')->execute([$period, $id]);
+        }
+        return $id;
+    }
+
+    public function saveBilling(int $invoiceId, int $supplierId, ?int $templateId, ?array $snapshot, ?string $period): void
+    {
+        $this->db->pdo()->prepare('UPDATE work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+            SET wr.billing_template_id = ?, wr.billing_snapshot = ?, wr.billing_period = ?
+            WHERE i.supplier_id = ? AND i.id = ? AND i.status = \'draft\'')->execute([
+                $templateId, $snapshot === null ? null : json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                $period, $supplierId, $invoiceId,
+            ]);
+        if ($snapshot === null) return;
+        $report = $this->findByInvoice($invoiceId, $supplierId);
+        if ($report !== null && $report['billing_preview'] !== null) {
+            $amount = $report['billing_preview']['total_amount'];
+            $this->db->pdo()->prepare('UPDATE work_reports SET total_amount = ? WHERE id = ?')->execute([$amount, $report['id']]);
+        }
     }
 
     /** Procentní sazba DPH z číselníku (rate_percent), nebo null když ID neexistuje. */
@@ -232,10 +370,10 @@ final class WorkReportRepository
      *
      * @param list<array<string,mixed>>|null $items null = řádky i součty existujícího výkazu ponechat
      */
-    public function save(int $invoiceId, ?int $projectId, string $title, ?array $items, ?int $vatRateId = null): int
+    public function save(int $invoiceId, int $supplierId, ?int $projectId, string $title, ?array $items, ?int $vatRateId = null): int
     {
         $pdo = $this->db->pdo();
-        $existing = $this->findByInvoice($invoiceId);
+        $existing = $this->findByInvoice($invoiceId, $supplierId);
 
         // project_id je nullable — faktura nemusí mít zakázku.
         $projectIdParam = ($projectId !== null && $projectId > 0) ? $projectId : null;
@@ -267,10 +405,14 @@ final class WorkReportRepository
                 'UPDATE work_reports SET project_id=?, title=?, total_hours=?, total_amount=?, vat_rate_id=? WHERE id=?'
             )->execute([$projectIdParam, $title, $totalHours, $totalAmount, $vatRateId, $id]);
         } else {
-            $pdo->prepare(
+            $insertReport = $pdo->prepare(
                 'INSERT INTO work_reports (invoice_id, project_id, title, total_hours, total_amount, vat_rate_id)
-                 VALUES (?,?,?,?,?,?)'
-            )->execute([$invoiceId, $projectIdParam, $title, $totalHours, $totalAmount, $vatRateId]);
+                 SELECT i.id, ?, ?, ?, ?, ? FROM invoices i WHERE i.supplier_id = ? AND i.id = ?'
+            );
+            $insertReport->execute([$projectIdParam, $title, $totalHours, $totalAmount, $vatRateId, $supplierId, $invoiceId]);
+            if ($insertReport->rowCount() !== 1) {
+                throw new \InvalidArgumentException('Faktura nepatří zadané firmě.');
+            }
             $id = (int) $pdo->lastInsertId();
         }
 
@@ -307,10 +449,10 @@ final class WorkReportRepository
      *
      * @param list<array<string,mixed>>|null $materials null = řádky i součet existujícího výkazu ponechat
      */
-    public function saveMaterials(int $invoiceId, ?int $projectId, ?string $materialTitle, ?int $materialVatRateId, ?array $materials): int
+    public function saveMaterials(int $invoiceId, int $supplierId, ?int $projectId, ?string $materialTitle, ?int $materialVatRateId, ?array $materials): int
     {
         $pdo = $this->db->pdo();
-        $existing = $this->findByInvoice($invoiceId);
+        $existing = $this->findByInvoice($invoiceId, $supplierId);
         if ($materials === null && $existing) {
             $id = (int) $existing['id'];
             $pdo->prepare('UPDATE work_reports SET material_title=?, material_vat_rate_id=? WHERE id=?')
@@ -334,10 +476,14 @@ final class WorkReportRepository
         } else {
             // Lazy vznik řádky — práce zatím prázdná (title je NOT NULL → fallback na materialTitle).
             $title = ($materialTitle !== null && $materialTitle !== '') ? $materialTitle : 'Materiál';
-            $pdo->prepare(
+            $insertReport = $pdo->prepare(
                 'INSERT INTO work_reports (invoice_id, project_id, title, total_hours, total_amount, material_title, material_total, material_vat_rate_id)
-                 VALUES (?,?,?,0,0,?,?,?)'
-            )->execute([$invoiceId, $projectIdParam, $title, $materialTitle, $materialTotal, $materialVatRateId]);
+                 SELECT i.id, ?, ?, 0, 0, ?, ?, ? FROM invoices i WHERE i.supplier_id = ? AND i.id = ?'
+            );
+            $insertReport->execute([$projectIdParam, $title, $materialTitle, $materialTotal, $materialVatRateId, $supplierId, $invoiceId]);
+            if ($insertReport->rowCount() !== 1) {
+                throw new \InvalidArgumentException('Faktura nepatří zadané firmě.');
+            }
             $id = (int) $pdo->lastInsertId();
         }
 
@@ -373,9 +519,59 @@ final class WorkReportRepository
         return $stmt->fetchColumn() !== false;
     }
 
-    public function deleteByInvoice(int $invoiceId): bool
+    private static function withDisplayOptions(array $report): array
+    {
+        $report['display_options'] = WorkReportDisplayOptions::decode($report['display_options'] ?? null);
+        $report['effective_display_options'] = WorkReportDisplayOptions::resolve($report['display_defaults'] ?? null, $report['display_options']);
+        unset($report['display_defaults']);
+        return $report;
+    }
+
+    /** Mění jen zobrazení; řádky a finanční součty zůstávají uložené. */
+    public function saveDisplayOptions(int $invoiceId, ?array $options, int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+                SET wr.display_options = ? WHERE i.supplier_id = ? AND i.id = ?'
+        )->execute([$options === null ? null : json_encode((object) $options, JSON_THROW_ON_ERROR), $supplierId, $invoiceId]);
+    }
+
+    /**
+     * Výkazy vystavených faktur bez vlastní volby dědí výchozí nastavení firmy živě.
+     * Před jeho změnou se jim proto zapíše dosavadní podoba, jinak by znovu vygenerované
+     * PDF, veřejný výkaz i e-mail vystaveného dokladu zpětně změnily vzhled. Koncept
+     * zůstává navázaný na firmu a novou podobu převezme.
+     *
+     * @return int počet výkazů, kterým se podoba zapsala
+     */
+    public function pinIssuedDisplayOptions(int $supplierId, mixed $currentDefaults): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+                SET wr.display_options = ?
+              WHERE i.supplier_id = ? AND i.status <> 'draft' AND wr.display_options IS NULL"
+        );
+        $stmt->execute([
+            json_encode(WorkReportDisplayOptions::resolve($currentDefaults), JSON_THROW_ON_ERROR),
+            $supplierId,
+        ]);
+        return $stmt->rowCount();
+    }
+
+    public function hasBillingItems(int $invoiceId, int $supplierId): bool
+    {
+        if (!$this->db->hasColumn('invoice_items', 'work_report_billing_key')) return false;
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM invoices i
+            JOIN invoice_items ii ON ii.invoice_id = i.id
+            WHERE i.supplier_id = ? AND i.id = ? AND ii.work_report_billing_key IS NOT NULL LIMIT 1');
+        $stmt->execute([$supplierId, $invoiceId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function deleteByInvoice(int $invoiceId, int $supplierId): bool
     {
         $pdo = $this->db->pdo();
-        return $pdo->prepare('DELETE FROM work_reports WHERE invoice_id = ?')->execute([$invoiceId]);
+        return $pdo->prepare('DELETE wr FROM work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+            WHERE i.supplier_id = ? AND i.id = ?')->execute([$supplierId, $invoiceId]);
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateDocumentData;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
@@ -220,7 +219,7 @@ final class AnnualTaxCertificatePartnerSettlementTest extends TestCase
      */
     private function fixture(): array
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $sensitive = $container->get(PayrollSensitiveData::class);

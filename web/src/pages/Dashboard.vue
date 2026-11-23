@@ -24,7 +24,8 @@ const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const canCreateSupplier = computed(() => auth.isSuperadmin || auth.isAdminPlusRole)
 const canReviewApprovals = computed(() => auth.canRead('invoices.approval'))
-const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 
 // Onboarding gate (#151): bez dodavatele je dashboard prázdný a všechny zakládací akce
 // padají → místo dat ukážeme výzvu k vytvoření prvního dodavatele.
@@ -224,7 +225,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       </div>
 
       <!-- ═══ Výkazy práce — rozpracované (draft) vystavené faktury k doplnění (skryto pro readonly) ═══ -->
-      <section v-if="auth.canWrite('dashboard') && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
+      <section v-if="auth.canWrite('dashboard') && supplierStore.currentSupplier?.dashboard_work_reports !== false && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
         <!-- Sekční štítek: caps popisek + hairline k pravému okraji (.rule-label).
              Plovoucí barevné pilulky přetahovaly pozornost na nadpisy sekcí,
              i když nesou nejmíň informace na stránce. -->

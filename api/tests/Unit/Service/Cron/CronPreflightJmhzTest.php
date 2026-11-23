@@ -37,7 +37,13 @@ final class CronPreflightJmhzTest extends TestCase
         yield 'due JMHZ25' => ['awaiting_protocol', 'synthetic', 'JMHZ25', 0, '2026-09-08 12:00:00', null, true];
         yield 'future poll' => ['awaiting_protocol', 'synthetic', 'JMHZ', 0, '2026-09-08 12:00:01', null, false];
         yield 'missing correlation' => ['awaiting_protocol', null, 'JMHZ', 0, null, null, false];
-        yield 'registration agenda' => ['awaiting_protocol', 'synthetic', 'PREZEC', 0, null, null, false];
+        yield 'unknown agenda' => ['awaiting_protocol', 'synthetic', 'PREZEC', 0, null, null, false];
+        yield 'due REGZEC25 poll' => ['awaiting_protocol', 'synthetic', 'REGZEC25', 0, null, null, true];
+        yield 'due PREZEC26 close' => ['completed', 'synthetic', 'PREZEC26', 2, null, null, true];
+        yield 'future REGZEC25 poll' => ['awaiting_protocol', 'synthetic', 'REGZEC25', 0, '2026-09-08 12:00:01', null, false];
+        // Registrační transport se na „možná doručeno" neptá, frontu to neotevře.
+        yield 'REGZEC25 possibly delivered' => ['possibly_delivered', 'synthetic', 'REGZEC25', 0, null, null, false];
+        yield 'closed REGZEC25' => ['completed', 'synthetic', 'REGZEC25', 1, null, '2026-09-08 11:00:00', false];
         yield 'due close' => ['completed', 'synthetic', 'JMHZ', 7, null, null, true];
         yield 'exhausted close' => ['completed', 'synthetic', 'JMHZ', 8, null, null, false];
         yield 'close without correlation' => ['completed', null, 'JMHZ', 0, null, null, false];

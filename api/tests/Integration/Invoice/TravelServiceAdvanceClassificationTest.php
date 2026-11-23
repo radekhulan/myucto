@@ -80,9 +80,11 @@ final class TravelServiceAdvanceClassificationTest extends TestCase
         }
 
         $this->origSupplier = $pdo->query(
-            "SELECT is_vat_payer, is_identified, dic, proforma_payment_document FROM supplier WHERE id = {$this->supplierId}"
+            "SELECT is_vat_payer, is_identified, dic, proforma_payment_document, accounting_mode FROM supplier WHERE id = {$this->supplierId}"
         )->fetch(PDO::FETCH_ASSOC) ?: [];
-        $pdo->prepare("UPDATE supplier SET is_vat_payer = 1, is_identified = 0, dic = 'CZ12345678', proforma_payment_document = ? WHERE id = ?")
+        // Klasifikace DPH na formě účetnictví nezávisí. Zálohy tu hradí ruční úhrada, kterou podvojné
+        // účetnictví čerpat nedovolí (advance_receipt_not_posted), proto daňová evidence.
+        $pdo->prepare("UPDATE supplier SET is_vat_payer = 1, is_identified = 0, dic = 'CZ12345678', proforma_payment_document = ?, accounting_mode = 'tax_evidence' WHERE id = ?")
             ->execute([ProformaPaymentDocuments::MODE_MANUAL, $this->supplierId]);
 
         $pdo->prepare(
@@ -102,12 +104,13 @@ final class TravelServiceAdvanceClassificationTest extends TestCase
         }
         $pdo = $this->db->pdo();
         if ($this->origSupplier !== []) {
-            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, dic = ?, proforma_payment_document = ? WHERE id = ?')
+            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, dic = ?, proforma_payment_document = ?, accounting_mode = ? WHERE id = ?')
                 ->execute([
                     $this->origSupplier['is_vat_payer'],
                     $this->origSupplier['is_identified'],
                     $this->origSupplier['dic'],
                     $this->origSupplier['proforma_payment_document'],
+                    $this->origSupplier['accounting_mode'],
                     $this->supplierId,
                 ]);
         }

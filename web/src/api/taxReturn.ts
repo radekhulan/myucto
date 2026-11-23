@@ -113,6 +113,13 @@ export interface TaxReturnState {
   variant_seq: number
   available_variants: AvailableVariant[]
   last_known_tax_suggested: number | null
+  /** Finalizované DPPO: odpovídá účetnictví období stavu při finalizaci? null = nelze posoudit. */
+  books_current?: boolean | null
+  /** Proč: otisk účetnictví, u přiznání bez otisku porovnání uloženého VH s VH z knih.
+   *  vh_differs_tax_same = VH se liší, zaokrouhlený základ i daň ale zůstávají. */
+  books_current_reason?: 'fingerprint_match' | 'fingerprint_mismatch' | 'vh_match' | 'vh_differs_tax_same' | 'vh_differs_tax_changed' | 'not_assessable' | null
+  /** U přiznání bez otisku: VH uložený v přiznání, VH z aktuálních knih a rozdíl. */
+  books_vh?: { stored: number; current: number; difference: number } | null
   computed: {
     lines: TaxReturnLine[]
     tax?: number

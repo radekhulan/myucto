@@ -150,7 +150,7 @@ final class PayrollJmhzIdentityAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -205,7 +205,7 @@ final class PayrollJmhzIdentityAction
             return $this->noStore(Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             ));
         } catch (\OutOfBoundsException $exception) {
@@ -224,7 +224,7 @@ final class PayrollJmhzIdentityAction
         Response $response,
         bool $write,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

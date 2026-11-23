@@ -27,6 +27,8 @@ use MyInvoice\Service\Submission\InboxMessageClassifier;
 use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
 use MyInvoice\Service\Submission\SubmissionChannelRegistry;
+use MyInvoice\Service\Submission\SubmissionInboxPollFlow;
+use MyInvoice\Service\Submission\SubmissionInboxService;
 use MyInvoice\Service\Submission\SubmissionInboxStorageSettingsService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
@@ -60,6 +62,7 @@ final class DeliveryReceiptServiceTest extends TestCase
 
     private Connection $db;
     private DeliveryReceiptService $service;
+    private SubmissionInboxService $inboxService;
     private SubmissionOutboxService $outboxService;
     private SubmissionOutboxRepository $outbox;
     private SubmissionInboxRepository $inbox;
@@ -75,6 +78,9 @@ final class DeliveryReceiptServiceTest extends TestCase
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);
         $this->db = $db;
+        $inboxService = $container->get(SubmissionInboxService::class);
+        self::assertInstanceOf(SubmissionInboxService::class, $inboxService);
+        $this->inboxService = $inboxService;
 
         $this->outbox = new SubmissionOutboxRepository($db);
         if (!$this->outbox->isAvailable()) {
@@ -788,6 +794,48 @@ final class DeliveryReceiptServiceTest extends TestCase
         $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
         self::assertNotNull($submission);
         self::assertNull($submission['receipt_document_id']);
+    }
+
+    // ───────────────────────── načtení schránky ─────────────────────────
+
+    /**
+     * Načtení schránky stáhne v téže relaci i doručenky. Bez toho účetní načetla
+     * schránku, podání dál „čekalo na doručenku" a povinnost se neuzavřela.
+     */
+    public function testInboxPollAttachesWaitingReceiptsInTheSameSession(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceipt = $this->receiptFor($row, ['sender_ident' => null]);
+
+        $result = $this->pollFlow()->poll($this->channelContext(), $this->transport, $this->userId);
+
+        self::assertSame(['attached' => 1, 'pending' => 0, 'failed' => 0], $result['receipts']);
+        self::assertSame(0, $result['failed']);
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNotNull($submission['receipt_document_id']);
+        self::assertSame('delivered', $submission['dispatch_state']);
+    }
+
+    /** Nedostupná schránka: na doručenky se neptáme a chyba zůstává vidět. */
+    public function testInboxPollSkipsReceiptsWhenTheBoxIsUnreachable(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceipt = $this->receiptFor($row, ['sender_ident' => null]);
+        $this->transport->inboxBehaviour = 'fail';
+
+        $result = $this->pollFlow()->poll($this->channelContext(), $this->transport, $this->userId);
+
+        self::assertNotNull($result['error']);
+        self::assertNull($result['receipts']);
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNull($submission['receipt_document_id']);
+    }
+
+    private function pollFlow(): SubmissionInboxPollFlow
+    {
+        return new SubmissionInboxPollFlow($this->inboxService, $this->service, new NullLogger());
     }
 
     // ───────────────────────── pomocné ─────────────────────────

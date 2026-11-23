@@ -22,7 +22,7 @@ use PDO;
  * dobu zaměstnavatele aplikace zatím neeviduje, limit je tedy 20 h týdně.
  *
  * Odpracované hodiny existují jen po měsících (potvrzený pracovní souhrn
- * měsíce, u převzatých mezd `payroll_migration_reference_totals`), proto se
+ * nebo přesný schválený ruční zdroj nezávislý na JMHZ, u převzatých mezd `payroll_migration_reference_totals`), proto se
  * 52 týdnů nahrazuje posledními 12 kalendářními měsíci (365 nebo 366 dnů),
  * zkrácenými na začátek dohody. Limit je poměrný počtu dnů okna.
  *
@@ -44,7 +44,7 @@ final class PayrollAgreementWeeklyAverage
      * Průměr za posuzované období končící posledním dnem měsíce `$periodStart`.
      *
      * @param array<int,string> $startsByEmployment employment_id => den začátku dohody
-     * @return array<int,array{window_from:string,window_to:string,days:int,own_minutes:int,takeover_minutes:int,worked_minutes:int,limit_minutes:int,average_weekly_minutes:int}>
+     * @return array<int,array<string,mixed>>
      */
     public function assess(int $supplierId, array $startsByEmployment, string $periodStart): array
     {
@@ -100,6 +100,7 @@ final class PayrollAgreementWeeklyAverage
               WHERE month_row.supplier_id = ?
                 AND month_row.employment_id IN ({$in})
                 AND month_row.period_start >= ? AND month_row.period_start <= ?
+                AND month_row.work_source <> 'manual_summary'
               GROUP BY month_row.employment_id, month_row.period_start",
         );
         $own->execute([$supplierId, ...$ids, $firstMonth, $lastMonth]);
@@ -111,6 +112,7 @@ final class PayrollAgreementWeeklyAverage
             $result[$employmentId]['own_minutes'] += intdiv((int) $row['millihours'] * 60, 1000);
         }
 
+
         $startPeriod = $this->startPeriod($supplierId);
         $takeover = $this->db->pdo()->prepare(
             "SELECT totals.employment_id, totals.period_start, SUM(totals.worked_minutes) AS minutes
@@ -121,6 +123,7 @@ final class PayrollAgreementWeeklyAverage
               GROUP BY totals.employment_id, totals.period_start",
         );
         $takeover->execute([$supplierId, ...$ids, $firstMonth, $lastMonth]);
+        $takenOverMonths = [];
         foreach ($takeover->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $employmentId = (int) $row['employment_id'];
             $month = (string) $row['period_start'];
@@ -130,9 +133,38 @@ final class PayrollAgreementWeeklyAverage
                 continue;
             }
             $result[$employmentId]['takeover_minutes'] += (int) $row['minutes'];
+            $takenOverMonths[$employmentId][$month] = true;
         }
 
+        // Před začátkem vedení mezd je stejně jako u DPP autoritativní
+        // převzatý součet; tentýž měsíc se ručním zdrojem nepřičte podruhé.
+        foreach ((new PayrollAgreementManualHours($this->db))->forEmployments($supplierId, $ids, $firstMonth, $lastMonth) as $month) {
+            $id = $month['employment_id'];
+            if (!$this->monthInWindow($month['period_start'], $windows[$id]) || isset($takenOverMonths[$id][$month['period_start']])) continue;
+            if (!array_key_exists('own_duration_units', $result[$id])) $result[$id]['own_duration_units'] = PayrollDuration::fromMinutes($result[$id]['own_minutes']);
+            if ($month['worked_duration_units'] === null) {
+                $result[$id]['evidence_status'] = 'manual_review_required';
+            } else {
+                $result[$id]['own_duration_units'] = PayrollDuration::add($result[$id]['own_duration_units'], $month['worked_duration_units']);
+            }
+        }
+
+
         foreach ($result as $employmentId => $row) {
+            if (array_key_exists('own_duration_units', $row)) {
+                $unknown = ($row['evidence_status'] ?? null) === 'manual_review_required';
+                $workedUnits = PayrollDuration::add($row['own_duration_units'], PayrollDuration::fromMinutes($row['takeover_minutes']));
+                $result[$employmentId]['own_duration_units'] = $unknown ? null : $row['own_duration_units'];
+                $result[$employmentId]['worked_duration_units'] = $unknown ? null : $workedUnits;
+                $result[$employmentId]['own_minutes'] = $unknown ? null : PayrollDuration::exactMinutes($row['own_duration_units']);
+                $result[$employmentId]['worked_minutes'] = $unknown ? null : PayrollDuration::exactMinutes($workedUnits);
+                // Průměr může být racionální i při přesně doložené době. Limit
+                // se níže porovnává křížovým násobením, nikoli zaokrouhlením.
+                $numerator = $workedUnits * 7;
+                $denominator = max(1, $row['days']) * 50;
+                $result[$employmentId]['average_weekly_minutes'] = !$unknown && $numerator % $denominator === 0 ? intdiv($numerator, $denominator) : null;
+                continue;
+            }
             $worked = $row['own_minutes'] + $row['takeover_minutes'];
             $result[$employmentId]['worked_minutes'] = $worked;
             $result[$employmentId]['average_weekly_minutes'] = intdiv($worked * 7, max(1, $row['days']));
@@ -164,18 +196,22 @@ final class PayrollAgreementWeeklyAverage
         }
         $validations = [];
         foreach ($this->assess($supplierId, $starts, $periodStart) as $employmentId => $assessment) {
-            if ($assessment['worked_minutes'] <= $assessment['limit_minutes']) {
-                continue;
-            }
+            $unknown = ($assessment['evidence_status'] ?? null) === 'manual_review_required';
+            $exceeded = isset($assessment['worked_duration_units'])
+                ? $assessment['worked_duration_units'] * 7 > $assessment['days'] * PayrollDuration::fromMinutes(self::LIMIT_WEEKLY_MINUTES)
+                : $assessment['worked_minutes'] > $assessment['limit_minutes'];
+            if (!$unknown && !$exceeded) continue;
             $row = $rows[$employmentId];
             $employeeId = (int) $row['employee_id'];
             $validations[] = new PayrollRunValidation(
                 'warning',
-                'dpc_weekly_average_exceeded',
+                $unknown ? 'dpc_weekly_average_manual_review_required' : 'dpc_weekly_average_exceeded',
                 'employment',
                 $employmentId,
-                self::message((string) ($row['full_name'] ?? ''), $assessment),
-                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+                $unknown ? 'Průměrný týdenní rozsah DPČ nelze ověřit: ruční podklad pracovní doby je neúplný nebo neschválený. Doplňte a schvalte skutečně odpracované hodiny.' : self::message((string) ($row['full_name'] ?? ''), $assessment),
+                $unknown
+                    ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'
+                    : "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
             );
         }
 
@@ -195,11 +231,11 @@ final class PayrollAgreementWeeklyAverage
             $name === '' ? 'Zaměstnanec' : $name,
             self::date($assessment['window_from']),
             self::date($assessment['window_to']),
-            self::hours($assessment['worked_minutes']),
+            isset($assessment['worked_duration_units']) ? PayrollAgreementManualHours::hours($assessment['worked_duration_units']) : self::hours($assessment['worked_minutes']),
             $assessment['takeover_minutes'] > 0
                 ? sprintf(' (z toho %s h převzatých z předchozího programu)', self::hours($assessment['takeover_minutes']))
                 : '',
-            self::hours($assessment['average_weekly_minutes']),
+            isset($assessment['worked_duration_units']) ? 'přibližně ' . number_format($assessment['worked_duration_units'] * 7 / ($assessment['days'] * PayrollDuration::UNITS_PER_HOUR), 3, ',', ' ') : self::hours($assessment['average_weekly_minutes']),
             self::hours(self::LIMIT_WEEKLY_MINUTES),
         );
     }

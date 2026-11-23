@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDaysIso, addMonthsIso, appIsoDate, appYear, overdueDays } from '../date'
+import { addDaysIso, addMonthsIso, appIsoDate, appYear, isCalendarIsoDate, overdueDays } from '../date'
 
 describe('overdueDays', () => {
   it.each([
@@ -114,5 +114,17 @@ describe('odolnost proti nesmyslnému vstupu', () => {
     expect(addDaysIso('2026-13', 14)).toBe('2026-13')
     expect(addMonthsIso('', 1)).toBe('')
     expect(addMonthsIso('nesmysl', 1)).toBe('nesmysl')
+  })
+})
+
+describe('isCalendarIsoDate', () => {
+  it('pustí jen skutečné kalendářní datum', () => {
+    expect(isCalendarIsoDate('2096-02-29')).toBe(true)
+    expect(isCalendarIsoDate('2099-02-28')).toBe(true)
+    expect(isCalendarIsoDate('2099-02-29')).toBe(false)
+    expect(isCalendarIsoDate('2099-04-31')).toBe(false)
+    expect(isCalendarIsoDate('2099-13-01')).toBe(false)
+    expect(isCalendarIsoDate('2099-1-01')).toBe(false)
+    expect(isCalendarIsoDate('')).toBe(false)
   })
 })

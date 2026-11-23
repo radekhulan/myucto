@@ -52,7 +52,7 @@ final class PayrollEnforcementClaimCorrectionMigrationRuntimeTest extends TestCa
         ) {
             return;
         }
-        $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+        \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
     }
 
     public function testMigrationTwiceAllowsOnlyUnusedPreActivationClaimMutation(): void

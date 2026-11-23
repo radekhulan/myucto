@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentDeliveryLedgerService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -32,7 +31,7 @@ final class PayrollDocumentDeliveryLedgerTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_document_delivery_events')) {
             self::fail('Migrace delivery ledgeru mzdových dokumentů neproběhla.');

@@ -28,6 +28,8 @@ final class OverdueActionItemsTest extends TestCase
         $sqlite->exec('CREATE TABLE invoices (id INTEGER, supplier_id INTEGER, status TEXT, due_date TEXT,
             invoice_type TEXT, parent_invoice_id INTEGER, amount_to_pay REAL, paid_total REAL)');
         $sqlite->exec('CREATE TABLE invoice_advance_deductions (supplier_id INTEGER, final_invoice_id INTEGER, advance_invoice_id INTEGER, amount REAL)');
+        $sqlite->exec('CREATE TABLE invoice_items (id INTEGER, invoice_id INTEGER, advance_invoice_id INTEGER, vat_rate_id INTEGER,
+            total_without_vat REAL, total_vat REAL, total_with_vat REAL, item_kind TEXT)');
         $insert = $sqlite->prepare("INSERT INTO invoices VALUES (?, ?, ?, ?, 'invoice', NULL, 100, ?)");
         foreach ([-1, 0, 1] as $offset) {
             $insert->execute([$offset + 2, 7, 'issued', date('Y-m-d', strtotime("$offset days")), 0]);

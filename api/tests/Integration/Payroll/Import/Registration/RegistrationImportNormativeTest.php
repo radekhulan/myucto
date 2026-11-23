@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportLookup;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
@@ -44,7 +43,7 @@ final class RegistrationImportNormativeTest extends TestCase
         if (!is_file(dirname(__DIR__, 6) . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje - test vyžaduje DB.');
         }
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $this->container->get(Connection::class);
         $this->imports = $this->container->get(RegistrationImportService::class);
         $this->lookup = $this->container->get(RegistrationImportLookup::class);
@@ -182,6 +181,36 @@ final class RegistrationImportNormativeTest extends TestCase
             array_map('array_values', $rows),
             'Dřívější podmínky zůstávají, změna platí od 1. 9. jako nová verze.',
         );
+    }
+
+    public function testRegistrationChangeKeepsHourlyRemunerationInNewTerms(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1);
+        $a1 = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $birthNumber]))];
+        $employmentId = (int) $this->apply($a1, [$this->previewKey($a1)])['results'][0]['employment_id'];
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms SET remuneration_type = 'hourly', hourly_rate_minor = 20000, remuneration_basis_kind = 'wage_statement',
+                    remuneration_basis = 'Syntetický výměr', monthly_gross_minor = NULL
+              WHERE supplier_id = ? AND employment_id = ?",
+        )->execute([$this->supplierId, $employmentId]);
+
+        $a3 = [$this->file('a3.xml', RegistrationXmlFixtures::regzecA3($birthNumber, '2026-09-15', [
+            'place' => 'Brno', 'municode' => '582786', 'insurer' => null,
+        ]))];
+        $result = $this->apply($a3, [$this->previewKey($a3)])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        $rows = $this->rows(
+            'SELECT remuneration_type, hourly_rate_minor, remuneration_basis, monthly_gross_minor
+               FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ? ORDER BY effective_from',
+            [$this->supplierId, $employmentId],
+        );
+        self::assertCount(2, $rows);
+        foreach ($rows as $row) {
+            self::assertSame('hourly', $row['remuneration_type']);
+            self::assertSame(20000, (int) $row['hourly_rate_minor']);
+            self::assertSame('Syntetický výměr', $row['remuneration_basis']);
+            self::assertNull($row['monthly_gross_minor']);
+        }
     }
 
     /** IMP-04: přihláška v minulosti + nenastoupení téže osoby v jedné dávce skončí jako nenastoupený vztah. */

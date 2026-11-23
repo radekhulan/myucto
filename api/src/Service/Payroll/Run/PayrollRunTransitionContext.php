@@ -39,6 +39,17 @@ final readonly class PayrollRunTransitionContext
          * s nenulovým počtem by revizi uzavřelo bez nich.
          */
         public int $staleSourceCount = 0,
+        /*
+         * Má běh schválenou revizi? Zrušení takového běhu (opravné revize nad
+         * schváleným, zaúčtovaným či uzavřeným během) ruší schválený základ
+         * a vyžaduje důvod stejně jako vyžádání opravy.
+         */
+        public bool $hasApprovedRevision = false,
+        /*
+         * Stav, ze kterého účetní vyžádala opravu (poslední událost
+         * `request_correction`). Vzetí žádosti zpět vrací běh přesně sem.
+         */
+        public ?PayrollRunStatus $correctionRequestedFrom = null,
     ) {
         if ($actorUserId <= 0) {
             throw new \InvalidArgumentException('Uživatel přechodu musí být platný.');

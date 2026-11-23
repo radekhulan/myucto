@@ -14,6 +14,8 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +30,7 @@ use Slim\Psr7\Response as Psr7Response;
 #[Group('integration')]
 final class ProductAccountCopyTest extends TestCase
 {
+    use IsolatedSupplierTrait;
     private Connection $db;
     private BulkReissueAction $bulk;
     private CancelInvoiceAction $cancel;
@@ -38,6 +41,8 @@ final class ProductAccountCopyTest extends TestCase
     private int $userId = 0;
     private int $clientId = 0;
     private int $vatRateId = 0;
+    private int $currencyId = 0;
+    private int $baselineCurrencyId = 0;
     /** @var list<int> */
     private array $invoiceIds = [];
     /** @var list<array{0:int,1:int}> */
@@ -52,36 +57,47 @@ final class ProductAccountCopyTest extends TestCase
 
     protected function setUp(): void
     {
-        if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
-        }
-        try {
-            $container = Bootstrap::buildContainer();
-            $this->db = $container->get(Connection::class);
-            $this->bulk = $container->get(BulkReissueAction::class);
-            $this->cancel = $container->get(CancelInvoiceAction::class);
-            $this->invoices = $container->get(InvoiceRepository::class);
-            $this->assignments = $container->get(DimensionAssignmentRepository::class);
-            $this->templates = $container->get(RecurringTemplateRepository::class);
-            $this->generator = $container->get(RecurringInvoiceGenerator::class);
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
-        }
+        $container = Bootstrap::buildContainer();
+        $this->db = $container->get(Connection::class);
+        $this->bulk = $container->get(BulkReissueAction::class);
+        $this->cancel = $container->get(CancelInvoiceAction::class);
+        $this->invoices = $container->get(InvoiceRepository::class);
+        $this->assignments = $container->get(DimensionAssignmentRepository::class);
+        $this->templates = $container->get(RecurringTemplateRepository::class);
+        $this->generator = $container->get(RecurringInvoiceGenerator::class);
         $pdo = $this->db->pdo();
-        $row = $pdo->query(
-            "SELECT c.supplier_id, c.id AS client_id
-               FROM clients c
-               JOIN supplier s ON s.id = c.supplier_id AND s.accounting_mode = 'double_entry'
-              ORDER BY c.id LIMIT 1"
-        )->fetch(PDO::FETCH_ASSOC) ?: [];
-        $this->supplierId = (int) ($row['supplier_id'] ?? 0);
-        $this->clientId = (int) ($row['client_id'] ?? 0);
-        $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $this->vatRateId = (int) ($pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $hasAccount = $pdo->prepare("SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '604' AND is_active = 1");
-        $hasAccount->execute([$this->supplierId]);
-        if ($this->supplierId === 0 || $this->userId === 0 || $this->vatRateId === 0 || $hasAccount->fetchColumn() === false) {
-            $this->markTestSkipped('Chybí podvojná firma s klientem, uživatel, sazba DPH nebo účet 604.');
+        $source = $pdo->query('SELECT id, default_currency_id FROM supplier ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        $sourceId = (int) ($source['id'] ?? 0);
+        $this->baselineCurrencyId = (int) ($source['default_currency_id'] ?? 0);
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $this->userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $this->vatRateId = (int) $pdo->query('SELECT MIN(id) FROM vat_rates')->fetchColumn();
+        self::assertGreaterThan(0, $sourceId);
+        self::assertGreaterThan(0, $this->baselineCurrencyId);
+        self::assertGreaterThan(0, $countryId);
+        self::assertGreaterThan(0, $this->userId);
+        self::assertGreaterThan(0, $this->vatRateId);
+        $pdo->beginTransaction();
+        try {
+            $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceId);
+            $pdo->prepare("UPDATE supplier SET company_name = 'Syntetická firma kopie účtů', display_name = 'Syntetická firma kopie účtů', accounting_mode = 'double_entry', stock_enabled = 1 WHERE id = ?")
+                ->execute([$this->supplierId]);
+            $this->setVatPayerAt($pdo, $this->supplierId, '1900-01-01', true);
+            $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_500')")
+                ->execute([$this->supplierId]);
+            $pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'CZK', 'CZK', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)")
+                ->execute([$this->supplierId]);
+            $this->currencyId = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$this->currencyId, $this->supplierId]);
+            $pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, main_email, is_customer) VALUES (?, 'Syntetický odběratel kopie účtů', 'Testovací 1', 'Praha', '11000', ?, ?, 'account-copy@example.test', 1)")
+                ->execute([$this->supplierId, $countryId, $this->currencyId]);
+            $this->clientId = (int) $pdo->lastInsertId();
+            $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $this->supplierId = 0;
+            throw $error;
         }
     }
 
@@ -106,6 +122,13 @@ final class ProductAccountCopyTest extends TestCase
         }
         if ($this->productId > 0) {
             $pdo->prepare('DELETE FROM stock_items WHERE id = ?')->execute([$this->productId]);
+        }
+        if ($this->supplierId > 0) {
+            $pdo->prepare('DELETE FROM clients WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $pdo->prepare('DELETE FROM accounting_account_definition_history WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$this->baselineCurrencyId, $this->supplierId]);
+            $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
         }
     }
 
@@ -141,7 +164,7 @@ final class ProductAccountCopyTest extends TestCase
     public function testRecurringTemplateCarriesAccountStockLinkAndDimensions(): void
     {
         [$typeId, $valueId] = $this->dimensionValue();
-        $currency = (int) $this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $currency = $this->currencyId;
         $today = date('Y-m-d');
         $tplId = $this->templates->create([
             'supplier_id' => $this->supplierId, 'client_id' => $this->clientId, 'project_id' => null,
@@ -193,7 +216,7 @@ final class ProductAccountCopyTest extends TestCase
     private function issuedInvoice(): int
     {
         $pdo = $this->db->pdo();
-        $currency = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $currency = $this->currencyId;
         $issue = date('Y-m-d');
         $pdo->prepare(
             'INSERT INTO invoices

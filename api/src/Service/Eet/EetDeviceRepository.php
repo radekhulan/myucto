@@ -52,7 +52,7 @@ final class EetDeviceRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM eet_devices d
                JOIN eet_units u ON u.supplier_id = d.supplier_id AND u.id = d.unit_id
-              WHERE d.supplier_id = ? AND d.active = 1
+              WHERE d.supplier_id = ? AND d.active = 1 AND u.unit_number IS NOT NULL
                 AND u.valid_from <= ? AND (u.valid_to IS NULL OR u.valid_to >= ?)'
         );
         $stmt->execute([$supplierId, $date, $date]);
@@ -134,10 +134,17 @@ final class EetDeviceRepository
         if ($unitId === null) {
             throw EetException::validation('Vyberte evidenční jednotku zařízení.', ['field' => 'unit_id']);
         }
-        $unit = $this->db->pdo()->prepare('SELECT id FROM eet_units WHERE supplier_id = ? AND id = ?');
+        $unit = $this->db->pdo()->prepare('SELECT unit_number FROM eet_units WHERE supplier_id = ? AND id = ?');
         $unit->execute([$supplierId, $unitId]);
-        if ($unit->fetchColumn() === false) {
+        $unitNumber = $unit->fetch(\PDO::FETCH_NUM);
+        if ($unitNumber === false) {
             throw EetException::validation('Vybraná jednotka EET ve firmě neexistuje.', ['field' => 'unit_id']);
+        }
+        if ($unitNumber[0] === null) {
+            throw EetException::validation(
+                'Vybraná jednotka ještě nemá číslo z DIS+. Oznamte ji v DIS+ a číslo doplňte u jednotky.',
+                ['field' => 'unit_id'],
+            );
         }
 
         $code = $pick('code');

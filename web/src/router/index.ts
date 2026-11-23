@@ -19,6 +19,8 @@ import { createWorkspaceRoutes } from './workspaceRoutes'
 import { workspaceShellRoutes } from './workspaceShellRoutes'
 import { switchSupplierForDeepLink } from './supplierDeepLink'
 import { isInstanceAdminRouteName } from '@/security/instanceAdminRoutePolicy'
+import { beginSsoRenewal, ssoRenewalDue, ssoRenewalPending } from '@/security/ssoRenewal'
+import { getWindowSupplierScope } from '@/workspace/supplierContext'
 import { payrollStartPeriodGuard } from './payrollStartPeriodGuard'
 import {
   canonicalDomainLoginHandoffPath,
@@ -36,6 +38,8 @@ declare module 'vue-router' {
     access?: AccessLevel
     staffOnly?: boolean
     superadminOnly?: boolean
+    /** Na ukázkové instanci (demo) se stránka nesmí otevřít vůbec, ani superadminovi. */
+    demoHidden?: boolean
     instanceAdminOnly?: boolean
     adminPlusOnly?: boolean
     companyAdminOnly?: boolean
@@ -104,19 +108,21 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[], AccessLevel?]> = {
+  'admin-work-report-billing-templates': ['price_list'],
   'admin-price-list': ['price_list'], 'admin-price-list-view': ['price_list'],
   'admin-price-list-new': ['price_list', 'write'], 'admin-price-list-edit': ['price_list', 'write'],
-  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
+  home: ['dashboard'], 'workspace-new-tab': ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
   'portal-purchase-invoice-submissions': ['documents.submit'], 'portal-company-settings': [OPERATIONAL_SETTINGS_KEYS, 'write'],
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],
   invoices: ['invoices'], 'invoice-new': ['invoices.create', 'write'], 'invoice-detail': ['invoices'], 'invoice-edit': ['invoices', 'write'],
+  'sales-quotes': ['sales_quotes'], 'sales-quote-new': ['sales_quotes.write', 'write'], 'sales-quote-detail': ['sales_quotes'],
   // AI import vydané faktury jede na invoices.create (write) — stejný klíč kontroluje BE AiExtractPdfIssuedAction.
   'invoice-ai-import': ['invoices.create', 'write'],
   // Export/Import vydaných (reorg UX 2026-07) — nav pod Prodej, viz AppLayout.vue.
   'invoices-export': ['invoices'], 'invoices-import': ['invoices'],
   'purchase-invoices': ['purchase_invoices'], 'purchase-invoices-payment-orders': ['purchase_invoices.payment_orders'],
-  'purchase-invoice-submissions': ['documents.inbox'],
+  'purchase-invoice-submissions': ['documents.inbox'], 'purchase-invoices-email': ['documents.inbox'],
   // Schvalovací schránka (F6): oprávnění lze přidělit i roli readonly, bez zápisu přijatých faktur.
   'purchase-approvals': ['purchase_invoices.approve'],
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],
@@ -126,6 +132,8 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'imports-overview': ['utilities.import', 'write'],
   'imports-myucto': ['utilities.import', 'write'],
   'imports-money-s3': ['utilities.import', 'write'],
+  // Kontrola dat po převodu — stejné právo jako BE MigrationDataCheckAction (accounting, čtení).
+  'imports-checks': ['accounting'], 'imports-check-detail': ['accounting'],
   'imports-pohoda': ['utilities.import', 'write'],
   'imports-pamica': ['utilities.import', 'write'],
   'imports-premier': ['utilities.import', 'write'],
@@ -134,7 +142,9 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // AI import má samostatné oprávnění (oddělené od skenování schránek).
   // Firemní povolení a připravenost AI pro klienty navíc ověřuje importní stránka i backend.
   'purchase-invoice-ai-import': ['purchase_invoices.extract', 'write'],
-  'purchase-invoices-renumber': ['purchase_invoices', 'write'],
+  // Záložky agend (přijaté, pokladna, OP/OZ, interní doklady): stačí zápis kterékoli
+  // z nich, stránka pak ukáže jen záložky s právem — stejným, jaké chce server.
+  'purchase-invoices-renumber': [['purchase_invoices', 'cash.document.write', 'other_items', 'accounting.journal.write'], 'write'],
   documents: ['documents'], 'document-detail': ['documents'], 'document-requests': ['documents.requests'],
   'other-items': ['other_items'], 'other-item-new': ['other_items', 'write'], 'other-item-detail': ['other_items'], 'other-item-edit': ['other_items', 'write'],
   'scan-attach': ['documents.upload', 'write'],
@@ -143,6 +153,9 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // Interní doklady: čtení jako deník, koncept jako ruční zápis (zaúčtování hlídá server právem accounting.journal.post).
   'accounting-internal-documents': ['accounting'], 'accounting-internal-document-detail': ['accounting'],
   'accounting-internal-document-new': ['accounting.journal.write', 'write'], 'accounting-internal-document-edit': ['accounting.journal.write', 'write'],
+  'accounting-accruals': ['accounting.accruals'], 'accounting-accrual-detail': ['accounting.accruals'],
+  'accounting-accrual-new': ['accounting.accruals.write', 'write'], 'accounting-accrual-edit': ['accounting.accruals.write', 'write'],
+  'accounting-accruals-takeover': ['accounting.accruals.write', 'write'],
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
@@ -150,11 +163,14 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // samotné spuštění hlídá server právem `accounting.journal.post` jako hromadné
   // zaúčtování z výběru — jedna operace, jedno právo.
   'accounting-posting-backfill': ['accounting'],
+  'accounting-journal-rebook': ['accounting'],
   'accounting-setup-assistant': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
+  'payroll-month-guide': ['payroll'],
   'payroll-payments': ['payroll.payments'],
   'payroll-posting-reconciliation': ['payroll.post'],
+  'payroll-posting-detail': ['payroll.reports'],
   'payroll-people': ['payroll'],
   // Adresa karty člověka jen přesměruje na seznam; práva musí být stejná, jinak
   // by odkaz končil na homepage dřív, než se přesměrování vůbec provede.
@@ -188,7 +204,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'accounting-dimension-profit': ['accounting'], 'company-dimensions': ['accounting'],
   'accounting-joint-allocations': ['accounting'],
   'accounting-nonprofit-tax': ['accounting'], 'accounting-nonprofit-dppo': ['accounting'], 'accounting-nonprofit-funding': ['accounting'], 'accounting-nonprofit-capital': ['accounting'],
-  'accounting-nonprofit-membership': ['accounting'],
+  'accounting-nonprofit-membership': ['accounting'], 'accounting-nonprofit-member-detail': ['accounting'],
   'accounting-statement-mapping': ['accounting'],
   'accounting-document-completeness': ['accounting'],
   'accounting-balance-inventory': ['accounting'],
@@ -227,7 +243,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'eet-records': ['eet', 'read'], 'eet-record-detail': ['eet', 'read'],
   // Kreditní karty čte RoutePermissionMap jako bankovní data (`bank`).
   'credit-cards': ['bank'], 'credit-card-detail': ['bank'],
-  'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
+  'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-vat-by-dimension': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': [['reports', 'reports.submissions']], 'reports-submissions-kh-evidence': ['reports'],'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
   'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'mcp-oauth-continue': ['profile'], 'profile-shortcuts': ['profile', 'write'],
 }
@@ -235,7 +251,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
   'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
-  'admin-isds-gateway', 'admin-instance',
+  'admin-isds-gateway', 'admin-access-credentials', 'admin-instance',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
@@ -260,6 +276,7 @@ const companyAdminRouteNames = new Set([] as string[])
 const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback', 'portal-mcp'])
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
+  'sales-quotes', 'sales-quote-new', 'sales-quote-detail',
   // GoPay vede podvojné účetnictví i daňová evidence (requiresAccountingMode), licence platí stejně.
   'gopay',
   // Majetek je dostupný i v daňové evidenci (requiresAccountingMode), licence platí stejně.
@@ -479,6 +496,8 @@ export async function authorizationGuard(
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
+      // Prohlížeč už odchází k tichému obnovení přihlášení (api/client.ts).
+      if (ssoRenewalPending()) return false
       if (auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()) {
         return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
       }
@@ -501,6 +520,17 @@ export async function authorizationGuard(
       return auth.domainContext?.locked
         ? { name: 'login' }
         : { name: 'login', query: { return_to: to.fullPath } }
+    }
+  }
+
+  // Sezení z Entra ID brzy vyprší: obnoví se při přechodu na jinou stránku, ne
+  // až uprostřed rozpracovaného formuláře. Jen v hlavním okně, ne v panelech.
+  if (requiresAuth && auth.isAuthenticated && !auth.lockedSession && !auth.domainContext?.locked
+      && options.allowGlobalSideEffects !== false && getWindowSupplierScope() === null && ssoRenewalDue()) {
+    const renewal = beginSsoRenewal(to.fullPath)
+    if (renewal.action === 'renew') {
+      window.location.assign(renewal.url)
+      return false
     }
   }
 
@@ -565,6 +595,8 @@ export async function authorizationGuard(
   }
 
   if (auth.isClientRole && to.matched.some(r => r.meta.staffOnly)) return denyFallback(to.name, auth)
+
+  if (auth.isDemo && to.matched.some((r) => r.meta.demoHidden)) return denyFallback(to.name, auth)
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {

@@ -34,6 +34,24 @@ export function paneForCtrlClick(
   return panesToRight.find(pane => !pane.fullPath)?.id ?? panesToRight[0]?.id ?? null
 }
 
+export function prepareExternalAnchorNavigation(event: MouseEvent, origin = window.location.origin): boolean {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false
+  const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null
+  if (!anchor || anchor.hasAttribute('target') || anchor.hasAttribute('download')) return false
+
+  let url: URL
+  try {
+    url = new URL(anchor.href, origin)
+  } catch {
+    return false
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.origin === origin) return false
+
+  anchor.target = '_blank'
+  anchor.relList.add('noopener')
+  return true
+}
+
 export function internalRouteFromAnchor(anchor: HTMLAnchorElement, origin = window.location.origin): string | null {
   if (anchor.hasAttribute('download')) return null
   if (anchor.target && anchor.target !== '_self') return null

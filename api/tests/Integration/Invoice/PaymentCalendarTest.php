@@ -352,7 +352,7 @@ final class PaymentCalendarTest extends TestCase
             // Vystavení po validaci pokračuje prací s vlastní transakcí, kterou uvnitř
             // testovací transakce dokončit nelze. Validace už proběhla — a právě tu testy
             // ověřují.
-            if (str_contains($e->getMessage(), 'Transaction characteristics')
+            if ((int) ($e->errorInfo[1] ?? 0) === 1568
                 || str_contains($e->getMessage(), 'already an active transaction')) {
                 return ['status' => 200, 'code' => null];
             }

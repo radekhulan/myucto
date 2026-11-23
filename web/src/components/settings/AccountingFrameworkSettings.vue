@@ -89,14 +89,6 @@ async function save() {
         </RouterLink>
       </div>
     </div>
-    <div v-if="framework === 'cz_504' || supplier.accounting_framework === 'cz_504'" class="mb-4 flex items-start gap-3 rounded-lg border-2 border-warning-500 bg-warning-50 p-4 text-warning-800" role="note" data-test="framework-testing-warning">
-      <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" /></svg>
-      <div>
-        <p class="font-semibold">{{ t('settings.accounting_framework.testing_warning_title') }}</p>
-        <p class="mt-1 text-sm">{{ t('settings.accounting_framework.testing_warning') }}</p>
-        <a href="https://github.com/radekhulan/myucto/issues/258" target="_blank" rel="noopener" class="mt-2 inline-block text-sm font-medium underline hover:text-warning-900" data-test="framework-testing-warning-link">{{ t('settings.accounting_framework.testing_warning_link') }}</a>
-      </div>
-    </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
       <label class="block min-w-0 text-xs font-medium text-neutral-700">
         {{ t('settings.accounting_framework.title') }}

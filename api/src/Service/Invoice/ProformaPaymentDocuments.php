@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Repository\AdvanceDeductionRepository;
+use MyInvoice\Service\SalesQuote\QuoteException;
 
 /**
  * Doklad, který má vzniknout po zaúčtování platby na zálohovou fakturu.
@@ -167,9 +168,19 @@ final class ProformaPaymentDocuments
         if ($becamePaid && $mode === self::MODE_FINAL_ON_FULL_PAYMENT) {
             // DUZP finálního dokladu = den přijetí platby, ne dnešek: daň z úplaty
             // musí spadnout do období, ve kterém úplata skutečně přišla.
-            $result['final_draft_id'] = $finalCreator->create($invoiceId, $userId, $documentDate);
-
-            return $result;
+            // Vyúčtování vzniká uvnitř zápisu úhrady, kdy bankovní ani pokladní zápis ještě
+            // neexistuje; kontrolu přijaté zálohy (AdvanceReceiptGuard) tu nejde použít.
+            try {
+                $result['final_draft_id'] = $finalCreator->create($invoiceId, $userId, $documentDate, requirePostedReceipt: false);
+                return $result;
+            } catch (QuoteException $e) {
+                if (!in_array($e->errorCode, ['quote_quantity_unavailable', 'quote_deposit_requires_offer', 'quote_has_pending_order'], true)) {
+                    throw $e;
+                }
+            } catch (ProformaWithoutVatRatesException) {
+                // Záloha převzatá bez sazeb DPH: konečnou fakturu vystaví uživatel ručně,
+                // zápis úhrady to nesmí shodit.
+            }
         }
 
         if ($taxDocCreator === null || $paymentId === null || $paymentId <= 0) {

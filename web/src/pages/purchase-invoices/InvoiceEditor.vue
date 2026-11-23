@@ -2,6 +2,7 @@
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, toRaw, onMounted, onBeforeUnmount, nextTick, watch, useId, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { useIsPhone } from '@/composables/useIsPhone'
 // RouterLink se používá i v Add Currency modalu — import už pokrývá
 import { useI18n } from 'vue-i18n'
 import {
@@ -20,7 +21,10 @@ import {
   type PurchaseVatAllocation,
   type AiPostingSuggestion,
   type PurchaseForceMode,
+  type PurchaseInvoiceBrief,
+  type PurchaseAdvanceDeductionLine,
 } from '@/api/purchaseInvoices'
+import AdvancePickerModal from '@/components/purchase/AdvancePickerModal.vue'
 import {
   portalPurchaseInvoiceSubmissionsApi,
   purchaseInvoiceSubmissionsApi,
@@ -35,12 +39,12 @@ import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
-import { allocationsHaveMixedDeduction, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
+import { allocationDeductionKey, allocationsHaveMixedDeduction, headerDeductionFromAllocations, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
 import { settingsApi } from '@/api/settings'
 import { usePaneDom } from '@/composables/usePaneDom'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney } from '@/composables/useFormat'
 import { evalMath } from '@/directives/vMath'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
@@ -51,33 +55,41 @@ import { rowKey } from '@/utils/rowKey'
 import { purchaseExpenseAccountOptions } from '@/utils/chartAccountOptions'
 import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
 import AccrualSuggestionHint from '@/components/accounting/AccrualSuggestionHint.vue'
+import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
+import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
+import { useEditorPosting } from '@/composables/useEditorPosting'
+import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import type { PostingRule } from '@/api/accounting'
 import { detectAccrualPeriod, type AccrualPeriod } from '@/utils/accrualPeriod'
 import { reverseChargeCodeForKind } from '@/utils/reverseChargeSupplyCode'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import PurchaseForceModeDialog from '@/components/purchase/PurchaseForceModeDialog.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { formControl, formInput } from '@/components/ui/formStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
 import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { appIsoDate } from '@/utils/date'
-import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
+import { useSidePreview } from '@/composables/useSidePreview'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
-import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
+import { isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, timeItemTotals, unitPriceForAmount, validateDurationInputs } from '@/utils/timeBilling'
 
 const route = useRoute()
 const router = useRouter()
@@ -400,30 +412,185 @@ watch(
   },
 )
 
+// Vyúčtování poskytnuté zálohy konečnou fakturou. U uloženého dokladu se vazba zakládá
+// a ruší hned (link-advance, stejně jako v detailu), u nového se pošle s uložením.
+// Záloha s DDKP se odečítá označenými odpočtovými řádky se základem a daní DDKP
+// („Doplnit odpočet zálohy z DDKP"), jinak by se DPH zálohy uplatnila podruhé.
+// Konečná faktura může vyúčtovat víc záloh téhož dodavatele; odpočtové řádky se vkládají
+// za každou zálohu zvlášť a nesou id své zálohy. Záloha bez DDKP se odečte v hlavičce.
+const linkedAdvances = ref<PurchaseInvoiceBrief[]>([])
+const advancePickerOpen = ref(false)
+const advanceBusy = ref(false)
+const advanceDeductionLines = ref<Record<number, PurchaseAdvanceDeductionLine[]>>({})
+const advanceLinkDisabledReason = computed(() =>
+  !form.value.vendor_id || !form.value.currency_id ? t('purchase_invoice.advance_deduction.pick_vendor') : null)
+let autoAddAdvanceDeduction = route.query.advance_deduction === '1'
+
+function advanceLabel(a: PurchaseInvoiceBrief): string {
+  return a.varsymbol || a.vendor_invoice_number || ('#' + a.id)
+}
+function hasAdvanceDeductionLine(advanceId: number): boolean {
+  return form.value.items.some(it => it.advance_purchase_invoice_id === advanceId)
+}
+function advanceHasDdkp(advanceId: number): boolean {
+  return (advanceDeductionLines.value[advanceId]?.length ?? 0) > 0
+}
+const advancesMissingDeduction = computed(() =>
+  linkedAdvances.value.filter(a => advanceHasDdkp(a.id) && !hasAdvanceDeductionLine(a.id)))
+
+watch(() => linkedAdvances.value.map(a => a.id).join(','), async () => {
+  const ids = linkedAdvances.value.map(a => a.id)
+  const known = advanceDeductionLines.value
+  const next: Record<number, PurchaseAdvanceDeductionLine[]> = {}
+  for (const id of ids) if (known[id]) next[id] = known[id]
+  const missing = ids.filter(id => !next[id])
+  try {
+    const loaded = await Promise.all(missing.map(id => purchaseInvoicesApi.advanceDeductionLines(id)))
+    missing.forEach((id, i) => { next[id] = loaded[i] })
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+  advanceDeductionLines.value = next
+  if (autoAddAdvanceDeduction && ids.length > 0) addAllAdvanceDeductionLines()
+  if (ids.length > 0) autoAddAdvanceDeduction = false
+})
+
+// Nový doklad: jiný dodavatel, měna nebo druh dokladu vybrané zálohy ruší (vazba by neprošla).
+watch(() => [form.value.vendor_id, form.value.currency_id, form.value.document_kind] as const, () => {
+  if (invoiceId.value === null) linkedAdvances.value = []
+})
+
+async function loadAdvanceCandidates(): Promise<PurchaseInvoiceBrief[]> {
+  if (invoiceId.value !== null) return purchaseInvoicesApi.advanceCandidates(invoiceId.value)
+  if (!form.value.vendor_id || !form.value.currency_id) return []
+  const candidates = await purchaseInvoicesApi.newInvoiceAdvanceCandidates({
+    vendor_id: form.value.vendor_id,
+    currency_id: form.value.currency_id,
+    total: totals.value.with_vat,
+  })
+  const picked = new Set(linkedAdvances.value.map(a => a.id))
+  return candidates.filter(c => !picked.has(c.id))
+}
+
+function applyLinkedAdvances(inv: PurchaseInvoice) {
+  linkedAdvances.value = inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
+  form.value.advance_paid_amount = inv.advance_paid_amount
+}
+
+async function pickAdvance(advanceId: number, candidate: PurchaseInvoiceBrief) {
+  if (invoiceId.value === null) {
+    if (!linkedAdvances.value.some(a => a.id === advanceId)) linkedAdvances.value = [...linkedAdvances.value, candidate]
+    advancePickerOpen.value = false
+    return
+  }
+  advanceBusy.value = true
+  try {
+    const append = linkedAdvances.value.length > 0
+    const inv = await purchaseInvoicesApi.linkAdvance(invoiceId.value, advanceId, append ? { append: true } : undefined)
+    applyLinkedAdvances(inv)
+    advancePickerOpen.value = false
+    toast.success(t('purchase_invoice.advance_link.linked'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    advanceBusy.value = false
+  }
+}
+
+async function unlinkAdvanceInEditor(advance: PurchaseInvoiceBrief) {
+  if (advanceBusy.value) return
+  if (!confirm(t('purchase_invoice.advance_link.unlink_one_confirm', { advance: advanceLabel(advance) }))) return
+  if (invoiceId.value === null) {
+    linkedAdvances.value = linkedAdvances.value.filter(a => a.id !== advance.id)
+    return
+  }
+  advanceBusy.value = true
+  try {
+    const inv = await purchaseInvoicesApi.unlinkAdvance(invoiceId.value, advance.id)
+    applyLinkedAdvances(inv)
+    toast.success(t('purchase_invoice.advance_link.unlinked_one'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    advanceBusy.value = false
+  }
+}
+
+function addAllAdvanceDeductionLines() {
+  for (const advance of advancesMissingDeduction.value) addAdvanceDeductionLines(advance)
+}
+
+// Odpočtový řádek za každý DDKP a sazbu: základ a daň DDKP se znaménkem minus. Hlavička
+// tuto zálohu pak neodečítá (server Uhrazenou zálohu u odečtené zálohy nepočítá); zálohy
+// bez DDKP v hlavičce zůstávají.
+function addAdvanceDeductionLines(advance: PurchaseInvoiceBrief) {
+  const lines = advanceDeductionLines.value[advance.id] ?? []
+  if (lines.length === 0 || hasAdvanceDeductionLine(advance.id)) return
+  const unit = units.value.find(u => u.is_default)?.code || 'ks'
+  for (const line of lines) {
+    form.value.items.push({
+      description: line.opening_balance
+        ? t('purchase_invoice.advance_deduction.line_description_opening', { number: advanceLabel(advance) })
+        : t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
+      quantity: 1,
+      duration_minutes: null,
+      unit,
+      unit_price_without_vat: form.value.prices_include_vat ? line.gross : line.base,
+      vat_rate_id: line.vat_rate_id,
+      order_index: form.value.items.length,
+      expense_kind: null,
+      expense_account_code: null,
+      vat_classification_code: line.vat_classification_code,
+      counter_account_code: null,
+      posting_rule_key: null,
+      accrual_from: null,
+      accrual_to: null,
+      stock_item_id: null,
+      advance_purchase_invoice_id: advance.id,
+    })
+  }
+  const headerOnly = linkedAdvances.value.some(a => !hasAdvanceDeductionLine(a.id))
+  const current = Number(form.value.advance_paid_amount) || 0
+  form.value.advance_paid_amount = headerOnly
+    ? Math.max(0, Math.round((current - Number(advance.total_with_vat)) * 100) / 100)
+    : 0
+}
+
 // PDF state
 const existingPdf = ref<{ path: string; hash: string; size: number; name: string; uploadedAt: string } | null>(null)
-// Výchozí stav: zavřeno. FR5 (audit 2026-08) — u konceptu z AI extrakce (source_format
-// mimo isdoc/isdocx) ho `populate()` přepne na otevřeno, ať má uživatel originál rovnou
-// na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
-const pdfPreviewOpen = ref(false)
-const pdfPreviewWide = useSidePreviewWide()
-const pdfSideBySide = computed(() => !!existingPdf.value && !!invoiceId.value && pdfPreviewOpen.value && pdfPreviewWide.value)
+// Výchozí stav: zavřeno, sdílená volba s detailem dokladu. FR5 (audit 2026-08) — u konceptu
+// z AI extrakce (source_format mimo isdoc/isdocx) ho `populate()` otevře, ať má uživatel
+// originál rovnou na očích při kontrole vytěžených dat (viz komentář u `structuredSource`
+// v populate()). Stejně tak předaný doklad z fronty; uloženou volbu to nemění.
+const pdfPreview = useSidePreview('purchase_invoices')
+const pdfPreviewOpen = pdfPreview.open
 const pdfInlineUrl = computed(() => invoiceId.value
   ? `${purchaseInvoicesApi.pdfUrl(invoiceId.value, true)}#view=FitH`
   : '')
 const pdfUploading = ref(false)
 const handoffUploading = ref(false)
 const dropzoneVisible = ref(true)
+// Telefon: místo plochy „přetáhněte sem" dvě velká tlačítka; výběr souboru jde přes
+// skrytý input dropzóny, aby zůstala stejná validace i ořez fotek.
+const isPhone = useIsPhone()
+const newPdfDropzone = ref<InstanceType<typeof PdfDropzone> | null>(null)
+const replacePdfDropzone = ref<InstanceType<typeof PdfDropzone> | null>(null)
+function pickDropzoneFile(dropzone: InstanceType<typeof PdfDropzone> | null) {
+  if (pdfUploading.value) return
+  const root = dropzone?.$el as HTMLElement | undefined
+  root?.querySelector<HTMLInputElement>('input[type="file"]')?.click()
+}
 
 // Náhled PDF/obrázku připraveného k nahrání u NOVÉ faktury (ještě není na serveru).
 // Soubor držíme jen v paměti prohlížeče (File), náhled tvoříme přes blob: URL —
 // žádný server round-trip není potřeba. URL musíme po výměně/zrušení uvolnit (revoke),
 // jinak by blob zůstal viset v paměti.
 const pendingPdfUrl = ref<string | null>(null)
-const pendingPdfPreviewOpen = ref(false)
 const pendingPdfFile = ref<File | null>(null)
+// Předání účetní řídí právo `documents.submit` (klient i interní role). Superadmin ho má
+// implicitně, ale doklady zakládá sám, nabídka předání by mu jen překážela.
 const canSubmitDocuments = computed(() =>
-  auth.isClientRole && auth.canWrite('documents.submit'),
+  !auth.isSuperadmin && auth.canWrite('documents.submit'),
 )
 const canHandoffPendingDocument = computed(() =>
   canSubmitDocuments.value && pendingPdfFile.value !== null,
@@ -433,12 +600,29 @@ function setPendingPdfUrl(file: File | null) {
     URL.revokeObjectURL(pendingPdfUrl.value)
     pendingPdfUrl.value = null
   }
-  pendingPdfPreviewOpen.value = false
   if (file) pendingPdfUrl.value = URL.createObjectURL(file)
 }
-// Pro náhled obrázku (JPG/PNG/…) použijeme <img>, pro PDF <iframe> s PDF viewerem.
 const pendingPdfIsImage = computed(() => !!pendingPdfFile.value?.type.startsWith('image/'))
 onBeforeUnmount(() => setPendingPdfUrl(null))
+
+// Co náhled ukazuje: předaný doklad z fronty, uložený originál, nebo soubor v paměti.
+const originalPreview = computed<{ src: string; name: string; docType: string } | null>(() => {
+  const handedOver = submission.value
+  if (handedOver && submissionCanPreviewInline.value) {
+    return {
+      src: purchaseInvoiceSubmissionsApi.previewUrl(handedOver.id),
+      name: handedOver.original_name,
+      docType: handedOver.doc_type ?? 'pdf',
+    }
+  }
+  if (existingPdf.value && invoiceId.value) {
+    return { src: pdfInlineUrl.value, name: existingPdf.value.name, docType: 'pdf' }
+  }
+  if (pendingPdfUrl.value && pendingPdfFile.value) {
+    return { src: pendingPdfUrl.value, name: pendingPdfFile.value.name, docType: pendingPdfIsImage.value ? 'image' : 'pdf' }
+  }
+  return null
+})
 
 // Diagnostické varování z AI extrakce (např. mezisoučty čteny jako items).
 // Backend sets via PurchaseInvoiceRepository::setExtractionWarning po sanity-check.
@@ -529,6 +713,19 @@ function onVendorVatPayerToggle() {
 
 // === Quick "New vendor" modal — vytvoří klienta s is_vendor=true, is_customer=false ===
 const vendorModalOpen = ref(false)
+const vendorPickerRef = ref<InstanceType<typeof VendorPicker> | null>(null)
+
+// Karta dodavatele aktualizovaná z ARES/VIES: obnov popisek výběru a plátcovství
+// na dokladu stejně jako při výběru dodavatele (neplátce ⇒ bez odpočtu).
+function onVendorRegistryUpdated(client: Client, fields: string[]) {
+  vendorPickerRef.value?.upsert(client)
+  if (form.value.vendor_id !== client.id) return
+  windowVendor.value = { id: client.id, name: client.company_name }
+  if (fields.includes('is_vat_payer') && client.is_vat_payer !== undefined) {
+    applyVendorVatStatus(client.is_vat_payer, true)
+  }
+}
+
 async function onVendorCreated(client: Client) {
   form.value.vendor_id = client.id
   vendorModalOpen.value = false
@@ -616,6 +813,7 @@ async function loadSubmissionOrigin(): Promise<void> {
       return
     }
     submission.value = item
+    if (submissionCanPreviewInline.value) pdfPreview.openTemporarily()
     if (item.document_kind_hint && item.document_kind_hint !== 'other') {
       form.value.document_kind = item.document_kind_hint
     }
@@ -843,7 +1041,12 @@ const vatClaimPeriodLabel = computed(() => {
   return parsed.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ', { month: 'long', year: 'numeric' })
 })
 
+// Řada z číselníku pro interní číslo (jen doklad bez čísla). undefined = beze změny,
+// null = výchozí řada. Výběr se ukáže jen při víc řadách přijatých dokladů.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+
 function populate(inv: PurchaseInvoice) {
+  numberSeriesId.value = inv.varsymbol ? undefined : ((inv as { number_series_id?: number | null }).number_series_id ?? undefined)
   windowVendor.value = inv.vendor_id ? { id: inv.vendor_id, name: inv.vendor_company_name ?? '' } : null
   form.value.vendor_id = inv.vendor_id
   form.value.vendor_invoice_number = inv.vendor_invoice_number
@@ -887,7 +1090,12 @@ function populate(inv: PurchaseInvoice) {
   form.value.project_id = inv.project_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
   form.value.parent_purchase_invoice_id = inv.parent_purchase_invoice_id ?? null
-  form.value.items = inv.items.length > 0 ? inv.items : []
+  form.value.items = inv.items.map(it => ({
+    ...it,
+    expense_account_code: it.expense_account_code ?? null,
+    vat_classification_code: it.vat_classification_code ?? null,
+  }))
+  linkedAdvances.value = inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
   // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
   showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
   // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
@@ -906,6 +1114,7 @@ function populate(inv: PurchaseInvoice) {
     vatOverrides.value[String(o.rate)] = { base: o.base, vat: o.vat }
   }
   vatAllocations.value = (inv.vat_allocations ?? []).map(a => ({ ...a }))
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
   // Existující faktura: plátcovství čteme ze SNAPSHOTU dokladu (migrace 0133), který si
   // fakturu drží k datu plnění. ZÁMĚRNĚ NEvoláme online ARES/VIES lookup — ten se ptá na
   // dnešní stav a persistoval by ho na klienta, čímž by u historické faktury příznak
@@ -931,7 +1140,7 @@ function populate(inv: PurchaseInvoice) {
     // uživatel ho už jednou zkontroloval, nemá smysl mu náhled vnucovat při každém otevření.
     const structuredSource = inv.source_format === 'isdoc' || inv.source_format === 'isdocx'
     if (inv.status === 'draft' && !structuredSource) {
-      pdfPreviewOpen.value = true
+      pdfPreview.openTemporarily()
     }
   }
 }
@@ -984,6 +1193,30 @@ const itemsConflictWithHeader = computed(() => form.value.items.some(itemVatConf
 const headerDiffersFromRozpis = computed(() => headerDiffersFromAllocations(headerVat.value, vatAllocations.value))
 function itemDetailsFilled(it: PurchaseInvoiceItem): boolean {
   return (showItemAccount.value && !!it.expense_account_code) || itemClassDiffers(it) || itemVatConflict(it)
+    || (editorPosting.enabled.value && (!!it.counter_account_code || !!it.posting_rule_key))
+    || !!it.seller_item_code?.trim() || !!it.item_ean?.trim()
+}
+
+// ─── ZAÚČTOVÁNÍ UŽ PŘI ZADÁNÍ (předkontace a protiúčet řádku, náhled, Uložit a zaúčtovat) ───
+const editorPosting = useEditorPosting()
+const postingErrorToast = useAccountingPeriodToast()
+onMounted(() => { void editorPosting.load() })
+/** Závazek, který platí bez volby na řádku — nápověda v poli protiúčtu. */
+const defaultCounterAccount = computed(() =>
+  editorPosting.ruleAccount(derivedIsFixedAsset.value ? 'invoice.dhm.received' : 'invoice.services.received', 'credit') ?? '321')
+/** Předkontace řádku doplní účet nákladu, který řádek ještě nemá (server pak totéž). */
+function applyItemRule(it: PurchaseInvoiceItem, rule: PostingRule) {
+  if (!it.expense_account_code && rule.debit_account_code) it.expense_account_code = rule.debit_account_code
+}
+/** EAN s chybnou kontrolní číslicí server neuloží, ať to uživatel vidí hned. Stejný výpočet jako PohodaStock::ean. */
+function itemEanInvalid(it: PurchaseInvoiceItem): boolean {
+  const ean = (it.item_ean ?? '').trim()
+  if (ean === '') return false
+  if (!/^(\d{8}|\d{12,14})$/.test(ean)) return true
+  const parity = ean.length % 2
+  let sum = 0
+  for (let i = 0; i < ean.length - 1; i++) sum += Number(ean[i]) * (i % 2 === parity ? 3 : 1)
+  return (10 - (sum % 10)) % 10 !== Number(ean[ean.length - 1])
 }
 function toggleItemDetails(it: PurchaseInvoiceItem) {
   if (itemDetailsOpen.has(it)) itemDetailsOpen.delete(it)
@@ -1054,6 +1287,12 @@ function addItem(hideDropzone = true) {
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
     order_index: form.value.items.length,
     expense_kind: null,
+    // Výběry na řádku mají volbu s hodnotou null („Účet podle druhu nákladu", „Automaticky…");
+    // bez explicitního null by select zůstal prázdný.
+    expense_account_code: null,
+    vat_classification_code: null,
+    counter_account_code: null,
+    posting_rule_key: null,
     accrual_from: null,
     accrual_to: null,
     stock_item_id: null,
@@ -1087,7 +1326,7 @@ function itemVatRate(it: PurchaseInvoiceItem): number {
 function itemTotal(it: PurchaseInvoiceItem) {
   const amt = itemAmount(it)
   const rate = itemVatRate(it)
-  if (isPreciseTimeItem(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
+  if (isPreciseUnitPrice(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
   // Režim "ceny s DPH": unit_price_without_vat nese cenu S DPH (gross) → DPH shora.
   if (form.value.prices_include_vat) {
     const vat = round2(amt * rate / (100 + rate))
@@ -1111,13 +1350,13 @@ function setItemGross(it: PurchaseInvoiceItem, raw: string): void {
   if (qty === 0) return
   if (form.value.prices_include_vat) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    it.unit_price_without_vat = isTimeItem(it) ? round6(gross / qty) : round2(gross / qty)
+    it.unit_price_without_vat = isTimeItem(it) ? round6(gross / qty) : unitPriceForAmount(gross, qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u reverse-charge je sazba 0).
   const rate = itemVatRate(it)
   const net = gross / (1 + rate / 100)
-  it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : round2(net / qty)
+  it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : unitPriceForAmount(net, qty)
 }
 
 // Záhlaví sloupce jednotkové ceny — v režimu „ceny s DPH" je to cena včetně DPH.
@@ -1152,6 +1391,16 @@ const vatOverrides = ref<Record<string, { base: number; vat: number }>>({})
 const vatAllocations = ref<PurchaseVatAllocation[]>([])
 const hasVatAllocations = computed(() => vatAllocations.value.length > 0)
 const mixedAllocationDeduction = computed(() => allocationsHaveMixedDeduction(vatAllocations.value))
+// Jednotný nárok rozpisu se po změně v rozpisu propíše do nároku v Klasifikaci. Načtení
+// dokladu uloženou hlavičku nepřepisuje: výchozí stav je nárok rozpisu při načtení.
+let allocationDeductionBaseline: string | null = null
+watch(() => allocationDeductionKey(vatAllocations.value), () => {
+  const next = headerDeductionFromAllocations(vatAllocations.value, allocationDeductionBaseline, form.value.vendor_is_vat_payer)
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
+  if (!next) return
+  form.value.vat_deduction = next.vat_deduction
+  form.value.vat_deduction_percent = next.vat_deduction_percent
+})
 
 function accountExists(code: string): boolean {
   return accountingAccounts.value.some(a => a.is_active && a.account_code === code)
@@ -1520,12 +1769,43 @@ async function submit() {
     return
   }
   try {
-    const payload: PurchaseInvoicePayload = {
+    const payload = buildPayload()
+    const itemDimsSnapshot = docDims.snapshot(form.value.items)
+    let inv: PurchaseInvoice
+    if (isEdit.value && invoiceId.value) {
+      // Force flag z URL query (?force=1) — pro admin edit received/booked faktur
+      const force = String(route.query.force ?? '') === '1'
+      inv = await purchaseInvoicesApi.update(invoiceId.value, payload, force, forceMode.value ?? undefined)
+    } else {
+      inv = await purchaseInvoicesApi.create(payload)
+    }
+    await docDims.save(inv.id, itemDimsSnapshot)
+    // Upload pending PDF pokud byl drop před save
+    if (pendingPdfFile.value && !submissionId.value) {
+      await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
+      pendingPdfFile.value = null
+      setPendingPdfUrl(null)
+    }
+    const posted = postAfterSave ? await postSavedInvoice(inv) : false
+    if (!posted) toast.success(isEdit.value ? t('common.saved') : t('common.created'))
+    afterSaveWarnings(inv)
+    router.push(`/purchase-invoices/${inv.id}`)
+  } catch (e: any) {
+    await handleSubmitError(e)
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** Tělo dokladu pro uložení i pro náhled zápisu (náhled ho uloží v odvolané transakci). */
+function buildPayload(): PurchaseInvoicePayload {
+  return {
       ...(submission.value ? { submission_id: submission.value.id } : {}),
       ...(allowDuplicateNumber ? { allow_duplicate_number: true } : {}),
       vendor_id: form.value.vendor_id!,
       vendor_invoice_number: form.value.vendor_invoice_number,
       varsymbol: form.value.varsymbol || null,
+      number_series_id: form.value.varsymbol ? undefined : numberSeriesId.value,
       document_kind: form.value.document_kind,
       issue_date: form.value.issue_date,
       tax_date: form.value.tax_date || null,
@@ -1581,6 +1861,12 @@ async function submit() {
         form.value.document_kind === 'credit_note' || form.value.document_kind === 'tax_document'
           ? form.value.parent_purchase_invoice_id
           : null,
+      // Zálohy vybrané u nového dokladu; uložený doklad má vazby už založené (link-advance).
+      ...(invoiceId.value === null && form.value.document_kind === 'invoice' && linkedAdvances.value.length > 0
+        ? (linkedAdvances.value.length === 1
+            ? { advance_purchase_invoice_id: linkedAdvances.value[0].id }
+            : { advance_purchase_invoice_ids: linkedAdvances.value.map(a => a.id) })
+        : {}),
       // Ruční rekapitulace DPH dle dokladu (§ 73) — [] vyčistí případný starý override.
       vat_overrides: buildVatOverridesPayload(),
       vat_allocations: vatAllocations.value.map((a, i) => ({ ...a, order_index: i })),
@@ -1595,28 +1881,73 @@ async function submit() {
         vat_classification_code: it.vat_classification_code,
         expense_kind: it.expense_kind ?? null,
         expense_account_code: it.expense_account_code?.trim() || null,
+        counter_account_code: it.counter_account_code?.trim() || null,
+        posting_rule_key: it.posting_rule_key || null,
         accrual_from: it.accrual_from ?? null,
         accrual_to: it.accrual_to ?? null,
         stock_item_id: it.stock_item_id ?? null,
+        seller_item_code: it.seller_item_code ?? null,
+        item_ean: it.item_ean ?? null,
+        intrastat_cn8_code: it.intrastat_cn8_code ?? null,
+        intrastat_country_of_origin: it.intrastat_country_of_origin ?? null,
+        advance_purchase_invoice_id: it.advance_purchase_invoice_id ?? null,
       })),
     }
-    const itemDimsSnapshot = docDims.snapshot(form.value.items)
-    let inv: PurchaseInvoice
-    if (isEdit.value && invoiceId.value) {
-      // Force flag z URL query (?force=1) — pro admin edit received/booked faktur
-      const force = String(route.query.force ?? '') === '1'
-      inv = await purchaseInvoicesApi.update(invoiceId.value, payload, force, forceMode.value ?? undefined)
-    } else {
-      inv = await purchaseInvoicesApi.create(payload)
-    }
-    await docDims.save(inv.id, itemDimsSnapshot)
-    // Upload pending PDF pokud byl drop před save
-    if (pendingPdfFile.value && !submissionId.value) {
-      await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
-      pendingPdfFile.value = null
-      setPendingPdfUrl(null)
-    }
-    toast.success(isEdit.value ? t('common.saved') : t('common.created'))
+}
+
+/**
+ * Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, číslo dokladu, měna,
+ * vyplněné položky). Úplně prázdný řádek (např. založený editorem) se přeskočí jako u vydané faktury.
+ */
+const previewMissing = computed<string[]>(() => {
+  const missing: string[] = []
+  if (!form.value.vendor_id) missing.push('partner')
+  if (form.value.vendor_invoice_number.trim() === '') missing.push('number')
+  if (!form.value.currency_id) missing.push('currency')
+  const filled = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  if (filled.length === 0) missing.push('items')
+  else if (!filled.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)) missing.push('item_detail')
+  return missing
+})
+const previewPayload = computed<PurchaseInvoicePayload | null>(() => {
+  if (!editorPosting.enabled.value || previewMissing.value.length > 0) return null
+  const payload = buildPayload()
+  // Prázdné řádky do náhledu neposíláme, uložení by je odmítlo.
+  return { ...payload, items: payload.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0) }
+})
+
+let postAfterSave = false
+/** Uložit a zaúčtovat: uloží doklad stejnou cestou jako Uložit a pak ho zaúčtuje. */
+async function saveAndPost() {
+  if (!editorPosting.canPost.value) return
+  postAfterSave = true
+  try {
+    await submit()
+  } finally {
+    postAfterSave = false
+  }
+}
+
+/**
+ * Zaúčtuje právě uložený doklad. Koncept se neúčtuje, proto ho nejdřív přijme (stejná
+ * akce jako tlačítko Přijmout v detailu). Chyba zaúčtování uložení nevrací: doklad je
+ * uložený a uživatel to vidí v hlášce.
+ */
+async function postSavedInvoice(inv: PurchaseInvoice): Promise<boolean> {
+  try {
+    const target = inv.status === 'draft' ? await purchaseInvoicesApi.transition(inv.id, 'received') : inv
+    await accountingApi.postPurchase(target.id)
+    toast.success(t('accounting.editor_posting.posted_toast'))
+    return true
+  } catch (e: any) {
+    postingErrorToast(e)
+    return false
+  }
+}
+
+function afterSaveWarnings(inv: PurchaseInvoice) {
     // Non-blocking varování ze serveru (např. dobropis s kladným součtem — issue #35).
     for (const code of inv._warnings ?? []) {
       if (code === 'exchange_rate_cnb_deviation') {
@@ -1635,6 +1966,18 @@ async function submit() {
           date: m?.rate_date ?? '—',
           reason: t(`purchase_invoice.warning.exchange_rate_not_reloaded_${m?.reason ?? 'source_locked'}`),
         }))
+      } else if (code === 'vendor_invoice_likely_duplicate') {
+        // Možná duplicita s jiným datem vystavení: proklik na existující doklad.
+        for (const m of inv._warning_meta?.vendor_invoice_likely_duplicate?.matches ?? []) {
+          toast.warning(t('purchase_invoice.warning.vendor_invoice_likely_duplicate', {
+            number: m.vendor_invoice_number,
+            date: formatDate(m.issue_date),
+            amount: formatMoney(m.total_with_vat, m.currency),
+          }), {
+            label: t('purchase_invoice.warning.vendor_invoice_likely_duplicate_open'),
+            handler: () => { router.push(`/purchase-invoices/${m.id}`) },
+          })
+        }
       } else if (code === 'cash_settlement_failed') {
         // Vlastní hláška — kód pokladny nese `_cash_settlement.reason`, ne
         // `purchase_invoice.warning.*` (tam by chyběl překlad).
@@ -1645,8 +1988,9 @@ async function submit() {
       }
     }
     notifyCashSettlement(inv._cash_settlement)
-    router.push(`/purchase-invoices/${inv.id}`)
-  } catch (e: any) {
+}
+
+async function handleSubmitError(e: any) {
     const data = e?.response?.data?.error
     // Zaúčtovaný doklad v uzavřeném období: server chce zvolený režim úpravy (B11).
     if (data?.code === 'force_mode_required' && String(route.query.force ?? '') === '1') {
@@ -1678,9 +2022,6 @@ async function submit() {
     toast.error(error.value)
     await nextTick()
     paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  } finally {
-    submitting.value = false
-  }
 }
 
 function fieldErr(key: string): string | null {
@@ -1695,8 +2036,8 @@ useWindowTitle(
 </script>
 
 <template>
-  <div :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
-  <div class="space-y-4 max-w-5xl min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
+  <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!originalPreview && pdfPreviewOpen" :src="originalPreview?.src ?? null"
+    :file-name="originalPreview?.name" :doc-type="originalPreview?.docType" form-class="space-y-4" narrow-class="max-w-5xl">
     <header class="flex items-center justify-between">
       <h1 class="text-xl font-semibold">
         {{ isEdit ? t('purchase_invoice.title_edit') : t('purchase_invoice.title_new') }}
@@ -1750,38 +2091,44 @@ useWindowTitle(
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_submissions.editor_origin_hint') }}</p>
             <p v-if="submission.note" class="text-sm text-neutral-600 mt-2">{{ submission.note }}</p>
           </div>
-          <a
-            :href="purchaseInvoiceSubmissionsApi.downloadUrl(submission.id)"
-            target="_blank"
-            rel="noopener"
-            class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
-            {{ t('purchase_submissions.download') }}
-          </a>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="submissionCanPreviewInline"
+              type="button"
+              class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              @click="pdfPreview.toggle()"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="pdfPreviewOpen ? ICONS.eyeOff : ICONS.eye" /></svg>
+              {{ pdfPreviewOpen ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+            </button>
+            <a
+              :href="purchaseInvoiceSubmissionsApi.downloadUrl(submission.id)"
+              target="_blank"
+              rel="noopener"
+              class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
+              {{ t('purchase_submissions.download') }}
+            </a>
+          </div>
         </div>
-        <iframe
-          v-if="submissionCanPreviewInline && submission.doc_type === 'pdf'"
-          :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
-          class="w-full h-[65vh] min-h-[420px] border-0"
-          :title="submission.original_name"
-        />
-        <div v-else-if="submissionCanPreviewInline" class="bg-neutral-50 p-4 flex justify-center">
-          <img
-            :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
-            :alt="submission.original_name"
-            class="max-h-[65vh] object-contain"
-          />
-        </div>
-        <div v-else class="bg-neutral-50 px-4 py-8 text-sm text-neutral-500 text-center">
+        <div v-if="!submissionCanPreviewInline" class="bg-neutral-50 px-4 py-8 text-sm text-neutral-500 text-center">
           {{ t('purchase_submissions.no_inline_preview') }}
         </div>
       </section>
 
       <!-- DRAG & DROP PDF (jen nahoře u nové faktury, schovaný po prvním interaction) -->
-      <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone accept-structured :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
+      <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-md:p-4">
+        <PdfDropzone ref="newPdfDropzone" accept-structured crop-photos :uploading="pdfUploading" :class="isPhone ? 'hidden' : ''" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <div v-if="isPhone" data-test="phone-upload-buttons" class="grid grid-cols-2 gap-2 [&_button]:h-12 [&_button]:w-full [&_button]:justify-center">
+          <CapturePhotoButton filled :disabled="pdfUploading" @captured="onPdfDropped" />
+          <button type="button" data-test="phone-pick-file" :class="btnOutline('neutral')" :disabled="pdfUploading" @click="pickDropzoneFile(newPdfDropzone)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('purchase_invoice.pdf.pick_file') }}
+          </button>
+        </div>
+        <p v-if="isPhone && pdfUploading" class="text-sm text-primary-700 mt-2">{{ t('purchase_invoice.pdf.uploading') }}</p>
+        <div v-else-if="!isPhone" class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
         <p class="text-xs text-neutral-500 mt-2">
           {{ t('purchase_invoice.extraction.ai_pending') }}
         </p>
@@ -1789,7 +2136,10 @@ useWindowTitle(
 
       <!-- Soubor připravený k nahrání u nové faktury (nahraje se po prvním uložení) -->
       <div v-if="!isEdit && !submissionId && pendingPdfFile" class="bg-success-50 border border-success-500/40 rounded-lg shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 gap-3">
+        <!-- Zalomení jako u originálu na detailu: na telefonu se trojice tlačítek
+             vedle názvu souboru nevejde, bez `flex-wrap` přelezla přes text i přes
+             pravý okraj obrazovky (nahlášeno z mobilu 06.11.2026). -->
+        <div class="flex flex-wrap items-center justify-between px-4 py-3 gap-3">
           <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
               <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
@@ -1798,31 +2148,31 @@ useWindowTitle(
             </svg>
             <div class="min-w-0">
               <div class="font-medium text-sm truncate">{{ pendingPdfFile.name }}</div>
-              <div class="text-xs text-success-700 flex items-center gap-1">
+              <div class="text-xs text-success-700 flex items-center gap-1 whitespace-nowrap">
                 <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 {{ t('purchase_invoice.pdf.pending_badge') }}
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-2 flex-wrap shrink-0">
+          <div class="flex items-center gap-2 flex-wrap">
             <button
               v-if="pendingPdfUrl"
               type="button"
-              @click="pendingPdfPreviewOpen = !pendingPdfPreviewOpen"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              @click="pdfPreview.toggle()"
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
               </svg>
-              {{ pendingPdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+              {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
             </button>
             <a
               v-if="pendingPdfUrl"
               :href="pendingPdfUrl"
               target="_blank"
               rel="noopener"
-              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.open') }}
@@ -1830,7 +2180,7 @@ useWindowTitle(
             <button
               type="button"
               @click="clearPendingPdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               {{ t('common.remove') }}
@@ -1856,38 +2206,20 @@ useWindowTitle(
               : t('purchase_submissions.editor_handoff_action') }}
           </button>
         </div>
-        <!-- Inline náhled ze souboru v paměti (blob: URL) — faktura ještě není na serveru.
-             Obrázek přes <img>, PDF přes <embed> (NE <iframe> ani #view= fragment — Chrome
-             odmítá blob PDF v iframu / s fragmentem jako „local resource"). Když ani <embed>
-             nevykreslí, je tu tlačítko „Otevřít" pro zobrazení v nové záložce. -->
-        <div v-if="pendingPdfPreviewOpen && pendingPdfUrl" class="bg-neutral-100 border-t border-success-500/30">
-          <img
-            v-if="pendingPdfIsImage"
-            :src="pendingPdfUrl"
-            :alt="pendingPdfFile?.name || 'preview'"
-            class="w-full max-h-[80vh] object-contain mx-auto"
-          />
-          <embed
-            v-else
-            :src="pendingPdfUrl"
-            type="application/pdf"
-            class="w-full h-[80vh] border-0"
-            :title="pendingPdfFile?.name || 'PDF'"
-          />
-        </div>
       </div>
 
-      <!-- Existující PDF na detail/edit (s inline preview, stejný pattern jako InvoiceDetail.vue) -->
+      <!-- Existující PDF na detail/edit, náhled kreslí DocumentPreviewSplit -->
+
       <div v-if="existingPdf" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
-          <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-neutral-100">
+          <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
               <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
               <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
               <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
             </svg>
-            <div>
-              <div class="font-medium text-sm">{{ existingPdf.name }}</div>
+            <div class="min-w-0">
+              <div class="font-medium text-sm truncate">{{ existingPdf.name }}</div>
               <div v-if="existingPdf.size > 0" class="text-xs text-neutral-500">{{ Math.round(existingPdf.size / 1024) }} KiB</div>
               <div v-else class="text-xs text-neutral-400 font-mono">{{ existingPdf.hash?.slice(0, 12) }}…</div>
             </div>
@@ -1897,7 +2229,7 @@ useWindowTitle(
               v-if="invoiceId"
               type="button"
               @click="pdfPreviewOpen = !pdfPreviewOpen"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
@@ -1910,7 +2242,7 @@ useWindowTitle(
               :href="purchaseInvoicesApi.pdfUrl(invoiceId)"
               target="_blank"
               @click="downloadPdfToCompanyFolder($event, invoiceId, form.vendor_invoice_number)"
-              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.open') }}
@@ -1918,28 +2250,27 @@ useWindowTitle(
             <button
               type="button"
               @click="onReplacePdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
               {{ t('common.delete') }}
             </button>
           </div>
         </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a Edge/IE blokují embed). -->
-        <div v-if="pdfPreviewOpen && invoiceId && !pdfSideBySide" class="bg-neutral-100">
-          <iframe
-            :src="pdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="existingPdf.name || 'PDF'"
-          ></iframe>
-        </div>
       </div>
 
       <!-- Replace dropzone když user vybere replace -->
-      <div v-else-if="isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
+      <div v-else-if="isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-md:p-4">
+        <PdfDropzone ref="replacePdfDropzone" crop-photos :uploading="pdfUploading" :class="isPhone ? 'hidden' : ''" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <div v-if="isPhone" data-test="phone-upload-buttons" class="grid grid-cols-2 gap-2 [&_button]:h-12 [&_button]:w-full [&_button]:justify-center">
+          <CapturePhotoButton filled :disabled="pdfUploading" @captured="onPdfDropped" />
+          <button type="button" data-test="phone-pick-file" :class="btnOutline('neutral')" :disabled="pdfUploading" @click="pickDropzoneFile(replacePdfDropzone)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('purchase_invoice.pdf.pick_file') }}
+          </button>
+        </div>
+        <p v-if="isPhone && pdfUploading" class="text-sm text-primary-700 mt-2">{{ t('purchase_invoice.pdf.uploading') }}</p>
+        <div v-else-if="!isPhone" class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
       </div>
 
       <!-- Box 1: Hlavička — vendor + typ + čísla + datumy + měna -->
@@ -1954,10 +2285,12 @@ useWindowTitle(
             <div class="flex gap-2">
               <div class="flex-1 min-w-0">
                 <VendorPicker
+                  ref="vendorPickerRef"
                   v-model="form.vendor_id"
                   @selected="onVendorSelected"
                 />
               </div>
+              <ClientRegistryCheck :client-id="form.vendor_id" button-class="mt-[26px]" @updated="onVendorRegistryUpdated" />
               <button type="button" @click="vendorModalOpen = true"
                 class="cursor-pointer shrink-0 h-9 px-3 mt-[26px] inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                 :title="t('purchase_invoice.new_vendor')">
@@ -2024,6 +2357,65 @@ useWindowTitle(
           </p>
         </div>
 
+        <!-- Konečná faktura: vyúčtování poskytnuté zálohy (a odpočet zálohy s DDKP) -->
+        <div v-if="form.document_kind === 'invoice' && auth.canWrite('purchase_invoices')"
+             class="rounded-md border border-primary-200 bg-primary-50/60 px-3 py-2.5 space-y-2" data-test="editor-advance">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-sm text-neutral-700 min-w-0">
+              {{ linkedAdvances.length > 0
+                ? (linkedAdvances.length === 1 ? t('purchase_invoice.advance_link.linked_to') : t('purchase_invoice.advance_link.linked_to_many'))
+                : t('purchase_invoice.advance_link.none') }}
+            </span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" :class="btnOutline('primary')" data-test="editor-advance-add"
+                :disabled="advanceBusy || advanceLinkDisabledReason !== null"
+                :title="advanceLinkDisabledReason ?? undefined" @click="advancePickerOpen = true">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="linkedAdvances.length > 0 ? ICONS.plus : ICONS.link" /></svg>
+                {{ linkedAdvances.length > 0 ? t('purchase_invoice.advance_link.add_more') : t('purchase_invoice.advance_link.pair') }}
+              </button>
+              <button v-if="advancesMissingDeduction.length > 1" type="button" :class="btnFilled('warning')"
+                @click="addAllAdvanceDeductionLines" data-test="add-advance-deduction-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                {{ t('purchase_invoice.advance_deduction.add_all') }}
+              </button>
+            </div>
+          </div>
+          <p v-if="linkedAdvances.length === 0 && advanceLinkDisabledReason" class="text-xs text-neutral-500">{{ advanceLinkDisabledReason }}</p>
+          <ul v-if="linkedAdvances.length > 0" class="space-y-2">
+            <li v-for="adv in linkedAdvances" :key="adv.id" data-test="editor-advance-row"
+                class="rounded-md border border-primary-200 bg-surface px-3 py-2 space-y-1.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm min-w-0">
+                  <span class="font-mono font-medium">{{ advanceLabel(adv) }}</span>
+                  <span class="text-neutral-500 font-mono ml-1">({{ formatMoney(adv.total_with_vat, adv.currency) }})</span>
+                </span>
+                <div class="flex flex-wrap gap-2">
+                  <button v-if="advanceHasDdkp(adv.id) && !hasAdvanceDeductionLine(adv.id)" type="button" :class="btnFilledSm('warning')"
+                    @click="addAdvanceDeductionLines(adv)" data-test="add-advance-deduction">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                    {{ t('purchase_invoice.advance_deduction.add') }}
+                  </button>
+                  <button type="button" :class="btnOutlineSm('neutral')" :disabled="advanceBusy"
+                    @click="unlinkAdvanceInEditor(adv)" data-test="editor-advance-unlink">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('purchase_invoice.advance_link.unlink_one') }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="advanceHasDdkp(adv.id) && !hasAdvanceDeductionLine(adv.id)" class="text-xs text-warning-700">{{ t('purchase_invoice.advance_deduction.missing') }}</p>
+              <p v-else-if="hasAdvanceDeductionLine(adv.id)" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.present') }}</p>
+              <p v-else-if="advanceDeductionLines[adv.id]" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.no_ddkp') }}</p>
+              <p v-if="advanceDeductionLines[adv.id]?.some(l => l.opening_balance)" class="text-xs text-neutral-600"
+                data-test="advance-opening-hint">{{ t('purchase_invoice.advance_deduction.opening_hint') }}</p>
+            </li>
+          </ul>
+        </div>
+        <AdvancePickerModal :open="advancePickerOpen"
+          :title="t('purchase_invoice.advance_link.modal_title')"
+          :empty-text="t('purchase_invoice.advance_link.no_candidates')"
+          :load="loadAdvanceCandidates" :busy="advanceBusy"
+          @pick="pickAdvance" @close="advancePickerOpen = false" />
+
         <!-- Vendor invoice number + our varsymbol -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -2031,7 +2423,7 @@ useWindowTitle(
             <input v-model="form.vendor_invoice_number" type="text" maxlength="50" required
                    class="w-full h-10 px-3 border rounded-md text-sm font-mono"
                    :class="fieldErr('vendor_invoice_number') ? 'border-danger-500/40' : 'border-neutral-300'" />
-            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.vendor_invoice_number_hint') }}</p>
+            <p class="text-xs text-neutral-500 mt-1 max-md:hidden">{{ t('purchase_invoice.fields.vendor_invoice_number_hint') }}</p>
             <p v-if="fieldErr('vendor_invoice_number')" class="text-xs text-danger-600 mt-1">{{ fieldErr('vendor_invoice_number') }}</p>
           </div>
           <div>
@@ -2039,8 +2431,10 @@ useWindowTitle(
             <input v-model="form.varsymbol" type="text" maxlength="20"
                    class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono"
                    placeholder="PF2605001" />
-            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
+            <p class="text-xs text-neutral-500 mt-1 max-md:hidden">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
           </div>
+          <NumberSeriesSelect v-if="!form.varsymbol" class="sm:col-span-2"
+            :scope="{ module: 'purchase-invoices' }" v-model="numberSeriesId" />
         </div>
 
         <!-- Dates -->
@@ -2068,9 +2462,9 @@ useWindowTitle(
             <DateInput v-model="form.delivery_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <p class="text-xs text-neutral-500 -mt-2">{{ t('purchase_invoice.fields.delivery_date_hint') }}</p>
+        <p class="text-xs text-neutral-500 -mt-2 max-md:hidden">{{ t('purchase_invoice.fields.delivery_date_hint') }}</p>
         <!-- RC: DPH období se řídí DUZP (§ 25 / § 24), ne datem vystavení — issue #117 -->
-        <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2">
+        <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2 max-md:hidden">
           {{ t('purchase_invoice.fields.tax_date_rc_hint') }}
         </p>
         <!-- Období odpočtu (§ 73/1/a) — issue #9: uživatel musí z formuláře poznat, do
@@ -2078,7 +2472,7 @@ useWindowTitle(
         <div v-else-if="vatClaim" class="-mt-2 text-xs rounded-md px-3 py-2"
              :class="vatClaim.basis === 'received_at'
                ? 'bg-warning-50 text-warning-700 border border-warning-500/30'
-               : 'bg-neutral-50 text-neutral-600 border border-neutral-200'">
+               : 'bg-neutral-50 text-neutral-600 border border-neutral-200 max-md:hidden'">
           <p>
             {{ t('purchase_invoice.fields.vat_claim_hint', {
               period: vatClaimPeriodLabel,
@@ -2209,6 +2603,8 @@ useWindowTitle(
                   @toggle="docDims.toggleItem(it)" />
                 </div>
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+                <span v-if="it.advance_purchase_invoice_id" class="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs bg-primary-50 text-primary-700 border border-primary-200"
+                  :title="t('purchase_invoice.advance_deduction.badge_hint')">{{ t('purchase_invoice.advance_deduction.badge') }}</span>
                 <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
                   :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
                   @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
@@ -2223,7 +2619,7 @@ useWindowTitle(
                 </select>
               </td>
               <td class="py-2 px-1">
-                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
               </td>
               <td class="py-2 px-1">
                 <select v-model.number="it.vat_rate_id" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
@@ -2306,6 +2702,11 @@ useWindowTitle(
                   <span v-if="showItemAccount && hasVatAllocations" class="text-xs text-neutral-500" data-test="item-account-allocations">
                     {{ t('purchase_invoice.items.expense_account_allocations') }}
                   </span>
+                  <ItemPostingFields v-if="editorPosting.enabled.value" direction="purchase"
+                    v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
+                    :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                    :default-counter="defaultCounterAccount"
+                    @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                   <label class="flex items-center gap-2 text-xs text-neutral-500">
                     <span class="shrink-0">{{ t('purchase_invoice.items.vat_classification') }}</span>
                     <select v-model="it.vat_classification_code" :aria-label="t('purchase_invoice.items.vat_classification')"
@@ -2333,6 +2734,17 @@ useWindowTitle(
                   <span v-else-if="it.vat_classification_code && it.vat_classification_code === form.vat_classification_code" class="text-xs text-neutral-500">
                     {{ t('purchase_invoice.items.vat_classification_same') }}
                   </span>
+                  <label class="flex items-center gap-2 text-xs text-neutral-500">
+                    <span class="shrink-0">{{ t('purchase_invoice.items.seller_item_code') }}</span>
+                    <input v-model="it.seller_item_code" type="text" maxlength="80" data-test="item-seller-code"
+                      :class="[formControl, 'w-44 h-8! text-neutral-900 font-mono']" />
+                  </label>
+                  <label class="flex items-center gap-2 text-xs text-neutral-500">
+                    <span class="shrink-0">{{ t('purchase_invoice.items.item_ean') }}</span>
+                    <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14" data-test="item-ean"
+                      :class="[formControl, 'w-40 h-8! text-neutral-900 font-mono', { 'border-warning-500!': itemEanInvalid(it) }]" />
+                  </label>
+                  <span v-if="itemEanInvalid(it)" class="text-xs text-warning-700" data-test="item-ean-invalid">{{ t('purchase_invoice.items.item_ean_invalid') }}</span>
                 </div>
               </td>
             </tr>
@@ -2383,6 +2795,8 @@ useWindowTitle(
                 @select="(v: number | null) => onStockSelect(i, v)"
               />
               <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+              <span v-if="it.advance_purchase_invoice_id" class="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs bg-primary-50 text-primary-700 border border-primary-200"
+                :title="t('purchase_invoice.advance_deduction.badge_hint')">{{ t('purchase_invoice.advance_deduction.badge') }}</span>
               <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
                 :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
                 @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
@@ -2403,7 +2817,7 @@ useWindowTitle(
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.vat_rate') }}</label>
@@ -2458,6 +2872,11 @@ useWindowTitle(
                   </select>
                   <span v-if="hasVatAllocations" class="mt-1 block text-xs text-neutral-500">{{ t('purchase_invoice.items.expense_account_allocations') }}</span>
                 </label>
+                <ItemPostingFields v-if="editorPosting.enabled.value" class="mt-2" direction="purchase" stacked
+                  v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
+                  :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                  :default-counter="defaultCounterAccount"
+                  @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                 <label class="mt-2 block text-xs text-neutral-600">
                   {{ t('purchase_invoice.items.vat_classification') }}
                   <select v-model="it.vat_classification_code" :aria-label="t('purchase_invoice.items.vat_classification')"
@@ -2484,6 +2903,17 @@ useWindowTitle(
                 <p v-else-if="it.vat_classification_code && it.vat_classification_code === form.vat_classification_code" class="mt-1 text-xs text-neutral-500">
                   {{ t('purchase_invoice.items.vat_classification_same') }}
                 </p>
+                <label class="mt-2 block text-xs text-neutral-600">
+                  {{ t('purchase_invoice.items.seller_item_code') }}
+                  <input v-model="it.seller_item_code" type="text" maxlength="80"
+                    :class="[formInput, 'mt-1 h-10! font-mono']" />
+                </label>
+                <label class="mt-2 block text-xs text-neutral-600">
+                  {{ t('purchase_invoice.items.item_ean') }}
+                  <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14"
+                    :class="[formInput, 'mt-1 h-10! font-mono', { 'border-warning-500!': itemEanInvalid(it) }]" />
+                </label>
+                <p v-if="itemEanInvalid(it)" class="mt-1 text-xs text-warning-700">{{ t('purchase_invoice.items.item_ean_invalid') }}</p>
               </template>
               <template v-if="showAccrual">
                 <button
@@ -2554,10 +2984,14 @@ useWindowTitle(
         </div>
       </div>
 
+      <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
+      <DraftPostingPreviewPanel v-if="editorPosting.enabled.value" source="purchase-invoices"
+        :doc-id="invoiceId" :payload="previewPayload" :missing="previewMissing" />
+
       <!-- Box 2b: Rekapitulace DPH — editovatelná dle dokladu dodavatele (§ 73 ZDPH).
            Pod reverse-charge se skrývá (na dokladu zahr. dodavatele není česká DPH). -->
       <div v-if="form.items.length > 0 && !form.reverse_charge" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3">
+        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3 max-md:flex-wrap max-md:px-4">
           <h2 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.vat_recap.title') }}</h2>
           <div class="flex flex-wrap items-center justify-end gap-3">
             <button v-if="canCreateExpenseTemplate" type="button" @click="expenseRuleTemplateOpen = true"
@@ -2584,9 +3018,36 @@ useWindowTitle(
             </button>
           </div>
         </div>
-        <div class="px-5 py-3">
-          <p class="text-xs text-neutral-500 mb-3">{{ t('purchase_invoice.vat_recap.hint') }}</p>
-          <table class="w-full sm:w-auto text-sm">
+        <div class="px-5 py-3 max-md:px-4">
+          <p class="text-xs text-neutral-500 mb-3 max-md:hidden">{{ t('purchase_invoice.vat_recap.hint') }}</p>
+          <!-- Telefon: tabulka sazba/základ/DPH se nevejde (ořezávala se vpravo), proto karty. -->
+          <div v-if="isPhone" data-test="vat-recap-cards" class="space-y-2">
+            <div v-for="r in recapRows" :key="r.rate" class="rounded-md border border-neutral-200 p-3">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <span class="text-sm font-medium text-neutral-700">{{ r.rate }} %</span>
+                <button v-if="r.overridden" type="button" @click="resetRecapRate(r.rate)"
+                  :title="t('purchase_invoice.vat_recap.reset')" :aria-label="t('purchase_invoice.vat_recap.reset')"
+                  class="cursor-pointer h-9 w-9 inline-flex items-center justify-center rounded-md text-neutral-500 hover:text-primary-700 text-lg leading-none">↺</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="block">
+                  <span class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_recap.base') }}</span>
+                  <input :value="r.base" @change="setRecapBase(r.rate, ($event.target as HTMLInputElement).value)"
+                    type="text" inputmode="decimal"
+                    class="w-full h-10 px-2 border rounded text-sm text-right font-mono"
+                    :class="r.overridden ? 'border-warning-500/60 bg-warning-50' : 'border-neutral-300'" />
+                </label>
+                <label class="block">
+                  <span class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_recap.vat') }}</span>
+                  <input :value="r.vat" @change="setRecapVat(r.rate, ($event.target as HTMLInputElement).value)"
+                    type="text" inputmode="decimal"
+                    class="w-full h-10 px-2 border rounded text-sm text-right font-mono"
+                    :class="r.overridden ? 'border-warning-500/60 bg-warning-50' : 'border-neutral-300'" />
+                </label>
+              </div>
+            </div>
+          </div>
+          <table v-else class="w-full sm:w-auto text-sm">
             <thead>
               <tr class="text-xs text-neutral-500">
                 <th class="text-left font-normal py-1 pr-6">{{ t('purchase_invoice.vat_recap.rate') }}</th>
@@ -2672,7 +3133,7 @@ useWindowTitle(
                   </div>
                   <div class="sm:col-span-2">
                     <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.deduction') }}</label>
-                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'"
+                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'" data-test="allocation-vat-deduction"
                       class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface disabled:bg-neutral-100">
                       <option value="full">{{ t('purchase_invoice.vat_deduction.full') }}</option>
                       <option value="none">{{ t('purchase_invoice.vat_deduction.none') }}</option>
@@ -2918,13 +3379,21 @@ useWindowTitle(
       </div>
 
       <!-- Submit bar — sticky bottom -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex items-center justify-between gap-2">
-        <RouterLink to="/purchase-invoices" class="px-4 h-10 inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">
+      <div data-test="purchase-editor-submit-bar" class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex flex-wrap items-center justify-between gap-2 max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 max-md:p-2 max-md:shadow-lg">
+        <RouterLink to="/purchase-invoices" data-test="purchase-editor-back" class="px-4 h-10 inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors max-md:hidden">
           ← {{ t('purchase_invoice.actions.back') }}
         </RouterLink>
-        <button type="submit" :disabled="submitting" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50">
-          {{ submitting ? '…' : t('purchase_invoice.actions.save') }}
-        </button>
+        <div class="flex flex-wrap items-center gap-2 max-md:w-full max-md:flex-nowrap">
+          <button v-if="editorPosting.canPost.value" type="button" :disabled="submitting" data-test="save-and-post"
+            :title="t('accounting.editor_posting.save_and_post_hint_purchase')"
+            :class="btnFilled('success')" class="whitespace-nowrap max-md:h-11 max-md:shrink-0 max-md:px-3 max-md:text-xs" @click="saveAndPost">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('accounting.editor_posting.save_and_post') }}
+          </button>
+          <button type="submit" :disabled="submitting" data-test="purchase-editor-save" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 whitespace-nowrap max-md:order-first max-md:h-11 max-md:flex-1 max-md:justify-center max-md:text-base">
+            {{ submitting ? '…' : t('purchase_invoice.actions.save') }}
+          </button>
+        </div>
       </div>
     </form>
 
@@ -2969,12 +3438,5 @@ useWindowTitle(
       :description-options="form.items.map(it => it.description)"
       @close="expenseRuleTemplateOpen = false"
       @saved="expenseRuleTemplateOpen = false" />
-  </div>
-  <DocumentSidePreview
-    v-if="pdfSideBySide"
-    :src="pdfInlineUrl"
-    :file-name="existingPdf?.name"
-    @close="pdfPreviewOpen = false"
-  />
-  </div>
+  </DocumentPreviewSplit>
 </template>

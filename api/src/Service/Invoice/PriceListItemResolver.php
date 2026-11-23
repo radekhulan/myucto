@@ -47,7 +47,6 @@ final class PriceListItemResolver
             $resolved[$id] = $this->resolveRow(
                 $row,
                 $currency['code'],
-                $currency['decimals'],
                 $pricesIncludeVat,
                 $referenceDate,
             );
@@ -81,7 +80,6 @@ final class PriceListItemResolver
                 $resolved[$id] = $this->resolveRow(
                     $rows[$id],
                     $currency['code'],
-                    $currency['decimals'],
                     $pricesIncludeVat,
                     $referenceDate,
                 );
@@ -96,7 +94,6 @@ final class PriceListItemResolver
     private function resolveRow(
         array $row,
         string $targetCurrency,
-        int $targetDecimals,
         bool $pricesIncludeVat,
         DateTimeImmutable $referenceDate,
     ): array {
@@ -157,12 +154,13 @@ final class PriceListItemResolver
             $priceSource = $row['customer_base_unit_price'] !== null
                 ? 'customer_base_converted'
                 : 'catalog_base_converted';
-            $conversion = $this->converter->convert(
+            // Jednotková cena se převádí na šest míst jako cena řádku dokladu, ne na
+            // haléře měny — levná položka (0,004 EUR) by se jinak vynulovala.
+            $conversion = $this->converter->convertUnitPrice(
                 $sourceUnitPrice,
                 $sourceCurrency,
                 $targetCurrency,
                 $referenceDate,
-                $targetDecimals,
             );
             if ($conversion === null) {
                 throw new PriceListResolutionException(

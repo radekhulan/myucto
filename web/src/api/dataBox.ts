@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { IsdsDirectAccess, IsdsStoredAccess } from './isdsAccess'
 import { downloadApiFile } from '@/utils/downloadFile'
 
 /**
@@ -150,6 +151,7 @@ export interface OutboxSubmission {
   agenda_code: string
   recipient_id: number | null
   recipient_box_id: string | null
+  isds_sender_box_id?: string | null
   subject: string
   artifact_kind: 'payroll_submission' | 'tax_submission' | 'document'
   artifact_id: number
@@ -181,6 +183,8 @@ export interface OutboxSubmission {
   last_error_message: string | null
   row_version: number
   created_at: string
+  /** Úřad výsledek zpracování neposílá, povinnost splňuje samo dodání do schránky. */
+  settles_on_delivery?: boolean
   /**
    * Smí zrušená zpráva zmizet nadobro? Server ji doplňuje JEN u zrušených
    * řádků — jinde je `undefined`, protože se tam mazat nedá vůbec.
@@ -238,6 +242,10 @@ export interface InboxMessage {
   sender_ident: string | null
   classification: InboxClassification
   matched_outbox_id: number | null
+  /** Podání, ke kterému zpráva patří; vrací jen seznam příchozích zpráv. */
+  matched_outbox_subject?: string | null
+  matched_outbox_artifact_kind?: string | null
+  matched_outbox_artifact_id?: number | null
   document_id: number | null
   signature_status: 'unverified' | 'trusted'
   delivered_at: string | null
@@ -591,6 +599,8 @@ export interface InboxPollResult {
   failed: number
   unclassified: number
   error?: string | null
+  /** Doručenky odeslaných zpráv stažené ve stejné relaci; `null`, když se nestáhly. */
+  receipts?: { attached: number; pending: number; failed: number } | null
 }
 
 export interface MobileKeyInboxStart {
@@ -806,14 +816,11 @@ export const dataBoxApi = {
       { environment },
     ).then(r => r.data),
 
-  /**
-   * Odeslání jménem a heslem. Heslo jde jen tímhle requestem do ISDS a nikam
-   * se neukládá — proto se pokaždé zadává znovu.
-   */
-  passwordSend: (id: number, environment: string, username: string, password: string) =>
+  /** Odeslání jednorázovými údaji nebo výslovně potvrzeným uloženým přístupem. */
+  passwordSend: (id: number, environment: string, access: IsdsDirectAccess) =>
     api.post<{ result: { row: OutboxSubmission; dispatched: boolean } }>(
       `/submissions/outbox/${id}/password-send`,
-      { environment, username, password },
+      { environment, ...access },
     ).then(r => r.data.result),
 
   /** Odeslání systémovým certifikátem; `authorized` je vědomé potvrzení uživatele. */
@@ -838,8 +845,8 @@ export const dataBoxApi = {
       { environment, flow_token: flowToken, sms_code: smsCode },
     ).then(r => r.data.result),
 
-  resolve: (id: number, environment: string) =>
-    api.post<OutboxSubmission>(`/submissions/outbox/${id}/resolve`, { environment }).then(r => r.data),
+  resolve: (id: number, environment: string, access?: IsdsStoredAccess) =>
+    api.post<OutboxSubmission>(`/submissions/outbox/${id}/resolve`, { environment, ...access }).then(r => r.data),
 
   cancel: (id: number) =>
     api.post<OutboxSubmission>(`/submissions/outbox/${id}/cancel`, {}).then(r => r.data),
@@ -1003,6 +1010,8 @@ export const dataBoxApi = {
       apply_to_sender: applyToSender,
     }).then(r => r.data.item),
 
+  markAllInboxRead: (params: Record<string, unknown>) =>
+    api.post<{ updated: number }>('/submissions/inbox/read-all', null, { params }).then(r => r.data.updated),
   markInboxRead: (id: number, read: boolean) =>
     api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/read`, { read }).then(r => r.data.item),
 
@@ -1038,11 +1047,10 @@ export const dataBoxApi = {
       { environment, acknowledged: true },
     ).then(r => r.data),
 
-  pollInboxWithPassword: (environment: string, username: string, password: string) =>
+  pollInboxWithPassword: (environment: string, access: IsdsDirectAccess) =>
     api.post<InboxPollResult>('/submissions/inbox/poll/password', {
       environment,
-      username,
-      password,
+      ...access,
       acknowledged: true,
     }).then(r => r.data),
 
@@ -1097,12 +1105,11 @@ export const dataBoxApi = {
     }).then(r => r.data),
 
   /** Dávka jménem a heslem: jedno zadání údajů pro všechna vybraná podání. */
-  passwordSendBatch: (outboxIds: number[], environment: string, username: string, password: string) =>
+  passwordSendBatch: (outboxIds: number[], environment: string, access: IsdsDirectAccess) =>
     api.post<{ results: MobileKeyBatchItemResult[] }>('/submissions/outbox/password-send-batch', {
       outbox_ids: outboxIds,
       environment,
-      username,
-      password,
+      ...access,
     }).then(r => r.data.results),
 
   /** Dávka systémovým certifikátem; `authorized` je vědomé potvrzení za celou dávku. */
@@ -1157,11 +1164,10 @@ export const dataBoxApi = {
       environment,
       finish,
     }).then(r => r.data),
-  downloadReceiptsBatchWithPassword: (environment: string, username: string, password: string) =>
+  downloadReceiptsBatchWithPassword: (environment: string, access: IsdsDirectAccess) =>
     api.post<ReceiptBatchResult>('/submissions/outbox/receipts/download/password', {
       environment,
-      username,
-      password,
+      ...access,
     }).then(r => r.data),
 
   /** Vyžádá SMS kód pro dávkové stažení dodejek. */
@@ -1234,10 +1240,10 @@ export const dataBoxApi = {
    * Není to vyzvednutí schránky — ptáme se na NAŠI odeslanou zprávu, takže se
    * tím nic nedoručuje a žádná lhůta nezačíná běžet.
    */
-  downloadReceipt: (id: number, environment: string) =>
+  downloadReceipt: (id: number, environment: string, access?: IsdsStoredAccess) =>
     api.post<ReceiptUploadResult>(
       `/submissions/outbox/${id}/receipt/download`,
-      { environment },
+      { environment, ...access },
     ).then(r => r.data),
 
   /** Totéž v relaci potvrzené Mobilním klíčem; zahajuje ji `startMobileKeyOutbox`. */

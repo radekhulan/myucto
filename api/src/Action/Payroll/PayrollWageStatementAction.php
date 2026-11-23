@@ -136,7 +136,7 @@ final class PayrollWageStatementAction
 
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return self::private(Json::sessionRequired(
                 $response,
                 'Tento endpoint je dostupný pouze z přihlášené webové session.',
@@ -145,7 +145,7 @@ final class PayrollWageStatementAction
         if (!$this->requirePermission($request, $response, 'payroll.documents', $level, $error)
             || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)
         ) {
-            return self::private($error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403));
+            return self::private($error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403));
         }
 
         return null;

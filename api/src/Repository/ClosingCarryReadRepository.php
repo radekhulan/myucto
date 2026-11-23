@@ -90,7 +90,7 @@ final class ClosingCarryReadRepository
 
     private function rows(int $supplierId, string $predicate, array $params): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT l.*, e.period_id, e.entry_date, e.source_type, e.source_id, e.row_version AS entry_version,
+        $stmt = $this->db->pdo()->prepare("SELECT " . JournalLineProofColumns::select('l') . ", e.period_id, e.entry_date, e.source_type, e.source_id, e.row_version AS entry_version,
             e.document_date, e.posted_at, e.posted_by, e.reversed_by, e.document_no AS entry_document_no, e.description AS entry_description,
             a.account_code, a.account_type, a.name AS account_name
             FROM journal_entries e JOIN journal_entry_lines l ON l.entry_id=e.id AND l.supplier_id=e.supplier_id

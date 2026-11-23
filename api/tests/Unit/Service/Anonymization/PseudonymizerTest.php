@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Anonymization;
 
 use MyInvoice\Service\Anonymization\Pseudonymizer;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use PHPUnit\Framework\TestCase;
 
 final class PseudonymizerTest extends TestCase
@@ -175,5 +176,22 @@ final class PseudonymizerTest extends TestCase
 
         self::assertSame($pseudo, $p->symbol($ico));
         self::assertSame('2024001', $p->symbol('2024001'));
+    }
+
+    public function testCsszVariableSymbolKeepsDistrictAndPassesLuhn(): void
+    {
+        $p = new Pseudonymizer(self::SECRET);
+        $original = '1101234560';
+        $body = substr($original, 0, 9);
+        $original = $body . Pseudonymizer::luhnCheckDigit($body);
+        self::assertNull(CsszEmployerVariableSymbol::invalidReason($original));
+
+        $pseudo = $p->csszVariableSymbol($original);
+
+        self::assertNotSame($original, $pseudo);
+        self::assertSame('110', substr($pseudo, 0, 3));
+        self::assertNull(CsszEmployerVariableSymbol::invalidReason($pseudo));
+        self::assertSame($pseudo, $p->symbol($original), 'Týž VS jinde (platby ČSSZ) dostane týž pseudonym.');
+        self::assertSame('1868', substr($p->csszVariableSymbol('1868' . substr($body, 4) . Pseudonymizer::luhnCheckDigit('1868' . substr($body, 4))), 0, 4));
     }
 }

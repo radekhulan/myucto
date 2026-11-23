@@ -5,6 +5,10 @@ import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { safeReturnPath } from '@/utils/returnPath'
 import { getWindowSupplierScope, requestSupplierId } from '@/workspace/supplierContext'
 import { postWindowFrameMessage } from '@/workspace/frameProtocol'
+import { ssoRequiredLoginPath } from '@/security/oidc'
+import { beginSsoRenewal } from '@/security/ssoRenewal'
+
+const SSO_LOGIN_ENDPOINTS = ['/auth/login', '/auth/webauthn/login/options', '/auth/webauthn/login/verify']
 
 export const api = axios.create({
   baseURL: '/api',
@@ -70,6 +74,18 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** Cesta hlavního okna aplikace, ve kterém běží okno pracovní plochy. */
+function parentAppPath(): string | null {
+  try {
+    return `${window.parent.location.pathname}${window.parent.location.search}`
+  } catch {
+    return null
+  }
+}
+
+/** Příznak pro přihlašovací stránku: relaci ukončilo novější přihlášení jinde. */
+export const SESSION_SUPERSEDED_KEY = 'myucto:session-superseded'
+
 // 401 → redirect na /login (kromě situace kdy už jsme na /login nebo /setup)
 api.interceptors.response.use(
   (response) => {
@@ -80,10 +96,11 @@ api.interceptors.response.use(
     // dotčená okna (`workspace/dataDependencies.ts`). Okno v iframe mu ji pošle,
     // hlavní dokument ji vyvolá jako událost.
     const method = response.config.method?.toLowerCase() ?? 'get'
-    const requestPath = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\/(?:v1\/)?/, '/')
-    const widgetRead = method === 'post' && requestPath === '/dashboard-widgets/query'
-    if (!['get', 'head', 'options'].includes(method) && !widgetRead) {
+    if (!['get', 'head', 'options'].includes(method)) {
       const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/')
+      if (method === 'post' && ['/dashboard-widgets/query', '/v1/dashboard-widgets/query'].includes(path)) {
+        return response
+      }
       const resource = path.split('/')[1]
       if (resource && /^[a-z0-9-]+$/.test(resource)) {
         const scope = getWindowSupplierScope()
@@ -109,8 +126,32 @@ api.interceptors.response.use(
       'session_expired',
       'invalid_token',
       'mfa_reauthentication_required',
+      'session_superseded',
     ].includes(code)) {
+      // Přihlašovací stránka pak řekne, proč relace skončila (limit relací podle licence).
+      if (code === 'session_superseded') {
+        try { sessionStorage.setItem(SESSION_SUPERSEDED_KEY, '1') } catch { /* soukromé okno */ }
+      }
       const windowScope = getWindowSupplierScope()
+      // Sezení z Entra ID vyprší po pevné době. Místo formuláře se aplikace tiše
+      // přihlásí znovu u poskytovatele a vrátí uživatele na stejnou stránku
+      // (security/ssoRenewal.ts). Neplatí pro zákaznickou doménu ani rozběhnuté
+      // přihlášení vlastní domény, ani pro relaci ukončenou přihlášením jinde.
+      if (code === 'unauthenticated' && domainSupplierLock === null && !domainLoginContinuationQuery()) {
+        const appPath = windowScope ? parentAppPath() : `${window.location.pathname}${window.location.search}`
+        if (appPath !== null && !appPath.startsWith('/login') && !appPath.startsWith('/setup')) {
+          const renewal = beginSsoRenewal(appPath)
+          if (renewal.action === 'wait') return Promise.reject(error)
+          if (renewal.action === 'renew') {
+            if (windowScope) {
+              postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: renewal.url, mode: 'assign' })
+            } else {
+              window.location.href = renewal.url
+            }
+            return Promise.reject(error)
+          }
+        }
+      }
       if (windowScope) {
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/login' })
         return Promise.reject(error)
@@ -169,6 +210,21 @@ api.interceptors.response.use(
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/setup-mfa?method=totp' })
       } else if (window.location.pathname !== '/setup-mfa') {
         window.location.href = '/setup-mfa?method=totp'
+      }
+    }
+    // 403 sso_required = firma vyžaduje přihlášení přes účet organizace a tohle
+    // sezení vzniklo heslem nebo passkey. Přihlašovací endpointy stejný kód
+    // vrací formuláři, který ho zobrazí sám.
+    if (status === 403 && code === 'sso_required' && !SSO_LOGIN_ENDPOINTS.includes(error.config?.url ?? '')) {
+      const target = ssoRequiredLoginPath(
+        error.response?.data?.error?.provider,
+        `${window.location.pathname}${window.location.search}`,
+      )
+      const windowScope = getWindowSupplierScope()
+      if (windowScope) {
+        postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: target })
+      } else if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = target
       }
     }
     if (status === 403 && code === 'mfa_setup_required') {

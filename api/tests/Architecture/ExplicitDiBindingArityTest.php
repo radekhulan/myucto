@@ -47,6 +47,10 @@ final class ExplicitDiBindingArityTest extends TestCase
         // zůstanou zelené.
         \MyInvoice\Service\Submission\SubmissionCredentialService::class,
         \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class,
+        // Volitelný limit souběžných relací a licenční brána tokenů se zápisem.
+        // Bez vyplnění by parametry licence v provozu tiše nic neomezovaly.
+        \MyInvoice\Service\Auth\SessionManager::class,
+        \MyInvoice\Service\Auth\ApiTokenService::class,
     ];
 
     /**

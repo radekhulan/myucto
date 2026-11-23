@@ -17,6 +17,9 @@ use MyInvoice\Service\Accounting\AccountingFrameworkService;
  *
  * Vstupní řádek zůstatku = {account_id, account_code, name, bal} — `bal` je
  * signed netto (MD kladně), viz ClosingRepository::plBalances/bsBalances.
+ * Rozvahový zůstatek v cizí měně nese navíc `currency_code` a `amount_foreign`;
+ * řádek téhož účtu je převezme v každém účetním rámci (504 i 500), aby počáteční
+ * stav dalšího roku měl cizoměnový zůstatek pro přecenění.
  * Výstupní řádek = {account_code, side: 'debit'|'credit', amount>0} — přesně
  * formát PostingService::postDocument lines; mapování kódů 701/702/710/431 na
  * account_id firmy dělá ClosingService (chybějící účet → missing_account).
@@ -93,7 +96,6 @@ final class ClosingEntryBuilder
             }
             $amount = abs($cents) / 100;
             $code = (string) $row['account_code'];
-            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
                 $lines[] = self::line($profile->account('closing.final_balance'), 'debit', $amount, $row);
                 $lines[] = self::line($code, 'credit', $amount, $row);
@@ -116,7 +118,7 @@ final class ClosingEntryBuilder
      * @param list<array{account_id:int, account_code:string, name:string, bal:float}> $bsBalances
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null): array
+    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null, int $carriedResidueCents = 0): array
     {
         $profile ??= new AccountingRoleProfile();
         $lines = [];
@@ -128,7 +130,6 @@ final class ClosingEntryBuilder
             }
             $amount = abs($cents) / 100;
             $code = $profile->openingAccount((string) $row['account_code']);
-            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
                 $lines[] = self::line($code, 'debit', $amount, $row);
                 $lines[] = self::line($profile->account('closing.opening_balance'), 'credit', $amount, $row);
@@ -156,7 +157,10 @@ final class ClosingEntryBuilder
             throw new ClosingException('opening_result_mismatch', 'Výsledek hospodaření nesouhlasí s převáděnými výsledkovými zůstatky.', 422);
         }
 
-        $this->assertZeroBalance($lines, $profile->account('closing.opening_balance'), 'opening_unbalanced_701');
+        // `$carriedResidueCents` = haléřový zbytek na počátečním účtu rozvažném, který rok
+        // zdědil z otevírací rozvahy převzaté z jiného systému. Otevření dalšího roku ho nese
+        // dál stejně jako původní systém; jinak musí účet končit na nule.
+        $this->assertZeroBalance($lines, $profile->account('closing.opening_balance'), 'opening_unbalanced_701', $carriedResidueCents);
 
         return $lines;
     }
@@ -173,7 +177,7 @@ final class ClosingEntryBuilder
      *
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float}> $lines
      */
-    private function assertZeroBalance(array $lines, string $accountCode, string $errorCode): void
+    private function assertZeroBalance(array $lines, string $accountCode, string $errorCode, int $allowedDebitMinusCreditCents = 0): void
     {
         $debit = 0;
         $credit = 0;
@@ -187,7 +191,7 @@ final class ClosingEntryBuilder
                 $credit += self::cents($line['amount']);
             }
         }
-        if ($debit !== $credit) {
+        if ($debit - $credit !== $allowedDebitMinusCreditCents) {
             throw new ClosingException(
                 $errorCode,
                 'Závěrkový zápis není vyvážený: účet ' . $accountCode . ' MD ' . ($debit / 100)

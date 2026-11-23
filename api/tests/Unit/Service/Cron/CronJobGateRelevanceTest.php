@@ -253,6 +253,23 @@ final class CronJobGateRelevanceTest extends TestCase
         self::assertNull($payroll(new Config(['payroll' => ['jmhz_source_monitor' => true]]))->inactiveReason($job));
     }
 
+    /**
+     * Automatický export do Pohody je volba instalace (export.scheduled_pohoda, výchozí vypnuto):
+     * vypnutý cron se nenaplánuje a v přehledu úloh nesvítí jako neběžící kritická úloha.
+     */
+    public function testScheduledPohodaExportRunsOnlyWhenInstallationEnablesIt(): void
+    {
+        $job = $this->job('cron-scheduled-pohoda-export');
+
+        $off = new CronJobGate(new Config([]), null);
+        self::assertSame(CronJobGate::INACTIVE_NOT_ENABLED, $off->inactiveReason($job));
+        self::assertFalse($off->isSchedulable($job));
+
+        $on = new CronJobGate(new Config(['export' => ['scheduled_pohoda' => true]]), null);
+        self::assertNull($on->inactiveReason($job));
+        self::assertTrue($on->isSchedulable($job));
+    }
+
     /** Povinné úlohy na tom, co je na instalaci zapnuté, nezávisí nikdy. */
     public function testMandatoryJobsNeverDependOnUsage(): void
     {

@@ -671,6 +671,7 @@ onMounted(async () => {
                     <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                       {{ it.doc_no }}
                     </RouterLink>
+                    <span v-if="it.other_doc_no" class="ml-1 font-mono text-xs text-neutral-500 whitespace-nowrap" data-testid="saldo-other-doc-no">· {{ it.other_doc_no }}</span>
                     <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="it.side" />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
@@ -804,6 +805,7 @@ onMounted(async () => {
                       <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                         {{ it.doc_no }}
                       </RouterLink>
+                      <span v-if="it.other_doc_no" class="ml-1 font-mono text-xs text-neutral-500 whitespace-nowrap" data-testid="saldo-other-doc-no">· {{ it.other_doc_no }}</span>
                       <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="sideOfAccount(b.account.normal_side)" />
                     </td>
                     <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>

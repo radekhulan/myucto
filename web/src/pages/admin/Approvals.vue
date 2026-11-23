@@ -14,6 +14,9 @@ const toast = useToast()
 type StatusFilter = 'requested' | 'approved' | 'rejected' | 'all'
 const statusFilter = ref<StatusFilter>('requested')
 const overdueOnly = ref(false)
+// Telefon: stavové filtry a „jen po termínu" za tlačítkem „Filtry" (vzor CashRegister).
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => (statusFilter.value !== 'requested' ? 1 : 0) + (overdueOnly.value ? 1 : 0))
 const items = ref<ApprovalInboxItem[]>([])
 const loading = ref(true)
 const loadingMore = ref(false)
@@ -100,19 +103,33 @@ function daysSince(date: string | null): number | null {
 
     <!-- Filtry -->
     <div class="bg-surface border border-neutral-200 rounded-lg p-3 mb-4 flex flex-wrap items-center gap-2">
+      <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="approvals-filters-toggle"
+        class="hidden max-md:inline-flex max-md:w-full cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+        :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+        </svg>
+        {{ t('common.filters') }}
+        <span v-if="activeFilterCount"
+          class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs font-medium tabular-nums">{{ activeFilterCount }}</span>
+        <svg class="ml-auto w-3.5 h-3.5 transition-transform" :class="filtersOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
       <button v-for="opt in (['requested','approved','rejected','all'] as const)" :key="opt"
-        @click="statusFilter = opt"
-        class="cursor-pointer px-3 h-8 text-xs rounded-md font-medium border inline-flex items-center gap-1.5"
-        :class="statusFilter === opt
+        @click="statusFilter = opt" data-test="approvals-status-filter"
+        class="cursor-pointer px-3 h-8 text-xs rounded-md font-medium border inline-flex items-center gap-1.5 max-md:h-10"
+        :class="[filtersOpen ? '' : 'max-md:hidden', statusFilter === opt
           ? 'bg-primary-600 text-white border-primary-600'
-          : 'bg-surface text-neutral-700 border-neutral-300 hover:bg-neutral-50'">
+          : 'bg-surface text-neutral-700 border-neutral-300 hover:bg-neutral-50']">
         {{ t('approval_inbox.filter_' + opt) }}
         <span class="text-xs opacity-80">({{ counts[opt] }})</span>
       </button>
-      <span class="ml-2 text-xs text-neutral-400">·</span>
-      <label class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer ml-2">
+      <span class="ml-2 text-xs text-neutral-400 max-md:hidden">·</span>
+      <label class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer ml-2 max-md:ml-0 max-md:min-h-10 max-md:w-full"
+        :class="filtersOpen ? '' : 'max-md:hidden'" data-test="approvals-overdue">
         <input v-model="overdueOnly" type="checkbox"
-          class="rounded border-neutral-300 text-primary-600" />
+          class="rounded border-neutral-300 text-primary-600 max-md:w-5 max-md:h-5" />
         {{ t('approval_inbox.overdue_only') }}
       </label>
     </div>

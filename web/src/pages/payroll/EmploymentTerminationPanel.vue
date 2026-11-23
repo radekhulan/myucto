@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -27,6 +28,7 @@ import { averageEarningsTarget } from './payrollRemediation'
 const props = defineProps<{
   employmentId: number
   canWrite: boolean
+  canReadDocuments?: boolean
 }>()
 const emit = defineEmits<{
   loaded: [overview: PayrollTerminationOverview]
@@ -387,6 +389,37 @@ onMounted(() => void load())
     </p>
 
     <template v-else-if="data">
+      <div v-if="data.employment.end_date" class="mt-4 rounded-md border border-neutral-200 bg-surface p-3" data-test="termination-follow-up">
+        <h5 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.termination.follow_up.title') }}</h5>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <RouterLink
+            :to="`/payroll/submissions/eldp?person=${data.employment.employee_id}&employment=${employmentId}&year=${data.employment.end_date.slice(0, 4)}`"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+            data-test="termination-eldp-link"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.people.termination.follow_up.eldp') }}
+          </RouterLink>
+          <RouterLink
+            v-if="canReadDocuments"
+            :to="`/payroll/people?person=${data.employment.employee_id}&employment=${employmentId}&panel=exit_documents`"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+            data-test="termination-certificates-link"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.people.termination.follow_up.certificates') }}
+          </RouterLink>
+          <RouterLink
+            v-if="canReadDocuments"
+            :to="`/payroll/documents?person=${data.employment.employee_id}&period=${data.employment.end_date.slice(0, 7)}&tab=annual`"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+            data-test="termination-tax-certificate-link"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.people.termination.follow_up.tax_certificate') }}
+          </RouterLink>
+        </div>
+      </div>
       <ul v-if="data.issues.length" class="mt-3 space-y-2" data-test="termination-issues">
         <li
           v-for="issue in data.issues"
@@ -504,13 +537,13 @@ onMounted(() => void load())
             </label>
             <label :class="FIELD">
               {{ t('payroll.people.termination.work_injury.paid_on_label') }}
-              <input v-model="workInjuryPaidOn" type="date" :min="data.employment.end_date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-paid-on">
+              <DateInput v-model="workInjuryPaidOn" :min="data.employment.end_date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-paid-on" />
               <span :class="HINT">{{ t('payroll.people.termination.work_injury.paid_on_hint') }}</span>
             </label>
           </template>
           <label :class="FIELD">
             {{ t('payroll.people.termination.severance.other_income_label') }}
-            <input v-model="otherIncomeFrom" type="date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-other-income-from">
+            <DateInput v-model="otherIncomeFrom" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-other-income-from" />
             <span :class="HINT">{{ t('payroll.people.termination.severance.other_income_hint') }}</span>
           </label>
           <label v-if="otherIncomeFrom !== ''" class="flex items-start gap-2 text-xs text-neutral-700 sm:col-span-2">

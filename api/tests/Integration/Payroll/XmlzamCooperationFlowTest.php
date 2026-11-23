@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
 use MyInvoice\Repository\DocumentFileRepository;
@@ -51,7 +50,7 @@ final class XmlzamCooperationFlowTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->database = $container->get(Connection::class);
         $this->pdo = $this->database->pdo();
         $this->pdo->beginTransaction();
@@ -80,7 +79,7 @@ final class XmlzamCooperationFlowTest extends TestCase
 
     public function testFlowIsRegisteredAndUsesDedicatedStorage(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $database = $container->get(Connection::class);
 
         self::assertInstanceOf(XmlzamCooperationFlowService::class, $container->get(XmlzamCooperationFlowService::class));
@@ -753,6 +752,22 @@ final class XmlzamCooperationFlowTest extends TestCase
             hash('sha256', 'xmlzam-enforcement-' . $revisionId, true),
         ]);
         return $revisionId;
+    }
+
+    /** Protokol ČSSZ ani vlastní odeslané hlášení požadavkem exekutora nejsou. */
+    public function testCandidatesLeaveOutRecognizedMessagesAndOwnSentOnes(): void
+    {
+        [$requestInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-request/>', 'abc1234');
+        [$protocolInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-protocol/>', 'def5678');
+        [$sentInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-sent/>', 'ghi9012');
+        $this->pdo->prepare("UPDATE submission_inbox_messages SET classification = 'cssz_protocol' WHERE id = ?")
+            ->execute([$protocolInboxId]);
+        $this->pdo->prepare("UPDATE submission_inbox_messages SET direction = 'sent' WHERE id = ?")
+            ->execute([$sentInboxId]);
+
+        $candidates = $this->flow->candidates($this->supplierId, 'test');
+
+        self::assertSame([$requestInboxId], array_column($candidates, 'inbox_message_id'));
     }
 
     /** @return array{0:int,1:int} */

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -37,7 +36,7 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_employment_terms')) {
             $this->markTestSkipped('Chybí tabulka podmínek pracovního vztahu.');
@@ -116,6 +115,122 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
             'employment_id',
         );
         self::assertSame('2026-09-30', $short[$working]['proposed_on'] ?? null);
+    }
+
+    /**
+     * Agentura má schválenou mzdu za únor a v říjnu teprve zpracovává jaro.
+     * Nečinnost se měří k únoru: dohoda s prací v květnu (vstup ještě není
+     * ve mzdách) nečinná není. Dřív se měřilo k dnešku a nabízela se.
+     */
+    public function testInactivityIsMeasuredToTheLastApprovedPayrollMonth(): void
+    {
+        $this->approvedRun('2026-02-01');
+        $springWork = $this->employment($this->supplierId, 'Jarní Brigáda', 'dpp', '2026-01-01', null);
+        $this->input($springWork, '2026-05-01', 120_000);
+        $autumnOnly = $this->employment($this->supplierId, 'Podzimní Brigáda', 'dpp', '2025-10-01', null);
+        $this->input($autumnOnly, '2025-11-01', 90_000);
+
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY);
+
+        $byId = array_column($preview['items'], null, 'employment_id');
+        self::assertArrayNotHasKey($springWork, $byId);
+        self::assertSame('inactive', $byId[$autumnOnly]['group'] ?? null);
+        self::assertSame('2025-11-30', $byId[$autumnOnly]['proposed_on']);
+        self::assertSame('2025-12-01', $preview['activity_since']);
+        self::assertSame('2026-02-28', $preview['activity_reference_on']);
+    }
+
+    /**
+     * Sjednaný konec jen v podmínkách (vztah bez `end_date`) je taky uplynulý
+     * konec: náhled ho nabídne k ukončení a noční úloha ho ukončí.
+     */
+    public function testAgreedEndFromTermsCountsAsExpiredForPreviewAndCron(): void
+    {
+        $employmentId = $this->employment($this->supplierId, 'Konec V Podmínkách', 'dpp', '2026-03-01', null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, fixed_term_end_on, weekly_hours)
+             VALUES (?, ?, '2026-03-01', '2026-03-01', '2026-03-31', 40)",
+        )->execute([$this->supplierId, $employmentId]);
+
+        $item = array_column($this->bulk->preview($this->supplierId, 3, 12, self::TODAY)['items'], null, 'employment_id')[$employmentId] ?? null;
+        self::assertSame('expired', $item['group'] ?? null);
+        self::assertSame('2026-03-31', $item['proposed_on']);
+        self::assertSame('2026-03-31', $item['agreed_end_on']);
+
+        $result = $this->bulk->endExpiredAgreements($this->supplierId, self::TODAY);
+        self::assertSame([$employmentId], $result['ended'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['status' => 'ended', 'end_date' => '2026-03-31'], $this->state($employmentId));
+    }
+
+    /**
+     * Kontrola před během za únor hlásila 20 skončených dohod a dialog jich
+     * v listopadu předvybral 42: bral i dohody skončené až po začátku února,
+     * protože období běhu ignoroval. Nález i předvýběr teď stojí na jednom
+     * pravidle: sjednaný konec (i jen z podmínek vztahu) uplynul před obdobím.
+     */
+    public function testRunPeriodNarrowsThePreselectionToAgreementsTheCheckReports(): void
+    {
+        $january = $this->employment($this->supplierId, 'Konec V Lednu', 'dpp', '2026-01-05', '2026-01-31');
+        $february = $this->employment($this->supplierId, 'Konec V Únoru', 'dpp', '2026-01-05', '2026-02-28');
+        $march = $this->employment($this->supplierId, 'Konec V Březnu', 'dpc', '2026-01-05', '2026-03-28');
+        // Konec jen v podmínkách vztahu (sloučení, převzetí): pravidlo ho zná také.
+        $termsOnly = $this->employment($this->supplierId, 'Konec V Podmínkách', 'dpp', '2026-01-05', null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, fixed_term_end_on, weekly_hours)
+             VALUES (?, ?, '2026-01-05', '2026-01-05', '2026-01-20', 40)",
+        )->execute([$this->supplierId, $termsOnly]);
+        $this->employment($this->supplierId, 'Bez Konce', 'dpp', '2026-01-05', null);
+        // Už ukončený vztah se nehlásí, i když skončil před obdobím.
+        $this->employment($this->supplierId, 'Ukončená V Lednu', 'dpp', '2026-01-05', '2026-01-31', 'ended');
+
+        $reported = array_column(
+            $this->bulk->expiredBeforePeriod($this->supplierId, '2026-02-01', self::TODAY),
+            'employment_id',
+        );
+        sort($reported);
+        $expected = [$january, $termsOnly];
+        sort($expected);
+        self::assertSame($expected, $reported);
+
+        // Bez období dialog předvybírá všechny uplynulé konce (4), s obdobím
+        // jen ty, které hlásí kontrola před během (2); ostatní zůstávají v nabídce.
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY, '2026-02-01');
+        self::assertSame('2026-02-01', $preview['period_start']);
+        $items = array_column($preview['items'], null, 'employment_id');
+        foreach ([$january, $february, $march, $termsOnly] as $id) {
+            self::assertSame('expired', $items[$id]['group'], (string) $id);
+        }
+        $beforePeriod = array_keys(array_filter(
+            $items,
+            static fn (array $item): bool => $item['before_period'] === true,
+        ));
+        sort($beforePeriod);
+        self::assertSame($expected, $beforePeriod);
+        self::assertSame(4, $preview['summary']['expired']);
+
+        // Náhled bez období nikoho jako „před obdobím" neoznačí.
+        $plain = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY);
+        self::assertNull($plain['period_start']);
+        self::assertSame([], array_filter($plain['items'], static fn (array $item): bool => $item['before_period']));
+    }
+
+    /**
+     * Běh za budoucí měsíc: dohoda, jejíž konec ještě nenastal, ukončit nejde,
+     * proto ji nehlásí kontrola ani dialog (dřív se počty rozešly).
+     */
+    public function testAgreementEndingInTheFutureIsNotReportedForAFuturePeriod(): void
+    {
+        $past = $this->employment($this->supplierId, 'Konec Minulý', 'dpp', '2026-01-05', '2026-06-30');
+        $this->employment($this->supplierId, 'Konec Budoucí', 'dpp', '2026-01-05', '2026-11-30');
+
+        $reported = array_column($this->bulk->expiredBeforePeriod($this->supplierId, '2027-01-01', '2026-11-11'), 'employment_id');
+        self::assertSame([$past], $reported);
+
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, '2026-11-11', '2027-01-01');
+        $marked = array_column(array_filter($preview['items'], static fn (array $item): bool => $item['before_period']), 'employment_id');
+        self::assertSame($reported, array_values($marked));
     }
 
     public function testExpiredAgreementWithWorkAfterTheEndIsFlagged(): void
@@ -241,6 +356,22 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         )->execute([$supplierId, $employeeId, 'BULK-' . $employeeId, $relationType, $status, $startOn, $startOn, $endOn]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    /** Schválená mzda firmy za měsíc (hranice zpracovaných měsíců). */
+    private function approvedRun(string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, 'approved', 1, 1)",
+        )->execute([$this->supplierId, $periodStart, (new \DateTimeImmutable($periodStart))->modify('+1 month +14 days')->format('Y-m-d')]);
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)",
+        )->execute([$this->supplierId, (int) $pdo->lastInsertId(), str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
     }
 
     private function component(int $supplierId): int

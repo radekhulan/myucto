@@ -20,7 +20,7 @@ const m = vi.hoisted(() => ({
   refresh: vi.fn(),
   replace: vi.fn(),
   routeQuery: { tab: 'totp' as string | undefined },
-  store: { user: { totp_enabled: false, mfa_methods: [], passkey_count: 0 } as any },
+  store: { user: { totp_enabled: false, mfa_methods: [], passkey_count: 0 } as any, setupStatus: undefined as any },
 }))
 
 vi.mock('@/api/auth', () => ({
@@ -56,6 +56,7 @@ vi.mock('@/security/domainLogin', () => ({
   pendingCanonicalDomainLoginQuery: () => ({ domain_login_request: 'r'.repeat(43), state: 's'.repeat(43) }),
 }))
 vi.mock('@/pages/Passkeys.vue', () => ({ default: { name: 'Passkeys', emits: ['registered'], template: '<button data-test="register-passkey" @click="$emit(\'registered\')" />' } }))
+vi.mock('@/components/security/ExternalIdentities.vue', () => ({ default: { name: 'ExternalIdentities', template: '<div data-test="external-identities" />' } }))
 vi.mock('@/pages/KeyboardShortcuts.vue', () => ({ default: { name: 'KeyboardShortcuts', template: '<div />' } }))
 vi.mock('@/components/security/RecoveryCodesOnce.vue', () => ({
   default: {
@@ -103,6 +104,7 @@ beforeEach(() => {
   m.ownedCsrf.mockReturnValue(null)
   m.routeQuery.tab = 'totp'
   m.store.user = { totp_enabled: false, mfa_methods: [], passkey_count: 0 }
+  m.store.setupStatus = undefined
   m.totpStatus.mockResolvedValue({ enabled: false })
   m.totpSetup.mockResolvedValue({ secret: 'S', uri: 'otpauth://x', qr_data_uri: 'data:,' })
   m.changePassword.mockResolvedValue(undefined)
@@ -225,6 +227,41 @@ describe('PasswordChange — owned portal session rotation', () => {
     expect(m.advanceSession).toHaveBeenCalledWith('owned', 'rotated')
     expect(m.setSessionCsrfToken).toHaveBeenCalledWith('rotated')
     expect(m.advanceSession.mock.invocationCallOrder[0]).toBeLessThan(m.refresh.mock.invocationCallOrder[0]!)
+    wrapper.unmount()
+  })
+})
+
+describe('PasswordChange — vynucené přihlášení přes organizaci', () => {
+  const tabLabels = (wrapper: ReturnType<typeof mountPage>) =>
+    wrapper.findAll('option').map(option => option.attributes('value'))
+
+  it('bez vynucení nabídne heslo, ověřovací aplikaci i přístupové klíče', async () => {
+    m.store.setupStatus = { sso_providers: [{ id: 'entra', strong: true }], sso_required_provider: null }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(tabLabels(wrapper)).toEqual(['password', 'totp', 'passkeys', 'sso', 'session-lock', 'shortcuts'])
+    expect(wrapper.find('[data-test="totp-current-password"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('silný poskytovatel schová heslo i místní faktory a přímý vstup na TOTP vrátí na propojené účty', async () => {
+    m.store.setupStatus = { sso_providers: [{ id: 'entra', strong: true }], sso_required_provider: 'entra' }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(tabLabels(wrapper)).toEqual(['sso', 'session-lock', 'shortcuts'])
+    expect((wrapper.vm as any).tab).toBe('sso')
+    expect(wrapper.find('[data-test="totp-start"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('poskytovatel jako první faktor nechá TOTP bez hesla', async () => {
+    m.store.setupStatus = { sso_providers: [{ id: 'entra', strong: false }], sso_required_provider: 'entra' }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(tabLabels(wrapper)).toEqual(['totp', 'passkeys', 'sso', 'session-lock', 'shortcuts'])
+    expect(wrapper.find('[data-test="totp-current-password"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="totp-needs-passkey"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="totp-start"]').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })

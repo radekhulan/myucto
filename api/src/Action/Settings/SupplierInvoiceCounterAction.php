@@ -144,4 +144,50 @@ final class SupplierInvoiceCounterAction
             'revenue_category_id' => $result['revenue_category_id'],
         ]);
     }
+
+    /**
+     * GET /api/settings/supplier/invoice-counter?type=invoice&client_id=&revenue_category_id=
+     *
+     * Vrátí, jaké číslo dostane PŘÍŠTÍ vystavený doklad řady (bez zápisu), aby pole
+     * „Příští číslo" v nastavení ukazovalo aktuální stav i po načtení stránky.
+     *
+     * Response: { "type": "invoice", "next_number": 123, "counter": 122, "period": "2026",
+     *             "preview": "20260123", "client_id": 0, "revenue_category_id": 0 }
+     *           nebo { "type": "invoice", "next_number": null } u řady bez čítače.
+     */
+    public function peek(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::allows($request, 'settings.company', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Nedostatečná oprávnění.', 403);
+        }
+
+        $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        if ($supplierId <= 0) {
+            return Json::error($response, 'no_supplier', 'Není zvolen dodavatel.', 400);
+        }
+
+        $q    = $request->getQueryParams();
+        $type = (string) ($q['type'] ?? 'invoice');
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', VarsymbolGenerator::SIMPLIFIED], true)) {
+            return Json::error($response, 'validation_failed', "Neplatný type (invoice|proforma|credit_note|simplified).", 400);
+        }
+
+        $clientId   = (int) ($q['client_id'] ?? 0);
+        $categoryId = (int) ($q['revenue_category_id'] ?? 0);
+        if ($clientId < 0 || $categoryId < 0 || ($clientId > 0 && $categoryId > 0)) {
+            return Json::error($response, 'validation_failed', 'Neplatná kombinace client_id / revenue_category_id.', 400);
+        }
+
+        $bad = $this->tenantRefs->violations($supplierId, $q, ['client_id', 'revenue_category_id']);
+        if ($bad !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($bad), 400);
+        }
+
+        $result = $this->varsymbol->peek($supplierId, $type, null, $clientId, $categoryId);
+        if ($result === null) {
+            return Json::ok($response, ['type' => $type, 'next_number' => null]);
+        }
+
+        return Json::ok($response, ['type' => $type] + $result);
+    }
 }

@@ -158,7 +158,7 @@ final class MonetaApiClient
             $options['query'] = $query;
         }
         if ($body !== null) {
-            $options['body'] = json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+            $options['body'] = BankPaymentJson::encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
             $options['headers']['Content-Type'] = 'application/json';
         }
 

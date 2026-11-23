@@ -20,9 +20,15 @@ use PDO;
  * banky a pokladny {@see DocumentLinker::matchPayments()}. Převádí se i uhrazené doklady,
  * aby agenda nesla celou historii roku.
  *
- * Předpisy mezd, odvodů a DPH (účty 331, 336, 342, 343) vlastní mzdový a daňový modul
- * a nepřevádějí se. Zálohy na daň z příjmů (341) bez zaúčtování převezme daňový modul jako
- * předpisy záloh ({@see self::taxAdvances()}).
+ * Mzdové závazky (331, 336, 342, {@see MigratedOtherItemPolicy}) se převádějí stejně:
+ * předpis s vlastním zápisem (pojistné) ho převezme, mzda zaměstnance (předpis nese interní
+ * doklad mezd) a závazek z počátečního stavu se založí bez zápisu. Protokol je počítá
+ * zvlášť (`payroll`). Předpisy DPH (343) vlastní daňový modul a nepřevádějí se. Zálohy na
+ * daň z příjmů (341) bez zaúčtování převezme daňový modul jako předpisy záloh
+ * ({@see self::taxAdvances()}).
+ *
+ * Doklad bez členění DPH s nulovou daní (MDB export členění u mzdových dokladů nevyplňuje)
+ * je mimo přiznání ({@see self::outsideReturnWithoutVatClass()}).
  */
 final class OtherItemImporter
 {
@@ -52,8 +58,9 @@ final class OtherItemImporter
             foreach ($ctx->export->records($agenda, 'invoice') as $record) {
                 $header = PohodaXml::get($record, 'invoiceHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
-                $issued = PohodaXml::date($header, 'date') ?? PohodaXml::date($header, 'dateAccounting');
-                if ($number === '' || $issued === null || $ctx->skipsDate($issued)) {
+                $accounting = PohodaXml::date($header, 'dateAccounting');
+                $issued = PohodaXml::date($header, 'date') ?? $accounting;
+                if ($number === '' || $issued === null || $ctx->skipsDate($accounting ?? $issued)) {
                     $p->count(self::STEP, 'skipped');
                     continue;
                 }
@@ -66,7 +73,9 @@ final class OtherItemImporter
                     continue;
                 }
                 if (isset($mappedAdvances[$key])) {
-                    self::captureLiquidations($ctx, 'tax_advance', (int) $mappedAdvances[$key], $number, $record);
+                    if (!$ctx->skipsDate(PohodaXml::date($header, 'dateDue') ?? $issued)) {
+                        self::captureLiquidations($ctx, 'tax_advance', (int) $mappedAdvances[$key], $number, $record);
+                    }
                     $p->count(self::STEP, 'existing');
                     continue;
                 }
@@ -89,14 +98,16 @@ final class OtherItemImporter
                     $p->warn(self::STEP, 'other_item_review', "Doklad {$number} (" . self::label($agenda) . ') má částky, měnu nebo zálohu, které převod do agendy nepřevezme; zůstává jen v deníku.', ['document_no' => $number]);
                     continue;
                 }
-                $entries = [];
+                $candidates = [];
                 foreach ($journal as $journalKey => $entryId) {
                     $parts = explode('|', (string) $journalKey, 4);
                     if (count($parts) === 4 && $parts[1] === $source && $parts[2] === $number
-                        && (int) $parts[0] >= $ctx->year() - 1 && (int) $parts[0] <= $ctx->year()) {
-                        $entries[(int) $entryId] = true;
+                        && (int) $parts[0] >= $ctx->year() - 1 && (int) $parts[0] <= $ctx->year() && !$ctx->skipsDate($parts[3])) {
+                        $candidates[] = ['year' => (int) $parts[0], 'date' => $parts[3], 'id' => (int) $entryId];
                     }
                 }
+                // Stejné číslo dokladu v minulé agendě je jiný doklad ({@see DocumentLinker::agendaEntries()}).
+                $entries = array_fill_keys(array_column(DocumentLinker::agendaEntries($candidates, $ctx->year(), $ctx->calendar->periodStart($ctx->year())), 'id'), true);
                 if ($entries === []) {
                     // Bez vlastního zápisu: předpis nese jiný doklad (nebo ho nese počáteční stav).
                     $rule = PohodaXml::text($header, 'accounting/ids');
@@ -112,9 +123,11 @@ final class OtherItemImporter
                     $id = $this->insertItem($ctx, $agenda, $header, $number, $issued, $candidate, [
                         'account' => $account, 'counter' => null, 'lines' => [], 'date' => $issued,
                         'posted_at' => null, 'entry_id' => null, 'status' => 'confirmed',
-                        'note' => "Převzato z POHODY, doklad {$number}. V POHODĚ veden bez zaúčtování"
-                            . ($rule !== '' ? " (předkontace {$rule})" : '')
-                            . ', předpis je v deníku jiným dokladem nebo v počátečním stavu - položka se proto neúčtuje.',
+                        'note' => $ctx->taxEvidence
+                            ? "Převzato z POHODY, doklad {$number}. Agenda je vedená v daňové evidenci, položka se neúčtuje."
+                            : "Převzato z POHODY, doklad {$number}. V POHODĚ veden bez zaúčtování"
+                                . ($rule !== '' ? " (předkontace {$rule})" : '')
+                                . ', předpis je v deníku jiným dokladem nebo v počátečním stavu - položka se proto neúčtuje.',
                     ]);
                     if ($id !== null) {
                         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_OTHER_ITEM, $key, $id, $ctx->runId);
@@ -122,6 +135,7 @@ final class OtherItemImporter
                         self::rememberSourcePaid($ctx, $id, $candidate, $record);
                         $p->count(self::STEP, 'created_unposted');
                         $p->count(self::STEP, $candidate['remaining'] >= 0.005 ? 'open' : 'settled');
+                        self::countPayroll($ctx, $account);
                     }
                     continue;
                 }
@@ -163,6 +177,7 @@ final class OtherItemImporter
                 self::rememberSourcePaid($ctx, $id, $candidate, $record);
                 $p->count(self::STEP, 'created');
                 $p->count(self::STEP, $candidate['remaining'] >= 0.005 ? 'open' : 'settled');
+                self::countPayroll($ctx, $posting['account']);
             }
         }
         $this->taxAdvances($ctx, $advances);
@@ -190,7 +205,10 @@ final class OtherItemImporter
         $taxpayer = (string) $type->fetchColumn() === 'fo' ? 'fo' : 'po';
         $byYear = [];
         foreach ($advances as $advance) {
-            $byYear[(int) substr((string) $advance['candidate']['due'], 0, 4)][] = $advance;
+            $due = $advance['candidate']['due'];
+            if (!$ctx->skipsDate($due)) {
+                $byYear[(int) substr($due, 0, 4)][] = $advance;
+            }
         }
         ksort($byYear);
         $existing = $pdo->prepare("SELECT COUNT(*) FROM tax_advance_schedules
@@ -214,11 +232,16 @@ final class OtherItemImporter
                 $paidOn = null;
                 foreach (PohodaXml::all($row['record'], 'liquidations/liquidation') as $l) {
                     $date = PohodaXml::date($l, 'date');
+                    if ($ctx->skipsDate($date)) {
+                        $paid -= abs(PohodaXml::num($l, 'amount'));
+                        continue;
+                    }
                     if ($date !== null && ($paidOn === null || $date > $paidOn)) {
                         $paidOn = $date;
                     }
                 }
-                $settled = $c['remaining'] < 0.005;
+                $paid = max(0.0, round($paid, 2));
+                $settled = $c['amount'] - $paid < 0.005;
                 $insert->execute([
                     $ctx->supplierId, $taxpayer, $year, $seq + 1, number_format($c['amount'], 2, '.', ''), $c['due'],
                     $c['symbol'] !== null && strlen($c['symbol']) <= 20 ? $c['symbol'] : null,
@@ -319,8 +342,13 @@ final class OtherItemImporter
         $header = PohodaXml::get($record, 'invoiceHeader');
         $summary = PohodaXml::get($record, 'invoiceSummary/homeCurrency');
         $code = PohodaXml::text($header, 'classificationVAT/ids');
-        $class = $agenda === 'receivable' ? $vat->sale($code, 0.0) : $vat->purchase($code);
-        if ($code === '' || $class === null || $class['in_return'] || PohodaXml::text($header, 'MOSS/ids') !== '') return null;
+        if (PohodaXml::text($header, 'MOSS/ids') !== '') return null;
+        if ($code !== '') {
+            $class = $agenda === 'receivable' ? $vat->sale($code, 0.0) : $vat->purchase($code);
+            if ($class === null || $class['in_return']) return null;
+        }
+        // Bez členění rozhoduje nulová daň, kterou níž hlídají částky souhrnu i položek
+        // ({@see self::outsideReturnWithoutVatClass()}).
         if (PohodaXml::text($record, 'invoiceSummary/foreignCurrency/currency/ids') !== '') return null;
         if (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') !== []) return null;
         foreach (['priceLow', 'priceLowVAT', 'priceHigh', 'priceHighVAT', 'price3', 'price3VAT', 'round/priceRound'] as $field) {
@@ -406,6 +434,24 @@ final class OtherItemImporter
     public static function moduleOwned(string $account): bool
     {
         return MigratedOtherItemPolicy::moduleOwned($account);
+    }
+
+    /**
+     * Ostatní pohledávka nebo závazek bez členění DPH a s nulovou daní je doklad mimo
+     * přiznání, ne faktura. MDB export (účetnictví bez XML datového balíku) členění
+     * u dokladů mimo DPH, typicky mezd a odvodů, nevyplňuje. Přijaté a vydané faktury
+     * (jiné agendy) bez členění zůstávají v přiznání ({@see InvoiceImporter}).
+     */
+    public static function outsideReturnWithoutVatClass(string $agenda, string $code, float $vat): bool
+    {
+        return in_array($agenda, ['receivable', 'commitment'], true) && $code === '' && abs($vat) < 0.005;
+    }
+
+    private static function countPayroll(PohodaContext $ctx, ?string $account): void
+    {
+        if ($account !== null && MigratedOtherItemPolicy::payroll($account)) {
+            $ctx->protocol->count(self::STEP, 'payroll');
+        }
     }
 
     /**

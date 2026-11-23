@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\SourceJournalPairs;
 
 /**
  * Účtová osnova, účetní období a účetní deník z Pohody.
@@ -41,6 +43,7 @@ final class ChartJournalImporter
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly PohodaImportRepository $map,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     public function chart(PohodaContext $ctx): void
@@ -115,6 +118,7 @@ final class ChartJournalImporter
         $ctx->periods = [$year => $period];
 
         $groups = [];
+        $skippedGroups = [];
         $closingRows = 0;
         $unknownAgendas = [];
         foreach ($ctx->export->records('journal', 'accountingItem') as $item) {
@@ -122,8 +126,19 @@ final class ChartJournalImporter
                 $closingRows++;
                 continue;
             }
-            $groups[PohodaJournal::groupKey($item)][] = $item;
+            $groupKey = PohodaJournal::groupKey($item);
+            if ($groupKey !== PohodaJournal::OPENING_KEY && $ctx->skipsDate(PohodaXml::date($item, 'date'))) {
+                $skippedGroups[$groupKey] = true;
+                continue;
+            }
+            $groups[$groupKey][] = $item;
             $source = PohodaJournal::source($item);
+            if ($source === PohodaJournal::BANK) {
+                $row = PohodaBankJournal::row($item);
+                if ($row !== null) {
+                    $ctx->bankJournalRows[PohodaJournal::number($item)][] = $row;
+                }
+            }
             if (str_starts_with($source, PohodaJournal::UNKNOWN_AGENDA_PREFIX)) {
                 $unknownAgendas[$source] = ($unknownAgendas[$source] ?? 0) + 1;
             }
@@ -169,9 +184,13 @@ final class ChartJournalImporter
         };
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
-        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => 0];
+        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => count($skippedGroups)];
         $moved = [];
         $later = [];
+        // Forma zápisu firmy: deník POHODY (řádek = účet MD, účet Dal, částka) jde ve formě
+        // single po dvojicích přímo ze zdroje.
+        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
+        $sameAccountRows = 0;
         $now = date('Y-m-d H:i:s');
         $done = 0;
         $total = count($groups);
@@ -205,13 +224,10 @@ final class ChartJournalImporter
             }
             $isOpening = $groupKey === PohodaJournal::OPENING_KEY;
             $first = $rows[0];
-            if (!$isOpening && $ctx->skipsDate(PohodaXml::date($first, 'date'))) {
-                $stats['later_year_skipped']++;
-                continue;
-            }
             $number = PohodaJournal::number($first);
 
             $lines = [];
+            $texts = [];
             $lineNo = 0;
             foreach ($rows as $item) {
                 $effect = PohodaJournal::effect($item);
@@ -236,6 +252,7 @@ final class ChartJournalImporter
                 }
                 $lines[] = ['account_id' => $debitId, 'side' => 'debit', 'amount' => $amount, 'line_no' => ++$lineNo, 'cost_center' => $centre !== '' ? $centre : null] + $activityFor((string) $effect['debit']);
                 $lines[] = ['account_id' => $creditId, 'side' => 'credit', 'amount' => $amount, 'line_no' => ++$lineNo, 'cost_center' => $centre !== '' ? $centre : null] + $activityFor((string) $effect['credit']);
+                $texts[] = PohodaXml::text($item, 'text');
             }
             if ($lines === []) {
                 continue;
@@ -258,6 +275,13 @@ final class ChartJournalImporter
                 $documentDate ??= $entryDate;
                 $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
                 $moved[] = $number ?: $groupKey;
+            }
+            if ($forms->singleAt($entryDate)) {
+                ['lines' => $lines, 'same_account' => $sameAccount] = SourceJournalPairs::pair($lines, $texts);
+                $sameAccountRows += $sameAccount;
+                if ($lines === []) {
+                    continue;
+                }
             }
             // Pohoda veze v řádku deníku JEN volný text (`act:text`), který je u celé
             // řady dokladů shodný („Fakturujeme Vám za …"). Do popisu proto jde i
@@ -295,6 +319,8 @@ final class ChartJournalImporter
             }
         }
         $ctx->report(self::STEP_JOURNAL, $total, $total);
+        $this->storePairingSymbols($ctx, $groups);
+        $this->collectSplits($ctx, $groups);
 
         $stats['debit'] = round($stats['debit'], 2);
         $stats['credit'] = round($stats['credit'], 2);
@@ -323,6 +349,9 @@ final class ChartJournalImporter
                 $year, $periodYear,
             ), ['year' => $periodYear, 'period_id' => $target['id'], 'entries' => $later[$periodYear] ?? 0]);
         }
+        if ($sameAccountRows > 0) {
+            $p->info(self::STEP_JOURNAL, 'same_account_rows', "{$sameAccountRows} řádků POHODY účtuje na straně MD i Dal na účet, který MyÚčto vede jako jeden. Na zůstatek účtu nemají vliv a v jednoduchém zápisu nejsou platná dvojice, proto se nepřenesly.", ['year' => $year, 'rows' => $sameAccountRows]);
+        }
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP_JOURNAL, 'negative_amounts', "{$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).");
         }
@@ -337,6 +366,75 @@ final class ChartJournalImporter
         }
         $p->set('journal', [$stats]);
         $p->finish(self::STEP_JOURNAL);
+    }
+
+    /**
+     * Zakázky a činnosti řádků deníku pro {@see PohodaSplitDimension}, i u zápisů z dřívějšího
+     * převodu: export s novým převodníkem je tak doplní i firmě převedené bez nich. Čísluje řádky
+     * stejně jako zápis a {@see storePairingSymbols()}, zápis se tím nemění.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     */
+    private function collectSplits(PohodaContext $ctx, array $groups): void
+    {
+        $entries = null;
+        $year = $ctx->year();
+        foreach ($groups as $groupKey => $rows) {
+            $lineNo = 0;
+            foreach ($rows as $item) {
+                if (PohodaJournal::effect($item) === null) {
+                    continue;
+                }
+                $lineNo += 2;
+                foreach (PohodaSplitDimension::SPLITS as $split) {
+                    $code = PohodaSplitDimension::code($item, $split);
+                    if ($code === '') {
+                        continue;
+                    }
+                    $entries ??= $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
+                    $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
+                    if ($entryId === null) {
+                        continue 2;
+                    }
+                    $ctx->splitLines[$split][$code][] = [(int) $entryId, $lineNo - 1];
+                    $ctx->splitLines[$split][$code][] = [(int) $entryId, $lineNo];
+                }
+            }
+        }
+    }
+
+    /**
+     * Párovací symboly řádků deníku, i u zápisů z dřívějšího převodu. Čísluje řádky stejně
+     * jako zápis, zápis se tím nemění. Export bez symbolů (XML) nezapisuje nic.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     */
+    private function storePairingSymbols(PohodaContext $ctx, array $groups): void
+    {
+        $entries = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
+        $year = $ctx->year();
+        $update = $this->db->pdo()->prepare('INSERT INTO journal_line_pairing (supplier_id, entry_id, line_no, pairing_symbol) VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE pairing_symbol = VALUES(pairing_symbol)');
+        foreach ($groups as $groupKey => $rows) {
+            $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
+            if ($entryId === null) {
+                continue;
+            }
+            $lineNo = 0;
+            foreach ($rows as $item) {
+                $effect = PohodaJournal::effect($item);
+                if ($effect === null) {
+                    continue;
+                }
+                foreach (['debit', 'credit'] as $side) {
+                    $lineNo++;
+                    $symbol = PohodaJournal::pairingSymbol($item, $effect[$side]);
+                    if ($symbol !== null) {
+                        $update->execute([$ctx->supplierId, (int) $entryId, $lineNo, $symbol]);
+                    }
+                }
+            }
+        }
     }
 
     /**

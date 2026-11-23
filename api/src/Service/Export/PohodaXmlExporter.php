@@ -10,6 +10,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Support\CompanyIdNormalizer;
+use MyInvoice\Support\PohodaPaymentType;
 
 /**
  * Stormware Pohoda XML data package exporter.
@@ -288,6 +289,13 @@ final class PohodaXmlExporter
                 $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', mb_substr($orderNumber, 0, self::DOCUMENT_NUMBER_LIMIT));
             }
 
+            $paymentType = PohodaPaymentType::toPohoda($invoice['payment_method'] ?? null);
+            if ($paymentType !== null) {
+                $payment = $dom->createElementNS(self::NS_INV, 'inv:paymentType');
+                $this->el($dom, $payment, self::NS_TYP, 'typ:paymentType', $paymentType);
+                $hdr->appendChild($payment);
+            }
+
             // Účet / středisko / činnost / zakázka (per-supplier)
             if (!empty($cfg['pohoda_account_code'])) {
                 $this->codeRef($dom, $hdr, 'inv:account', (string) $cfg['pohoda_account_code']);
@@ -386,11 +394,11 @@ final class PohodaXmlExporter
                 $block = $dom->createElementNS(self::NS_INV, $blockName);
                 // payVAT=false → unitPrice musí být BEZ DPH. V režimu „ceny s DPH" nese
                 // unit_price_without_vat brutto, proto dopočítáme netto z řádkového základu.
-                $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
+                $preciseUnitPrice = TimeBillingExport::usesPreciseUnitPrice($item);
                 $unitPriceNet = (!empty($invoice['prices_include_vat']) && $qtyItem != 0.0)
-                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, $preciseTimeRate ? 6 : 2)
+                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, $preciseUnitPrice ? 6 : 2)
                     : (float) $item['unit_price_without_vat'];
-                $unitPrice = TimeBillingExport::usesPreciseHourlyRate($item)
+                $unitPrice = TimeBillingExport::usesPreciseUnitPrice($item)
                     ? TimeBillingExport::formatRate($unitPriceNet)
                     : $this->fmt($unitPriceNet);
                 $this->el($dom, $block, self::NS_TYP, 'typ:unitPrice', $unitPrice);

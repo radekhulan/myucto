@@ -67,6 +67,17 @@ final class PohodaImportJobPlanTest extends TestCase
         }
     }
 
+    /** Běh účetnictví dostane přehled mezd své agendy: mzdy, které se nepřevedou, zapíše do protokolu. */
+    public function testAgendaCarriesPayrollSummaryForAccountingRun(): void
+    {
+        $payroll = ['employees' => 4, 'months' => 10, 'first' => '2026-01', 'last' => '2026-10'];
+        $meta = ['agendas' => [['dir' => self::ICO . '_2026', 'ico' => self::ICO, 'year' => 2026, 'has_accounting' => true,
+            'has_payroll' => true, 'payroll' => $payroll, 'counts' => ['later_years' => []]]]];
+
+        self::assertSame($payroll, PohodaImportJobService::agenda($meta, self::ICO, 2026)['payroll'] ?? null);
+        self::assertNull(PohodaImportJobService::agenda(self::meta([2025 => []]), self::ICO, 2025)['payroll'] ?? null);
+    }
+
     public function testYearsFromParamsAreAscendingAndKeepLegacyYear(): void
     {
         self::assertSame([2025, 2026], ImportYears::fromParams(['years' => ['2026', 2025, 2025], 'year' => 2024]));

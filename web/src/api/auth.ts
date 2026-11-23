@@ -52,6 +52,7 @@ export interface SupplierBrief {
   oss_enabled: boolean
   /** 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno. */
   taxpayer_type: 'fo' | 'po' | null
+  default_hourly_rate?: number
   default_payment_due_days: number
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
@@ -60,7 +61,10 @@ export interface SupplierBrief {
   default_rounding_mode?: InvoiceRoundingMode
   /** Vyúčtování s výsledkem k vyplacení (migrace 1937): editor povolí zápornou fakturu. */
   allow_refund_invoices: boolean
+  /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
+  dashboard_work_reports?: boolean
   /** Rozpis slevy z ceníkové ceny na PDF (migrace 2035); editor podle ní ukáže u řádku pole „Sleva %". */
+  work_report_display_options?: import('./invoices').WorkReportDisplayOptions
   invoice_pdf_show_line_discount?: boolean
   /** Výchozí „netisknout odběratele" na zjednodušeném dokladu (migrace 2037). */
   simplified_hide_customer_default?: boolean
@@ -99,6 +103,16 @@ export interface SupplierBrief {
   payroll_enabled?: boolean
 }
 
+export interface SsoProvider {
+  id: string
+  label: string
+  /**
+   * Plné přihlášení včetně MFA u poskytovatele (Entra ID): smí potvrzovat citlivé
+   * operace a firma ho může vynutit. Ostatní poskytovatelé jsou jen první faktor.
+   */
+  strong?: boolean
+}
+
 export interface SetupStatus {
   needs_setup: boolean
   version: string
@@ -117,6 +131,15 @@ export interface SetupStatus {
     password: string
   }
   passwordless_login_enabled: boolean
+  /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
+  sso_providers?: SsoProvider[]
+  /**
+   * Poskytovatel povinný pro celou instalaci. Heslo, passkey ani TOTP se pak
+   * nepoužívají pro nikoho; citlivé operace ověřuje jen účet organizace.
+   */
+  sso_required_provider?: string | null
+  /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
+  maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {
     provider: 'turnstile' | 'none'
     site_key: string
@@ -138,8 +161,10 @@ export interface DomainContext {
 }
 
 export interface LoginPayload {
-  email: string
-  password: string
+  email?: string
+  password?: string
+  /** Lístek z návratu od poskytovatele, který je jen prvním faktorem; nahrazuje e-mail a heslo. */
+  sso_ticket?: string
   totp?: string
   email_otp?: string
   /** Záložní jednorázový kód — break-glass při ztraceném silném faktoru. */
@@ -198,6 +223,11 @@ export interface AuthSessionContract {
 }
 
 export interface MeResponse extends AuthSessionContract {
+  /**
+   * Sezení z poskytovatele, který nahrazuje celé přihlášení (Entra ID), a jeho
+   * pevné vypršení. Po něm se přihlášení tiše obnoví (security/ssoRenewal.ts).
+   */
+  sso_session?: { provider: string; expires_at: string } | null
   current_supplier_id: number
   suppliers: SupplierBrief[]
   permissions: Record<string, 0 | 1 | 2>
@@ -208,6 +238,10 @@ export interface MeResponse extends AuthSessionContract {
   submission_test_environment_allowed?: boolean
   /** Je na instalaci zapnutá web faktura (veřejný odkaz na fakturu)? */
   invoice_public_links_enabled?: boolean
+  /** Je na instalaci zapnuté tlačítko Uložit a zaúčtovat v editorech faktur? */
+  save_and_post_enabled?: boolean
+  /** Je na instalaci zapnutý automatický export do Pohody e-mailem účetní? */
+  scheduled_pohoda_export_enabled?: boolean
 }
 
 export interface DomainLoginStart {
@@ -394,10 +428,13 @@ export const authApi = {
       cf_turnstile_response: captchaToken,
     }).then(r => r.data),
 
-  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>) =>
+  // `ssoTicket`: přihlášení přes Google, Apple či Seznam dokončené passkey;
+  // server lístek po vydání sezení spotřebuje.
+  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>, ssoTicket?: string) =>
     api.post<AuthSessionContract>('/auth/webauthn/login/verify', {
       flow_token: flowToken,
       credential,
+      ...(ssoTicket ? { sso_ticket: ssoTicket } : {}),
     }).then(r => r.data),
 
   sessionStatus: () =>

@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\Accounting\Codebooks\AbstractCodebookImportService;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -294,6 +295,9 @@ final class VendorOfferImportService extends AbstractCodebookImportService
             [$v, $e] = $this->decCell($cols, $map, 'price', 10, 'nákupní cena');
             if ($e !== null) {
                 return [[], $e];
+            }
+            if (!UnitPricePrecision::isWithinPrecision($v)) {
+                return [[], 'Nákupní cena smí mít nejvýše šest desetinných míst: „' . $v . '".'];
             }
             $out['purchase_price'] = $v;
         }

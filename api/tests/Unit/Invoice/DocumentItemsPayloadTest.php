@@ -35,6 +35,17 @@ final class DocumentItemsPayloadTest extends TestCase
             'Doklad bez položek nemá co ztratit — prázdné pole je no-op.');
     }
 
+    public function testEmptyUpdateIsAllowedOnlyForAnExistingDraft(): void
+    {
+        $stored = [['description' => 'Pracovní souhrn', 'quantity' => 1]];
+        self::assertFalse(DocumentItemsPayload::emptiesExisting(['items' => []], $stored, 'draft'));
+        foreach (['issued', 'sent', 'received', 'booked', 'paid', 'cancelled', ''] as $status) {
+            self::assertTrue(DocumentItemsPayload::emptiesExisting(['items' => []], $stored, $status), $status);
+        }
+        self::assertFalse(DocumentItemsPayload::emptiesExisting([], $stored, 'draft'));
+        self::assertFalse(DocumentItemsPayload::emptiesExisting(['items' => null], $stored, 'draft'));
+    }
+
     public function testChangedComparesContentNotFormatting(): void
     {
         // Uložený řádek přichází z DB jako float, tělo requestu jako string z formuláře.
@@ -172,6 +183,34 @@ final class DocumentItemsPayloadTest extends TestCase
         ]];
 
         self::assertFalse(DocumentItemsPayload::changed(self::storedOssRow(), $sameFromForm));
+    }
+
+    /**
+     * Poslaný kód členění přesouvá řádek v přiznání a KH, takže v podaném období nesmí
+     * projít jako poznámková úprava. Vynechaný klíč dál změnou není.
+     */
+    public function testSentVatClassificationIsContentMissingKeyIsNot(): void
+    {
+        $stored = [[
+            'description' => 'Zboží', 'quantity' => 1.0, 'unit' => 'ks',
+            'unit_price_without_vat' => 1000.0, 'vat_rate_id' => 3, 'vat_classification_code' => '22',
+        ]];
+        $form = [[
+            'description' => 'Zboží', 'quantity' => '1', 'unit' => 'ks',
+            'unit_price_without_vat' => '1000.00', 'vat_rate_id' => '3',
+        ]];
+
+        self::assertFalse(DocumentItemsPayload::changed($stored, $form), 'Vynechaný kód se dopočítá.');
+        self::assertFalse(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => '22']]),
+            'Stejný kód poslaný zpět není změna.');
+        self::assertTrue(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => '20']]),
+            'Jiný kód je jiný řádek přiznání.');
+        self::assertTrue(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => null]]),
+            'Výslovný návrat na automatiku může kód změnit.');
+
+        $noCode = [[...$stored[0], 'vat_classification_code' => null]];
+        self::assertFalse(DocumentItemsPayload::changed($noCode, [[...$form[0], 'vat_classification_code' => null]]));
+        self::assertFalse(DocumentItemsPayload::changed($noCode, [[...$form[0], 'vat_classification_code' => '']]));
     }
 
     /**

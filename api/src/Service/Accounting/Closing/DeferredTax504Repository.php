@@ -12,19 +12,50 @@ final class DeferredTax504Repository
 {
     public function __construct(private readonly Connection $db, private readonly JournalEntryRepository $journal, private readonly bool $currentRead = true) {}
 
+    /**
+     * Otisk podkladů odložené daně ukládaný k rozhodnutí: obsah zdrojových řádků období
+     * ({@see DeferredTax504SourceContent}), ne jejich id.
+     */
     public static function sourceHash(Connection $db, int $supplierId, int $periodId, bool $currentRead = false): string
     {
+        return self::sourceHashes($db, $supplierId, $periodId, $currentRead)['content'];
+    }
+
+    /**
+     * Původní otisk nad id řádků (otisk podkladů posouzení neziskovky, resp. stránkovaného
+     * zdroje J6). Nové otisky se jím nepočítají, slouží jen k ověření rozhodnutí uložených dřív.
+     */
+    public static function legacySourceHash(Connection $db, int $supplierId, int $periodId, bool $currentRead = false): string
+    {
+        return self::sourceHashes($db, $supplierId, $periodId, $currentRead)['legacy'];
+    }
+
+    /** Odpovídá uložený otisk aktuálním podkladům? Rozhodnutí z doby před obsahovým otiskem nese původní otisk. */
+    public static function sourceHashMatches(Connection $db, mixed $stored, int $supplierId, int $periodId, bool $currentRead = false): bool
+    {
+        if (!is_string($stored)) return false;
+        $hashes = self::sourceHashes($db, $supplierId, $periodId, $currentRead);
+        return hash_equals($hashes['content'], $stored) || hash_equals($hashes['legacy'], $stored);
+    }
+
+    /** @return array{content:string, legacy:string} */
+    private static function sourceHashes(Connection $db, int $supplierId, int $periodId, bool $currentRead): array
+    {
+        $content = new DeferredTax504SourceContent();
         if (\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoAssessmentSource::pagedHistory($db, $supplierId, $periodId, $currentRead)) {
-            // Nad stránkovanou historií J6 doloží podklady období otisk stránkovaného zdroje.
+            // Nad stránkovanou historií J6 doloží podklady období stránkovaný zdroj.
             $container = \MyInvoice\Bootstrap::buildContainer();
             $container->set(Connection::class, $db);
-            return $container->get(\MyInvoice\Service\Tax\Nonprofit\Authoritative\J6CurrentProviderFactory::class)
-                ->fingerprint($supplierId, $periodId, $currentRead)->inputHash;
+            $fingerprint = $container->get(\MyInvoice\Service\Tax\Nonprofit\Authoritative\J6CurrentProviderFactory::class)
+                ->fingerprint($supplierId, $periodId, $currentRead, $content->add(...));
+            return ['content' => $content->finish($fingerprint->header->data), 'legacy' => $fingerprint->inputHash];
         }
         $frameworks = new \MyInvoice\Service\Accounting\AccountingFrameworkService($db, new \MyInvoice\Repository\AccountingFrameworkRepository($db));
         $sources = new \MyInvoice\Repository\NonprofitTaxSourceRepository($db, $frameworks,
             new \MyInvoice\Repository\JointAllocationReadRepository($db), new \MyInvoice\Repository\NonprofitTaxAssessmentRepository($db));
-        return $sources->snapshot($supplierId, $periodId, $currentRead)['input_hash'];
+        $snapshot = $sources->snapshot($supplierId, $periodId, $currentRead);
+        $content->add($snapshot['sources'], $snapshot['findings']);
+        return ['content' => $content->finish(DeferredTax504SourceContent::snapshotHeader($snapshot)), 'legacy' => $snapshot['input_hash']];
     }
 
     public function hasApplicableDecision(int $supplierId, string $asOf): bool
@@ -102,7 +133,7 @@ final class DeferredTax504Repository
         foreach ($effectiveAssessment['closing']['cells'] ?? [] as $key => $cell) $expected[$key] = $cell['balance_cents'];
         ksort($actual); ksort($expected);
         return ['method' => $method, 'balances' => $balances, 'decisions' => $decisions,
-            'effective_period_id' => $effectivePeriodId, 'effective_body' => $effectiveBody, 'effective_assessment' => $effectiveAssessment, 'assessment_current' => $actual === $expected && ($effectivePeriodId === null || (is_string($effectiveSourceHash) && hash_equals($effectiveSourceHash, self::sourceHash($this->db, $supplierId, $effectivePeriodId, $this->currentRead)))),
+            'effective_period_id' => $effectivePeriodId, 'effective_body' => $effectiveBody, 'effective_assessment' => $effectiveAssessment, 'assessment_current' => $actual === $expected && ($effectivePeriodId === null || self::sourceHashMatches($this->db, $effectiveSourceHash, $supplierId, $effectivePeriodId, $this->currentRead)),
             'source_line_ids' => array_map('intval', array_keys($known)), 'rows' => $rows];
     }
 

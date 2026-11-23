@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { formatPeriod } from '@/composables/useFormat'
 
 const m = vi.hoisted(() => ({
@@ -16,10 +16,14 @@ const m = vi.hoisted(() => ({
   importTime: vi.fn(),
   approveTimeMonth: vi.fn(),
   reopenTimeMonth: vi.fn(),
+  saveTimeCalendar: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
   revealField: vi.fn(),
 }))
+
+// Průvodce měsícem a akce řádků vedou odkazy do jiných agend.
+config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 
 vi.mock('@/utils/revealField', () => ({ revealField: m.revealField }))
 
@@ -43,6 +47,7 @@ vi.mock('@/api/payroll', () => ({
     importTime: m.importTime,
     approveTimeMonth: m.approveTimeMonth,
     reopenTimeMonth: m.reopenTimeMonth,
+    saveTimeCalendar: m.saveTimeCalendar,
   },
 }))
 
@@ -154,6 +159,25 @@ afterEach(() => {
 })
 
 describe('TimeAttendance', () => {
+  it('posune editor přidání času z řádku do zobrazení', async () => {
+    m.timeMonth.mockResolvedValue({ items: [row(12, 'Syntetická Osoba')], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await openRowEditor(wrapper)
+      const editor = wrapper.get('[data-test="time-editor-timezone"]').element.closest('section')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(editor)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
@@ -190,6 +214,154 @@ describe('TimeAttendance', () => {
     await add[1].trigger('click')
     await flushPromises()
   }
+
+  it.each([[3, '0,001'], [50, '0:01'], [53, '0:01:03.6'], [0, '0:00'], [null, 'payroll.worked_hours.unknown']] as const)('ruční souhrn %s ukáže přesně a staré denní hodiny pouze jako nepoužité', async (units, text) => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original,
+      month: { ...original.month, work_source: 'manual_summary' },
+      summary: { ...original.summary, work_source: 'manual_summary', worked_duration_units: units, actual_minutes: null, difference_minutes: null, category_minutes: null },
+      manual_summary: { id: 5, time_month_revision_no: 2, content_sha256: 'a'.repeat(64), reason: 'Syntetický ruční podklad', segments: [] },
+      shifts: [], entries: [{ id: 101, row_version: 1, category: 'regular', starts_at: '2026-09-01T08:00:00+02:00', ends_at: '2026-09-01T16:00:00+02:00', timezone_name: 'Europe/Prague', net_minutes: 480, break_minutes: 0, status: 'approved' }],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-actual-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-worked-total-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="time-selected-source"]').text()).toContain('source_manual')
+    await openRowEditor(wrapper)
+    expect(wrapper.get('[data-test="time-inactive-records-hint"]').text()).toContain('inactive_entries_hint')
+    const old = wrapper.get('[data-test="time-record-entry-101"]')
+    expect(old.get('[data-test="time-inactive-entry"]').text()).toContain('inactive_entry')
+    expect(old.find('[data-test="time-record-edit"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="time-record-save-blocked"]').text()).toContain('daily_source_locked')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('importovaný měsíc měsíčně odměňovaného vztahu ponechá mřížku i přehled beze změny', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false,
+      month: { ...original.month, work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="time-selected-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="grid-summary-source"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeUndefined()
+    await openRowEditor(wrapper)
+    expect(wrapper.find('[data-test="time-inactive-records-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('importovaný měsíc vztahu bez hodinové odměny pošle nastavit sazbu na kartu vztahu', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false,
+      month: { ...original.month, status: 'open', work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-import-needs-rate-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.needs_rate')
+    expect(wrapper.find('[data-test="switch-to-entries-keep"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="time-import-keep-blocked-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.keep.blocked')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('vztah bez sazby a měsíční mzdy nabídne zapisovat směny s ponechanými částkami', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false, import_amounts_keepable: true,
+      month: { ...original.month, status: 'open', work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    const block = wrapper.get('[data-test="time-import-needs-rate-12"]')
+    expect(block.text()).toContain('payroll.worked_hours.switch_to_entries.keep.hint')
+    expect(block.find('[data-test="switch-to-entries-keep"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="time-import-keep-blocked-12"]').exists()).toBe(false)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('ukáže nálezy pracovní doby mladistvého a rozdíl proti původnímu souhrnu importu', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'),
+      import_summary_comparison: { import_worked_duration_units: 30_000, entries_worked_duration_units: 27_000, differs: true },
+      juvenile_work_time: [{ code: 'juvenile_daily_shift_exceeded', severity: 'warning', message: '4. 9. 2026: mladistvý odpracoval 8:01 h.', scope_from: '2026-09-04', scope_to: '2026-09-04', actual_minutes: 481, limit_minutes: 480, provision: '§ 79a zákoníku práce' }],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="juvenile-finding-juvenile_daily_shift_exceeded"]').text()).toContain('8:01 h')
+    expect(wrapper.get('[data-test="juvenile-finding-juvenile_daily_shift_exceeded"]').text()).toContain('§ 79a')
+    expect(wrapper.get('[data-test="time-import-comparison-12"]').text()).toContain('payroll.time.import_comparison')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('historie měsíce použije přesný vybraný souhrn a ne archivní denní záznamy', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'), entries: [] }], total: 1, limit: 25, offset: 0 })
+    const old = historyMonth('2026-09')
+    m.timeHistory.mockResolvedValue({ employment: { id: 12, full_name: 'Syntetická Osoba', code: 'SYN-12' }, items: [{ ...old, month: { ...old.month, work_source: 'manual_summary' }, summary: { ...old.summary, work_source: 'manual_summary', worked_duration_units: 3, actual_minutes: null, difference_minutes: null, category_minutes: null } }], total: 1, limit: 12, offset: 0, range: { from: '2026-01', to: '2026-12' } })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-scope-year"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="history-actual-2026-09"]').text()).toBe('0,001')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('inactive_record_counts')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('payroll.worked_hours.unknown')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('neověřitelné přesčasy ukáže jako neznámé, nikoli nulu nebo prokázaný porušený zákaz', async () => {
+    m.routeQuery = { period: '2026-09' }
+    const item = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...item, entries: [], shifts: [], overtime_consents: [], overtime_protections: [], overtime_compensations: [],
+      overtime_limits: { employment_id: 12, evidence_status: 'manual_review_required', manual_summary_periods: ['2026-08'],
+        findings: [{ code: 'overtime_manual_summary_review_required', severity: 'warning', message: 'Neověřený podklad', actual_minutes: null, limit_minutes: 9000, scope_from: '2026-01-01', scope_to: '2026-09-30', consent_evidenced: false, provision: '§ 93', requires_override: true }],
+        weeks: [], ordered_year_minutes: null, agreed_year_minutes: null, ordered_year_limit_minutes: 9000,
+        averaging_from: '2026-01-01', averaging_to: '2026-09-30', averaging_weeks: 26, averaging_minutes: null,
+        averaging_limit_minutes: 12480, averaging_compensated_minutes: null, averaging_basis: 'statutory', averaging_reference: null,
+        prohibited_minutes: {}, requires_override: true, consent_evidenced: false, limits_from_ruleset: true,
+      },
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const limits = wrapper.get('[data-test="overtime-limits-12"]')
+    expect(limits.text()).toContain('payroll.time.overtime.manual_review')
+    expect(limits.text()).toContain('payroll.time.overtime.year_unknown')
+    expect(limits.text()).toContain('payroll.time.overtime.averaging_unknown')
+    expect(limits.find('[data-test="overtime-prohibition-banner"]').exists()).toBe(false)
+    expect(limits.text()).not.toContain('payroll.time.overtime.year_summary')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it.each(['open', 'approved'] as const)('proklik na JMHZ otevře existující potvrzení jen u otevřeného měsíce (%s)', async status => {
+    m.routeQuery = { period: '2026-11', employment: '12', confirm_jmhz: '1' }
+    const item = row(12, 'Syntetická Osoba')
+    item.month.status = status
+    m.timeMonth.mockResolvedValue({ items: [item], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="jmhz-confirm"]').exists()).toBe(status === 'open')
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
 
   it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí a pošle vyplněný počet nebo null', async () => {
     m.timeMonth.mockResolvedValue({
@@ -807,6 +979,79 @@ describe('TimeAttendance', () => {
     }
   })
 
+  /*
+   * DPP s nástupem uprostřed měsíce: 10261 je u dohody kód 99, ne týdenní
+   * úvazek 99 h, a 10265 je podle pokynů 0. Dialog to musí říct slovy a návrh
+   * (zaokrouhlené hodiny ze zápisů) odeslat beze změny.
+   */
+  it('u dohody neukáže kód 99 jako týdenní úvazek a vysvětlí nulové dny v evidenci', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-DPP', relation_type: 'dpp' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 0,
+          planned_minutes: 0,
+          actual_minutes: 1_945,
+          difference_minutes: 1_945,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v9',
+            source_snapshot_sha256: 'a'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '120',
+              agreed_fund_hours: '32.417',
+              weekly_work_hours: '99',
+              evidence_days: 0,
+              worked_hours: '32.417',
+            },
+            issues: [],
+            rounded_suggestions: ['agreed_fund_hours', 'worked_hours'],
+            requires_unworked_hours_followup: false,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect(wrapper.find('[data-test="jmhz-weekly-work"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-weekly-work-not-stated"]').text())
+      .toContain('payroll.time.jmhz.weekly_work_not_stated')
+    expect(wrapper.get('[data-test="jmhz-evidence-days"]').text())
+      .toBe('payroll.time.jmhz.evidence_days_agreement')
+    expect(wrapper.get('[data-test="jmhz-agreed-fund-hint"]').text())
+      .toBe('payroll.time.jmhz.agreed_fund_hint_agreement')
+    expect(wrapper.find('[data-test="jmhz-worked-rounded"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      jmhz_work_summary: expect.objectContaining({
+        standard_fund_hours: '120',
+        agreed_fund_hours: '32.417',
+        weekly_work_hours: '99',
+        worked_hours: '32.417',
+      }),
+    }))
+    wrapper.unmount()
+  })
+
   it('freezes exact JMHZ core values together with month approval', async () => {
     m.timeMonth.mockResolvedValue({
       items: [{
@@ -1096,6 +1341,88 @@ describe('TimeAttendance', () => {
           unworked_hours_occurred: true,
           unworked_total_hours: '16',
           parental_hours: '16',
+          unpaid_leave_hours: null,
+          maternity_hours: null,
+        }),
+      }),
+    )
+    expect(m.approveTimeMonth.mock.calls.at(-1)?.[1].jmhz_work_summary).not.toHaveProperty('holiday_time_off_hours')
+  })
+  it.each(['jmhz-work-month.v11', 'jmhz-work-month.v12'])('confirms paid holiday time off for %s without adding it to totals again', async (version) => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 34, full_name: 'Osoba na rodičovské', code: 'ZAM-45' },
+        month: { status: 'open', row_version: 6 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_560,
+          planned_minutes: 10_080,
+          actual_minutes: 9_600,
+          difference_minutes: -480,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: version,
+            source_snapshot_sha256: 'd'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '168',
+              agreed_fund_hours: '176',
+              weekly_work_hours: '40.00',
+              evidence_days: 30,
+              worked_hours: '160',
+              unworked_hours_occurred: true,
+              work_obstacles_occurred: false,
+              unworked_total_hours: '16',
+              unworked_paid_hours: null,
+              dpn_without_employer_compensation_hours: null,
+              dpn_with_employer_compensation_hours: null,
+              vacation_hours: null,
+              care_hours: null,
+              employee_obstacle_paid_hours: null,
+              employer_obstacle_hours: null,
+              maternity_hours: null,
+              paternity_hours: null,
+              parental_hours: null,
+              holiday_time_off_hours: '16',
+              unpaid_leave_hours: null,
+              unexcused_hours: null,
+              compensatory_time_off_hours: null,
+            },
+            issues: [],
+            requires_unworked_hours_followup: true,
+            absence_types: ['holiday_compensatory_time_off'],
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-holiday_time_off"]').element as HTMLInputElement)
+      .value).toBe('16')
+    for (const absent of ['maternity', 'paternity', 'unpaid_leave', 'unexcused']) {
+      expect(wrapper.find(`[data-test="jmhz-${absent}"]`).exists()).toBe(false)
+    }
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({
+        employment_id: 34,
+        jmhz_work_summary: expect.objectContaining({
+          unworked_hours_occurred: true,
+          unworked_total_hours: '16',
+          holiday_time_off_hours: '16',
           unpaid_leave_hours: null,
           maternity_hours: null,
         }),
@@ -1756,6 +2083,32 @@ describe('TimeAttendance — měsíční mřížka', () => {
   })
 
   /**
+   * Svátek v jinak pracovní den je neodpracovaná hodina, která se do fondu
+   * počítá (10268 + 10275 = 10260). Hromadné schválení dřív porovnávalo jen
+   * odpracovanou dobu s fondem a u měsíce se svátkem varovalo, že práce fond
+   * nepokrývá.
+   */
+  it('hromadné schválení nevaruje pod fondem, když chybějící hodiny pokryje svátek', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    const [holidayMonth, shortMonth] = page.items as any[]
+    holidayMonth.summary = { ...holidayMonth.summary, fund_minutes: 10_080 }
+    holidayMonth.jmhz_work_summary.preview.holiday_millihours = 8_000
+    shortMonth.summary = { ...shortMonth.summary, fund_minutes: 10_080 }
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="bulk-approve-under-fund"]')
+    expect(warning.text()).not.toContain('Osoba A')
+    expect(warning.text()).toContain('Osoba B')
+    wrapper.unmount()
+  })
+
+  /**
    * X-18: hromadné schválení posílalo `approveTimeMonth` BEZ souhrnu JMHZ,
    * zatímco schválení jednoho vztahu šlo přes modal s dvanácti poli. Měsíc se
    * tak dal schválit dvěma různě úplnými způsoby. Souhrn se teď skládá i
@@ -1912,6 +2265,100 @@ describe('TimeAttendance — měsíční mřížka', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('Osoba A')
     expect(rows[1].text()).toContain('Osoba B')
+    wrapper.unmount()
+  })
+
+  /*
+   * „Schválit měsíc všem" dřív vzalo jen 25 řádků viditelné stránky, kontrola
+   * běhu přitom hlásila 39 vztahů. Počet i dávka teď pokrývají celý výběr.
+   */
+  it('schválit měsíc všem pracuje s celým výběrem, ne se stránkou', async () => {
+    const names = Array.from({ length: 30 }, (_, index) => `Osoba ${index + 1}`)
+    const all = gridPage(names)
+    const firstPage = { ...all, items: all.items.slice(0, 25), total: 30, open_total: 30 }
+    m.timeMonth.mockImplementation((_period: string, _incomplete: boolean, page?: { limit?: number }) =>
+      Promise.resolve(page?.limit === 200 ? { ...all, total: 30, open_total: 30 } : firstPage))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="payroll-time-approve-all"]')
+    await button.trigger('click')
+    await flushPromises()
+    expect(m.timeMonth).toHaveBeenCalledWith(expect.any(String), false, { limit: 200, offset: 0 }, null)
+
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(30)
+    wrapper.unmount()
+  })
+
+  /*
+   * Pracovní poměr s nástupem uprostřed měsíce bez kalendáře: náhled má
+   * nález, server by řádek odmítl 422. Dávka ho vyřadí jménem a důvodem.
+   */
+  it('vztah s nálezem pracovního souhrnu z dávky vyřadí a řekne proč', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    page.items[1].jmhz_work_summary.preview.issues = [
+      { code: 'calendar_day_not_uniquely_covered', message: 'Datum 2026-02-20 není pokryto právě jedním pracovním kalendářem.' },
+    ] as never[]
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    const excluded = wrapper.get('[data-test="bulk-approve-excluded"]')
+    expect(excluded.text()).toContain('Osoba B')
+    expect(excluded.text()).toContain('payroll.remediation.work.problems.calendar')
+
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  /*
+   * Chyba dávky se dřív ukázala jen na stránce ZA dialogem, který zůstal
+   * otevřený s „Schválí se 0 vztahů". Teď je v dialogu po řádcích.
+   */
+  it('chybu hromadného schválení ukáže v dialogu po řádcích', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    m.approveTimeMonth.mockRejectedValue({
+      response: { data: { error: { code: 'payroll_time_summary_incomplete', message: 'Osoba A (ZAM-1): Pracovní souhrn nejde potvrdit: chybí kalendář.' } } },
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    const form = wrapper.get('[data-test="bulk-approve-form"]')
+    const rows = form.findAll('[data-test="bulk-approve-failure-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Pracovní souhrn nejde potvrdit: chybí kalendář.')
+    expect(form.text()).not.toContain('payroll.time.bulk.blocked_no_candidates')
+    wrapper.unmount()
+  })
+
+  it('kalendář vztahu bez kalendáře založí podle úvazku z podmínek', async () => {
+    m.routeQuery = { period: '2026-02' }
+    const page = gridPage(['Osoba A'])
+    ;(page.items[0] as Record<string, unknown>).calendar = null
+    m.timeMonth.mockResolvedValue(page)
+    m.saveTimeCalendar.mockResolvedValue({ id: 5 })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.get('[data-work-calendar="12"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveTimeCalendar).toHaveBeenCalledWith(12, { from_terms: true, period: '2026-02' })
+    m.routeQuery = {}
     wrapper.unmount()
   })
 

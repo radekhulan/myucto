@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Shared;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankApiMonthlyStatements;
+use MyInvoice\Service\Bank\StatementTransactionScope;
+use PDO;
 
 /**
  * Zápis převzatých bankovních výpisů a pohybů (zdroj výpisu `import`) z kanonického
@@ -153,6 +157,186 @@ final class BankStatementImportWriter
         );
         $this->ledgerOpening->execute([$supplierId, $periodId, $accountId]);
         return (float) $this->ledgerOpening->fetchColumn();
+    }
+
+    /**
+     * Pohyby účtu, které do MyÚčta přišly jinou cestou než převodem (stažené přes API banky,
+     * nahraný GPC či PDF výpis), v rozsahu dat, ve kterém pohyby účtu nese zdrojový program,
+     * porovnané s pohyby zdroje (`$source`: datum, částka v měně účtu, variabilní symbol).
+     *
+     * - `duplicates`: pohyb má ve zdroji protějšek (datum a částka, variabilní symbol, když
+     *   ho nesou oba) a uživatel s ním v MyÚčtu nepracoval - převod ho nahradí pohybem
+     *   zdroje ({@see deleteMovements()}),
+     * - `used`: pohyb s protějškem, se kterým se pracovalo ({@see BankTransactionLinks}) -
+     *   převod by ho zdvojil, volající převod zastaví s výpisem,
+     * - `unmatched`: pohyb bez protějšku ve zdroji - převod ho nemaže, jen vyjmenuje.
+     *
+     * Účet se pozná podle čísla účtu (i s předčíslím, bez vodicích nul) nebo IBANu, kódu
+     * banky a měny výpisu. Bez kódu banky a IBANu účet určí jen číslo; patří-li číslu výpisy
+     * různých bank, je výsledek `ambiguous` a volající nic nemaže.
+     *
+     * @param list<array{0:string,1:string,2:?string}> $source pohyby zdroje: datum, částka, VS
+     * @return array{duplicates:list<array<string,mixed>>,used:list<array<string,mixed>>,unmatched:list<array<string,mixed>>,ambiguous:bool}
+     */
+    public function foreignMovements(int $supplierId, string $accountNumber, string $bankCode, string $iban, string $currency, string $from, string $until, array $source): array
+    {
+        $out = ['duplicates' => [], 'used' => [], 'unmatched' => [], 'ambiguous' => false];
+        $pdo = $this->db->pdo();
+        $statements = $pdo->prepare(
+            "SELECT id, account_number, bank_code, currency FROM bank_statements
+              WHERE supplier_id = ? AND source <> 'import'"
+        );
+        $statements->execute([$supplierId]);
+        $bank = AccountNumberNormalizer::canonicalBankCode($bankCode, $iban);
+        $ids = [];
+        $banks = [];
+        foreach ($statements->fetchAll(PDO::FETCH_ASSOC) as $st) {
+            $stBank = AccountNumberNormalizer::canonicalBankCode((string) ($st['bank_code'] ?? ''));
+            if (($st['currency'] ?? null) !== null && (string) $st['currency'] !== $currency) {
+                continue;
+            }
+            if ($bank !== null && $stBank !== null && $bank !== $stBank) {
+                continue;
+            }
+            if (AccountNumberNormalizer::matchesAny((string) $st['account_number'], $accountNumber !== '' ? $accountNumber : null, $iban !== '' ? $iban : null)) {
+                $ids[] = (int) $st['id'];
+                $banks[$stBank ?? ''] = true;
+            }
+        }
+        if ($ids === []) {
+            return $out;
+        }
+        if ($bank === null && count(array_filter(array_keys($banks), static fn (string $b): bool => $b !== '')) > 1) {
+            $out['ambiguous'] = true;
+            return $out;
+        }
+        $pool = [];
+        foreach ($source as [$date, $amount, $vs]) {
+            $pool[substr($date, 0, 10) . '|' . number_format((float) $amount, 2, '.', '')][] = self::symbol($vs);
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $rows = $pdo->prepare(
+            "SELECT t.id, t.posted_at, t.amount, t.variable_symbol, t.counterparty_name, t.match_status,
+                    " . BankTransactionLinks::linkedSql('t') . " AS used
+               FROM bank_transactions t
+              WHERE t.statement_id IN ({$in}) AND t.posted_at >= ? AND t.posted_at <= ?
+              ORDER BY t.posted_at, t.id"
+        );
+        $rows->execute([$supplierId, $supplierId, $supplierId, ...$ids, $from, $until]);
+        $candidates = $rows->fetchAll(PDO::FETCH_ASSOC);
+        // Dva průchody: nejdřív protějšek se shodným variabilním symbolem pro všechny pohyby,
+        // teprve pak záložní protějšek, u kterého symbol jedna strana nemá. Jinak by pohyb bez
+        // symbolu „spotřeboval" pohyb zdroje, který patří pohybu se symbolem.
+        $hits = [];
+        foreach ([true, false] as $exact) {
+            foreach ($candidates as $i => $r) {
+                if (isset($hits[$i])) {
+                    continue;
+                }
+                $key = substr((string) $r['posted_at'], 0, 10) . '|' . number_format((float) $r['amount'], 2, '.', '');
+                $vs = self::symbol($r['variable_symbol']);
+                foreach ($pool[$key] ?? [] as $j => $sourceVs) {
+                    if ($exact ? ($vs !== '' && $sourceVs === $vs) : ($sourceVs === $vs || $sourceVs === '' || $vs === '')) {
+                        $hits[$i] = true;
+                        unset($pool[$key][$j]);
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($candidates as $i => $r) {
+            $row = [
+                'id' => (int) $r['id'], 'posted_at' => substr((string) $r['posted_at'], 0, 10), 'amount' => (string) $r['amount'],
+                'variable_symbol' => $r['variable_symbol'], 'counterparty_name' => $r['counterparty_name'], 'status' => (string) $r['match_status'],
+            ];
+            if (!isset($hits[$i])) {
+                $out['unmatched'][] = $row;
+            } elseif ((int) $r['used'] === 1) {
+                $out['used'][] = $row;
+            } else {
+                $out['duplicates'][] = $row;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Smaže pohyby jiného zdroje, které nahradí pohyby převodu ({@see foreignMovements()}
+     * `duplicates`), i se záznamy jejich načtení, a přepočte počty a obraty dotčených výpisů
+     * (u měsíčních výpisů API celý souhrn měsíce). Pohyby se zamknou (`FOR UPDATE`) a smažou
+     * jen ty, které ani teď nenesou vazbu ({@see BankTransactionLinks}); vazba vzniklá mezi
+     * kontrolou a mazáním pohyb ponechá. Volající drží transakci převodu.
+     *
+     * @param list<int> $ids
+     * @return list<int> smazané pohyby
+     */
+    public function deleteMovements(int $supplierId, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $pdo = $this->db->pdo();
+        $deleted = [];
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $owned = $pdo->prepare(
+                "SELECT t.id, t.statement_id FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                  WHERE s.supplier_id = ? AND t.id IN ({$in}) AND s.source <> 'import'
+                    AND NOT " . BankTransactionLinks::linkedSql('t') . '
+                  FOR UPDATE'
+            );
+            $owned->execute([$supplierId, ...$chunk, $supplierId, $supplierId, $supplierId]);
+            $statementIds = [];
+            $txIds = [];
+            foreach ($owned->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $txIds[] = (int) $r['id'];
+                $statementIds[(int) $r['statement_id']] = true;
+            }
+            if ($txIds === []) {
+                continue;
+            }
+            $txIn = implode(',', array_fill(0, count($txIds), '?'));
+            $imports = $pdo->prepare("SELECT DISTINCT statement_id FROM bank_transaction_imports WHERE bank_transaction_id IN ({$txIn})");
+            $imports->execute($txIds);
+            foreach ($imports->fetchAll(PDO::FETCH_COLUMN) as $statementId) {
+                $statementIds[(int) $statementId] = true;
+            }
+            $pdo->prepare("DELETE FROM bank_transaction_imports WHERE bank_transaction_id IN ({$txIn})")->execute($txIds);
+            $pdo->prepare("DELETE t FROM bank_transactions t WHERE t.id IN ({$txIn}) AND NOT " . BankTransactionLinks::linkedSql('t'))
+                ->execute([...$txIds, $supplierId, $supplierId, $supplierId]);
+            $left = $pdo->prepare("SELECT id FROM bank_transactions WHERE id IN ({$txIn})");
+            $left->execute($txIds);
+            $kept = array_fill_keys(array_map('intval', $left->fetchAll(PDO::FETCH_COLUMN)), true);
+            foreach ($txIds as $id) {
+                if (!isset($kept[$id])) {
+                    $deleted[] = $id;
+                }
+            }
+
+            $months = new BankApiMonthlyStatements($pdo);
+            $isMonth = $pdo->prepare('SELECT 1 FROM bank_api_months WHERE statement_id = ? AND supplier_id = ?');
+            $monthIds = [];
+            foreach (array_keys($statementIds) as $statementId) {
+                $isMonth->execute([$statementId, $supplierId]);
+                if ($isMonth->fetchColumn() !== false) {
+                    $monthIds[] = $statementId;
+                    continue;
+                }
+                $pdo->prepare(
+                    'UPDATE bank_statements SET transaction_count = ' . StatementTransactionScope::countSql($statementId) . ',
+                            matched_count = ' . StatementTransactionScope::countSql($statementId, 'bt', "bt.match_status IN ('auto_exact', 'auto_partial', 'manual')") . '
+                      WHERE id = ? AND supplier_id = ?'
+                )->execute([$statementId, $supplierId]);
+            }
+            $months->refreshMonths($monthIds, $supplierId);
+        }
+        return $deleted;
+    }
+
+    /** Variabilní symbol pro porovnání: jen číslice bez vodicích nul. */
+    private static function symbol(mixed $vs): string
+    {
+        return ltrim((string) preg_replace('/\D+/', '', (string) $vs), '0');
     }
 
     /** Haléře jako částka pro DECIMAL sloupec (`12345` → `123.45`). */

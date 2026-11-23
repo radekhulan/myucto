@@ -56,6 +56,11 @@ final readonly class JmhzEldpEvidenceSnapshotService
      * @param array<string,mixed> $confirmation
      * @return array<string,mixed>
      */
+    /**
+     * @param array<string,mixed>|null $lockedSource
+     * @param array<string,mixed> $confirmation
+     * @return array<string,mixed>
+     */
     private function freezeAgainst(
         ?array $lockedSource,
         int $supplierId,
@@ -66,6 +71,33 @@ final readonly class JmhzEldpEvidenceSnapshotService
         string $idempotencyKey,
         ?int $createdBy,
         string $sourceKind,
+    ): array {
+        $frozen = $this->freezeStored(
+            $lockedSource,
+            $supplierId,
+            $sourceRevisionId,
+            $employmentId,
+            $environment,
+            $confirmation,
+            $idempotencyKey,
+            $createdBy,
+            $sourceKind,
+        );
+
+        return $this->result($frozen['stored'], $frozen['created']);
+    }
+
+    private function freezeStored(
+        ?array $lockedSource,
+        int $supplierId,
+        int $sourceRevisionId,
+        int $employmentId,
+        string $environment,
+        array $confirmation,
+        string $idempotencyKey,
+        ?int $createdBy,
+        string $sourceKind,
+        bool $knownAbsent = false,
     ): array {
         if ($supplierId <= 0 || $sourceRevisionId <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize a pracovní vztah musí být kladná čísla.');
@@ -103,6 +135,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             $confirmationFingerprint,
             $createdBy,
             $sourceKind,
+            $knownAbsent,
         ): array {
             $source = $lockedSource ?? $this->repository->lockSource($supplierId, $sourceRevisionId);
             if ($source === null) {
@@ -136,8 +169,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
                 if ($stored === null) {
                     throw new JmhzEldpEvidenceException('jmhz_eldp_idempotency_incomplete', 'Idempotentní vazba ELDP nemá snapshot.');
                 }
-                $this->verifyStored($stored);
-                return $this->result($stored, false);
+                return ['stored' => $stored, 'payload' => $this->verifyStored($stored), 'created' => false];
             }
 
             $this->builder->verifySourceCatalogs();
@@ -176,19 +208,19 @@ final readonly class JmhzEldpEvidenceSnapshotService
                 'employment_id' => $employmentId,
                 'source_manifest_sha256' => $manifestHash,
             ]));
-            $existing = $this->repository->findByScopeForUpdate(
+            $existing = $knownAbsent ? null : $this->repository->findByScopeForUpdate(
                 $supplierId,
                 $environment,
                 $sourceRevisionId,
                 $employmentId,
             );
             if ($existing !== null) {
-                $this->verifyStored($existing);
+                $payload = $this->verifyStored($existing);
                 if (!hash_equals((string) $existing['request_fingerprint'], $requestFingerprint)) {
                     throw new JmhzEldpEvidenceException('jmhz_eldp_scope_already_frozen', 'ELDP tohoto vztahu je již zmrazené s jiným obsahem.');
                 }
                 $this->repository->bindClaim($supplierId, $environment, $idempotencyHash, (int) $existing['id']);
-                return $this->result($existing, false);
+                return ['stored' => $existing, 'payload' => $payload, 'created' => false];
             }
             $ciphertext = $this->encryption->encryptFor(
                 $plaintext,
@@ -240,8 +272,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             if ($stored === null) {
                 throw new \RuntimeException('Uložené ELDP nelze načíst.');
             }
-            $this->verifyStored($stored);
-            return $this->result($stored, true);
+            return ['stored' => $stored, 'payload' => $this->verifyStored($stored), 'created' => true];
         });
     }
 
@@ -260,6 +291,8 @@ final readonly class JmhzEldpEvidenceSnapshotService
     /**
      * @param array<string,mixed>|null $lockedSource výsledek
      *        {@see lockSourceForPreparation()} ze STEJNÉ transakce; `null` = zamkne se tady
+     * @param array<int,array<string,mixed>>|null $storedForRevision výsledek
+     *        {@see storedForPreparation()} ze STEJNÉ transakce; `null` = dotaz za vztah
      * @return array{snapshot:array<string,mixed>|null,issue_code:string|null}
      */
     public function ensureForPreparation(
@@ -269,13 +302,18 @@ final readonly class JmhzEldpEvidenceSnapshotService
         int $employmentId,
         ?int $createdBy,
         ?array $lockedSource = null,
+        ?array $storedForRevision = null,
     ): array {
-        $existing = $this->snapshotForPreparation(
-            $supplierId,
-            $environment,
-            $sourceRevisionId,
-            $employmentId,
-        );
+        $existing = $storedForRevision === null
+            ? $this->snapshotForPreparation(
+                $supplierId,
+                $environment,
+                $sourceRevisionId,
+                $employmentId,
+            )
+            : (isset($storedForRevision[$employmentId])
+                ? $this->preparationSnapshot($storedForRevision[$employmentId])
+                : null);
         if ($existing !== null || $createdBy === null) {
             return ['snapshot' => $existing, 'issue_code' => null];
         }
@@ -294,7 +332,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             return ['snapshot' => null, 'issue_code' => $exception->validationCode];
         }
 
-        $this->freezeAgainst(
+        $frozen = $this->freezeStored(
             $lockedSource,
             $supplierId,
             $sourceRevisionId,
@@ -304,16 +342,49 @@ final readonly class JmhzEldpEvidenceSnapshotService
             "jmhz-eldp-derived-v1:{$sourceRevisionId}:{$employmentId}",
             $createdBy,
             'derived_from_frozen_payroll_sources',
+            $storedForRevision !== null && $lockedSource !== null,
         );
 
         return [
-            'snapshot' => $this->snapshotForPreparation(
-                $supplierId,
-                $environment,
-                $sourceRevisionId,
-                $employmentId,
-            ),
+            'snapshot' => [
+                'id' => $frozen['stored']['id'],
+                'source_manifest_sha256' => $frozen['stored']['source_manifest_sha256'],
+                'snapshot_fingerprint' => $frozen['stored']['snapshot_fingerprint'],
+                'payload' => $frozen['payload'],
+            ],
             'issue_code' => null,
+        ];
+    }
+
+    /**
+     * Uložená ELDP všech vztahů revize jedním zamykacím dotazem; příprava je
+     * předá do {@see ensureForPreparation()} místo dotazu za každý vztah.
+     *
+     * @return array<int,array<string,mixed>> employment_id => uložený řádek
+     */
+    public function storedForPreparation(int $supplierId, string $environment, int $sourceRevisionId): array
+    {
+        $stored = [];
+        foreach ($this->repository->findByRevisionForUpdate($supplierId, $environment, $sourceRevisionId) as $row) {
+            $stored[(int) $row['employment_id']] = $row;
+        }
+
+        return $stored;
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array<string,mixed>
+     */
+    private function preparationSnapshot(array $stored): array
+    {
+        $payload = $this->verifyStored($stored);
+
+        return [
+            'id' => $stored['id'],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+            'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
+            'payload' => $payload,
         ];
     }
 

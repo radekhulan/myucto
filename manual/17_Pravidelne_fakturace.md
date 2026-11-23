@@ -224,7 +224,7 @@ stejně jako v popisu položky. Do částek ani DPH nevstupuje, viz
 [§ 15.9.3](15_Faktura_editor.md#1593-polozky). Šablona jen z textových řádků fakturu
 nevygeneruje.
 
-Vedle sazby má řádek volitelnou **klasifikaci DPH** - kód, podle kterého se plnění
+Šipka na konci řádku otevře účet položky a volitelné **členění DPH** - kód, podle kterého se plnění
 dostane na správný řádek přiznání a do kontrolního či souhrnného hlášení. Výchozí
 volba **Automaticky podle sazby** ho nechá odvodit při každém generování ze sazby a
 měrné jednotky, což stačí u drtivé většiny šablon. Vyplňte ho tam, kde odvození

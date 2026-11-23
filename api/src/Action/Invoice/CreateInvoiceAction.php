@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Service\Stock\InvoiceItemTracking;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockPriceLevelService;
@@ -29,6 +32,7 @@ use MyInvoice\Service\Oss\OssDocumentCoherence;
 use MyInvoice\Service\Oss\OssItemDeriver;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Validation\InvoiceValidation;
+use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -58,6 +62,7 @@ final class CreateInvoiceAction
         private readonly StockPriceLevelService $priceLevels,
         private readonly InvoiceItemTracking $itemTracking,
         private readonly UnitPrecision $unitPrecision,
+        private readonly NumberSeriesSelection $numberSeries,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -130,7 +135,8 @@ final class CreateInvoiceAction
         try {
             $body = $this->defaults->resolve($body, forNewInvoice: true);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            $code = $e instanceof \MyInvoice\Service\Invoice\UnknownCurrencyException ? $e::ERROR_CODE : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         }
 
         // Derivace OSS pro API klienty. Běží PŘED validací schválně: kontrola „zahraniční
@@ -186,6 +192,12 @@ final class CreateInvoiceAction
         $contradiction = OssDocumentCoherence::flagItems($items, $this->repo->vatRateMap());
         $body['items'] = $items;
 
+        $seriesKind = NumberSeriesKinds::issuedKind((string) ($body['invoice_type'] ?? 'invoice'));
+        try {
+            $this->numberSeries->fromBody(SupplierGuard::currentId($request), $body, $seriesKind);
+        } catch (NumberSeriesException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
         try {
             // Číslo zadané volajícím (API, MCP) může už existovat — to je očekávaný stav
             // s odpovědí 409 níž, ne chyba do logu.
@@ -222,9 +234,20 @@ final class CreateInvoiceAction
                 ($body['cash_register_id'] ?? null) !== null ? (int) $body['cash_register_id'] : null,
             );
         }
+        // Řada z číselníku (volba v hlavičce, jinak výchozí řada uživatele).
+        $this->numberSeries->apply('invoices', SupplierGuard::currentId($request), $id, $body, $seriesKind, 0, $userId, isNew: true);
         $this->paymentSchedule->saveFromPayload(SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
-        $rateMeta = $this->rateApplier->applyToInvoice($id);
+        // Ruční kurz z těla má přednost před ČNB stejně jako u PUT ({@see UpdateInvoiceAction}),
+        // rozhodný den je DUZP s fallbackem na vystavení. Koruna kurz nemá, tu srovná applier.
+        $userRate = $body['exchange_rate'] ?? null;
+        $currencyCode = strtoupper((string) $this->repo->currencyCode($body['currency_id'] ?? null));
+        if (is_numeric($userRate) && (float) $userRate > 0 && $currencyCode !== '' && $currencyCode !== 'CZK') {
+            $this->repo->setExchangeRate($id, (float) $userRate, ExchangeRateDate::forInvoice($body) ?? (string) ($body['issue_date'] ?? ''));
+            $rateMeta = null;
+        } else {
+            $rateMeta = $this->rateApplier->applyToInvoice($id);
+        }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('invoice.created', $userId, 'invoice', $id, [

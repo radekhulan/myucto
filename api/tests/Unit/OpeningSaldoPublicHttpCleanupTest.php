@@ -45,8 +45,8 @@ final class OpeningSaldoPublicHttpCleanupTest extends TestCase
             $caught = null;
             try {
                 (new \ReflectionMethod($test, 'tearDown'))->invoke($test);
-            } catch (PDOException $actual) {
-                $caught = $actual;
+            } catch (\RuntimeException $actual) {
+                $caught = $actual instanceof PDOException ? $actual : $actual->getPrevious();
             }
             self::assertSame($capturedPrior, getenv('MYINVOICE_DB_NAME'));
             self::assertSame($throws ? $error : null, $caught);
@@ -73,6 +73,11 @@ final class OpeningSaldoCleanupPdo extends PDO
             throw $this->error;
         }
         return 0;
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        return false;
     }
 
     public function prepare(string $query, array $options = []): PDOStatement|false

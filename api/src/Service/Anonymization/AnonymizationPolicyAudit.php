@@ -30,15 +30,16 @@ final class AnonymizationPolicyAudit
     /**
      * @param array<string, array<string,string>> $tables tabulka → sloupec → definice typu
      * @param array<string, list<array{table:string, references:string}>> $foreignKeys cizí klíče
+     * @param bool $olderSource struktura je starší verze (chybějící tabulky a sloupce politiky nevadí)
      * @return list<string> popis nálezů (prázdné = politika pokrývá strukturu)
      */
-    public static function problems(array $tables, array $foreignKeys = []): array
+    public static function problems(array $tables, array $foreignKeys = [], bool $olderSource = false): array
     {
         $problems = [];
         $known = AnonymizationPolicy::knownStrategies();
 
         foreach (AnonymizationPolicy::TRUNCATE as $table => $reason) {
-            if (!isset($tables[$table])) {
+            if (!isset($tables[$table]) && !$olderSource) {
                 $problems[] = "TRUNCATE: tabulka {$table} ve struktuře neexistuje.";
             }
             if (isset(AnonymizationPolicy::COLUMNS[$table])) {
@@ -67,7 +68,9 @@ final class AnonymizationPolicyAudit
             $companions = [];
             foreach ($policy as $column => $strategy) {
                 if (!isset($columns[$column])) {
-                    $problems[] = "{$table}.{$column}: sloupec v politice ve struktuře neexistuje.";
+                    if (!$olderSource) {
+                        $problems[] = "{$table}.{$column}: sloupec v politice ve struktuře neexistuje.";
+                    }
                     continue;
                 }
                 if (!self::isTextColumn($columns[$column])) {
@@ -103,7 +106,7 @@ final class AnonymizationPolicyAudit
         }
 
         foreach (AnonymizationPolicy::COLUMNS as $table => $policy) {
-            if (!isset($tables[$table])) {
+            if (!isset($tables[$table]) && !$olderSource) {
                 $problems[] = "{$table}: tabulka v politice ve struktuře neexistuje.";
             }
         }
@@ -126,7 +129,7 @@ final class AnonymizationPolicyAudit
                 $problems[] = "POST_SQL: nerozpoznaný příkaz {$sql}";
                 continue;
             }
-            if (!isset($tables[$m[1]][$m[2]])) {
+            if (!isset($tables[$m[1]][$m[2]]) && !$olderSource) {
                 $problems[] = "POST_SQL: {$m[1]}.{$m[2]} ve struktuře neexistuje.";
             }
         }

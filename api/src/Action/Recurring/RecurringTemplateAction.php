@@ -721,7 +721,8 @@ final class RecurringTemplateAction
             'advance_paid_amount' => 0,
             'reverse_charge' => !empty($data['reverse_charge']),
             'discount_percent' => (float) ($data['discount_percent'] ?? 0),
-            'items' => $items,
+            // Šablona ruční cenu nezná: nulový řádek s příznakem by jinak spadl až v cronu.
+            'items' => array_map(static fn (mixed $item): mixed => is_array($item) ? array_diff_key($item, ['manual_price' => true]) : $item, $items),
         ], $this->invoices->vatRateMap());
         if ($amountError !== null) {
             $err['amount_to_pay'][] = $amountError;

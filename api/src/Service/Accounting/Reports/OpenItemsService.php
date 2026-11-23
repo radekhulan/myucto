@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalLinePairingRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\AccountBalanceSign;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
@@ -27,6 +28,10 @@ final class OpenItemsService
     public const MAX_SUGGESTIONS = 500;
     public const DEFAULT_SUGGESTION_DAYS = 14;
     public const MAX_NOTE_LENGTH = 255;
+
+    /** Výchozí účty soupisu; přidávají se k nim účty označené v osnově jako zúčtovací. */
+    public const LISTING_DEFAULT_CODES = ['261', '335', '395'];
+    public const LISTING_MAX_ACCOUNTS = 50;
 
     public function __construct(
         private readonly Connection $db,
@@ -51,6 +56,8 @@ final class OpenItemsService
         $totals = $this->pairings->openItemTotals($supplierId, $accountId, $asOf, $periodStart, $anchor);
         $rows = $this->pairings->openItemLines($supplierId, $accountId, $asOf, $periodStart, $anchor, $onlyOpen, $perPage, ($page - 1) * $perPage);
 
+        $normalSide = $account['normal_side'] !== null ? (string) $account['normal_side'] : null;
+        $type = $account['type'];
         $codes = $this->accountCodes($supplierId, array_map(static fn (array $r): int => $r['account_id'], $rows));
         $items = [];
         foreach ($rows as $r) {
@@ -69,6 +76,9 @@ final class OpenItemsService
                 'open_amount'     => $r['open_amount'],
                 'open_balance'    => $r['running_open'],
                 'balance'         => $r['running_balance'],
+                'balance_signed'      => AccountBalanceSign::signed($r['running_balance'], $type),
+                'balance_unusual'     => AccountBalanceSign::isUnusual($r['running_balance'], $normalSide),
+                'open_balance_signed' => AccountBalanceSign::signed($r['running_open'], $type),
                 'account_id'      => $r['account_id'],
                 'account_code'    => $codes[$r['account_id']]['code'] ?? '',
                 'account_name'    => $codes[$r['account_id']]['name'] ?? '',
@@ -100,8 +110,96 @@ final class OpenItemsService
             'open_md'        => $totals['open_md'],
             'open_d'         => $totals['open_d'],
             'open_total'     => $totals['open_total'],
+            'open_total_signed' => AccountBalanceSign::signed($totals['open_total'], $type),
             'balance'        => $ledgerBalance,
+            'balance_signed'  => AccountBalanceSign::signed($ledgerBalance, $type),
+            'balance_unusual' => AccountBalanceSign::isUnusual($ledgerBalance, $normalSide),
             'difference'     => round($totals['open_total'] - $ledgerBalance, 2),
+        ];
+    }
+
+    /**
+     * Soupis otevřených položek více účtů k datu pro inventarizaci (261, 335, 395 a další).
+     * Bez `codes` vezme výchozí účty a zúčtovací účty z osnovy; účet bez jediného pohybu
+     * do soupisu nepatří. Jeden účet = jeden dotaz nad jeho okruhy, počet účtů je omezený
+     * konstantou LISTING_MAX_ACCOUNTS a každý účet jde po svém indexu.
+     *
+     * @param list<string> $codes
+     * @return array<string,mixed>
+     */
+    public function listing(int $supplierId, string $asOf, array $codes, int $maxRowsPerAccount): array
+    {
+        $accounts = $this->listingAccounts($supplierId, $codes);
+        $out = [];
+        $grand = ['open_count' => 0, 'open_md' => 0, 'open_d' => 0, 'unmatched' => 0];
+        foreach ($accounts as $id) {
+            $report = $this->build($supplierId, $id, $asOf, true, 1, $maxRowsPerAccount);
+            if ($report['line_count'] === 0) {
+                continue;
+            }
+            unset($report['page'], $report['per_page'], $report['only_open'], $report['as_of']);
+            $report['matches'] = (int) round($report['difference'] * 100) === 0;
+            $report['truncated'] = $report['total'] > count($report['items']);
+            $out[] = $report;
+            $grand['open_count'] += $report['open_count'];
+            $grand['open_md'] += self::cents($report['open_md']);
+            $grand['open_d'] += self::cents($report['open_d']);
+            $grand['unmatched'] += $report['matches'] ? 0 : 1;
+        }
+        return [
+            'as_of'    => $asOf,
+            'entity'   => $this->listingEntity($supplierId),
+            'accounts' => $out,
+            'totals'   => [
+                'open_count' => $grand['open_count'],
+                'open_md'    => $grand['open_md'] / 100,
+                'open_d'     => $grand['open_d'] / 100,
+                'unmatched'  => $grand['unmatched'],
+            ],
+        ];
+    }
+
+    /**
+     * @param list<string> $codes
+     * @return list<int> ID účtů; analytika pod vybranou syntetikou se nevrací zvlášť,
+     *                   protože ji syntetika zahrnuje
+     */
+    private function listingAccounts(int $supplierId, array $codes): array
+    {
+        $byDefault = $codes === [];
+        if ($byDefault) {
+            $codes = self::LISTING_DEFAULT_CODES;
+        }
+        $in = implode(',', array_fill(0, count($codes), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.id, a.parent_id
+               FROM chart_of_accounts a
+              WHERE a.supplier_id = ?
+                AND (a.account_code IN ({$in})" . ($byDefault ? " OR (a.is_clearing = 1 AND a.parent_id IS NULL)" : '') . ")
+              ORDER BY a.account_code"
+        );
+        $stmt->execute([$supplierId, ...$codes]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $ids = array_map(static fn (array $r): int => (int) $r['id'], $rows);
+        $own = array_values(array_filter($rows, static fn (array $r): bool => $r['parent_id'] === null || !in_array((int) $r['parent_id'], $ids, true)));
+        return array_slice(array_map(static fn (array $r): int => (int) $r['id'], $own), 0, self::LISTING_MAX_ACCOUNTS);
+    }
+
+    /** @return array{name:string, ico:?string, address:string, prepared_at:string} */
+    private function listingEntity(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT company_name, street, city, zip, ic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $parts = array_filter([
+            trim((string) ($row['street'] ?? '')),
+            trim((string) ($row['zip'] ?? '') . ' ' . (string) ($row['city'] ?? '')),
+        ], static fn (string $p): bool => $p !== '');
+        return [
+            'name'        => (string) ($row['company_name'] ?? ''),
+            'ico'         => ($row['ic'] ?? '') !== '' ? (string) $row['ic'] : null,
+            'address'     => implode(', ', $parts),
+            'prepared_at' => (new \DateTimeImmutable())->format('d.m.Y H:i'),
         ];
     }
 

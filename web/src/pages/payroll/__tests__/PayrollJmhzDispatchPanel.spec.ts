@@ -12,7 +12,11 @@ const m = vi.hoisted(() => ({
   enqueueIsds: vi.fn(),
   gatewayStart: vi.fn(),
   employerSettings: vi.fn(),
+  deferMany: vi.fn(),
 }))
+
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
@@ -21,6 +25,7 @@ vi.mock('@/api/payroll', () => ({
     sendJmhzTransport: m.sendTransport,
     enqueueJmhzIsds: m.enqueueIsds,
     employerSettings: m.employerSettings,
+    deferJmhzEmployments: m.deferMany,
   },
 }))
 vi.mock('@/api/dataBox', () => ({
@@ -139,7 +144,7 @@ describe('PayrollJmhzDispatchPanel', () => {
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'production')
-    expect(m.freezeSubmission).toHaveBeenCalledWith(55, 99, 'production', 3, false)
+    expect(m.freezeSubmission).toHaveBeenCalledWith(55, 99, 'production', 3, false, false)
     expect(m.enqueueIsds).toHaveBeenCalledWith(66, 'production')
     expect(m.gatewayStart).toHaveBeenCalledWith(77)
     expect(assign).not.toHaveBeenCalled()
@@ -219,7 +224,7 @@ describe('PayrollJmhzDispatchPanel', () => {
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'test')
-    expect(m.freezeSubmission).toHaveBeenCalledWith(55, null, 'test', 3, false)
+    expect(m.freezeSubmission).toHaveBeenCalledWith(55, null, 'test', 3, false, false)
     expect(m.sendTransport).toHaveBeenCalledWith(
       66,
       '12345678',
@@ -262,9 +267,92 @@ describe('PayrollJmhzDispatchPanel', () => {
     await wrapper.get('[data-test="jmhz-late-discount-7:3-yes"]').trigger('click')
     await flushPromises()
 
-    expect(m.freezeSubmission).toHaveBeenLastCalledWith(55, 99, 'production', 3, true)
+    expect(m.freezeSubmission).toHaveBeenLastCalledWith(55, 99, 'production', 3, true, false)
     expect(m.sendTransport).toHaveBeenCalledWith(66, '12345678', 'production', expect.any(String))
     expect(wrapper.find('[data-test="jmhz-late-discount-7:3"]').exists()).toBe(false)
+  })
+
+  /** Audit #16: 48 h po přijaté změně A3 nabídne odeslat i tak, nebo odložit dotčené. */
+  it('do 48 hodin po změně údajů nabídne odeslat i tak a odložit dotčené', async () => {
+    m.freezeSubmission.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'jmhz_registration_change_settling',
+        message: 'U 1 pracovních vztahů ČSSZ přijala změnu údajů.',
+        details: { deferral: { preparation_id: 55, environment: 'production', office_id: 3, employment_ids: [11], count: 1 } },
+      } } },
+    })
+    m.sendTransport.mockResolvedValue({
+      attempt: { id: 77, status: 'awaiting_protocol' },
+      acknowledgement: null,
+      settled: false,
+      report: null,
+    })
+    m.deferMany.mockResolvedValue({ created: true, deferral_ids: [1], employment_ids: [11], people: [{ employee_id: 5 }], firm_blocker_count: 0, source_revision_id: 7 })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'production', previews: [preview], obligations: [obligation()] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
+    await flushPromises()
+
+    const confirm = wrapper.get('[data-test="jmhz-settling-7:3"]')
+    expect(confirm.text()).toContain('U 1 pracovních vztahů ČSSZ přijala změnu údajů.')
+    await confirm.get('[data-test="jmhz-bulk-defer-open"]').trigger('click')
+    await confirm.get('[data-test="jmhz-bulk-defer-reason"]').setValue('Změna údajů, doplníme opravou.')
+    await confirm.get('[data-test="jmhz-bulk-defer-confirm"]').trigger('click')
+    await flushPromises()
+    expect(m.deferMany).toHaveBeenCalledWith({
+      environment: 'production',
+      preparationId: 55,
+      officeId: 3,
+      employmentIds: [11],
+      reason: 'Změna údajů, doplníme opravou.',
+    })
+
+    await wrapper.get('[data-test="jmhz-settling-7:3-yes"]').trigger('click')
+    await flushPromises()
+    expect(m.freezeSubmission).toHaveBeenLastCalledWith(55, 99, 'production', 3, false, true)
+    expect(m.sendTransport).toHaveBeenCalledWith(66, '12345678', 'production', expect.any(String))
+  })
+
+  /** Audit #2: blokace zmrazení nabídne odložit všechny dotčené jedním důvodem. */
+  it('u blokace zmrazení nabídne odložit všechny dotčené', async () => {
+    m.freezeSubmission.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'conflict',
+        message: 'Příprava JMHZ není úplná.',
+        details: {
+          blockers: [{ code: 'jmhz_identity_missing', entity_type: 'employment', entity_id: 11, attribute_ids: [], label: 'Eva', remediation_path: null, deferrable: true }],
+          deferral: { preparation_id: 55, environment: 'production', office_id: 3, employment_ids: null, count: 14 },
+        },
+      } } },
+    })
+    m.deferMany.mockResolvedValue({ created: true, deferral_ids: [1], employment_ids: [11], people: [{ employee_id: 5 }], firm_blocker_count: 0, source_revision_id: 7 })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'production', previews: [preview], obligations: [obligation()] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
+    await flushPromises()
+
+    const bulk = wrapper.get('[data-test="jmhz-freeze-blockers"] [data-test="jmhz-bulk-defer"]')
+    expect(bulk.get('[data-test="jmhz-bulk-defer-open"]').text()).toContain('"count":14')
+    await bulk.get('[data-test="jmhz-bulk-defer-open"]').trigger('click')
+    await bulk.get('[data-test="jmhz-bulk-defer-reason"]').setValue('Chybí adresy brigádníků.')
+    await bulk.get('[data-test="jmhz-bulk-defer-confirm"]').trigger('click')
+    await flushPromises()
+    expect(m.deferMany).toHaveBeenCalledWith({
+      environment: 'production',
+      preparationId: 55,
+      officeId: 3,
+      employmentIds: null,
+      reason: 'Chybí adresy brigádníků.',
+    })
+    expect(wrapper.find('[data-test="jmhz-bulk-defer-done"]').exists()).toBe(true)
   })
 
   it('v testovacím prostředí pošle do obálky testovací VS účtárny', async () => {
@@ -352,5 +440,67 @@ describe('PayrollJmhzDispatchPanel', () => {
 
     expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(false)
     expect(m.sendTransport).not.toHaveBeenCalled()
+  })
+
+  /**
+   * B3: období, které nejde sestavit (číselníky 2027) nebo ještě neskončilo.
+   * Dřív se tlačítka zhasínala jen podle evidované povinnosti, takže u období
+   * bez povinnosti zůstala aktivní a klik skončil chybou.
+   */
+  it('podle závory přípravy zneaktivní obě tlačítka i bez evidované povinnosti', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'production',
+        previews: [preview],
+        obligations: [],
+        preparationGate: {
+          code: 'jmhz_spec_version_unavailable',
+          message: 'Číselník obcí a států ještě nebyl vyhlášen. Termín podání je 22. 2. 2027.',
+          available_from: null,
+        },
+      },
+    })
+
+    expect((wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.text()).toContain('22. 2. 2027')
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(false)
+    expect(m.freezePreparation).not.toHaveBeenCalled()
+  })
+
+  it('už zmrazené podání závora přípravy neblokuje', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'test',
+        previews: [preview],
+        obligations: [obligation({ latest_submission: { id: 88, status: 'ready', row_version: 1 } as never })],
+        preparationGate: { code: 'jmhz_period_not_finished', message: 'Období ještě neskončilo.', available_from: '2026-08-01' },
+      },
+    })
+
+    expect((wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  /**
+   * M13: zpráva do datové schránky se potvrzením neodešle, jen se zmrazí
+   * a zařadí do fronty. Potvrzení to musí říct, ne se ptát „Opravdu odeslat?".
+   */
+  it('u datové schránky se ptá na přípravu zprávy, u VREP na odeslání', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'production', previews: [preview], obligations: [obligation()] },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').trigger('click')
+    let confirm = wrapper.get('[data-test="jmhz-dispatch-confirm-7:3"]').text()
+    expect(confirm).toContain('jmhz_dispatch_confirm_title_isds')
+    expect(confirm).toContain('jmhz_dispatch_confirm_prepare')
+    expect(confirm).not.toContain('jmhz_dispatch_confirm_irreversible')
+
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-no-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    confirm = wrapper.get('[data-test="jmhz-dispatch-confirm-7:3"]').text()
+    expect(confirm).toContain('jmhz_dispatch_confirm_send')
+    expect(confirm).toContain('jmhz_dispatch_confirm_irreversible')
   })
 })

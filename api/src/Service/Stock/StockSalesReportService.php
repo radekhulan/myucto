@@ -25,6 +25,13 @@ use PDO;
  *
  * Částky jsou v měně dokladu a sčítají se po měnách; přepočet kurzem sestava
  * nedělá, aby se nemíchaly kurzy různých dnů.
+ *
+ * Volba `include_imported` přidá řádky importovaných faktur (`import_batch_id`), které
+ * kartu nemají, ale kód položky (`seller_item_code`) se shoduje s kódem karty. Typicky
+ * historie faktur z předchozího systému: zboží odešlo tam, výdejka v MyÚčtu nevznikla
+ * a vznikat nesmí, proto se karta do řádku neukládá a páruje se až tady. Takový řádek
+ * má `matched_by_code`, dobropis odečítá množství z řádku. Když se kód karty později
+ * uvolní přejmenováním nebo smazáním karty, už se pro párování nepoužije.
  */
 final class StockSalesReportService
 {
@@ -35,6 +42,18 @@ final class StockSalesReportService
     private const FROM = ' FROM invoice_items ii
         JOIN invoices i ON i.id = ii.invoice_id
         JOIN stock_items si ON si.id = ii.stock_item_id AND si.supplier_id = i.supplier_id
+        LEFT JOIN currencies cur ON cur.id = i.currency_id';
+
+    /** Totéž včetně řádků importovaných faktur spárovaných s kartou podle kódu položky. */
+    private const FROM_WITH_IMPORTED = ' FROM invoice_items ii
+        JOIN invoices i ON i.id = ii.invoice_id
+        LEFT JOIN invoices ip ON ip.id = i.parent_invoice_id AND ip.supplier_id = i.supplier_id
+        LEFT JOIN stock_items sic ON ii.stock_item_id IS NULL
+             AND (i.import_batch_id IS NOT NULL OR ip.import_batch_id IS NOT NULL)
+             AND sic.supplier_id = i.supplier_id AND sic.sku = ii.seller_item_code
+             AND NOT EXISTS (SELECT 1 FROM stock_sales_retired_skus retired
+                              WHERE retired.supplier_id = sic.supplier_id AND retired.sku = sic.sku)
+        JOIN stock_items si ON si.id = COALESCE(ii.stock_item_id, sic.id) AND si.supplier_id = i.supplier_id
         LEFT JOIN currencies cur ON cur.id = i.currency_id';
 
     /**
@@ -55,8 +74,9 @@ final class StockSalesReportService
     /** Částka řádku bez DPH; dobropis vždy záporně. */
     private const TOTAL = "CASE WHEN i.invoice_type = 'credit_note' THEN -ABS(ii.total_without_vat) ELSE ii.total_without_vat END";
 
-    /** Prodané množství; dobropis jen za zboží vrácené na sklad. */
+    /** Prodané množství; dobropis jen za zboží vrácené na sklad, u řádku bez karty (import) vždy. */
     private const QTY = "CASE WHEN i.invoice_type <> 'credit_note' THEN ii.quantity
+        WHEN ii.stock_item_id IS NULL THEN -ABS(ii.quantity)
         WHEN EXISTS (SELECT 1 FROM stock_document_lines rl
                        JOIN stock_documents d ON d.id = rl.document_id AND d.supplier_id = rl.supplier_id
                             AND d.doc_type = 'receipt' AND " . self::LIVE_DOCUMENT . "
@@ -100,6 +120,9 @@ final class StockSalesReportService
         if ($q !== '') {
             $filters['q'] = mb_substr($q, 0, 100);
         }
+        if (filter_var($input['include_imported'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            $filters['include_imported'] = true;
+        }
         $groupBy = (string) ($input['group_by'] ?? 'none');
         if (!in_array($groupBy, self::GROUP_BY, true)) {
             throw new StockException('validation_failed', 'Neznámé seskupení.', 422, ['field' => 'group_by']);
@@ -116,16 +139,16 @@ final class StockSalesReportService
     {
         $page = max(1, $page);
         $perPage = max(1, min(500, $perPage));
-        [$where, $params] = $this->where($supplierId, $filters);
+        [$where, $params, $from] = $this->where($supplierId, $filters);
 
-        $totals = $this->totals($where, $params);
-        $rows = $this->rows($supplierId, $where, $params, $perPage, ($page - 1) * $perPage);
+        $totals = $this->totals($from, $where, $params);
+        $rows = $this->rows($supplierId, $from, $where, $params, $perPage, ($page - 1) * $perPage);
         $groupBy = (string) ($filters['group_by'] ?? 'none');
 
         return [
             'filters'    => $filters,
             'items'      => $rows,
-            'groups'     => $groupBy === 'none' ? [] : $this->groups($groupBy, $where, $params),
+            'groups'     => $groupBy === 'none' ? [] : $this->groups($groupBy, $from, $where, $params),
             'totals'     => $totals,
             'pagination' => [
                 'page'     => $page,
@@ -144,8 +167,8 @@ final class StockSalesReportService
      */
     public function export(int $supplierId, array $filters): array
     {
-        [$where, $params] = $this->where($supplierId, $filters);
-        $totals = $this->totals($where, $params);
+        [$where, $params, $from] = $this->where($supplierId, $filters);
+        $totals = $this->totals($from, $where, $params);
         if ($totals['lines'] > self::MAX_EXPORT_ROWS) {
             throw new StockException('too_many_rows', 'Sestava má víc než ' . self::MAX_EXPORT_ROWS
                 . ' řádků. Zužte období nebo filtry.', 422, ['lines' => $totals['lines']]);
@@ -153,15 +176,15 @@ final class StockSalesReportService
         $groupBy = (string) ($filters['group_by'] ?? 'none');
         return [
             'filters' => $filters,
-            'items'   => $this->rows($supplierId, $where, $params, max(1, $totals['lines']), 0),
-            'groups'  => $groupBy === 'none' ? [] : $this->groups($groupBy, $where, $params),
+            'items'   => $this->rows($supplierId, $from, $where, $params, max(1, $totals['lines']), 0),
+            'groups'  => $groupBy === 'none' ? [] : $this->groups($groupBy, $from, $where, $params),
             'totals'  => $totals,
         ];
     }
 
     /**
      * @param array<string,mixed> $filters
-     * @return array{0:string,1:list<mixed>}
+     * @return array{0:string,1:list<mixed>,2:string} podmínka, parametry, FROM
      */
     private function where(int $supplierId, array $filters): array
     {
@@ -179,13 +202,13 @@ final class StockSalesReportService
         }
         if (!empty($filters['warehouse_id'])) {
             // Řádek bez skladu vydává automatická výdejka z výchozího skladu firmy.
-            $where[] = '(ii.warehouse_id = ? OR (ii.warehouse_id IS NULL AND EXISTS (
+            $where[] = '(ii.warehouse_id = ? OR (ii.warehouse_id IS NULL AND ii.stock_item_id IS NOT NULL AND EXISTS (
                 SELECT 1 FROM warehouses dw WHERE dw.id = ? AND dw.supplier_id = i.supplier_id AND dw.is_default = 1)))';
             $params[] = (int) $filters['warehouse_id'];
             $params[] = (int) $filters['warehouse_id'];
         }
         if (!empty($filters['stock_item_id'])) {
-            $where[] = 'ii.stock_item_id = ?';
+            $where[] = 'si.id = ?';
             $params[] = (int) $filters['stock_item_id'];
         }
         if (!empty($filters['category_id'])) {
@@ -211,20 +234,20 @@ final class StockSalesReportService
             }
             $where[] = '(' . implode(' OR ', $or) . ')';
         }
-        return [implode(' AND ', $where), $params];
+        return [implode(' AND ', $where), $params, empty($filters['include_imported']) ? self::FROM : self::FROM_WITH_IMPORTED];
     }
 
     /**
      * @param list<mixed> $params
      * @return array{lines:int, qty:string, units:list<string>, amounts:list<array{currency:string,total_without_vat:string}>}
      */
-    private function totals(string $where, array $params): array
+    private function totals(string $from, string $where, array $params): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT cur.code AS currency, ii.unit, COUNT(*) AS line_count,
                     SUM(' . self::QTY . ') AS qty,
                     SUM(' . self::TOTAL . ') AS total'
-            . self::FROM . ' WHERE ' . $where . ' GROUP BY cur.code, ii.unit ORDER BY cur.code, ii.unit'
+            . $from . ' WHERE ' . $where . ' GROUP BY cur.code, ii.unit ORDER BY cur.code, ii.unit'
         );
         $stmt->execute($params);
         $lines = 0;
@@ -249,7 +272,7 @@ final class StockSalesReportService
      * @param list<mixed> $params
      * @return list<array<string,mixed>>
      */
-    private function rows(int $supplierId, string $where, array $params, int $limit, int $offset): array
+    private function rows(int $supplierId, string $from, string $where, array $params, int $limit, int $offset): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT ii.id AS invoice_item_id, i.id AS invoice_id, i.varsymbol AS invoice_number, i.invoice_type,
@@ -259,8 +282,8 @@ final class StockSalesReportService
                     ' . self::QTY . ' AS qty, ii.unit,
                     ' . StockLevelRepository::netUnitPriceSql('i', 'ii') . ' AS unit_price,
                     ' . self::TOTAL . ' AS total_without_vat,
-                    cur.code AS currency'
-            . self::FROM . ' WHERE ' . $where
+                    cur.code AS currency, ii.stock_item_id IS NULL AS matched_by_code'
+            . $from . ' WHERE ' . $where
             . ' ORDER BY tax_date DESC, i.id DESC, ii.order_index ASC, ii.id ASC'
             . ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset)
         );
@@ -288,6 +311,7 @@ final class StockSalesReportService
             'total_without_vat' => (string) $r['total_without_vat'],
             'currency'          => (string) ($r['currency'] ?? ''),
             'identifiers'       => $identifiers[(int) $r['invoice_item_id']] ?? [],
+            'matched_by_code'   => (bool) $r['matched_by_code'],
         ], $rows);
     }
 
@@ -325,7 +349,7 @@ final class StockSalesReportService
      * @param list<mixed> $params
      * @return list<array<string,mixed>>
      */
-    private function groups(string $groupBy, string $where, array $params): array
+    private function groups(string $groupBy, string $from, string $where, array $params): array
     {
         [$key, $label, $extra] = $groupBy === 'client'
             ? ['COALESCE(i.client_id, 0)', 'MAX(' . StockLevelRepository::snapshotNameSql('i.client_snapshot') . ')', "'' "]
@@ -335,7 +359,7 @@ final class StockSalesReportService
                     cur.code AS currency, COUNT(*) AS line_count, COUNT(DISTINCT i.id) AS documents,
                     SUM(' . self::QTY . ') AS qty,
                     SUM(' . self::TOTAL . ') AS total'
-            . self::FROM . ' WHERE ' . $where
+            . $from . ' WHERE ' . $where
             . ' GROUP BY ' . $key . ', cur.code'
         );
         $stmt->execute($params);

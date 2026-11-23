@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
 
 /**
  * Dotažení protokolu a uzavření transakce BEZ UŽIVATELE.
@@ -43,6 +44,7 @@ final readonly class JmhzTransportSweepService
         private PayrollSubmissionRepository $submissionRepository,
         private JmhzFrozenPayloadReader $frozen,
         private JmhzDispatchService $dispatch,
+        private PayrollRegistrationTransportService $registrations,
     ) {}
 
     /**
@@ -72,13 +74,26 @@ final readonly class JmhzTransportSweepService
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
         foreach ($this->attempts->listDuePolls($limit) as $attempt) {
-            $this->pollOne($attempt, $now, $result);
+            $this->pollOne($attempt, $now, $result, false);
         }
         foreach (
             $this->attempts->listDueCloses($limit, JmhzPollSchedule::MAX_CLOSE_ATTEMPTS)
             as $attempt
         ) {
-            $this->closeOne($attempt, $result);
+            $this->closeOne($attempt, $result, false);
+        }
+        // Registrace PREZEC/REGZEC jdou stejným rozvrhem i stropem, ale dotaz
+        // a uzavření volají registrační transport — tutéž cestu jako ruční
+        // „Zjistit výsledek" a „Uzavřít". Přijetí protokolu pak zapíše OIČ
+        // a ID PPV stejným importem protokolu jako u ručního dotazu.
+        foreach ($this->attempts->listDueRegistrationPolls($limit) as $attempt) {
+            $this->pollOne($attempt, $now, $result, true);
+        }
+        foreach (
+            $this->attempts->listDueRegistrationCloses($limit, JmhzPollSchedule::MAX_CLOSE_ATTEMPTS)
+            as $attempt
+        ) {
+            $this->closeOne($attempt, $result, true);
         }
 
         return $result;
@@ -95,8 +110,12 @@ final readonly class JmhzTransportSweepService
      *   closed:int,close_failed:int,errors:int,skipped?:string
      * } $result
      */
-    private function pollOne(array $attempt, \DateTimeImmutable $now, array &$result): void
-    {
+    private function pollOne(
+        array $attempt,
+        \DateTimeImmutable $now,
+        array &$result,
+        bool $registration,
+    ): void {
         $exhausted = JmhzPollSchedule::exhaustedReason(
             $now,
             self::nullableString($attempt['sent_at'] ?? null),
@@ -108,8 +127,13 @@ final readonly class JmhzTransportSweepService
             return;
         }
 
+        $variableSymbol = '';
         try {
-            $variableSymbol = $this->variableSymbol($attempt);
+            // Registrační transport si variabilní symbol čte ze zmrazené věty
+            // sám, včetně kontroly agendy a stavu podání.
+            if (!$registration) {
+                $variableSymbol = $this->variableSymbol($attempt);
+            }
         } catch (\Throwable $exception) {
             // Bez variabilního symbolu se nemáme jak zeptat. Není to důvod
             // k opakování donekonečna: pokus se uzavře a člověk to uvidí.
@@ -126,12 +150,18 @@ final readonly class JmhzTransportSweepService
 
         ++$result['polled'];
         try {
-            $outcome = $this->dispatch->poll(
-                (int) $attempt['supplier_id'],
-                (string) $attempt['environment'],
-                (int) $attempt['id'],
-                $variableSymbol,
-            );
+            $outcome = $registration
+                ? $this->registrations->poll(
+                    (int) $attempt['supplier_id'],
+                    (string) $attempt['environment'],
+                    (int) $attempt['id'],
+                )
+                : $this->dispatch->poll(
+                    (int) $attempt['supplier_id'],
+                    (string) $attempt['environment'],
+                    (int) $attempt['id'],
+                    $variableSymbol,
+                );
         } catch (\Throwable) {
             // Důvod už zapsal dispatch do ledgeru; sem patří jen počet.
             ++$result['errors'];
@@ -156,6 +186,7 @@ final readonly class JmhzTransportSweepService
                 (int) $attempt['id'],
             ) ?? $outcome->attempt,
             $result,
+            $registration,
         );
     }
 
@@ -170,7 +201,7 @@ final readonly class JmhzTransportSweepService
      *   closed:int,close_failed:int,errors:int,skipped?:string
      * } $result
      */
-    private function closeOne(array $attempt, array &$result): void
+    private function closeOne(array $attempt, array &$result, bool $registration): void
     {
         if (($attempt['status'] ?? null) !== 'completed'
             || ($attempt['closed_at'] ?? null) !== null
@@ -178,13 +209,18 @@ final readonly class JmhzTransportSweepService
             return;
         }
         try {
-            $variableSymbol = $this->variableSymbol($attempt);
-            $closed = $this->dispatch->close(
-                (int) $attempt['supplier_id'],
-                (string) $attempt['environment'],
-                (int) $attempt['id'],
-                $variableSymbol,
-            );
+            $closed = $registration
+                ? $this->registrations->close(
+                    (int) $attempt['supplier_id'],
+                    (string) $attempt['environment'],
+                    (int) $attempt['id'],
+                )
+                : $this->dispatch->close(
+                    (int) $attempt['supplier_id'],
+                    (string) $attempt['environment'],
+                    (int) $attempt['id'],
+                    $this->variableSymbol($attempt),
+                );
         } catch (\Throwable) {
             ++$result['close_failed'];
             $this->escalateUnclosed($attempt);

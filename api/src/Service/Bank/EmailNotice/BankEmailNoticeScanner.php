@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\EmailNotice;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Security\CrossSupplierAuthorization;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeProvider;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
@@ -142,7 +143,10 @@ final class BankEmailNoticeScanner
     {
         $accountId = (int) ($settings['id'] ?? 0);
         $accountName = (string) ($settings['name'] ?? ('IMAP #' . $accountId));
-        foreach (['host', 'username', 'password'] as $required) {
+        $requiredSettings = ($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT
+            ? ['host', 'username', 'oauth_client_secret_enc']
+            : ['host', 'username', 'password'];
+        foreach ($requiredSettings as $required) {
             if (trim((string) ($settings[$required] ?? '')) === '') {
                 $msg = "IMAP není nakonfigurován: chybí {$required}.";
                 $this->repo->updateScanStatus($supplierId, $accountId, 'error', $msg);
@@ -359,14 +363,28 @@ final class BankEmailNoticeScanner
                 return $attachmentSummary + ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'account_mapping_missing'];
             }
 
-            $tx = $this->repo->createTransactionFromNotice(
-                $targetSupplierId,
-                $notice,
-                'imap-' . $imapAccountId . ':' . ($messageId ?: $hash),
-                (float) ($mapping['amount_tolerance'] ?? 0.05),
-                $this->matcher,
-                isset($mapping['currency_code']) ? (string) $mapping['currency_code'] : null,
-            );
+            try {
+                $tx = $this->repo->createTransactionFromNotice(
+                    $targetSupplierId,
+                    $notice,
+                    'imap-' . $imapAccountId . ':' . ($messageId ?: $hash),
+                    (float) ($mapping['amount_tolerance'] ?? 0.05),
+                    $this->matcher,
+                    isset($mapping['currency_code']) ? (string) $mapping['currency_code'] : null,
+                );
+            } catch (ForeignCurrencyNoticeException $e) {
+                // Avízo přečtené správně, jen bez částky v měně účtu (#390). Není to chyba
+                // parseru, a proto ani položka v „Akcích pro tebe": pohyb doplní výpis.
+                $this->repo->recordMessage($base + [
+                    'provider_id' => $provider->id,
+                    'provider_code' => $provider->code,
+                    'status' => 'match_failed',
+                    'parsed_payload' => $notice->toArray(),
+                    'error_message' => $e->getMessage(),
+                ]);
+                $this->safePostProcess($settings, $message, 'failure');
+                return $attachmentSummary + ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'foreign_currency_without_account_amount'];
+            }
             $match = $tx['match_result'];
             $matchedInvoiceId = isset($match['invoice_id']) ? (int) $match['invoice_id'] : null;
             // Spárování je úspěšné i u ODCHOZÍ platby na přijatou fakturu — matcher v tom

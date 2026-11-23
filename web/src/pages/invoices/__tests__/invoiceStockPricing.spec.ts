@@ -66,8 +66,10 @@ describe('invoice stock pricing', () => {
 
   it('záložní cena balení vynásobí cenu za základní jednotku poměrem', () => {
     expect(unitPriceForUnit(154.32, 'KT', 'ks', units)).toBe(1234.56)
-    expect(unitPriceForUnit(10, 'BAL', 'ks', units)).toBe(3.33)
+    expect(unitPriceForUnit(10, 'BAL', 'ks', units)).toBe(3.333333)
     expect(unitPriceForUnit(10, 'ks', 'ks', units)).toBe(10)
+    expect(unitPriceForUnit(0.0108, 'ks', 'ks', units)).toBe(0.0108)
+    expect(unitPriceForUnit(0.004, 'KT', 'ks', units)).toBe(0.032)
   })
 
   it('nacení kladným množstvím, prázdné jako jeden kus', () => {

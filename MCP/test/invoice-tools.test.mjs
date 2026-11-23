@@ -57,7 +57,8 @@ const NEW_TOOLS = {
   list_invoice_advance_candidates: 'read',
   list_proforma_final_candidates: 'read',
   link_invoice_advance: 'write',
-  unlink_invoice_advance: 'write',
+  unlink_invoice_advance: 'destructive',
+  remove_invoice_advance_drawdown: 'destructive',
   preview_invoice_penalty: 'read',
   create_invoice_penalty: 'write',
   add_invoice_payment: 'write',
@@ -114,7 +115,6 @@ test('jednoduché nástroje volají správnou cestu se správným tělem', async
     ['list_invoice_advance_candidates', { id: 42 }, 'GET', '/invoices/42/advance-candidates'],
     ['list_proforma_final_candidates', { id: 7 }, 'GET', '/invoices/7/final-candidates'],
     ['link_invoice_advance', { id: 42, advance_id: 7 }, 'POST', '/invoices/42/link-advance', { advance_id: 7 }],
-    ['unlink_invoice_advance', { id: 42 }, 'DELETE', '/invoices/42/link-advance'],
     ['preview_invoice_penalty', { id: 42, as_of: '2026-10-01' }, 'GET', '/invoices/42/penalty/preview'],
     ['create_invoice_penalty', { id: 42, principal: 1000 }, 'POST', '/invoices/42/penalty', { principal: 1000 }],
     ['add_invoice_payment', { id: 42, amount: 5000, paid_on: '2026-09-30', note: 'Hotově' },
@@ -266,6 +266,7 @@ const calendarDraft = (overrides = {}) => ({
       small_asset_id: null, asset_id: null, accrual_from: '2026-10-01', accrual_to: '2027-09-30',
       oss_applicable: false, oss_consumer_country: null, total_with_vat: 14520,
       tracking_allocations: [{ quantity: '1.000', serial_number: 'VIN-A', lot_code: null, expires_on: null }],
+      revenue_account_code: '613', counter_account_code: '315', posting_rule_key: 'najem.kancelare',
     },
     { id: 102, description: 'Sleva 10 %', quantity: 1, unit: 'ks', unit_price_without_vat: -1200,
       vat_rate_id: 1, order_index: 1, item_kind: 'discount' },
@@ -302,6 +303,7 @@ test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async 
   // Slevový řádek generuje server; ostatní položky jdou zpět i se skrytými poli.
   assert.equal(body.items.length, 1);
   assert.deepEqual(body.items[0], {
+    id: 101, revenue_account_code: '613', counter_account_code: '315', posting_rule_key: 'najem.kancelare',
     description: 'Nájem kanceláře', quantity: 12, duration_minutes: null, unit: 'měs',
     unit_price_without_vat: 1000, list_unit_price: 1200, vat_rate_id: 1, order_index: 0, item_kind: 'standard', vat_classification_code: '1',
     stock_item_id: null, warehouse_id: null, small_asset_id: null, asset_id: null,
@@ -418,7 +420,7 @@ test('create_invoice bez rozpisu posílá zadání beze změny', async () => {
   const args = { client_id: 8, items: [{ description: 'X', quantity: 1, unit_price_without_vat: 1, vat_rate_id: 1 }] };
   const client = new FakeClient();
   await run(client, 'create_invoice', args);
-  assert.equal(client.calls[0].body, args);
+  assert.deepEqual(client.calls[0].body, args);
 });
 
 test('rozpis plateb u jiného typu než kalendáře create_invoice odmítne', async () => {
@@ -482,7 +484,8 @@ const recurringTemplate = () => ({
     id: 900, template_id: 5, price_list_item_id: null, catalog_policy: 'fixed',
     description_source: 'template', description: 'Správa serveru', quantity: 1,
     duration_minutes: null, unit: 'měs', unit_price_without_vat: 5000, vat_rate_id: 1,
-    vat_classification_code: '1', order_index: 0, stock_item_id: null, warehouse_id: null,
+    vat_classification_code: '1', order_index: 0, stock_item_id: 44, warehouse_id: 2,
+    revenue_account_code: '602.100', item_kind: 'standard',
     vat_code: 'standard', vat_rate_percent: 21, oss_applicable: false, oss_consumer_country: null,
   }],
 });
@@ -527,10 +530,12 @@ test('úprava pravidelné fakturace pošle celou šablonu a zachová položky', 
   assert.equal(put.body.note_below_items, 'Nová poznámka');
   assert.equal('status' in put.body, false);
   assert.equal('next_run_date' in put.body, false);
+  // BEZ OPRAVY PADÁ: úprava hlavičky smazala výnosový účet, skladovou vazbu i druh řádku šablony.
   assert.deepEqual(put.body.items, [{
-    price_list_item_id: null, catalog_policy: 'fixed', description_source: 'template',
+    item_kind: 'standard', price_list_item_id: null, catalog_policy: 'fixed', description_source: 'template',
     description: 'Správa serveru', quantity: 1, duration_minutes: null, unit: 'měs',
     unit_price_without_vat: 5000, vat_rate_id: 1, vat_classification_code: '1', order_index: 0,
+    revenue_account_code: '602.100', stock_item_id: 44, warehouse_id: 2,
     oss_applicable: false, oss_consumer_country: null,
   }]);
 });

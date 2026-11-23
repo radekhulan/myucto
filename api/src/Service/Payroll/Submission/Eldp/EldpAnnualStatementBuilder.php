@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
@@ -107,7 +108,9 @@ use Psr\Clock\ClockInterface;
  *   základ, který výpočet za část měsíce nevede, a proto blokuje
  *   (`eldp_pension_age_mid_month_unsupported`).
  *
- * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí.
+ * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí
+ * až od měsíce, který následuje po měsíci, od něhož výplata náleží; ten ještě
+ * vykazuje stejně jako list ({@see PayrollPensionStatus::eldpKeptInMonth()}).
  * Kód D pro ostatní (po dovršení důchodového věku bez plného důchodu) se skládá
  * tímtéž pravidlem ({@see EldpPensionAgeCode}) i v hlášení
  * ({@see JmhzEldpEvidenceBuilder}), pokud zdroj nese potvrzené důchodové údaje.
@@ -315,6 +318,7 @@ final class EldpAnnualStatementBuilder
         $employmentFromTakeover = false;
         $continuationEvidence = [];
         $usedContinuation = null;
+        $blockersBeforeEmployment = count($blockers);
         $employment = $this->resolveEmployment(
             $months,
             $employmentId,
@@ -326,6 +330,29 @@ final class EldpAnnualStatementBuilder
         );
         if ($usedContinuation !== null) {
             $continuationEvidence[$employmentId] = $usedContinuation;
+        }
+        /*
+         * Přípustnost samostatného listu se rozhoduje dřív než úplnost měsíců.
+         * Trvající vztah bez výzvy za rok 2026 by jinak dostal výčet „chybí
+         * schválená revize“ za všechny zbývající měsíce roku a proklik do běhů
+         * budoucích měsíců, přestože list za něj zaměstnavatel nevyhotovuje
+         * vůbec (§ 38 odst. 1 a 2 zákona č. 582/1991 Sb. ve znění zák.
+         * č. 360/2025 Sb.). Navazující vztahy řetězu končí až po tomto vztahu,
+         * takže když přechodné ustanovení nedopadá na něj, nedopadne ani na
+         * celý list; konečné rozhodnutí podle konce řetězu padá níž.
+         */
+        if (!$requestedByAuthority && count($blockers) === $blockersBeforeEmployment) {
+            $earlyEnd = $employment['end'] !== null
+                && $employment['end'] <= sprintf('%04d-12-31', $year)
+                    ? $employment['end']
+                    : null;
+            $early = EldpDeadlinePolicy::standaloneStatementAllowed($year, $earlyEnd, false);
+            if (!$early['allowed']) {
+                throw new EldpValidationException(
+                    'eldp_standalone_statement_not_applicable',
+                    $early['reason'],
+                );
+            }
         }
         $employeeEmployments = self::employeeEmployments($allMonths, $employment['employee_id']);
         $this->assertNotContinuationOfEarlierEmployment(
@@ -2008,27 +2035,35 @@ final class EldpAnnualStatementBuilder
             'takeover_source' => $month->source,
         ];
 
-        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp'], true)) {
+        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)) {
             $blockers[] = [
                 'code' => 'eldp_takeover_relationship_kind_unsupported',
-                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ ani DPP ("
-                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list jiný neumí.'
+                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ, DPP, "
+                    . 'společník ani člen orgánu (' . ($month->relationType ?? 'neuvedeno')
+                    . '); evidenční list jiný neumí.'
                     . $where,
                 'detail' => $detail + ['relation_type' => $month->relationType],
             ];
 
             return null;
         }
-        $code = $month->relationType === 'employment'
-            ? $month->eldpCode()
-            : ($month->activityCode !== null
+        // Převzatý řádek nenese bližší určení, u společníka a člena orgánu
+        // proto rozhoduje jen rodina druhu činnosti (měsíční hlášení: S++).
+        $code = match (true) {
+            $month->relationType === 'employment' => $month->eldpCode(),
+            self::socialKind($month->relationType) === 'corporate_body' => $month->activityCode !== null
+                && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($month->activityCode)
+                    ? $month->activityCode . '++'
+                    : null,
+            default => $month->activityCode !== null
                 && PayrollEmploymentJmhzActivityFamily::matches(
                     $month->relationType,
                     $month->activityCode,
                     null,
                 )
                     ? $month->activityCode . '++'
-                    : null);
+                    : null,
+        };
         if ($code === null) {
             $blockers[] = [
                 'code' => 'eldp_takeover_activity_missing',
@@ -2420,22 +2455,18 @@ final class EldpAnnualStatementBuilder
      * Zaměstnavatel vede list „do měsíce, od něhož pojištěnci náleží výplata
      * starobního důchodu v plné výši" včetně tohoto měsíce (Metodická pomůcka
      * ELDP, příklad 8a: důchod od 1. 5., list do 31. 5.). Nevede se tedy až od
-     * následujícího měsíce.
+     * následujícího měsíce; pravidlo sdílí s měsíčním hlášením
+     * ({@see PayrollPensionStatus::eldpNotKeptFrom()}).
      *
      * @param array{full_pension_paid_from:?string,foreign_insurance:bool} $pension
      */
     private static function fullPensionNotKeptFrom(int $year, array $pension): ?string
     {
-        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR
-            || $pension['full_pension_paid_from'] === null
-            || $pension['foreign_insurance']
-        ) {
+        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR || $pension['foreign_insurance']) {
             return null;
         }
 
-        return (new \DateTimeImmutable($pension['full_pension_paid_from'] . '-01'))
-            ->modify('first day of next month')
-            ->format('Y-m-d');
+        return PayrollPensionStatus::eldpNotKeptFrom($pension['full_pension_paid_from']);
     }
 
     /**

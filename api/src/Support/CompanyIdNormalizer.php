@@ -42,6 +42,18 @@ final class CompanyIdNormalizer
     }
 
     /**
+     * SQL výraz se stejnou normalizací jako {@see self::ic()} nad sloupcem s IČO.
+     * Samotný `LPAD(…, 8, '0')` delší hodnotu ořízne na 8 znaků, takže zahraniční
+     * identifikátor s víc číslicemi (maďarské daňové číslo apod.) se s výsledkem
+     * ic() nikdy neshodl a import zakládal ke každému dokladu novou kartu.
+     */
+    public static function icSql(string $column): string
+    {
+        $digits = "REGEXP_REPLACE({$column}, '[^0-9]', '')";
+        return "IF(CHAR_LENGTH({$digits}) <= 8, LPAD({$digits}, 8, '0'), {$digits})";
+    }
+
+    /**
      * Odstraní mezery a jakékoli nealfanumerické znaky, převede na velká písmena.
      * „CZ 12345678" i „cz12345678" normalizuje na „CZ12345678".
      */
@@ -50,5 +62,41 @@ final class CompanyIdNormalizer
         $clean = preg_replace('/[^A-Za-z0-9]/', '', (string) $dic) ?? '';
         $clean = strtoupper($clean);
         return $clean !== '' ? $clean : null;
+    }
+
+    /** Právní formy jako sledy tokenů po {@see self::nameKey()} normalizaci, delší dřív. */
+    private const LEGAL_FORM_SUFFIXES = [
+        'spol s r o', 'sp z o o', 's r o', 'v o s', 'k s', 'z s', 'z u', 'o p s', 'a s',
+        'sro', 'as', 'spol', 'gmbh', 'ltd', 'llc', 'inc', 'plc', 'se', 'ag', 'kg', 'sa',
+    ];
+
+    /**
+     * Klíč názvu firmy pro tolerantní porovnání: malá písmena, bez diakritiky,
+     * interpunkce a koncové právní formy. „Novák, spol. s r.o." i „NOVAK s.r.o."
+     * dají „novak". Právní forma se odstraňuje jen na konci názvu, uprostřed může
+     * být součástí jména.
+     */
+    public static function nameKey(?string $name): ?string
+    {
+        $lower = mb_strtolower(trim((string) $name), 'UTF-8');
+        $ascii = strtr($lower, [
+            'á' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e', 'í' => 'i',
+            'ň' => 'n', 'ó' => 'o', 'ř' => 'r', 'š' => 's', 'ť' => 't', 'ú' => 'u',
+            'ů' => 'u', 'ý' => 'y', 'ž' => 'z', 'ä' => 'a', 'ô' => 'o', 'ĺ' => 'l',
+            'ľ' => 'l', 'ŕ' => 'r', 'ü' => 'u', 'ö' => 'o', 'ß' => 'ss', 'à' => 'a',
+            'è' => 'e', 'ç' => 'c', 'ê' => 'e', 'î' => 'i', 'û' => 'u', 'ł' => 'l',
+            'ą' => 'a', 'ę' => 'e', 'ś' => 's', 'ź' => 'z', 'ż' => 'z', 'ć' => 'c', 'ń' => 'n',
+        ]);
+        $key = trim((string) preg_replace('/[^a-z0-9]+/', ' ', $ascii));
+        do {
+            $before = $key;
+            foreach (self::LEGAL_FORM_SUFFIXES as $form) {
+                if ($key !== $form && str_ends_with($key, ' ' . $form)) {
+                    $key = rtrim(substr($key, 0, -strlen($form)));
+                    break;
+                }
+            }
+        } while ($key !== $before);
+        return $key !== '' ? $key : null;
     }
 }

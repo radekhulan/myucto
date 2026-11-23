@@ -77,7 +77,7 @@ final class StereoNxInventoryImportTest extends TestCase
         $itemRow['is_active'] = (int) $itemRow['is_active'];
         self::assertSame([
             'sku' => 'SYN-001', 'item_type' => 'goods', 'unit' => 'ks', 'tracking_mode' => 'serial',
-            'ean' => '4006381333931', 'sale_price_without_vat' => '125.50', 'min_qty' => '2.500',
+            'ean' => '4006381333931', 'sale_price_without_vat' => '125.500000', 'min_qty' => '2.500',
             'weight_g' => 750, 'intrastat_cn8_code' => '12345678', 'intrastat_net_mass_kg' => '0.750',
             'intrastat_supplementary_unit' => 'KGM', 'intrastat_supplementary_unit_coefficient' => '1.000000',
             'is_active' => 1,

@@ -581,6 +581,24 @@ export interface StockTrackingOverview {
   history: Array<Record<string, unknown>>
 }
 
+/** Oprava kódu a data spotřeby šarže; chybějící klíč hodnotu ponechá, `expires_on: null` expiraci smaže. */
+export interface StockTrackingUnitPayload {
+  lot_code?: string
+  expires_on?: string | null
+}
+
+/** Šarže karty v seznamu k opravě (kmen šarže bez pohybů). */
+export interface StockTrackingLotUnit {
+  id: number
+  lot_code: string
+  expires_on: string | null
+}
+
+export interface StockTrackingUnitResult {
+  unit: { id: number; lot_code: string; expires_on: string | null }
+  updated: { invoices: number; stock_drafts: number; stock_posted: number; fulfillment: number }
+}
+
 export interface StockLevelRow {
   warehouse_id: number
   stock_item_id: number
@@ -669,6 +687,9 @@ export interface StockDocumentLine {
   invoice_item_id?: number | null
   purchase_invoice_item_id?: number | null
   purchase_order_line_id?: number | null
+  /** Po zaúčtování uloží kód z řádku faktury ke kartě. */
+  remember_seller_code?: boolean
+  fill_intrastat?: boolean
   source_description?: string | null
   source_qty?: string | null
   line_no?: number
@@ -679,6 +700,41 @@ export interface StockDocumentLine {
   sku?: string
   name?: string
   unit?: string
+}
+
+/** Bez práva číst faktury přijdou jen čísla řádků nestornovaných faktur. */
+export interface ReceiptSalesInvoice {
+  line_nos: number[]
+  invoice_id?: number
+  varsymbol?: string | null
+  status?: string
+  client_name?: string | null
+}
+
+export interface ReceiptInvoiceWarningLine {
+  line_id: number
+  line_no: number
+  sku: string
+}
+
+export interface ReceiptInvoiceCreated {
+  id: number
+  _warnings?: string[]
+  _warning_meta?: {
+    receipt_tracking_unavailable?: { lines: (ReceiptInvoiceWarningLine & {
+      units: { serial_number: string | null; lot_code: string | null; requested: string; available: string }[]
+    })[] }
+    receipt_foreign_client_domestic_vat?: { lines: ReceiptInvoiceWarningLine[] }
+    oss_derived_notes?: { items: { item: number; manual_review: boolean; message: string }[] }
+    exchange_rate_cnb_deviation?: { used_rate: number; cnb_rate: number; diff_percent: number }
+  }
+}
+
+export interface ReceiptInvoicePayload {
+  client_id: number
+  price_level_id?: number | null
+  lines?: { line_id: number; manual_price?: boolean }[]
+  allow_duplicate?: boolean
 }
 
 export interface StockDocument {
@@ -712,6 +768,10 @@ export interface StockDocument {
   warehouse_to_code?: string | null
   warehouse_to_name?: string | null
   lines?: StockDocumentLine[]
+  /** Jen detail příjemky: vydané faktury vzniklé z jejích řádků. */
+  sales_invoices?: ReceiptSalesInvoice[]
+  /** Jen příjemka: uložené vedlejší náklady. Dokud nějaké jsou, řídí extra_cost řádků. */
+  landed_costs?: Array<Required<Pick<StockReceiptLandedCost, 'description' | 'allocation'>> & { id: number; amount: string; purchase_invoice_id: number | null; purchase_invoice_item_id: number | null }>
   warnings?: string[]
 }
 
@@ -726,6 +786,8 @@ export interface StockDocumentPayload {
   invoice_id?: number
   purchase_invoice_id?: number
   stock_take_id?: number
+  /** Nahradí uložené vedlejší náklady příjemky (přidání, úprava i smazání). */
+  landed_costs?: StockReceiptLandedCost[]
   lines: Array<{
     stock_item_id: number
     qty: string | number
@@ -733,6 +795,7 @@ export interface StockDocumentPayload {
     extra_cost?: string | number
     invoice_item_id?: number
     purchase_invoice_item_id?: number
+    fill_intrastat?: boolean
     source_description?: string
     source_qty?: string | number
     note?: string | null
@@ -849,6 +912,8 @@ export interface StockSalesFilters {
   stock_item_id?: number
   q?: string
   group_by?: 'none' | 'client' | 'item'
+  /** Přidá řádky importovaných faktur bez karty spárované s kartou podle kódu položky. */
+  include_imported?: boolean
   page?: number
   per_page?: number
 }
@@ -876,6 +941,8 @@ export interface StockSalesRow {
   currency: string
   /** Sériová čísla a šarže vydané k řádku faktury. */
   identifiers: string[]
+  /** Řádek importované faktury bez karty, spárovaný podle kódu položky (jen s include_imported). */
+  matched_by_code?: boolean
 }
 
 export interface StockSalesGroup {
@@ -910,6 +977,15 @@ export interface StockValuationRow {
   value_total: string
 }
 
+export interface StockValueTrendReport {
+  job_id: number
+  computed_at: string | null
+  dates: string[]
+  parent: { id: number; code: string; name: string } | null
+  groups: Array<{ kind: 'category' | 'parent' | 'uncategorized'; category_id: number | null; code: string; name: string; values: Record<string, string> }>
+  totals: Record<string, { value_total: string; count: number }>
+}
+
 export interface StockValuationReport {
   date: string
   items: StockValuationRow[]
@@ -918,6 +994,7 @@ export interface StockValuationReport {
 
 interface StockReceiptProposalBase {
   lines: Array<{
+    order_index: number
     purchase_invoice_item_id: number
     purchase_order_line_id: number | null
     stock_item_id: number | null
@@ -926,7 +1003,20 @@ interface StockReceiptProposalBase {
     already_received: string
     remaining_qty: string
     unit_cost: string
+    seller_item_code?: string | null
+    /** Karty, u kterých má dodavatel tento kód uložený. */
+    vendor_code_cards?: Array<{ id: number; sku: string; name: string }>
+    intrastat_cn8_code?: string | null
+    intrastat_country_of_origin?: string | null
+    matched_stock_item_id?: number | null
+    match_source?: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   }>
+  /** Řádky s kódem, ke kterým se nenašla karta: člověk ji vybere v okně příjemky. */
+  unmatched_lines?: StockReceiptProposalBase['lines']
+  /** Řádky bez kódu a bez EAN, které nejsou služba: člověk jim kartu vybere v okně příjemky. */
+  uncoded_lines?: StockReceiptProposalBase['lines']
+  /** Faktura má řádek, který zbývá přijmout na sklad: podle něj se nabízí příjem. */
+  has_lines_to_receive?: boolean
   cost_candidates: Array<{
     purchase_invoice_item_id: number
     description: string
@@ -974,6 +1064,8 @@ export interface StockReceiptPayload {
     stock_item_id?: number
     quantity: string | number
     unit_cost?: string | number
+    remember_seller_code?: boolean
+    fill_intrastat?: boolean
   }>
   landed_costs?: StockReceiptLandedCost[]
 }
@@ -1167,6 +1259,14 @@ export const stockApi = {
     api.get<StockTrackingChoices>(`/stock/items/${id}/tracking-choices`, {
       params: { warehouse_id: params.warehouse_id ?? undefined, invoice_id: params.invoice_id ?? undefined },
     }).then(r => r.data),
+  /** Šarže karty po stránkách (lehké, bez historie pohybů), volitelně hledání v kódu. */
+  listTrackingUnits: (itemId: number, params: { q?: string; page?: number; per_page?: number } = {}) =>
+    api.get<{ data: StockTrackingLotUnit[]; meta: StockPageMeta }>(`/stock/items/${itemId}/tracking-units`, {
+      params: { q: params.q || undefined, page: params.page ?? undefined, per_page: params.per_page ?? undefined },
+    }).then(r => r.data),
+  /** Oprava šarže na kartě; nový text se propíše do konceptů a zaúčtovaných skladových dokladů. */
+  updateTrackingUnit: (itemId: number, unitId: number, payload: StockTrackingUnitPayload) =>
+    api.put<StockTrackingUnitResult>(`/stock/items/${itemId}/tracking-units/${unitId}`, payload).then(r => r.data),
   replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
 
   // ── Výchozí účet a dimenze produktu (Účtování podle dimenzí, F1) ─────────
@@ -1232,6 +1332,10 @@ export const stockApi = {
   documentPdfUrl: (id: number) => downloadUrl(`/stock/documents/${id}/pdf`),
   documentsForInvoice: (invoiceId: number) =>
     api.get<StockDocument[]>(`/invoices/${invoiceId}/stock-documents`).then(r => r.data),
+  sourceReceipts: (invoiceId: number) =>
+    api.get<StockDocument[]>(`/invoices/${invoiceId}/source-receipts`).then(r => r.data),
+  createInvoiceFromReceipt: (id: number, payload: ReceiptInvoicePayload) =>
+    api.post<ReceiptInvoiceCreated>(`/stock/documents/${id}/invoice`, payload).then(r => r.data),
 
   // ── Inventury ───────────────────────────────────────────────────────────
   listTakes: (filters: { warehouse_id?: number; status?: StockTakeStatus } = {}) =>
@@ -1258,14 +1362,17 @@ export const stockApi = {
     api.get<StockValuationReport>('/stock/reports/valuation', { params: toParams(filters) }).then(r => r.data),
   reportSales: (filters: StockSalesFilters = {}) =>
     api.get<StockSalesReport>('/stock/reports/sales', { params: toParams(filters) }).then(r => r.data),
-  reportExportUrl: (name: 'status' | 'valuation' | 'sales', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
+  reportExportUrl: (name: 'status' | 'valuation' | 'value-trend' | 'sales', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
     const params = new URLSearchParams(toParams({ ...filters, format }) as Record<string, string>)
     return downloadUrl(`/stock/reports/${name}/export?${params.toString()}`)
   },
 
   // ── Příjem na sklad z přijaté faktury ───────────────────────────────────
-  receiptPropose: (purchaseInvoiceId: number) =>
-    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`).then(r => r.data),
+  /** `stockItemIds`: purchase_invoice_item_id → vybraná karta, řádek se přepočte podle jejího balení. */
+  receiptPropose: (purchaseInvoiceId: number, stockItemIds?: Record<number, number>) =>
+    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, {
+      params: stockItemIds ? { stock_item_ids: stockItemIds } : undefined,
+    }).then(r => r.data),
   receiptCreate: (purchaseInvoiceId: number, payload: StockReceiptPayload) =>
     api.post<StockDocument>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, payload).then(r => r.data),
   receiptList: (purchaseInvoiceId: number) =>

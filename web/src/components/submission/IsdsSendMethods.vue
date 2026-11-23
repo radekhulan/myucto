@@ -8,15 +8,17 @@
  * nebo SMS zprávu připraví a odeslat ji nemůže. Brána a certifikát se ukazují
  * i nedostupné, s důvodem — schovaná volba vypadá jako chybějící funkce.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
+import IsdsSavedAccessPicker from '@/components/submission/IsdsSavedAccessPicker.vue'
+import { useIsdsSavedAccess } from '@/components/submission/useIsdsSavedAccess'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
-type Method = 'gateway' | 'mobile_key' | 'password' | 'sms' | 'certificate'
+type Method = 'gateway' | 'mobile_key' | 'password' | 'sms' | 'certificate' | 'saved'
 
 const props = defineProps<{
   outboxId: number
@@ -31,9 +33,6 @@ const props = defineProps<{
 const emit = defineEmits<{ sent: [dispatched: boolean] }>()
 const { t } = useI18n()
 
-const methods = computed<Method[]>(() => props.gatewayOnly
-  ? ['gateway']
-  : ['gateway', 'mobile_key', 'password', 'sms', 'certificate'])
 const ACCESS_LINK = '/admin/databox?tab=access'
 
 const gatewayRegistered = ref(false)
@@ -50,6 +49,14 @@ const smsFlowToken = ref('')
 const smsStatus = ref('')
 const smsCode = ref('')
 const certificateConfirmed = ref(false)
+const savedAccess = useIsdsSavedAccess(() => props.environment, 'send', () => !props.gatewayOnly)
+const canUseSavedAccess = savedAccess.canUseSelected
+const methods = computed<Method[]>(() => {
+  if (props.gatewayOnly) return ['gateway']
+  const items: Method[] = ['gateway', 'mobile_key', 'password', 'sms', 'certificate']
+  if (savedAccess.state.choices.length || method.value === 'saved') items.splice(2, 0, 'saved')
+  return items
+})
 
 const outboxLink = computed(() => `/admin/databox?tab=outbox&outbox=${props.outboxId}`)
 
@@ -64,6 +71,7 @@ const recommended = computed<Method>(() => (props.gatewayOnly || gatewayAvailabl
 function available(option: Method): boolean {
   if (option === 'gateway') return gatewayAvailable.value
   if (option === 'certificate') return certificateStored.value
+  if (option === 'saved') return savedAccess.state.choices.length > 0
   return true
 }
 
@@ -71,6 +79,7 @@ function methodTitle(option: Method): string {
   switch (option) {
     case 'gateway': return t('databox.send.gateway.title')
     case 'mobile_key': return t('databox.send.mobile_key.title')
+    case 'saved': return t('databox.savedAccess.title')
     case 'password': return t('databox.send.password.title')
     case 'sms': return t('databox.send.sms.title')
     default: return t('databox.send.certificate.title')
@@ -81,6 +90,7 @@ function methodDescription(option: Method): string {
   switch (option) {
     case 'gateway': return t('databox.send.gateway.description')
     case 'mobile_key': return t('databox.send.mobile_key.description')
+    case 'saved': return t('databox.savedAccess.description')
     case 'password': return t('databox.send.password.description')
     case 'sms': return t('databox.send.sms.description')
     default: return t('databox.send.certificate.description')
@@ -101,6 +111,9 @@ function select(option: Method) {
   smsFlowToken.value = ''
   smsStatus.value = ''
   resetSecrets()
+  username.value = ''
+  certificateConfirmed.value = false
+  savedAccess.reset()
 }
 
 function handleError(exception: unknown, fallback: string) {
@@ -140,21 +153,21 @@ function credentialsFilled(): boolean {
 }
 
 async function sendWithPassword() {
-  if (busy.value || !credentialsFilled()) return
+  const useSaved = method.value === 'saved'
+  const isCurrent = savedAccess.captureScope()
+  if (busy.value || (useSaved ? !canUseSavedAccess.value : !credentialsFilled())) return
   busy.value = true
   error.value = ''
   try {
-    const result = await dataBoxApi.passwordSend(
-      props.outboxId,
-      props.environment,
-      username.value.trim(),
-      password.value,
-    )
-    finish(result.dispatched)
+    const access = await savedAccess.credentials(useSaved, username.value, password.value)
+    if (!access || !isCurrent()) return
+    const result = await dataBoxApi.passwordSend(props.outboxId, props.environment, access)
+    if (isCurrent()) finish(result.dispatched)
   } catch (exception) {
     handleError(exception, t('databox.outbox.passwordSend.failed'))
   } finally {
     resetSecrets()
+    savedAccess.state.confirmed = false
     busy.value = false
   }
 }
@@ -245,6 +258,15 @@ onMounted(async () => {
   await loadAvailability()
   if (!touched.value || !available(method.value)) method.value = recommended.value
 })
+watch(savedAccess.scope, () => {
+  resetSecrets()
+  username.value = ''
+  smsFlowToken.value = ''
+  smsStatus.value = ''
+  gateway.value = null
+  certificateConfirmed.value = false
+  method.value = recommended.value
+}, { flush: 'sync' })
 onBeforeUnmount(resetSecrets)
 </script>
 
@@ -346,6 +368,22 @@ onBeforeUnmount(resetSecrets)
         @sent="finish"
       />
 
+      <template v-else-if="method === 'saved'">
+        <IsdsSavedAccessPicker :access="savedAccess" :disabled="busy" />
+        <button
+          type="button"
+          :class="[btnFilled('primary'), 'mt-3']"
+          :disabled="busy || !canUseSavedAccess"
+          data-test="isds-send-saved-submit"
+          @click="sendWithPassword"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
+          </svg>
+          {{ busy ? t('common.loading') : t('databox.outbox.passwordSend.submit') }}
+        </button>
+      </template>
+
       <template v-else-if="method === 'password' || method === 'sms'">
         <p class="text-sm text-neutral-700">
           {{ method === 'sms' ? t('databox.send.sms.intro') : t('databox.outbox.passwordSend.intro') }}
@@ -375,6 +413,10 @@ onBeforeUnmount(resetSecrets)
             >
           </label>
         </template>
+        <label v-if="method === 'password'" class="mt-3 flex items-center gap-2 text-sm">
+          <input v-model="savedAccess.state.remember" type="checkbox" :disabled="busy" data-test="isds-remember-access">
+          <span>{{ t('databox.savedAccess.remember') }}</span>
+        </label>
         <div class="mt-3 flex flex-wrap gap-2">
           <button
             v-if="method === 'password'"

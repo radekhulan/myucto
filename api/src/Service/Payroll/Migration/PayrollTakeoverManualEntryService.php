@@ -190,6 +190,9 @@ final class PayrollTakeoverManualEntryService
             }
         }
 
+        $partialLock = $opening['locked']
+            && $this->openings->lockAllowsUnreportedChanges($supplierId, $employeeId, $year);
+
         return [
             'year' => $year,
             'employee_id' => $employeeId,
@@ -207,8 +210,12 @@ final class PayrollTakeoverManualEntryService
             ),
             'rows' => $rows,
             'source_reference' => (string) $opening['source_reference'],
-            'locked' => $opening['locked'],
-            'lock_reason' => $opening['lock_reason'],
+            // Po podaném hlášení zůstává měsíc otevřený pro údaje, které hlášení
+            // z převzatých úhrnů nevzalo (dny, odvody, čistá mzda). Co vzalo,
+            // hlídá uložení přes PayrollOpeningBalanceService::lockReasonForChange().
+            'locked' => $opening['locked'] && !$partialLock,
+            'lock_reason' => $partialLock ? null : $opening['lock_reason'],
+            'partial_lock_reason' => $partialLock ? $opening['lock_reason'] : null,
         ];
     }
 
@@ -233,10 +240,6 @@ final class PayrollTakeoverManualEntryService
                 . 'Nastavte první mzdové období v nastavení mezd.',
                 $year,
             ));
-        }
-        $lock = $this->openings->lockReason($supplierId, $employeeId, $year);
-        if ($lock !== null) {
-            throw new \DomainException($lock);
         }
         $employments = [];
         foreach ($this->employments($supplierId, $employeeId, $year, $takeoverMonths) as $employment) {

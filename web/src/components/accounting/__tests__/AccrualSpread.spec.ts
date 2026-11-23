@@ -10,7 +10,7 @@ import en from '@/i18n/en.json'
 const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })
 const format = (value: number) => `${value.toFixed(2)} Kč`
 const spread: StatementAccrualSpread = {
-  applied: true, skipped_reason: null, prepaid_expense: 6100, deferred_revenue: 24300, documents: 2, prev: null,
+  applied: true, skipped_reason: null, prepaid_expense: 6100, deferred_revenue: 24300, documents: 2, depreciation: 0, depreciation_assets: 0, prev: null,
 }
 
 describe('průběžné časové rozlišení ve výkazech', () => {

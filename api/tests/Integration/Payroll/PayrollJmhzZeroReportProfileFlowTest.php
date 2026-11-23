@@ -50,6 +50,10 @@ final class PayrollJmhzZeroReportProfileFlowTest extends TestCase
      */
     private const AGREEMENT_SOCIAL_ATTRIBUTES = ['10481', '10370'];
 
+    private const ADVANCE_TAX_ATTRIBUTES = ['10297', '10298', '10305', '10306'];
+    private const WITHHOLDING_TAX_ATTRIBUTES = ['10307', '10309'];
+    private const CREDIT_ATTRIBUTES = ['10299', '10300', '10301', '10302'];
+
     private int $officeId;
     private int $baseComponentId;
     private int $sequence = 0;
@@ -172,6 +176,67 @@ final class PayrollJmhzZeroReportProfileFlowTest extends TestCase
         }
     }
 
+    /**
+     * Podlimitní DPP bez účasti na pojištění a bez prohlášení (srážková daň)
+     * v měsíci bez příjmu: řádný nulový formulář podle tabulky Pravidel podání
+     * 1.4.5, kap. 4, a FAQ MPSV „Vyplnění ELDP v případě DPP a DPČ do limitu"
+     * (10354 a 10355 celý měsíc, 10356 = 0, kód ELDP 10240 se nevyplňuje).
+     */
+    public function testWithholdingAgreementWithoutIncomeMatchesRegularZeroTable(): void
+    {
+        $person = $this->hireAgreement('Klára Srážková', 'female', '1996-03-03');
+        $response = $this->approveTimeMonth($person['employment_id'], self::PERIOD, [], dailyMinutes: 240);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->createApprovedInput($person, $this->baseComponentId, 0, 'zero-profile-' . $person['employment_id'], self::PERIOD_START);
+
+        $projection = JmhzAttributeProjection::fromXml($this->submission('withholding-dpp'));
+        $this->assertAgreementZeroForm($projection->forms()[0]);
+        $summary = $projection->forms()[0];
+        self::assertFalse($summary->boolean('10419'));
+        $this->assertNoTaxAttributes($summary, [...self::ADVANCE_TAX_ATTRIBUTES, ...self::WITHHOLDING_TAX_ATTRIBUTES, ...self::CREDIT_ATTRIBUTES]);
+    }
+
+    /** DPČ do limitu bez příjmu v měsíci: stejný nulový formulář, záloha bez nulových atributů. */
+    public function testAgreementForWorkActivityWithoutIncomeMatchesRegularZeroTable(): void
+    {
+        $person = $this->hireAgreement('Lenka Činná', 'female', '1993-05-05', 'dpc', 'advance', true);
+        $response = $this->approveTimeMonth($person['employment_id'], self::PERIOD, [], dailyMinutes: 240);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->createApprovedInput($person, $this->baseComponentId, 0, 'zero-profile-' . $person['employment_id'], self::PERIOD_START);
+
+        $projection = JmhzAttributeProjection::fromXml($this->submission('dpc'));
+        $this->assertAgreementZeroForm($projection->forms()[0]);
+        $summary = $projection->forms()[0];
+        self::assertTrue($summary->boolean('10419'));
+        self::assertTrue($summary->has('10299'), 'Souhrnná data osoby se ve formuláři čtou.');
+        $this->assertNoTaxAttributes($summary, [...self::ADVANCE_TAX_ATTRIBUTES, ...self::WITHHOLDING_TAX_ATTRIBUTES]);
+    }
+
+    /**
+     * Kontroly ČSSZ 242, 244, 245 a 325 berou za vyplněný i nulový atribut.
+     * Měsíc bez příjmu nemá zálohu ani srážkovou daň, takže se jejich bloky
+     * neuvádějí vůbec; bez prohlášení se neuvádějí ani slevy.
+     *
+     * @param list<string> $attributeIds
+     */
+    private function assertNoTaxAttributes(JmhzAttributeScope $summary, array $attributeIds): void
+    {
+        foreach ($attributeIds as $attributeId) {
+            self::assertFalse($summary->has($attributeId), "Daňový atribut {$attributeId} v měsíci bez příjmu.");
+        }
+    }
+
+    private function assertAgreementZeroForm(JmhzAttributeScope $form): void
+    {
+        $this->assertRegularZeroTable($form, []);
+        self::assertFalse($form->has('10240'), 'Kód ELDP se u dohody do limitu nevyplňuje.');
+        self::assertSame('0', $form->value('10286'));
+        self::assertSame(0.0, (float) $form->value('10265'));
+        self::assertSame('0', $form->value('10356'));
+        self::assertSame(self::PERIOD_START, $form->value('10354'));
+        self::assertSame(self::PERIOD_END, $form->value('10355'));
+    }
+
     private function assertSubmissionHeader(JmhzAttributeProjection $projection): void
     {
         $header = $projection->submission();
@@ -275,19 +340,26 @@ final class PayrollJmhzZeroReportProfileFlowTest extends TestCase
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string,sequence:int} */
-    private function hireAgreement(string $name, string $sex, string $birthDate): array
-    {
+    private function hireAgreement(
+        string $name,
+        string $sex,
+        string $birthDate,
+        string $relationType = 'dpp',
+        string $taxRegime = 'advance',
+        bool $taxDeclarationSigned = false,
+    ): array {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment(
             $this->officeId,
             $name,
             $sequence,
-            'dpp',
-            'dpp',
+            $relationType,
+            $relationType,
             10,
             2_500,
-            false,
+            $taxDeclarationSigned,
             self::PERIOD_START,
+            taxRegime: $taxRegime,
         );
         $this->completeIdentity($person, $name, $sex, $birthDate, $sequence);
 

@@ -53,6 +53,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+// Zápis po dvojicích ukazuje stránka deníku v tabulce dvojic nad panelem; tabulka řádků pod ní
+// by tytéž částky opakovala. Složený zápis (bez `pairs`) zůstává s tabulkou řádků.
+const hasPairs = computed(() => (props.detail.pairs?.length ?? 0) > 0)
+
 // Přeúčtovat jde i z deníku, ne jen z detailu dokladu: účetní opravu kontace hledá
 // u zápisu, a bez tohohle tlačítka jí deník nabízel jen smazání. Jen živý zápis
 // dokladu nebo bankovního pohybu, plán i provedení rozhoduje server.
@@ -65,6 +69,15 @@ const repostSource = computed(() => REPOST_SOURCES[props.detail.source_type] ?? 
 const canRepost = computed(() => props.canWrite && repostSource.value !== null && !!props.detail.source_id
   && !props.detail.reversed_by && !props.detail.reverses_entry_id)
 const repostOpen = ref(false)
+
+// Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService).
+// Zápis interního dokladu se stornuje v detailu dokladu. Zápisy uzávěrky a otevření účtů
+// založené průvodcem (otevření se source_id) vrací jen průvodce uzávěrkou (server ruční
+// storno odmítne); převzaté otevření z migrace (bez source_id) stornovat jde.
+const wizardOnly = computed(() => props.detail.source_type === 'closing'
+  || (props.detail.source_type === 'opening' && props.detail.source_id != null))
+const canReverse = computed(() => props.canWrite && !props.detail.reversed_by && !wizardOnly.value
+  && props.detail.source_type !== 'vat_clearing' && !props.detail.internal_document)
 
 // Přílohy, poznámky, vazby, dokumenty: u drtivé většiny zápisů je pod hlavní
 // věcí prázdno, takže celá ta část stojí sbalená pod jedním řádkem. Počty
@@ -97,7 +110,7 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
   <div>
     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
          u protějšku, aby je účetní poznal jako stejnou věc. -->
-    <JournalLinesTable class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
+    <JournalLinesTable v-if="!hasPairs" class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
     <JournalLineDimensionsEditor v-if="canWrite" class="mb-3" :entry-id="detail.id" :lines="detail.lines" @saved="onLineDimensionsSaved" />
     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
          je to první, co účetní po rozpadu na účty hledá. -->
@@ -135,9 +148,7 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           <span class="whitespace-nowrap">{{ t('accounting.repost.action') }}</span>
         </button>
-        <!-- Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService).
-             Zápis interního dokladu se stornuje v detailu dokladu. -->
-        <button v-if="canWrite && !detail.reversed_by && detail.source_type !== 'vat_clearing' && !detail.internal_document" @click="emit('reverse', detail)" :class="btnOutline('danger')">
+        <button v-if="canReverse" @click="emit('reverse', detail)" :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
           {{ t('accounting.journal.reverse') }}
         </button>

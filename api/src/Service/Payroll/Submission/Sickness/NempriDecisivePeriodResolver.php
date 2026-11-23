@@ -282,6 +282,9 @@ final class NempriDecisivePeriodResolver
                 'Rozhodné období ' . $from . ' – ' . $to . ' musí ve větě nést všechny měsíce. '
                 . implode(' ', $parts)
                 . ' Měsíce lze také zadat u případu ručně (započitatelný příjem a vyloučené dny).',
+                // Měsíc, který počítá MyÚčto, se opravuje mzdovým během, převzatý
+                // v Kontrole převodu mezd — obrazovka podle toho nabídne proklik.
+                ['payroll_periods' => $missingPayroll, 'takeover_periods' => $missingTakeover],
             );
         }
         if ($unknownExcluded !== []) {

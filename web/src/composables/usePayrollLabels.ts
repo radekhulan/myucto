@@ -56,6 +56,16 @@ const SUBMISSION_ISSUE_CODES = new Set([
   'regzel_xsd_validation_failed',
   'registration_xsd_validation_failed',
   'manual_acceptance_contradicted',
+  'registration_receipt_oic_invalid',
+  'registration_receipt_id_ppv_invalid',
+])
+/**
+ * Nálezy s vlastním návodem. Obecná rada podle fáze („zkontrolujte protokol
+ * úřadu nebo kontaktujte podporu") u nich účetní neřekne, co má udělat.
+ */
+const SUBMISSION_ISSUE_CODE_REMEDIATIONS = new Set([
+  'registration_receipt_oic_invalid',
+  'registration_receipt_id_ppv_invalid',
 ])
 
 /**
@@ -179,7 +189,13 @@ export function usePayrollLabels() {
     )
   }
 
-  function submissionIssueRemediation(stage: string | null | undefined): string {
+  function submissionIssueRemediation(
+    stage: string | null | undefined,
+    issueCode: string | null = null,
+  ): string {
+    if (issueCode !== null && SUBMISSION_ISSUE_CODE_REMEDIATIONS.has(issueCode)) {
+      return t(`payroll.submissions.overview.issue_code_remediation.${issueCode}`)
+    }
     return knownLabel(
       'payroll.submissions.overview.issue_remediation',
       stage,

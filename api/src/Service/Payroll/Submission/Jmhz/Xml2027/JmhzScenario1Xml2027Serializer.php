@@ -2242,12 +2242,29 @@ final class JmhzScenario1Xml2027Serializer
                 $this->text($dom, $place, Jmhz2027Schema::NS_FORM, $element, $address[$key]);
             }
         }
+        $country = $this->string($term['jmhz_workplace_country_code'] ?? null, '10231');
+        if ($abroad && $country === 'CZ') {
+            $this->invalid(
+                'jmhz_xml_workplace_address_invalid',
+                'U místa výkonu práce mimo ČR (kód obce 111111) se uvádí stát, ve kterém zaměstnanec práci'
+                    . ' skutečně vykonával (atribut 10231), ne CZ.',
+            );
+        }
+        /*
+         * Obec 10229 je název obce z číselníku obcí datového slovníku 1.5.0.3
+         * („CISOB + navíc hodnota 111111 s názvem Mimo ČR"); Pokyny k vyplnění
+         * MH 1.5 (vydání 4. 11. 2026, atribut 10229) totéž: u práce pouze mimo
+         * ČR „hodnota Mimo ČR a současně stát". Název se u 111111 odvozuje
+         * z kódu, ne z volného textu smlouvy (tam bývá zahraniční město).
+         */
         $this->text(
             $dom,
             $place,
             Jmhz2027Schema::NS_FORM,
             'form:obec',
-            $this->string($term['work_place'] ?? null, '10229'),
+            $abroad
+                ? Jmhz2027DocumentContract::MUNICIPALITY_ABROAD_NAME
+                : $this->string($term['work_place'] ?? null, '10229'),
         );
         $this->text($dom, $place, Jmhz2027Schema::NS_FORM, 'form:kodObce', $municipalityCode);
         if (isset($address[Jmhz2027DocumentContract::TERM_POSTAL_CODE])) {
@@ -2259,13 +2276,7 @@ final class JmhzScenario1Xml2027Serializer
                 $address[Jmhz2027DocumentContract::TERM_POSTAL_CODE],
             );
         }
-        $this->text(
-            $dom,
-            $place,
-            Jmhz2027Schema::NS_FORM,
-            'form:kodStatu',
-            $this->string($term['jmhz_workplace_country_code'] ?? null, '10231'),
-        );
+        $this->text($dom, $place, Jmhz2027Schema::NS_FORM, 'form:kodStatu', $country);
 
         return $place;
     }

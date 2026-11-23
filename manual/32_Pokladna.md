@@ -103,6 +103,15 @@ DPH lze zapnout jen u účelů **Prodej** a **Nákup**. U úhrad faktur, převod
 2. Vyberte fakturu. Partner (dodavatel s IČ a DIČ) se předvyplní. Částka je uzamčená: přijatou fakturu hradíte vždy v **plné zbývající výši**.
 3. Klikněte na **Vystavit**.
 
+**Faktura nebo účtenka v cizí měně (z korunové pokladny):**
+
+1. Zvolte účel **Úhrada vydané faktury** (příjem) nebo **Úhrada přijaté faktury** (výdej) a vyberte cizoměnový doklad. V našeptávači je zbytek uvedený v měně dokladu.
+2. Částka se předvyplní v korunách podle kurzu dokladu. Přepište ji na koruny, které jste skutečně přijali nebo vyplatili.
+3. Pod částkou se ukáže kurz dokladu, zbytek v měně dokladu i v korunách a odhad kurzového rozdílu (zisk nebo ztráta).
+4. Klikněte na **Vystavit**.
+
+Přijatý cizoměnový doklad (faktura i účtenka) se hradí vždy celý a jen tehdy, když na něm ještě žádná úhrada není. Koruny se od zbytku přepočteného kurzem dokladu smí lišit nejvýš o kurzovou toleranci (4 %, nejméně 1 Kč), stejně jako u bankovní korunové platby; jinak uložení odmítne s uvedením, kolik korun doklad podle kurzu dělá. U vydané faktury částka v toleranci uhradí celý zbytek, menší částka se přepočte kurzem dokladu a uhradí jen odpovídající část. Jak se úhrada zaúčtuje, popisuje [§ 32.11.10](#321110-zauctovani-a-vazba-na-denik).
+
 **Vratka od dodavatele (příjem):** Klikněte na **Příjem**, zvolte účel **Úhrada přijaté faktury**, vyberte fakturu, na které už úhrada visí, zadejte vrácenou částku (libovolnou, nejvýše uhrazenou) a doklad vystavte. Když vratku později stornujete nebo smažete a zbývající úhrady kryjí celou fakturu, faktura je znovu uhrazená s datem poslední zbývající úhrady, stejně jako po zrušení spárování bankovní vratky ([§ 29](29_Banka.md)).
 
 **Jak poznáte, že je hotovo:** Faktura je označená jako uhrazená a doklad je v seznamu se stavem **Vystaven**. U zálohové faktury se plátci DPH navíc připraví koncept daňového dokladu k přijaté platbě.
@@ -182,7 +191,7 @@ Každá pokladna musí mít **jinou analytiku 211** (ani neaktivní pokladna ú�
 
 Stránka `Peníze → Pokladna` zobrazuje:
 
-- **Hero panel se zůstatkem** vybrané pokladny k aktuálnímu dni, název pokladny a účet analytiky. U valutové pokladny je vedle korunové účetní hodnoty vidět také zůstatek v její měně. Je-li zůstatek záporný, zobrazí se červené upozornění „Zůstatek pokladny je záporný“. Pokladna do minusu jít nemá (krátkodobý finanční majetek), ale systém to eviduje jako varování, nikoli jako tvrdý blok.
+- **Zůstatek vybrané pokladny** k aktuálnímu dni, název pokladny a analytický účet. U valutové pokladny je hlavní částka v její měně. Pod ní je korunová **Účetní hodnota** z deníku. Při záporné korunové hodnotě systém zobrazí červené upozornění „Zůstatek pokladny je záporný“. Jde o varování, které další práci neblokuje.
 - **Výběr pokladny** (pokud jich firma má víc) v rozbalovací nabídce v hlavičce.
 - Tlačítka **Příjem** a **Výdej** (zelené pro příjem, oranžové pro výdej), **Pokladní kniha** a v nabídce **…** položku **Správa pokladen**.
 
@@ -203,6 +212,7 @@ V rozbaleném detailu je sekce **Přílohy** pro sken účtenky, paragonu nebo p
 - **Nahrát sken**: vybrané soubory (PDF nebo obrázek) se uloží do modulu Dokumenty a rovnou se k dokladu připojí.
 - **Připojit dokument**: připojí soubor, který už v Dokumentech je (vyhledání podle názvu nebo obsahu).
 - U každé přílohy je **náhled** (otevře soubor v nové záložce), stažení a **odpojení**. Odpojení soubor nemaže, jen zruší vazbu; soubor zůstává v Dokumentech.
+- **Zobrazit originál**: ukáže první přílohu ve formátu PDF nebo obrázek přímo vedle detailu dokladu. Stejné tlačítko a sekci **Přílohy** má i formulář úprav rozpracovaného dokladu. U nového dokladu vyberete sken tlačítkem **Přiložit originál** v hlavičce formuláře: náhled se hned otevře vedle formuláře, soubor ale zůstává jen v prohlížeči a do Dokumentů se nahraje a k dokladu připojí až při uložení. Když formulář opustíte bez uložení, nic se nenahraje. Pokud se po uložení originál připojit nepodaří, doklad zůstane uložený a aplikace vás upozorní, ať originál nahrajete v úpravě nebo detailu dokladu. Umístění vpravo nebo pod formulářem přepnete v hlavičce náhledu, šířku změníte tažením rozhraní nebo šipkami na klávesnici a aplikace si volbu pamatuje (podrobně viz [§ 23.11.4](23_Prijate_faktury.md#23114-nahrani-dokladu-drag-and-drop-isdoc-a-limity)).
 
 Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvisí s** (hledá se podle čísla dokladu, partnera nebo popisu). Připojit jde jen doklad téže firmy. Při smazání pokladního dokladu se jeho vazby na přílohy zruší, soubory samotné zůstanou v Dokumentech. Sekce se zobrazuje uživatelům s přístupem k modulu Dokumenty; nahrávat a připojovat mohou ti, kdo mají práva nahrát a přesunout dokument.
 
@@ -210,7 +220,7 @@ Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvis
 
 Formulář nového dokladu se otevírá tlačítkem **Příjem** nebo **Výdej** z hlavní stránky pokladny, případně z rychlé akce v menu (ikona plus u položky Pokladna). Předvyplní se typ dokladu podle zvoleného tlačítka a aktuální nebo výchozí pokladna. Pokladní doklad ale může vzniknout i bez toho, že byste sem vůbec šli: přímo z editoru faktury volbou způsobu úhrady **Hotově** (viz [§ 32.11.7](#32117-doklad-vznikly-z-faktury-hotovostni-vyrovnani)).
 
-Hlavička obsahuje typ dokladu (příjem **P**, výdej **V**), **Pokladnu** (z aktivních) a **Datum** (datum vystavení = datum pokladního pohybu). Číslo dokladu (řada `PPD-RRRR-####` / `VPD-RRRR-####`) se přiděluje **až při vystavení**, ne při rozepsání formuláře. Prefix a tvar čísla se nastavují v **Nástrojích → Číselné řady**, a to v obou účetních režimech (daňové evidenci se řady účetního deníku nenabízejí).
+Hlavička obsahuje typ dokladu (příjem **P**, výdej **V**), **Pokladnu** (z aktivních) a **Datum** (datum vystavení = datum pokladního pohybu). Číslo dokladu (řada `PPD-RRRR-####` / `VPD-RRRR-####`) se přiděluje **až při vystavení**, ne při rozepsání formuláře. Prefix a tvar čísla se nastavují v **Nástrojích → Číselné řady**, a to v obou účetních režimech (daňové evidenci se řady účetního deníku nenabízejí). Pokladna může mít i víc řad, například `HP` pro hotovostní účtenky vedle PPD pro úhrady faktur: další řadu založíte v číselníku řad ([§ 95.6.1](95_Multi_supplier.md#9561-ciselnik-rad-vic-rad-pro-jeden-druh-dokladu)) a v hlavičce dokladu ji pak vyberete v poli **Číselná řada**. Doklady všech řad jedné pokladny jsou v jedné pokladní knize a tvoří jeden zůstatek.
 
 <!-- cols: 24 76 -->
 | Typ | Dostupné účely |
@@ -225,7 +235,7 @@ U **valutové pokladny** jsou záměrně dostupné jen účely, které lze bezpe
 Podle zvoleného účelu se formulář mění:
 
 - **Prodej / Nákup**: zobrazí se pole partner (s našeptávačem z evidence klientů), IČ a DIČ partnera. Volitelně lze doklad vystavit s DPH. U prodeje formulář připomíná, že existuje-li k prodeji faktura, má se použít úhrada faktury, jinak by DPH vzniklo dvakrát.
-- **Úhrada faktury / Úhrada přijaté faktury**: zobrazí se našeptávač nezaplacených dokladů (vyhledávání podle čísla nebo partnera); po výběru dokladu se automaticky předvyplní partner (název, IČ a DIČ odběratele, u přijaté faktury dodavatele), popis a částka. Partnera jde přepsat, například když platí jiná osoba než odběratel. Uložíte-li doklad s prázdným partnerem, doplní se odběratel nebo dodavatel faktury. Při změně účelu se partner vymaže. U úhrady vydané faktury lze uhradit i částečnou částku (do výše zbývající k úhradě). U úhrady přijaté faktury (VPD) je nutné uhradit **celou zbývající částku najednou**, částka je po výběru dokladu uzamčená. Zbývající částkou se rozumí brutto snížené o **už uhrazenou zálohu** a o dřívější úhrady (bankovní i hotovostní); doklad, na kterém po záloze nic nezbývá, se v našeptávači vůbec nenabídne. Po zaúčtování se faktura označí jako uhrazená. U přijaté hotovostní úhrady zálohové faktury se stejně jako u bankovní platby automaticky připraví koncept daňového dokladu k částečné platbě, nebo koncept finální faktury při úplném uhrazení zálohy; v našeptávači jsou proto i **zálohové (proforma) faktury**, označené jako záloha. Našeptávač zobrazuje nejvýše 20 shod. Pokud jich odpovídá víc, dá to na konci seznamu vědět poznámkou, upřesněte hledání (například celým číslem dokladu).
+- **Úhrada faktury / Úhrada přijaté faktury**: zobrazí se našeptávač nezaplacených dokladů (vyhledávání podle čísla nebo partnera); po výběru dokladu se automaticky předvyplní partner (název, IČ a DIČ odběratele, u přijaté faktury dodavatele), popis a částka. Partnera jde přepsat, například když platí jiná osoba než odběratel. Uložíte-li doklad s prázdným partnerem, doplní se odběratel nebo dodavatel faktury. Při změně účelu se partner vymaže. U úhrady vydané faktury lze uhradit i částečnou částku (do výše zbývající k úhradě). U úhrady přijaté faktury (VPD) je nutné uhradit **celou zbývající částku najednou**, částka je po výběru dokladu uzamčená. Zbývající částkou se rozumí brutto snížené o **už uhrazenou zálohu** a o dřívější úhrady (bankovní i hotovostní); doklad, na kterém po záloze nic nezbývá, se v našeptávači vůbec nenabídne. Po zaúčtování se faktura označí jako uhrazená. U přijaté hotovostní úhrady zálohové faktury se stejně jako u bankovní platby automaticky připraví koncept daňového dokladu k částečné platbě, nebo koncept finální faktury při úplném uhrazení zálohy; v našeptávači jsou proto i **zálohové (proforma) faktury**, označené jako záloha. Našeptávač zobrazuje nejvýše 20 shod. Pokud jich odpovídá víc, dá to na konci seznamu vědět poznámkou, upřesněte hledání (například celým číslem dokladu). Korunová pokladna nabízí i **cizoměnové doklady**: vydanou fakturu (ne zálohovou) a dosud neuhrazenou přijatou fakturu nebo účtenku. Částka se u nich zadává v korunách a uzamčená není, viz [§ 32.6](#326-krok-za-krokem-uhrada-faktury-z-pokladny).
 - **Převod** (v nabídce **Převod banka ↔ pokladna**): pokladní strana převodu hotovosti mezi bankou a pokladnou. Druhá strana (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem.
 - **Ostatní**: pro případy, které nespadají pod žádný z předchozích účelů (například manko nebo přebytek pokladny). Pole **Co to je** nabízí předvolby, které protiúčet doplní podle kontace. Nesedí-li žádná, zvolte **Jiné - vyberu protiúčet ručně** a vyberte volný protiúčet z účtové osnovy (musí být jiný než účet vybrané pokladny). Protiúčet se vybírá polem s hledáním podle čísla účtu nebo části názvu. DPH u tohoto účelu není podporována.
 
@@ -273,7 +283,7 @@ Druhé upozornění přijde, pokud je pokladna **po stornu v mínusu**, typicky 
 
 Storno **úhrady zálohové faktury**, ze které už vznikla finální faktura nebo daňový doklad k přijaté platbě, systém odmítne, takový doklad by po sobě zůstal vystavený. Zrušte proto nejdřív navazující doklad, teprve pak pokladní doklad; hláška uvede jeho číslo.
 
-**Trvalé smazání** zaúčtovaného dokladu (na rozdíl od storna po sobě nenechá žádnou stopu a v číselné řadě zůstane díra, číslo se znovu nepoužije) vyžaduje samostatné právo **Uzavřít pokladnu a trvale mazat doklady**. Smazat lze jen doklad v otevřeném a neuzamčeném období. Pro doklady, které už prošly přiznáním, použijte raději storno.
+**Trvalé smazání** zaúčtovaného dokladu (na rozdíl od storna po sobě nenechá žádnou stopu a v číselné řadě zůstane díra, číslo se znovu nepoužije) vyžaduje samostatné právo **Uzavřít pokladnu a trvale mazat doklady**. Smazat lze jen doklad v otevřeném a neuzamčeném období. Smazání se odmítne také, když je řádek zápisu dokladu spárovaný s jiným zápisem v okruhu otevřených položek (okruh nejdřív zrušte v opisu účtu na záložce **Otevřené položky - párování**) nebo rozepsaný na doklady v saldokontu. Pro doklady, které už prošly přiznáním, použijte raději storno.
 
 ### 32.11.7 Doklad vzniklý z faktury (hotovostní vyrovnání)
 
@@ -285,6 +295,7 @@ Takový doklad se od ručního liší v jediné věci: **řídí ho faktura**.
 - Změníte-li na faktuře pokladnu, původní doklad se stornuje a v nové pokladně vznikne nový s **novým číslem** z její řady.
 - Změna částky nebo data vystavení faktury se propíše stejně: starý doklad se stornuje a vznikne nový.
 - U přijaté faktury se vyrovnává **zbytek k úhradě**, tedy brutto snížené o už uhrazenou zálohu a o dřívější úhrady. Doklad, na kterém po záloze nic nezbývá, se hotovostně nevyrovnává.
+- U **cizoměnové faktury** (vydané i přijaté, včetně účtenky) vystaví vyrovnání korunový doklad na zbytek přepočtený kurzem dokladu. Platí se ke dni dokladu, takže kurzový rozdíl nevzniká. Platili-li jste jinou korunovou částkou, vyrovnání v editoru nepoužijte a doklad pořiďte ručně tady, se skutečnými korunami.
 - **Ručně pořízeného dokladu se tenhle mechanismus nikdy nedotkne**, ani když je navázaný na tutéž fakturu. Rozlišují se v datech.
 
 > [!WARNING]
@@ -292,7 +303,7 @@ Takový doklad se od ručního liší v jediné věci: **řídí ho faktura**.
 
 Doklad vzniklý z faktury **nemá vlastní rozpad DPH**, daň nese sama faktura a úhrada ji neduplikuje. Zaúčtuje se tedy jen dvouřádkově, saldokonto proti pokladně (viz [§ 32.11.10](#321110-zauctovani-a-vazba-na-denik)). Analytika 211 se i tady bere z karty zvolené pokladny.
 
-Hotovostní vyrovnání **nefunguje** u zálohových (proforma) faktur, u pravidelně a hromadně vystavovaných faktur, u cizoměnových dokladů a u valutových pokladen; seznam s vysvětlením je v [§ 15.2.7](15_Faktura_editor.md#1592-hlavicka). Zálohu inkasovanou v hotovosti tedy pořiďte rovnou tady, účelem *Úhrada faktury*; pokladna umí i navazující daňový doklad k platbě.
+Hotovostní vyrovnání **nefunguje** u zálohových (proforma) faktur, u pravidelně a hromadně vystavovaných faktur, u cizoměnových záloh a daňových dokladů k platbě, u cizoměnových dokladů bez kurzu a u valutových pokladen; seznam s vysvětlením je v [§ 15.2.7](15_Faktura_editor.md#1592-hlavicka). Zálohu inkasovanou v hotovosti tedy pořiďte rovnou tady, účelem *Úhrada faktury*; pokladna umí i navazující daňový doklad k platbě.
 
 ### 32.11.8 Tisk pokladního dokladu
 
@@ -349,6 +360,15 @@ Firmy s analytikami DPH ([§ 66.8.5](66_Ucetni_osnova.md#6685-analytiky-dph-3431
 
 Strana účtu 211 v zápisu vždy odpovídá konkrétní analytice zvolené pokladny. Z detailu dokladu i z řádku pokladní knihy lze prokliknout přímo na odpovídající zápis v deníku. V daňové evidenci žádný deníkový zápis nevzniká, pokladní pohyb se eviduje jen v rámci pokladny samotné (kasová báze).
 
+**Úhrada cizoměnového dokladu z korunové pokladny.** Saldokonto se odúčtuje v účetní hodnotě dokladu, tedy uhrazenou částkou v měně dokladu krát kurz, kterým byl doklad zaúčtovaný. Pokladna 211 nese skutečně přijaté nebo vydané koruny a rozdíl je realizovaný kurzový rozdíl: **563 Kurzové ztráty** nebo **663 Kurzové zisky** (účty z kontací kurzových rozdílů). Je to stejné zaúčtování jako u korunové bankovní platby cizoměnové faktury. Saldokontní řádek nese měnu, kurz a částku v cizí měně, takže závěrkové přecenění s uhrazenou částkou počítá správně. Příklad: přijatá faktura 1 000 EUR zaúčtovaná kurzem 24 (závazek 24 000 Kč) uhrazená 24 500 Kč:
+
+| MD | D | Částka |
+|---|---|---|
+| 321 Dodavatelé | 211 Pokladna | 24 000 Kč (1 000 EUR × 24) |
+| 563 Kurzové ztráty | 211 Pokladna | 500 Kč |
+
+U účtenky se závazek odúčtuje z účtu, na kterém vznikl (například 325). Vydaná faktura 1 000 EUR (kurz 24) uhrazená 24 500 Kč se zaúčtuje MD 211 24 500 Kč / D 311 24 000 Kč a D 663 500 Kč. Úhrada nemění daňovou evidenci DPH, daň nese faktura. Storno dokladu zruší protizápisem i kurzový rozdíl. V daňové evidenci se do peněžního deníku zapíše skutečná korunová částka.
+
 U valutové pokladny jsou všechny deníkové řádky vedené v CZK a řádek analytiky 211 navíc obsahuje měnu, kurz a cizí částku. Díky tomu ji závěrková kontrola kurzových pozic zahrne mezi účty k přecenění. Samotné PPD/VPD typu Prodej, Nákup a Ostatní se zaúčtují automaticky stejně jako korunové doklady, včetně rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
 
 **Vratka úhrady.** Účel **Úhrada přijaté faktury** na *příjmovém* dokladu (PPD) znamená, že dodavatel vrací hotovost, za vrácené zboží nebo přeplatek. Účtuje se opačným směrem (MD 211 / D 321, u zálohové faktury MD 211 / D 314), vrací se **libovolná část** (na rozdíl od úhrady, která musí být v plné výši) a nesmí přesáhnout to, co je na faktuře zaplaceno, jinak by na účtu 321 vznikl debetní zůstatek. Našeptávač v tomhle režimu nabízí faktury, na kterých už úhrada visí, ne ty nezaplacené. Pokud vratka odkryje neuhrazenou část, faktura se vrátí ze stavu *uhrazena*; v peněžním deníku vratka **snižuje daňový výdaj**.
@@ -357,7 +377,8 @@ U valutové pokladny jsou všechny deníkové řádky vedené v CZK a řádek an
 
 ### 32.11.11 Omezení a tipy
 
-- Valutová pokladna je dostupná jen v podvojném účetnictví. Podporuje samostatný hotovostní Prodej, Nákup a Ostatní, nikoli úhradu cizoměnové vydané/přijaté faktury. Ta vyžaduje saldokontní vypořádání 311/321 v cizí měně a systém ji záměrně odmítne místo vytvoření neúplného zápisu.
+- Valutová pokladna je dostupná jen v podvojném účetnictví. Podporuje samostatný hotovostní Prodej, Nákup a Ostatní, nikoli úhradu faktury. Cizoměnovou fakturu nebo účtenku uhraďte z **korunové pokladny** korunami, s kurzovým rozdílem (viz [§ 32.6](#326-krok-za-krokem-uhrada-faktury-z-pokladny)).
+- Z korunové pokladny nejde korunami uhradit cizoměnovou zálohovou fakturu, daňový doklad k platbě, částečně uhrazený přijatý doklad, vratku ani výplatu dokladu k vyplacení v cizí měně. Zaúčtujte je přes banku.
 - Převod mezi valutovou pokladnou a bankou nebo jinou pokladnou přes účet 261 není podporovaný. Různé měny vyžadují doložený kurz a kurzový rozdíl; zaúčtujte je ručně v deníku.
 - Úhradu přijaté faktury z pokladny lze provést jen v plné zbývající výši; částečné úhrady přijatých faktur hotově systém nepodporuje. Zbývající výše je brutto snížené o uhrazenou zálohu a o dřívější úhrady.
 - Trvalé smazání zaúčtovaného dokladu vyžaduje samostatné právo **Uzavřít pokladnu a trvale mazat doklady**. Běžné právo na pokladní doklady na to nestačí; standardní cestou k opravě je storno.
@@ -366,6 +387,7 @@ U valutové pokladny jsou všechny deníkové řádky vedené v CZK a řádek an
 - Vystavený doklad se needituje ani nemaže, jedinou opravou je storno s uvedením důvodu a případné vystavení nového dokladu. Výjimkou je rozpracovaný doklad (lze ho upravit i smazat) a doklad vzniklý z faktury ([§ 32.11.7](#32117-doklad-vznikly-z-faktury-hotovostni-vyrovnani)), který faktura umí zase zrušit.
 - Hotovostní vyrovnání z editoru faktury neumí zálohové faktury, pravidelné a hromadně vystavované faktury ani valutové pokladny; ty se hradí ručním dokladem tady.
 - Smazat lze jen pokladnu bez jediného dokladu; jinak nabídne systém deaktivaci.
+- Výdajové doklady bez DPH očíslované v jiném pořadí, než jsou data úhrady, srovnáte v nabídce „…" volbou **Přečíslovat podle data**. Příjmové doklady, doklady s DPH a doklady evidované v EET si číslo nechávají, viz [Přijaté faktury, přečíslování](23_Prijate_faktury.md).
 
 ## 32.12 Související kapitoly
 

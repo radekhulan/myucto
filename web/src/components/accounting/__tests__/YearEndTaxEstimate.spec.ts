@@ -83,6 +83,24 @@ describe('YearEndTaxEstimate', () => {
     expect(links).toContain(JSON.stringify({ name: 'accounting-assets' }))
   })
 
+  it('warns that the projection is incomplete when a closing step preview failed', async () => {
+    getYearEndTaxEstimate.mockResolvedValue(estimate({ projection_warnings: [{ source: 'small_asset', reason: 'Neplatná politika' }] }))
+    const w = mountBlock()
+    await flushPromises()
+    const box = w.find('[data-test="estimate-projection-warnings"]')
+    expect(box.exists()).toBe(true)
+    expect(box.text()).toContain('taxReturn.projection_incomplete')
+    expect(box.text()).toContain('taxReturn.proj_small_asset: Neplatná politika')
+    expect(w.find('[data-test="estimate-vh-before-tax"]').exists()).toBe(true)
+  })
+
+  it('shows no projection warning when every step was previewed', async () => {
+    getYearEndTaxEstimate.mockResolvedValue(estimate({ projection_warnings: [] }))
+    const w = mountBlock()
+    await flushPromises()
+    expect(w.find('[data-test="estimate-projection-warnings"]').exists()).toBe(false)
+  })
+
   it('renders nothing for a closed year or a posted income tax', async () => {
     getYearEndTaxEstimate.mockResolvedValue(estimate({ applicable: false, reason: 'income_tax_posted' }))
     const w = mountBlock()

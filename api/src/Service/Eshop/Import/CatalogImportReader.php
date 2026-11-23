@@ -126,7 +126,9 @@ final class CatalogImportReader
                 for ($row = $start; $row <= $end; $row++) {
                     $values = [];
                     for ($column = 1; $column <= $sheet['totalColumns']; $column++) {
-                        $value = $worksheet->getCell([$column, $row])->getValue();
+                        $cell = $worksheet->getCell([$column, $row]);
+                        // Vzorec se nikdy nepočítá; použije se jen výsledek uložený v souboru.
+                        $value = $cell->isFormula() ? ($cell->getOldCalculatedValue() ?? $cell->getValue()) : $cell->getValue();
                         $values[] = is_bool($value) ? ($value ? '1' : '0') : (string) ($value ?? '');
                     }
                     $this->validateCells($values);

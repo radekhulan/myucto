@@ -65,7 +65,6 @@ describe('parseInputDate', () => {
 
   it('rozepsaný nebo cizí vstup vrací null, ne částečné datum', () => {
     expect(parseInputDate('', 'cs')).toBeNull()
-    expect(parseInputDate('1.9.', 'cs')).toBeNull()
     expect(parseInputDate('1.9.202', 'cs')).toBeNull()
     expect(parseInputDate('1.9.20266', 'cs')).toBeNull()
     expect(parseInputDate('dnes', 'cs')).toBeNull()
@@ -78,5 +77,42 @@ describe('isoParts', () => {
     expect(isoParts('2026-09-01')).toEqual({ year: 2026, month: 9, day: 1 })
     expect(isoParts('2026-9-1')).toBeNull()
     expect(isoParts('2026-02-30')).toBeNull()
+  })
+})
+
+describe('parseInputDate - rychlý zápis', () => {
+  const today = new Date(2026, 10, 2)
+
+  it('souvislé číslice 4, 6 a 8 znaků', () => {
+    expect(parseInputDate('0110', 'cs', { today })).toBe('2026-10-01')
+    expect(parseInputDate('011026', 'cs', { today })).toBe('2026-10-01')
+    expect(parseInputDate('01102026', 'cs', { today })).toBe('2026-10-01')
+    expect(parseInputDate('1001', 'en', { today })).toBe('2026-10-01')
+    expect(parseInputDate('100126', 'en', { today })).toBe('2026-10-01')
+  })
+
+  it('bez roku znamená aktuální rok, i s tečkami', () => {
+    expect(parseInputDate('1.10.', 'cs', { today })).toBe('2026-10-01')
+    expect(parseInputDate('1.10', 'cs', { today })).toBe('2026-10-01')
+    expect(parseInputDate('10/1', 'en', { today })).toBe('2026-10-01')
+    expect(parseInputDate('0110', 'cs', { today: new Date(2030, 0, 5) })).toBe('2030-10-01')
+  })
+
+  it('neplatné datum a nesmyslná délka se nepřijmou', () => {
+    expect(parseInputDate('3102', 'cs', { today })).toBeNull()
+    expect(parseInputDate('310226', 'cs', { today })).toBeNull()
+    expect(parseInputDate('29022025', 'cs', { today })).toBeNull()
+    expect(parseInputDate('29.2.', 'cs', { today })).toBeNull()
+    expect(parseInputDate('29.2.', 'cs', { today: new Date(2028, 0, 1) })).toBe('2028-02-29')
+    expect(parseInputDate('011', 'cs', { today })).toBeNull()
+    expect(parseInputDate('01102', 'cs', { today })).toBeNull()
+    expect(parseInputDate('0110202', 'cs', { today })).toBeNull()
+  })
+
+  it('během psaní (allowShortYear false) se zkrácené zápisy nepřijímají', () => {
+    expect(parseInputDate('0110', 'cs', { today, allowShortYear: false })).toBeNull()
+    expect(parseInputDate('011026', 'cs', { today, allowShortYear: false })).toBeNull()
+    expect(parseInputDate('1.10.', 'cs', { today, allowShortYear: false })).toBeNull()
+    expect(parseInputDate('01102026', 'cs', { today, allowShortYear: false })).toBe('2026-10-01')
   })
 })

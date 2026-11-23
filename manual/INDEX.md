@@ -41,6 +41,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 17. [Pravidelné faktury](17_Pravidelne_fakturace.md)
 18. [Klienti](18_Klienti.md)
 19. [Zakázky](19_Zakazky.md)
+124. [Nabídky](124_Nabidky.md)
 20. [Exporty](20_Exporty.md)
 21. [Importy](21_Importy.md)
 22. [Upomínky](22_Upominky.md)
@@ -93,6 +94,8 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 50. [Průvodce účetního](50_Pruvodce_ucetniho.md)
 51. [Přehled firem](51_Prehled_firem.md)
 52. [Účetní deník](52_Ucetni_denik.md)
+125. [Časové rozlišení](125_Casove_rozliseni.md)
+123. [AI asistent](123_AI_asistent.md)
 53. [Automat účtování](53_Automat.md)
 54. [K doúčtování](54_Rucni_fronta_doctovani.md)
 55. [Hlavní kniha](55_Hlavni_kniha.md)
@@ -150,6 +153,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 93. [Retenční lhůty](93_Retencni_lhuty.md)
 94. [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
 113. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
+122. [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md)
 
 ### Firma
 
@@ -176,6 +180,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 108. [Přechod z PAMICA](108_Prechod_z_PAMICA.md)
 109. [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 110. [Přechod z ABRA Flexi](110_Prechod_z_ABRA_Flexi.md)
+126. [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md)
 
 ### Reference
 

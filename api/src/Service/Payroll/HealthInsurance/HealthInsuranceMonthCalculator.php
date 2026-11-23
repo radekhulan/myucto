@@ -203,6 +203,8 @@ final class HealthInsuranceMonthCalculator
                 $input,
                 $facts,
                 $statutoryMinimum,
+                $dppThreshold,
+                $dpcThreshold,
             );
         }
 
@@ -299,15 +301,42 @@ final class HealthInsuranceMonthCalculator
         HealthPersonMonthInput $input,
         array $facts,
         int $statutoryMinimum,
+        int $dppThreshold,
+        int $dpcThreshold,
     ): HealthPersonMonthResult {
-        $manual = $input->jurisdiction === HealthJurisdictionEvidence::Unverified
+        /*
+         * Neznámá příslušnost nebo chybějící věta pojištění nevadí tam, kde
+         * pojistné nevznikne v žádném režimu: v cizím režimu se české pojistné
+         * neplatí vůbec a v českém z vztahů, které podle § 5 písm. a) zákona
+         * č. 48/1997 Sb. nezakládají účast (dohoda pod rozhodným příjmem),
+         * také ne. Účast se proto posoudí podle českých pravidel a výpočet se
+         * zastaví, jen když by účast vznikla nebo ji nelze posoudit.
+         */
+        $czechDecisions = $input->jurisdiction === HealthJurisdictionEvidence::Unverified
+            ? $this->participationResolver->resolve(
+                $calculationDate,
+                $facts,
+                $dppThreshold,
+                $dpcThreshold,
+            )
+            : null;
+        $noLiabilityInAnyRegime = $czechDecisions !== null
+            && array_filter(
+                $czechDecisions,
+                static fn (HealthParticipationDecision $decision): bool =>
+                    $decision->status !== HealthParticipationStatus::DoesNotParticipate,
+            ) === [];
+        $manual = ($input->jurisdiction === HealthJurisdictionEvidence::Unverified
+                && !$noLiabilityInAnyRegime)
             || (
                 $input->jurisdiction === HealthJurisdictionEvidence::ForeignRegimeVerified
                 && $input->insurerStatus !== HealthInsurerSnapshotStatus::NotApplicable
             );
         $issues = [];
-        if ($input->jurisdiction === HealthJurisdictionEvidence::Unverified) {
-            $issues[] = 'health_insurance_jurisdiction_unverified';
+        if ($input->jurisdiction === HealthJurisdictionEvidence::Unverified && $manual) {
+            $issues[] = $input->coverageEvidenceMissing
+                ? 'health_coverage_evidence_missing'
+                : 'health_insurance_jurisdiction_unverified';
         }
         if (
             $input->jurisdiction === HealthJurisdictionEvidence::ForeignRegimeVerified
@@ -320,6 +349,11 @@ final class HealthInsuranceMonthCalculator
             : 'health_insurance_jurisdiction_unverified';
         $decisions = [];
         foreach ($facts as $fact) {
+            if ($noLiabilityInAnyRegime) {
+                $decisions[$fact->relationship->relationshipId] =
+                    $czechDecisions[$fact->relationship->relationshipId];
+                continue;
+            }
             $decisions[$fact->relationship->relationshipId] =
                 new HealthParticipationDecision(
                     $fact->relationship->relationshipId,

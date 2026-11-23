@@ -10,6 +10,21 @@ dokumenty, platby, zaúčtování a zákonná podání. Kroky jsou oddělené z�
 Výpočet mzdy sám neodešle peníze, nezaúčtuje doklad a nepodá hlášení. Každý
 další krok spouštíte vědomě.
 
+Na [kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu)
+lze evidovat také hodinovou mzdu nebo hodinovou odměnu s účinností a historií.
+Hodinový výpočet používá přesně doložené a schválené hodiny, účinné sazby
+a samostatné podklady příplatků. V rychlém měsíčním vstupu ukazuje rozpad
+nároků, zaokrouhlené částky a konkrétní chybějící podklady. Podporuje více
+sazeb i změnu způsobu odměňování během měsíce, pokud lze dobu jednoznačně
+rozdělit. Součástí je posouzení minima a případný doplatek podle
+[doloženého režimu a započitatelných složek](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Neúplné podklady minima mají konkrétní důvod blokace. Po schválení
+běhu se hodinové nároky přenášejí do výplatní pásky a navazujících
+výstupů ze zmrazené revize, bez přepočtu podle pozdějších sazeb.
+Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
+Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
+částka sama tento režim nezapíná.
+
 ## 75.1 Kdy to potřebujete
 
 Kapitolu otevřete, když:
@@ -26,7 +41,7 @@ Kapitolu otevřete, když:
 | Pořadí | Co udělat | Kde v aplikaci |
 |---:|---|---|
 | 1 | Otevřít správnou firmu a měsíc, zkontrolovat nástupy, výstupy a změny podmínek | `Mzdy → Zaměstnanci`, viz [Zaměstnanci](86_Zamestnanci.md) |
-| 2 | Doplnit absence, dovolenou, docházku a pracovní cesty a **schválit měsíc docházky** | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
+| 2 | Doplnit absence, dovolenou a pracovní cesty a **schválit vybraný podklad pracovní doby** (docházku nebo doložený ruční souhrn) | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
 | 3 | Zadat mzdy, odměny, náhrady a srážky; pro víc lidí hromadně | `Mzdy → Rychlý měsíční vstup`, `Mzdy → Mzdové složky a vstupy` |
 | 4 | Založit mzdový běh, uzamknout vstupy, spočítat mzdy a projít blokace i varování | `Mzdy → Mzdové běhy` |
 | 5 | Zkontrolovat čisté mzdy, odvody, daně, rozpad po zaměstnancích, srážky a exekuce | `Mzdy → Mzdové běhy`, [Srážky a exekuce](88_Srazky_a_exekuce.md) |
@@ -37,6 +52,9 @@ Kapitolu otevřete, když:
 | 10 | Připravit a odeslat JMHZ a přehledy zdravotním pojišťovnám, nakonec měsíc uzavřít | `Mzdy → Podání a hlášení`, viz [§ 85.3](85_Podani_a_hlaseni.md#853-krok-za-krokem-mesicni-hlaseni-jmhz) |
 
 Podrobný postup je v [§ 75.4](#754-krok-za-krokem-zpracovani-mzdoveho-mesice).
+Zpracováváte-li stovky lidí (agentura s brigádníky na DPP a DPČ, větší firma
+s docházkovým systémem), projděte měsíc podle kapitoly
+[Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
 
 ### 75.1.2 Průběžně
 
@@ -94,6 +112,11 @@ obrazovky; přeskočený krok obvykle skončí blokací při výpočtu nebo pod�
    registrace u ČSSZ, zdravotních pojišťoven a finančního úřadu, bankovní účty
    institucí a předkontace (podrobně v [Nastavení mezd](90_Nastaveni_mezd.md)).
    Registrační a sériová čísla opište přesně tak, jak je přidělila instituce.
+   Chcete-li mzdové náklady vidět na střediscích nebo zakázkách, založte na
+   záložce **Dimenze** mzdové dimenze a navažte je na firemní dimenze; mzdová
+   zakázka se do deníku a do Ekonomiky zakázky dostane jen přes hodnotu
+   firemní dimenze druhu Projekt navázanou na zakázku (postup
+   v [Mzdy na zakázky krok za krokem](114_Dimenze.md#mzdy-na-zakazky-krok-za-krokem)).
 5. **Datová schránka.** V `Mzdy → Datová schránka` na záložce **Přístup**
    nastavte schránku firmy (viz [§ 75.7.3](#7573-datova-schranka-firmy)
    a [Datová schránka](97_Datova_schranka.md)).
@@ -173,8 +196,15 @@ ukazuje na `Mzdy → Přehled mezd` rozcestník **Jak to funguje**.
     tlačítkem **Schválit vše**. Varování, které nejde odstranit, převezmete
     tlačítkem **Schválit výjimku** s odůvodněním.
 12. Zkontrolujte dlaždice **Peněžní příjem před srážkou**, **Exekuční srážka
-    a paušál**, **K výplatě po srážce** a rozpad pod odkazem **Zobrazit rozpad
-    podle zaměstnanců**.
+    a paušál**, **K výplatě po srážce** a klikněte na **Zobrazit rozpad
+    podle zaměstnanců**. Otevře se tabulka **Zaměstnanci v běhu** s hrubou
+    mzdou, pojistným zaměstnance, daní (záloha nebo srážková daň), čistou
+    mzdou a částkou k výplatě každé osoby a se součtem dole. Řadíte kliknutím
+    na záhlaví sloupce, hledáte podle jména nebo osobního čísla a volba **Jen
+    s nálezem** nechá v tabulce jen osoby, kterých se týká některá kontrola
+    běhu. Tlačítko **Detail výpočtu** u osoby ukáže, jak vznikla její daň,
+    pojistné a čistá mzda. Po schválení vede tlačítko **Výplatní páska** na
+    měsíční dokumenty osoby.
 13. Je-li něco špatně, opravte zdrojový údaj a klikněte na **Přepočítat**.
     Změněný podklad (nový nebo opravený vstup, nepřítomnost, zákonná evidence)
     převezme do běhu tlačítko **Obnovit podklady**.
@@ -293,6 +323,16 @@ aby nezmizely vazby na běhy, platby, dokumenty a podání. Vypnutí **Vést mzd
 skryje mzdy z menu, mzdová data se ale nemažou a po opětovném zapnutí zůstanou
 dostupná.
 
+Dokud jsou mzdy ve stavu nastavení, jde první mzdové období změnit na
+`Mzdy → Přehled mezd` volbou **Změnit první mzdové období** v nabídce „…".
+Posun zpět se hodí, když má rozpracovaný měsíc z předchozího programu spočítat
+MyÚčto. Nejde ho posunout přes převzatý mzdový běh a dopředu přes běh, který už
+MyÚčto spočítalo. Po posunu zpět zkontrolujte počáteční stavy kumulací: smějí
+končit měsícem před novým prvním obdobím. Převod z předchozího programu je po
+zopakování srovná sám, ručně zadané stavy upravte na kartě pracovního vztahu.
+Dokud počáteční stav pokrývá počítaný měsíc, výpočet běhu skončí chybou, aby se
+měsíc do ročních kumulací nezapočetl dvakrát.
+
 ### 75.7.2 Průvodce prvním nastavením mezd
 
 Průvodce **Rozjezd mezd krok za krokem** na `Mzdy → Přehled mezd` má jedenáct
@@ -382,14 +422,30 @@ Pořadí je dané a nedá se přeskočit.
 | Schváleno | **Zaúčtovat** | zápis do deníku (u daňové evidence se přeskočí) |
 | Zaúčtováno | **Připravit platby** | vznikne seznam platebních závazků |
 | Platby připraveny / Uhrazeno | **Uzavřít** | uzavře měsíc |
-| Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
+| Čeká na opravu | **Otevřít opravu** | nová revize nad opravenými vstupy |
+| Zrušeno | **Začít z opravených vstupů** | nový výpočet z aktuálních podkladů |
 
 Vedle jsou méně časté akce **Vyžádat opravu** a **Zrušit běh** (červeně úplně
-vpravo).
+vpravo). Důvod se píše u **Vyžádat opravu** schváleného běhu a u zrušení
+opravné revize, protože ta stojí nad schváleným výsledkem. Zrušení
+neschváleného běhu stačí potvrdit, docházka ani vstupy se nemažou a běh vrátí
+**Začít znovu a spočítat**. Zrušení uvolní jen vstupy zaměstnanců tohoto běhu.
+Vstupy, které drží běh jiné mzdové účtárny za stejný měsíc, zůstávají
+zamčené.
 
 **Kontrola před zahájením.** Každý nález má vyznačený dopad: **Bez tohohle se
-nedá počítat**, **Pozdější oprava znamená opravnou revizi**, nebo **Doplní se
-kdykoli, běh to nezdrží**.
+nedá počítat**, **Spočítat půjde, schválit ne** (červeně, například neschválená
+docházka, rozpracované vstupy nebo vztah bez mzdové složky), **Pozdější oprava
+znamená opravnou revizi**, nebo **Doplní se kdykoli, běh to nezdrží**. U
+červených nálezů jsou tlačítka, která je vyřeší rovnou: **Otevřít docházku
+a schválit měsíc**, **Schválit všechny mzdové vstupy** a **Otevřít měsíční
+vstupy**.
+
+**Běh nejde schválit.** Drží-li spočítaný běh neschválená docházka,
+rozpracované vstupy, chybějící mzda nebo chybějící údaje v zákonné evidenci
+(například zdravotní pojišťovna), karta běhu ukáže panel **Jak pokračovat**
+s očíslovanými kroky a tlačítkem u každého z nich. Běh nerušte: po opravě podkladů stačí
+kliknout na **Obnovit podklady a přepočítat**.
 
 **Uzamčení vstupů** vytvoří neměnný snímek zaměstnanců, vztahů, složek, data
 výplaty a podkladů srážek. Co zapíšete potom, se do výpočtu ani do hlášení
@@ -407,6 +463,11 @@ stopy. Bez převzetí odpovědnosti běh schválit nejde.
 **Výsledek.** Rozpad podle zaměstnanců obsahuje čísla po osobách, **Rozklad
 čisté mzdy**, **Rozklad sociálního a zdravotního pojištění** a **Rozpad daně
 ze závislé činnosti**. Historie je pod odkazem **Zobrazit historii a změny**.
+U hodinově odměňovaných osob **Hodinové nároky na výplatní pásce** uvádějí
+každý vyplácený nárok jednou; rozpis úseků a zaokrouhlení řádku se rozbalí
+pod odkazem **Rozpis výpočtu**. Doložené nulové nároky (0 h, 0 Kč) jsou
+schované pod odkazem **Zobrazit i nulové nároky**. Výplatní páska se tím
+nemění.
 
 **Schválení** uloží výsledek jako závazný, zařadí generování výplatních pásek
 každé zpracované osoby na pozadí, v podvojném účetnictví připraví rozdílový mzdový deník
@@ -625,3 +686,7 @@ Nastavení:
 21. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
 22. [Mzdová rekapitulace](64_Mzdy.md)
 23. [Řešení problémů](999_Reseni_problemu.md)
+
+Postup pro stovky lidí:
+
+24. [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md)

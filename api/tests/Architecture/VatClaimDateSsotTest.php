@@ -73,6 +73,26 @@ final class VatClaimDateSsotTest extends TestCase
     }
 
     /**
+     * Převod z cizího systému potřebuje totéž pravidlo dřív, než je doklad v databázi
+     * ({@see VatLedgerService::purchaseClaimFollowsTaxDate()}). Kódy sdílí s SQL výrazem
+     * konstanta a PHP větev rozhoduje stejně: přenesení příznakem nebo kódem hlavičky či
+     * položky a dodavatel mimo CZ, chybějící země je CZ jako `COALESCE(co.iso2, 'CZ')`.
+     */
+    public function testPhpPredicateMatchesForeignReverseChargeBranch(): void
+    {
+        $expr = VatLedgerService::purchaseClaimDateExpr();
+        self::assertStringContainsString("IN ('" . implode("','", VatLedgerService::FOREIGN_REVERSE_CHARGE_CODES) . "')", $expr);
+        self::assertStringContainsString("COALESCE(co.iso2, 'CZ') <> 'CZ'", $expr);
+
+        self::assertTrue(VatLedgerService::purchaseClaimFollowsTaxDate(true, null, [], 'DE'));
+        self::assertTrue(VatLedgerService::purchaseClaimFollowsTaxDate(false, null, [null, '24e'], 'DE'));
+        self::assertTrue(VatLedgerService::purchaseClaimFollowsTaxDate(false, '25', [], 'US'));
+        self::assertFalse(VatLedgerService::purchaseClaimFollowsTaxDate(true, null, ['24e'], 'CZ'));
+        self::assertFalse(VatLedgerService::purchaseClaimFollowsTaxDate(true, null, [], null));
+        self::assertFalse(VatLedgerService::purchaseClaimFollowsTaxDate(false, null, ['40', '5', null], 'DE'), 'Tuzemské přenesení (kód 5) se řadí podle § 73.');
+    }
+
+    /**
      * Výraz je psaný pro aliasy `pi` a `co`. Volající, který je nemá, dostane až
      * SQL chybu za běhu — proto se kontroluje, že je export v dotazu opravdu zavádí.
      */

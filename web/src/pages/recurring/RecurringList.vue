@@ -23,6 +23,9 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const statusFilter = ref<RecurringStatus | ''>('active')
 const sortBy = ref<RecurringSort>('next_run')
+// Telefon: stav a řazení za tlačítkem „Filtry" (vzor CashRegister), hledání zůstává vidět.
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => (statusFilter.value !== 'active' ? 1 : 0) + (sortBy.value !== 'next_run' ? 1 : 0))
 // Dotaz drží URL (?q=) a sessionStorage — odkaz „Zpět na seznam" z detailu vede
 // na holé /recurring, tak ať se hledání po návratu neztratí.
 const SEARCH_KEY = 'recurring.list.q'
@@ -191,7 +194,20 @@ function gotoDetail(id: number, e?: MouseEvent) {
             class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
           />
         </div>
-        <select v-model="statusFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="recurring-filters-toggle"
+          class="hidden max-md:inline-flex cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+          :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+          </svg>
+          {{ t('common.filters') }}
+          <span v-if="activeFilterCount"
+            class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs font-medium tabular-nums">{{ activeFilterCount }}</span>
+          <svg class="w-3.5 h-3.5 transition-transform" :class="filtersOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <select v-model="statusFilter" data-test="recurring-status-filter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" :class="filtersOpen ? '' : 'max-md:hidden'">
           <option value="">{{ t('common.all') ?? 'Vše' }} (status)</option>
           <option value="active">{{ t('recurring.status.active') }}</option>
           <option value="paused">{{ t('recurring.status.paused') }}</option>
@@ -205,8 +221,8 @@ function gotoDetail(id: number, e?: MouseEvent) {
               {{ grandTotalIsCzkConversion ? '≈ ' : '' }}{{ grandTotalLabel }}
             </span>
           </div>
-          <select v-model="sortBy" :title="t('recurring.sort.label')"
-            class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm flex-1 sm:flex-none min-w-0 max-w-full">
+          <select v-model="sortBy" :title="t('recurring.sort.label')" data-test="recurring-sort"
+            class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm flex-1 sm:flex-none min-w-0 max-w-full" :class="filtersOpen ? '' : 'max-md:hidden'">
             <option value="next_run">{{ t('recurring.sort.label') }}: {{ t('recurring.sort.next_run') }}</option>
             <option value="client">{{ t('recurring.sort.label') }}: {{ t('recurring.sort.client') }}</option>
             <option value="amount_czk">{{ t('recurring.sort.label') }}: {{ t('recurring.sort.amount_czk') }}</option>

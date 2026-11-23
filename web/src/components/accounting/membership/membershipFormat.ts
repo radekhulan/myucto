@@ -1,4 +1,5 @@
-import type { MemberRevision } from '@/api/nonprofitMembership'
+import type { MemberRevision, MemberStatus } from '@/api/nonprofitMembership'
+import { formatDate } from '@/composables/useFormat'
 
 /** Částka jako desetinný řetězec na dvě místa (to, co backend čte jako `amount`), jinak null. */
 export function amountDecimal(value: string): string | null {
@@ -20,12 +21,70 @@ export function isIsoDate(value: string): boolean {
 
 export const titleKeyPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/
 
-export function formatCents(cents: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'CZK' }).format(cents / 100)
+/** Rozsah dvou kalendářních dat stejně jako u ostatních neziskových agend („01. 01. 2026 – 31. 12. 2026“). */
+export function formatDateRange(from: string, to: string): string {
+  return `${formatDate(from)} – ${formatDate(to)}`
+}
+
+/**
+ * Štítky stavů jako na fakturách (`.badge` v main.css, statusBadgeClass): běžný stav je tichý (tečka a text),
+ * plnou výplň má jen stav, který po uživateli něco chce (neuhrazeno, neověřeno, chyba).
+ */
+export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'primary'
+const dotTones: Record<BadgeTone, string> = {
+  success: '[--badge-dot:var(--color-success-500)]',
+  warning: '[--badge-dot:var(--color-warning-500)]',
+  danger: '[--badge-dot:var(--color-danger-500)]',
+  neutral: '[--badge-dot:var(--color-neutral-400)]',
+  primary: '[--badge-dot:var(--color-primary-500)]',
+}
+const fillTones: Record<BadgeTone, string> = {
+  success: 'bg-success-50 text-success-700',
+  warning: 'bg-warning-50 text-warning-700',
+  danger: 'bg-danger-50 text-danger-700',
+  neutral: 'bg-neutral-100 text-neutral-700',
+  primary: 'bg-primary-50 text-primary-700',
+}
+export const quietBadge = (tone: BadgeTone) => `badge badge-quiet px-2 py-0.5 text-xs ${dotTones[tone]}`
+export const loudBadge = (tone: BadgeTone) => `badge badge-loud rounded-full px-2 py-0.5 text-xs ${fillTones[tone]}`
+
+const statusTones: Record<MemberStatus, BadgeTone> = { active: 'success', suspended: 'warning', ended: 'neutral' }
+
+export function memberStatusBadge(status: MemberStatus): string {
+  return quietBadge(statusTones[status] ?? 'neutral')
+}
+
+/** Chybová hláška ve stejném rámečku jako sousední obrazovky. */
+export const errorBox = 'rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700'
+
+/** Upozornění ve stejném tvaru jako chybová hláška. */
+export const warningBox = 'rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800'
+
+/**
+ * Platné revize v pořadí řetězu. Zrcadlí `MembershipRevisionTimeline::effective()`: rušící článek
+ * odebere poslední platnou revizi; zrušená revize ani rušící článek stav členství nemění.
+ */
+export function validRevisions(history: readonly MemberRevision[]): MemberRevision[] {
+  const valid: MemberRevision[] = []
+  for (const row of [...history].sort((a, b) => a.revision_no - b.revision_no || a.id - b.id)) {
+    if (row.voids_revision_id == null) valid.push(row)
+    else if (valid[valid.length - 1]?.id === row.voids_revision_id) valid.pop()
+  }
+  return valid
+}
+
+/** Zrušená revize → rušící článek (pro zobrazení historie). */
+export function voidedRevisions(history: readonly MemberRevision[]): Map<number, MemberRevision> {
+  return new Map(history.filter(row => row.voids_revision_id != null).map(row => [row.voids_revision_id as number, row]))
+}
+
+/** Poslední platná revize: od ní se posuzuje datum a stav další revize. */
+export function lastValidRevision(history: readonly MemberRevision[]): MemberRevision | null {
+  return validRevisions(history).at(-1) ?? null
 }
 
 function ordered(history: readonly MemberRevision[]): MemberRevision[] {
-  return [...history].sort((a, b) => a.effective_from.localeCompare(b.effective_from) || a.id - b.id)
+  return validRevisions(history).sort((a, b) => a.effective_from.localeCompare(b.effective_from) || a.id - b.id)
 }
 
 /** Revize platná k datu: poslední, která už začala. Budoucí revize dnešní stav nemění. */
@@ -35,6 +94,23 @@ export function revisionAt(history: readonly MemberRevision[], date: string): Me
   return match
 }
 
+/**
+ * Je členství aktivní po celé období příspěvku? Nápověda formuláře; rozhoduje server.
+ * Zrcadlí `MembershipRevisionTimeline::intervals()` a kontrolu pokrytí v `MembershipChargeService::issueContext()`:
+ * revize platí od svého dne do začátku další, všechny revize zasahující do období musí být aktivní a první z nich
+ * musí začít nejpozději prvním dnem období. Konec poslední zasahující revize server také kontroluje, ale ta je vždy
+ * ta, která platí k poslednímu dni období, takže končí až po něm; klient tu podmínku proto neopakuje.
+ */
+export function activeThroughout(history: readonly MemberRevision[], from: string, to: string): boolean {
+  const rows = ordered(history)
+  const covered = rows
+    .map((row, index) => ({ row, end: rows[index + 1]?.effective_from ?? null }))
+    .filter(({ row, end }) => row.effective_from <= to && (end === null || end > from))
+  if (!covered.length || covered.some(({ row }) => row.status !== 'active')) return false
+  return covered[0]!.row.effective_from <= from
+}
+
+/** Hlava řetězu (i rušící článek): její číslo je očekávaná revize dalšího zápisu. */
 export function lastRevision(history: readonly MemberRevision[]): MemberRevision | null {
   return history.reduce<MemberRevision | null>((last, row) => (last === null || row.revision_no > last.revision_no ? row : last), null)
 }
@@ -49,4 +125,17 @@ export function errorCode(e: unknown): string {
 
 export function errorMessage(e: unknown): string {
   return (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? ''
+}
+
+/** Známý kód přeložíme; pro neznámý použijeme lokalizovaný text, nikoli zprávu serveru v jiném jazyce. */
+export function membershipError(i18n: { t: (key: string) => string; te: (key: string) => boolean }, e: unknown, _fallbackText = ''): string {
+  const code = typeof e === 'string' ? e : errorCode(e)
+  const key = `nonprofitMembership.serverErrors.${code}`
+  if (code && i18n.te(key)) return i18n.t(key)
+  return i18n.t('nonprofitMembership.error')
+}
+
+/** Firma má přednost, u fyzické osoby zobrazujeme jméno kontaktu. */
+export function membershipMemberLabel(row: { company_name?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  return row.company_name?.trim() || [row.first_name, row.last_name].filter(Boolean).join(' ').trim()
 }

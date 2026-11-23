@@ -1,0 +1,272 @@
+[
+ {
+  "template": "{YY}{CCCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": []
+ },
+ {
+  "template": "{YYYY}{MM}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "month",
+  "errors": []
+ },
+ {
+  "template": "{YY+1}{CCCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "year",
+  "errors": []
+ },
+ {
+  "template": "{YY}{MM-1}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "month",
+  "errors": []
+ },
+ {
+  "template": "{PREFIX}-{YYYY}-{CC}",
+  "allowPrefix": true,
+  "allowPp": false,
+  "period": "year",
+  "errors": []
+ },
+ {
+  "template": "{PP}{YY}{MM}{CCC}",
+  "allowPrefix": false,
+  "allowPp": true,
+  "period": null,
+  "errors": []
+ },
+ {
+  "template": "9{YY}{CCCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": []
+ },
+ {
+  "template": "{YYx}{CCCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{1YY}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{YY0}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{yy}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{PREFIX}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{PP}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{YY{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{YY}{CCC}}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{YY+1000}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ]
+ },
+ {
+  "template": "{YY}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "counter"
+  ]
+ },
+ {
+  "template": "{YY}{CC}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "counter"
+  ]
+ },
+ {
+  "template": "{YY} {CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "whitespace"
+  ]
+ },
+ {
+  "template": "{YY}\t{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "whitespace"
+  ]
+ },
+ {
+  "template": "",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "length",
+   "counter"
+  ]
+ },
+ {
+  "template": "{CCC}AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "length"
+  ]
+ },
+ {
+  "template": "{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "year",
+  "errors": [
+   "period"
+  ]
+ },
+ {
+  "template": "{YY}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "month",
+  "errors": [
+   "period"
+  ]
+ },
+ {
+  "template": "{MM}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "month",
+  "errors": [
+   "period"
+  ]
+ },
+ {
+  "template": "{YY}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "none",
+  "errors": []
+ },
+ {
+  "template": "{YYx} {CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder",
+   "whitespace"
+  ]
+ },
+ {
+  "template": "{YY}{CCC}",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": []
+ },
+ {
+  "template": "(YY)(CCCC)",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [],
+  "normalized": "{YY}{CCCC}"
+ },
+ {
+  "template": "[YY][MM][CCC]",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": "month",
+  "errors": [],
+  "normalized": "{YY}{MM}{CCC}"
+ },
+ {
+  "template": "(YYx)[CCCC]",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [
+   "placeholder"
+  ],
+  "normalized": "{YYx}{CCCC}"
+ },
+ {
+  "template": "FA-(CCC)",
+  "allowPrefix": false,
+  "allowPp": false,
+  "period": null,
+  "errors": [],
+  "normalized": "FA-{CCC}"
+ }
+]

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 
 const m = vi.hoisted(() => ({
   credentials: vi.fn(),
+  choices: vi.fn(),
+  remember: vi.fn(),
+  forget: vi.fn(),
   passwordSendBatch: vi.fn(),
   smsSendStartBatch: vi.fn(),
   smsSendCompleteBatch: vi.fn(),
@@ -10,6 +14,7 @@ const m = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/dataBox', () => ({ dataBoxApi: m }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: m }))
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
 }))
@@ -38,7 +43,7 @@ const MobileKeyBatchStub = {
 function mountBatch(outboxIds: number[]) {
   return mount(IsdsBatchSendMethods, {
     props: { outboxIds, environment: 'production' },
-    global: { stubs: { IsdsSendMethods: SingleStub, MobileKeyBatchSendButton: MobileKeyBatchStub } },
+    global: { plugins: [createPinia()], stubs: { IsdsSendMethods: SingleStub, MobileKeyBatchSendButton: MobileKeyBatchStub } },
   })
 }
 
@@ -55,6 +60,7 @@ const sentResults = [
 beforeEach(() => {
   vi.clearAllMocks()
   m.credentials.mockResolvedValue([])
+  m.choices.mockResolvedValue([])
 })
 
 describe('IsdsBatchSendMethods', () => {
@@ -92,9 +98,28 @@ describe('IsdsBatchSendMethods', () => {
     await wrapper.get('[data-test="isds-batch-password-submit"]').trigger('click')
     await flushPromises()
 
-    expect(m.passwordSendBatch).toHaveBeenCalledWith([11, 12], 'production', 'synthetic', 'secret')
+    expect(m.passwordSendBatch).toHaveBeenCalledWith([11, 12], 'production', { username: 'synthetic', password: 'secret' })
+    expect(m.remember).not.toHaveBeenCalled()
     expect(wrapper.emitted('sent')?.[0]?.[0]).toEqual(sentResults)
     expect((wrapper.get('[data-test="isds-batch-password"]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('uloženým přístupem odešle potvrzenou dávku', async () => {
+    m.choices.mockResolvedValue([{ id: 83, label: 'Kancelář', box_id: 'abcdefg', scope: 'shared', method: 'password' }])
+    m.passwordSendBatch.mockResolvedValue(sentResults)
+    const wrapper = mountBatch([11, 12])
+    await flushPromises()
+
+    await choose(wrapper, 'saved')
+    await wrapper.get('[data-test="isds-saved-access-select"]').setValue('83')
+    const submit = wrapper.get('[data-test="isds-batch-saved-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="isds-saved-access-confirm"]').setValue(true)
+    await submit.trigger('click')
+    await flushPromises()
+
+    expect(m.passwordSendBatch).toHaveBeenCalledWith([11, 12], 'production', { access_id: 83, authorized: true })
+    expect(wrapper.emitted('sent')?.[0]?.[0]).toEqual(sentResults)
   })
 
   it('SMS kódem si vyžádá kód a odešle dávku v jedné relaci', async () => {

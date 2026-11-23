@@ -32,14 +32,29 @@ final class ClosingCurrency504BuilderTest extends TestCase
         self::assertSame([[1 => 11], [1 => 11]], array_column($receivables, 'dimensions'));
     }
 
-    public function test500SerializationDoesNotChangeWhenInputIncludesFxMetadata(): void
+    /**
+     * Rámec 500 nese cizí měnu rozvahového zůstatku stejně jako 504: řádek účtu ji převezme,
+     * protiúčet 702/701 ani výsledkové řádky ne. Bez měny se nic nemění.
+     */
+    public function test500CarriesFxMetadataOnlyOnBalanceAccountLines(): void
     {
         $builder = new ClosingEntryBuilder();
         $bs = [['account_id' => 10, 'account_code' => '311', 'name' => 'Synthetic', 'bal' => 25000]];
-        $foreign = [array_replace($bs[0], ['currency_code' => 'EUR', 'amount_foreign' => 1000, 'fx_rate' => 25])];
+        $foreign = [array_replace($bs[0], ['currency_code' => 'EUR', 'amount_foreign' => 1000, 'fx_rate' => null])];
         $pl = [['account_id' => 20, 'account_code' => '602', 'name' => 'Synthetic', 'bal' => -25000]];
-        self::assertSame(serialize($builder->closingLines($pl, $bs)), serialize($builder->closingLines($pl, $foreign)));
-        self::assertSame(serialize($builder->openingLines($bs, 25000)), serialize($builder->openingLines($foreign, 25000)));
+        $strip = static fn (array $lines): array => array_map(
+            static fn (array $line): array => array_diff_key($line, ['currency_code' => true, 'amount_foreign' => true, 'fx_rate' => true]), $lines);
+        $closing = $builder->closingLines($pl, $foreign)['lines'];
+        $opening = $builder->openingLines($foreign, 25000);
+        self::assertSame($builder->closingLines($pl, $bs)['lines'], $strip($closing));
+        self::assertSame($builder->openingLines($bs, 25000), $strip($opening));
+        foreach ([...$closing, ...$opening] as $line) {
+            if ($line['account_code'] === '311') {
+                self::assertSame(['EUR', 1000, null], [$line['currency_code'], $line['amount_foreign'], $line['fx_rate']]);
+            } else {
+                self::assertArrayNotHasKey('currency_code', $line);
+            }
+        }
     }
 
     public function testCancellationRemovesBothCzkAndForeignBalance(): void

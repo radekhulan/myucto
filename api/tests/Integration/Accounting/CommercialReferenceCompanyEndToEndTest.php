@@ -319,7 +319,7 @@ final class CommercialReferenceCompanyEndToEndTest extends TestCase
      */
     private function assertVatReports2024(): void
     {
-        self::assertEquals(['dan23' => '42420', 'obrat23' => '202000', 'nar_maj' => '120000', 'odp_sum_nar' => '25200', 'odp_tuz23_nar' => '25200',
+        self::assertEquals(['dan23' => '42420', 'obrat23' => '202000', 'nar_maj' => '120000', 'od_maj' => '25200', 'odp_sum_nar' => '25200', 'odp_tuz23_nar' => '25200',
             'pln23' => '120000', 'dan_zocelk' => '42420', 'dano_da' => '17220', 'odp_zocelk' => '25200'], $this->dph(2024, 1));
         self::assertEquals(['dan5' => '6000', 'obrat5' => '50000', 'odp_sum_nar' => '14700', 'odp_tuz23_nar' => '14700', 'pln23' => '70000',
             'dan_zocelk' => '6000', 'dano_no' => '8700', 'odp_zocelk' => '14700'], $this->dph(2024, 2));

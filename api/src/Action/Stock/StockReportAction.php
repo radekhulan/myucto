@@ -18,6 +18,8 @@ use MyInvoice\Service\Stock\StockReportService;
 use MyInvoice\Service\Stock\StockSalesReportService;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
 use MyInvoice\Service\Stock\StockValuationCategoryGroups;
+use MyInvoice\Service\Stock\StockValueTrendService;
+use MyInvoice\Service\Pdf\StockValueTrendPdfRenderer;
 use MyInvoice\Service\Stock\StockValuationJobService;
 use MyInvoice\Service\Eshop\CatalogJobService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -30,6 +32,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *                                                 category_id; volitelné sloupce columns, attribute_id)
  *   GET /api/stock/reports/valuation?date=      — data k historickému datu (B8 limit-guard),
  *                                                 group_by=category[&group_parent_id] přidá souhrn podle kategorií
+ *   POST /api/stock/reports/value-trend-jobs     — výpočet vývoje hodnoty na pozadí (from, to, warehouse_id?, group_parent_id?);
+ *   GET  .../value-trend-jobs/{id}[/status]      — výsledek po kategoriích ke koncům měsíců a ke dni `to`, stav a průběh;
+ *   POST .../value-trend-jobs/{id}/cancel        — zrušení
  *   GET /api/stock/reports/sales                — prodeje karet z řádků FV a dobropisů (právo i na vydané faktury)
  *   GET /api/stock/reports/{name}/export        — PDF/XLSX (?format=pdf|xlsx), name = status|valuation; sales jen XLSX
  */
@@ -38,7 +43,7 @@ final class StockReportAction
     use AccountingActionSupport;
     use GuardsStockEnabled;
 
-    private const REPORTS = ['status', 'valuation', 'sales'];
+    private const REPORTS = ['status', 'valuation', 'value-trend', 'sales'];
 
     public function __construct(
         private readonly Connection $db,
@@ -52,6 +57,8 @@ final class StockReportAction
         private readonly CatalogJobService $jobs,
         private readonly StockSalesReportService $sales,
         private readonly StockValuationCategoryGroups $categoryGroups,
+        private readonly StockValueTrendService $valueTrend,
+        private readonly StockValueTrendPdfRenderer $valueTrendPdf,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -75,20 +82,106 @@ final class StockReportAction
         }
         $q = $request->getQueryParams();
         $date = trim((string) ($q['date'] ?? (new \DateTimeImmutable())->format('Y-m-d')));
-        $filters = [];
-        if (!empty($q['warehouse_id'])) {
-            $filters['warehouse_id'] = (int) $q['warehouse_id'];
-        }
         try {
             $grouping = $this->categoryGrouping($request, $q);
-            $data = $this->service->valuation($supplierId, $date, $filters);
-            if ($grouping !== null) {
-                $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
-            }
-            return Json::ok($response, $data);
+            return Json::ok($response, $this->synchronousValuation($supplierId, $date, $q, $grouping));
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
         }
+    }
+
+    public function createValueTrendJob(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::READ, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $dates = StockValueTrendService::dates(trim((string) ($body['from'] ?? '')), trim((string) ($body['to'] ?? (new \DateTimeImmutable())->format('Y-m-d'))));
+            $warehouseId = $body['warehouse_id'] ?? null;
+            if ($warehouseId !== null && (!is_int($warehouseId) || $warehouseId < 1)) {
+                return Json::error($response, 'validation_failed', 'Neplatný sklad.', 422);
+            }
+            $grouping = StockValuationCategoryGroups::normalize(array_merge($body, ['group_by' => 'category']));
+            $job = $this->valueTrend->enqueue($supplierId, $dates, $warehouseId, $grouping['parent_id'],
+                RequestAuthorization::allows($request, 'eshop', AccessLevel::READ), $this->userId($request));
+            return Json::ok($response, $this->trendJobView($job), 202);
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    public function valueTrendJobResult(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        try {
+            return Json::ok($response, $this->valueTrendResult($request, $supplierId, (int) $args['id']));
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function valueTrendResult(Request $request, int $supplierId, int $jobId): array
+    {
+        return $this->valueTrend->result($supplierId, $jobId, RequestAuthorization::allows($request, 'eshop', AccessLevel::READ));
+    }
+
+    /** @param array<string,mixed> $job @return array<string,mixed> */
+    private function trendJobView(array $job): array
+    {
+        unset($job['input'], $job['lease_token']);
+        // Součty po kategoriích jen přes výsledek s kontrolou práv; z reportu zbývá počet restartů pro UI.
+        $job['report'] = ['restarts' => (int) ($job['report']['restarts'] ?? 0)];
+        return $job;
+    }
+
+    public function valueTrendJobStatus(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $job = $this->jobs->find($supplierId, (int) $args['id']);
+        if ($job === null || $job['kind'] !== StockValueTrendService::KIND) {
+            return Json::error($response, 'not_found', 'Výpočet nenalezen.', 404);
+        }
+        return Json::ok($response, $this->trendJobView($job));
+    }
+
+    /** Zrušit smí zakladatel úlohy (stačí čtení skladu, výpočet nic nemění), jinak uživatel s právem zápisu do skladu. */
+    public function cancelValueTrendJob(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::READ, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $id = (int) $args['id'];
+        $job = $this->jobs->find($supplierId, $id);
+        if ($job === null || $job['kind'] !== StockValueTrendService::KIND) {
+            return Json::error($response, 'not_found', 'Výpočet nenalezen.', 404);
+        }
+        if (($job['created_by'] === null || (int) $job['created_by'] !== $this->userId($request))
+            && !RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Výpočet založil někdo jiný, zrušit ho může jen správce skladu.', 403);
+        }
+        if (!$this->jobs->cancel($supplierId, $id)) {
+            return Json::error($response, 'job_state_conflict', 'Úlohu již nelze zrušit.', 409);
+        }
+        if ($this->jobs->find($supplierId, $id)['status'] === 'cancelled') {
+            $this->valueTrend->dropQueue($supplierId, $id); // běžící úloha se uklidí v další dávce
+        }
+        return $this->valueTrendJobStatus($request, $response, $args);
     }
 
     /**
@@ -129,11 +222,12 @@ final class StockReportAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         if (!is_string($body['date'] ?? null)
-            || (isset($body['warehouse_id']) && (!is_int($body['warehouse_id']) || $body['warehouse_id'] < 1))) {
-            return Json::error($response, 'validation_failed', 'Neplatné datum nebo sklad.', 422);
+            || (isset($body['warehouse_id']) && (!is_int($body['warehouse_id']) || $body['warehouse_id'] < 1))
+            || (isset($body['category_id']) && (!is_int($body['category_id']) || $body['category_id'] < 1))) {
+            return Json::error($response, 'validation_failed', 'Neplatné datum, sklad nebo kategorie.', 422);
         }
         try {
-            $filters = isset($body['warehouse_id']) ? ['warehouse_id' => $body['warehouse_id']] : [];
+            $filters = array_intersect_key($body, ['warehouse_id' => true, 'category_id' => true]);
             $job = $this->valuationJobs->enqueue($supplierId, $body['date'], $filters);
             unset($job['input'], $job['lease_token']);
             return Json::ok($response, $job, 202);
@@ -232,10 +326,18 @@ final class StockReportAction
                 $out = $format === 'pdf'
                     ? ['bytes' => $this->statusPdf->render($data), 'filename' => 'stav-zasob.pdf', 'mime' => 'application/pdf']
                     : $this->xlsx->status($data);
+            } elseif ($name === 'value-trend') {
+                $jobId = filter_var($request->getQueryParams()['job_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                if ($jobId === false) {
+                    return Json::error($response, 'validation_failed', 'Nejdřív spusťte výpočet a exportujte jeho výsledek (job_id).', 422);
+                }
+                $data = $this->valueTrendResult($request, $supplierId, $jobId);
+                $out = $format === 'pdf'
+                    ? ['bytes' => $this->valueTrendPdf->render($data), 'filename' => 'vyvoj-hodnoty-zasob-' . $data['dates'][0] . '-' . end($data['dates']) . '.pdf', 'mime' => 'application/pdf']
+                    : $this->xlsx->valueTrend($data);
             } else {
                 $q = $request->getQueryParams();
                 $date = trim((string) ($q['date'] ?? (new \DateTimeImmutable())->format('Y-m-d')));
-                $filters = !empty($q['warehouse_id']) ? ['warehouse_id' => (int) $q['warehouse_id']] : [];
                 $grouping = $this->categoryGrouping($request, $q);
                 if (isset($q['job_id'])) {
                     $jobId = filter_var($q['job_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -253,10 +355,7 @@ final class StockReportAction
                         $data['category_groups'] = $this->valuationJobs->categoryGroups($supplierId, $jobId, $grouping['parent_id']);
                     }
                 } else {
-                    $data = $this->service->valuation($supplierId, $date, $filters);
-                    if ($grouping !== null) {
-                        $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
-                    }
+                    $data = $this->synchronousValuation($supplierId, $date, $q, $grouping);
                 }
                 $out = $format === 'pdf'
                     ? ['bytes' => $this->valuationPdf->render($data), 'filename' => 'oceneni-zasob-' . $date . '.pdf', 'mime' => 'application/pdf']
@@ -303,6 +402,23 @@ final class StockReportAction
     {
         $grouping = StockValuationCategoryGroups::normalize($q);
         return RequestAuthorization::allows($request, 'eshop', AccessLevel::READ) ? $grouping : null;
+    }
+
+    private function synchronousValuation(int $supplierId, string $date, array $q, ?array $grouping): array
+    {
+        $filters = !empty($q['warehouse_id']) ? ['warehouse_id' => (int) $q['warehouse_id']] : [];
+        if (isset($q['category_id'])) {
+            $categoryId = filter_var($q['category_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($categoryId === false) {
+                throw new StockException('validation_failed', 'Neplatná kategorie.', 422, ['field' => 'category_id']);
+            }
+            $filters['category_id'] = $categoryId;
+        }
+        $data = $this->service->valuation($supplierId, $date, $filters);
+        if ($grouping !== null) {
+            $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
+        }
+        return $data;
     }
 
     private function mapStockError(Response $response, \Throwable $e): Response

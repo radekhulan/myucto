@@ -105,6 +105,8 @@ final class Jmhz2027DocumentContract
 
     /** Kód obce „Mimo ČR" (CISOB, interakce IN41): adresa se nevyplňuje. */
     public const MUNICIPALITY_ABROAD = '111111';
+    /** Název hodnoty 111111 v číselníku obcí datového slovníku 1.5.0.3 (10229). */
+    public const MUNICIPALITY_ABROAD_NAME = 'Mimo ČR';
 
     /** Scénáře, jejichž formulář nese místo výkonu práce (`vykonavanaPozice`). */
     private const POSITION_SCENARIOS = ['scenario_1', 'scenario_3', 'scenario_4', 'scenario_6'];

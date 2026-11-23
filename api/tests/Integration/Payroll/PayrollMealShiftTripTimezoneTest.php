@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -40,7 +39,7 @@ final class PayrollMealShiftTripTimezoneTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
@@ -152,6 +151,21 @@ final class PayrollMealShiftTripTimezoneTest extends TestCase
         $this->seedTrip('2026-07-06 05:00', '2026-07-06 09:00', '2026-07-01');
 
         self::assertSame(0, $this->qualifying('2026-07-01'));
+    }
+
+    public function testManualSourceCannotUseArchivedApprovedEntriesForMealEntitlement(): void
+    {
+        $this->approveMonth('2026-07-01');
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00');
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 12:00');
+        self::assertSame(1, $this->qualifying('2026-07-01'));
+        $this->db->pdo()->prepare("UPDATE payroll_time_months SET work_source = 'manual_summary' WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-07-01'")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $entitlement = $this->evidence->forPeriod($this->supplierId, $this->employeeId, '2026-07-01');
+        self::assertFalse($entitlement->complete);
+        self::assertContains('manual_work_source_requires_review', $entitlement->missing);
+        self::assertNull($entitlement->jsonSerialize()['count']);
+        self::assertNull($entitlement->jsonSerialize()['qualifying_count']);
     }
 
     private function qualifying(string $periodStart): int

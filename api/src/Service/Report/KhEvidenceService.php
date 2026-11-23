@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 
 /**
  * Evidence pro kontrolní hlášení (issue #142): soupis dokladů vybraného oddílu KH
@@ -52,11 +53,16 @@ final class KhEvidenceService
         return implode(', ', $parts);
     }
 
-    public static function filterLabel(string $section): string
+    /** @param array{label?:?string}|null $dimension filtr dimenze sestavy ({@see DimensionFilter::toArray()}) */
+    public static function filterLabel(string $section, ?array $dimension = null): string
     {
-        return $section === 'all'
+        $label = $section === 'all'
             ? 'všechny oddíly'
             : ($section === 'none' ? 'mimo KH' : 'oddíl ' . $section) . ' - ' . (self::SECTION_LABELS[$section] ?? '');
+        if (($dimension['label'] ?? null) !== null) {
+            $label .= '; dimenze ' . $dimension['label'] . ' (podíl dokladů připadající na hodnotu, bez oprav § 43, 46 a 74b)';
+        }
+        return $label;
     }
 
     public function __construct(
@@ -123,6 +129,84 @@ final class KhEvidenceService
             'warnings'      => [],
             'status_counts' => $counts,
         ];
+    }
+
+    /**
+     * Čím se dnes sestavené KH liší od posledního podaného, po dokladech. Porovnává se
+     * podané XML, takže se projeví jen to, co by se v hlášení opravdu změnilo: úhrada ani
+     * jiná úprava bez dopadu na KH rozdíl nevyvolá. Následné KH je úplné, proto stačí
+     * poslední podání. Potvrzení výzvy řádky nenese a platí podání před ním.
+     *
+     * @return array{has_filing:bool, snapshot_available:bool,
+     *               submission:array{id:int, generated_at:string, form_variant:string}|null,
+     *               documents:list<array<string,mixed>>}
+     */
+    public function postFilingChanges(int $supplierId, int $year, int $month, string $period, string $currentXml): array
+    {
+        $quarterly = $period === 'quarterly';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, generated_at, form_variant, xml_content FROM tax_submissions
+              WHERE supplier_id = ? AND form_code = 'dphkh1' AND period_year = ?
+                AND " . ($quarterly ? 'period_month IS NULL AND period_quarter = ?' : 'period_month = ? AND period_quarter IS NULL') . "
+                AND form_variant IN ('B', 'O', 'N', 'E')
+                AND status IN ('submitted', 'accepted') AND validation_status <> 'failed'
+           ORDER BY submitted_at DESC, generated_at DESC, id DESC"
+        );
+        $stmt->execute([$supplierId, $year, $quarterly ? (int) ceil($month / 3) : $month]);
+        $meta = static fn (array $row): array => [
+            'id' => (int) $row['id'], 'generated_at' => (string) $row['generated_at'], 'form_variant' => (string) $row['form_variant'],
+        ];
+        $latest = null;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $latest ??= $row;
+            if (KhSubmittedXmlReader::isConfirmation((string) $row['xml_content'])) {
+                continue;
+            }
+            return [
+                'has_filing' => true,
+                'snapshot_available' => true,
+                'submission' => $meta($row),
+                'documents' => self::changedDocuments((string) $row['xml_content'], $currentXml),
+            ];
+        }
+        return [
+            'has_filing' => $latest !== null,
+            'snapshot_available' => false,
+            'submission' => $latest !== null ? $meta($latest) : null,
+            'documents' => [],
+        ];
+    }
+
+    /**
+     * Řádky, kterými se dvě XML kontrolního hlášení liší.
+     *
+     * @return list<array{section:string, status:string, doc_number:string, is_aggregate:bool,
+     *                    filed:array{base:float, vat:float}|null, current:array{base:float, vat:float}|null}>
+     */
+    public static function changedDocuments(string $filedXml, string $currentXml): array
+    {
+        $current = [];
+        foreach (KhSubmittedXmlReader::read($currentXml) as $section => $rows) {
+            $current[$section] = ['rows' => $rows, 'totals' => ['count' => count($rows)] + ($rows[0] ?? [])];
+        }
+        $amount = static fn (?array $r): ?array => $r === null ? null : ['base' => (float) $r['base_total'], 'vat' => (float) $r['vat_total']];
+        $out = [];
+        foreach (self::compare(KhSubmittedXmlReader::read($filedXml), $current) as $section => $block) {
+            foreach ($block['rows'] as $row) {
+                if ($row['status'] === 'match') {
+                    continue;
+                }
+                $out[] = [
+                    'section'      => (string) $section,
+                    'status'       => (string) $row['status'],
+                    'doc_number'   => (string) $row['doc_number'],
+                    'is_aggregate' => !empty($row['is_aggregate']),
+                    'filed'        => $row['status'] === 'only_current' ? null : $amount($row),
+                    'current'      => $amount($row['current']),
+                ];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -276,18 +360,22 @@ final class KhEvidenceService
     /**
      * Sestava z aktuálních dat.
      *
+     * `$dimension` zúží soupis na díl dokladů připadající na hodnotu dimenze
+     * ({@see KontrolniHlaseniBuilder::sectionDocuments()}).
+     *
      * @param string $section oddíl (A.4, …), 'none' = mimo KH, 'all' = všechny oddíly
      * @return array<string,mixed>
      */
-    public function current(int $supplierId, int $year, int $month, string $period, string $section): array
+    public function current(int $supplierId, int $year, int $month, string $period, string $section, ?DimensionFilter $dimension = null): array
     {
-        $docs = $this->kh->sectionDocuments($supplierId, $year, $month, $period);
+        $docs = $this->kh->sectionDocuments($supplierId, $year, $month, $period, $dimension);
         return [
             'source'       => 'current',
             'submission'   => null,
             'supplier'     => $this->supplier($supplierId),
             'period'       => $docs['period'],
             'section'      => $section,
+            'dimension'    => $dimension?->toArray(),
             'generated_at' => date('Y-m-d H:i:s'),
             'sections'     => self::filterSections($docs['sections'], $section),
             'excluded'     => array_values(array_filter(

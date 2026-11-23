@@ -9,6 +9,7 @@ use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigratedClientCountry;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -60,6 +61,13 @@ final class InvoiceImporter
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
 
+    private readonly MigratedClientCountry $clientCountry;
+
+    private readonly DocumentRefresh $documentRefresh;
+
+    /** @var \WeakMap<ImportContext,array<string,mixed>>|null doklady Money pro krok deníku ({@see moneyDocuments()}) */
+    private ?\WeakMap $moneyDocuments = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -70,6 +78,8 @@ final class InvoiceImporter
     ) {
         $this->rates = new MigrationVatRateLookup($db);
         $this->foreignCurrency = new ForeignCurrencyTakeover($db);
+        $this->clientCountry = new MigratedClientCountry($db);
+        $this->documentRefresh = new DocumentRefresh($db);
     }
 
     public function importPurchases(ImportContext $ctx): void
@@ -78,9 +88,16 @@ final class InvoiceImporter
         $pdo = $this->db->pdo();
         $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE);
+        $refresh = $this->refreshState($ctx, false, $existing);
         $claimShifts = $this->claimShifts($ctx);
         $selfAssessed = $this->selfAssessments($ctx);
         $usedSelfAssessments = [];
+        $purchaseNumbers = [];
+        if ($selfAssessed !== []) {
+            foreach ($ctx->backup->rowsAcrossYears('PFaktury', ['Doklad']) as $r) {
+                $purchaseNumbers[mb_strtoupper(preg_replace('/\s+/u', '', (string) ($r['Doklad'] ?? '')) ?? '')] = true;
+            }
+        }
         $duplicate = $pdo->prepare(
             'SELECT 1 FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
@@ -96,7 +113,7 @@ final class InvoiceImporter
             if (isset($existing[$key])) {
                 $ctx->purchaseInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_PURCHASE, 'existing');
-                $this->reportChangedInMoney($ctx, self::STEP_PURCHASE, 'purchase_invoices', $existing[$key], $docNo, $year, $r);
+                $this->refreshExisting($ctx, false, $refresh, $key, $existing[$key], $docNo, $year, $r);
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_PURCHASE)) {
@@ -139,7 +156,7 @@ final class InvoiceImporter
                 continue;
             }
             $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
-            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year, (string) ($r['PrijatDokl'] ?? ''), $usedSelfAssessments);
+            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year, (string) ($r['PrijatDokl'] ?? ''), $usedSelfAssessments, $purchaseNumbers);
             if (!$review && $selfAssessment === null && (int) ($r['RevCH'] ?? 0) === 1) {
                 // Přenesená povinnost bez dohledaného samovyměření by v přiznání skončila
                 // jako plnění bez daně (ř. 40 s nulovou daní, bez ř. 10 a 43).
@@ -164,9 +181,19 @@ final class InvoiceImporter
                     $p->count(self::STEP_PURCHASE, 'self_assessed');
                 }
             }
-            $paidAt = self::date($r, ['Uhrazeno']);
+            // Daňová evidence: zaplaceno až podle navázaných úhrad z peněžního deníku
+            // ({@see TaxRecordsImporter::payments()}). Doklad označený zaplaceným bez vazby
+            // na pohyb by peněžní deník MyÚčta započetl jako virtuální výdaj podruhé.
+            // Úhrada po konci převáděných období do převodu nepatří ({@see ImportContext::paidWithin()}).
+            $paidAt = $ctx->taxRecords ? null : $ctx->paidWithin(self::date($r, ['Uhrazeno']));
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je přijatá, ne zaúčtovaná.
-            $unbooked = $review || $class['kind'] === 'advance';
+            // Daňová evidence doklady neúčtuje vůbec.
+            $unbooked = $review || $class['kind'] === 'advance' || $ctx->taxRecords;
+            // Konečná faktura s plnými sazbami a odečtenou zálohou (`SumZaloha`): zálohu
+            // zaplatil doklad zálohy, faktura ji má jako uhrazenou zálohu.
+            $advancePaid = $ctx->taxRecords && (float) ($r['SumZaloha'] ?? 0) < 0
+                && abs(round((float) ($r['CelkemSDPH'] ?? 0), 2) - $amounts['total']) < 0.005
+                ? min(round(-(float) $r['SumZaloha'], 2), $amounts['total']) : 0.0;
             // Odpočet, který Money přesunulo do pozdějšího období (§ 73), se uplatní ke dni
             // z Money — stejně jako ručně zadané datum přijetí dokladu.
             $claimDate = $claimShifts[$key] ?? null;
@@ -208,6 +235,7 @@ final class InvoiceImporter
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                     noteBelowItems: self::note($docNo, $class['reasons'], $fx),
                     createdBy: $ctx->userId,
+                    advancePaidAmount: $advancePaid,
                     paymentVariableSymbol: mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
                     paymentMethod: self::paymentMethod((string) ($r['Uhrada'] ?? '')),
                     paidAt: $paidAt,
@@ -225,17 +253,13 @@ final class InvoiceImporter
                 $p->warn(self::STEP_PURCHASE, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
-            $items = [];
-            foreach ($amounts['items'] as $i => $item) {
-                $items[$i] = MigratedDocumentItem::purchase(
-                    trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
-                    1.0, 'ks', $item['base'], $item['rate_id'], $item['rate'],
-                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
-                    $item['code'] ?? $class['code'],
-                    $assets[$i],
-                );
-            }
+            $items = self::purchaseItems($r, $amounts, $class, $assets);
             $this->writer->insertPurchaseItems($id, $items);
+            $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint(DocumentRefresh::sourceHash($r),
+                DocumentRefresh::stateHash($issue, $taxDate, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
+            if ($ctx->taxRecords) {
+                $this->applyTaxRecordsDeductibility($ctx, $id, $r, $docNo, $year);
+            }
             ForeignCurrencyTakeover::report($p, self::STEP_PURCHASE, $docNo, $fx);
             if ($claimDate !== null) {
                 $p->count(self::STEP_PURCHASE, 'claim_shifted');
@@ -255,6 +279,7 @@ final class InvoiceImporter
                 }
             }
         }
+        $this->finishRefresh($ctx, self::STEP_PURCHASE, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE, $refresh);
         $unlinked = array_values($unlinked);
         if ($unlinked !== []) {
             $p->warn(self::STEP_PURCHASE, 'self_assessment_unlinked', count($unlinked) . ' interních dokladů se samovyměřením DPH nejde přiřadit k převedené faktuře ('
@@ -268,6 +293,7 @@ final class InvoiceImporter
         $p = $ctx->protocol;
         $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
+        $refresh = $this->refreshState($ctx, true, $existing);
         $itemCodes = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktPol', ['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) as $item) {
             if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
@@ -286,7 +312,8 @@ final class InvoiceImporter
             if (isset($existing[$key])) {
                 $ctx->issuedInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_ISSUED, 'existing');
-                $this->reportChangedInMoney($ctx, self::STEP_ISSUED, 'invoices', $existing[$key], $docNo, $year, $r);
+                $this->refreshExisting($ctx, true, $refresh, $key, $existing[$key], $docNo, $year, $r,
+                    self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_ISSUED)) {
@@ -323,14 +350,27 @@ final class InvoiceImporter
                 continue;
             }
             [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
+            // Ř. 26 (`19Ř26`) u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+            $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
+            foreach ($amounts['items'] as $i => $item) {
+                if (array_key_exists('code', $item)) {
+                    $amounts['items'][$i]['code'] = $this->clientCountry->saleCode($item['code'], $ctx->supplierId, $clientId);
+                }
+            }
             $review = $class['reasons'] !== [];
             if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
                 $p->count(self::STEP_ISSUED, 'unposted_review_skipped');
                 continue;
             }
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je vystavená, ne zaúčtovaná.
-            $unbooked = $review || $class['kind'] === 'proforma';
-            $paidAt = self::date($r, ['Uhrazeno']);
+            // Daňová evidence doklady neúčtuje vůbec.
+            $unbooked = $review || $class['kind'] === 'proforma' || $ctx->taxRecords;
+            // Daňová evidence: úhrady z peněžního deníku ({@see TaxRecordsImporter::payments()}).
+            // Úhrada po konci převáděných období (faktura 2026 zaplacená v lednu 2027, kterou
+            // Money už zná) se nepřevezme: doklad zůstane neuhrazený a lednovou platbu spáruje
+            // uživatel v MyÚčtu. Uhrazenou částku z `Uhrazeno` do konce převáděných období
+            // doplní evidovaná platba ({@see DocumentLinker::matchPayments()}).
+            $paidAt = $ctx->taxRecords ? null : $ctx->paidWithin(self::date($r, ['Uhrazeno']));
             // Money vede úhradu jen jako datum (celá, nebo žádná) - částečná úhrada doklad neblokuje.
             $fx = $this->takeOverCurrency($ctx, $r, $amounts, null);
             try {
@@ -372,17 +412,17 @@ final class InvoiceImporter
                 continue;
             }
             $clients[$clientId] = $clientId;
-            $items = [];
-            foreach ($amounts['items'] as $i => $item) {
-                $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
-            }
+            $items = self::issuedItems($r, $amounts, $class);
             $this->writer->insertIssuedItems($id, $items);
+            $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint(DocumentRefresh::sourceHash($r),
+                DocumentRefresh::stateHash($issue, self::date($r, ['PlnenoDPH']) ?? $issue, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
             ForeignCurrencyTakeover::report($p, self::STEP_ISSUED, $docNo, $fx);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
             $ctx->issuedInvoices[$key] = $id;
             $p->count(self::STEP_ISSUED, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_ISSUED, $docNo, $year, $number, $class['reasons']);
         }
+        $this->finishRefresh($ctx, self::STEP_ISSUED, MoneyS3ImportRepository::KIND_INVOICE, $refresh);
         $this->importOtherReceivables($ctx, $currencyId, $clients);
         $ctx->statsClients = array_values(array_unique(array_merge($ctx->statsClients, array_values($clients))));
         // Doklady deníku potřebují jen přijaté a vydané faktury; další kroky už ne.
@@ -466,7 +506,8 @@ final class InvoiceImporter
                 'country' => trim((string) ($r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
-            $paidAt = self::date($r, ['UhDatum']);
+            $resolved['code'] = $this->clientCountry->saleCode($resolved['code'], $ctx->supplierId, $clientId);
+            $paidAt = $ctx->taxRecords ? null : $ctx->paidWithin(self::date($r, ['UhDatum']));
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
                 invoiceType: $total < 0 ? 'credit_note' : 'invoice',
@@ -490,8 +531,8 @@ final class InvoiceImporter
                 createdBy: $ctx->userId > 0 ? $ctx->userId : null,
                 paidTotal: $paidAt !== null ? $total : 0.0,
                 paidAt: $paidAt,
-                bookedAt: (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                bookedBy: $ctx->userId > 0 ? $ctx->userId : null,
+                bookedAt: $ctx->taxRecords ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                bookedBy: !$ctx->taxRecords && $ctx->userId > 0 ? $ctx->userId : null,
                 vatClassificationCode: $resolved['code'],
             ));
             foreach ($items as $i => $item) {
@@ -505,6 +546,35 @@ final class InvoiceImporter
             $ctx->otherReceivables[$year . '|' . $docNo] = $id;
             $clients[$clientId] = $clientId;
             $p->count(self::STEP_ISSUED, 'other_receivables');
+        }
+    }
+
+    /**
+     * Daňová uznatelnost přijatého dokladu v daňové evidenci podle předkontace daňové
+     * evidence Money (`PredKontac` → pohyb → sloupec peněžního deníku,
+     * {@see Ms3CashBook::ruleBucket()}). Doklad s nedaňovým výdajem (nedaňové výdaje,
+     * investiční majetek, osobní spotřeba) je daňově neuznatelný; doklad bez předkontace
+     * zůstává uznatelný jako jinde v MyÚčtu.
+     *
+     * @param array<string,mixed> $r
+     */
+    private function applyTaxRecordsDeductibility(ImportContext $ctx, int $id, array $r, string $docNo, int $year): void
+    {
+        $rule = trim((string) ($r['PredKontac'] ?? ''));
+        $book = $ctx->cashBooks[(string) ($r['__dir'] ?? '')] ?? null;
+        if ($rule === '' || $book === null) {
+            return;
+        }
+        $bucket = $book->ruleBucket($rule);
+        if ($bucket === null) {
+            $ctx->protocol->warn(self::STEP_PURCHASE, 'tax_records_rule_unknown', "Faktura {$docNo} ({$year}): předkontaci daňové evidence „{$rule}“ převod nezná, "
+                . 'doklad zůstává daňově uznatelný, zkontrolujte ho.', ['document_no' => $docNo, 'year' => $year]);
+            return;
+        }
+        if (!in_array($bucket, ['expense_taxable', Ms3CashBook::VAT], true)) {
+            $this->db->pdo()->prepare('UPDATE purchase_invoices SET tax_deductible = 0 WHERE id = ? AND supplier_id = ?')
+                ->execute([$id, $ctx->supplierId]);
+            $ctx->protocol->count(self::STEP_PURCHASE, 'tax_non_deductible');
         }
     }
 
@@ -726,7 +796,7 @@ final class InvoiceImporter
      * „PDP k FP 241001", „Přiznání daně z 241003") nebo z čísla dokladu dodavatele, které
      * interní doklad přebírá z faktury ({@see selfAssessmentKeys()}).
      *
-     * @return array<string,array<int,list<array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>>
+     * @return array<string,array<int,list<array{key:string,doc:string,date:?string,ref:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>>
      *   klíč faktury => rok interního dokladu => samovyměření (jeden doklad pod více klíči)
      */
     private function selfAssessments(ImportContext $ctx): array
@@ -759,7 +829,9 @@ final class InvoiceImporter
             if ($output === []) {
                 continue;
             }
+            $keys = self::selfAssessmentKeys((string) ($h['Popis'] ?? ''), (string) ($h['PrijatDokl'] ?? ''));
             $entry = ['key' => $year . '|' . $docNo, 'doc' => $docNo, 'date' => self::date($h, ['DatUplDPH', 'DatPln', 'DatUcPr']),
+                'ref' => $keys[0] !== '' && $keys[0][0] !== '@' ? $keys[0] : null,
                 'lines' => [], 'deduction' => 'full', 'fixed_asset' => false, 'error' => null];
             foreach ($output as $l) {
                 $resolved = Ms3VatCode::reverseCharge((string) $l['Cleneni'], $mirror, (string) ($l['PredmPln'] ?? ''));
@@ -775,7 +847,7 @@ final class InvoiceImporter
                 $entry['deduction'] = $resolved['deduction'];
                 $entry['fixed_asset'] = $resolved['fixed_asset'];
             }
-            foreach (self::selfAssessmentKeys((string) ($h['Popis'] ?? ''), (string) ($h['PrijatDokl'] ?? '')) as $ref) {
+            foreach ($keys as $ref) {
                 $out[$ref][$year][] = $entry;
             }
         }
@@ -808,15 +880,20 @@ final class InvoiceImporter
      * Samovyměření k faktuře: interní doklad z roku faktury, z následujícího (faktura
      * z prosince samovyměřená v lednu) nebo z předchozího. Hledá se podle čísla faktury,
      * pak podle jeho číslic a nakonec podle čísla dokladu dodavatele; doklad už přiřazený
-     * jiné faktuře se přeskočí.
+     * jiné faktuře se přeskočí. Podle číslic ani dokladu dodavatele se nepřiřadí interní
+     * doklad, jehož popis jmenuje jiný doklad z `PFaktury` („PDP k PF260029" nepatří
+     * k dokladu k platbě DPP260029, i když ten je převáděný dřív nebo PF260029 už převzatý
+     * minulým převodem).
      *
      * @param array<string,array<int,list<array<string,mixed>>>> $selfAssessed
      * @param array<string,bool> $used
+     * @param array<string,bool> $purchaseNumbers čísla všech přijatých dokladů agendy (velkými písmeny bez mezer)
      * @return array<string,mixed>|null
      */
-    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year, string $vendorDocument = '', array $used = []): ?array
+    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year, string $vendorDocument = '', array $used = [], array $purchaseNumbers = []): ?array
     {
-        $keys = [mb_strtoupper(preg_replace('/\s+/u', '', $docNo) ?? '')];
+        $own = mb_strtoupper(preg_replace('/\s+/u', '', $docNo) ?? '');
+        $keys = [$own];
         $digits = preg_replace('/\D+/', '', $docNo) ?? '';
         if (strlen($digits) >= 4) {
             $keys[] = '#' . $digits;
@@ -825,15 +902,19 @@ final class InvoiceImporter
         if ($vendor !== '') {
             $keys[] = '@' . $vendor;
         }
-        foreach ($keys as $key) {
+        foreach ($keys as $i => $key) {
             if ($key === '' || !isset($selfAssessed[$key])) {
                 continue;
             }
             foreach ([$year, $year + 1, $year - 1] as $y) {
                 foreach ($selfAssessed[$key][$y] ?? [] as $sa) {
-                    if (!isset($used[$sa['key']])) {
-                        return $sa;
+                    if (isset($used[$sa['key']])) {
+                        continue;
                     }
+                    if ($i > 0 && ($sa['ref'] ?? null) !== null && $sa['ref'] !== $own && isset($purchaseNumbers[$sa['ref']])) {
+                        continue;
+                    }
+                    return $sa;
                 }
             }
         }
@@ -939,10 +1020,26 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $r
      */
-    private function reportChangedInMoney(ImportContext $ctx, string $step, string $table, int $id, string $docNo, int $year, array $r): void
+    /**
+     * Liší se celkem dokladu z Money od převzatého dokladu (doklad převedený před otisky)?
+     *
+     * @param array<string,mixed> $r
+     */
+    private function changedInMoney(ImportContext $ctx, string $table, int $id, array $r): bool
     {
         if (!array_key_exists('CelkemSDPH', $r)) {
-            return;
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt->execute([$id, $ctx->supplierId]);
+        $stored = $stmt->fetchColumn();
+        return $stored !== false && abs((float) $stored - self::expectedTotal($r)) >= 0.005;
+    }
+
+    private function reportChangedInMoney(ImportContext $ctx, string $step, string $table, int $id, string $docNo, int $year, array $r): bool
+    {
+        if (!array_key_exists('CelkemSDPH', $r)) {
+            return false;
         }
         // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
         $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
@@ -950,13 +1047,341 @@ final class InvoiceImporter
         $stored = $stmt->fetchColumn();
         $money = self::expectedTotal($r);
         if ($stored === false || abs((float) $stored - $money) < 0.005) {
-            return;
+            return false;
         }
         $ctx->protocol->count($step, 'changed');
         $ctx->protocol->warn($step, 'changed_in_money', sprintf(
             'Doklad %s (%d) se v Money od převodu změnil (celkem %s → %s). V MyÚčtu zůstává beze změny, upravte ho ručně.',
             $docNo, $year, number_format((float) $stored, 2, ',', ' '), number_format($money, 2, ',', ' ')
         ), ['document_no' => $docNo, 'year' => $year, 'id' => $id]);
+        return true;
+    }
+
+    /**
+     * Stav pro aktualizaci převzatých dokladů ({@see DocumentRefresh}) v letech, do kterých
+     * převod zapisuje: uložené otisky, dnešní stav dokladů a doklady se zásahem uživatele.
+     *
+     * @param array<string,int> $existing klíč mapy => id dokladu
+     * @return array{issued:bool,stored:array<string,?string>,states:array<int,array<string,mixed>>,touched:array<int,true>,fingerprints:array<string,array{0:int,1:string}>,updated:list<string>,kept:list<string>}
+     */
+    private function refreshState(ImportContext $ctx, bool $issued, array $existing): array
+    {
+        $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
+        $ids = [];
+        if (!$ctx->options->relinkOnly && !$ctx->taxRecords) {
+            foreach ($existing as $key => $id) {
+                if ($ctx->yearWritable((int) explode('|', (string) $key, 2)[0])) {
+                    $ids[] = (int) $id;
+                }
+            }
+        }
+        return [
+            'issued' => $issued,
+            'stored' => $ids === [] ? [] : $this->map->fingerprints($ctx->supplierId, $kind),
+            'states' => $ids === [] ? [] : $this->documentRefresh->states($ctx->supplierId, $issued, $ids),
+            'touched' => $ids === [] ? [] : $this->documentRefresh->touched($ctx->supplierId, $issued, $ids, $ctx->keptEntries),
+            'fingerprints' => [],
+            'updated' => [],
+            'kept' => [],
+        ];
+    }
+
+    /**
+     * Převzatý doklad při opakovaném převodu. V roce, do kterého převod zapisuje, se doklad,
+     * který Money změnilo, aktualizuje podle Money ({@see DocumentRefresh}); s dokladem, se
+     * kterým se v MyÚčtu pracovalo, nebo se změnou druhu, členění DPH či měny převod nic
+     * nedělá a změnu ohlásí. V uzavřeném roce a u dokladu převedeného před zavedením otisků
+     * změnu jen ohlásí.
+     *
+     * @param array<string,mixed> $refresh {@see refreshState()}
+     * @param array<string,mixed> $r
+     * @param list<array<string,mixed>> $lineCodes členění řádků vydané faktury ({@see lineCodes()})
+     */
+    private function refreshExisting(ImportContext $ctx, bool $issued, array &$refresh, string $key, int $id, string $docNo, int $year, array $r, array $lineCodes = []): void
+    {
+        $step = $issued ? self::STEP_ISSUED : self::STEP_PURCHASE;
+        $table = $issued ? 'invoices' : 'purchase_invoices';
+        $current = $refresh['states'][$id] ?? null;
+        if ($current === null) {
+            $this->reportChangedInMoney($ctx, $step, $table, $id, $docNo, $year, $r);
+            return;
+        }
+        $source = DocumentRefresh::sourceHash($r);
+        $stored = $refresh['stored'][$key] ?? null;
+        if ($stored === null) {
+            // Převedený před zavedením otisků: změnu jen ohlásit, shodný doklad dostane otisk.
+            if (!$this->reportChangedInMoney($ctx, $step, $table, $id, $docNo, $year, $r)) {
+                $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint($source, $current['state'])];
+            }
+            return;
+        }
+        if (substr($stored, 0, 32) === $source) {
+            return;
+        }
+        $label = "{$docNo} ({$year})";
+        // Změnu čísla dokladu dodavatele, doručení, symbolu, zaúčtování, zálohy či druhu
+        // aktualizace nepřenese - doklad se ponechá a ohlásí.
+        $updated = !DocumentRefresh::otherFieldsChanged($stored, $source)
+            && substr($stored, 32) === $current['state'] && !isset($refresh['touched'][$id])
+            && $this->updateDocument($ctx, $issued, $id, $r, $current, $lineCodes);
+        if (!$updated) {
+            $refresh['kept'][] = $label;
+            $ctx->protocol->count($step, 'changed');
+            return;
+        }
+        $refresh['updated'][] = $label;
+        $ctx->protocol->count($step, 'updated');
+        $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint($source, $this->documentRefresh->states($ctx->supplierId, $issued, [$id])[$id]['state'] ?? '')];
+    }
+
+    /**
+     * Přepíše doklad podle Money ({@see prepareUpdate()}); false = doklad převod nezmění.
+     *
+     * @param array<string,mixed> $r
+     * @param array<string,mixed> $current {@see DocumentRefresh::states()}
+     * @param list<array<string,mixed>> $lineCodes
+     */
+    private function updateDocument(ImportContext $ctx, bool $issued, int $id, array $r, array $current, array $lineCodes): bool
+    {
+        $prepared = $this->prepareUpdate($ctx, $issued, $r, $current, $lineCodes);
+        if ($prepared === null) {
+            return false;
+        }
+        $this->documentRefresh->update($ctx->supplierId, $issued, $id, $prepared['header'], $prepared['items'], $this->writer);
+        if ($issued) {
+            $ctx->refreshedInvoices[] = $id;
+        }
+        return true;
+    }
+
+    /**
+     * Nový stav dokladu podle Money, pokud ho aktualizace umí zapsat: změnily se jen částky,
+     * data a položky, doklad je v CZK bez přenesené povinnosti, ve stavu, který převod
+     * založil, v zapisovatelném období bez podaného přiznání DPH a jeho druh i členění DPH
+     * zůstávají. Jinak null - doklad se nemění.
+     *
+     * @param array<string,mixed> $r
+     * @param array<string,mixed> $current {@see DocumentRefresh::states()}
+     * @param list<array<string,mixed>> $lineCodes
+     * @return array{header:array{issue_date:string,tax_date:string,due_date:string,base:float,vat:float,total:float,rounding:float},items:list<MigratedDocumentItem>}|null
+     */
+    private function prepareUpdate(ImportContext $ctx, bool $issued, array $r, array $current, array $lineCodes, bool $quiet = false): ?array
+    {
+        $issue = self::date($r, ['Vystaveno', 'DatUcPr']);
+        if ($issue === null || !in_array($current['status'], $issued ? ['issued', 'sent', 'reminded', 'paid'] : ['received', 'booked', 'paid'], true)
+            || $current['reverse_charge'] || $current['currency'] !== 'CZK' || !in_array(self::currency($r), ['', 'CZK'], true)) {
+            return null;
+        }
+        $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
+        if (!$ctx->writable($taxDate) || !$ctx->writable($issue) || !$ctx->writable($current['tax_date'] ?? $current['issue_date']) || !$ctx->writable($current['issue_date'])) {
+            return null;
+        }
+        // Doklad v období s podaným přiznáním DPH, kontrolním nebo OSS hlášením (staré i nové
+        // datum plnění, u přijatého dokladu i den nároku na odpočet) převod nepřepisuje.
+        if ($this->documentRefresh->filedPeriod($ctx->supplierId, [$current['tax_date'] ?? $current['issue_date'], $taxDate, $current['received_at']]) !== null) {
+            return null;
+        }
+        $step = $issued ? self::STEP_ISSUED : self::STEP_PURCHASE;
+        try {
+            $amounts = $this->amounts($ctx, $step, trim((string) ($r['Doklad'] ?? '')), $r, $taxDate, $quiet);
+        } catch (MoneyS3Exception) {
+            return null;
+        }
+        if ($issued) {
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, $lineCodes);
+            if ($current['client_id'] !== null) {
+                $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $current['client_id']);
+                foreach ($amounts['items'] as $i => $item) {
+                    if (array_key_exists('code', $item)) {
+                        $amounts['items'][$i]['code'] = $this->clientCountry->saleCode($item['code'], $ctx->supplierId, $current['client_id']);
+                    }
+                }
+            }
+            if ($class['reasons'] !== [] || $class['kind'] !== $current['invoice_type'] || $class['code'] !== $current['vat_classification_code']) {
+                return null;
+            }
+            $items = self::issuedItems($r, $amounts, $class);
+        } else {
+            $class = self::classify($r, false, $amounts['vat']);
+            if ($class['reasons'] !== [] || (int) ($r['RevCH'] ?? 0) === 1 || $class['kind'] !== $current['document_kind'] || $class['code'] !== $current['vat_classification_code']) {
+                return null;
+            }
+            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'],
+                ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
+            $items = self::purchaseItems($r, $amounts, $class, $assets);
+        }
+        return ['header' => [
+            'issue_date' => $issue, 'tax_date' => $taxDate, 'due_date' => self::date($r, ['Splatno']) ?? $issue,
+            'base' => $amounts['base'], 'vat' => $amounts['vat'], 'total' => $amounts['total'], 'rounding' => $amounts['rounding'],
+        ], 'items' => $items];
+    }
+
+    /**
+     * Smí krok deníku přepsat zápis dokladu podle Money? Jen když doklad zůstane se zápisem
+     * v souladu: Money ho nezměnilo, nebo ho krok dokladů podle Money aktualizuje stejnými
+     * pravidly ({@see refreshExisting()}, {@see prepareUpdate()}). Doklad, který převod
+     * nezmění (zásah uživatele, změna členění DPH, druhu, měny, přenesené povinnosti, podané
+     * období, doklad převedený před otisky se změnou), drží i svůj zápis.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     */
+    public function documentFollowsEntry(ImportContext $ctx, string $docType, int $docId): bool
+    {
+        $issued = $docType === 'invoice';
+        $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
+        $key = $this->moneyDocumentKeys($ctx, $issued)[$docId] ?? null;
+        $source = $key !== null ? $this->moneyDocuments($ctx, $issued, (int) explode('|', $key, 2)[0]) : ['rows' => [], 'codes' => []];
+        $r = $key !== null ? ($source['rows'][$key] ?? null) : null;
+        $current = $this->documentRefresh->states($ctx->supplierId, $issued, [$docId])[$docId] ?? null;
+        if ($key === null || $current === null) {
+            return $current === null;
+        }
+        if ($r === null) {
+            return false;
+        }
+        $stored = $this->map->fingerprints($ctx->supplierId, $kind, $key)[$key] ?? null;
+        $hash = DocumentRefresh::sourceHash($r);
+        if ($stored === null) {
+            return !$this->changedInMoney($ctx, $issued ? 'invoices' : 'purchase_invoices', $docId, $r);
+        }
+        if (substr($stored, 0, 32) === $hash) {
+            return true;
+        }
+        return !DocumentRefresh::otherFieldsChanged($stored, $hash)
+            && substr($stored, 32) === $current['state']
+            && $this->documentRefresh->touched($ctx->supplierId, $issued, [$docId], $ctx->keptEntries) === []
+            && $this->prepareUpdate($ctx, $issued, $r, $current, $issued ? self::lineCodes($r, $source['codes'][$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []) : [], true) !== null;
+    }
+
+    /**
+     * Klíč mapy převodu podle id dokladu (jednou za běh).
+     *
+     * @return array<int,string>
+     */
+    private function moneyDocumentKeys(ImportContext $ctx, bool $issued): array
+    {
+        $this->moneyDocuments ??= new \WeakMap();
+        $cached = $this->moneyDocuments[$ctx] ?? [];
+        if (!isset($cached['keys'][(int) $issued])) {
+            $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
+            $cached['keys'][(int) $issued] = array_map('strval', array_flip($this->map->all($ctx->supplierId, $kind)));
+            $this->moneyDocuments[$ctx] = $cached;
+        }
+        return $cached['keys'][(int) $issued];
+    }
+
+    /**
+     * Doklady Money jednoho roku (adresáře roku podle rozvrhu) pro krok deníku, po letech
+     * - krok deníku zná rozvrh jen do roku, který právě převádí: `rows` klíč => řádek Money,
+     * `codes` členění řádků vydaných dokladů. Zapisovatelnost roku posoudí až
+     * {@see prepareUpdate()}.
+     *
+     * @return array{rows:array<string,array<string,mixed>>,codes:array<string,list<array<string,mixed>>>}
+     */
+    private function moneyDocuments(ImportContext $ctx, bool $issued, int $year): array
+    {
+        $this->moneyDocuments ??= new \WeakMap();
+        $cached = $this->moneyDocuments[$ctx] ?? [];
+        if (isset($cached['years'][(int) $issued][$year])) {
+            return $cached['years'][(int) $issued][$year];
+        }
+        $rows = [];
+        $codes = [];
+        foreach ($ctx->dirYears as $dir => $dirYear) {
+            if ($dirYear !== $year) {
+                continue;
+            }
+            $path = $ctx->backup->dir() . DIRECTORY_SEPARATOR . $dir;
+            foreach ($ctx->backup->table($issued ? 'VFaktury' : 'PFaktury', $path)?->rows() ?? [] as $r) {
+                $docNo = trim((string) ($r['Doklad'] ?? ''));
+                if ($docNo !== '') {
+                    $rows[$year . '|' . $docNo] = ['__dir' => (string) $dir] + $r;
+                }
+            }
+            if ($issued) {
+                foreach ($ctx->backup->table('VFaktPol', $path)?->rows(['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) ?? [] as $item) {
+                    if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
+                        $codes[$dir . '|' . (int) ($item['Cislo'] ?? 0)][] = $item;
+                    }
+                }
+            }
+        }
+        $cached['years'][(int) $issued][$year] = ['rows' => $rows, 'codes' => $codes];
+        $this->moneyDocuments[$ctx] = $cached;
+        return $cached['years'][(int) $issued][$year];
+    }
+
+    /**
+     * Otisky zapsaných dokladů do mapy převodu a protokol aktualizace převzatých dokladů.
+     *
+     * @param array<string,mixed> $refresh {@see refreshState()}
+     */
+    private function finishRefresh(ImportContext $ctx, string $step, string $kind, array $refresh): void
+    {
+        if ($refresh['fingerprints'] !== []) {
+            $this->map->setFingerprints($ctx->supplierId, $kind, $refresh['fingerprints']);
+        }
+        $list = static fn (array $docs): string => implode(', ', array_slice($docs, 0, 20)) . (count($docs) > 20 ? ', …' : '');
+        if ($refresh['updated'] !== []) {
+            $ctx->protocol->info($step, 'documents_refreshed', sprintf(
+                '%d dokladů Money od minulého převodu změnilo; v MyÚčtu se s nimi nepracovalo, převod je aktualizoval podle Money (částky, data, položky): %s.',
+                count($refresh['updated']), $list($refresh['updated']),
+            ), ['documents' => array_slice($refresh['updated'], 0, ImportProtocol::LIST_LIMIT)]);
+        }
+        if ($refresh['kept'] !== []) {
+            $ctx->protocol->warn($step, 'changed_in_money', sprintf(
+                '%d dokladů Money od minulého převodu změnilo, převod je ale nezměnil: v MyÚčtu se s nimi už pracovalo (úhrada, párování, odeslání, úprava, navázaný doklad nebo zápis), leží v uzavřeném nebo zamčeném období či v období s podaným přiznáním DPH nebo kontrolním hlášením, nebo se změnilo, co převod nepřenese (druh dokladu, členění DPH, měna, číslo dokladu dodavatele, doručení, symbol, záloha). Upravte je ručně podle Money: %s.',
+                count($refresh['kept']), $list($refresh['kept']),
+            ), ['documents' => array_slice($refresh['kept'], 0, ImportProtocol::LIST_LIMIT)]);
+        }
+    }
+
+    /**
+     * Položky přijatého dokladu ze sazeb ({@see amounts()}).
+     *
+     * @param array{items:list<array<string,mixed>>} $amounts
+     * @param array<string,mixed> $class
+     * @param array<int,bool> $assets
+     * @return list<MigratedDocumentItem>
+     */
+    private static function purchaseItems(array $r, array $amounts, array $class, array $assets): array
+    {
+        $items = [];
+        foreach ($amounts['items'] as $i => $item) {
+            $items[$i] = MigratedDocumentItem::purchase(
+                trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
+                1.0, 'ks', $item['base'], $item['rate_id'], $item['rate'],
+                $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
+                $item['code'] ?? $class['code'],
+                $assets[$i],
+            );
+        }
+        return $items;
+    }
+
+    /**
+     * Položky vydaného dokladu ze sazeb ({@see amounts()}).
+     *
+     * @param array{items:list<array<string,mixed>>} $amounts
+     * @param array<string,mixed> $class
+     * @return list<MigratedDocumentItem>
+     */
+    private static function issuedItems(array $r, array $amounts, array $class): array
+    {
+        $items = [];
+        foreach ($amounts['items'] as $i => $item) {
+            $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
+        }
+        return $items;
+    }
+
+    /**
+     * @param list<MigratedDocumentItem> $items
+     * @return list<array{0:float,1:float}>
+     */
+    private static function itemAmounts(array $items): array
+    {
+        return array_map(static fn (MigratedDocumentItem $i): array => [$i->totalWithoutVat, $i->totalVat], array_values($items));
     }
 
     /**
@@ -1027,7 +1452,7 @@ final class InvoiceImporter
      * @param array<string,mixed> $r
      * @return array{items:list<array{base:float,rate:float,vat:float,rate_id:int}>,base:float,vat:float,total:float,rounding:float}
      */
-    private function amounts(ImportContext $ctx, string $step, string $docNo, array $r, string $taxDate): array
+    private function amounts(ImportContext $ctx, string $step, string $docNo, array $r, string $taxDate, bool $quiet = false): array
     {
         $items = [];
         foreach (self::rateLines($r) as $line) {
@@ -1055,7 +1480,7 @@ final class InvoiceImporter
             if (abs($diff) <= self::ROUNDING_LIMIT) {
                 $rounding = $diff;
                 $total = $moneyTotal;
-            } else {
+            } elseif (!$quiet) {
                 $ctx->protocol->warn($step, 'total_mismatch', sprintf(
                     'Doklad %s: součet sazeb %s nesedí na celkem %s z Money.',
                     $docNo, number_format($total, 2, ',', ' '), number_format($moneyTotal, 2, ',', ' ')
@@ -1118,8 +1543,8 @@ final class InvoiceImporter
     /** Cizí měna dokladu Money (`Mena`), prázdné = Kč. @param array<string,mixed> $r */
     private static function currency(array $r): string
     {
-        $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
-        return in_array($currency, ['', 'CZK', 'KČ', 'KC'], true) ? '' : $currency;
+        $currency = MoneyS3Currency::code($r['Mena'] ?? null);
+        return $currency === 'CZK' ? '' : $currency;
     }
 
     private function rateId(float $rate, string $date): int

@@ -306,6 +306,7 @@ final class Config
     {
         return [
             'invoices' => ['overdue_includes_today' => false, 'public_links' => true],
+            'api' => ['allow_system_write_tokens' => false],
             'epo_test' => false,
             'epo' => [
                 // Bundle se nasazuje spolu s aplikací, takže výchozí instalace ověří pečeť
@@ -326,6 +327,55 @@ final class Config
                 'allowed_mfa_methods' => ['passkey', 'totp'],
                 'passwordless_login'  => [
                     'enabled' => false,
+                ],
+                // Přihlášení přes poskytovatele identity (OpenID Connect). Registrace
+                // aplikace u poskytovatele je vždy vlastní pro každou instalaci, proto
+                // je všechno vypnuté a bez hodnot. Viz OidcProviderRegistry.
+                'oidc' => [
+                    'enabled' => false,
+                    'session_lifetime_hours' => 12,
+                    // API tokeny a MCP připojení vydané z přihlášení přes Entra ID platí
+                    // jen do session_lifetime_hours od posledního ověření v Entra ID, takže
+                    // uživatele zablokovaného v Entra ID nepřežijí. Vypnuto = tokeny platí
+                    // do své vlastní expirace a přístup se odebírá deaktivací účtu.
+                    'tokens_follow_identity' => false,
+                    // Poskytovatel povinný pro celou instalaci (např. 'entra'). Platí
+                    // pro všechny firmy i uživatele včetně správce instance, heslo
+                    // se pak nepoužívá. Prázdné = přihlášení heslem i přes poskytovatele.
+                    'required_provider' => '',
+                    'providers' => [
+                        'entra' => [
+                            'enabled' => false,
+                            'label' => 'Microsoft Entra ID',
+                            'tenant_id' => '',
+                            'client_id' => '',
+                            'client_secret' => '',
+                            'allow_guests' => false,
+                            'skip_mfa' => true,
+                        ],
+                        'google' => [
+                            'enabled' => false,
+                            'label' => 'Google',
+                            'client_id' => '',
+                            'client_secret' => '',
+                            'allowed_hosted_domains' => [],
+                        ],
+                        'apple' => [
+                            'enabled' => false,
+                            'label' => 'Apple',
+                            'team_id' => '',
+                            'key_id' => '',
+                            'services_id' => '',
+                            'private_key' => '',
+                            'private_key_file' => '',
+                        ],
+                        'seznam' => [
+                            'enabled' => false,
+                            'label' => 'Seznam',
+                            'client_id' => '',
+                            'client_secret' => '',
+                        ],
+                    ],
                 ],
             ],
             'app' => [
@@ -369,6 +419,13 @@ final class Config
                 'lock_file'   => '',
                 'retry_after' => 300,
             ],
+            // Ohlášení plánované údržby ze serveru provozovatele
+            // (MaintenanceNoticeService). Ve spravovaném provozu se stahuje vždy,
+            // self-hosted instalace si úlohu zapíná sama. Prázdné `url` = licenční server.
+            'maintenance_notice' => [
+                'enabled' => false,
+                'url'     => '',
+            ],
             // Vlastní domény firem (#11) jsou opt-in a defaultně VYPNUTÉ.
             // Zapnutí mění hostname na tenantovou hranici: jiný host než ten
             // z `app.url` (a než registrovaná doména firmy) dostane 421.
@@ -382,6 +439,20 @@ final class Config
                 'ruleset' => [
                     'approver' => \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::DEFAULT_NAME,
                 ],
+            ],
+            // Výchozí forma účetního zápisu NOVÝCH firem instalace ('composite' = složený,
+            // 'single' = jednoduchý po dvojicích). Stávající firmy se nemění, firma si formu
+            // dál přepíná sama v nastavení účetnictví. Viz EntryFormInstallationDefault.
+            'accounting' => [
+                'default_entry_form' => 'composite',
+                // Tlačítko „Uložit a zaúčtovat“ v editorech vydané a přijaté faktury.
+                // Výchozí vypnuto; zaúčtování z detailu dokladu funguje vždy.
+                'save_and_post' => false,
+            ],
+            // Automatický měsíční export dokladů do Pohody e-mailem účetní.
+            // Výchozí vypnuto; viz ScheduledPohodaExportFeature.
+            'export' => [
+                'scheduled_pohoda' => false,
             ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
@@ -422,7 +493,11 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
+            'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
+            'MYINVOICE_ACCOUNTING_SAVE_AND_POST' => ['accounting.save_and_post', 'bool'],
+            'MYINVOICE_SCHEDULED_POHODA_EXPORT' => ['export.scheduled_pohoda', 'bool'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
+            'MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS' => ['api.allow_system_write_tokens', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_APP_MANAGED'  => ['app.managed', 'bool'],
@@ -435,6 +510,8 @@ final class Config
             'MYINVOICE_INSTANCE_PORTAL_URL'    => ['instance.portal_url', 'string'],
             'MYINVOICE_SETUP_PROVISION_TOKEN' => ['setup.provision_token', 'string'],
             'MYINVOICE_MAINTENANCE_LOCK_FILE' => ['maintenance.lock_file', 'string'],
+            'MYINVOICE_MAINTENANCE_NOTICE_ENABLED' => ['maintenance_notice.enabled', 'bool'],
+            'MYINVOICE_MAINTENANCE_NOTICE_URL' => ['maintenance_notice.url', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],
@@ -481,6 +558,30 @@ final class Config
             'MYINVOICE_AUTH_REQUIRE_MFA'     => ['auth.require_mfa', 'bool'],
             'MYINVOICE_AUTH_MFA_METHODS'     => ['auth.allowed_mfa_methods', 'csv'],
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
+            'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
+            'MYINVOICE_OIDC_REQUIRED'                => ['auth.oidc.required_provider', 'string'],
+            'MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY'  => ['auth.oidc.tokens_follow_identity', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
+            'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_ID'         => ['auth.oidc.providers.entra.client_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET'     => ['auth.oidc.providers.entra.client_secret', 'string'],
+            'MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS'      => ['auth.oidc.providers.entra.allow_guests', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_SKIP_MFA'          => ['auth.oidc.providers.entra.skip_mfa', 'bool'],
+            'MYINVOICE_OIDC_GOOGLE_ENABLED'          => ['auth.oidc.providers.google.enabled', 'bool'],
+            'MYINVOICE_OIDC_GOOGLE_CLIENT_ID'        => ['auth.oidc.providers.google.client_id', 'string'],
+            'MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET'    => ['auth.oidc.providers.google.client_secret', 'string'],
+            'MYINVOICE_OIDC_GOOGLE_HOSTED_DOMAINS'   => ['auth.oidc.providers.google.allowed_hosted_domains', 'csv'],
+            'MYINVOICE_OIDC_APPLE_ENABLED'           => ['auth.oidc.providers.apple.enabled', 'bool'],
+            'MYINVOICE_OIDC_APPLE_TEAM_ID'           => ['auth.oidc.providers.apple.team_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_KEY_ID'            => ['auth.oidc.providers.apple.key_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_SERVICES_ID'       => ['auth.oidc.providers.apple.services_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_PRIVATE_KEY'       => ['auth.oidc.providers.apple.private_key', 'string'],
+            'MYINVOICE_OIDC_APPLE_PRIVATE_KEY_FILE'  => ['auth.oidc.providers.apple.private_key_file', 'string'],
+            'MYINVOICE_OIDC_SEZNAM_ENABLED'          => ['auth.oidc.providers.seznam.enabled', 'bool'],
+            'MYINVOICE_OIDC_SEZNAM_CLIENT_ID'        => ['auth.oidc.providers.seznam.client_id', 'string'],
+            'MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET'    => ['auth.oidc.providers.seznam.client_secret', 'string'],
             'MYINVOICE_DEMO_ENABLED'         => ['demo.enabled', 'bool'],
             'MYINVOICE_EPO_TEST'             => ['epo_test', 'bool'],
             'MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256'

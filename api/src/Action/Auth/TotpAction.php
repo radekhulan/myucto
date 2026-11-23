@@ -72,6 +72,7 @@ final class TotpAction
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly PasskeyCredentialRepository $credentials,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -181,8 +182,11 @@ final class TotpAction
         // TOTP tu aktivní být nemůže (409 výš), takže jediný silný faktor je passkey.
         // Počítá se bez ohledu na aktuální MFA politiku: zakázaný passkey nesmí
         // tiše přepnout na slabší heslovou větev.
-        if ($this->credentials->countActiveForUser($userId) > 0) {
-            return ['step_up_token' => trim((string) ($body['step_up_token'] ?? ''))];
+        // Proof z přihlášení u poskytovatele identity zastoupí heslo i u účtu bez
+        // passkey; spotřebuje se stejně jako passkey proof (MfaProtectedOperationService).
+        $stepUpToken = trim((string) ($body['step_up_token'] ?? ''));
+        if ($this->credentials->countActiveForUser($userId) > 0 || $stepUpToken !== '') {
+            return ['step_up_token' => $stepUpToken];
         }
 
         $enrollmentToken = trim((string) ($body['enrollment_token'] ?? ''));
@@ -193,6 +197,14 @@ final class TotpAction
         // Účet bez silného faktoru: heslo, stejně jako u vydání API tokenu
         // ({@see Tokens\CreateTokenAction}) — včetně brute-force brány, protože
         // generický rate limit na hádání hesla nestačí.
+        if ($this->loginPolicy->isEnforced()) {
+            return Json::error(
+                $response,
+                'sso_required',
+                'Operaci potvrďte přihlášením přes poskytovatele identity organizace.',
+                403,
+            );
+        }
         $email = (string) ($user['email'] ?? '');
         $bfState = $this->bruteForce->check($email, (string) $ip);
         if (in_array($bfState, [BruteForceGuard::STATE_LOCKED_15M, BruteForceGuard::STATE_LOCKED_24H], true)) {

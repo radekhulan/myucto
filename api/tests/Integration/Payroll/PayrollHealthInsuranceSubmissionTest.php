@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DragonOfMercy\PhpPdf\PdfEditor;
-use MyInvoice\Bootstrap;
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -49,7 +48,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Databázové spojení není dostupné.');
@@ -815,7 +814,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
 
     private function serviceAt(string $now): HealthInsuranceSubmissionService
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $container->set(Connection::class, $this->db);
         $container->set(ClockInterface::class, new MockClock($now));
         $service = $container->get(HealthInsuranceSubmissionService::class);

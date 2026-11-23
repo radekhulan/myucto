@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\PayrollArtifact;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
@@ -20,7 +19,7 @@ final class PayrollEmploymentExitDocumentSchemaTest extends TestCase
 
     public function testExitRevisionIsAnImmutableThirdDocumentAnchor(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
 
         self::assertTrue(
@@ -57,7 +56,7 @@ final class PayrollEmploymentExitDocumentSchemaTest extends TestCase
             . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $dataDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(PayrollDocumentService::class);
         self::assertInstanceOf(Connection::class, $connection);

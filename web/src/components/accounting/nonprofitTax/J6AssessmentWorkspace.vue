@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import { nonprofitTaxJ6Api } from '@/api/nonprofitTaxJ6'
@@ -11,10 +11,12 @@ import type {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { formInput, formTextarea, formLabel } from '@/components/ui/formStyles'
+import { centsText, parseCents } from '@/utils/nonprofitTaxDraft'
 
 const props = defineProps<{ supplierId: number; periodId: number; canManage: boolean; reloadKey: number }>()
 const { t, locale } = useI18n()
 const PAGE_LIMIT = 100
+const expenseTitles = ['cost', 'nonbusiness_cost', 'excluded_cost', 'withholding_interest_cost']
 type Tab = 'source' | 'decisions' | 'activities' | 'pools' | 'links' | 'preview' | 'history'
 type DecisionFact = { key: string; type: 'string' | 'number' | 'boolean'; value: string }
 
@@ -61,6 +63,10 @@ const decision = ref<{ source_id: string; payload: J6TaxDecision }>({
   payload: { title: '', evidence: '', final_regime: '', final_method: '' },
 })
 const decisionFacts = ref<DecisionFact[]>([])
+const decisionSource = ref<J6SourceRow | null>(null)
+const deductibleAmount = ref('')
+const deductibleError = ref('')
+const deductibleErrorId = useId()
 const activityDraft = ref({ activity_kind_id: '', evidence: '' })
 const activityCohortCode = ref('')
 const activityCohortEvidence = ref('')
@@ -89,6 +95,18 @@ const frozenBack = ref<(string | null)[]>([])
 const draft = computed(() => envelope.value?.draft ?? null)
 const capabilities = computed(() => envelope.value?.capabilities ?? null)
 const editable = computed(() => props.canManage && !!capabilities.value?.can_edit && !stale.value)
+const decisionSourceRow = computed(() => {
+  const id = decision.value.source_id
+  return decisionSource.value?.id === id ? decisionSource.value : sourceRows.value.find(row => row.id === id)
+})
+const isExpenseDecision = computed(() => decisionSourceRow.value
+  ? decisionSourceRow.value.kind === 'expense'
+  : expenseTitles.includes(decision.value.payload.title.trim()))
+const deductibleIsFixedZero = computed(() => isExpenseDecision.value
+  && (decisionSourceRow.value?.mandatory_non_deductible || decision.value.payload.title.trim() === 'excluded_cost'))
+watch([deductibleAmount, decisionSourceRow, () => decision.value.source_id, () => decision.value.payload.title], () => {
+  deductibleError.value = ''
+})
 const profileValid = computed(() => !!profileKind.value && profileEvidence.value.trim().length > 0
   && (!manualMethod.value || (methodBasis.value.trim().length > 0 && methodEvidence.value.trim().length > 0)))
 const knownErrors = new Set([
@@ -123,7 +141,8 @@ function report(value: unknown) {
     previewPageNo.value = 0
     acknowledged.value = false
   }
-  error.value = code && knownErrors.has(code) ? t('nonprofitTaxJ6.errors.' + code) : apiErrorMessage(value)
+  const translated = code && knownErrors.has(code) ? t('nonprofitTaxJ6.errors.' + code) : undefined
+  error.value = code === 'nonprofit_tax_facts_incomplete' ? apiErrorMessage(value, translated) : translated ?? apiErrorMessage(value)
 }
 function requestBody(): J6DraftOpenRequest {
   if (!profileKind.value) throw new Error('nonprofitTaxJ6.profileRequired')
@@ -178,6 +197,7 @@ async function loadOverview() {
   loading.value = true
   error.value = ''
   envelope.value = null
+  decisionSource.value = null
   invalidatePages()
   historyCursor.value = null
   historyBack.value = []
@@ -287,7 +307,9 @@ async function collectionPrevious() {
   await loadCollection(active.value, cursor)
 }
 function editDecision(row: J6DecisionRow) {
-  decision.value = { source_id: row.source_id, payload: structuredClone(row.payload) }
+  decision.value = { source_id: row.source_id, payload: { ...row.payload } }
+  deductibleAmount.value = Number.isSafeInteger(row.payload.deductible_cents) ? centsText(row.payload.deductible_cents) : ''
+  deductibleError.value = ''
   decisionFacts.value = Object.entries(row.payload.facts ?? {}).map(([key, value]) => ({
     key,
     type: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string',
@@ -295,8 +317,11 @@ function editDecision(row: J6DecisionRow) {
   }))
 }
 function assessSource(row: J6SourceRow) {
+  decisionSource.value = row
   decision.value = { source_id: row.id, payload: { title: '', evidence: '', final_regime: '', final_method: '' } }
   decisionFacts.value = []
+  deductibleAmount.value = ''
+  deductibleError.value = ''
   void selectTab('decisions')
 }
 async function mutate(run: () => Promise<J6DraftEnvelope>, reload: Tab) {
@@ -311,8 +336,29 @@ async function mutate(run: () => Promise<J6DraftEnvelope>, reload: Tab) {
   finally { busy.value = false }
 }
 function saveDecision() {
-  if (!draft.value || !decision.value.source_id || !decision.value.payload.title || !decision.value.payload.evidence.trim()) return
-  const payload = structuredClone(decision.value.payload)
+  if (!draft.value || !editable.value || busy.value || !decision.value.source_id || !decision.value.payload.title || !decision.value.payload.evidence.trim()) return
+  const payload = { ...decision.value.payload }
+  if (isExpenseDecision.value) {
+    if (deductibleIsFixedZero.value) {
+      payload.deductible_cents = 0
+    } else {
+      if (!deductibleAmount.value.trim()) {
+        deductibleError.value = t('nonprofitTaxJ6.deductibleRequired')
+        return
+      }
+      try {
+        payload.deductible_cents = parseCents(deductibleAmount.value)
+      } catch {
+        deductibleError.value = t('nonprofitTaxJ6.deductibleInvalid')
+        return
+      }
+      const sourceAmount = decisionSourceRow.value?.amount_cents
+      if (sourceAmount !== undefined && (Math.abs(payload.deductible_cents) > Math.abs(sourceAmount) || payload.deductible_cents * Math.sign(sourceAmount) < 0)) {
+        deductibleError.value = t('nonprofitTaxJ6.deductibleRange')
+        return
+      }
+    }
+  }
   payload.facts = Object.fromEntries(decisionFacts.value.filter(fact => fact.key.trim()).map(fact => [
     fact.key.trim(),
     fact.type === 'boolean' ? fact.value === 'true' : fact.type === 'number' ? Number(fact.value) : fact.value,
@@ -670,6 +716,16 @@ onMounted(() => { void loadOverview() })
             <label :class="formLabel">{{ t('nonprofitTaxJ6.regime') }}<select v-model="decision.payload.final_regime" :class="formInput" class="mt-1"><option value="">{{ t('nonprofitTaxJ6.choose') }}</option><option v-for="value in ['subject','exempt','out_of_scope']" :key="value" :value="value">{{ value }}</option></select></label>
             <label :class="formLabel">{{ t('nonprofitTaxJ6.finalMethod') }}<select v-model="decision.payload.final_method" :class="formInput" class="mt-1"><option value="">{{ t('nonprofitTaxJ6.choose') }}</option><option v-for="value in ['return','none','final_withholding']" :key="value" :value="value">{{ value }}</option></select></label>
             <label :class="formLabel">{{ t('nonprofitTaxJ6.legalBasis') }}<input v-model="decision.payload.legal_basis" maxlength="2000" :class="formInput" class="mt-1" /></label>
+            <div v-if="isExpenseDecision">
+              <label :class="formLabel">
+                {{ t('nonprofitTaxJ6.deductibleBeforeFunding') }}
+                <input :value="deductibleIsFixedZero ? '0.00' : deductibleAmount" inputmode="decimal" :class="formInput" class="mt-1"
+                  :readonly="deductibleIsFixedZero || !editable" :required="!deductibleIsFixedZero && editable"
+                  :aria-invalid="deductibleError ? 'true' : undefined" :aria-describedby="deductibleError ? deductibleErrorId : undefined"
+                  @input="deductibleAmount = ($event.target as HTMLInputElement).value" />
+              </label>
+              <p v-if="deductibleError" :id="deductibleErrorId" role="alert" class="mt-1 text-sm text-danger-700">{{ deductibleError }}</p>
+            </div>
             <label :class="formLabel">{{ t('nonprofitTaxJ6.cohort') }}<input v-model="decision.payload.cohort" :class="formInput" class="mt-1" /></label>
             <label :class="formLabel" class="md:col-span-2">{{ t('nonprofitTaxJ6.evidence') }}<textarea v-model="decision.payload.evidence" rows="2" maxlength="2000" :class="formTextarea" class="mt-1" /></label>
           </div>

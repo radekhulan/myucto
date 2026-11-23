@@ -64,6 +64,9 @@ final class CreateTokenStepUpTest extends TestCase
             $policy,
             $this->createMock(BruteForceGuard::class),
             $protectedOperations,
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->createStub(\MyInvoice\Security\CrossSupplierAuthorization::class),
+            new \MyInvoice\Service\Auth\SystemWriteTokenFeature(new \MyInvoice\Infrastructure\Config\Config([])),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/tokens')

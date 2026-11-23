@@ -76,7 +76,7 @@ Volitelné kroky:
   [§ 25.9.13](#25913-poskytovatele-ai-a-jejich-nastaveni).
 - **Ladění extrakce.** Pod formulářem nastavíte **Míru uvažování AI** a **Poznámky k extrakci**, uložíte tlačítkem
   **Uložit ladění** (viz [§ 25.9.16](#25916-ladeni-extrakce-poznamky-a-mira-uvazovani)).
-- **Model pro dotaz účetnímu asistentovi.** V `Účetnictví → AI asistent` vyberete u vstupu dotazu **Model** aktivního
+- **Model pro dotaz účetnímu asistentovi.** V `Účetnictví → AI asistent` ([kapitola 123](123_AI_asistent.md)) vyberete u vstupu dotazu **Model** aktivního
   poskytovatele, například `gpt-5.5` místo `gpt-5.4-mini`. Volba platí pro další odesílané dotazy na této stránce a nemění
   výchozí model firmy. U každé odpovědi je uveden použitý model, také při otevření uložené konverzace.
   Navrhne-li asistent v odpovědi ostatní pohledávku nebo závazek, nabídne tlačítko **Založit v Ostatních pohledávkách
@@ -100,8 +100,10 @@ Volitelné kroky:
 ## 25.4 Krok za krokem: importovat přijaté faktury z PDF
 
 1. Otevřete `Nákup → AI import`.
-2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo na telefonu a tabletu klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Při více souborech vznikne dávka, která se zpracuje
+2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Na telefonu a tabletu se otevře fotoaparát. Na počítači je tlačítko vidět, jen když je připojená kamera; otevře živý náhled z webkamery (při více kamerách s výběrem kamery), doklad podržte před kamerou a klikněte na **Vyfotit**. Prohlížeč se napoprvé zeptá na povolení kamery; když ho odmítnete nebo kameru používá jiná aplikace, dialog to oznámí a doklad můžete nahrát ze souboru. U vybrané nebo přetažené fotky se otevře stejná obrazovka s návrhem ořezu jako u **Vyfotit**; ořez v ní jde vypnout. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí. Při více souborech vznikne dávka, která se zpracuje
    postupně po jednom.
+   Nahrané obrázky se pro vytěžení a archivaci převedou do PDF se zachovaným poměrem stran, bez deformace či ořezu.
+   Když u dokladů nepotřebujete rozpis položek, zaškrtněte před spuštěním **Načíst bez položek** (viz níže).
 3. Počkejte na zpracování. U každého souboru uvidíte stav, dodavatele, částku a **typ dokladu**.
 4. Případně změňte **Typ dokladu** přímo v tabulce (například účtenku placenou kartou, kterou AI zařadila jako
    *Účtenka / paragon*, chcete vést jako *Faktura*).
@@ -120,6 +122,13 @@ Klient zkontroluje údaje a na detailu použije **Označit jako přijaté**, ste
 schválení, doklad nejprve projde schvalováním. Koncept se do souhrnu nákladů nezapočítává; přijatý doklad se zahrne podle
 stejných pravidel jako ručně zadaná faktura. Doklad jiné firmy se při klientském importu automaticky nepřesouvá.
 
+**Načíst bez položek.** Zaškrtávátko platí jen pro právě spouštěné vytěžení (jeden soubor i celou dávku), není to
+nastavení firmy ani dodavatele. Koncept dostane místo rozpisu položek **jeden řádek na každou sazbu DPH**: řádky téže sazby
+se sečtou včetně slev, takže základ daně, DPH i celková částka odpovídají dokladu. Popis řádku nese názvy sloučených plnění.
+Odpočet zálohy zůstává jako bez volby: nedaňová záloha se jen naváže jako odpočet a odpočet zálohy s DPH zůstane
+samostatným záporným řádkem. Stejná volba je u příchozích dokladů vedle **Vytěžit a vytvořit** i **Vytěžit označené**
+(viz [§ 23](23_Prijate_faktury.md)). Doklad se strukturovaným ISDOC se zakládá vždy z vlastních položek.
+
 Pokud brána ještě není vůbec nakonfigurovaná a pokusíte se o AI import v [Import přijatých](21_Importy.md#21914-import-prijatych-faktur-pravidla-a-scan-inbox),
 zobrazí se upozornění s odkazem na **AI nastavení**.
 
@@ -131,7 +140,9 @@ potřebují: mají hlášení z vytěžení, nebo jim chybí dimenze povinná po
 okno jen oznámí, že není co kontrolovat.
 
 Vedle formuláře (na užší obrazovce pod ním) okno ukazuje **Náhled originálu** právě kontrolovaného dokladu, takže vytěžené údaje
-porovnáte s PDF bez přepínání; tlačítkem **Skrýt PDF** / **Zobrazit PDF** v patičce ho schováte nebo znovu zobrazíte.
+porovnáte s PDF bez přepínání; tlačítkem **Skrýt PDF** / **Zobrazit PDF** v patičce ho schováte nebo znovu zobrazíte. V hlavičce
+náhledu přepnete umístění vpravo nebo pod formulář a šířku změníte tažením rozhraní nebo šipkami na klávesnici. Volbu si aplikace
+pamatuje.
 
 1. Nahoře zkontrolujte dodavatele, číslo dokladu, datum, stav a částku. Odkaz **Otevřít doklad** otevře editor.
 2. Projděte ostatní části hlášení (reverse charge, nesouhlasící součty apod.). U každé, kterou jste ověřili, klikněte na **Vyřešeno**.
@@ -162,13 +173,17 @@ V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u v
 ## 25.6 Krok za krokem: importovat vydané faktury z PDF
 
 1. Otevřete `Prodej → AI import`. Položku vidí uživatel, který smí vytvářet vydané faktury.
-2. Přetáhněte PDF, obrázek, ISDOC nebo ISDOCX. Při přetažení více souborů vznikne dávka, zpracuje se postupně po jednom.
+2. Vyberte nebo přetáhněte PDF, obrázek, ISDOC nebo ISDOCX, nebo klikněte na **Vyfotit** (fotoaparát telefonu nebo tabletu, na počítači připojená webkamera, viz 25.4). Při více souborech vznikne dávka, zpracuje se postupně po jednom.
    Pro jednotlivý import i dávku lze dočasně vybrat jiný model z whitelistu aktivního poskytovatele.
 3. Po úspěchu klikněte na odkaz do editoru.
 4. Ověřte odběratele, typ dokladu, DUZP, splatnost, režim cen s/bez DPH, sazby a text položek.
+5. Odečítá-li doklad zálohu, ke které je vystavený daňový doklad k přijaté platbě, klikněte
+   v konceptu na **Odečíst zálohu** a teprve pak fakturu vystavte. Postup a kontrola jsou
+   v [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 **Jak poznáte, že je hotovo:** u každého souboru je výsledek a odkaz na vytvořený **koncept** vydané faktury. Import sám fakturu
-nevystaví, neodešle a nezaúčtuje.
+nevystaví, neodešle a nezaúčtuje. Upozornění ke konceptu (odpočet zálohy, nesedící součet, sporné místo plnění OSS) se ukáže
+pod výsledkem, v dávce jako štítek **upozornění** u souboru s výpisem textů.
 
 Podrobnosti o chování importu jsou v [§ 25.9.19](#25919-ai-import-vydanych-faktur-podrobnosti).
 
@@ -305,6 +320,8 @@ doplňte řádky ručně. Doklady s uvedenými jednotkovými cenami se přebíra
   Datum objednávky, expedice, tisku nebo přijetí objednávky za něj nezamění.
 - **Chybějící splatnost se neodhaduje.** Pokud na dokladu datum splatnosti není, výsledek ho nechá neurčené a doplníte ho při
   kontrole v editoru. Stejně tak se extraktor nesnaží „opravovat" DUZP jen proto, že předchází datu vystavení.
+- **Doklad s jediným datem dostane DUZP z data vystavení.** Typicky účtenka nebo doklad zaplacený kartou. Prázdné DUZP zůstane
+  u zálohy, dobropisu, dokladu s datem dodání a u pořízení zboží z EU, kde chybí datum dodání.
 - **Datum přijetí se bere z dokladu, ne ze dne vytěžení.** Do pole **Datum přijetí** se doplní **datum vystavení** dokladu,
   a když ho doklad nenese, DUZP. Datum v budoucnosti se nepoužije nikdy. Nemá-li doklad čitelné vůbec žádné datum, zůstane
   den importu a doklad na to upozorní žlutou hláškou. Chcete-li jako datum přijetí den importu, přepněte v
@@ -360,6 +377,12 @@ jen zařazení, částky ani DPH se nepřepočítávají. Záloha se tu měnit n
 
 Po dokončení dávky ukáže souhrn počet úspěšných a chybných dokladů a tlačítko **Zobrazit v přijatých fakturách**, které otevře
 seznam vyfiltrovaný na tuto dávku. Tam lze vybraným dokladům změnit typ hromadně akcí **Nastavit typ**.
+
+**Jeden doklad ve více souborech.** Když máte jednu fakturu nebo účtenku rozdělenou do více souborů (třeba každou stranu
+jako samostatné PDF nebo fotku), použijte sekci **Spojit více PDF do jednoho dokladu** pod nahráváním. Je na stránce
+`Nákup → AI import` i `Prodej → AI import`. Nahrajte všechny části, seřaďte je přetažením řádků nebo šipkami a klikněte na **Spojit a importovat
+jako jeden doklad**. Části se v prohlížeči spojí do jednoho PDF a vytěží se jako jediný doklad, takže vznikne jeden koncept.
+Spojit lze PDF a fotky JPG, PNG a WebP. PDF chráněné heslem spojit nejde a spojený soubor smí mít nejvýš 32 MB.
 
 ### 25.9.12 Kontrola vytěžených dokladů: podrobnosti
 
@@ -564,6 +587,12 @@ zvolená firma. Existující ISDOC se stejným variabilním symbolem vrátí jak
 Při přetažení více souborů vznikne dávka. Zpracovává se **postupně po jednom**, aby nepřetížila limit poskytovatele. U každého
 řádku je samostatný výsledek a odkaz na vytvořený koncept. Maximální velikost jednoho uploadu je 32 MiB, konkrétní poskytovatel
 může mít nižší limit uvedený v [§ 25.9.15](#25915-vyber-modelu-a-chovani-shodne-napric-poskytovateli).
+
+Import zálohy nepáruje. Konečná faktura, která v souboru odečítá zálohu, vznikne s položkami v plné výši a bez vazby na zálohu,
+takže by po vystavení nesla plnou DPH. Nese-li ISDOC odpočet zálohy nebo nesedí-li součet řádků na částku k úhradě, dostane
+koncept upozornění **Koncept zkontrolujte před vystavením**. Zálohu s daňovým dokladem k přijaté platbě odečtěte na konceptu
+tlačítkem **Odečíst zálohu**, ne tlačítkem **Spárovat se zálohou**, které odečte jen úhradu v hlavičce
+([§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph)).
 
 Výsledek nese zdroj (`ISDOC`, `AI` nebo duplicita), poskytovatele, model, region a případně spotřebu tokenů. Tyto údaje se spolu
 s názvem a velikostí souboru zapisují do activity logu, samotné přihlašovací údaje ani obsah dokladu se do něj nezapisují.

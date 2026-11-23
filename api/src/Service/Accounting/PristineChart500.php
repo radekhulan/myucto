@@ -27,6 +27,7 @@ final class PristineChart500
     /** Cizí klíče na chart_of_accounts.id: tabulka => sloupce. */
     public const ACCOUNT_ID_REFERENCES = [
         'accounting_account_definition_history' => ['account_id'],
+        'accrual_entry_links' => ['account_id'],
         'card_clearing_settings' => ['writeoff_account_id', 'holder_account_id', 'rounding_gain_account_id', 'fx_gain_account_id', 'rounding_loss_account_id', 'fx_loss_account_id'],
         'credit_card_settings' => ['repayment_account_id', 'interest_account_id', 'reward_account_id', 'opening_account_id', 'writeoff_nontax_account_id', 'cash_account_id', 'private_account_id', 'writeoff_tax_account_id', 'fee_account_id'],
         'dimension_account_map' => ['analytic_account_id', 'synthetic_account_id'],
@@ -41,6 +42,7 @@ final class PristineChart500
     /** Kódy účtů v tabulkách se sloupcem supplier_id: tabulka => sloupce. */
     public const ACCOUNT_CODE_REFERENCES = [
         'accounting_balance_inventory_items' => ['account_code'],
+        'accrual_items' => ['accrual_account_code', 'counter_account_code', 'termination_account_code'],
         'accounting_opening_balances' => ['account_code'],
         'assets' => ['asset_account_code', 'accumulated_account_code', 'acquisition_account_code', 'summary_account_code'],
         'bank_posting_rules' => ['debit_account_code', 'credit_account_code'],
@@ -52,10 +54,13 @@ final class PristineChart500
         'internal_document_lines' => ['account_code'],
         'other_items' => ['account_code', 'counter_account_code'],
         'other_item_posting_lines' => ['account_code'],
+        'other_item_posting_profiles' => ['debit_account_code', 'credit_account_code'],
+        'other_item_posting_overrides' => ['debit_account_code', 'credit_account_code'],
         'payroll_dimensions' => ['default_account_code'],
         'payroll_employees' => ['net_settlement_account_code'],
         'payroll_employee_profiles' => ['partner_settlement_account_code'],
         'payroll_posting_allocations' => ['account_code'],
+        'payroll_posting_code_maps' => ['debit_account_code', 'credit_account_code'],
         'property_funding_effects' => ['account_code'],
         'purchase_invoice_vat_allocations' => ['account_code'],
         'stock_categories' => ['revenue_account_code', 'expense_account_code'],
@@ -69,12 +74,12 @@ final class PristineChart500
      */
     public const SUPPLIER_CODE_REFERENCES = ['receipt_payable_account_code'];
 
-    /** Kódy účtů v řádcích dokladů bez supplier_id: tabulka => [sloupec, rodič, FK na rodiče]. */
+    /** Kódy účtů v řádcích dokladů bez supplier_id: tabulka => [sloupce, rodič, FK na rodiče]. */
     public const CHILD_CODE_REFERENCES = [
-        'invoice_items' => ['revenue_account_code', 'invoices', 'invoice_id'],
-        'purchase_invoice_items' => ['expense_account_code', 'purchase_invoices', 'purchase_invoice_id'],
-        'recurring_invoice_template_items' => ['revenue_account_code', 'recurring_invoice_templates', 'template_id'],
-        'journal_entry_template_lines' => ['account_code', 'journal_entry_templates', 'template_id'],
+        'invoice_items' => [['revenue_account_code', 'counter_account_code'], 'invoices', 'invoice_id'],
+        'purchase_invoice_items' => [['expense_account_code', 'counter_account_code'], 'purchase_invoices', 'purchase_invoice_id'],
+        'recurring_invoice_template_items' => [['revenue_account_code'], 'recurring_invoice_templates', 'template_id'],
+        'journal_entry_template_lines' => [['account_code'], 'journal_entry_templates', 'template_id'],
     ];
 
     /**
@@ -124,9 +129,10 @@ final class PristineChart500
                 return false;
             }
         }
-        foreach (self::CHILD_CODE_REFERENCES as $table => [$column, $parent, $foreignKey]) {
+        foreach (self::CHILD_CODE_REFERENCES as $table => [$columns, $parent, $foreignKey]) {
+            $any = implode(' OR ', array_map(static fn (string $c): string => "c.{$c} IS NOT NULL", $columns));
             $sql = "SELECT 1 FROM {$parent} p JOIN {$table} c ON c.{$foreignKey} = p.id
-                     WHERE p.supplier_id = ? AND c.{$column} IS NOT NULL LIMIT 1";
+                     WHERE p.supplier_id = ? AND ({$any}) LIMIT 1";
             if ($this->exists($sql, [$supplierId])) {
                 return false;
             }

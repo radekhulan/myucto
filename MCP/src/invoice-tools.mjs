@@ -16,7 +16,10 @@
  * (CONFIRM) jsou v `tool-shared.mjs`, který nic dalšího neimportuje.
  */
 
-import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
+import {
+  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, requireConfirm, confirmed, changed, merged, seg,
+} from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
 } from './tools.mjs';
@@ -70,6 +73,23 @@ const invoiceSummary = (inv) => ({
 const getInvoice = (c, invoiceId, tool) => c.get(`/invoices/${seg(invoiceId)}`, null, tool);
 
 const ISSUED = ['issued', 'sent', 'reminded', 'paid'];
+
+/**
+ * Doklad má živý zápis v deníku, nebo zaúčtovaný pokladní doklad hotovostního vyrovnání.
+ * Storno by takový zápis stornovalo a to je účetní úkon, který token dělat nesmí.
+ */
+const hasJournalWrite = (inv) => Boolean(
+  inv?.booked_at || inv?.locked?.journal_entry_id || inv?.locked?.booked_at
+  || (inv?.cash_documents ?? []).some((doc) => doc?.status === 'posted'),
+);
+
+function refuseJournalWrite(inv, fallbackId, what) {
+  if (!hasJournalWrite(inv)) return;
+  throw new Error(
+    `NEPROVEDENO: ${invoiceLabel(inv, fallbackId)} je zaúčtovaná. ${what} by změnilo zápis v účetním deníku `
+    + 'a účetní deník je přes MCP jen ke čtení. Proveďte to v aplikaci (detail faktury).',
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rozpis plateb platebního kalendáře (§ 31 a § 31a ZDPH)
@@ -235,12 +255,16 @@ const RECURRING_FIELDS = [
   'increment_month_in_descriptions', 'auto_issue', 'auto_send_email', 'payment_variable_symbol',
 ];
 
-/** Pole řádku šablony, která server při náhradě položek ukládá. */
-const RECURRING_ITEM_FIELDS = [
-  'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
+/**
+ * Pole řádku šablony, která server při náhradě položek ukládá (`RecurringTemplateRepository::replaceItems`).
+ * Úplnost hlídá `item-field-coverage.test.mjs` proti `recurring_invoice_template_items`.
+ */
+export const RECURRING_ITEM_FIELDS = [
+  'item_kind', 'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
   'catalog_source_currency_code', 'catalog_source_unit_price', 'catalog_exchange_rate',
   'catalog_exchange_rate_date', 'description', 'quantity', 'duration_minutes', 'unit',
   'unit_price_without_vat', 'vat_rate_id', 'vat_classification_code', 'order_index',
+  'revenue_account_code', 'stock_item_id', 'warehouse_id',
   'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
 ];
 
@@ -260,6 +284,10 @@ const RECURRING_ITEMS = {
     unit: str('Měrná jednotka, výchozí „ks".'),
     unit_price_without_vat: num('Jednotková cena (bez DPH, u šablony s `prices_include_vat` s DPH).'),
     vat_rate_id: int('ID sazby DPH, viz `list_vat_rates`. Sazbu nehádej.'),
+    revenue_account_code: str('Účet položky na vygenerované faktuře (`chart_of_accounts`). Bez zadání výchozí.', { maxLength: 10 }),
+    vat_classification_code: str('Kód členění DPH (`list_vat_classifications`, strana `sales`). Jen na výslovný pokyn.'),
+    stock_item_id: int('Vazba na skladovou kartu; generovaná faktura z ní vydá zboží.'),
+    warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
   }, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
 };
 
@@ -275,7 +303,8 @@ const RECURRING_INPUT = {
   invoice_type: str('Typ generovaného dokladu.', { enum: ['invoice', 'proforma'] }),
   project_id: int('Zakázka; musí patřit odběrateli. 0 zakázku ze šablony odebere.', { minimum: 0 }),
   language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
-  payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
+  payment_method: str(PAYMENT_METHOD_HELP, { enum: PAYMENT_METHODS }),
+  branding_profile_id: int('Brandingový profil generovaných faktur (`list_branding_profiles`). 0 = výchozí identita firmy.', { minimum: 0 }),
   payment_due_days: int('Splatnost ve dnech (výchozí 14).', { minimum: 0, maximum: 365 }),
   payment_due_unit: str('Jednotka splatnosti.', { enum: ['days', 'month'] }),
   tax_date_mode: str(
@@ -291,7 +320,7 @@ const RECURRING_INPUT = {
   prices_include_vat: bool('Ceny položek jsou včetně DPH.'),
   reverse_charge: bool('Přenesená daňová povinnost.'),
   discount_percent: num('Sleva z celé faktury v procentech (0–100).', { minimum: 0, maximum: 100 }),
-  revenue_category_id: int('Pevná kategorie tržby.'),
+  revenue_category_id: int('Pevná kategorie tržby (`list_revenue_categories`).'),
   note_above_items: str('Poznámka nad položkami.'),
   note_below_items: str('Poznámka pod položkami.'),
   payment_variable_symbol: str('Pevný variabilní symbol pro platbu (jen číslice, max 10).'),
@@ -319,6 +348,7 @@ function recurringLabel(tpl, fallbackId) {
 const recurringInput = (a) => {
   const body = changed(a, RECURRING_FIELDS);
   if (body.project_id === 0) body.project_id = null;
+  if (body.branding_profile_id === 0) body.branding_profile_id = null;
   if (a.items !== undefined) body.items = a.items.map((item, index) => ({ unit: 'ks', ...item, order_index: index }));
   return body;
 };
@@ -329,6 +359,10 @@ export const INVOICE_TOOLS = [
   // ── Smazání, storno, dobropis ────────────────────────────────────────────
   {
     name: 'delete_invoice_draft',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}'],
+    ],
     title: 'Smazat koncept faktury',
     description:
       'Nevratně smaže KONCEPT vydaného dokladu i s položkami a výkazem práce. Vystavený '
@@ -351,12 +385,17 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'cancel_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/cancel'],
+    ],
     title: 'Stornovat fakturu nebo založit dobropis',
     description:
       'Zruší VYSTAVENÝ doklad. NEVRATNÝ KROK S DAŇOVÝM DOPADEM: jen na výslovný pokyn uživatele.\n\n'
       + '`mode: "internal"` = interní storno chybně vystaveného dokladu, který odběratel '
-      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb, zaúčtovaný '
-      + 'zápis se stornuje. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
+      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb. Jen u NEZAÚČTOVANÉHO '
+      + 'dokladu: zaúčtovaný (i se zaúčtovaným pokladním dokladem) nástroj odmítne, storno zápisu v deníku '
+      + 'dělá účetní v aplikaci. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
       + '`mode: "credit_note"` = opravný daňový doklad (dobropis) k dokladu, který odběratel už má. '
       + 'Vznikne KONCEPT dobropisu se zápornými položkami a dnešním datem; ten je potřeba '
       + 'zkontrolovat a vystavit (`issue_invoice`). Dobropis sám jde stornovat jen interně.\n\n'
@@ -381,6 +420,7 @@ export const INVOICE_TOOLS = [
       if (invoice.invoice_type === 'credit_note' && a.mode !== 'internal') {
         throw new Error('Dobropis lze stornovat pouze interně (`mode: "internal"`).');
       }
+      if (a.mode === 'internal') refuseJournalWrite(invoice, a.id, 'Interní storno');
       requireConfirm(
         a,
         a.mode === 'internal' ? 'Interně stornovat se má' : 'K dokladu se má založit dobropis',
@@ -393,10 +433,13 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'uncancel_invoice',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
-      + 'vrací do evidence DPH svého původního období a podle nastavení firmy se znovu zaúčtuje. '
+      + 'vrací do evidence DPH svého původního období. Jen u faktury, která nebyla zaúčtovaná: '
+      + 'zrušení storna zaúčtované faktury maže zápisy v deníku a dělá ho účetní v aplikaci. '
       + 'Nejde, když byl doklad zrušen vystaveným dobropisem, ani v uzavřeném nebo uzamčeném období.\n\n'
       + 'Daňový dopad: jen na výslovný pokyn. Bez `confirm: true` nic neprovede a jen vypíše doklad.',
     inputSchema: schema({ id: id('ID stornované faktury nebo zálohy.'), confirm: CONFIRM }, ['id']),
@@ -407,6 +450,7 @@ export const INVOICE_TOOLS = [
       if (invoice?.status !== 'cancelled' || !['invoice', 'proforma'].includes(invoice?.invoice_type)) {
         throw new Error(`${invoiceLabel(invoice, a.id)}: zrušit storno lze jen u stornované faktury nebo zálohy.`);
       }
+      refuseJournalWrite(invoice, a.id, 'Zrušení storna');
       requireConfirm(a, 'Zrušit storno a obnovit se má', invoiceLabel(invoice, a.id));
       return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/uncancel`, {}, tool) };
     },
@@ -415,6 +459,9 @@ export const INVOICE_TOOLS = [
   // ── Kopie a záloha ───────────────────────────────────────────────────────
   {
     name: 'clone_invoice',
+    api: [
+      ['POST', '/api/invoices/{id}/clone'],
+    ],
     title: 'Kopie dokladu jako nový koncept',
     description:
       'Založí nový KONCEPT jako kopii existujícího dokladu (odběratel, zakázka, položky). Nic '
@@ -434,6 +481,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_final_invoice_from_proforma',
+    api: [
+      ['POST', '/api/invoices/{id}/issue-final'],
+    ],
     title: 'Finální faktura ze zálohy',
     description:
       'Ze zaplacené (i částečně) zálohové faktury založí KONCEPT finálního daňového dokladu: '
@@ -455,46 +505,83 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_invoice_advance_drawdown_candidates',
-    title: 'Zálohy k postupnému čerpání',
+    api: [
+      ['GET', '/api/invoices/{id}/advance-drawdown'],
+    ],
+    title: 'Zálohy k čerpání na faktuře',
     description:
       'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
-      + 'daňový doklad k platbě, s dosud nevyčerpanou částkou (`available`, s DPH). Čerpá se přes '
-      + '`apply_invoice_advance_drawdown`.',
+      + 'daňový doklad k platbě, s dosud nevyčerpanou částkou (`available` s DPH, `available_base` '
+      + 'bez DPH, bez čerpání tohoto konceptu) a s částkou, kterou z nich koncept čerpá teď (`drawn`, '
+      + '`drawn_base`). Faktura může čerpat víc záloh najednou; plnění faktury a čerpání po zálohách '
+      + 'ukazuje `advance_drawdown` v detailu faktury. Čerpá se přes `apply_invoice_advance_drawdown`.',
     inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/advance-drawdown`, null, tool),
   },
   {
     name: 'apply_invoice_advance_drawdown',
-    title: 'Odečíst část zálohy na faktuře',
+    api: [
+      ['POST', '/api/invoices/{id}/advance-drawdown'],
+    ],
+    title: 'Odečíst zálohu na faktuře',
     description:
-      'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
-      + 'doplní záporné odpočtové řádky § 37a ZDPH na `amount` (s DPH) z dané zálohy a naváže fakturu '
-      + 'na zálohu. Záloha musí mít vystavený daňový doklad k platbě. Opakované volání odpočet '
-      + 'nahradí. Na rozdíl od `create_final_invoice_from_proforma` nekopíruje položky zálohy a jednu '
-      + 'zálohu může čerpat víc faktur, dokud se nevyčerpá.',
+      'Čerpání zálohy na KONCEPTU běžné faktury s vlastními položkami: doplní záporné odpočtové '
+      + 'řádky § 37a ZDPH z dané zálohy (`proforma_id`) po sazbách jejího daňového dokladu k platbě. '
+      + 'Faktura může čerpat víc záloh: volání přidá zálohu, nebo nahradí čerpání téže zálohy, '
+      + 'čerpání ostatních záloh na faktuře zůstává. Částka je `amount` (v měně dokladu, `basis` '
+      + '`gross` = s DPH, výchozí, nebo `net` = bez DPH), nebo `percent` = procento plnění faktury '
+      + '(součtu jejích řádků mimo odpočty záloh, typicky 30). Záloha musí mít vystavený daňový doklad '
+      + 'k platbě; jednu zálohu může čerpat víc faktur, dokud se nevyčerpá. Při čerpání víc záloh nesmí '
+      + 'odpočty převýšit plnění faktury. Na rozdíl od `create_final_invoice_from_proforma` nekopíruje '
+      + 'položky zálohy.',
     inputSchema: schema({
       id: id('ID konceptu faktury.'),
       proforma_id: id('ID zálohové faktury.'),
-      amount: num('Čerpaná částka zálohy s DPH v měně dokladu.', { exclusiveMinimum: 0 }),
-    }, ['id', 'proforma_id', 'amount']),
+      amount: num('Čerpaná částka zálohy v měně dokladu (podle `basis`). Zadejte `amount`, nebo `percent`.', { exclusiveMinimum: 0 }),
+      percent: num('Čerpaná část jako procento plnění faktury (s DPH). Zadejte `amount`, nebo `percent`.', { exclusiveMinimum: 0, maximum: 100 }),
+      basis: str('Základ částky `amount`: `gross` = s DPH (výchozí), `net` = bez DPH.', { enum: ['gross', 'net'] }),
+    }, ['id', 'proforma_id']),
     write: true,
+    // Právě jedno z `amount` a `percent` hlídá API (400 invalid_input), tady se jen přepošle.
     run: (c, a, tool) => c.post(
       `/invoices/${seg(a.id)}/advance-drawdown`,
-      { proforma_id: a.proforma_id, amount: a.amount },
+      { proforma_id: a.proforma_id, ...changed(a, ['amount', 'percent', 'basis']) },
       tool,
     ),
   },
   {
     name: 'remove_invoice_advance_drawdown',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/advance-drawdown'],
+    ],
     title: 'Odebrat čerpání zálohy z faktury',
-    description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu.',
-    inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
+    description:
+      'Z KONCEPTU faktury odebere odpočtové řádky zálohy `proforma_id` (ostatní zálohy zůstanou), '
+      + 'bez `proforma_id` odpočty všech záloh i vazbu na zálohovou fakturu. Vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID konceptu faktury.'),
+      proforma_id: id('ID zálohové faktury, jejíž čerpání se odebere. Bez něj se odeberou všechny zálohy.'),
+      confirm: CONFIRM,
+    }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool),
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await loadDraftInvoice(c, a.id, tool);
+      requireConfirm(
+        a,
+        a.proforma_id ? `Odebrat se mají odpočtové řádky zálohy #${a.proforma_id}` : 'Odebrat se mají odpočtové řádky všech záloh i vazba na zálohu',
+        invoiceLabel(invoice, a.id),
+      );
+      return c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool, a.proforma_id ? { proforma_id: a.proforma_id } : undefined);
+    },
   },
   {
     name: 'list_invoice_advance_candidates',
+    api: [
+      ['GET', '/api/invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k propojení s fakturou',
     description:
       'K faktuře vrátí nespárované zálohové faktury téhož odběratele (nejdřív stejná měna '
@@ -505,6 +592,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_proforma_final_candidates',
+    api: [
+      ['GET', '/api/invoices/{id}/final-candidates'],
+    ],
     title: 'Faktury k propojení se zálohou',
     description:
       'K zálohové faktuře vrátí nepropojené faktury téhož odběratele. Propojení pak udělá '
@@ -515,6 +605,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'link_invoice_advance',
+    api: [
+      ['POST', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Propojit fakturu se zálohou',
     description:
       'Ručně propojí fakturu se zálohovou fakturou téhož odběratele a měny. Nemá-li faktura '
@@ -530,19 +623,33 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unlink_invoice_advance',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit propojení faktury se zálohou',
     description:
       'Zruší propojení faktury se zálohovou fakturou. Odečtená záloha (`advance_paid_amount`) '
       + 'na faktuře zůstane, případně ji uprav. Nejde u daňového dokladu k platbě ani u finálu '
-      + 's odpočty záloh podle § 37a ZDPH.',
-    inputSchema: schema({ id: id('ID faktury.') }, ['id']),
+      + 's odpočty záloh podle § 37a ZDPH. Bez `confirm: true` pouze ukáže dotčený doklad a ponechanou zálohu.',
+    inputSchema: schema({ id: id('ID faktury.'), confirm: CONFIRM }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/link-advance`, tool),
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await getInvoice(c, a.id, tool);
+      if (!invoice?.parent_invoice_id) throw new Error(`Faktura ${invoiceLabel(invoice, a.id)} nemá vazbu na zálohu.`);
+      requireConfirm(a, 'Zrušit se má vazba na zálohu',
+        `${invoiceLabel(invoice, a.id)}; odečtená záloha ${money(invoice.advance_paid_amount, invoice.currency)} na faktuře zůstane`);
+      return c.del(`/invoices/${seg(a.id)}/link-advance`, tool);
+    },
   },
 
   // ── Penále ───────────────────────────────────────────────────────────────
   {
     name: 'preview_invoice_penalty',
+    api: [
+      ['GET', '/api/invoices/{id}/penalty/preview'],
+    ],
     title: 'Výpočet úroku z prodlení',
     description:
       'Spočítá zákonný úrok z prodlení (NV č. 351/2013 Sb.) k vystavené faktuře po splatnosti: '
@@ -557,6 +664,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_invoice_penalty',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit penalizační fakturu',
     description:
       'Založí KONCEPT penalizační faktury na úrok z prodlení (mimo předmět DPH) k vystavené '
@@ -574,6 +683,9 @@ export const INVOICE_TOOLS = [
   // ── Úhrady ───────────────────────────────────────────────────────────────
   {
     name: 'add_invoice_payment',
+    api: [
+      ['POST', '/api/invoices/{id}/payments'],
+    ],
     title: 'Zaevidovat úhradu (i částečnou)',
     description:
       'Zaeviduje úhradu dokladu v jeho měně, i částečnou. Když platby pokryjí celou částku, '
@@ -600,11 +712,17 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_invoice_payment',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/payments/{item_id}'],
+      ['GET', '/api/invoices/{id}/payments'],
+    ],
     title: 'Smazat úhradu',
     description:
       'Nevratně smaže evidovanou úhradu dokladu (ID z `list_invoice_payments`). Když pak doklad '
       + 'přestane být pokrytý, vrátí se ze stavu zaplaceno. Platba spárovaná z banky se ruší '
-      + 'zrušením spárování ve výpisu, platba s vystaveným daňovým dokladem až po jeho stornu.\n\n'
+      + 'zrušením spárování ve výpisu, platba s vystaveným daňovým dokladem až po jeho stornu. '
+      + 'Úhradu převzatou z POHODY bez protějšku v MyÚčtu (`taken_over_locked`) smazat nejde.\n\n'
       + 'Bez `confirm: true` nic nesmaže a jen vypíše platbu a doklad.',
     inputSchema: schema({
       id: id('ID faktury.'),
@@ -632,6 +750,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_payment_tax_document',
+    api: [
+      ['POST', '/api/invoices/{id}/payments/{payment_id}/tax-document'],
+    ],
     title: 'Daňový doklad k přijaté platbě',
     description:
       'K přijaté platbě zálohové faktury založí KONCEPT daňového dokladu k přijaté úplatě '
@@ -646,11 +767,16 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unmark_invoice_paid',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/unmark-paid'],
+    ],
     title: 'Zrušit úhradu dokladu',
     description:
       'Vrátí zaplacený doklad do stavu vystaveno nebo odesláno a SMAŽE všechny jeho evidované '
       + 'úhrady. Jen pro administrátora firmy. Nejde, je-li doklad spárovaný s bankovním pohybem '
-      + '(to se ruší ve výpisu) nebo k platbě existuje daňový doklad.\n\n'
+      + '(to se ruší ve výpisu) nebo k platbě existuje daňový doklad. Úhrada převzatá z POHODY '
+      + 'bez protějšku v MyÚčtu (`taken_over_locked`) zůstává; hradí-li doklad celý, vrátit ho nejde.\n\n'
       + 'Bez `confirm: true` nic nezmění a jen vypíše doklad.',
     inputSchema: schema({ id: id('ID zaplaceného dokladu.'), confirm: CONFIRM }, ['id']),
     write: true,
@@ -668,6 +794,8 @@ export const INVOICE_TOOLS = [
   // ── Platební kalendář ────────────────────────────────────────────────────
   {
     name: 'set_invoice_payment_schedule',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpis plateb kalendáře',
     description:
       'Nastaví rozpis plateb KONCEPTU kalendáře: `rent_calendar` je splátkový kalendář k nájmu '
@@ -724,6 +852,9 @@ export const INVOICE_TOOLS = [
   // ── Export a odeslání ────────────────────────────────────────────────────
   {
     name: 'get_invoice_isdoc',
+    api: [
+      ['GET', '/api/invoices/{id}/isdoc'],
+    ],
     title: 'ISDOC vystavené faktury',
     description:
       'Vrátí ISDOC XML vystaveného dokladu jako text (strojově čitelný formát pro účetní '
@@ -738,6 +869,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'get_invoice_recipients',
+    api: [
+      ['GET', '/api/invoices/{id}/recipients'],
+    ],
     title: 'Příjemci dokladu',
     description:
       'Komu by aplikace doklad poslala: adresy To/Cc/Bcc z kontaktů odběratele a zakázky '
@@ -751,6 +885,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'send_invoice_reminders_bulk',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hromadně poslat upomínky',
     description:
       'Pošle upomínky k více fakturám po splatnosti naráz (nejvýš 50). Každá upomínka je e-mail '
@@ -786,9 +922,174 @@ export const INVOICE_TOOLS = [
     },
   },
 
+  {
+    name: 'set_invoice_project',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zařadit vydanou fakturu k zakázce',
+    description:
+      'Přiřadí vydanou fakturu k zakázce, nebo ji z ní vyřadí (`project_id: 0`), i když už je vystavená nebo '
+      + 'zaúčtovaná: zakázka je jen analytický údaj pro marži zakázky, účty ani částky se nemění. Zakázka musí '
+      + 'patřit odběrateli faktury. U konceptu jde zakázka měnit i přes `update_invoice`.',
+    inputSchema: schema({
+      id: id('ID faktury.'),
+      project_id: int('ID zakázky (`list_projects`); 0 zakázku odebere.', { minimum: 0 }),
+    }, ['id', 'project_id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/project`, {
+      project_id: Number(a.project_id) > 0 ? a.project_id : null,
+    }, tool),
+  },
+
+  // ── Zápočet dobropisu, vratka, výkaz práce ───────────────────────────────
+  {
+    name: 'get_invoice_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zápočet dobropisu s fakturou',
+    description:
+      'Zápočty, kterých se vydaný doklad účastní (jako dobropis i jako opravovaná faktura), a u dobropisu '
+      + 'bez zápočtu, jestli ho jde započíst (`can_offset`, `reason`). Zápočet sníží „zbývá uhradit" '
+      + 'opravované faktury o celý dobropis; do deníku ani evidence DPH nic nezapisuje.',
+    inputSchema: schema({ id: id('ID dobropisu nebo faktury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/credit-note-offset`, null, tool),
+  },
+  {
+    name: 'set_invoice_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Započíst nebo zrušit zápočet dobropisu',
+    description:
+      '`action: "apply"` započte VYSTAVENÝ dobropis (`id`) proti faktuře, kterou opravuje: faktura pak '
+      + 'k úhradě ukáže jen rozdíl. Jde jen v plné výši dobropisu a jen když ho zbytek faktury pokryje; jinak '
+      + 'server vrátí důvod (`credit_note_offset_*`). Při vystavení dobropisu se to obvykle stane samo.\n'
+      + '`action: "revert"` zápočty dokladu zruší (odběratel přesto zaplatil celou fakturu); vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID dobropisu (u `revert` i opravované faktury).'),
+      action: str('Započíst (`apply`), nebo zápočet zrušit (`revert`).', { enum: ['apply', 'revert'] }),
+      confirm: CONFIRM,
+    }, ['id', 'action']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const path = `/invoices/${seg(a.id)}/credit-note-offset`;
+      if (a.action === 'apply') return c.post(path, {}, tool);
+      requireConfirm(a, 'Zrušit se má zápočet dobropisu u dokladu', `#${a.id}`);
+      return c.del(path, tool);
+    },
+  },
+  {
+    name: 'prefill_invoice_refund_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Podklady k vratce odběrateli',
+    description:
+      'K dokladu, který máme odběrateli vyplatit (přeplatek, dobropis k zaplacené faktuře), vrátí částku, '
+      + 'variabilní symbol, známé účty odběratele a účty firmy, ze kterých lze platit (`payer_accounts`). '
+      + 'Vratku pak založí `create_invoice_refund_order`.',
+    inputSchema: schema({ id: id('ID dokladu k vyplacení.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/refund-order/prefill`, null, tool),
+  },
+  {
+    name: 'create_invoice_refund_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Vratka odběrateli (příkaz k úhradě)',
+    description:
+      'Připraví příkaz k úhradě s jednou platbou, kterou firma vrací odběrateli peníze k dokladu (přeplatek, '
+      + 'dobropis). NIC NEODESÍLÁ DO BANKY: soubor pro banku stáhne a odešle uživatel v aplikaci. Účet '
+      + 'odběratele a účet firmy vezmi z `prefill_invoice_refund_order`. Změna účtu příjemce je častý podvod, '
+      + 'proto vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID dokladu k vyplacení.'),
+      payer_currency_id: id('Účet firmy, ze kterého se platí (`payer_accounts[].id`).'),
+      account_number: str('Číslo účtu odběratele (u českého účtu i s předčíslím); s `bank_code`, nebo místo nich `iban`.'),
+      bank_code: str('Kód banky, 4 číslice.'),
+      iban: str('IBAN odběratele (zahraniční účet).'),
+      payment_date: date('Požadované datum splatnosti příkazu; výchozí dnes.'),
+      save_to_client: bool('Uložit účet na kartu odběratele.'),
+      note: str('Poznámka k příkazu.'),
+      confirm: CONFIRM,
+    }, ['id', 'payer_currency_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      requireConfirm(a, `Vratka k dokladu #${a.id} se má poslat na účet`,
+        a.iban ? `IBAN ${a.iban}` : `${a.account_number ?? '?'}/${a.bank_code ?? '?'}`);
+      return c.post(`/invoices/${seg(a.id)}/refund-order`, changed(a, [
+        'payer_currency_id', 'account_number', 'bank_code', 'iban', 'payment_date', 'save_to_client', 'note',
+      ]), tool);
+    },
+  },
+  {
+    name: 'preview_work_report_billing',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Cenová rekapitulace výkazu práce',
+    description:
+      'Spočítá z výkazu práce konceptu faktury položky podle cenového ujednání (paušál, pásma hodin) a vrátí, '
+      + 'co by `transfer_work_report_billing` na fakturu zapsal. Nic neukládá.',
+    inputSchema: schema({ id: id('ID konceptu faktury s výkazem práce.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/work-report/billing-preview`, null, tool),
+  },
+  {
+    name: 'transfer_work_report_billing',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Přenést výkaz práce do položek faktury',
+    description:
+      'Přenese cenovou rekapitulaci výkazu práce do položek KONCEPTU faktury: nahradí položky navázané na '
+      + 'paušál a pásma výkazu, ostatní položky zachová. Nástroj si nejdřív spočítá aktuální náhled '
+      + '(`preview_work_report_billing`) a přenese přesně ten. Starší souhrnnou položku výkazu nahradí '
+      + '`legacy_item_id`.',
+    inputSchema: schema({
+      id: id('ID konceptu faktury s výkazem práce.'),
+      legacy_item_id: id('ID staré souhrnné položky výkazu, kterou má přenos nahradit.'),
+    }, ['id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const preview = await c.get(`/invoices/${seg(a.id)}/work-report/billing-preview`, null, tool);
+      if (typeof preview?.fingerprint !== 'string') {
+        throw new Error('Výkaz nemá cenové ujednání, ze kterého by šlo položky spočítat. Nastavte ho v aplikaci.');
+      }
+      return c.post(`/invoices/${seg(a.id)}/work-report/billing-transfer`, {
+        fingerprint: preview.fingerprint, ...changed(a, ['legacy_item_id']),
+      }, tool);
+    },
+  },
+  {
+    name: 'get_invoice_posting',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zaúčtování faktury (zápis nebo náhled)',
+    description:
+      'Kontace vydané (`document_type: "invoices"`) nebo přijaté (`"purchase-invoices"`) faktury v podvojném '
+      + 'účetnictví. Zaúčtovaná faktura vrátí své zápisy v deníku (`posted: true`, i storna). Nezaúčtovaná vrátí '
+      + 'NÁHLED zápisu, jak by ho zaúčtování vytvořilo (`posted: false`): účty MD a Dal, částky a co je určilo. '
+      + 'Hodí se před přijetím nebo vystavením ke kontrole účtů, předkontací a střediska. Nic nezapisuje.',
+    inputSchema: schema({
+      document_type: str('Vydaná (`invoices`) nebo přijatá (`purchase-invoices`) faktura.', { enum: ['invoices', 'purchase-invoices'] }),
+      id: id('ID faktury.'),
+    }, ['document_type', 'id']),
+    write: false,
+    run: async (c, a, tool) => {
+      const doc = seg(a.document_type);
+      const posted = await c.get(`/accounting/journal/for-document/${doc}/${seg(a.id)}`, null, tool);
+      const entries = posted?.items ?? [];
+      if (entries.length > 0) return { posted: true, entries };
+      return { posted: false, preview: await c.get(`/accounting/journal/posting-preview/${doc}/${seg(a.id)}`, null, tool) };
+    },
+  },
+
   // ── Pravidelná fakturace ─────────────────────────────────────────────────
   {
     name: 'create_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring'],
+    ],
     title: 'Založit pravidelnou fakturaci',
     description:
       'Založí šablonu pravidelné fakturace: z ní aplikace podle rozvrhu generuje faktury. '
@@ -802,6 +1103,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'update_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['PUT', '/api/recurring/{id}'],
+    ],
     title: 'Upravit pravidelnou fakturaci',
     description:
       'Změní šablonu pravidelné fakturace. Zadaná pole se změní, ostatní zůstanou; nástroj '
@@ -824,6 +1129,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['DELETE', '/api/recurring/{id}'],
+    ],
     title: 'Smazat pravidelnou fakturaci',
     description:
       'Nevratně smaže šablonu pravidelné fakturace; další faktury z ní už nevzniknou. Už '
@@ -844,6 +1153,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'pause_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/pause'],
+    ],
     title: 'Pozastavit pravidelnou fakturaci',
     description: 'Pozastaví šablonu; dokud se neobnoví, žádné faktury z ní nevzniknou.',
     inputSchema: schema({ id: id('ID šablony.') }, ['id']),
@@ -852,6 +1164,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'resume_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/resume'],
+    ],
     title: 'Obnovit pravidelnou fakturaci',
     description:
       'Obnoví pozastavenou šablonu. Příští faktura vznikne v den `next_run_date` ze šablony; '
@@ -862,6 +1177,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'reschedule_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/reschedule'],
+    ],
     title: 'Přeplánovat příští fakturu',
     description:
       'Posune datum příští faktury ze šablony (`next_run_date`). Datum musí být od dneška '
@@ -881,6 +1200,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'run_recurring_invoice_now',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/run-now'],
+    ],
     title: 'Vygenerovat fakturu ze šablony hned',
     description:
       'Vygeneruje fakturu ze šablony hned, mimo rozvrh, a standardně posune rozvrh na další '

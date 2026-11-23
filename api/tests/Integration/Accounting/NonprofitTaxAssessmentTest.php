@@ -79,7 +79,7 @@ final class NonprofitTaxAssessmentTest extends TestCase
         if ($this->committed) {
             $this->pdo->prepare('DELETE FROM activity_log WHERE supplier_id = ?')->execute([$this->supplier]);
             $this->pdo->prepare('DELETE FROM journal_entries WHERE supplier_id = ?')->execute([$this->supplier]);
-            $this->pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplier]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($this->pdo, $this->supplier);
         }
     }
 
@@ -469,7 +469,7 @@ final class NonprofitTaxAssessmentTest extends TestCase
         } catch (\PDOException $e) {
             self::assertSame('23000', $e->getCode());
         }
-        $this->pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplier]);
+        \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($this->pdo, $this->supplier);
         self::assertSame([], $this->repository->history($this->supplier, $this->period));
     }
 
@@ -512,21 +512,21 @@ final class NonprofitTaxAssessmentTest extends TestCase
     {
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('DELETE', '/api/suppliers/' . $this->supplier)
             ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, 1)
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'admin']);
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'admin', 'is_superadmin' => true])
+            ->withParsedBody(['confirm' => (string) $this->pdo->query("SELECT COALESCE(NULLIF(TRIM(ic), ''), TRIM(company_name)) FROM supplier WHERE id = " . $this->supplier)->fetchColumn()]);
         return Bootstrap::buildContainer()->get(\MyInvoice\Action\Settings\SettingsAction::class)
             ->deleteSupplierById($request, new \Slim\Psr7\Response(), ['id' => (string) $this->supplier]);
     }
 
-    public function testSupplierDeleteTreatsEmptyYearAssessmentAsAccountingData(): void
+    public function testSupplierDeleteRemovesCompanyWithConfirmedAssessment(): void
     {
         $confirmed = $this->confirmation();
         $this->pdo->commit();
         $this->committed = true;
         $response = $this->deleteSupplier();
-        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
-        self::assertSame(409, $response->getStatusCode());
-        self::assertSame('has_dependencies', $body['error']['code']);
-        self::assertSame($confirmed, $this->repository->find($this->supplier, $confirmed['id']));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_tax_assessments WHERE id = ' . (int) $confirmed['id'])->fetchColumn());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_tax_assessments WHERE supplier_id = ' . $this->supplier)->fetchColumn());
     }
 
     public function testSupplierDeleteStillRemovesCompanyWithoutAccountingData(): void

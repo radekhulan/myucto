@@ -35,6 +35,13 @@ describe('CatalogJobs', () => {
     expect(wrapper.find('a[href="/eshop?tab=import&import_job=1"]').exists()).toBe(true)
     expect(wrapper.find('a[href="/eshop?tab=price-matrix&matrix_job=2"]').exists()).toBe(true)
   })
+  it('opens finished stock valuation and value trend results in stock reports', async () => {
+    mocks.list.mockResolvedValue([job(7, 'stock_value_trend'), job(6, 'stock_valuation')])
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('a[href="/stock/reports?tab=trend&trend_job=7"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/stock/reports?valuation_job=6"]').exists()).toBe(true)
+  })
   it('offers retry of a stock history import or rollback only for the latest one', async () => {
     mocks.list.mockResolvedValue([
       { ...job(5, 'stock_history_import_apply'), status: 'cancelled' },

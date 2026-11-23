@@ -12,8 +12,8 @@ describe('StatementDetail – obnovení po akci nad pohybem (#272)', () => {
   })
 
   it('akce návrhů spárování obnovují šetrně', () => {
-    expect(source).toContain(
-      'useBankTransactionActions({ reload: () => refreshTransactions(), refresh: () => refreshTransactions() })',
+    expect(source).toMatch(
+      /useBankTransactionActions\(\{\s*reload: \(\) => refreshTransactions\(\),\s*refresh: \(\) => refreshTransactions\(\)/,
     )
   })
 

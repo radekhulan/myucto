@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Bank\Card\PaymentCardVehicleResolver;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use PDO;
 
@@ -169,7 +170,7 @@ final class FuelingFromExtraction
         if ($quantity !== null && $quantity <= 0) $quantity = null;
         if ($unitPrice !== null && $unitPrice <= 0) $unitPrice = null;
         if ($quantity !== null && $unitPrice === null) {
-            $unitPrice = round($amount / $quantity, 4);
+            $unitPrice = UnitPricePrecision::normalize($amount / $quantity);
         } elseif ($unitPrice !== null && $quantity === null) {
             $quantity = round($amount / $unitPrice, 3);
         }

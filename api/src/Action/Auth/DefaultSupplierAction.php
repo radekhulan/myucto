@@ -49,7 +49,7 @@ final class DefaultSupplierAction
         $isSuperadmin = (bool) ($user['is_superadmin'] ?? false);
         $membershipIds = $isSuperadmin ? [] : $this->memberships->allowedSupplierIds($userId);
         if (!$this->defaults->isAccessible($supplierId, $isSuperadmin, $membershipIds)) {
-            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
         }
 
         $this->defaults->store($userId, $supplierId);

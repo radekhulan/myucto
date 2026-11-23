@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Invoice;
 
 use MyInvoice\Action\Invoice\CreateInvoiceAction;
+use MyInvoice\Action\Invoice\IssueInvoiceAction;
 use MyInvoice\Action\Invoice\UpdateInvoiceAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Service\Invoice\InvoiceCalculator;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -40,6 +42,8 @@ final class PartialUpdateItemsTest extends TestCase
     private Connection $db;
     private CreateInvoiceAction $create;
     private UpdateInvoiceAction $update;
+    private IssueInvoiceAction $issue;
+    private InvoiceCalculator $calculator;
 
     private int $supplierId = 0;
     private int $userId = 0;
@@ -57,6 +61,8 @@ final class PartialUpdateItemsTest extends TestCase
             $this->db     = $c->get(Connection::class);
             $this->create = $c->get(CreateInvoiceAction::class);
             $this->update = $c->get(UpdateInvoiceAction::class);
+            $this->issue  = $c->get(IssueInvoiceAction::class);
+            $this->calculator = $c->get(InvoiceCalculator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -126,9 +132,9 @@ final class PartialUpdateItemsTest extends TestCase
     }
 
     /**
-     * BEZ OPRAVY PADÁ: prázdné pole doklad tiše vyprázdnilo se stavem 200.
+     * Koncept smí zůstat prázdný; po explicitním [] se přepočítá na nulu.
      */
-    public function testUpdateWithExplicitEmptyItemsIsRejected(): void
+    public function testDraftUpdateWithExplicitEmptyItemsClearsRows(): void
     {
         $id = $this->createInvoice();
 
@@ -136,9 +142,43 @@ final class PartialUpdateItemsTest extends TestCase
         $body['items'] = [];
 
         $res = $this->put($id, $body);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->itemCount($id));
+        self::assertEqualsWithDelta(0, $this->totalWithVat($id), 0.005);
+    }
+
+    /** Uložení prázdného konceptu nesmí dovolit jeho následné vystavení. */
+    public function testEmptiedDraftCannotBeIssued(): void
+    {
+        $id = $this->createInvoice();
+        $updated = $this->put($id, ['items' => []]);
+        self::assertSame(200, $updated['status'], json_encode($updated['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->itemCount($id));
+
+        $res = self::decode(($this->issue)($this->request('POST', []), new Psr7Response(), ['id' => (string) $id]));
         self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame('no_items', $res['body']['error']['code'] ?? null);
-        self::assertSame(2, $this->itemCount($id), 'Odmítnutý požadavek nesmí nic smazat.');
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        self::assertSame('draft', $stmt->fetchColumn());
+    }
+
+    /** Výjimka pro prázdný koncept nesmí obejít kladnou částku při vystavení. */
+    public function testZeroAmountDraftCannotBeIssued(): void
+    {
+        $id = $this->createInvoice();
+        // Simulace staršího uloženého konceptu; nový nulový řádek validace odmítá už při POST.
+        $this->db->pdo()->prepare('UPDATE invoice_items SET unit_price_without_vat = 0 WHERE invoice_id = ?')->execute([$id]);
+        $this->calculator->recompute($id);
+        self::assertSame(2, $this->itemCount($id));
+        self::assertEqualsWithDelta(0, $this->totalWithVat($id), 0.005);
+
+        $res = self::decode(($this->issue)($this->request('POST', []), new Psr7Response(), ['id' => (string) $id]));
+        self::assertSame(409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('invalid_amount', $res['body']['error']['code'] ?? null);
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        self::assertSame('draft', $stmt->fetchColumn());
     }
 
     /** Doklad, který žádné řádky nemá, nemá co ztratit — prázdné pole je tam no-op. */
@@ -154,6 +194,24 @@ final class PartialUpdateItemsTest extends TestCase
         $res = $this->put($id, $body);
         self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame(0, $this->itemCount($id));
+    }
+
+    /** Ani vynucená editace nesmí vyprázdnit doklad mimo koncept. */
+    public function testNonDraftCannotLoseAllItemsEvenWithForce(): void
+    {
+        $id = $this->createInvoice();
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$id]);
+        $before = $this->totalWithVat($id);
+        self::assertGreaterThan(0.0, $before);
+
+        foreach ([false, true] as $force) {
+            // Podvržený status v těle nesmí udělit výjimku pro koncept.
+            $res = $this->put($id, ['items' => [], 'status' => 'draft'], $force);
+            self::assertSame($force ? 422 : 409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            self::assertSame($force ? 'no_items' : 'not_editable', $res['body']['error']['code'] ?? null);
+            self::assertSame(2, $this->itemCount($id), 'Odmítnutý požadavek nesmí nic smazat.');
+            self::assertEqualsWithDelta($before, $this->totalWithVat($id), 0.005);
+        }
     }
 
     /** Regrese: poslané neprázdné `items` řádky dál nahrazují. */
@@ -277,10 +335,10 @@ final class PartialUpdateItemsTest extends TestCase
      * @param  array<string,mixed> $body
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function put(int $id, array $body): array
+    private function put(int $id, array $body, bool $force = false): array
     {
         return self::decode(
-            ($this->update)($this->request('PUT', $body), new Psr7Response(), ['id' => (string) $id])
+            ($this->update)($this->request('PUT', $body)->withQueryParams($force ? ['force' => '1'] : []), new Psr7Response(), ['id' => (string) $id])
         );
     }
 
@@ -291,6 +349,7 @@ final class PartialUpdateItemsTest extends TestCase
             ->createServerRequest($method, '/api/invoices')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body);
     }
 

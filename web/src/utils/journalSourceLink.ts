@@ -30,6 +30,21 @@ export interface JournalSourceRef {
   source_asset_id?: number | null
   source_settlement_doc_type?: string | null
   source_settlement_doc_id?: number | null
+  /** Rozpuštění a ukončení časového rozlišení: položka agendy, ze které zápis vznikl. */
+  source_accrual_item_id?: number | null
+}
+
+/**
+ * Doplněk štítku zdroje v deníku. Přednost má číslo dokladu (`source_ref`), interní ID
+ * je jen náhrada pro zdroje bez čísla. Protizápis (storno) nese `source_id` NULL a jeho
+ * zdroj je dohledaný přes stornovaný zápis (`source_link_id`); bez žádného ID se nevypíše
+ * nic, nikdy „#null".
+ */
+export function journalSourceRefLabel(entry: JournalSourceRef & { source_asset_name?: string | null, source_ref?: string | null }): string {
+  if (entry.source_asset_name) return entry.source_asset_name
+  if (entry.source_ref) return entry.source_ref
+  const id = entry.source_id ?? entry.source_link_id
+  return id ? `#${id}` : ''
 }
 
 export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | null {
@@ -45,6 +60,9 @@ export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | n
   }
   if (entry.source_type === 'other_item' && sourceId) {
     return { name: 'other-item-detail', params: { id: sourceId } }
+  }
+  if ((entry.source_type === 'accrual_release' || entry.source_type === 'accrual_termination') && entry.source_accrual_item_id) {
+    return { name: 'accounting-accrual-detail', params: { id: entry.source_accrual_item_id } }
   }
   if (entry.source_type === 'bank' && entry.source_statement_id) {
     return { name: 'bank-detail', params: { id: entry.source_statement_id } }

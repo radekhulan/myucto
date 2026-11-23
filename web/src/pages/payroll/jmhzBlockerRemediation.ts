@@ -127,9 +127,12 @@ export function jmhzRemediationTarget(
           Math.ceil(Number(period.slice(5, 7)) / 3),
         )
       }
+      const quarterQuery = period
+        ? { year: period.slice(0, 4), quarter: String(Math.ceil(Number(period.slice(5, 7)) / 3)) }
+        : {}
       return employmentId === null
-        ? { name: 'payroll-absences', query: { tab: 'averages' } }
-        : { name: 'payroll-absences', query: { employment: String(employmentId), tab: 'averages' } }
+        ? { name: 'payroll-absences', query: { tab: 'averages', ...quarterQuery } }
+        : { name: 'payroll-absences', query: { employment: String(employmentId), tab: 'averages', ...quarterQuery } }
     }
     case 'time':
       return employmentId === null
@@ -138,15 +141,30 @@ export function jmhzRemediationTarget(
     case 'runs':
       return { name: 'payroll-runs', query: periodQuery }
     case 'components':
-      return { name: 'payroll-components' }
+      return {
+        name: 'payroll-components',
+        query: jmhzComponentQuery(blocker.code, blocker.entity_type === 'component' ? entityId : null),
+      }
     case 'ordinary_evidence':
       return { name: 'payroll-submissions', query: periodQuery, hash: '#jmhz-ordinary-evidence' }
     case 'employer_annual':
-      return { name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' }
+      // Stejně jako server: rok hlášeného období, ne výchozí rok formuláře.
+      return {
+        name: 'payroll-settings',
+        query: { tab: 'submissions', ...(period && /^\d{4}-/.test(period) ? { year: period.slice(0, 4) } : {}) },
+        hash: '#jmhz-employer-annual-evidence',
+      }
     case 'office':
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
-    case 'annual_settlement':
-      return { name: 'payroll-annual-settlement' }
+    case 'annual_settlement': {
+      // Leden a únor hlásí zúčtování MINULÉHO roku; stejně jako server
+      // (`JmhzBlockerRemediationPath`) odkaz nese rok, osobu a u nerozhodnuté
+      // žádosti zúžení na nerozhodnuté osoby.
+      const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
+      const state = ANNUAL_REQUEST_CODES.includes(blocker.code) ? { state: 'request_undecided' } : {}
+      const person = employeeId === null ? {} : { person: String(employeeId) }
+      return { name: 'payroll-annual-settlement', query: { ...year, ...state, ...person } }
+    }
     case 'deferred_income':
       return { name: 'payroll-people', query: { ...scope, panel: 'deferred_income' } }
     case 'takeover':
@@ -161,6 +179,55 @@ export function jmhzRemediationTarget(
     default:
       return null
   }
+}
+
+/** Nerozhodnutá žádost o roční zúčtování (JMHZ 10319). */
+export const ANNUAL_REQUEST_CODES = [
+  'jmhz_annual_request_source_missing',
+  'jmhz_annual_request_status_unresolved',
+]
+
+/**
+ * Hromadné „nepožádal" na stránce Roční zúčtování pro osoby jednoho hlášení.
+ *
+ * Hlášení za leden a únor se ptá na zúčtování MINULÉHO roku. Seznam se zúží
+ * na nerozhodnuté a na osoby hlášení (`employees`); bez toho stránka ukázala
+ * všechny nerozhodnuté osoby roku, i ty, které v měsíci nepracovaly.
+ * `preselect` je vybere všechny, potvrzuje se až dialogem na stránce.
+ */
+export function annualSettlementRequestTarget(
+  period: string | null | undefined,
+  employeeIds: number[] = [],
+  preselect = true,
+  returnTo: string | null = null,
+): RouteLocationRaw {
+  const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
+  const ids = [...new Set(employeeIds.filter(id => Number.isInteger(id) && id > 0))]
+  return {
+    name: 'payroll-annual-settlement',
+    query: {
+      ...year,
+      state: 'request_undecided',
+      ...(ids.length > 0 ? { employees: ids.join(',') } : {}),
+      ...(preselect ? { select: 'all' } : {}),
+      ...(returnTo ? { return: returnTo } : {}),
+    },
+  }
+}
+
+/**
+ * Proklik na číselník složek, stejně jako `JmhzBlockerRemediationPath::componentPath()`
+ * na serveru: jednotlivá složka otevře svoje zařazení do JMHZ, souhrnný nález
+ * číselník vyfiltrovaný na složky s tímtéž problémem.
+ */
+export function jmhzComponentQuery(code: string, componentId: number | null): Record<string, string> {
+  if (componentId !== null) return { tab: 'catalog', component: String(componentId), panel: 'jmhz' }
+  // Neověřené zařazení odměny je zařazení, ne chybějící stav — filtr ho nemá.
+  if (code === 'component_jmhz_bonus_regularity_unverified') return { tab: 'catalog' }
+  const jmhz = code === 'component_jmhz_manual_review'
+    ? 'manual_review'
+    : code === 'component_jmhz_treatment_invalid' ? 'invalid' : 'missing'
+  return { tab: 'catalog', jmhz }
 }
 
 /**
@@ -204,12 +271,21 @@ export function jmhzErrorMessage(
   return apiErrorMessage(error, t(fallbackKey))
 }
 
-/** Popisek kódu: nejdřív katalog kódů, pak starší blok, pak věta serveru. */
+/**
+ * Popisek kódu: nejdřív katalog kódů, pak starší blok, pak věta serveru.
+ *
+ * Výjimka: když server označí svůj důvod za přesnější než obecný popisek
+ * kódu (`reason_specific`, např. PROČ je variabilní symbol neplatný nebo
+ * KTERÝ údaj hlášení 2027 chybí), ukáže se v češtině věta serveru. Obecný
+ * popisek kódu by přesný důvod zahodil.
+ */
 export function jmhzBlockerLabel(
   t: (key: string) => string,
   te: (key: string) => boolean,
   blocker: PayrollJmhzXmlDryRunBlocker,
+  locale?: string,
 ): string {
+  if (locale === 'cs' && blocker.reason_specific && blocker.reason) return blocker.reason
   const catalog = `payroll.jmhz_gate.codes.${blocker.code}`
   if (te(catalog)) return t(catalog)
   const legacy = `payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`

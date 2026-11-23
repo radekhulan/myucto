@@ -42,7 +42,7 @@ export interface PayrollAbsenceDecisionResult {
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
-  | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
+  | 'employer_obstacle' | 'compensatory_time_off' | 'holiday_compensatory_time_off' | 'unexcused' | 'other'
   | 'public_function' | 'employee_obstacle_unpaid' | 'invalid_termination'
 
 /**
@@ -76,6 +76,9 @@ export interface PayrollAbsenceEmployment {
   relation_type: string
   status: string
   full_name: string
+  /** Den nástupu (skutečný, jinak sjednaný) a konec vztahu; rozliší starou a novou dohodu. */
+  start_date?: string | null
+  end_date?: string | null
 }
 
 export interface AverageSnapshot {
@@ -85,6 +88,8 @@ export interface AverageSnapshot {
   applicable_quarter: number
   source_kind: 'actual' | 'probable'
   average_hourly_minor: number
+  worked_minutes?: number | null
+  worked_duration_units?: number | null
   rationale: string | null
   support_status: 'manual_review'
   status: 'manual_review' | 'approved' | 'superseded'
@@ -125,6 +130,7 @@ export interface PayrollAbsence {
   /** Jen u placené překážky: druh, podle kterého se určila sazba náhrady. */
   obstacle_kind?: ObstacleKind | null
   /** Sazba náhrady v bazických bodech (10 000 = 100 % průměru). */
+  compensation_policy?: 'none' | 'average_100' | 'average_custom' | 'dpn' | 'statutory_manual_review' | 'hourly_claim'
   compensation_rate_basis_points?: number | null
   compensation_rate_reason?: string | null
   row_version: number
@@ -178,6 +184,32 @@ export interface PayrollAbsencesPage {
  * `longer_period_allocated_minor` je vždy `null`: poměrnou část mzdy za období
  * delší než čtvrtletí (§ 358 ZP) aplikace v datech nerozlišuje.
  */
+/**
+ * Proč návrh použil pravděpodobný výdělek místo skutečného průměru (§ 355
+ * odst. 1 ZP). `codes` jsou důvody ze serveru, `missing_run_periods` měsíce
+ * rozhodného období (`RRRR-MM`) bez schváleného běhu, `worked_days` dny
+ * doložené uzavřenými běhy.
+ */
+export interface AverageEarningProbableReason {
+  codes: Array<'run_missing' | 'probable_earning_required' | 'worked_time_missing'>
+  missing_run_periods: string[]
+  worked_days: number
+  minimum_worked_days: number
+}
+
+export interface AverageEarningBelowMinimumWage {
+  source_kind: 'actual' | 'probable'
+  raw_hourly_minor: number
+  minimum_hourly_minor: number
+}
+
+export interface AverageEarningProbableUnusable {
+  code: 'agreed_gross_below_minimum_wage'
+  monthly_gross_minor: number
+  hourly_minor: number
+  minimum_hourly_minor: number
+}
+
 export interface AverageEarningSuggestion {
   employment_id: number
   applicable_year: number
@@ -185,6 +217,8 @@ export interface AverageEarningSuggestion {
   decisive_from: string
   decisive_to: string
   minimum_worked_days: number
+  /** Vztah začal až po rozhodném období: odpracováno v něm bylo 0 h a 0 dnů. */
+  employment_started_after_decisive_period?: boolean
   ready: boolean
   blockers: string[]
   /**
@@ -195,12 +229,18 @@ export interface AverageEarningSuggestion {
   source_kind: 'actual' | 'probable' | null
   /** Proč skutečný průměr nevyšel; u `source_kind: 'actual'` prázdné. */
   actual_blockers: string[]
+  /** Důvod pravděpodobného výdělku; `null` u skutečného průměru a u vadné evidence. */
+  probable_reason?: AverageEarningProbableReason | null
+  below_minimum_wage?: AverageEarningBelowMinimumWage | null
+  probable_unusable?: AverageEarningProbableUnusable | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
+  probable_source?: AverageEarningCandidate['probable_source']
   probable_term_id: number | null
   gross_earnings_minor: number | null
   longer_period_allocated_minor: null
   worked_minutes: number | null
+  worked_duration_units?: number | null
   worked_days: number | null
   /**
    * Měsíce (`YYYY-MM`) vzaté z převzatých mezd předchozího programu. Jejich
@@ -214,6 +254,7 @@ export interface AverageEarningSuggestion {
     revision_no: number | null
     gross_earnings_minor: number | null
     worked_minutes: number | null
+    worked_duration_units?: number | null
     worked_days: number | null
     work_summary_id: number | null
     takeover?: boolean
@@ -236,11 +277,15 @@ export interface AverageEarningCandidate {
   ready: boolean
   blockers: string[]
   source_kind: 'actual' | 'probable' | null
-  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | 'minimum_wage' | null
+  probable_source: 'terms' | 'achieved_wage' | 'agreed_hourly_rate' | 'agreed_monthly_gross' | 'minimum_wage' | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
+  probable_reason?: AverageEarningProbableReason | null
+  below_minimum_wage?: AverageEarningBelowMinimumWage | null
+  probable_unusable?: AverageEarningProbableUnusable | null
   gross_earnings_minor: number | null
   worked_minutes: number | null
+  worked_duration_units?: number | null
   worked_days: number | null
   input_version: string
   existing: {
@@ -248,9 +293,50 @@ export interface AverageEarningCandidate {
     status: 'manual_review' | 'approved'
     source_kind: 'actual' | 'probable'
     average_hourly_minor: number
+    /** Odkud byl pravděpodobný výdělek vzat (u skutečného průměru `null`). */
+    probable_source?: AverageEarningCandidate['probable_source']
   } | null
-  /** Běh rozhodného období se po schválení průměru opravil a průměr na něj nesedí. */
+  /** Schválený skutečný průměr neodpovídá dnešním podkladům rozhodného období. */
   existing_outdated?: boolean
+  /**
+   * Proč nesedí: `holiday_hours` = do odpracované doby nově patří hodiny svátku
+   * krytého měsíční mzdou (§ 353 odst. 2 ZP), `earnings` = změnila se mzda,
+   * `worked_time` = změnila se odpracovaná doba, `mixed` = obojí.
+   */
+  existing_outdated_reason?: 'holiday_hours' | 'earnings' | 'worked_time' | 'mixed' | null
+  /** Průměr, který by z dnešních podkladů vyšel (haléře za hodinu). */
+  suggested_average_hourly_minor?: number | null
+  relation_type?: string
+}
+
+/** Vztah, který hromadné schválení návrhů přeskočilo (návrh nebyl připravený). */
+export interface AverageBulkSkipped {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  employment_code: string
+  blockers: string[]
+}
+
+/** Řádek výsledku „Nastavit pravděpodobný výdělek vybraným". */
+export interface ProbableBulkRow {
+  employment_id: number
+  employee_id: number | null
+  employee_name: string | null
+  employment_code: string | null
+  warnings?: Array<{ code: string, params: Record<string, string>, message: string }>
+  snapshot_id?: number
+  superseded_average_hourly_minor?: number | null
+  code?: string
+  message?: string
+  params?: Record<string, string>
+}
+
+export interface ProbableBulkResult {
+  counts: { applied: number, unchanged: number, failed: number }
+  applied: ProbableBulkRow[]
+  unchanged: ProbableBulkRow[]
+  failed: ProbableBulkRow[]
 }
 
 export interface AverageEarningCandidatesPage {
@@ -272,7 +358,7 @@ export interface LeaveEntitlementCandidate {
   entitlement_weeks: number | null
   allowance_source: 'company_policy' | 'employment_override' | 'mixed_same_value' | null
   continuous_calendar_days: number
-  worked_equivalent_minutes: number
+  worked_equivalent_minutes: number | null
   ready: boolean
   blockers: string[]
   input_version: string
@@ -299,6 +385,64 @@ export interface LeaveEntitlementCandidatesPage {
   total: number
   limit: number
   offset: number
+}
+
+/** Náhrada mzdy spočítaná z jiného než dnes schváleného průměru čtvrtletí. */
+export interface CompensationRecalculationItem {
+  input_id: number
+  input_status: 'approved' | 'locked'
+  period: string
+  employee_id: number
+  employment_id: number
+  full_name: string
+  component_code: string
+  component_name: string
+  kind: 'leave' | 'import' | 'obstacle' | 'other'
+  quantity_milliunits: number | null
+  minutes: number | null
+  amount_minor: number
+  old_average_hourly_minor: number | null
+  new_average_hourly_minor: number | null
+  new_amount_minor: number | null
+  /** `recalculate`/`replace` = přepočte se, `manual` = jen výpis, `blocked` = schválený běh. */
+  action: 'recalculate' | 'replace' | 'manual' | 'blocked'
+  reason: string | null
+  next_step: 'request_correction' | 'reopen' | null
+  run_id: number | null
+  run_status: string | null
+}
+
+export interface CompensationRecalculationPeriod {
+  period: string
+  availability: 'ready' | 'request_correction' | 'reopen'
+  reason: string | null
+  runs: Array<{ id: number, status: string, row_version: number, availability: string, refresh: boolean }>
+  counts: { recalculate: number, manual: number, blocked: number }
+  difference_minor: number
+  items: CompensationRecalculationItem[]
+}
+
+export interface CompensationRecalculationPreview {
+  periods: CompensationRecalculationPeriod[]
+  can_apply: boolean
+  can_approve: boolean
+  can_refresh: boolean
+}
+
+export interface CompensationRecalculationResult {
+  period: string
+  recalculated: Array<{
+    input_id: number
+    new_input_id: number
+    new_status: string
+    employment_id: number
+    full_name: string
+    component_name: string
+    amount_minor: number
+    new_amount_minor: number
+  }>
+  manual: CompensationRecalculationItem[]
+  refreshed_runs: Array<{ id: number, status: string, row_version: number }>
 }
 
 export const payrollAbsenceApi = {
@@ -454,7 +598,45 @@ export const payrollAbsenceApi = {
   createAveragesBulk: (payload: {
     year: number
     quarter: number
-    items: Array<{ employment_id: number, input_version: string }>
-  }) => api.post<{ averages: AverageSnapshot[] }>('/payroll/time/averages/bulk', payload)
-    .then(response => response.data.averages),
+    items: Array<{ employment_id: number, input_version: string, recalculate_outdated?: boolean }>
+  }) => api.post<{ averages: AverageSnapshot[], skipped?: AverageBulkSkipped[] }>('/payroll/time/averages/bulk', payload)
+    .then(response => ({ averages: response.data.averages, skipped: response.data.skipped ?? [] })),
+  /**
+   * Pravděpodobný výdělek (§ 355 odst. 2 ZP) zadaný účetní vybraným vztahům:
+   * oprava podmínek vztahu a nová schválená revize průměru za čtvrtletí.
+   */
+  setProbableBulk: (payload: {
+    year: number
+    quarter: number
+    probable_hourly_minor: number
+    rationale: string
+    employment_ids: number[]
+  }) => api.post<ProbableBulkResult>('/payroll/time/averages/probable-bulk', payload)
+    .then(response => response.data),
+  /**
+   * Doplní pravděpodobný výdělek ze sjednané hodinové sazby vztahům měsíce,
+   * kterým chybí schválený průměr (automatický záznam, opravitelný revizí).
+   */
+  fillProbableFromRate: (period: string, officeId: number | null = null) =>
+    api.post<{ created: AverageSnapshot[]; candidates: number }>('/payroll/time/averages/probable-from-rate', {
+      period,
+      ...(officeId === null ? {} : { office_id: officeId }),
+    }).then(response => response.data),
+  /** Náhled přepočtu náhrad z nového průměru (jen čte). */
+  compensationRecalculationPreview: (periods: string[], employmentIds: number[] | null = null) =>
+    api.get<CompensationRecalculationPreview>('/payroll/time/compensation-recalculation', {
+      params: {
+        periods: periods.join(','),
+        ...(employmentIds === null ? {} : { employment_ids: employmentIds.join(',') }),
+      },
+    }).then(response => response.data),
+  /** Přepočet náhrad jednoho období; jen vstupy, které účetní viděla v náhledu. */
+  applyCompensationRecalculation: (payload: {
+    period: string
+    employment_ids: number[] | null
+    input_ids: number[]
+  }, idempotencyKey: string) =>
+    api.post<CompensationRecalculationResult>('/payroll/time/compensation-recalculation', payload, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }).then(response => response.data),
 }

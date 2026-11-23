@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Payroll\Report;
 
 use MyInvoice\Repository\Payroll\PayrollDimensionCostReportRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceCostAllocation;
+use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder;
 
 /**
@@ -23,6 +25,11 @@ use MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder;
  * ({@see PayrollPostingLineBuilder::employerInsuranceCostShares()}), a podíl
  * vztahu promítne do jeho dimenzí. Do řádku „nerozděleno" jde jen to, co
  * rozdělit nejde: revize, která si neuložila vyměřovací základy vztahů.
+ *
+ * Zákonné pojištění odpovědnosti (548) se v alokacích můstku nevyskytuje, má
+ * vlastní čtvrtletní předpis. Report vezme čistou částku čtvrtletí (předpis
+ * s opravami) a rozloží ji klíčem, kterým se předpis zaúčtuje
+ * ({@see PayrollAccidentInsuranceCostAllocation}); patří do sloupce pojistného.
  *
  * Report se ukazuje jen firmě, která dimenze používá (firemní dimenze zapnuté,
  * nebo aspoň jedna mzdová dimenze); jinak vrací `enabled: false`.
@@ -43,6 +50,8 @@ final class PayrollDimensionCostReportService
         private readonly PayrollDimensionCostReportRepository $repository,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
         private readonly PayrollPostingLineBuilder $lineBuilder,
+        private readonly PayrollAccidentInsuranceLiabilityMaterializer $accidentInsurance,
+        private readonly PayrollAccidentInsuranceCostAllocation $accidentInsuranceCosts,
     ) {}
 
     /**
@@ -105,7 +114,8 @@ final class PayrollDimensionCostReportService
             ];
             $bucket = match (true) {
                 str_starts_with($allocation['allocation_key'], 'gross:') => 'wages_minor',
-                str_starts_with($allocation['allocation_key'], 'employer-insurance:') => 'insurance_minor',
+                str_starts_with($allocation['allocation_key'], 'employer-insurance:'),
+                str_starts_with($allocation['allocation_key'], 'accident-insurance:') => 'insurance_minor',
                 default => 'other_minor',
             };
             $groups[$key][$bucket] += $allocation['signed_minor'];
@@ -241,6 +251,26 @@ final class PayrollDimensionCostReportService
                 'dimensions' => self::dimensions($allocation['dimensions']),
                 'signed_minor' => $allocation['signed_minor'],
             ];
+        }
+
+        foreach ($this->repository->accidentInsuranceQuarters($supplierId, $year) as $quarter) {
+            if ($quarter['signed_minor'] <= 0) {
+                continue;
+            }
+            $allocationKey = 'accident-insurance:quarter:' . substr($quarter['quarter_end_period'], 0, 7) . ':debit';
+            $key = $this->accidentInsurance->quarterCostKey($supplierId, $quarter['quarter_end_period']);
+            $parts = $key === null
+                ? [['employment_id' => null, 'cost_center' => null, 'dimensions' => [], 'amount_minor' => $quarter['signed_minor']]]
+                : $this->accidentInsuranceCosts->allocate($supplierId, $key, $quarter['signed_minor']);
+            foreach ($parts as $part) {
+                $result[] = [
+                    'allocation_key' => $allocationKey,
+                    'employment_id' => $part['employment_id'],
+                    'cost_center' => $part['cost_center'],
+                    'dimensions' => $part['dimensions'],
+                    'signed_minor' => $part['amount_minor'],
+                ];
+            }
         }
 
         return $result;

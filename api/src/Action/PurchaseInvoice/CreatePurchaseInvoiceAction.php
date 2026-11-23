@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
@@ -23,6 +26,9 @@ use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
@@ -58,6 +64,8 @@ final class CreatePurchaseInvoiceAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
         private readonly PurchaseInvoiceSubmissionCompletionService $submissionCompletion,
+        private readonly NumberSeriesSelection $numberSeries,
+        private readonly TransitionPurchaseInvoiceStatusAction $transition,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -68,6 +76,17 @@ final class CreatePurchaseInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Doklad vzniká vždy jako koncept. `status: received` z těla se provede až po
+        // založení stejným přechodem jako tlačítko Přijmout ({@see TransitionPurchaseInvoiceStatusAction}):
+        // schvalování, interní číslo, automatické zaúčtování i pokladní doklad. Dřív se
+        // stav zapsal rovnou a přechod se obešel. Strukturované importy volají repozitář přímo.
+        $requestedStatus = isset($body['status']) && $body['status'] !== '' ? (string) $body['status'] : null;
+        unset($body['status']);
+        if ($requestedStatus !== null && !in_array($requestedStatus, ['draft', 'received'], true)) {
+            return Json::error($response, 'validation_failed',
+                'Doklad jde založit jen jako koncept (`draft`) nebo přijatý (`received`); zaúčtování, úhrada a storno jsou samostatné přechody.',
+                400, ['fields' => ['status' => 'Povolené hodnoty: draft, received.']]);
+        }
         $submissionId = max(0, (int) ($body['submission_id'] ?? 0));
         if ($submissionId > 0) {
             if (RequestAuthorization::isClientType($request)
@@ -183,6 +202,17 @@ final class CreatePurchaseInvoiceAction
             );
         }
 
+        // Řada z číselníku: volba z hlavičky, jinak výchozí řada uživatele. Doklad
+        // založený rovnou jako přijatý dostane číslo už v createDraft().
+        try {
+            $series = $this->numberSeries->fromBody($supplierId, $body, 'purchase');
+        } catch (NumberSeriesException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        $body['number_series_id'] = $series === false
+            ? $this->numberSeries->userDefaultFor($supplierId, 'purchase', 0, $userId)
+            : $series;
+
         $pdo = $this->db->pdo();
         $ownTransaction = !$pdo->inTransaction();
         if ($ownTransaction) $pdo->beginTransaction();
@@ -235,6 +265,35 @@ final class CreatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Záloha vybraná už v editoru nového dokladu: vazba vzniká v téže transakci,
+            // aby přijetí dokladu níž zaúčtovalo konečnou fakturu i s vyúčtováním zálohy.
+            // Víc záloh (`advance_purchase_invoice_ids`): první jde do hlavičky, další se přidají
+            // a faktura přejde na vazbu řádky čerpání ({@see PurchaseAdvanceLinks}).
+            $advancesToLink = self::advanceIdsFromBody($body);
+            $links = new PurchaseAdvanceLinks($this->db);
+            try {
+                foreach ($advancesToLink as $i => $advanceToLink) {
+                    if ($i === 0) {
+                        $this->repo->linkAdvance($id, $advanceToLink, $supplierId);
+                    } else {
+                        $links->append($supplierId, $id, $advanceToLink, $userId > 0 ? $userId : null);
+                    }
+                }
+            } catch (PurchaseAdvanceLinkException $e) {
+                throw new PurchaseInvoiceSubmissionException($e->errorCode, $e->getMessage(), $e->status);
+            } catch (\RuntimeException $e) {
+                throw new PurchaseInvoiceSubmissionException('link_failed', $e->getMessage(), 409);
+            }
+            (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+            try {
+                $links->sync($supplierId, $id);
+            } catch (PurchaseAdvanceLinkException $e) {
+                throw new PurchaseInvoiceSubmissionException($e->errorCode, $e->getMessage(), $e->status);
+            }
+            // Zaokrouhlení dokladu jako v PUT ({@see UpdatePurchaseInvoiceAction}), až po přepočtu.
+            if (array_key_exists('rounding', $body) && is_numeric($body['rounding'])) {
+                $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
+            }
             $this->repo->replaceVatAllocations(
                 $id,
                 $supplierId,
@@ -298,12 +357,28 @@ final class CreatePurchaseInvoiceAction
                 $supplierId,
             );
         }
-        try {
-            $this->aiSuggestions->enqueuePurchase($supplierId, $id);
-        } catch (\Throwable) {
+        $preview = $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) === true;
+        // Fronta AI návrhů je vedlejší zápis: až po commitu a v náhledu zápisu vůbec.
+        if (!$preview) {
+            AfterCommit::run($this->db->pdo(), 'ai_suggestions.purchase.' . $id, function () use ($supplierId, $id): void {
+                $this->aiSuggestions->enqueuePurchase($supplierId, $id);
+            });
+        }
+
+        $transition = null;
+        if ($requestedStatus === 'received' && !$preview) {
+            $transition = $this->receiveCreated($request, $id);
         }
 
         $invoice = $this->repo->find($id, $supplierId);
+        if ($transition !== null && is_array($invoice)) {
+            $invoice['status_transition'] = $transition['status_transition'];
+            foreach (['posting', '_cash_settlement'] as $key) {
+                if (isset($transition[$key])) {
+                    $invoice[$key] = $transition[$key];
+                }
+            }
+        }
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
@@ -316,9 +391,15 @@ final class CreatePurchaseInvoiceAction
         if ($vendorUnreliablePayer) {
             $warnings[] = 'vendor_unreliable_payer';
         }
-        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet, viz helper).
-        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && self::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+        // Tentýž doklad dodavatele už může být v evidenci s jiným datem vystavení — unikátní
+        // index ho nechytí, editor proto jen upozorní a nabídne proklik na existující doklad.
+        $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
+        if ($likelyDuplicates !== []) {
+            $warnings[] = 'vendor_invoice_likely_duplicate';
+            $invoice['_warning_meta']['vendor_invoice_likely_duplicate'] = ['matches' => $likelyDuplicates];
+        }
+        // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH (viz helper).
+        if (is_array($invoice) && self::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';
         }
         // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.
@@ -348,6 +429,42 @@ final class CreatePurchaseInvoiceAction
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice, 201);
+    }
+
+    /**
+     * Přijetí právě založeného konceptu tou samou akcí, jakou volá tlačítko Přijmout.
+     * Koncept je v tu chvíli úplný a uložený; když přechod neprojde (schválení, kolize
+     * čísla, zámek), zůstane konceptem a odpověď to řekne v `status_transition`.
+     *
+     * @return array{status_transition: array<string,mixed>, posting?: mixed, _cash_settlement?: mixed}
+     */
+    private function receiveCreated(Request $request, int $id): array
+    {
+        $response = ($this->transition)(
+            $request->withParsedBody(['target' => 'received'])->withQueryParams([]),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $id],
+        );
+        $response->getBody()->rewind();
+        $body = (array) json_decode((string) $response->getBody(), true);
+        if ($response->getStatusCode() >= 300) {
+            return ['status_transition' => [
+                'requested' => 'received',
+                'result'    => 'failed',
+                'error'     => $body['error'] ?? ['code' => 'transition_failed', 'message' => 'Doklad se nepodařilo přijmout.'],
+            ]];
+        }
+        $out = ['status_transition' => [
+            'requested' => 'received',
+            'result'    => !empty($body['approval_requested']) ? 'approval_requested' : (string) ($body['status'] ?? 'received'),
+        ]];
+        foreach (['posting', '_cash_settlement'] as $key) {
+            if (isset($body[$key])) {
+                $out[$key] = $body[$key];
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -382,11 +499,48 @@ final class CreatePurchaseInvoiceAction
     }
 
     /**
-     * Varování `advance_has_tax_document`: finální faktura navázaná na zálohu, která má DDKP
-     * (daňový doklad k platbě). DPH ze zálohy už byla odečtena (343/314 na DDKP), takže
-     * vyúčtovací faktura smí v DPH/KH nárokovat jen DOPLATKOVOU daň — jinak dvojí odpočet.
-     * Deník to blokuje (advance_settlement_ambiguous), evidence DPH ale ne → měkké upozornění
-     * při uložení. Vrací true, když má navázaná záloha aspoň jeden živý DDKP.
+     * Zálohy k propojení z těla POST: `advance_purchase_invoice_ids` (víc záloh), jinak
+     * `advance_purchase_invoice_id`. Kladná id bez duplicit v pořadí z formuláře.
+     *
+     * @param array<string,mixed> $body
+     * @return list<int>
+     */
+    private static function advanceIdsFromBody(array $body): array
+    {
+        $raw = is_array($body['advance_purchase_invoice_ids'] ?? null)
+            ? $body['advance_purchase_invoice_ids']
+            : [$body['advance_purchase_invoice_id'] ?? 0];
+        $ids = [];
+        foreach ($raw as $value) {
+            $id = is_numeric($value) ? (int) $value : 0;
+            if ($id > 0 && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        return $ids;
+    }
+
+    /**
+     * Varování `advance_has_tax_document`: konečná faktura navázaná na zálohu s DDKP, která
+     * zálohu neodečítá odpočtovým řádkem ({@see PurchaseAdvanceDeduction}). DPH ze zálohy už
+     * uplatnil DDKP, faktura s daní v plné výši by ji v evidenci DPH a KH uplatnila podruhé.
+     * Deník takovou fakturu nezaúčtuje (advance_settlement_ambiguous), evidenci DPH to ale
+     * nezastaví. Táž podmínka hlídá staré doklady v Měsíční kontrole
+     * ({@see PurchaseAdvanceDeduction::finalsMissingDeduction()}).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    public static function finalRisksDoubleVatDeduction(Connection $db, array $invoice, int $supplierId): bool
+    {
+        if ((string) ($invoice['document_kind'] ?? 'invoice') !== 'invoice' || (int) ($invoice['id'] ?? 0) <= 0) {
+            return false;
+        }
+        return (new PurchaseAdvanceDeduction($db))->finalMissingDeduction($supplierId, (int) $invoice['id']);
+    }
+
+    /**
+     * Má navázaná záloha aspoň jeden DDKP (daňový doklad k platbě), nebo je sama
+     * samostatným DDKP? DPH ze zálohy je pak už uplatněná (343/314 na DDKP).
      */
     public static function advanceHasActiveTaxDocument(Connection $db, mixed $advanceId, int $supplierId): bool
     {

@@ -23,7 +23,7 @@ final class PayrollPersonQuickEditService
 
     /**
      * @param array<string,mixed> $input
-     * @return array{profile:array<string,mixed>,employment:?array<string,mixed>}
+     * @return array{profile:array<string,mixed>,employment:?array<string,mixed>,warnings:list<array{field:string,code:string,message:string}>}
      */
     public function save(
         int $supplierId,
@@ -80,7 +80,7 @@ final class PayrollPersonQuickEditService
                     $userId,
                     $ip,
                     $userAgent,
-                    true,
+                    $normalizedEmployment['replace_monthly_gross'],
                     $normalizedEmployment['monthly_gross_minor'],
                 );
             }
@@ -109,6 +109,7 @@ final class PayrollPersonQuickEditService
             return [
                 'profile' => $profile,
                 'employment' => $employment ?? $this->primaryEmployment($supplierId, $employeeId),
+                'warnings' => $normalizedEmployment['warnings'] ?? [],
             ];
         });
     }
@@ -141,9 +142,11 @@ final class PayrollPersonQuickEditService
     /**
      * @param array<string,mixed> $input
      * @return array{
+     *   warnings:list<array{field:string,code:string,message:string}>,
      *   id:int,
      *   row_version:int,
      *   monthly_gross_minor:?int,
+     *   replace_monthly_gross:bool,
      *   terms:TermsInput
      * }
      */
@@ -151,29 +154,46 @@ final class PayrollPersonQuickEditService
     {
         $id = $this->version($input['id'] ?? null, false);
         $rowVersion = $this->version($input['row_version'] ?? null, false);
-        if (!array_key_exists('monthly_gross_minor', $input)) {
+        $termsBody = $this->object($input['terms'] ?? null, 'employment.terms');
+        $current = $this->employments->currentTerms($supplierId, $id)
+            ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
+        $hourly = ($current['remuneration_type'] ?? null) === 'hourly';
+        $replaceMonthlyGross = array_key_exists('monthly_gross_minor', $input);
+        if ($hourly && $replaceMonthlyGross) {
+            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
+        }
+        if (!$hourly && !$replaceMonthlyGross) {
             throw new \InvalidArgumentException('employment.monthly_gross_minor je povinné.');
         }
-        $monthlyGross = $input['monthly_gross_minor'];
+        $monthlyGross = $input['monthly_gross_minor'] ?? null;
         if ($monthlyGross !== null && (!is_int($monthlyGross) || $monthlyGross < 0)) {
             throw new \InvalidArgumentException(
                 'Pravidelná hrubá mzda musí být nezáporná částka v haléřích.',
             );
         }
+        // Rychlá editace způsob odměňování nenabízí; změna patří na kartu vztahu.
+        foreach (PayrollEmploymentTermsBody::REMUNERATION_KEYS as $key) {
+            $termsBody[$key] = $current[$key];
+        }
         $terms = $this->employmentValidator->terms(
-            $this->object($input['terms'] ?? null, 'employment.terms'),
+            $termsBody,
             // Rychlá editace mění hlavně mzdu a osobní údaje — historický kód
             // CZ-ISCO mimo číselník ji nesmí zablokovat, dokud na něj nikdo nesáhne.
             $this->employments->currentCzIscoCode($supplierId, $id),
             // Zařazení pro srážkovou daň rychlá editace vůbec nenabízí, takže
             // ho nesmí přepsat na „neurčeno" — přebírá se uložené.
             $this->employments->currentOtherWithholdingEligibility($supplierId, $id),
+            // Pole, která rychlá editace nemění, neblokují uložení mzdy.
+            stored: $current,
+            warnings: $warnings,
         );
 
         return [
+            'warnings' => $warnings,
             'id' => $id,
             'row_version' => $rowVersion,
             'monthly_gross_minor' => $monthlyGross,
+            'replace_monthly_gross' => $replaceMonthlyGross,
             'terms' => $terms,
         ];
     }

@@ -20,8 +20,10 @@ const { t } = useI18n()
 
 <template>
   <div v-if="item.expense_kind || item.expense_account_code || item.vat_classification_code || item.accrual_from
-    || vatState?.state === 'allocations' || vatState?.state === 'no_claim_header'"
+    || item.advance_purchase_invoice_id || vatState?.state === 'allocations' || vatState?.state === 'no_claim_header'"
     class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+    <span v-if="item.advance_purchase_invoice_id" class="inline-block px-1.5 py-0.5 rounded bg-primary-50 text-primary-700"
+      :title="t('purchase_invoice.advance_deduction.badge_hint')">{{ t('purchase_invoice.advance_deduction.badge') }}</span>
     <span v-if="item.expense_kind" class="inline-block px-1.5 py-0.5 rounded"
       :class="item.expense_kind === 'fixed_asset' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">
       {{ t('purchase_invoice.expense_kind.' + item.expense_kind) }}

@@ -242,6 +242,15 @@ final class JournalSourceResolverTest extends TestCase
         self::assertSame('Podklad k nároku', $fields['note']);
         self::assertSame(1250, $fields['amount_to_pay']);
 
+        // Úhrada převzatá mimo evidenci se počítá stejně jako v detailu položky.
+        $pdo->prepare('UPDATE other_items SET settled_outside_amount = 500 WHERE id = ? AND supplier_id = ?')
+            ->execute([$itemId, $this->supplierId]);
+        $outside = array_column($this->summaries->summarize($this->supplierId, [
+            'source_type' => 'other_item', 'source_id' => $itemId,
+        ])['fields'], 'value', 'key');
+        self::assertEqualsWithDelta(500.0, $outside['paid_total'], 0.001);
+        self::assertEqualsWithDelta(750.0, $outside['amount_to_pay'], 0.001);
+
         $restrictedRequest = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/accounting/journal/' . $entryId . '/source')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)

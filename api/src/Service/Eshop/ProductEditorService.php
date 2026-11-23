@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemPromoPriceRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use MyInvoice\Support\Slugifier;
 
@@ -171,7 +172,7 @@ final class ProductEditorService
             'tracking_mode' => $trackingMode,
             'ean' => $this->stringOrNull($pick('ean')),
             'vat_rate_id' => $this->intOrNull($pick('vat_rate_id')),
-            'sale_price_without_vat' => $this->decimalOrNull($pick('sale_price_without_vat')),
+            'sale_price_without_vat' => $this->unitPriceOrNull($pick('sale_price_without_vat')),
             'min_qty' => $this->decimalOrNull($pick('min_qty')),
             ...$this->intrastat->normalize($input, $existing),
             'is_active' => (bool) (array_key_exists('is_active', $input) ? ($input['is_active'] ?? true) : ($existing['is_active'] ?? true)),
@@ -186,6 +187,15 @@ final class ProductEditorService
         }
         $string = trim((string) $value);
         return $string === '' ? null : $string;
+    }
+
+    private function unitPriceOrNull(mixed $value): ?string
+    {
+        $number = $this->decimalOrNull($value);
+        if ($number !== null && !UnitPricePrecision::isWithinPrecision($number)) {
+            throw new EshopException('validation_failed', 'Prodejní cena smí mít nejvýše šest desetinných míst.', 400);
+        }
+        return $number;
     }
 
     private function decimalOrNull(mixed $value): ?string

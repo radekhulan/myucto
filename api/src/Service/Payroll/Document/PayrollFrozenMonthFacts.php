@@ -22,7 +22,7 @@ final readonly class PayrollFrozenMonthFacts
     /** Složky, které jsou náhradou mzdy za dovolenou (§ 222 ZP). */
     private const VACATION_CODE_PREFIX = 'NAHRADA_MZDY_DOVOLENA';
 
-    private const OVERTIME_CODES = ['PRIPLATEK_PRESCAS'];
+    private const OVERTIME_CODES = ['PRIPLATEK_PRESCAS', 'MZDA_DOSAZENA_PRESCAS'];
 
     /** Nezdanitelné náhrady výdajů, které PAMICA vede mimo mzdu. */
     private const REIMBURSEMENT_CODES = ['NAHRADA_VYDAJU_PREVZATA'];

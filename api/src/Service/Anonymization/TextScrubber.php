@@ -37,6 +37,8 @@ final class TextScrubber
      */
     private const JSON_KEYS = [
         'costcenter' => 'cost_center',
+        // Členské číslo (audit oprav členské evidence) zachová tvar, ne hodnotu.
+        'membernumber' => 'shape',
         'companyname' => 'party_name', 'displayname' => 'party_name', 'partnername' => 'party_name',
         'vendorname' => 'party_name', 'buyername' => 'party_name', 'customername' => 'party_name',
         'counterpartyname' => 'party_name', 'payername' => 'party_name', 'payeename' => 'party_name',
@@ -170,7 +172,9 @@ final class TextScrubber
             'cost_center' => $this->pseudonymizer->costCenter($value),
             'shape' => $this->pseudonymizer->shape($value),
             'shape_digits' => $this->pseudonymizer->shapeDigits($value),
+            'payment_symbol' => $this->pseudonymizer->paymentSymbol($value),
             'symbol' => $this->pseudonymizer->symbol($value),
+            'cssz_variable_symbol' => $this->pseudonymizer->csszVariableSymbol($value),
             'file_name' => $this->pseudonymizer->fileName($value),
             'file_path' => $this->pseudonymizer->filePath($value),
             'text' => $this->scrub($value),

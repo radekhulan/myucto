@@ -109,7 +109,7 @@ describe('WorkspaceWindowSwitcher', () => {
     mocks.lockBodyScroll.mockReset()
     mocks.unlockBodyScroll.mockReset()
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
-      configurable: true,
+      configurable: true, writable: true,
       value: vi.fn(),
     })
   })

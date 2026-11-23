@@ -5,6 +5,7 @@ import { Features } from 'lightningcss'
 import { fileURLToPath, URL } from 'node:url'
 import i18nSplit from './plugins/i18n-split.mjs'
 import buildFiles from './plugins/build-files.mjs'
+import pdfjsAssets from './plugins/pdfjs-assets.mjs'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -28,8 +29,12 @@ export default defineConfig(({ mode }) => {
         },
       }),
       tailwindcss(),
+      pdfjsAssets(),
       buildFiles(),
     ],
+    worker: {
+      format: 'es',
+    },
     resolve: {
       alias: {
         '@shared': fileURLToPath(new URL('./shared', import.meta.url)),

@@ -295,6 +295,30 @@ final class Section18StatementsTest extends TestCase
         self::assertTrue($eq['reconciles']);
     }
 
+    /**
+     * Stornovaný zápis a jeho storno se ve výkazech vyruší stejně jako v hlavní knize.
+     * Filtr „jen nestornované zápisy" vyřadil originál, ale storno (samo nestornované)
+     * nechal, takže každé storno přičetlo minus originál.
+     */
+    public function testReversedEntryNetsOutInCashFlowAndEquity(): void
+    {
+        $this->post('221', '602', 100_000.0, '-03-10');
+        $wrong = $this->post('221', '602', 50_000.0, '-03-11');
+        $this->posting->reverse($this->supplierId, $wrong, ['entry_date' => self::YEAR . '-03-12', 'user_id' => $this->userId]);
+        $capital = $this->post('221', '411', 200_000.0, '-04-01');
+        $this->posting->reverse($this->supplierId, $capital, ['entry_date' => self::YEAR . '-04-02', 'user_id' => $this->userId]);
+
+        $cf = $this->cashFlow->build($this->supplierId, $this->periodId);
+        self::assertEqualsWithDelta(100_000.0, $cf['net_change'], 0.01, 'Storno se v peněžních tocích započítalo bez originálu.');
+        self::assertEqualsWithDelta(100_000.0, $cf['operating'], 0.01);
+        self::assertEqualsWithDelta(0.0, $cf['financing'], 0.01);
+        self::assertTrue($cf['reconciles']);
+
+        $eq = $this->equity->build($this->supplierId, $this->periodId);
+        self::assertEqualsWithDelta(0.0, $eq['totals']['closing'], 0.01, 'Storno vkladu ubralo kapitál, který nikdy nepřibyl.');
+        self::assertTrue($eq['reconciles']);
+    }
+
     /** Bez pohybů je výkaz prázdný, ale pořád konzistentní. */
     public function testEmptyPeriodStillReconciles(): void
     {
@@ -362,9 +386,9 @@ final class Section18StatementsTest extends TestCase
         ]);
     }
 
-    private function post(string $debit, string $credit, float $amount, string $mmdd): void
+    private function post(string $debit, string $credit, float $amount, string $mmdd): int
     {
-        $this->posting->postDocument($this->supplierId, 'manual', null, [
+        return $this->posting->postDocument($this->supplierId, 'manual', null, [
             ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount],
             ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
         ], [

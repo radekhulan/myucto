@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Admin\DiagnosticsAction;
 use MyInvoice\Action\Admin\PayrollArchiveEncryptionAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\Payroll\Document\PayrollArchiveDiagnostics;
@@ -48,7 +47,7 @@ final class PayrollArchiveEncryptionFlowTest extends TestCase
         mkdir($this->dataDir, 0750, true);
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
 
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $this->container->get(Connection::class);
         foreach (['payroll_document_data_keys', 'payroll_generated_documents', 'payroll_annual_document_revisions'] as $table) {
             if (!$this->db->hasTable($table)) {

@@ -22,6 +22,7 @@ final class CashRegisterRepository
     public function listForTenant(int $supplierId, bool $includeInactive = false): array
     {
         $sql = 'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
+                    opening_foreign_amount, opening_foreign_date,
                        created_at, updated_at
                   FROM cash_registers
                  WHERE supplier_id = ?';
@@ -38,6 +39,7 @@ final class CashRegisterRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
+                    opening_foreign_amount, opening_foreign_date,
                     created_at, updated_at
                FROM cash_registers
               WHERE supplier_id = ? AND id = ?'
@@ -51,6 +53,7 @@ final class CashRegisterRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
+                    opening_foreign_amount, opening_foreign_date,
                     created_at, updated_at
                FROM cash_registers
               WHERE supplier_id = ? AND account_code = ?'
@@ -84,7 +87,7 @@ final class CashRegisterRepository
     /**
      * Aktualizuje povolená pole (name/account_code/is_default/own_series/is_active).
      *
-     * @param array{name?:string, account_code?:string, is_default?:bool, own_series?:bool, is_active?:bool} $data
+     * @param array{name?:string, account_code?:string, is_default?:bool, own_series?:bool, is_active?:bool, opening_foreign_amount?:?float, opening_foreign_date?:?string} $data
      */
     public function update(int $supplierId, int $id, array $data): bool
     {
@@ -100,6 +103,12 @@ final class CashRegisterRepository
             if (array_key_exists($key, $data)) {
                 $sets[] = "$key = ?";
                 $params[] = (int) $data[$key];
+            }
+        }
+        foreach (['opening_foreign_amount', 'opening_foreign_date'] as $key) {
+            if (array_key_exists($key, $data)) {
+                $sets[] = "$key = ?";
+                $params[] = $data[$key];
             }
         }
         if ($sets === []) {
@@ -183,6 +192,8 @@ final class CashRegisterRepository
         $r['is_default'] = (bool) $r['is_default'];
         $r['own_series'] = (bool) ($r['own_series'] ?? false);
         $r['is_active'] = (bool) $r['is_active'];
+        $r['opening_foreign_amount'] = isset($r['opening_foreign_amount']) ? (float) $r['opening_foreign_amount'] : null;
+        $r['opening_foreign_date'] = isset($r['opening_foreign_date']) ? substr((string) $r['opening_foreign_date'], 0, 10) : null;
         return $r;
     }
 }

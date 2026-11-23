@@ -419,6 +419,40 @@ document.querySelectorAll('.content a[href^="http"]').forEach(a => {
     });
     input.addEventListener('blur', () => setTimeout(() => results.classList.remove('active'), 200));
 })();
+
+// ── Diagramy mermaid ──
+// Knihovna se načte z CDN jen v kapitole, která diagram má (do distribuce se
+// nebalí). Bez sítě nebo při chybě zůstane vidět zdrojový text diagramu.
+(function () {
+    const nodes = Array.from(document.querySelectorAll('pre.mermaid'));
+    if (!nodes.length) return;
+    const MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@12.2.0/dist/mermaid.esm.min.mjs';
+    nodes.forEach(n => { n.dataset.src = n.textContent; });
+    let mermaid = null;
+    let renderedDark = null;
+    async function render() {
+        const dark = document.documentElement.classList.contains('dark');
+        if (dark === renderedDark) return;
+        renderedDark = dark;
+        try {
+            if (!mermaid) mermaid = (await import(MERMAID_URL)).default;
+            mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: 'strict',
+                theme: dark ? 'dark' : 'default',
+                flowchart: { wrappingWidth: 320 },
+            });
+            nodes.forEach(n => { n.removeAttribute('data-processed'); n.textContent = n.dataset.src; });
+            await mermaid.run({ nodes });
+            nodes.forEach(n => { n.classList.add('mermaid-rendered'); });
+        } catch (e) {
+            renderedDark = null;
+            nodes.forEach(n => { n.classList.remove('mermaid-rendered'); n.textContent = n.dataset.src; });
+        }
+    }
+    render();
+    new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+})();
 </script>
 </body>
 </html>

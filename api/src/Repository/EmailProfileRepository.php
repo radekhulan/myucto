@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use PDO;
 
 /**
@@ -80,7 +81,7 @@ final class EmailProfileRepository
             if ($this->secretTargetValue($data[$field]) === $this->secretTargetValue($current[$field] ?? null)) continue;
 
             throw new \InvalidArgumentException(
-                'Měníš server, port nebo přihlašovací jméno — pole ' . $passwordField . ' je proto nutné vyplnit znovu.'
+                'Měníte server, port nebo přihlašovací jméno, pole ' . $passwordField . ' je proto nutné vyplnit znovu.'
             );
         }
     }
@@ -123,17 +124,24 @@ final class EmailProfileRepository
      */
     public function findProfile(int $supplierId, int $profileId, bool $includeDeleted = false, bool $includeSecret = false): ?array
     {
+        $row = $this->profileRow($supplierId, $profileId, $includeDeleted);
+        return $row !== null ? $this->hydrate($row, $includeSecret) : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function profileRow(int $supplierId, int $profileId, bool $includeDeleted = false, bool $lock = false): ?array
+    {
         $sql = 'SELECT ep.*, sp.name AS signing_profile_name, sp.code AS signing_profile_code
                   FROM email_profiles ep
              LEFT JOIN signing_profiles sp ON sp.id = ep.signing_profile_id
                  WHERE ep.supplier_id = ? AND ep.id = ?'
              . ($includeDeleted ? '' : ' AND ep.deleted_at IS NULL')
-             . ' LIMIT 1';
+             . ' LIMIT 1' . ($lock ? ' FOR UPDATE' : '');
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $profileId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $row !== false ? $this->hydrate($row, $includeSecret) : null;
+        return $row !== false ? $row : null;
     }
 
     /**
@@ -164,7 +172,12 @@ final class EmailProfileRepository
     public function createProfile(int $supplierId, array $data, ?int $createdBy = null): int
     {
         $normalized = $this->normalize($supplierId, $data, false);
+        return $this->writeProfile(fn (): int => $this->insertProfile($supplierId, $normalized, $createdBy));
+    }
 
+    /** @param array<string,mixed> $normalized */
+    private function insertProfile(int $supplierId, array $normalized, ?int $createdBy): int
+    {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO email_profiles
                 (supplier_id, name, code, from_email, from_name, reply_to_email, reply_to_name,
@@ -174,9 +187,9 @@ final class EmailProfileRepository
                  smtp_verify_peer_name, smtp_allow_self_signed, smtp_timeout, smtp_keepalive,
                  sendmail_command, imap_sent_enabled, imap_host, imap_port, imap_encryption,
                  imap_validate_cert, imap_username, imap_password_enc, imap_folder, imap_create_folder,
-                 imap_mark_seen, imap_timeout, imap_on_failure,
+                 imap_mark_seen, imap_timeout, imap_on_failure, imap_auth_mode, imap_oauth_tenant_id, imap_oauth_client_id,
                  is_default, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId,
@@ -217,11 +230,22 @@ final class EmailProfileRepository
             $normalized['imap_mark_seen'] ? 1 : 0,
             $normalized['imap_timeout'],
             $normalized['imap_on_failure'],
+            $normalized['imap_auth_mode'],
+            $normalized['imap_oauth_tenant_id'],
+            $normalized['imap_oauth_client_id'],
             $normalized['is_default'] ? 1 : 0,
             $normalized['is_active'] ? 1 : 0,
             $createdBy,
         ]);
         $id = (int) $this->db->pdo()->lastInsertId();
+        if ($normalized['imap_auth_mode'] === ImapAuthSettings::MICROSOFT) {
+            $this->db->pdo()->prepare(
+                'UPDATE email_profiles SET imap_oauth_client_secret_enc = ? WHERE supplier_id = ? AND id = ?'
+            )->execute([
+                ImapAuthSettings::encryptedSecret($this->secrets, $normalized, $supplierId, $id, ImapAuthSettings::SENT, 'imap_'),
+                $supplierId, $id,
+            ]);
+        }
 
         if ($normalized['is_default']) {
             $this->clearOtherDefaults($supplierId, $id);
@@ -239,11 +263,18 @@ final class EmailProfileRepository
         array $changes,
         bool $strictSecretReuse = false,
     ): bool {
-        $current = $this->findProfile($supplierId, $profileId);
-        if ($current === null) {
+        return $this->writeProfile(fn (): bool => $this->persistProfileChanges($supplierId, $profileId, $changes, $strictSecretReuse));
+    }
+
+    /** @param array<string,mixed> $changes */
+    private function persistProfileChanges(int $supplierId, int $profileId, array $changes, bool $strictSecretReuse): bool
+    {
+        $row = $this->profileRow($supplierId, $profileId, lock: true);
+        if ($row === null) {
             return false;
         }
-        $currentWithSecret = $this->findProfile($supplierId, $profileId, false, true);
+        $current = $this->hydrate($row);
+        $currentWithSecret = $this->hydrate($row, true);
 
         $merged = $current;
         foreach ($changes as $key => $value) {
@@ -262,7 +293,9 @@ final class EmailProfileRepository
             );
             $merged['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
         }
-        if ($currentWithSecret !== null
+        if (!empty($merged['imap_sent_enabled'])
+            && ($merged['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+            && $currentWithSecret !== null
             && (!array_key_exists('imap_password', $changes) || trim((string) ($changes['imap_password'] ?? '')) === '')
         ) {
             $this->assertSecretTargetUnchanged(
@@ -284,7 +317,7 @@ final class EmailProfileRepository
             $merged['dkim_enabled'] = trim((string) ($merged['dkim_domain'] ?? '')) !== ''
                 || trim((string) ($merged['dkim_selector'] ?? '')) !== '';
         }
-        $normalized = $this->normalize($supplierId, $merged, true, $profileId);
+        $normalized = $this->normalize($supplierId, $merged, true, $profileId, $currentWithSecret);
 
         $stmt = $this->db->pdo()->prepare(
             'UPDATE email_profiles
@@ -298,7 +331,8 @@ final class EmailProfileRepository
                     imap_sent_enabled = ?, imap_host = ?, imap_port = ?, imap_encryption = ?,
                     imap_validate_cert = ?, imap_username = ?, imap_password_enc = ?,
                     imap_folder = ?, imap_create_folder = ?, imap_mark_seen = ?,
-                    imap_timeout = ?, imap_on_failure = ?,
+                    imap_timeout = ?, imap_on_failure = ?, imap_auth_mode = ?,
+                    imap_oauth_tenant_id = ?, imap_oauth_client_id = ?, imap_oauth_client_secret_enc = ?,
                     is_default = ?, is_active = ?
               WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL'
         );
@@ -340,6 +374,10 @@ final class EmailProfileRepository
             $normalized['imap_mark_seen'] ? 1 : 0,
             $normalized['imap_timeout'],
             $normalized['imap_on_failure'],
+            $normalized['imap_auth_mode'],
+            $normalized['imap_oauth_tenant_id'],
+            $normalized['imap_oauth_client_id'],
+            ImapAuthSettings::encryptedSecret($this->secrets, $normalized, $supplierId, $profileId, ImapAuthSettings::SENT, 'imap_'),
             $normalized['is_default'] ? 1 : 0,
             $normalized['is_active'] ? 1 : 0,
             $supplierId,
@@ -351,6 +389,28 @@ final class EmailProfileRepository
         }
 
         return $stmt->rowCount() > 0;
+    }
+
+    /** @template T @param callable():T $operation @return T */
+    private function writeProfile(callable $operation): mixed
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $result = $operation();
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            return $result;
+        } catch (\Throwable $error) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $error;
+        }
     }
 
     /**
@@ -391,7 +451,9 @@ final class EmailProfileRepository
                 );
                 $draft['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
             }
-            if ($currentWithSecret !== null
+            if (!empty($draft['imap_sent_enabled'])
+                && ($draft['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+                && $currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
                 $this->assertSecretTargetUnchanged(
@@ -416,7 +478,7 @@ final class EmailProfileRepository
                 || trim((string) ($draft['dkim_selector'] ?? '')) !== '';
         }
 
-        $normalized = $this->normalize($supplierId, $draft, $profileId !== null, $profileId);
+        $normalized = $this->normalize($supplierId, $draft, $profileId !== null, $profileId, $currentWithSecret ?? []);
         $normalized['id'] = $profileId;
         $normalized['supplier_id'] = $supplierId;
 
@@ -428,12 +490,7 @@ final class EmailProfileRepository
      * Nevyžaduje vyplněný celý odesílací profil, pouze údaje nutné pro IMAP.
      *
      * @param array<string,mixed> $data
-     * @return array{
-     *   imap_sent_enabled:bool,imap_host:string,imap_port:int,imap_encryption:string,
-     *   imap_validate_cert:bool,imap_username:string,imap_password:string,
-     *   imap_folder:string,imap_create_folder:bool,imap_mark_seen:bool,
-     *   imap_timeout:int,imap_on_failure:string
-     * }
+     * @return array<string,mixed>
      */
     public function imapProbeSettingsForDraft(
         int $supplierId,
@@ -452,7 +509,8 @@ final class EmailProfileRepository
             foreach ($data as $key => $value) {
                 $draft[$key] = $value;
             }
-            if ($currentWithSecret !== null
+            if (($draft['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+                && $currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
                 $this->assertSecretTargetUnchanged(
@@ -467,12 +525,16 @@ final class EmailProfileRepository
             }
         }
 
+        $auth = ImapAuthSettings::normalize($draft, $currentWithSecret ?? [], 'imap_');
+        $draft = array_replace($draft, $auth);
         $password = $this->nullableString($draft['imap_password'] ?? null, 'imap_password', 255);
-        if ($password === null) {
+        if ($auth['imap_auth_mode'] === ImapAuthSettings::PASSWORD && $password === null) {
             throw new \InvalidArgumentException('Pole imap_password je pro načtení složek povinné.');
         }
 
         return [
+            'supplier_id' => $supplierId,
+            'id' => $profileId,
             'imap_sent_enabled' => true,
             'imap_host' => $this->nonEmpty((string) ($draft['imap_host'] ?? ''), 'imap_host', 190),
             'imap_port' => max(1, min(65535, (int) ($draft['imap_port'] ?? 993))),
@@ -485,7 +547,7 @@ final class EmailProfileRepository
             'imap_mark_seen' => (bool) ($draft['imap_mark_seen'] ?? true),
             'imap_timeout' => max(1, min(300, (int) ($draft['imap_timeout'] ?? 30))),
             'imap_on_failure' => $this->oneOf((string) ($draft['imap_on_failure'] ?? 'log_only'), self::IMAP_ON_FAILURES, 'imap_on_failure'),
-        ];
+        ] + $auth;
     }
 
     public function softDeleteProfile(int $supplierId, int $profileId): bool
@@ -493,7 +555,7 @@ final class EmailProfileRepository
         $code = $this->deletedProfileCode($supplierId, $profileId);
         $stmt = $this->db->pdo()->prepare(
             'UPDATE email_profiles
-                SET code = ?, deleted_at = CURRENT_TIMESTAMP, is_active = 0, is_default = 0
+                SET code = ?, deleted_at = CURRENT_TIMESTAMP, is_active = 0, is_default = 0, imap_oauth_client_secret_enc = NULL
               WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL'
         );
         $stmt->execute([$code, $supplierId, $profileId]);
@@ -529,7 +591,7 @@ final class EmailProfileRepository
      *   is_default:bool,is_active:bool
      * }
      */
-    private function normalize(int $supplierId, array $data, bool $updating, ?int $profileId = null): array
+    private function normalize(int $supplierId, array $data, bool $updating, ?int $profileId = null, array $current = []): array
     {
         $name = $this->nonEmpty((string) ($data['name'] ?? ''), 'name', 120);
         $code = $this->code((string) ($data['code'] ?? ''));
@@ -575,6 +637,8 @@ final class EmailProfileRepository
         $smtpKeepalive = false;
         $sendmailCommand = null;
         $imapSentEnabled = (bool) ($data['imap_sent_enabled'] ?? false);
+        $imapAuth = ImapAuthSettings::normalize($imapSentEnabled ? $data : [], $current, 'imap_');
+        $data = array_replace($data, $imapAuth);
         $imapHost = null;
         $imapPort = null;
         $imapEncryption = 'ssl';
@@ -621,10 +685,12 @@ final class EmailProfileRepository
             $imapValidateCert = (bool) ($data['imap_validate_cert'] ?? true);
             $imapUsername = $this->nonEmpty((string) ($data['imap_username'] ?? ''), 'imap_username', 190);
             $imapPassword = $this->nullableString($data['imap_password'] ?? null, 'imap_password', 255);
-            if ($imapPassword === null) {
-                throw new \InvalidArgumentException('Při zapnutém ukládání do IMAP je pole imap_password povinné.');
+            if ($imapAuth['imap_auth_mode'] === ImapAuthSettings::PASSWORD) {
+                if ($imapPassword === null) {
+                    throw new \InvalidArgumentException('Při zapnutém ukládání do IMAP je pole imap_password povinné.');
+                }
+                $imapPasswordEnc = $this->secrets->encrypt($imapPassword);
             }
-            $imapPasswordEnc = $this->secrets->encrypt($imapPassword);
             $imapFolder = $this->nonEmpty((string) ($data['imap_folder'] ?? 'Sent'), 'imap_folder', 190);
             $imapCreateFolder = (bool) ($data['imap_create_folder'] ?? false);
             $imapMarkSeen = (bool) ($data['imap_mark_seen'] ?? true);
@@ -680,7 +746,7 @@ final class EmailProfileRepository
             'imap_on_failure' => $imapOnFailure,
             'is_default' => $isDefault,
             'is_active' => $isActive,
-        ];
+        ] + $imapAuth;
     }
 
     private function assertSigningProfile(int $supplierId, int $profileId): void
@@ -913,6 +979,10 @@ final class EmailProfileRepository
             'imap_validate_cert' => (int) ($row['imap_validate_cert'] ?? 1) === 1,
             'imap_username' => ($row['imap_username'] ?? null) !== null ? (string) $row['imap_username'] : null,
             'has_imap_password' => $imapPasswordEnc !== '',
+            'imap_auth_mode' => (string) ($row['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD),
+            'imap_oauth_tenant_id' => $row['imap_oauth_tenant_id'] ?? null,
+            'imap_oauth_client_id' => $row['imap_oauth_client_id'] ?? null,
+            'has_imap_oauth_client_secret' => !empty($row['imap_oauth_client_secret_enc']),
             'imap_folder' => ($row['imap_folder'] ?? null) !== null ? (string) $row['imap_folder'] : null,
             'imap_create_folder' => (int) ($row['imap_create_folder'] ?? 0) === 1,
             'imap_mark_seen' => (int) ($row['imap_mark_seen'] ?? 1) === 1,
@@ -931,6 +1001,10 @@ final class EmailProfileRepository
         }
         if ($includeSecret && $imapPasswordEnc !== '') {
             $profile['imap_password'] = $this->secrets->decrypt($imapPasswordEnc);
+        }
+
+        if ($includeSecret) {
+            $profile['imap_oauth_client_secret_enc'] = $row['imap_oauth_client_secret_enc'] ?? null;
         }
 
         return $profile;

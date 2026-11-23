@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Export;
 
 use MyInvoice\Service\Invoice\TimeBilling;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class TimeBillingExport
 {
@@ -35,17 +36,15 @@ final class TimeBillingExport
     }
 
     /** @param array<string,mixed> $item */
-    public static function usesPreciseHourlyRate(array $item): bool
+    public static function usesPreciseUnitPrice(array $item): bool
     {
         return self::durationMinutes($item) !== null
-            || ((!isset($item['stock_item_id']) || (int) $item['stock_item_id'] <= 0)
-                && TimeBilling::isHourUnit($item['unit'] ?? null)
-                && abs((float) ($item['unit_price_without_vat'] ?? 0) - round((float) ($item['unit_price_without_vat'] ?? 0), 2)) > 0.0000001);
+            || UnitPricePrecision::hasSubCentPrecision((float) ($item['unit_price_without_vat'] ?? 0));
     }
 
     public static function formatRate(float $rate): string
     {
-        return self::trimmed($rate, 6, 2);
+        return self::trimmed($rate, UnitPricePrecision::DECIMALS, UnitPricePrecision::MIN_DISPLAY_DECIMALS);
     }
 
     private static function trimmed(float $value, int $maxDecimals, int $minDecimals): string

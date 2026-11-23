@@ -476,6 +476,34 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Oba ročníky berou výčet EDV s listem 2119. Uložený kód 2219 (tisková
+     * chyba sdělení ČSÚ č. 401/2024 Sb. převzatá do iSMS) se při čtení
+     * převede na 2119, takže vadou není ani v jednom ročníku; neznámý kód ano.
+     */
+    public function testEmploymentStatusCodebookFollowsVintage(): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        $scope2027 = ['effective_on' => '2027-01-15'] + self::scope();
+        foreach ([
+            ['2219', self::scope(), false],
+            ['2119', self::scope(), false],
+            ['2219', $scope2027, false],
+            ['2119', $scope2027, false],
+            ['2229', self::scope(), true],
+            ['2229', $scope2027, true],
+        ] as [$code, $scope, $problem]) {
+            $source = self::source('1', '1');
+            $source['employment']['employment_status_code'] = $code;
+            $problems = array_column($builder->problems($source, self::identity(), $scope), 'message', 'field');
+            self::assertSame(
+                $problem,
+                array_key_exists('employment.employment_status_code', $problems),
+                $code . ' k ' . $scope['effective_on'],
+            );
+        }
+    }
+
     public function testFourDigitEmploymentStatusReachesXmlAndPassesXsd(): void
     {
         $source = self::source('1', '1');
@@ -768,7 +796,7 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
                 'contract_workplace' => 'Testov',
                 'workplace_city' => 'Testov',
                 'workplace_municipality_code' => '554782',
-                'profession_code' => '24110',
+                'profession_code' => '24111',
                 'required_education_code' => 'T',
                 'position_name' => 'Účetní',
                 'leadership' => false,

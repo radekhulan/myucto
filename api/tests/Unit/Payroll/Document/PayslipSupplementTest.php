@@ -70,6 +70,19 @@ final class PayslipSupplementTest extends TestCase
         self::assertSame('other', PayrollFrozenMonthFacts::group('NEPENEZNI_PRIJEM', 'non_cash'));
     }
 
+    public function testWageSheetGroupsAchievedOvertimeWithItsPremium(): void
+    {
+        $input = self::inputPerson();
+        $input['employments'][0]['inputs'][] = ['id' => 14, 'component' => ['code' => 'MZDA_DOSAZENA_PRESCAS', 'name' => 'Dosažená mzda za přesčas', 'component_kind' => 'hourly_wage']];
+        $input['employments'][0]['inputs'][] = ['id' => 15, 'component' => ['code' => 'PRIPLATEK_PRESCAS', 'name' => 'Příplatek za přesčas', 'component_kind' => 'premium']];
+        $result = self::resultPerson();
+        $result['employments'][0]['inputs'][] = ['input_id' => 14, 'totals' => ['source_amount_minor' => 16800]];
+        $result['employments'][0]['inputs'][] = ['input_id' => 15, 'totals' => ['source_amount_minor' => 4200]];
+        $totals = PayrollFrozenMonthFacts::fromFrozen($input, $result)->groupTotals();
+        self::assertSame(21000, $totals['overtime_pay']);
+        self::assertSame(2407300, $totals['base_wage']);
+    }
+
     public function testMissingAttendanceStaysUnknownNotZero(): void
     {
         $input = self::inputPerson();

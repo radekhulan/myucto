@@ -10,6 +10,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
+use MyInvoice\Service\Invoice\TaxDocumentAdvanceLink;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -20,6 +21,8 @@ final class GetInvoiceAction
         private readonly ExchangeRateApplier $rateApplier,
         private readonly DocumentLockService $locks,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLinks,
+        private readonly TaxDocumentAdvanceLink $taxDocumentLinks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -51,7 +54,8 @@ final class GetInvoiceAction
         $invoice['payment_schedule'] = $this->paymentSchedule->forInvoice($sid, $id);
 
         $invoice['cash_documents'] = $this->repo->cashDocumentsForInvoice($sid, $id);
+        $invoice = $this->taxDocumentLinks->withDetail($sid, $invoice);
 
-        return Json::ok($response, $invoice);
+        return Json::ok($response, $this->otherItemLinks->withLink($sid, $invoice));
     }
 }

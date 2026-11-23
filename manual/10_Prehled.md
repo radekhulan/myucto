@@ -114,6 +114,8 @@ Dva panely jsou dostupné od šířky pracovního prostoru 1 100 px, tři od 1 6
 1. Ve spodní liště klikněte na ikonu slunce nebo měsíce - přepne se **světlý** a **tmavý** motiv.
 2. Kliknutím na vlaječku přepnete jazyk na druhý dostupný.
 
+Na telefonu jsou obě tlačítka dole v **Menu** (spodní lišta vpravo).
+
 Volba se uloží v prohlížeči. Podrobnosti jsou v [§ 10.10.12](#101012-vzhled-jazyk-svetly-a-tmavy-rezim).
 
 ### 10.7.4 Přepnutí firmy
@@ -151,15 +153,15 @@ Výchozí zkratky jsou v [§ 10.10.11](#101011-klavesove-zkratky).
 
 ### 10.10.1 KPI dlaždice
 
-Horní řada dlaždic se přizpůsobí počtu aktivních měn (4 až 6 dlaždic):
+Horní řada dlaždic se přizpůsobí měnám vráceným v přehledu; obrat není
+omezený jen na CZK a EUR:
 
 <!-- cols: 30 70 -->
 | Dlaždice | Význam |
 |---|---|
-| **Obrat YYYY (CZK)** | Součet všech vystavených (i nezaplacených) faktur v CZK za aktuální rok. Pod číslem je pro porovnání obrat minulého roku ve stejném období. |
-| **Obrat YYYY (EUR)** | Totéž pro EUR, jen pokud je měna EUR aktivní v číselnících. |
-| **Vystaveno YYYY** | Počet faktur za rok (všechny stavy kromě konceptů). |
-| **Po splatnosti** | Suma neuhrazených faktur po splatnosti, součet CZK a EUR, červeně. Klik otevře filtrovaný seznam. |
+| **Obrat YYYY (měna)** | Obrat za aktuální rok v dané měně, včetně nezaplacených vystavených dokladů. Pod číslem je pro porovnání stejné období minulého roku; každá měna má vlastní dlaždici. |
+| **Vystaveno YYYY** | Počet běžných faktur, dobropisů a daňových dokladů k platbě za rok, bez konceptů, storen a proforem. |
+| **Po splatnosti** | Počet neuhrazených faktur po splatnosti; pod ním částky odděleně podle měn. Měny se nesčítají. Klik otevře filtrovaný seznam. |
 | **Ø doba úhrady** | Průměrný počet dní mezi vystavením a zaplacením (jen letošní zaplacené faktury). |
 
 ### 10.10.2 Top klienti
@@ -261,9 +263,16 @@ Na desktopu má aplikace dvě stálé lišty:
 - **spodní lišta** - vlevo společné hledání v menu, klientech a dokladech, uprostřed přepínač firem (jen v režimu horního menu) a vpravo jazyk, světlý nebo tmavý motiv a na širokém desktopu také verze a odkazy aplikace. Na užším desktopu se sem z horní lišty přesune přepínač panelů, rychlé vytvoření a nápověda, verze a odkazy ustoupí.
 - **režim levého menu** - přepínač firem se přesune do pravé části hlavičky, kde je od ostatních akcí oddělený svislou čárou.
 
-Máte-li víc firem, hledání (**Alt+Q**) i paleta příkazů (**Ctrl+K**) nabízí ve skupině **Přepnout firmu** i firmy podle názvu nebo IČ. Aktuální firma se nenabízí.
+Hledání v patičce (**Alt+Q**), paleta příkazů (**Ctrl+K**) a hledání na nové záložce najdou totéž. Liší se jen vzhledem: paleta je okno uprostřed obrazovky s barevnými ikonami a bez zadaného textu nabízí rychlé akce. Hledá se v těchto skupinách:
 
-Hledání (**Alt+Q**) najde také zaměstnance podle jména, příjmení nebo osobního čísla, a to ve všech firmách, kde smíte číst mzdy. U zaměstnance z jiné firmy je uveden její název; jeho volbou se firma přepne a otevře se karta osoby.
+- **Akce** - založení nového záznamu, například „nová faktura" najde akci **Vydaná faktura**.
+- **Menu** - položky menu podle názvu i sekce. Stačí i počáteční písmena slov, „vyfa" najde **Vydané faktury**.
+- **Přepnout firmu** - máte-li víc firem, firmy podle názvu nebo IČ. Aktuální firma se nenabízí.
+- **Klienti** - podle názvu, e-mailu, IČ nebo DIČ.
+- **Zaměstnanci** - podle jména, příjmení nebo osobního čísla, vždy ve všech firmách, kde smíte číst mzdy.
+- **Vydané faktury** a **Přijaté faktury** - podle čísla dokladu, variabilního symbolu nebo čísla dokladu dodavatele.
+
+Klienty a faktury hledá aplikace nejdřív v aktuální firmě. Když tam v dané skupině nic nenajde, prohledá od třetího znaku i ostatní vaše firmy, ve kterých smíte klienty, vydané nebo přijaté faktury číst. Číslo dokladu se v ostatních firmách porovnává od začátku, takže zadejte jeho počátek nebo celé číslo. U výsledku z jiné firmy je uveden její název; jeho volbou se firma přepne a otevře se karta klienta, doklad nebo karta zaměstnance.
 
 Otevřete-li odkaz na doklad jiné firmy (vydaná či přijatá faktura, zápis v deníku, pokladní doklad, ostatní položka, bankovní výpis, dokument, skladový doklad nebo objednávka) a máte do té firmy přístup, aplikace na ni přepne sama a doklad otevře. Do firmy, ke které přístup nemáte, se nepřepíná a doklad se nezobrazí.
 
@@ -271,7 +280,14 @@ Pokud v sekci **Systém** zůstane pouze **Nápověda (manuál)**, horní menu t
 
 Pokud by se názvy sekcí do horní lišty nevešly, aplikace to změří a automaticky zobrazí menu jako trvalý levý panel. Na dostatečně široké obrazovce můžete mezi horní a levou variantou přepnout tlačítkem **Styl menu** ve spodní liště. Přetékající horní variantu nelze vynutit. Výchozí je horní menu, ručně zvolená levá varianta se uloží do cookie tohoto prohlížeče. Přepínač rozložení nabízí horní menu, plný levý panel a kompaktní levý pruh. Sbalovací šipka v prvním řádku plného panelu přepne na kompaktní pruh s výraznými barevnými ikonami sekcí, šipka nahoře v pruhu znovu otevře plný panel. Všechny varianty používají stejné sekce, například **Sklad** a **Nástroje**.
 
-Na menších obrazovkách se v hlavičce vedle loga zobrazuje celý název aplikace a hlavní nabídka se otevírá tlačítkem **☰** zprava. Přepínač firmy pod hlavičkou využívá celou dostupnou šířku. Jazyk a motiv zůstávají ve spodní liště, jazyk přepíná jediná vlaječka na druhý dostupný jazyk.
+Na telefonu na výšku (a na menších obrazovkách bez kompaktního pruhu) je navigace ve **spodní liště** s velkými ikonami **Přehled**, **Prodej**, **Nákup**, **Peníze** a **Menu**:
+
+- **Prodej** otevře nabídku s dlaždicemi **Vystavit fakturu**, **Účtenka** (zjednodušený daňový doklad, jen plátce DPH, viz [§ 15.3.3](15_Faktura_editor.md#1533-uctenka-z-telefonu-zjednoduseny-danovy-doklad)), **Nová zakázka** a **Nový klient**, pod nimi jsou všechny položky sekce Prodej.
+- **Nákup** nabízí **Vyfotit doklad**: otevře fotoaparát, fotku nechá oříznout a rovnou ji pošle k AI vytěžení přijaté faktury. Dále **Nahrát doklad**, **Přijatá faktura** a **Nový dodavatel**.
+- **Peníze** ukazuje stav bankovních účtů podle posledního výpisu nebo avíza a zůstatky pokladen, dlaždice **Příjem do pokladny**, **Výdej z pokladny**, **Kdo mi dluží**, **Co zaplatit** (neuhrazené vydané a přijaté faktury) a **Zapsat jízdu**. Pod položkami sekce Peníze jsou i **Dokumenty** (dokumenty, chybějící doklady, předání dokladů, skeny, kniha jízd); na jejich stránkách svítí záložka Peníze.
+- **Menu** otevře úplné menu se všemi sekcemi (Daně, Účetnictví, Nástroje, Mzdy, Firma, Systém...). Sekce jsou sbalené, otevřená je ta, ve které právě jste. Dole je jazyk, motiv, oblíbené a odhlášení.
+
+Každá dlaždice se zobrazí jen tomu, kdo má k akci oprávnění, stejně jako v menu. Na telefonu jsou detailní stránky zjednodušené: lišta akcí ukazuje jen hlavní krok a ostatní akce otevře **…** jako nabídku zespodu, hromadné akce nad vybranými řádky jsou pod tlačítkem **Akce**, detail faktury začíná souhrnem částky, splatnosti a stavu úhrady a Příchozí doklady se procházejí po jednom (šipkami nebo přejetím prstem). V hlavičce vpravo jsou **Okna** (s počtem otevřených oken), hledání (v menu, klientech a dokladech) a tlačítko **+** s rychlým zakládáním. Přepínač firmy pod hlavičkou využívá celou dostupnou šířku.
 
 Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště nahradit hamburger kompaktním levým pruhem. Volba je dostupná, pokud pruh a rozbalené menu společně zaberou nejvýše 90 % šířky obrazovky (při běžné velikosti textu je to šířka alespoň 400 px). Barevné ikony a názvy sekcí zůstávají viditelné, klepnutí otevře položky vedle pruhu. Tlačítkem **Hamburger** se vrátíte k hamburgeru. Volba se ukládá v prohlížeči. Dokud pro menší obrazovku nevyberete jiný režim, přebírá se kompaktní menu z desktopového nastavení. Při dalším zúžení se dočasně zobrazí hamburger, po rozšíření se kompaktní menu vrátí.
 
@@ -284,12 +300,12 @@ Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště nahradit 
 | **Prodej** | Vydané a pravidelné faktury, klienti, zakázky, AI import, export a import |
 | **Nákup** | Přijaté faktury, Příchozí doklady, AI import, dodavatelé, platební příkazy, drobný majetek, export a import |
 | **Peníze** | Bankovní účty a Pokladna |
-| **Dokumenty** | Dokumenty a Kniha jízd |
+| **Dokumenty** | Dokumenty, Chybějící doklady a Kniha jízd |
 | **Sklad** | Skladové karty, příjemky a výdejky, E-shop, inventury a sestavy |
 | **Daně** | Daňové výkazy, Daňový optimalizátor a samostatný **Hromadný export** |
 | **Účetnictví** | Účetní deník, Automat, K doúčtování, účetní výkazy, kontroly, mzdy a majetek |
 | **Nástroje** | Šablony, Účtový rozvrh, Zápočty, Aktivace a doúčtování, Inventarizace účtů, výkazy kapitálu, Spojené osoby, Uzávěrka, Účetní nastavení a jako poslední **EPO podání a archív** |
-| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie, API tokeny a Chybějící doklady |
+| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie a API tokeny |
 | **Systém** | **Přehled firem** (jen s přístupem k více firmám), Sazby a číselníky, samostatné **Daňové konstanty**, dodavatelé, uživatelé, role, e-maily, log, plánované úlohy, aktualizace a licenční položky |
 
 ### 10.10.10 Více panelů pracovního prostoru
@@ -304,7 +320,9 @@ Zvýšení počtu panelů zachová jejich otevřený obsah, přidá nový prázd
 
 Všechna tlačítka **+** v menu a rychlé přidání v horní liště otevřou nové čisté okno v aktivním panelu, i když už máte stejný formulář rozepsaný. Stejně fungují klávesové zkratky pro vytvoření a rychlé akce v paletě příkazů. Původní rozepsané okno zůstane dostupné v přepínači **Okna**.
 
-Přepínač **Okna** najdete vlevo od volby rozložení, na mobilu ve spodní liště vedle přepínače světlého a tmavého režimu. Ukazuje nejvýše 20 oken podle posledního použití, jejich názvy, firmu a případné číslo panelu. U vydaných a přijatých faktur uvádí také číslo dokladu a zákazníka nebo dodavatele; u klientských karet jejich název. Domovská obrazovka má označení **Homepage**. Okno, které je právě vidět v aktivním panelu, má zelené číslo a štítek **Právě otevřené**. Okno lze vyhledat podle těchto údajů, vybrat šipkami a potvrdit klávesou **Enter**; **Esc** přepínač zavře. Křížek u okna nebo klávesa **Delete** okno zavře i s rozpracovaným obsahem. Ikona obnovy vlevo od přepínače znovu načte jen okno v aktivním panelu s výchozími daty, ostatní okna zůstanou beze změny. Výchozí zkratky jsou **Alt+W** pro přepínač, **Alt+PageUp** pro předchozí okno v historii, **Alt+PageDown** pro další, **Alt+Shift+W** pro střídání posledních dvou oken a **Alt+Shift+R** pro obnovu aktivního okna. Fungují také při psaní do formuláře a lze je změnit v **Klávesových zkratkách**. Na macOS se místo Alt používá Option.
+Přepínač **Okna** najdete vlevo od volby rozložení, na mobilu ve spodní liště vedle přepínače světlého a tmavého režimu. Ukazuje nejvýše 20 oken podle posledního použití, jejich názvy, firmu a případné číslo panelu. U vydaných a přijatých faktur uvádí také číslo dokladu a zákazníka nebo dodavatele; u klientských karet jejich název. Domovská obrazovka má označení **Homepage**. Okno, které je právě vidět v aktivním panelu, má zelené číslo a štítek **Právě otevřené**. Okno lze vyhledat podle těchto údajů, vybrat šipkami a potvrdit klávesou **Enter**; **Esc** přepínač zavře. Křížek u okna nebo klávesa **Delete** okno zavře i s rozpracovaným obsahem. Ikona obnovy vlevo od přepínače znovu načte jen okno v aktivním panelu s výchozími daty, ostatní okna zůstanou beze změny. Výchozí zkratky jsou **Alt+W** pro přepínač, **Alt+Shift+T** pro novou záložku, **Alt+Shift+X** pro zavření aktivní záložky, **Alt+PageUp** pro předchozí okno v historii, **Alt+PageDown** pro další, **Alt+Shift+W** pro střídání posledních dvou oken a **Alt+Shift+R** pro obnovu aktivního okna. Fungují také při psaní do formuláře a lze je změnit v **Klávesových zkratkách**. Na macOS se místo Alt používá Option.
+
+Nad obsahem je lišta **záložek**. Záložka sdružuje okna jedné agendy, tedy jedné položky hlavního menu: seznam vydaných faktur, detail faktury i její úprava jsou jedna záložka a ukazuje okno, ve kterém jste v agendě skončili. Odkaz do jiné agendy, například na kartu klienta nebo do účetního deníku, otevře její záložku. Každá firma má své záložky. Tlačítko **+** za záložkami otevře novou záložku s vyhledáváním, do kterého můžete rovnou psát. Najde stránky z menu, firmy, klienty, zaměstnance a doklady stejně jako hledání v patičce (**Alt+Q**) a vybraný výsledek otevře v této záložce. Pod hledáním jsou oblíbené stránky aktuální firmy a přehled otevřených záložek; výběr záložky z přehledu na ni přepne a prázdnou novou záložku zavře. Stránka, kterou v nové záložce otevřete jako první (hledáním, z menu nebo odkazem), v ní zůstane a záložka tím převezme její agendu. Ikona **Duplikovat** na aktivní záložce otevře stejnou stránku znovu jako další záložku, takže můžete mít například dvě rozpracované faktury vedle sebe. Novou záložku otevře také **Shift+klik** na odkaz. Pravé tlačítko myši na záložce nabídne **Duplikovat záložku**, **Zavřít záložku** a **Zavřít ostatní záložky**. Na malém tabletu lišta ukazuje dvě záložky, na širokém monitoru až osm, podle šířky, kterou má obsah k dispozici; na mobilu se nezobrazuje. Záložky jsou seřazené podle toho, kdy jste je otevřeli, takže kliknutím na záložku se pořadí nezmění. Kliknutí záložku přepne, křížek na záložce nebo prostřední tlačítko myši ji zavře se všemi jejími okny a rozpracovaným obsahem. Aktivní záložka nese nahoře barvu sekce. Ve více panelech ukazuje záložka čísla panelů, ve kterých jsou její okna vidět, a záložka jiné firmy má ikonu budovy. Šipky vlevo a vpravo přesouvají výběr mezi záložkami, **Delete** zavře vybranou záložku. Ikona oken na konci lišty otevře přehled všech oken a číslem **+N** ukazuje, kolik dalších záložek se do lišty nevešlo. Křížek vpravo lištu skryje; zpět ji zapnete tlačítkem **Zobrazit záložky** v přehledu oken. Volba se pamatuje v tomto prohlížeči.
 
 Ikona hvězdičky **Oblíbené** vlevo od obnovy okna otevře seznam oblíbených stránek (výchozí zkratka **Alt+Shift+F**). Tlačítkem **Přidat aktuální stránku** si uložíte stránku, na které právě jste; vyplněná hvězdička znamená, že už v oblíbených je, a dalším kliknutím ji odeberete. Každá položka si pamatuje firmu, ve které jste ji uložili. Kliknutí ji otevře v této firmě, **Shift**+kliknutí ve firmě, kterou máte právě vybranou (u detailu konkrétního dokladu se pak otevře jeho seznam). Položku lze přejmenovat (**F2**) nebo odebrat (**Delete**). Oblíbené se ukládají k vašemu účtu, takže je uvidíte na každém zařízení; uložit jich jde nejvýše 50.
 
@@ -312,28 +330,30 @@ Uložíte-li nebo odešlete-li něco v jednom okně, ostatní okna stejné firmy
 
 Najednou může být otevřeno nejvýše 20 oken. Při otevření dvacátého prvního okna aplikace bez dotazu zavře nejstarší skryté okno i s jeho rozpracovaným obsahem. Jsou-li všechna okna zobrazená v panelech, nové okno se neotevře. Obsah oken se uchovává pouze v paměti této záložky. Obnovení stránky, zavření záložky nebo odhlášení jej vymaže; po obnovení se otevře jeden panel na adrese prvního panelu. Okna nenahrazují ukládání dokladů.
 
-Každé okno si pamatuje vlastní firmu. Výběr okna jiné firmy automaticky přepne aktivní firmu; rozpracovaná okna předchozí firmy zůstanou v přepínači. Zobrazované panely patří vždy aktivní firmě. Ruční přepnutí firmy obnoví její poslední otevřené okno, případně Homepage, pokud ještě žádné nemá. Prakticky lze například ponechat seznam přijatých faktur v prvním panelu, otevřít detail dokladu ve druhém a účetní deník ve třetím. **Ctrl+klik** na interní odkaz uvnitř panelu jej otevře v prvním prázdném panelu napravo a tento panel aktivuje. Po zaplnění všech panelů napravo se další odkaz otevře v bezprostředním panelu **+1**. Ctrl+klik v posledním panelu, Cmd+klik a prostřední tlačítko myši zachovávají běžné otevření nové záložky prohlížeče.
+Každé okno si pamatuje vlastní firmu. Výběr okna jiné firmy automaticky přepne aktivní firmu; rozpracovaná okna předchozí firmy zůstanou v přepínači. Zobrazované panely patří vždy aktivní firmě. Ruční přepnutí firmy obnoví její poslední otevřené okno, případně Homepage, pokud ještě žádné nemá. Prakticky lze například ponechat seznam přijatých faktur v prvním panelu, otevřít detail dokladu ve druhém a účetní deník ve třetím. **Ctrl+klik** na interní odkaz nebo navigovatelný řádek uvnitř panelu jej otevře v prvním prázdném panelu napravo a tento panel aktivuje. Po zaplnění všech panelů napravo se další odkaz otevře v bezprostředním panelu **+1**. Pokud pravý panel ještě nemáte, aplikace ho přidá, dovoluje-li to šířka pracovního prostoru; z jednoho panelu tak vzniknou dva, ze dvou tři. Ctrl+klik v posledním podporovaném panelu, Ctrl+klik v hlavním menu, Cmd+klik a prostřední tlačítko myši zachovávají běžné otevření nové záložky prohlížeče.
 
-**Shift+klik** na interní odkaz nebo navigovatelný řádek otevře cíl v bezprostředním
-panelu napravo a aktivuje jej. Funguje také na odkazy v hlavním menu; jejich cílový
-panel se určuje podle právě aktivního panelu. Pokud pravý panel ještě nemáte,
-aplikace ho přidá, dovoluje-li to šířka pracovního prostoru. Z jednoho panelu tak
-vzniknou dva, ze dvou mohou vzniknout tři. Původní stránka i rozpracované formuláře
-zůstanou otevřené. Je-li cílová stránka už vidět v jiném panelu, otevře se její
-samostatné okno vpravo. Na úzkém okně nebo za posledním podporovaným panelem si
-Shift+klik zachová běžné chování prohlížeče. Stejně se chovají externí odkazy,
-stahování a odkazy s výslovným cílem do nové záložky. Kombinace s dalšími
-modifikačními klávesami tato zkratka nepřebírá.
+Externí webové odkazy bez výslovně nastaveného cíle se běžným kliknutím otevírají v nové kartě prohlížeče. Objednávka doplňku, web podpory nebo externí dokumentace tak zůstávají mimo pracovní panel a rozpracovaná stránka MyÚčta se zachová.
+
+**Shift+klik** na interní odkaz nebo navigovatelný řádek otevře cíl v nové záložce
+v panelu, ve kterém jste klikli. Funguje také na odkazy v hlavním menu; ty se otevřou
+v aktivním panelu. Původní stránka i rozpracované formuláře zůstanou v původní
+záložce. Shift+klik na externí odkaz, stahování nebo odkaz s výslovným cílem do nové
+záložky zachová běžné chování prohlížeče. Kombinace s dalšími modifikačními klávesami
+tato zkratka nepřebírá.
 
 ### 10.10.11 Klávesové zkratky
 
 Obrazovka **Klávesové zkratky** umožňuje nastavit kombinaci pro každý viditelný bod menu, položky **Přidat / Nová** i hledání ve spodní liště. Nastavení je uložené u uživatelského účtu, takže se přenáší mezi prohlížeči a není společné s ostatními uživateli. Stejnou obrazovku najdete jako pátou záložku v **Profilu**, na mobilu ji vyberete z nabídky záložek pod nadpisem Profil.
 
-Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání, **Alt+1** vydaná faktura, **Alt+2** přijatá faktura, **Alt+3** klient, **Alt+4** dodavatel, **Alt+5** účetní zápis, **Alt+6** pravidelná fakturace a **Alt+7** přehled firem. Na macOS se klávesy zobrazují jako **Cmd** a **Option**. Samostatné hledání tam nemá rizikovou výchozí kombinaci Option+Q, **Cmd+K** otevře paletu příkazů, která vyhledává také v menu, klientech a fakturách. Číselné zkratky se zobrazí jako **Option+1** až **Option+7**. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám. Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
+Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání, **Alt+1** vydaná faktura, **Alt+2** přijatá faktura, **Alt+3** klient, **Alt+4** dodavatel, **Alt+5** účetní zápis, **Alt+6** pravidelná fakturace a **Alt+7** přehled firem. Na macOS se klávesy zobrazují jako **Cmd** a **Option**. Samostatné hledání tam nemá rizikovou výchozí kombinaci Option+Q, **Cmd+K** otevře paletu příkazů, která najde totéž co hledání v patičce. Číselné zkratky se zobrazí jako **Option+1** až **Option+7**. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám. Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
 
 ### 10.10.12 Vzhled: jazyk, světlý a tmavý režim
 
 Ve spodní liště jsou vedle sebe jediná přepínací vlaječka jazyka a ikona motivu (slunce nebo měsíc podle aktuálního režimu). Vlaječka ukazuje jazyk, na který se kliknutím přepnete, druhé tlačítko pro aktuální jazyk se nezobrazuje. Ikona motivu přepíná mezi **světlým** a **tmavým** tématem.
+
+Na telefonu jsou tyto přepínače v **Menu**. Vedle ikony motivu je tlačítko
+**Celá obrazovka**, které zapne fullscreen; dalším klepnutím jej opustíte.
+Pokud prohlížeč tuto funkci nepodporuje, tlačítko je neaktivní.
 
 Dokud v prohlížeči není uložená žádná volba (první návštěva), aplikace se řídí nastavením operačního systému nebo prohlížeče. Jakmile ikonu poprvé použijete, volba se uloží v prohlížeči (per zařízení) a platí napříč celou aplikací včetně grafů, dokud ji znovu nezměníte.
 

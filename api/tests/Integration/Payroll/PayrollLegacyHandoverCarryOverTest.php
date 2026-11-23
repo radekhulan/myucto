@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
@@ -46,7 +45,7 @@ final class PayrollLegacyHandoverCarryOverTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $connection = $container->get(Connection::class);
         $handover = $container->get(PayrollLegacyRecapitulationService::class);

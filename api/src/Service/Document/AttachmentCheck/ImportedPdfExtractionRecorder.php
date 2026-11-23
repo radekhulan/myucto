@@ -34,7 +34,7 @@ final class ImportedPdfExtractionRecorder
             $this->extractions->save(
                 $supplierId, null, $sha256, ScanExtractionNormalizer::SCHEMA_VERSION, 'ok', $fields, $data, $provider, $model, null,
             );
-            $this->checks->recheckEntity($supplierId, 'purchase_invoice', $purchaseInvoiceId);
+            $this->checks->recheckEntityAfterCommit($supplierId, 'purchase_invoice', $purchaseInvoiceId);
         } catch (\Throwable $e) {
             $this->logger->warning('Uložení vytěžení importovaného PDF selhalo', [
                 'supplier_id' => $supplierId,

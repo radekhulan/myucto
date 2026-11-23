@@ -7,6 +7,7 @@ import type {
   PayrollRunResultPerson,
 } from '@/api/payroll'
 import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
+import { formatDate } from '@/composables/useFormat'
 
 const props = withDefaults(defineProps<{
   people: PayrollRunResultPerson[]
@@ -237,7 +238,7 @@ function unavailableAdvanceLabel(): string {
           <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
             {{ t('payroll.runs.tax.calculation_date') }}
           </p>
-          <p class="mt-1 text-sm font-medium text-neutral-900">{{ tax.calculation_date }}</p>
+          <p class="mt-1 text-sm font-medium text-neutral-900">{{ formatDate(tax.calculation_date) }}</p>
         </div>
         <span class="rounded-full bg-payroll-50 px-3 py-1 text-sm font-medium text-payroll-700">
           {{ t(`payroll.runs.tax.regime.${regime()}`) }}

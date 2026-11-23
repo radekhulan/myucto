@@ -104,6 +104,8 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
                 (int) ($params['from_year'] ?? 0) > 0 ? (int) $params['from_year'] : null,
                 (string) ($params['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
                 (bool) ($params['accept_differences'] ?? false),
+                // Job uložený před volbou „Převést do roku" ji nemá: výchozí rok podle firmy.
+                toYear: (int) ($params['to_year'] ?? 0) > 0 ? (int) $params['to_year'] : null,
             );
             $agenda = (array) ($meta['agenda'] ?? []);
             $runId = $this->runs->startRun($supplierId, $jobId, $mode, [
@@ -113,7 +115,7 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
                 'backup_sha256' => $meta['sha256'] ?? null,
             ], $userId > 0 ? $userId : null);
 
-            $steps = MoneyS3Importer::stepKeys();
+            $steps = MoneyS3Importer::stepKeys(AgendaInfo::isComplete($agenda) && AgendaInfo::fromArray($agenda)->taxRecordsOnly());
             $this->jobs->updateProgress($jobId, [
                 'total_items' => count($steps),
                 'processed' => 0,

@@ -87,6 +87,8 @@ final class PayrollEmploymentSurchargePolicyAction
                 is_array($body) ? PayrollTimeValue::row($body, 'request_body') : [],
                 $this->userId($request),
             );
+        } catch (\MyInvoice\Repository\Payroll\PayrollTermsSettledException $e) {
+            return $this->domainError($response, $e);
         } catch (DomainException $e) {
             // Zásada od téhož nebo pozdějšího dne už existuje. Není to vada
             // vstupu, ale stav — proto 409, ne 422.
@@ -195,6 +197,39 @@ final class PayrollEmploymentSurchargePolicyAction
         return Json::ok($response, ['policy' => $policy]);
     }
 
+    /**
+     * Posun začátku platnosti verze, podle které se ještě nepočítalo.
+     *
+     * @param array<string,string> $args
+     */
+    public function moveStart(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $employmentId = (int) ($args['id'] ?? 0);
+        if (!$this->repository->employmentExists($supplierId, $employmentId)) {
+            return Json::error($response, 'not_found', 'Pracovní vztah nebyl nalezen.', 404);
+        }
+        $policyId = (int) ($args['policyId'] ?? 0);
+
+        try {
+            $policy = $this->service->moveStart(
+                $supplierId,
+                $employmentId,
+                $policyId,
+                $this->body($request),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        $this->logPolicy($request, 'payroll.employment_surcharge_policy.start_moved', $employmentId, $policy);
+
+        return Json::ok($response, ['policy' => $policy]);
+    }
+
     /** @return array<string,mixed> */
     private function body(Request $request): array
     {
@@ -206,6 +241,10 @@ final class PayrollEmploymentSurchargePolicyAction
     private function domainError(Response $response, \Throwable $e): Response
     {
         return match (true) {
+            $e instanceof \MyInvoice\Repository\Payroll\PayrollTermsSettledException => Json::error(
+                $response, 'payroll_terms_settled', $e->getMessage(), 409,
+                ['settled_period' => $e->settledPeriod],
+            ),
             $e instanceof PayrollSurchargePolicyNotFoundException => Json::error(
                 $response,
                 'not_found',
@@ -265,7 +304,7 @@ final class PayrollEmploymentSurchargePolicyAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

@@ -131,6 +131,18 @@ export interface SupplierCarryOverResult {
   certificates: Array<{ id: number; ok: boolean; error?: SupplierCarryOverError }>
 }
 
+export interface SupplierDeletePreview {
+  id: number
+  company_name: string
+  ic: string | null
+  confirm_with: 'ic' | 'company_name'
+  total_rows: number
+  tables: Array<{ table: string; rows: number }>
+  protected_tables: number
+  files: number
+  is_last: boolean
+}
+
 export const suppliersApi = {
   list: () => api.get<SupplierListItem[]>('/suppliers').then(r => r.data),
   directory: (params: SupplierDirectoryParams) =>
@@ -142,6 +154,8 @@ export const suppliersApi = {
     api.post<{ id: number; carry_over_result?: SupplierCarryOverResult }>('/suppliers', payload).then(r => r.data),
   update: (id: number, payload: Partial<Supplier>) =>
     api.put<Supplier>(`/suppliers/${id}`, payload).then(r => r.data),
-  delete: (id: number) =>
-    api.delete<{ deleted: true }>(`/suppliers/${id}`).then(r => r.data),
+  deletePreview: (id: number) =>
+    api.get<SupplierDeletePreview>(`/suppliers/${id}/delete-preview`).then(r => r.data),
+  delete: (id: number, confirm: string) =>
+    api.delete<{ deleted: true; rows: number }>(`/suppliers/${id}`, { data: { confirm } }).then(r => r.data),
 }

@@ -24,7 +24,8 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam } from '@/utils/dimensionFilter'
 import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
 import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
 import { useAccrualSpread } from '@/composables/useAccrualSpread'
@@ -68,7 +69,7 @@ const filters = reactive({
   period_id: '' as number | '',
   as_of: '',
   scope: 'auto' as StatementScope,
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
@@ -77,16 +78,32 @@ function queryParams() {
     period_id: Number(filters.period_id),
     as_of: filters.as_of || undefined,
     scope: filters.scope,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
     ...accrualSpread.param(),
   }
 }
 
+const hideZero = ref(true)
+const showAnalytics = ref(true)
+
 function accountsParams(): Omit<StatementParams, 'scope'> {
   const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams
-  return { period_id, as_of, dimension_value_id, dimension_descendants }
+  return {
+    period_id, as_of, dimension_value_id, dimension_descendants,
+    columns: 1, hide_zero: hideZero.value ? 1 : 0, analytics: showAnalytics.value ? 1 : 0,
+  }
+}
+
+function onHideZero(value: boolean) {
+  hideZero.value = value
+  void load()
+}
+
+function onShowAnalytics(value: boolean) {
+  showAnalytics.value = value
+  void load()
 }
 
 function switchView(next: 'statement' | 'accounts') {
@@ -96,8 +113,8 @@ function switchView(next: 'statement' | 'accounts') {
   void load()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   void load()
 }
 
@@ -284,9 +301,9 @@ onMounted(async () => {
           <AccrualSpreadToggle :model-value="accrualSpreadOn" @update:model-value="onAccrualSpread" />
         </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
     </div>
     <p v-if="report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
@@ -306,7 +323,9 @@ onMounted(async () => {
         · {{ t('accounting.income_statement.version') }}: {{ accountsReport.version_code }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
-      <StatementAccountsTable :report="accountsReport" part="profit_loss" :format="fm" />
+      <StatementAccountsTable :report="accountsReport" part="profit_loss" :format="fm"
+        :hide-zero="hideZero" :show-analytics="showAnalytics"
+        @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
       <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id" :format="fm" />
     </template>
 

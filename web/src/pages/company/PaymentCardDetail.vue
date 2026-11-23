@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -309,12 +310,12 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="block">
               <span class="text-xs font-medium text-neutral-600">{{ t('payment_cards.field_valid_from') }}</span>
-              <input v-model="form.valid_from" type="date" :class="INPUT" />
+              <DateInput v-model="form.valid_from" :class="INPUT" />
               <span v-if="errors.valid_from" class="block text-xs text-danger-600 mt-1">{{ errors.valid_from }}</span>
             </label>
             <label class="block">
               <span class="text-xs font-medium text-neutral-600">{{ t('payment_cards.field_valid_to') }}</span>
-              <input v-model="form.valid_to" type="date" :class="INPUT" />
+              <DateInput v-model="form.valid_to" :class="INPUT" />
               <span v-if="errors.valid_to" class="block text-xs text-danger-600 mt-1">{{ errors.valid_to }}</span>
             </label>
           </div>

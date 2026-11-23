@@ -222,12 +222,20 @@ final class JournalEntryLinker
      * komfort, kvůli kterému nesmí spadnout celý převod.
      *
      * @param bool $scriptHint připojit k chybě odkaz na skript, který popisy doplní později
+     * @param list<int>|null $entryIds
      */
-    public function refreshDescriptions(int $supplierId, ImportProtocol $p, string $step, bool $scriptHint = true): void
+    public function refreshDescriptions(int $supplierId, ImportProtocol $p, string $step, bool $scriptHint = true, ?array $entryIds = null): void
     {
         try {
             $rebuilder = new JournalDescriptionRebuilder($this->db, new JournalDescriptionBuilder($this->db));
-            $changed = $rebuilder->rebuild(['supplier_id' => $supplierId]);
+            $changed = 0;
+            foreach ($entryIds === null ? [null] : array_chunk($entryIds, 500) as $chunk) {
+                $filter = ['supplier_id' => $supplierId];
+                if ($chunk !== null) {
+                    $filter['entry_ids'] = $chunk;
+                }
+                $changed += $rebuilder->rebuild($filter);
+            }
             if ($changed > 0) {
                 $p->info($step, 'descriptions_rebuilt', "U {$changed} převedených zápisů se popis doplnil o číslo dokladu a protistranu.");
             }

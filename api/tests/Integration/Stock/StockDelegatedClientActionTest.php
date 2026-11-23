@@ -164,10 +164,10 @@ final class StockDelegatedClientActionTest extends StockTestCase
             $denied = $action->put($this->request($sid, $permissions)->withParsedBody($changed), new Response(), ['id' => $id]);
             self::assertSame(403, $denied->getStatusCode(), json_encode($permissions) . ': ' . (string) $denied->getBody());
         }
-        self::assertSame(['90.00'], $stored());
+        self::assertSame(['90.000000'], $stored());
         $response = $action->put($this->request($sid, ['stock' => 1, 'stock.items.write' => 2, 'price_list' => 2])->withParsedBody($changed), new Response(), ['id' => $id]);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame(['80.00'], $stored());
+        self::assertSame(['80.000000'], $stored());
 
         // Interní role se řídí skladem jako dosud; podmínka platí jen pro klienta.
         $staff = $this->request($sid, ['stock' => 1])->withAttribute('auth.effective_role', new EffectiveRole(101, 'Synthetic stock staff', 'staff', true, ['stock' => 1]));

@@ -151,9 +151,12 @@ final class JournalSourceSummaryService
     private function otherItem(int $supplierId, int $id): ?array
     {
         $row = $this->one(
-            'SELECT id, side, kind, title, partner_name, issued_on, due_on, currency,
-                    amount, document_no, status, variable_symbol, account_code, counter_account_code, note
-               FROM other_items WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL',
+            'SELECT oi.id, oi.side, oi.kind, k.name AS kind_name, oi.title, oi.partner_name, oi.issued_on, oi.due_on,
+                    oi.currency, oi.amount, oi.document_no, oi.status, oi.variable_symbol, oi.account_code,
+                    oi.counter_account_code, oi.note, oi.settled_outside_amount
+               FROM other_items oi
+               LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
+              WHERE oi.id = ? AND oi.supplier_id = ? AND oi.deleted_at IS NULL',
             [$id, $supplierId],
         );
         if ($row === null) return null;
@@ -162,7 +165,8 @@ final class JournalSourceSummaryService
               WHERE other_item_id = ? AND supplier_id = ? AND reversed_on IS NULL',
             [$id, $supplierId],
         );
-        $paidAmount = (float) ($paid['amount'] ?? 0);
+        // Uhrazeno stejně jako v detailu položky (OtherItemRepository): i úhrada převzatá mimo evidenci.
+        $paidAmount = (float) ($paid['amount'] ?? 0) + (float) $row['settled_outside_amount'];
         $route = ['name' => 'other-item-detail', 'params' => ['id' => $id]];
         $currency = (string) $row['currency'];
         return [
@@ -172,7 +176,10 @@ final class JournalSourceSummaryService
             'currency' => $currency,
             'fields' => [
                 $this->kv('side', 'other_item_side', $row['side'], 'text'),
-                $this->kv('kind', 'other_item_kind', $row['kind'], 'text'),
+                // Vlastní druh nese název (klíč kind_name se nepřekládá), vestavěný kód druhu.
+                $row['kind_name'] !== null
+                    ? $this->kv('kind_name', 'other_item_kind', $row['kind_name'], 'text')
+                    : $this->kv('kind', 'other_item_kind', $row['kind'], 'text'),
                 $this->kv('partner_name', 'other_item_partner', $row['partner_name'], 'text'),
                 $this->kv('issued_on', 'other_item_issued_on', $row['issued_on'], 'date'),
                 $this->kv('due_on', 'due_date', $row['due_on'], 'date'),
@@ -353,8 +360,9 @@ final class JournalSourceSummaryService
             $this->kv('reverse_charge', 'reverse_charge', (bool) $row['reverse_charge'], 'bool'),
             $this->kv('is_fixed_asset', 'is_fixed_asset', (bool) $row['is_fixed_asset'], 'bool'),
         ];
-        if ($row['advance_purchase_invoice_id'] !== null) {
-            $fields[] = $this->kv('advance_link', 'advance_link', (int) $row['advance_purchase_invoice_id'], 'doc_ref');
+        // Vyúčtovaná záloha, u faktury s víc zálohami každá (PurchaseAdvanceLinks).
+        foreach ((new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $id) as $advanceId) {
+            $fields[] = $this->kv('advance_link', 'advance_link', $advanceId, 'doc_ref');
         }
         // „Uhrazeno, ale nezaúčtováno" — typický zdroj rozdílu mezi saldem a deníkem.
         if ($row['paid_at'] !== null && $row['booked_at'] === null) {

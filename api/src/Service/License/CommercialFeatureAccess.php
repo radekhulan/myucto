@@ -31,6 +31,7 @@ final class CommercialFeatureAccess
     /** @var list<string> */
     private const RESTRICTED_API_PATTERNS = [
         '#^/api/(stock|eshop|catalog)(/|$)#',
+        '#^/api/sales-quotes(/|$)#',
         // Mzdy jsou komerční modul celé, včetně capabilities a nastavení —
         // frontend si podle 403 schová sekci stejně jako u skladu.
         '#^/api/payroll(/|$)#',

@@ -90,7 +90,7 @@ final class PayrollEmploymentWorkplaceBulkFillAction
     /** @return array<string,mixed>|null */
     private function body(Request $request, Response $response, ?Response &$error): ?array
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response);
             return null;
         }

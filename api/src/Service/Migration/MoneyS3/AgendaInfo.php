@@ -13,11 +13,8 @@ final class AgendaInfo
     /** Verze Money, na kterých je čtení formátu ověřené proti sestavám z Money. */
     public const VERIFIED_VERSIONS = ['26.600'];
 
-    public const TEXT_TAX_RECORDS_NOT_SUPPORTED = 'Agenda vede v Money daňovou evidenci (peněžní deník), ne podvojné účetnictví (účetní deník). '
-        . 'Převod z Money S3 přenáší jen účetní deník podvojného účetnictví, daňovou evidenci tímto průvodcem převést zatím nedokáže.';
-
     /**
-     * @param list<array{dir:string,fiscal_year:?int,journal_rows:int,cashbook_rows:int,opening_rows:int,first_date:?string,last_date:?string,purchase_invoices:int,issued_invoices:int,cash_documents:int,bank_documents:int}> $years
+     * @param list<array{dir:string,fiscal_year:?int,money_year:?int,accounting_mode:?string,journal_rows:int,cashbook_rows:int,opening_rows:int,first_date:?string,last_date:?string,purchase_invoices:int,issued_invoices:int,cash_documents:int,bank_documents:int}> $years
      * @param list<array{code:string,message:string}> $warnings
      */
     public function __construct(
@@ -44,14 +41,19 @@ final class AgendaInfo
         foreach ($backup->yearDirs() as $dir) {
             $journal = $backup->table('UcDenik', $dir);
             $summary = Ms3Journal::summarize($journal !== null && $journal->hasData() ? $journal->rows(['Zdroj', 'Datum', 'Popis']) : []);
+            $settings = $backup->yearSettings($dir);
+            $cashbookRows = self::count($backup, 'UcPenDen', $dir);
             $years[] = [
                 'dir' => basename($dir),
                 'fiscal_year' => $summary['fiscal_year'],
+                // Účetní rok, jak ho vede Money (`Rok.DAT`); null = záloha ho nenese.
+                'money_year' => $settings['year'],
+                'accounting_mode' => self::mode($settings['double_entry'], $summary['rows'], $cashbookRows),
                 'journal_rows' => $summary['rows'],
                 // Počet živých (nesmazaných) řádků peněžního deníku roku (`UcPenDen`).
                 // Pokud rok daňové evidence ho má nenulový a `journal_rows` nulový,
                 // pak Money v něm vede peněžní deník místo podvojného účetnictví.
-                'cashbook_rows' => self::count($backup, 'UcPenDen', $dir),
+                'cashbook_rows' => $cashbookRows,
                 'opening_rows' => $summary['opening_rows'],
                 'first_date' => $summary['first_date'],
                 'last_date' => $summary['last_date'],
@@ -60,6 +62,16 @@ final class AgendaInfo
                 'cash_documents' => self::count($backup, 'PoklKnih', $dir),
                 'bank_documents' => self::count($backup, 'BankKnih', $dir),
             ];
+        }
+
+        // Agendu vedenou celou jako daňová evidence převod převede do daňové evidence
+        // firmy: rok adresáře je rok, jak ho vede Money.
+        $taxRecords = self::onlyTaxRecords($years);
+        if ($taxRecords) {
+            foreach ($years as &$y) {
+                $y['fiscal_year'] ??= $y['money_year'];
+            }
+            unset($y);
         }
 
         $partners = 0;
@@ -73,11 +85,17 @@ final class AgendaInfo
             $warnings[] = ['code' => 'no_years', 'message' => 'Záloha neobsahuje žádný účetní rok.'];
         }
         foreach ($years as $y) {
-            if ($y['journal_rows'] === 0 && $y['cashbook_rows'] > 0) {
-                $warnings[] = ['code' => 'tax_records_year', 'message' => "Rok v adresáři {$y['dir']} nemá účetní deník, ale peněžní deník "
-                    . '(daňová evidence). Peněžní deník převod z Money S3 zatím nepodporuje, rok se nepřevede.'];
+            $label = $y['money_year'] !== null ? "Rok {$y['money_year']} v adresáři {$y['dir']}" : "Rok v adresáři {$y['dir']}";
+            if ($taxRecords) {
+                if ($y['cashbook_rows'] === 0) {
+                    $warnings[] = ['code' => 'empty_year', 'message' => "{$label} nemá peněžní deník."];
+                }
+            } elseif ($y['journal_rows'] === 0 && $y['cashbook_rows'] > 0) {
+                // Rok daňové evidence v agendě, která vede i podvojné účetnictví.
+                $warnings[] = ['code' => 'tax_records_year', 'message' => "{$label} nemá účetní deník, ale peněžní deník "
+                    . '(daňová evidence). Peněžní deník agendy, která vede i podvojné účetnictví, převod z Money S3 zatím nepodporuje, rok se nepřevede.'];
             } elseif ($y['journal_rows'] === 0) {
-                $warnings[] = ['code' => 'empty_year', 'message' => "Rok v adresáři {$y['dir']} nemá účetní deník."];
+                $warnings[] = ['code' => 'empty_year', 'message' => "{$label} nemá účetní deník."];
             }
         }
         $seen = [];
@@ -151,7 +169,7 @@ final class AgendaInfo
             }
         }
         foreach ($data['years'] as $y) {
-            if (!is_array($y) || array_diff(['dir', 'fiscal_year', 'journal_rows', 'cashbook_rows', 'opening_rows', 'first_date', 'last_date', 'purchase_invoices', 'issued_invoices', 'cash_documents', 'bank_documents'], array_keys($y)) !== []) {
+            if (!is_array($y) || array_diff(['dir', 'fiscal_year', 'money_year', 'accounting_mode', 'journal_rows', 'cashbook_rows', 'opening_rows', 'first_date', 'last_date', 'purchase_invoices', 'issued_invoices', 'cash_documents', 'bank_documents'], array_keys($y)) !== []) {
                 return false;
             }
         }
@@ -160,18 +178,61 @@ final class AgendaInfo
 
     /**
      * Agenda vede v Money jen daňovou evidenci: žádný rok nemá účetní deník a aspoň jeden
-     * má peněžní deník. Převod z Money S3 přenáší jen podvojné účetnictví.
+     * má peněžní deník. Takovou agendu převod převede do daňové evidence firmy.
      */
     public function taxRecordsOnly(): bool
     {
+        return self::onlyTaxRecords($this->years);
+    }
+
+    /** @param list<array<string,mixed>> $years */
+    private static function onlyTaxRecords(array $years): bool
+    {
         $cashbook = false;
-        foreach ($this->years as $y) {
+        foreach ($years as $y) {
             if ((int) ($y['journal_rows'] ?? 0) > 0) {
                 return false;
             }
             $cashbook = $cashbook || (int) ($y['cashbook_rows'] ?? 0) > 0;
         }
         return $cashbook;
+    }
+
+    /**
+     * První rok, který Money vede jako daňovou evidenci až PO prvním roce podvojného
+     * účetnictví (firma se z podvojného vrátila do daňové evidence, nebo má mezi roky
+     * podvojného rok daňové evidence). Převod by takovou firmu přepnul do podvojného
+     * účetnictví i pro roky daňové evidence, proto ji kontrola zastaví. Roky se řadí podle
+     * roku Money, bez něj podle roku převodu; rok bez obojího nebo bez režimu se nepočítá.
+     *
+     * @return array{year:int,dir:string}|null
+     */
+    public function taxRecordsAfterDoubleEntry(): ?array
+    {
+        $years = [];
+        foreach ($this->years as $y) {
+            $year = $y['money_year'] ?? $y['fiscal_year'] ?? null;
+            if ($year !== null && in_array($y['accounting_mode'] ?? null, ['double_entry', 'tax_evidence'], true)) {
+                $years[] = ['year' => (int) $year, 'dir' => (string) $y['dir'], 'mode' => $y['accounting_mode']];
+            }
+        }
+        usort($years, static fn (array $a, array $b): int => $a['year'] <=> $b['year']);
+        $doubleEntry = false;
+        foreach ($years as $y) {
+            if ($y['mode'] === 'double_entry') {
+                $doubleEntry = true;
+            } elseif ($doubleEntry) {
+                return ['year' => $y['year'], 'dir' => $y['dir']];
+            }
+        }
+        return null;
+    }
+
+    /** @param array{year:int,dir:string} $conflict {@see taxRecordsAfterDoubleEntry()} */
+    public static function textTaxRecordsAfterDoubleEntry(array $conflict): string
+    {
+        return "Money vede od roku {$conflict['year']} (adresář {$conflict['dir']}) znovu daňovou evidenci. Převod by firmu přepnul "
+            . 'do podvojného účetnictví i pro roky daňové evidence, takovou agendu proto zatím nepřevede.';
     }
 
     /** @return list<int> */
@@ -203,7 +264,25 @@ final class AgendaInfo
             'years' => $this->years,
             'partners' => $this->partners,
             'warnings' => $this->warnings,
+            // Agenda vedená celá jako daňová evidence ({@see taxRecordsOnly()}) - průvodce
+            // podle toho skryje volby podvojného účetnictví.
+            'tax_records' => $this->taxRecordsOnly(),
         ];
+    }
+
+    /**
+     * Režim roku: rozhoduje obsah, když je jednoznačný (jen účetní deník = podvojné
+     * účetnictví, jen peněžní deník = daňová evidence), jinak nastavení roku v Money.
+     */
+    private static function mode(?bool $doubleEntry, int $journalRows, int $cashbookRows): ?string
+    {
+        if ($journalRows > 0 && $cashbookRows === 0) {
+            return 'double_entry';
+        }
+        if ($cashbookRows > 0 && $journalRows === 0) {
+            return 'tax_evidence';
+        }
+        return $doubleEntry === null ? null : ($doubleEntry ? 'double_entry' : 'tax_evidence');
     }
 
     private static function count(Ms3Backup $backup, string $table, string $dir): int

@@ -28,6 +28,7 @@ use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Invoice\NewInvoiceVatClassification;
 use MyInvoice\Service\Invoice\ReceiptLinkService;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -249,8 +250,9 @@ final class QuickReceiptService
             'prices_include_vat' => $in['prices_include_vat'],
             'reverse_charge' => false,
             'payment_method' => $method,
-            // Bez odběratele zjednodušený doklad (§ 30); brány níže ho odmítnou nad limit.
-            'is_simplified' => $walkIn,
+            // Bez odběratele i pro drobného zákazníka bez adresy (#310) zjednodušený doklad
+            // (§ 30); brány níže ho odmítnou nad limit.
+            'is_simplified' => $walkIn || !empty($client['simplified_only']),
             // Účtenka je zaplacená hned, upomínky nemají smysl.
             'auto_send_reminders' => 0,
             'items' => $items,
@@ -291,12 +293,10 @@ final class QuickReceiptService
         }
 
         $issueDate = new \DateTimeImmutable($today);
-        $varsymbol = $this->varsymbol->next(
+        [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice(
             $supplierId,
-            VarsymbolGenerator::seriesTypeFor($invoice),
+            ['client_id' => $clientId] + $invoice,
             $issueDate,
-            $clientId,
-            (int) ($invoice['revenue_category_id'] ?? 0),
         );
         $snapshots = $this->snapshots->build(
             $clientId,
@@ -317,6 +317,7 @@ final class QuickReceiptService
             $invoiceId,
             $supplierId,
         ]);
+        $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
         if ($issue->rowCount() === 0) {
             throw new \RuntimeException('Doklad účtenky byl mezitím změněn.');
         }
@@ -379,7 +380,7 @@ final class QuickReceiptService
         if (!InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)) {
             throw QuickReceiptException::validation('Částka účtenky musí být kladná.', 'items');
         }
-        foreach (['reverseChargeRejection', 'walkInRejection', 'simplifiedRejection', 'vatPayerRejection'] as $gate) {
+        foreach (['reverseChargeRejection', 'simplifiedOnlyClientRejection', 'walkInRejection', 'simplifiedRejection', 'vatPayerRejection'] as $gate) {
             $rejected = $this->taxGate->{$gate}($invoice);
             if ($rejected === null) {
                 continue;
@@ -552,7 +553,7 @@ final class QuickReceiptService
             if ((float) $quantity <= 0 || (float) $quantity > 1000000) {
                 throw QuickReceiptException::validation('Množství položky č. ' . ($i + 1) . ' musí být kladné.', 'items.' . $i . '.quantity');
             }
-            $price = self::decimal($raw['unit_price'] ?? null, 'items.' . $i . '.unit_price', 2);
+            $price = self::decimal($raw['unit_price'] ?? null, 'items.' . $i . '.unit_price', UnitPricePrecision::DECIMALS);
             if ((float) $price < 0 || (float) $price >= 100000000) {
                 throw QuickReceiptException::validation('Cena položky č. ' . ($i + 1) . ' musí být nezáporná.', 'items.' . $i . '.unit_price');
             }

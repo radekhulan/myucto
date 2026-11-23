@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunInputSnapshot;
+use MyInvoice\Service\Payroll\Run\PayrollRunPersonSummary;
 use MyInvoice\Service\Payroll\Run\PayrollRunValidationMessageFormatter;
 use PDO;
 
@@ -27,6 +28,44 @@ final class PayrollRunRepository
 
     /** Kolik měsíců zpět se díry před během hledají; víc je chyba nastavení, ne díra. */
     private const MISSING_PERIODS_LIMIT = 24;
+
+    /**
+     * Souhrn aktuální revize uložený u běhu (sloupce `summary_*`, migrace 2285).
+     * Platí jen pro revizi, ke které vznikl: ukazuje-li běh na jinou, čte se
+     * hodnota postaru ze snímku. Zastaralý souhrn tak nikdy nevrátí cizí číslo,
+     * jen přijde o zrychlení.
+     */
+    private const SUMMARY_IS_CURRENT = 'run.summary_revision_id = revision.id';
+
+    /**
+     * `payment_materialization_supported` ze vstupního snímku: schéma v2 a KAŽDÁ
+     * osoba nese pole `payout_accounts`. Wildcard `$.people[*].payout_accounts`
+     * vrací v MariaDB pole všech nalezených hodnot (i pro jedinou osobu), takže
+     * osoba bez klíče sníží počet a porovnání délek je úplný test „nikomu
+     * nechybí". Prázdné `people` dá 0 = 0, tedy true, stejně jako PHP cyklus
+     * v {@see self::supportsPaymentMaterialization()}. Jediná vědomá odchylka:
+     * `payout_accounts` uložené jako objekt místo pole tu projde; snapshot
+     * builder pole zapisuje vždy.
+     */
+    private const PAYMENT_MATERIALIZATION_FROM_SNAPSHOT =
+        '(revision.input_snapshot_json IS NOT NULL
+          AND JSON_VALUE(revision.input_snapshot_json, "$.schema_version")
+              = "' . self::INPUT_SCHEMA_WITH_PAYOUTS . '"
+          AND JSON_TYPE(JSON_QUERY(revision.input_snapshot_json, "$.people")) = "ARRAY"
+          AND JSON_LENGTH(revision.input_snapshot_json, "$.people")
+              = COALESCE(JSON_LENGTH(JSON_EXTRACT(
+                    revision.input_snapshot_json, "$.people[*].payout_accounts"
+                )), 0))';
+
+    /** Sloupce `payroll_runs`, které jsou jen uložený souhrn a ven se neposílají. */
+    private const SUMMARY_COLUMNS = [
+        'summary_revision_id',
+        'summary_person_count',
+        'summary_payment_materialization',
+        'summary_cash_payable_minor',
+        'summary_enforcement_withheld_minor',
+        'summary_payable_after_enforcement_minor',
+    ];
 
     /**
      * Měsíce od začátku vedení mezd (`payroll_module_state.start_period`) před
@@ -86,12 +125,16 @@ final class PayrollRunRepository
      * snapshotu se přitom používal JEDINÝ boolean a z výsledkového tři částky.
      *
      * ── Co se dělá teď ──────────────────────────────────────────────────────────
-     * Oba LONGTEXTy zůstávají v databázi a čtou se celé jen v detailu běhu
-     * ({@see self::detail()}). Do seznamu se z nich SQL vytáhne jen to, co seznam
-     * skutečně zobrazuje, a stránkuje se s tvrdým stropem.
+     * Oba LONGTEXTy zůstávají v databázi a seznam je nečte vůbec: tři součty
+     * a příznak materializace výplat má běh uložené ve sloupcích `summary_*`
+     * (zapisují je {@see self::insertRevision()} a {@see self::saveCalculation()}).
+     * I vytažení čtyř hodnot přes `JSON_VALUE` totiž znamenalo, že MariaDB
+     * u každého běhu na stránce prošla megabajtový snímek několikrát (u 150
+     * osob desítky milisekund na běh). Ze snímku se čte jen tehdy, když
+     * uložený souhrn nepatří aktuální revizi ({@see self::SUMMARY_IS_CURRENT}).
      *
-     * Osobní rozpad (`result_snapshot.people`) v seznamu ZÁMĚRNĚ není — to je ta
-     * objemná část a frontend si ji dotahuje na vyžádání pro jeden konkrétní běh.
+     * Osobní rozpad v seznamu ZÁMĚRNĚ není; stránkuje ho
+     * {@see PayrollRunPeopleRepository}.
      *
      * @return array{items: list<array<string,mixed>>, total: int}
      */
@@ -117,14 +160,6 @@ final class PayrollRunRepository
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
 
-        // `payment_materialization_supported`: schéma v2 a KAŽDÁ osoba nese pole
-        // `payout_accounts`. Wildcard `$.people[*].payout_accounts` vrací v MariaDB
-        // pole všech nalezených hodnot (i pro jedinou osobu), takže osoba bez klíče
-        // sníží počet — porovnání délek je tedy úplný test „nikomu nechybí".
-        // Prázdné `people` dá 0 = 0, tedy true, stejně jako se dřív choval PHP cyklus.
-        // Jediná vědomá odchylka od původního PHP testu: `payout_accounts` uložené
-        // jako objekt místo pole tu projde. Snapshot builder pole zapisuje vždy,
-        // a cena za odstranění dekódu celého LONGTEXTu je to nesrovnatelně nižší.
         $sql = 'SELECT run.*,
                        revision.id AS revision_id,
                        revision.revision_no,
@@ -133,22 +168,23 @@ final class PayrollRunRepository
                        revision.calculated_by,
                        revision.reviewed_by,
                        revision.approved_by,
-                       (revision.input_snapshot_json IS NOT NULL
-                        AND JSON_VALUE(revision.input_snapshot_json, "$.schema_version")
-                            = "' . self::INPUT_SCHEMA_WITH_PAYOUTS . '"
-                        AND JSON_TYPE(JSON_QUERY(revision.input_snapshot_json, "$.people")) = "ARRAY"
-                        AND JSON_LENGTH(revision.input_snapshot_json, "$.people")
-                            = COALESCE(JSON_LENGTH(JSON_EXTRACT(
-                                  revision.input_snapshot_json, "$.people[*].payout_accounts"
-                              )), 0)
-                       ) AS payment_materialization_supported,
+                       CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                            THEN run.summary_payment_materialization
+                            ELSE ' . self::PAYMENT_MATERIALIZATION_FROM_SNAPSHOT . '
+                       END AS payment_materialization_supported,
                        (revision.result_snapshot_json IS NOT NULL) AS has_result_snapshot,
-                       JSON_VALUE(revision.result_snapshot_json, "$.totals.cash_payable_minor")
-                           AS total_cash_payable_minor,
-                       JSON_VALUE(revision.result_snapshot_json, "$.totals.enforcement_withheld_minor")
-                           AS total_enforcement_withheld_minor,
-                       JSON_VALUE(revision.result_snapshot_json, "$.totals.payable_after_enforcement_minor")
-                           AS total_payable_after_enforcement_minor
+                       CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                            THEN run.summary_cash_payable_minor
+                            ELSE JSON_VALUE(revision.result_snapshot_json, "$.totals.cash_payable_minor")
+                       END AS total_cash_payable_minor,
+                       CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                            THEN run.summary_enforcement_withheld_minor
+                            ELSE JSON_VALUE(revision.result_snapshot_json, "$.totals.enforcement_withheld_minor")
+                       END AS total_enforcement_withheld_minor,
+                       CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                            THEN run.summary_payable_after_enforcement_minor
+                            ELSE JSON_VALUE(revision.result_snapshot_json, "$.totals.payable_after_enforcement_minor")
+                       END AS total_payable_after_enforcement_minor
                   FROM payroll_runs run
              LEFT JOIN payroll_run_revisions revision
                     ON revision.supplier_id = run.supplier_id
@@ -199,9 +235,12 @@ final class PayrollRunRepository
     }
 
     /**
-     * Jeden běh včetně CELÉHO výsledkového snapshotu — objemná data, která seznam
-     * záměrně neposílá. Vstupní snapshot se nevrací vůbec: nese osobní údaje všech
-     * zaměstnanců a žádná obrazovka ho nezobrazuje.
+     * Jeden běh se SOUHRNEM výsledku: součty, zákonný souhrn zaměstnavatele
+     * a počet osob. Výsledky jednotlivých osob tu nejsou; u 150 lidí dělaly
+     * z jedné odpovědi 2,8 MB a stránkuje je {@see PayrollRunPeopleRepository}.
+     * Osoby z výsledkového snímku vyřízne MariaDB (`JSON_REMOVE`), do PHP se
+     * megabajtový snímek nedekóduje. Vstupní snímek se nevrací vůbec: nese
+     * osobní údaje všech zaměstnanců a žádná obrazovka ho nezobrazuje.
      *
      * @return array<string,mixed>|null
      */
@@ -213,8 +252,17 @@ final class PayrollRunRepository
                     revision.revision_no,
                     revision.revision_kind,
                     revision.status AS revision_status,
-                    revision.result_snapshot_json,
-                    revision.input_snapshot_json,
+                    JSON_REMOVE(
+                        revision.result_snapshot_json, "$.people", "$.statutory.people"
+                    ) AS result_summary_json,
+                    CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                         THEN run.summary_payment_materialization
+                         ELSE ' . self::PAYMENT_MATERIALIZATION_FROM_SNAPSHOT . '
+                    END AS payment_materialization_supported,
+                    CASE WHEN ' . self::SUMMARY_IS_CURRENT . '
+                         THEN run.summary_person_count
+                         ELSE JSON_LENGTH(revision.input_snapshot_json, "$.people")
+                    END AS person_count,
                     revision.calculated_by,
                     revision.reviewed_by,
                     revision.approved_by
@@ -236,20 +284,75 @@ final class PayrollRunRepository
         $run['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
         $run['revision_kind'] = $row['revision_kind'];
         $run['revision_status'] = $row['revision_status'];
-        $inputSnapshot = $row['input_snapshot_json'] === null
-            ? null
-            : json_decode((string) $row['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
         $run['payment_materialization_supported'] =
-            self::supportsPaymentMaterialization($inputSnapshot);
-        $run['result_snapshot'] = $row['result_snapshot_json'] === null
-            ? null
-            : json_decode((string) $row['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            (bool) (int) $row['payment_materialization_supported'];
+        $run['result_snapshot'] = self::resultSummary(
+            $row['result_summary_json'],
+            $row['person_count'],
+        );
         foreach (['calculated_by', 'reviewed_by', 'approved_by'] as $field) {
             $run[$field] = $row[$field] === null ? null : (int) $row[$field];
         }
-        unset($run['result_snapshot_json'], $run['input_snapshot_json']);
+        unset($run['result_summary_json'], $run['person_count']);
 
         return $run;
+    }
+
+    /**
+     * Souhrn výsledku revize bez osob, v témž tvaru jako `result_snapshot`
+     * (`totals`, `statutory` bez `people`), doplněný o `person_count`.
+     *
+     * @return array<string,mixed>|null
+     */
+    private static function resultSummary(mixed $summaryJson, mixed $personCount): ?array
+    {
+        if (!is_string($summaryJson) || $summaryJson === '') {
+            return null;
+        }
+        $summary = json_decode($summaryJson, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($summary)) {
+            return null;
+        }
+        $summary['person_count'] = $personCount === null ? null : (int) $personCount;
+
+        return $summary;
+    }
+
+    /**
+     * Revize pro odpověď příkazu běhu: hlavička, stav, otisky a souhrn výsledku.
+     * Oba snímky (u 150 osob dohromady přes 10 MB) v odpovědi nejsou; kdo
+     * potřebuje osoby, čte je stránkovaně z {@see PayrollRunPeopleRepository}.
+     *
+     * @param array<string,mixed>|null $revision výsledek {@see self::currentRevision()}
+     * @return array<string,mixed>|null
+     */
+    public static function revisionSummary(?array $revision): ?array
+    {
+        if ($revision === null) {
+            return null;
+        }
+        $result = $revision['result_snapshot'] ?? null;
+        $input = $revision['input_snapshot'] ?? null;
+        $personCount = is_array($input) && is_array($input['people'] ?? null)
+            ? count($input['people'])
+            : null;
+        if (is_array($result)) {
+            unset($result['people']);
+            if (is_array($result['statutory'] ?? null)) {
+                unset($result['statutory']['people']);
+            }
+            $result['person_count'] = $personCount;
+        } else {
+            $result = null;
+        }
+        unset(
+            $revision['input_snapshot'],
+            $revision['input_snapshot_json'],
+            $revision['result_snapshot_json'],
+        );
+        $revision['result_snapshot'] = $result;
+
+        return $revision;
     }
 
     /**
@@ -311,7 +414,8 @@ final class PayrollRunRepository
             $find = $pdo->prepare(
                 'SELECT id FROM payroll_runs
                   WHERE supplier_id = ? AND period_start = ?
-                    AND office_scope_id = COALESCE(?, 0)'
+                    AND office_scope_id = COALESCE(?, 0)
+                    AND period_slot IS NOT NULL'
             );
             $find->execute([$supplierId, $periodStart, $officeId]);
             $id = (int) $find->fetchColumn();
@@ -319,9 +423,14 @@ final class PayrollRunRepository
         $run = $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Mzdový běh se nepodařilo načíst.');
         if ((string) $run['payment_date'] !== $paymentDate) {
-            throw new \DomainException(
-                'Mzdový běh pro období už existuje s jiným datem výplaty.',
-            );
+            throw new \DomainException(sprintf(
+                'Mzdový běh č. %d za toto období už existuje s datem výplaty %s. Nový běh se '
+                    . 'nezakládá: v Mzdy → Mzdové běhy otevřete běh č. %d a klikněte na „Změnit datum '
+                    . 'výplaty“ (jde to až do schválení, i u zrušeného běhu).',
+                $id,
+                (new \DateTimeImmutable((string) $run['payment_date']))->format('j. n. Y'),
+                $id,
+            ));
         }
         if ($stmt->rowCount() === 1) {
             $this->insertEvent(
@@ -422,6 +531,7 @@ final class PayrollRunRepository
                          WHERE sibling.supplier_id = run.supplier_id
                            AND sibling.period_start = run.period_start
                            AND sibling.id <> run.id
+                           AND sibling.period_slot IS NOT NULL
                     ) AS replacement_owner_run_id,
                     (
                         SELECT COUNT(*)
@@ -564,7 +674,7 @@ final class PayrollRunRepository
                 'payroll_run_has_revision',
                 'Mzdový běh má schválenou revizi, podle které se už mohlo '
                     . 'účtovat a podávat — smazat ho nelze. Opravu proveďte '
-                    . 'přes „Otevřít k opravě“.',
+                    . 'přes „Vyžádat opravu“ a „Otevřít opravu“.',
             ],
         ] as [$field, $code, $message]) {
             if ((int) $row[$field] > 0) {
@@ -586,9 +696,11 @@ final class PayrollRunRepository
             return PayrollRunDeletionDecision::blocked(
                 'payroll_run_has_working_revision',
                 'Mzdový běh má rozpracovanou revizi, protože už proběhlo '
-                    . '„Uzamknout vstupy“. Smazat ho zatím nejde — použijte '
-                    . '„Zrušit běh“; zrušený běh nic neblokuje a období se '
-                    . 'uvolní.',
+                    . '„Uzamknout vstupy“. Smazat ho nejde — použijte '
+                    . '„Zrušit běh“: zrušený běh nedrží vstupy ani uzávěrku '
+                    . 'roku, za období ale zůstává a pokračuje se v něm přes '
+                    . '„Začít znovu“. Špatné datum výplaty opravíte tlačítkem '
+                    . '„Změnit datum výplaty“.',
             );
         }
         $status = (string) $row['status'];
@@ -1162,6 +1274,37 @@ final class PayrollRunRepository
         return $row === false ? null : self::castRevision($row);
     }
 
+    /**
+     * Vstupní snímek aktuální revize a čas jejího vzniku, bez výsledkového
+     * snímku. Seznam běhů ho potřebuje u otevřeného běhu k porovnání podkladů
+     * ({@see \MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector});
+     * číst a dekódovat kvůli tomu i megabajtový výsledek by bylo zbytečné.
+     *
+     * @return array{input_snapshot:array<string,mixed>,created_at:string}|null
+     */
+    public function currentInputSnapshot(int $supplierId, int $runId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT revision.input_snapshot_json, revision.created_at
+               FROM payroll_runs run
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+              WHERE run.supplier_id = ? AND run.id = ?'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $snapshot = json_decode((string) $row['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+
+        return is_array($snapshot)
+            ? ['input_snapshot' => $snapshot, 'created_at' => (string) $row['created_at']]
+            : null;
+    }
+
     /** @return array<string,mixed>|null */
     public function revision(int $supplierId, int $revisionId): ?array
     {
@@ -1536,6 +1679,14 @@ final class PayrollRunRepository
      * i když je jediným důvodem chybějící čistá mzda: srážka na ni čeká
      * a účetní to má vidět.
      *
+     * Bez čisté mzdy se osoba bez srážek nedostane do výsledku „nic se
+     * nesráží", a tak jí kalkulačka připíše i ostatní nálezy, které se srážek
+     * jen týkají (např. pravidla exekučních srážek pro rok výplaty). U osoby,
+     * která nic srážet nemá, jsou stejnou ozvěnou: po doplnění zákonného
+     * výpočtu skončí „nic se nesráží" bez nich. Hlásit je znamenalo poslat
+     * účetní ke správci pro pravidla srážek, zatímco skutečně chyběly
+     * počáteční roční úhrny (leden nového roku).
+     *
      * @param array<string,mixed> $person
      */
     private static function enforcementOnlyAwaitsStatutoryResult(array $person): bool
@@ -1552,7 +1703,7 @@ final class PayrollRunRepository
         $issues = is_array($enforcement['result'] ?? null)
             ? ($enforcement['result']['issues'] ?? null)
             : null;
-        if ($issues !== [PayrollRunValidationMessageFormatter::NET_PAY_ISSUE]) {
+        if (!is_array($issues) || !in_array(PayrollRunValidationMessageFormatter::NET_PAY_ISSUE, $issues, true)) {
             return false;
         }
         $input = is_array($enforcement['input'] ?? null) ? $enforcement['input'] : null;
@@ -1591,7 +1742,26 @@ final class PayrollRunRepository
              VALUES (?, ?, "blocker", "statutory_calculation_manual_review",
                      ?, ?, ?, ?, 0)'
         );
-        foreach (PayrollRunValidationMessageFormatter::statutoryDetails($statutory) as $detail) {
+        // Vztahy, u kterých revize hlásí neschválené vstupy: chybějící schválenou
+        // složku u nich zákonné posouzení znovu neopakuje.
+        $drafts = $this->db->pdo()->prepare(
+            'SELECT entity_id
+               FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code = "draft_inputs_present"
+                AND entity_type = "employment"
+                AND entity_id IS NOT NULL'
+        );
+        $drafts->execute([$supplierId, $revisionId]);
+        $draftInputEmployments = [];
+        foreach ($drafts->fetchAll(PDO::FETCH_COLUMN) as $employmentId) {
+            $draftInputEmployments[(int) $employmentId] = true;
+        }
+        $details = PayrollRunValidationMessageFormatter::statutoryDetails($statutory, $draftInputEmployments);
+        if (PayrollHealthCoverageLaterRecord::concerns($details)) {
+            $details = $this->withLaterHealthCoverage($supplierId, $revisionId, $details);
+        }
+        foreach ($details as $detail) {
             $insert->execute([
                 $supplierId,
                 $revisionId,
@@ -1601,6 +1771,31 @@ final class PayrollRunRepository
                 $detail['remediation_path'],
             ]);
         }
+    }
+
+    /**
+     * Chybějící zdravotní pojištění: hláška řekne, od kdy je pojišťovna u osoby
+     * zapsaná, pokud ji má až od pozdějšího měsíce než běh.
+     *
+     * @param list<array<string,mixed>> $details
+     * @return list<array<string,mixed>>
+     */
+    private function withLaterHealthCoverage(int $supplierId, int $revisionId, array $details): array
+    {
+        $period = $this->db->pdo()->prepare(
+            'SELECT run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+              WHERE revision.supplier_id = ? AND revision.id = ?'
+        );
+        $period->execute([$supplierId, $revisionId]);
+        $periodStart = $period->fetchColumn();
+        if (!is_string($periodStart)) {
+            return $details;
+        }
+
+        return array_values((new PayrollHealthCoverageLaterRecord($this->db))
+            ->annotate($supplierId, substr($periodStart, 0, 10), $details));
     }
 
     /** @return array<string,mixed>|null */
@@ -1659,8 +1854,40 @@ final class PayrollRunRepository
         ]);
         $revisionId = (int) $this->db->pdo()->lastInsertId();
         $this->supersedeAbandonedRevisions($supplierId, $runId, $revisionId);
+        $this->storeRevisionSummary($supplierId, $runId, $revisionId, $snapshot);
 
         return $revisionId;
+    }
+
+    /**
+     * Souhrn nové revize u běhu: počet osob a příznak materializace výplat ze
+     * vstupního snímku, součty prázdné do výpočtu. Nová revize je vždy ta, na
+     * kterou běh vzápětí ukáže, takže souhrn předchozí revize už nikdo nečte.
+     */
+    private function storeRevisionSummary(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        PayrollRunInputSnapshot $snapshot,
+    ): void {
+        $people = $snapshot->data['people'] ?? null;
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_runs
+                SET summary_revision_id = ?,
+                    summary_person_count = ?,
+                    summary_payment_materialization = ?,
+                    summary_cash_payable_minor = NULL,
+                    summary_enforcement_withheld_minor = NULL,
+                    summary_payable_after_enforcement_minor = NULL
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([
+            $revisionId,
+            is_array($people) ? count($people) : 0,
+            self::supportsPaymentMaterialization($snapshot->data) ? 1 : 0,
+            $supplierId,
+            $runId,
+        ]);
     }
 
     /**
@@ -1883,33 +2110,417 @@ final class PayrollRunRepository
     }
 
     /**
-     * Opravná revize vrací uzamčené vstupy období do stavu schválený, aby je šlo
-     * opravit nebo zrušit. Schválený výsledek drží vlastní snímek vstupů, zámek
-     * se obnoví schválením opravné revize ({@see lockApprovedInputs()}).
+     * Opravná revize a zrušení neschváleného běhu vrací uzamčené vstupy období
+     * do stavu schválený, aby je šlo opravit nebo zrušit. Schválený výsledek
+     * drží vlastní snímek vstupů, zámek se obnoví schválením opravné revize
+     * ({@see lockApprovedInputs()}).
+     *
+     * Odemykají se jen vstupy zaměstnání zmrazených v revizích tohoto běhu,
+     * stejně jako je zamyká {@see lockApprovedInputs()}. Za totéž období může
+     * běžet i běh jiného rozsahu účtárny ({@see siblingRunsInOtherOfficeScope()});
+     * vstup, který drží jeho schválená revize nebo rozdělaná revize jeho
+     * nezrušeného běhu, zůstává zamčený. Dřív se odemykalo podle období
+     * a účtárny, takže zrušení běhu bez účtárny odemklo i vstupy schváleného
+     * běhu jiné účtárny.
      */
     public function unlockInputsForCorrection(
         int $supplierId,
+        int $runId,
         string $periodStart,
-        ?int $officeId,
     ): void {
-        $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
         $stmt = $this->db->pdo()->prepare(
             'UPDATE payroll_inputs input
-               JOIN payroll_employments employment
-                 ON employment.supplier_id = input.supplier_id
-                AND employment.id = input.employment_id
                 SET input.status = "approved",
                     input.row_version = input.row_version + 1
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
                 AND input.status = "locked"
-                AND ' . $officeSql
+                AND EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions own
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = own.supplier_id
+                         AND frozen.revision_id = own.id
+                       WHERE own.supplier_id = input.supplier_id
+                         AND own.run_id = ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_runs other
+                        JOIN payroll_run_revisions held
+                          ON held.supplier_id = other.supplier_id
+                         AND held.run_id = other.id
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = held.supplier_id
+                         AND frozen.revision_id = held.id
+                       WHERE other.supplier_id = input.supplier_id
+                         AND other.period_start = input.period_start
+                         AND other.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                         AND (held.status = "approved"
+                              OR (other.status <> "cancelled"
+                                  AND held.status IN ("snapshot", "calculated", "reviewed")))
+                    )'
         );
         $stmt->execute([
             $supplierId,
             $periodStart,
-            ...($officeId === null ? [] : [$officeId]),
+            $runId,
+            $runId,
         ]);
+    }
+
+    /**
+     * Převezme do nové revize výjimky, které účetní schválila v předchozí.
+     *
+     * Každá obnova podkladů i oprava zakládá novou revizi s vlastní sadou
+     * kontrol, takže výjimky se musely zadávat znovu, s důvodem aspoň dvacet
+     * znaků, po každé obnově. Převezme se jen výjimka u kontroly se STEJNÝM
+     * kódem, vztahem (entitou), seznamem dotčených osob a doslova stejným
+     * textem: jakmile se situace změní, text se změní taky a rozhodnutí se
+     * dělá znovu. Původní autor, čas i důvod zůstávají; převzetí zapíše
+     * volající do historie běhu jako „převzato z revize N".
+     *
+     * @return list<array{validation_id:int,source_validation_id:int,code:string}>
+     */
+    public function carryOverOverrides(int $supplierId, int $revisionId, int $sourceRevisionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT target.id AS validation_id,
+                    source.id AS source_validation_id,
+                    target.code,
+                    source.override_reason,
+                    source.overridden_by,
+                    source.overridden_at
+               FROM payroll_run_validations target
+               JOIN payroll_run_validations source
+                 ON source.supplier_id = target.supplier_id
+                AND source.revision_id = ?
+                AND source.code = target.code
+                AND source.entity_type = target.entity_type
+                AND source.entity_id <=> target.entity_id
+                AND source.message = target.message
+                AND source.subject_ids_json <=> target.subject_ids_json
+                AND source.requires_override = 1
+                AND source.overridden_at IS NOT NULL
+              WHERE target.supplier_id = ?
+                AND target.revision_id = ?
+                AND target.requires_override = 1
+                AND target.overridden_at IS NULL
+              ORDER BY target.id, source.id'
+        );
+        $stmt->execute([$sourceRevisionId, $supplierId, $revisionId]);
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = ?, overridden_by = ?, overridden_at = ?
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NULL'
+        );
+        $carried = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $update->execute([
+                (string) $row['override_reason'],
+                $row['overridden_by'] === null ? null : (int) $row['overridden_by'],
+                (string) $row['overridden_at'],
+                $supplierId,
+                (int) $row['validation_id'],
+            ]);
+            if ($update->rowCount() === 1) {
+                $carried[] = [
+                    'validation_id' => (int) $row['validation_id'],
+                    'source_validation_id' => (int) $row['source_validation_id'],
+                    'code' => (string) $row['code'],
+                ];
+            }
+        }
+
+        return $carried;
+    }
+
+    /** Stav, ze kterého byla vyžádaná poslední oprava běhu. */
+    public function correctionRequestedFrom(int $supplierId, int $runId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT from_status
+               FROM payroll_run_events
+              WHERE supplier_id = ? AND run_id = ?
+                AND event_type = "request_correction"
+                AND to_status = "correction_pending"
+              ORDER BY id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Nové datum výplaty běhu, který ještě nemá schválenou revizi. Verzi řádku
+     * posune až následný {@see updateRun()} v téže transakci; trigger z migrace
+     * 1632 datum schváleného běhu nepustí ani tak.
+     */
+    public function setPaymentDate(int $supplierId, int $runId, int $expectedVersion, string $paymentDate): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_runs
+                SET payment_date = ?
+              WHERE supplier_id = ? AND id = ? AND row_version = ?'
+        );
+        $stmt->execute([$paymentDate, $supplierId, $runId, $expectedVersion]);
+        if ($stmt->rowCount() !== 1) {
+            $current = $this->find($supplierId, $runId);
+            throw new PayrollRunConflictException(
+                $current === null ? 0 : (int) $current['row_version'],
+            );
+        }
+    }
+
+    public function revisionHasEmployee(int $supplierId, int $revisionId, int $employeeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $revisionId, $employeeId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function employeeOfEmployment(int $supplierId, int $employmentId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? null : (int) $value;
+    }
+
+    /** @return list<int> */
+    public function activeExclusionEmployeeIds(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id
+               FROM payroll_run_exclusions
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1
+              ORDER BY employee_id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
+     * Všechny vztahy aktivně vyřazených osob — i ty, které vznikly až po
+     * vyřazení. Kontrola zastaralých podkladů je nesmí počítat jako nové.
+     *
+     * @return list<int>
+     */
+    public function excludedEmploymentIds(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employment.id
+               FROM payroll_run_exclusions exclusion
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = exclusion.supplier_id
+                AND employment.employee_id = exclusion.employee_id
+              WHERE exclusion.supplier_id = ? AND exclusion.run_id = ?
+                AND exclusion.active_key = 1
+              ORDER BY employment.id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    public function insertExclusion(
+        int $supplierId,
+        int $runId,
+        int $employeeId,
+        string $reason,
+        int $actorUserId,
+        int $revisionNo,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_exclusions
+                (supplier_id, run_id, employee_id, reason, excluded_by, excluded_revision_no)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([$supplierId, $runId, $employeeId, mb_substr($reason, 0, 500), $actorUserId, $revisionNo]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    public function liftExclusions(
+        int $supplierId,
+        int $runId,
+        ?int $employeeId,
+        int $actorUserId,
+        string $liftReason,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_exclusions
+                SET lifted_at = NOW(), lifted_by = ?, lift_reason = ?
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1'
+            . ($employeeId === null ? '' : ' AND employee_id = ?')
+        );
+        $stmt->execute([
+            $actorUserId,
+            $liftReason,
+            $supplierId,
+            $runId,
+            ...($employeeId === null ? [] : [$employeeId]),
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /** Schválená revize šla bez vyřazených osob; vyřazení tím končí. */
+    public function settleExclusions(int $supplierId, int $runId, int $revisionId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_exclusions
+                SET settled_revision_id = ?
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1'
+        );
+        $stmt->execute([$revisionId, $supplierId, $runId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Vyřazení osob z běhu pro obrazovku: aktivní a ta, se kterými odešla
+     * schválená revize, jež je pořád platná (osoba čeká na doplatek opravou).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function exclusions(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT exclusion.id, exclusion.employee_id, employee.full_name,
+                    exclusion.reason, exclusion.excluded_at, exclusion.excluded_by,
+                    actor.name AS excluded_by_name, exclusion.excluded_revision_no,
+                    exclusion.settled_revision_id, settled.revision_no AS settled_revision_no
+               FROM payroll_run_exclusions exclusion
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = exclusion.supplier_id
+                AND employee.id = exclusion.employee_id
+          LEFT JOIN users actor ON actor.id = exclusion.excluded_by
+          LEFT JOIN payroll_run_revisions settled
+                 ON settled.supplier_id = exclusion.supplier_id
+                AND settled.id = exclusion.settled_revision_id
+              WHERE exclusion.supplier_id = ? AND exclusion.run_id = ?
+                AND exclusion.lifted_at IS NULL
+                AND (exclusion.settled_revision_id IS NULL OR settled.status = "approved")
+              ORDER BY employee.full_name, exclusion.id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'reason' => (string) $row['reason'],
+            'excluded_at' => (string) $row['excluded_at'],
+            'excluded_by' => $row['excluded_by'] === null ? null : (int) $row['excluded_by'],
+            'excluded_by_name' => $row['excluded_by_name'] === null ? null : (string) $row['excluded_by_name'],
+            'excluded_revision_no' => (int) $row['excluded_revision_no'],
+            'active' => $row['settled_revision_id'] === null,
+            'settled_revision_no' => $row['settled_revision_no'] === null ? null : (int) $row['settled_revision_no'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+    }
+
+    /**
+     * Po obnově podkladů odemkne vstupy vztahů, které nová revize už nezná.
+     *
+     * Vztah, který po zámku z běhu vypadl (nenastoupil, ukončený, přesunutý),
+     * měl vstupy zamčené předchozí revizí a nová revize je nepustila: hláška
+     * „vstupy zrušte" nešla provést a pomohlo až zrušení běhu a nové zadání
+     * výjimek. Odemyká se jen to, co zamkla některá revize tohoto běhu,
+     * a nic, co drží jiný běh téhož období (stejná podmínka jako
+     * {@see unlockInputsForCorrection()}).
+     */
+    public function unlockInputsOutsideRevision(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        string $periodStart,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_inputs input
+                SET input.status = "approved",
+                    input.row_version = input.row_version + 1
+              WHERE input.supplier_id = ?
+                AND input.period_start = ?
+                AND input.status = "locked"
+                AND EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions own
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = own.supplier_id
+                         AND frozen.revision_id = own.id
+                       WHERE own.supplier_id = input.supplier_id
+                         AND own.run_id = ?
+                         AND own.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_run_employments current_frozen
+                       WHERE current_frozen.supplier_id = input.supplier_id
+                         AND current_frozen.revision_id = ?
+                         AND current_frozen.employment_id = input.employment_id
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions approved
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = approved.supplier_id
+                         AND frozen.revision_id = approved.id
+                       WHERE approved.supplier_id = input.supplier_id
+                         AND approved.run_id = ?
+                         AND approved.status = "approved"
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_runs other
+                        JOIN payroll_run_revisions held
+                          ON held.supplier_id = other.supplier_id
+                         AND held.run_id = other.id
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = held.supplier_id
+                         AND frozen.revision_id = held.id
+                       WHERE other.supplier_id = input.supplier_id
+                         AND other.period_start = input.period_start
+                         AND other.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                         AND (held.status = "approved"
+                              OR (other.status <> "cancelled"
+                                  AND held.status IN ("snapshot", "calculated", "reviewed")))
+                    )'
+        );
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            $runId,
+            $revisionId,
+            $revisionId,
+            $runId,
+            $runId,
+        ]);
+
+        return $stmt->rowCount();
     }
 
     /**
@@ -1945,6 +2556,26 @@ final class PayrollRunRepository
         if ($updateRevision->rowCount() !== 1) {
             throw new \DomainException('Revizi nelze v aktuálním stavu přepočítat.');
         }
+        // Součty do souhrnu běhu, jen patří-li souhrn této revizi (jinak se
+        // v seznamu dál čtou ze snímku, viz SUMMARY_IS_CURRENT).
+        $totals = is_array($result['totals'] ?? null) ? $result['totals'] : [];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_runs run
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                SET run.summary_cash_payable_minor = ?,
+                    run.summary_enforcement_withheld_minor = ?,
+                    run.summary_payable_after_enforcement_minor = ?
+              WHERE revision.supplier_id = ? AND revision.id = ?
+                AND ' . self::SUMMARY_IS_CURRENT
+        )->execute([
+            self::summaryMinor($totals, 'cash_payable_minor'),
+            self::summaryMinor($totals, 'enforcement_withheld_minor'),
+            self::summaryMinor($totals, 'payable_after_enforcement_minor'),
+            $supplierId,
+            $revisionId,
+        ]);
 
         $employmentUpdate = $this->db->pdo()->prepare(
             'UPDATE payroll_run_employments
@@ -1953,7 +2584,11 @@ final class PayrollRunRepository
         );
         $personUpdate = $this->db->pdo()->prepare(
             'UPDATE payroll_run_persons
-                SET result_json = ?, result_hash = ?, status = "calculated"
+                SET result_json = ?, result_hash = ?, status = "calculated",
+                    ' . implode(', ', array_map(
+                        static fn (string $column): string => $column . ' = ?',
+                        PayrollRunPersonSummary::COLUMNS,
+                    )) . '
               WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?'
         );
         foreach ($result['people'] ?? [] as $person) {
@@ -1993,6 +2628,7 @@ final class PayrollRunRepository
             $personUpdate->execute([
                 $personJson,
                 hash('sha256', $personJson),
+                ...array_values(PayrollRunPersonSummary::fromResult($person)),
                 $supplierId,
                 $revisionId,
                 (int) $person['employee_id'],
@@ -2248,7 +2884,20 @@ final class PayrollRunRepository
         foreach (['office_id', 'created_by', 'updated_by'] as $field) {
             $row[$field] = $row[$field] === null ? null : (int) $row[$field];
         }
+        // Uložený souhrn je vnitřní zrychlení seznamu, ne údaj běhu.
+        foreach (self::SUMMARY_COLUMNS as $field) {
+            unset($row[$field]);
+        }
+        unset($row['period_slot']);
         return $row;
+    }
+
+    /** @param array<string,mixed> $totals */
+    private static function summaryMinor(array $totals, string $key): ?int
+    {
+        $value = $totals[$key] ?? null;
+
+        return is_int($value) ? $value : null;
     }
 
     /**

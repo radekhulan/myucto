@@ -15,9 +15,12 @@ final class PayrollTermsSettledException extends \DomainException
     public function __construct(public readonly string $settledPeriod)
     {
         parent::__construct(sprintf(
-            'Podmínky platné od tohoto data už nejde opravit — za období %d/%d '
-            . 'je mzda zaúčtovaná nebo vyplacená. Změnu zapište jako novou verzi '
-            . 'podmínek od data, kdy začíná platit.',
+            'Podmínky platné od tohoto data nejde opravit - za období %d/%d '
+            . 'je mzda zaúčtovaná nebo vyplacená. Pro zpětnou opravu otevřete opravu běhu '
+            . 'za tento měsíc a za všechny další vyúčtované měsíce opravované verze podmínek. '
+            . 'Otevřená oprava jiného měsíce nestačí. Po uložení zvolte Obnovit podklady '
+            . 'a mzdy znovu přepočítejte. Změnu platnou až do budoucna zapište jako novou '
+            . 'verzi podmínek od data, kdy začíná platit.',
             (int) substr($settledPeriod, 5, 2),
             (int) substr($settledPeriod, 0, 4),
         ));

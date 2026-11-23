@@ -7,8 +7,12 @@ namespace MyInvoice\Tests\Integration\Invoice;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\FinalDraftToTaxDocument;
+use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Invoice\PaymentTaxDocumentNotApplicableException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -167,6 +171,81 @@ final class FinalDraftToTaxDocumentTest extends TestCase
         }
         self::assertSame(0, $this->countChildren($proformaId, 'tax_document'));
         self::assertSame(1, $this->countChildren($proformaId, 'invoice'));
+    }
+
+    /**
+     * Úhrada minulého roku převzatá z POHODY: daň z ní přiznala POHODA. Daňový doklad k ní
+     * nevznikne ručně ani převodem konceptu, ten zdaní jen platbu z MyÚčta.
+     */
+    public function testPriorYearPohodaPaymentGetsNoTaxDocument(): void
+    {
+        $proformaId = $this->proforma(70000.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source) VALUES (?, ?, ?, 24200, ?, ?, ?)')
+            ->execute([$this->supplierId, $proformaId, '2098-03-31', 'CZK', PohodaPriorYearPayments::NOTE, PohodaPriorYearPayments::SOURCE]);
+        $prior = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE invoices SET paid_total = 24200 WHERE id = ?')->execute([$proformaId]);
+        $creator = Bootstrap::buildContainer()->get(PaymentTaxDocumentCreator::class);
+        try {
+            $creator->createForPayment($prior);
+            self::fail('K úhradě minulého roku z POHODY nesmí vzniknout daňový doklad.');
+        } catch (PaymentTaxDocumentNotApplicableException $e) {
+            self::assertStringContainsString('POHODY', $e->getMessage());
+        }
+
+        $result = $this->payments->recordPayment($proformaId, 60500.0, self::PAID_ON);
+        $draftId = (int) ($result['final_draft_id'] ?? 0);
+        self::assertGreaterThan(0, $draftId);
+        self::assertSame([(int) $result['payment_id']], array_column($this->converter->pendingPayments($proformaId), 'id'));
+        $converted = $this->converter->convert($draftId, 0);
+        self::assertCount(1, $converted['tax_document_ids']);
+        self::assertNull($this->payments->findPayment($prior)['tax_document_invoice_id']);
+    }
+
+    /**
+     * Platba zálohy převzatá z Money S3 v zamčeném období: daň z ní přiznala Money. Daňový
+     * doklad k ní nevznikne ručně ani převodem konceptu, ten zdaní jen platbu z MyÚčta.
+     */
+    public function testMoneyS3PaymentGetsNoTaxDocument(): void
+    {
+        $proformaId = $this->proforma(70000.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source) VALUES (?, ?, ?, 24200, ?, ?, ?)')
+            ->execute([$this->supplierId, $proformaId, '2098-03-31', 'CZK', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP98001', 'bank']);
+        $money = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE invoices SET paid_total = 24200 WHERE id = ?')->execute([$proformaId]);
+        // Záloha z mapy převodu, platba v zamčeném období. Test běží nad sdílenou firmou bez
+        // transakce: zámek a mapa se po kontrole vrátí, jinak by zamkly ostatní testy.
+        $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
+        $lock->execute([$this->supplierId]);
+        $lockedBefore = $lock->fetchColumn();
+        $pdo->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', ?, ?)")
+            ->execute([$this->supplierId, '2098|ZV' . $proformaId, $proformaId]);
+        $pdo->prepare("INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, '2098-03-31')
+                        ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)")->execute([$this->supplierId]);
+        try {
+            $creator = Bootstrap::buildContainer()->get(PaymentTaxDocumentCreator::class);
+            try {
+                $creator->createForPayment($money);
+                self::fail('K platbě zálohy převzaté z Money S3 nesmí vzniknout daňový doklad.');
+            } catch (PaymentTaxDocumentNotApplicableException $e) {
+                self::assertStringContainsString('zdaněná', $e->getMessage());
+            }
+
+            // Nová platba po datu zámku DDKP dostane.
+            $result = $this->payments->recordPayment($proformaId, 60500.0, self::PAID_ON);
+            $draftId = (int) ($result['final_draft_id'] ?? 0);
+            self::assertGreaterThan(0, $draftId);
+            self::assertSame([(int) $result['payment_id']], array_column($this->converter->pendingPayments($proformaId), 'id'));
+            $converted = $this->converter->convert($draftId, 0);
+            self::assertCount(1, $converted['tax_document_ids']);
+            self::assertNull($this->payments->findPayment($money)['tax_document_invoice_id']);
+        } finally {
+            $pdo->prepare('UPDATE accounting_supplier_settings SET locked_until = ? WHERE supplier_id = ?')
+                ->execute([$lockedBefore === false ? null : $lockedBefore, $this->supplierId]);
+            $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'invoice' AND target_id = ?")
+                ->execute([$this->supplierId, $proformaId]);
+        }
     }
 
     /** Koncept faktury bez zálohové faktury (běžná faktura) se nemění. */

@@ -35,7 +35,7 @@ final class PayrollPeriodExportApiContractTest extends TestCase
         }
         self::assertStringContainsString(
             // Brána se čte přes sdílený helper; doslovné ATTR_METHOD už v akcích není.
-            '!RequestAuthorization::isSessionAuth($request)',
+            '!RequestAuthorization::actsAsSession($request)',
             $action,
         );
         self::assertStringContainsString(

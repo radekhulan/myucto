@@ -37,7 +37,11 @@ import {
   registrationMissingItems,
 } from './registrationMissingItems'
 import { registrationA1FieldLabel } from './registrationA1FieldLabels'
-import { registrationRemediation } from './registrationRemediation'
+import {
+  registrationErrorBeforeStart,
+  registrationRemediation,
+  registrationTooEarly,
+} from './registrationRemediation'
 import { usePersonCardSaveSection } from './personCardSave'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -105,7 +109,9 @@ const showXml = ref(false)
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const transport =ref<PayrollJmhzTransportPoll | null>(null)
-const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
+const transportBusy = ref<'send' | 'poll' | 'close' | 'reprepare' | null>(null)
+/** Odeslání odmítlo zastaralý formát věty (REGZEC25 od 23. 12. 2026). */
+const staleSendRejected = ref(false)
 const transportMessage = ref('')
 const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
 const changesBusy = ref(false)
@@ -120,6 +126,7 @@ const eventsBusy = ref(false)
 const eventSaving = ref(false)
 const eventError = ref('')
 const eventErrorCode = ref('')
+const a2OverrideReason = ref('')
 const selectedEventId = ref<number | null>(null)
 const eventFormOpen = ref(false)
 const eventInteraction = ref<PayrollRegistrationEventInteraction>('termination')
@@ -569,12 +576,16 @@ const a1InsurerOptions = computed(() => {
  * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
  * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
  * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
- * první uložení tiše nesmazalo.
+ * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere nabídku `from_2027`
+ * (REGZEC 2027); podle EDV 1.5.0.3 je shodná s dřívější (list 2119).
  */
 const a1EmploymentStatusOptions = computed(() => {
   const activity = a1Form.value.employment.activity_code
   const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
-  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+  const source = a1FromNextVintage.value
+    ? jmhzOptions.value?.from_2027?.employment_status_codes
+    : jmhzOptions.value?.employment_status_codes
+  const options = (source ?? [])
     .filter(option => restricted === null || restricted.includes(option.code))
     .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
   const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
@@ -1459,17 +1470,39 @@ const canSend = computed(() => transportAttempt.value === null || [
   'expired',
 ].includes(transportAttempt.value.status))
 
+/**
+ * Změna nebo oprava připravená ve formátu REGZEC25, kterou ČSSZ od 23. 12. 2026
+ * nepřijme: místo odeslání se nabízí Připravit znovu.
+ */
+const vintageExpired = computed(() => submission.value !== null
+  && transportAttempt.value === null
+  && (submission.value.vintage_expired === true || staleSendRejected.value))
+
 const transportActions = computed<ActionItem[]>(() => {
   if (!submission.value) return []
 
   return [
+    {
+      key: 'registration-reprepare',
+      label: t('payroll.people.registration.reprepare'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'warning',
+      show: vintageExpired.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'reprepare',
+      run: reprepare,
+    },
     {
       key: 'registration-send',
       label: t(`payroll.people.registration.send_${environment.value}`),
       icon: 'send',
       tier: 'primary',
       variant: 'primary',
-      show: canSend.value,
+      show: canSend.value && !vintageExpired.value,
       disabled: !props.canWrite || transportBusy.value !== null,
       disabledReason: !props.canWrite
         ? t('payroll.people.registration.write_required')
@@ -1511,6 +1544,7 @@ const transportActions = computed<ActionItem[]>(() => {
 function resetPreparedFiling(): void {
   preview.value = null
   submission.value = null
+  staleSendRejected.value = false
   transport.value = null
   transportMessage.value = ''
   showXml.value = false
@@ -1808,6 +1842,9 @@ function eventPayload(): PayrollRegistrationEventInput {
   if (eventInteraction.value === 'termination' && identifiersVerifiedInCsszList.value) {
     payload.identifiers_verified_in_cssz_list = true
   }
+  if (eventInteraction.value === 'termination' && a2OverrideReason.value.trim().length >= 10) {
+    payload.jmhz_corrections_override_reason = a2OverrideReason.value.trim()
+  }
   return payload
 }
 
@@ -1824,6 +1861,7 @@ async function saveEvent(): Promise<void> {
     events.value = [event, ...events.value.filter(existing => existing.id !== event.id)]
     selectedEventId.value = event.id
     eventFormOpen.value = false
+    a2OverrideReason.value = ''
     resetEventForm()
     await run('preview')
   } catch (exception) {
@@ -2092,6 +2130,7 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
   error.value = ''
   errorCode.value = ''
   errorProblems.value = []
+  staleSendRejected.value = false
   try {
     if (action === 'preview') {
       submission.value = null
@@ -2166,6 +2205,12 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
     errorProblems.value = registrationMissingItems(exception)
     const code = apiErrorCode(exception)
     errorCode.value = code
+    // Náhled před nástupem neprošel (brzy, nebo částečné přihlášení nejde):
+    // volba částečná / plná se dřív ukázala až po úspěšném náhledu, takže
+    // rada „podejte plnou registraci" neměla v obrazovce kam vést.
+    if (selectedEventId.value === null && registrationErrorBeforeStart(code)) {
+      beforeStartChoice.value = true
+    }
     if (code === 'registration_already_prepared' || code === 'registration_already_filed') {
       void loadCurrentRegistration()
     }
@@ -2203,9 +2248,38 @@ async function send(): Promise<void> {
       report: null,
     }
   } catch (exception) {
+    if (apiErrorCode(exception) === 'registration_regzec25_change_stale') {
+      staleSendRejected.value = true
+    }
     error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.send_failed'),
+    )
+  } finally {
+    transportBusy.value = null
+  }
+}
+
+/** Nová věta REGZEC27 ze stejné události; zastaralé podání server zruší. */
+async function reprepare(): Promise<void> {
+  if (!submission.value || !props.canWrite || selectedEventId.value === null) return
+  transportBusy.value = 'reprepare'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    submission.value = await payrollApi.prepareEmploymentRegistration(
+      props.employmentId,
+      environment.value,
+      selectedEventId.value,
+      'auto',
+      { replacesSubmissionId: submission.value.submission_id },
+    )
+    staleSendRejected.value = false
+    transport.value = null
+  } catch (exception) {
+    error.value = serverErrorMessage(
+      exception,
+      t('payroll.people.registration.reprepare_failed'),
     )
   } finally {
     transportBusy.value = null
@@ -4804,6 +4878,34 @@ async function copyXml(): Promise<void> {
 
       <div v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
         <p>{{ eventError }}</p>
+        <div
+          v-if="eventErrorCode === 'registration_a2_jmhz_corrections_incomplete' && canWrite"
+          class="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-3 text-warning-900"
+          data-test="registration-a2-override"
+        >
+          <label class="block text-xs font-medium" for="registration-a2-override-reason">
+            {{ t('payroll.people.registration.event.a2_override_reason') }}
+          </label>
+          <textarea
+            id="registration-a2-override-reason"
+            v-model="a2OverrideReason"
+            rows="2"
+            maxlength="500"
+            class="mt-1 w-full rounded-lg border border-neutral-300 bg-surface px-2 py-1 text-sm text-neutral-900"
+            data-test="registration-a2-override-reason"
+          />
+          <button
+            type="button"
+            :class="btnFilled('warning')"
+            class="mt-2"
+            :disabled="eventSaving || a2OverrideReason.trim().length < 10"
+            data-test="registration-a2-override-save"
+            @click="saveEvent"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.people.registration.event.a2_override_save') }}
+          </button>
+        </div>
         <div v-if="registrationRemediation(eventErrorCode) !== null" class="mt-2 flex flex-wrap gap-2">
           <button
             v-if="registrationRemediation(eventErrorCode)?.kind === 'a1_profile'"
@@ -4906,6 +5008,14 @@ async function copyXml(): Promise<void> {
       <p class="mt-1 break-all font-mono text-xs text-success-700">
         {{ submission.artifact_sha256.slice(0, 16) }}…
       </p>
+      <p
+        v-if="vintageExpired"
+        class="mt-2 rounded-md border border-warning-300 bg-warning-50 px-2 py-1 text-xs text-warning-800"
+        role="alert"
+        data-test="registration-vintage-expired"
+      >
+        {{ t('payroll.people.registration.vintage_expired') }}
+      </p>
 
       <div class="mt-3 border-t border-success-500/20 pt-3" data-test="registration-transport-actions">
         <ActionBar :actions="transportActions" />
@@ -4970,6 +5080,9 @@ async function copyXml(): Promise<void> {
     </div>
 
     <div v-if="preview && !submission" class="mt-3">
+      <p v-if="preview.schema_validation?.valid" class="mb-2 text-sm font-medium text-success-700" data-test="registration-preview-xsd-valid">
+        {{ t('payroll.people.registration.xml_schema_valid', { schema: preview.schema_validation.schema_version }) }}
+      </p>
       <div class="flex flex-wrap gap-2">
         <button
           type="button"
@@ -5000,8 +5113,11 @@ async function copyXml(): Promise<void> {
 
     <div
       v-if="error"
-      class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-      role="alert"
+      class="mt-3 rounded-lg border p-3 text-sm"
+      :class="registrationTooEarly(errorCode)
+        ? 'border-info-500/30 bg-info-50 text-info-700'
+        : 'border-danger-500/30 bg-danger-50 text-danger-700'"
+      :role="registrationTooEarly(errorCode) ? 'status' : 'alert'"
       data-test="registration-error"
     >
       <p>{{ error }}</p>

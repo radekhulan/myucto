@@ -153,6 +153,7 @@ final class AresClient
     /**
      * Typ poplatníka z kódu právní formy (ARES `pravniForma`):
      *  - kódy 100–109 = fyzické osoby podnikající (OSVČ) → 'fo' (DPFO),
+     *  - 424 zahraniční fyzická osoba a 425 její odštěpný závod → 'fo',
      *  - jakýkoli jiný neprázdný kód = právnická osoba → 'po' (DPPO),
      *  - prázdné = '' (nedeterminujeme, necháme uživateli).
      */
@@ -161,7 +162,7 @@ final class AresClient
         if ($pf === '') {
             return '';
         }
-        return preg_match('/^10\d$/', $pf) === 1 ? 'fo' : 'po';
+        return preg_match('/^(10\d|424|425)$/', $pf) === 1 ? 'fo' : 'po';
     }
 
     /**

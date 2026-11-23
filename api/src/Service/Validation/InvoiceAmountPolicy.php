@@ -12,6 +12,7 @@ use MyInvoice\Service\Invoice\TimeBilling;
 
 final class InvoiceAmountPolicy
 {
+    public const MANUAL_PRICE_MISSING_MESSAGE = 'Některé řádky čekají na zadání ceny. Doplňte je, než fakturu vystavíte.';
     public const NON_POSITIVE_DRAFT_MESSAGE = 'Výsledná částka k úhradě musí být větší než 0. Pro čistě záporný nebo nulový doklad použij dobropis.';
     public const NON_POSITIVE_MARK_PAID_MESSAGE = 'Fakturu s částkou k úhradě 0 nebo méně nelze označit jako zaplacenou.';
     public const NON_POSITIVE_REMINDER_MESSAGE = 'Upomínat lze jen faktury s kladnou částkou k úhradě.';
@@ -37,6 +38,26 @@ final class InvoiceAmountPolicy
         return true;
     }
 
+    /**
+     * Záloha, kterou konečná faktura vyúčtovává: vazba dokladu (`parent_invoice_id`), nebo
+     * u faktury čerpající víc záloh záloha vyznačená na odpočtovém řádku
+     * ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}). Faktura krytá zálohami se posuzuje stejně
+     * bez ohledu na to, kolik záloh čerpá.
+     */
+    public static function advanceLinkId(array $invoice): ?int
+    {
+        $parent = (int) ($invoice['parent_invoice_id'] ?? 0);
+        if ($parent > 0) {
+            return $parent;
+        }
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (is_array($item) && (int) ($item['advance_invoice_id'] ?? 0) > 0) {
+                return (int) $item['advance_invoice_id'];
+            }
+        }
+        return null;
+    }
+
     public static function requiresPositiveAmountToPay(string $invoiceType): bool
     {
         return in_array($invoiceType, ['invoice', 'proforma'], true);
@@ -55,7 +76,7 @@ final class InvoiceAmountPolicy
         ?string $currency = null,
     ): ?string {
         $type = (string) ($data['invoice_type'] ?? 'invoice');
-        if (!self::requiresPositiveDraftAmountToPay($type, $data['parent_invoice_id'] ?? null)) {
+        if (!self::requiresPositiveDraftAmountToPay($type, self::advanceLinkId($data))) {
             return null;
         }
 
@@ -69,6 +90,16 @@ final class InvoiceAmountPolicy
         // a uživatel viděl všechny chyby naráz.
         $mathItems = [];
         foreach ($items as $item) {
+            // Řádek „cenu zadá člověk" zatím bez ceny do součtu nepatří, ostatní řádky ano. Hlídá ho
+            // vystavení: příznak nese jen koncept (replaceItems ho jinde neuloží, force-edit vystavené
+            // ho zahodí) a každá cesta, která vystavuje existující koncept, volá hasMissingManualPrice():
+            // IssueInvoiceAction (UI, API v1, MCP `issue_invoice`), AutoIssueAndSendService (schválení
+            // výkazu) a už žádost o schválení (RequestApprovalAction). Pravidelná faktura, účtenka a
+            // storno vystavují vlastní nově založený doklad bez příznaku; kopie, dobropis a konečná
+            // faktura ze zálohy ho nepřenáší.
+            if (is_array($item) && self::isMissingManualPrice($item)) {
+                continue;
+            }
             if (
                 !is_array($item)
                 || InvoiceItemKind::isText($item)
@@ -130,6 +161,28 @@ final class InvoiceAmountPolicy
     }
 
     /**
+     * Řádek „cenu zadá člověk" (faktura z příjemky), kterému ještě chybí cena: součet může být
+     * kladný díky ostatním řádkům, plnění za 0 Kč by ale odešlo odběrateli.
+     *
+     * @param array<int, mixed> $items
+     */
+    public static function hasMissingManualPrice(array $items): bool
+    {
+        foreach ($items as $item) {
+            if (is_array($item) && self::isMissingManualPrice($item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string, mixed> $item */
+    private static function isMissingManualPrice(array $item): bool
+    {
+        return !empty($item['manual_price']) && (float) ($item['unit_price_without_vat'] ?? 0) === 0.0;
+    }
+
+    /**
      * Aspoň jeden řádek s kladnou částkou (množství × cena). Rozlišuje vyúčtování,
      * ve kterém odpočty převážily plnění, od dokladu bez plnění, který patří na dobropis.
      *
@@ -182,7 +235,7 @@ final class InvoiceAmountPolicy
     public static function canBeMarkedPaid(array $invoice): bool
     {
         $type = (string) ($invoice['invoice_type'] ?? 'invoice');
-        if ($type === 'invoice' && (int) ($invoice['parent_invoice_id'] ?? 0) > 0) {
+        if ($type === 'invoice' && self::advanceLinkId($invoice) !== null) {
             return true;
         }
         // Doklad k vyplacení se „zaplatí" vrácením peněz zákazníkovi (InvoicePaymentService::markRefunded).
@@ -205,7 +258,7 @@ final class InvoiceAmountPolicy
         // už přijatou úplatu (advance_paid_amount = brutto platby → amount_to_pay = 0),
         // takže se při vystavení označí jako zaplacený stejně jako finál krytý zálohou.
         return in_array((string) ($invoice['invoice_type'] ?? ''), ['invoice', 'tax_document'], true)
-            && (int) ($invoice['parent_invoice_id'] ?? 0) > 0
+            && self::advanceLinkId($invoice) !== null
             && (float) ($invoice['amount_to_pay'] ?? 0) <= 0.0;
     }
 

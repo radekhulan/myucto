@@ -9,6 +9,9 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
@@ -51,6 +54,44 @@ final class DimensionDefaults
     }
 
     /**
+     * {@see resolve()} pro víc dokladů najednou: zakázka > klient (dodavatel), se stejným
+     * filtrem neaktivních hodnot a typů. Čte dávkou, počet dotazů nezávisí na počtu dokladů.
+     *
+     * @param array<int,array{0:?int,1:?int}> $parties klíč (doklad) => [klient, zakázka]
+     * @return array<int,array<int,int>> klíč => typ => hodnota (jen neprázdné)
+     */
+    public function resolveMany(int $supplierId, array $parties): array
+    {
+        $clientIds = $projectIds = [];
+        foreach ($parties as [$clientId, $projectId]) {
+            if ($clientId !== null && $clientId > 0) {
+                $clientIds[] = $clientId;
+            }
+            if ($projectId !== null && $projectId > 0) {
+                $projectIds[] = $projectId;
+            }
+        }
+        $repo = new DimensionDefaultRepository($this->db);
+        $byProject = $repo->forEntities($supplierId, 'project', $projectIds);
+        $byClient = $repo->forEntities($supplierId, 'client', $clientIds);
+        if ($byProject === [] && $byClient === []) {
+            return [];
+        }
+        $context = $this->mergeContext($supplierId, [...array_values($byProject), ...array_values($byClient)]);
+        $out = [];
+        foreach ($parties as $key => [$clientId, $projectId]) {
+            $header = self::mergeLayers([
+                'project:' . (int) $projectId => $byProject[(int) $projectId] ?? [],
+                'client:' . (int) $clientId => $byClient[(int) $clientId] ?? [],
+            ], $context)['header'];
+            if ($header !== []) {
+                $out[$key] = $header;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Výchozí dimenze položek z produktu: produkt > jeho kategorie > nadřízené kategorie,
      * typ po typu (Účtování podle dimenzí, F1). Volá je předvyplnění položky v editoru
      * i {@see DimensionStamper}, takže položka bez vlastních dimenzí dostane při
@@ -73,13 +114,15 @@ final class DimensionDefaults
         if ($own === [] && $categories === []) {
             return [];
         }
+        // Typy a hodnoty jedním čtením pro všechny produkty, ne po produktech.
+        $context = $this->mergeContext($supplierId, [...array_values($own), ...array_values($categories)]);
         $out = [];
         foreach ($productIds as $productId) {
             $layers = ['product:' . $productId => $own[$productId] ?? []];
             foreach ($chains[$productId] ?? [] as $categoryId) {
                 $layers['product_category:' . $categoryId] = $categories[$categoryId] ?? [];
             }
-            $merged = $this->merge($supplierId, $layers);
+            $merged = self::mergeLayers($layers, $context);
             if ($merged['header'] === []) {
                 continue;
             }
@@ -99,7 +142,8 @@ final class DimensionDefaults
      *     včetně jejích výchozích
      *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
      *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
-     *     jen hodnoty společné všem
+     *     jen hodnoty společné všem; výchozí dimenze vlastního bankovního účtu jen
+     *     řádku banky a protiúčtu pohybu bez dokladu ({@see DimensionStamper::fillBankAccount()})
      *   • ostatní pohledávka / závazek: protistrana
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
@@ -120,12 +164,12 @@ final class DimensionDefaults
      *
      * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
      */
-    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId, bool $includeInactiveBankAccount = false): array
     {
         return match ($sourceType) {
             'invoice', 'purchase_invoice', 'other_item' => $this->forDocumentWithOrigins($supplierId, $sourceType, $sourceId) + ['splits' => [], 'split_origins' => []],
             'cash' => $this->forCash($supplierId, $sourceId, true),
-            'bank' => $this->forBank($supplierId, $sourceId, true),
+            'bank', 'card_writeoff' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
             'offset' => $this->forOffset($supplierId, $sourceId, true),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
@@ -419,30 +463,187 @@ final class DimensionDefaults
      * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
      * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
      *
+     * Výchozí dimenze vlastního bankovního účtu do hlavičky nepatří: platí jen pro řádek
+     * banky a protiúčet pohybu bez dokladu. S originy proto vrací i `bank_account`
+     * ({@see bankAccountLayer()}), které po řádcích doplní {@see DimensionStamper::fillBankAccount()}.
+     * Stejně omezenou vrstvu tvoří dimenze pravidla účtování zapsané k pohybu (`bank_rule`,
+     * {@see bankRuleLayer()}): doplní se na stejné řádky, ale ještě před výchozími
+     * hodnotami pravidel dimenzí podle účtu.
+     *
      * @return array<int,int>
      */
-    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false): array
+    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false, bool $includeInactiveAccount = false): array
     {
-        $documents = $this->bankDocuments($supplierId, $transactionId, $withOrigins)['documents'];
+        $bank = $this->bankDocuments($supplierId, $transactionId, $withOrigins);
+        $documents = $bank['documents'];
         $header = self::commonHeader(array_column($documents, 'header'));
-        return $withOrigins
-            ? ['header' => $header, 'splits' => [], 'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId), 'split_origins' => []]
-            : $header;
+        if (!$withOrigins) {
+            return $header;
+        }
+        return [
+            'header' => $header,
+            'splits' => [],
+            'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId),
+            'split_origins' => [],
+            'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
+            'bank_rule' => $this->bankRuleLayer($supplierId, $transactionId, $bank, $includeInactiveAccount),
+        ];
+    }
+
+    /**
+     * Výchozí dimenze cílového bankovního účtu vyúčtování GoPay (nastavení GoPay v měně
+     * pohybu). Nastavení drží analytiku 221.x, účet firmy se k ní dohledá přes
+     * `analytic_suffix` ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner}).
+     * Pohyb GoPay jiný kontext nemá; hodnota musí být aktivní a typ viditelný.
+     *
+     * @return array{header:array<int,int>, origins:array<int,array{origin:string,ref:string}>}
+     */
+    public function gopayAccountLayer(int $supplierId, int $movementId): array
+    {
+        $none = ['header' => [], 'origins' => []];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sba.id
+               FROM gopay_movements gm
+          LEFT JOIN gopay_clearings gc ON gc.id = gm.clearing_id AND gc.supplier_id = gm.supplier_id
+               JOIN gopay_settings gs ON gs.supplier_id = gm.supplier_id AND gs.currency = COALESCE(gc.currency, gm.currency)
+               JOIN chart_of_accounts coa ON coa.id = gs.destination_bank_account_id AND coa.supplier_id = gm.supplier_id
+               JOIN supplier_bank_accounts sba ON sba.supplier_id = gm.supplier_id
+                AND coa.account_code = CONCAT(?, sba.analytic_suffix)
+              WHERE gm.id = ? AND gm.supplier_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([BankAnalyticAssigner::BANK_SYNTHETIC . '.', $movementId, $supplierId]);
+        $accountId = (int) $stmt->fetchColumn();
+        if ($accountId <= 0) {
+            return $none;
+        }
+        $layer = (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId);
+        if ($layer === []) {
+            return $none;
+        }
+        $merged = $this->merge($supplierId, ['bank_account:' . $accountId => $layer]);
+        return ['header' => $merged['header'], 'origins' => $merged['origins']];
+    }
+
+    /** @var array<string,array{id:int, kind:string, layer:array<int,int>}|null> (firma, číslo účtu, kód banky, i neaktivní) => účet */
+    private array $bankAccountCache = [];
+
+    private int $bankAccountGeneration = -1;
+
+    /**
+     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží, s tím, na které
+     * řádky zápisu patří: `synthetics` a `side` určují řádek banky, `pays_documents`
+     * říká, zda smí i na protiúčet (pohyb, který nehradí doklad).
+     *
+     * Účet výpisu se hledá stejně jako bankovní noha zápisu
+     * ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}), takže dimenze patří
+     * účtu, na jehož analytiku 221.xxx se pohyb účtuje. Přerazítkování už zaúčtovaného
+     * pohybu (`$includeInactive`) bere i účet, který mezitím někdo deaktivoval — pohyb
+     * na něm byl zaúčtován a dimenzi si má ponechat.
+     *
+     * Shoda účtu a jeho výchozí dimenze se drží v cache podle (firma, číslo účtu, kód
+     * banky), hromadné přerazítkování tak pro každý pohyb téhož účtu nečte znovu.
+     * Uložení výchozích dimenzí ({@see DimensionDefaultRepository::replace()}) cache zahodí.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankAccountLayer(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        $account = $this->statementAccount($supplierId, $bank, $includeInactive);
+        if ($account === null || $account['layer'] === []) {
+            return null;
+        }
+        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
+        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
+        if ($merged['header'] === []) {
+            return null;
+        }
+        return ['header' => $merged['header'], 'origins' => $merged['origins']] + self::bankLines($account, $bank);
+    }
+
+    /**
+     * Dimenze pravidla účtování, které pohyb zaúčtovalo ({@see BankRuleDimensions}), s týmiž
+     * řádky jako výchozí dimenze účtu ({@see bankAccountLayer()}): řádek banky a u pohybu,
+     * který nehradí doklad, protiúčet. Pravidlo popisuje druh pohybu, ne saldokonto
+     * hrazeného dokladu ani druhou nohu převodu, které se po dimenzi musí vyrovnat.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankRuleLayer(int $supplierId, int $transactionId, array $bank, bool $includeInactive): ?array
+    {
+        $rule = (new BankRuleDimensions($this->db))->onTransaction($supplierId, $transactionId);
+        if ($rule['header'] === []) {
+            return null;
+        }
+        return $rule + self::bankLines($this->statementAccount($supplierId, $bank, $includeInactive), $bank);
+    }
+
+    /**
+     * Řádky pohybu, na které patří výchozí hodnoty pohybu ({@see DimensionStamper::fillBankAccount()}).
+     *
+     * @param array{kind:string}|null $account účet výpisu z {@see statementAccount()}
+     * @param array{incoming:bool, documents:list<array<string,mixed>>} $bank
+     * @return array{synthetics:list<string>, side:string, pays_documents:bool}
+     */
+    private static function bankLines(?array $account, array $bank): array
+    {
+        return [
+            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
+            'synthetics' => ($account['kind'] ?? '') === BankAnalyticAssigner::CREDIT_CARD_KIND
+                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
+                : [BankAnalyticAssigner::BANK_SYNTHETIC],
+            'side' => $bank['incoming'] ? 'debit' : 'credit',
+            'pays_documents' => $bank['documents'] !== [],
+        ];
+    }
+
+    /**
+     * Vlastní účet výpisu pohybu s jeho výchozími dimenzemi (cache viz {@see bankAccountLayer()}).
+     *
+     * @param array{statement_account?:array{number:string, bank:string}} $bank
+     * @return array{id:int, kind:string, layer:array<int,int>}|null
+     */
+    private function statementAccount(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        if (!isset($bank['statement_account'])) {
+            return null;
+        }
+        $number = $bank['statement_account']['number'];
+        $bankCode = $bank['statement_account']['bank'];
+        if ($this->bankAccountGeneration !== DimensionDefaultRepository::generation()) {
+            $this->bankAccountCache = [];
+            $this->bankAccountGeneration = DimensionDefaultRepository::generation();
+        }
+        $key = $supplierId . '|' . $number . '|' . $bankCode . '|' . ($includeInactive ? 1 : 0);
+        if (!array_key_exists($key, $this->bankAccountCache)) {
+            // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
+            $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+                ->matchCounterparty($supplierId, $number, $bankCode, $includeInactive);
+            $this->bankAccountCache[$key] = $account === null ? null : [
+                'id' => (int) $account['id'],
+                'kind' => (string) ($account['kind'] ?? ''),
+                'layer' => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', (int) $account['id']),
+            ];
+        }
+        return $this->bankAccountCache[$key];
     }
 
     /**
      * Doklady, které bankovní pohyb hradí, s částkou alokace a efektivní hlavičkou.
      * Stejné zdroje jako úhrada v BankPostingService: vystavené faktury z invoice_payments
      * (bez nich z párování, jinak matched_invoice_id), přijaté faktury z párování.
-     * Více alokací na tentýž doklad se sečte.
+     * Více alokací na tentýž doklad se sečte. `statement_account` = číslo účtu a kód banky
+     * výpisu, na kterém pohyb leží (pro výchozí dimenze účtu, {@see forBank()}).
      *
-     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>, statement_account?:array{number:string, bank:string}}
      */
     public function bankDocuments(int $supplierId, int $transactionId, bool $withOrigins = false): array
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT bt.amount, bt.matched_invoice_id
+            'SELECT bt.amount, bt.matched_invoice_id, bs.account_number, bs.bank_code
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
@@ -500,7 +701,94 @@ final class DimensionDefaults
                 ];
             }
         }
-        return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
+        array_push($documents, ...$this->membershipClaims($supplierId, $transactionId, $withOrigins));
+        return [
+            'incoming' => (float) $tx['amount'] > 0,
+            'documents' => $documents,
+            'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
+        ];
+    }
+
+    /** @var array{0:int,1:int,2:list<int>}|null firma, pohyb a předpisy, které právě zaúčtovávané párování hradí */
+    private static ?array $pendingMembershipClaims = null;
+
+    /**
+     * Jen pro {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankMatchService::match()}: párování
+     * zaúčtovává dosud nezaúčtovaný pohyb dřív, než může vzniknout okruh. Razítka zápisu i kontrola pravidel
+     * dimenzí tak vidí dimenze hrazených předpisů už při zaúčtování (jinak by povinné pravidlo na 315
+     * nebo systémové dimenze zápis odmítly, i když je předpis nese). Platí jen pro tento pohyb a dokud
+     * okruh neexistuje.
+     *
+     * @param list<int> $claimIds
+     */
+    public static function withPendingMembershipClaims(int $supplierId, int $transactionId, array $claimIds, callable $post): mixed
+    {
+        $previous = self::$pendingMembershipClaims;
+        self::$pendingMembershipClaims = [$supplierId, $transactionId, array_values(array_map('intval', $claimIds))];
+        try {
+            return $post();
+        } finally {
+            self::$pendingMembershipClaims = $previous;
+        }
+    }
+
+    /**
+     * Členské předpisy hrazené pohybem (nativní párování bankovního zápisu s řádkem pohledávky,
+     * {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard::entryUsedSql()}).
+     * Předpis nemá vlastní dimenze dokladu: hlavičkou jsou dimenze jeho řádku pohledávky,
+     * aby se úhrada vyrovnala s pohledávkou i po dimenzi (stejný požadavek jako saldokonto
+     * faktur, #312). Jen podvojné účetnictví; daňová evidence předpisy nemá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function membershipClaims(int $supplierId, int $transactionId, bool $withOrigins): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.id, c.amount_cents, l.id AS line_id
+               FROM journal_entries be
+               JOIN journal_line_pairing_items bp ON bp.supplier_id = be.supplier_id AND bp.entry_id = be.id
+               JOIN journal_line_pairing_items cp ON cp.supplier_id = bp.supplier_id AND cp.pairing_id = bp.pairing_id
+                AND cp.entry_id <> be.id
+               JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = cp.supplier_id
+                AND mop.journal_entry_id = cp.entry_id AND mop.operation = 'issue'
+               JOIN journal_entry_lines l ON l.supplier_id = cp.supplier_id AND l.entry_id = cp.entry_id
+                AND l.line_no = cp.line_no AND l.account_id = cp.account_id AND l.id = mop.receivable_line_id
+               JOIN nonprofit_membership_charge_claims c ON c.supplier_id = mop.supplier_id
+                AND c.operation_id = mop.id AND c.kind = 'issue'
+              WHERE be.supplier_id = ? AND be.source_type = 'bank' AND be.source_id = ? AND be.reversed_by IS NULL
+           GROUP BY c.id, c.amount_cents, l.id
+           ORDER BY c.id"
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pending = self::$pendingMembershipClaims;
+        if ($rows === [] && $pending !== null && $pending[0] === $supplierId && $pending[1] === $transactionId && $pending[2] !== []) {
+            $marks = implode(',', array_fill(0, count($pending[2]), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT c.id, c.amount_cents, mop.receivable_line_id AS line_id
+                   FROM nonprofit_membership_charge_claims c
+                   JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = c.supplier_id
+                    AND mop.id = c.operation_id AND mop.operation = 'issue'
+                  WHERE c.supplier_id = ? AND c.kind = 'issue' AND c.id IN ($marks)
+               ORDER BY c.id"
+            );
+            $stmt->execute([$supplierId, ...$pending[2]]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        if ($rows === []) {
+            return [];
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $lineIds = array_map(static fn (array $r): int => (int) $r['line_id'], $rows);
+        $dims = $assignments->lineDimensions($supplierId, $lineIds);
+        $origins = $withOrigins ? $assignments->lineOrigins($supplierId, $lineIds) : [];
+        return array_map(static fn (array $r): array => [
+            'doc_type' => 'membership_claim',
+            'doc_id' => (int) $r['id'],
+            'amount' => round((int) $r['amount_cents'] / 100, 2),
+            'header' => $dims[(int) $r['line_id']] ?? [],
+            ...($withOrigins ? ['origins' => $origins[(int) $r['line_id']] ?? []] : []),
+        ], $rows);
     }
 
     /**
@@ -512,7 +800,7 @@ final class DimensionDefaults
     private function otherItemAllocations(int $supplierId, string $column, int $paymentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT other_item_id, SUM(amount) AS amount FROM other_item_allocations
+            "SELECT other_item_id, SUM(amount + interest_amount + fee_amount) AS amount FROM other_item_allocations
               WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL
            GROUP BY other_item_id
            ORDER BY MIN(id)"
@@ -592,27 +880,49 @@ final class DimensionDefaults
      */
     private function merge(int $supplierId, array $layers): array
     {
+        return self::mergeLayers($layers, $this->mergeContext($supplierId, array_values($layers)));
+    }
+
+    /**
+     * Aktivní typy a hodnoty vrstev pro {@see mergeLayers()}; bez hodnot se nečte nic.
+     *
+     * @param list<array<int,int>> $layers typ => hodnota
+     * @return array{types:array<int,true>, values:array<int,array<string,mixed>>}
+     */
+    private function mergeContext(int $supplierId, array $layers): array
+    {
         $all = [];
         foreach ($layers as $dims) {
             array_push($all, ...array_values($dims));
         }
         if ($all === []) {
-            return ['header' => [], 'sources' => [], 'origins' => []];
+            return ['types' => [], 'values' => []];
         }
         $dimRepo = new DimensionRepository($this->db);
         $types = [];
         foreach ($dimRepo->listTypes($supplierId, false) as $t) {
             $types[$t['id']] = true;
         }
-        $values = $dimRepo->valuesByIds($supplierId, $all);
+        return ['types' => $types, 'values' => $dimRepo->valuesByIds($supplierId, $all)];
+    }
+
+    /**
+     * Složí vrstvy typ po typu: bere první vrstvu s aktivní hodnotou aktivního typu.
+     *
+     * @param array<string,array<int,int>> $layers zdroj => typ => hodnota, v pořadí přednosti
+     * @param array{types:array<int,true>, values:array<int,array<string,mixed>>} $context výstup {@see mergeContext()}
+     * @return array{header:array<int,int>, sources:array<int,string>, origins:array<int,array{origin:string,ref:string}>}
+     */
+    private static function mergeLayers(array $layers, array $context): array
+    {
         $header = [];
         $sources = [];
         $origins = [];
         foreach ($layers as $source => $dims) {
             foreach ($dims as $typeId => $valueId) {
-                $value = $values[$valueId] ?? null;
+                $value = $context['values'][$valueId] ?? null;
                 if (isset($header[$typeId]) || $value === null || !$value['is_active']
-                    || $value['type_id'] !== $typeId || !isset($types[$typeId])) {
+                    || $value['type_id'] !== $typeId || !isset($context['types'][$typeId])) {
                     continue;
                 }
                 $header[$typeId] = $valueId;

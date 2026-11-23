@@ -146,9 +146,9 @@ final class InvoiceLineDiscountTest extends StockTestCase
         $text = $this->pdfText($id);
         self::assertStringContainsString('Cena/j před slevou', $text);
         self::assertStringContainsString('Cena/j po slevě', $text);
-        self::assertMatchesRegularExpression('/Kolo\s+2\s+ks\s+1 000,00\s+10 %\s+900,00\s+21 %\s+1 800,00\s+2 178,00/u', $text);
-        self::assertMatchesRegularExpression('/Brzdy\s+1\s+ks\s+1 050,00\s+21 %/u', $text, 'Přirážka se nerozepisuje, jen výsledná cena.');
-        self::assertMatchesRegularExpression('/Montáž\s+1\s+ks\s+500,00\s+21 %/u', $text);
+        self::assertMatchesRegularExpression('/Kolo\s+2\s+kus\s+1 000,00\s+10 %\s+900,00\s+21 %\s+1 800,00\s+2 178,00/u', $text);
+        self::assertMatchesRegularExpression('/Brzdy\s+1\s+kus\s+1 050,00\s+21 %/u', $text, 'Přirážka se nerozepisuje, jen výsledná cena.');
+        self::assertMatchesRegularExpression('/Montáž\s+1\s+kus\s+500,00\s+21 %/u', $text);
     }
 
     public function testPdfWithoutAnyDiscountKeepsOriginalLayoutEvenWithOption(): void
@@ -169,7 +169,7 @@ final class InvoiceLineDiscountTest extends StockTestCase
 
         $text = $this->pdfText($id);
         self::assertStringContainsString('Cena/j před slevou', $text);
-        self::assertMatchesRegularExpression('/Kolo\s+2\s+ks\s+1 000,00\s+12,5 %\s+875,00\s+1 750,00/u', $text);
+        self::assertMatchesRegularExpression('/Kolo\s+2\s+kus\s+1 000,00\s+12,5 %\s+875,00\s+1 750,00/u', $text);
     }
 
     public function testPdfListPriceIsNetInPricesIncludingVatMode(): void
@@ -180,7 +180,7 @@ final class InvoiceLineDiscountTest extends StockTestCase
         $id = $this->createInvoice($sid, [$this->line('Kolo', 1, 1089, 1210)], pricesIncludeVat: true);
         self::assertSame([1210.0, 10.0], $this->listAndPct($id));
 
-        self::assertMatchesRegularExpression('/Kolo\s+1\s+ks\s+1 000,00\s+10 %\s+900,00\s+21 %\s+900,00\s+1 089,00/u', $this->pdfText($id));
+        self::assertMatchesRegularExpression('/Kolo\s+1\s+kus\s+1 000,00\s+10 %\s+900,00\s+21 %\s+900,00\s+1 089,00/u', $this->pdfText($id));
     }
 
     public function testPdfInEnglish(): void
@@ -192,7 +192,7 @@ final class InvoiceLineDiscountTest extends StockTestCase
 
         $text = $this->pdfText($id);
         self::assertStringContainsString('Unit price before discount', $text);
-        self::assertMatchesRegularExpression('/Bike\s+1\s+ks\s+1,000\.00\s+12\.45 %\s+875\.50/u', $text);
+        self::assertMatchesRegularExpression('/Bike\s+1\s+piece\s+1,000\.00\s+12\.45 %\s+875\.50/u', $text);
     }
 
     public function testManualLineWithDiscountFromEditorIsSavedAndPrinted(): void
@@ -212,8 +212,8 @@ final class InvoiceLineDiscountTest extends StockTestCase
             $items,
         ));
         $text = $this->pdfText($id);
-        self::assertMatchesRegularExpression('/Servis\s+1\s+ks\s+999,00\s+12,5 %\s+874,13\s+21 %/u', $text);
-        self::assertMatchesRegularExpression('/Dárek\s+1\s+ks\s+250,00\s+100 %\s+0,00\s+21 %/u', $text);
+        self::assertMatchesRegularExpression('/Servis\s+1\s+kus\s+999,00\s+12,5 %\s+874,13\s+21 %/u', $text);
+        self::assertMatchesRegularExpression('/Dárek\s+1\s+kus\s+250,00\s+100 %\s+0,00\s+21 %/u', $text);
     }
 
     // ── exporty a nastavení ─────────────────────────────────────────────────

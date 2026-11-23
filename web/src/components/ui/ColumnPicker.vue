@@ -60,6 +60,7 @@ function isPresetActive(preset: ColumnPreset): boolean {
       type="button"
       @click="toggleOpen"
       :aria-expanded="open"
+      :title="t('common.columns')"
       class="cursor-pointer shrink-0 whitespace-nowrap h-9 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
       :class="open ? 'bg-neutral-50' : ''"
     >
@@ -68,7 +69,7 @@ function isPresetActive(preset: ColumnPreset): boolean {
         <path stroke-linecap="round" stroke-linejoin="round" d="M9 4v16" />
       </svg>
       <span>{{ t('common.columns') }}</span>
-      <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <svg class="w-3 h-3 transition-transform max-md:hidden" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
       </svg>
     </button>

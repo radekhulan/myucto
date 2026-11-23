@@ -151,15 +151,39 @@ final class PayrollRegistrationNormCoverageRulesTest extends TestCase
             PayrollRegistrationDeltaVariantRule::forbiddenPaths(
                 PayrollRegistrationBusinessMatrix::VARIANT_SPEC,
                 $delta,
+                3,
             ),
         );
         self::assertSame([], PayrollRegistrationDeltaVariantRule::forbiddenPaths(
             PayrollRegistrationBusinessMatrix::VARIANT_OST,
             $delta,
+            3,
         ));
         self::assertContains('employment.contract_workplace', PayrollRegistrationDeltaVariantRule::forbiddenPaths(
             PayrollRegistrationBusinessMatrix::VARIANT_10,
             $delta,
+            3,
+        ));
+    }
+
+    /**
+     * EDV 1.4.0.7 i 1.5.0.3, ID 10224: A3-10 a A3-SPEC datum skončení nesou
+     * „/", všechny varianty A4 „N" (odpověď ČSSZ 4 k NV2027).
+     */
+    public function testEndOnIsAllowedInEveryCorrectionVariantButOnlyInOstChange(): void
+    {
+        $delta = ['employment' => ['end_on' => '2026-11-30']];
+        foreach ([PayrollRegistrationBusinessMatrix::VARIANT_10, PayrollRegistrationBusinessMatrix::VARIANT_SPEC] as $variant) {
+            self::assertSame(
+                ['employment.end_on'],
+                PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta, 3),
+            );
+            self::assertSame([], PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta, 4));
+        }
+        self::assertSame([], PayrollRegistrationDeltaVariantRule::forbiddenPaths(
+            PayrollRegistrationBusinessMatrix::VARIANT_OST,
+            $delta,
+            3,
         ));
     }
 

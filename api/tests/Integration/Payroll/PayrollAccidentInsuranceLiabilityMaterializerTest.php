@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
@@ -21,6 +20,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsurancePosting;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\Report\PayrollDimensionCostReportService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -33,6 +33,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private \Psr\Container\ContainerInterface $container;
     private PayrollAccidentInsuranceLiabilityMaterializer $materializer;
     private PayrollAccidentInsuranceRateRepository $rates;
     private int $supplierId;
@@ -41,7 +42,8 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $this->container = $container;
         $connection = $container->get(Connection::class);
         $sensitiveData = $container->get(PayrollSensitiveData::class);
         self::assertInstanceOf(Connection::class, $connection);
@@ -621,6 +623,312 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
     }
 
     /**
+     * Náklad 548 se dělí stejným klíčem jako 524: poměrem vyměřovacích základů
+     * vztahů a dál podle jejich mzdových dimenzí. Vztah A (33 333,33 Kč měsíčně)
+     * je rozdělený 70/30 na dvě střediska, vztah B (16 666,67 Kč) celý na
+     * zakázku. Čtvrtletí 150 000 Kč × 4,20 ‰ = 630 Kč; podíl A za měsíc vyjde
+     * 139,9999… Kč a haléř dorovná největší zbytek na 140 Kč, B 70 Kč.
+     * Závazek 379 zůstává jeden řádek bez dimenzí.
+     */
+    public function testQuarterlyPremiumIsSplitByEmploymentDimensions(): void
+    {
+        $this->makeDoubleEntry();
+        $dims = $this->createCompanyDimensions();
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createDimensionMonth('2026-01-01', $this->dimensionRelationships($dims, 3_333_333, 1_666_667));
+        $this->createDimensionMonth('2026-02-01', $this->dimensionRelationships($dims, 3_333_333, 1_666_667));
+        $marchRevisionId = $this->createDimensionMonth(
+            '2026-03-01',
+            $this->dimensionRelationships($dims, 3_333_333, 1_666_667),
+        );
+
+        $result = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+
+        self::assertSame('posted', $result['posting']['status'] ?? null, (string) json_encode($result));
+        $liabilityId = $result['liability_ids'][0];
+        self::assertSame(63_000, (int) $this->liability($liabilityId)['amount_minor']);
+        // A: 3 × 140 Kč, 70 % S1 = 294 Kč, 30 % S2 = 126 Kč; B: 3 × 70 Kč = 210 Kč na zakázku.
+        self::assertSame([
+            '379|credit|630.00||',
+            "548|debit|126.00|S2|{$dims['str']}:{$dims['s2']}",
+            "548|debit|210.00||{$dims['zak']}:{$dims['z1']}",
+            "548|debit|294.00|S1|{$dims['str']}:{$dims['s1']}",
+        ], $this->detailedJournalLines($liabilityId));
+
+        $report = $this->container->get(PayrollDimensionCostReportService::class)
+            ->report($this->supplierId, 2026);
+        self::assertTrue($report['enabled']);
+        $byValue = [];
+        foreach ($report['by_dimension'] as $row) {
+            $byValue[$row['code']] = $row['total_minor'];
+        }
+        ksort($byValue);
+        self::assertSame(['S1' => 29_400, 'S2' => 12_600, 'Z1' => 21_000], $byValue);
+        self::assertSame(63_000, $report['totals']['insurance_minor']);
+        foreach ($report['rows'] as $row) {
+            self::assertNotNull($row['employment_id'], 'Pojistné 548 patří pracovnímu vztahu, ne do „nerozděleno".');
+        }
+    }
+
+    /**
+     * Opravný řádek závazku se dělí klíčem opraveného čtvrtletí. Oprava března
+     * zvedne základ A na 63 333,33 Kč: čtvrtletí 180 000 Kč, pojistné 756 Kč,
+     * doměrek 126 Kč. Už zaúčtovaný předpis se nemění.
+     */
+    public function testCorrectionDeltaIsSplitByTheCorrectedQuarterKey(): void
+    {
+        $this->makeDoubleEntry();
+        $dims = $this->createCompanyDimensions();
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createDimensionMonth('2026-01-01', $this->dimensionRelationships($dims, 3_333_333, 1_666_667));
+        $this->createDimensionMonth('2026-02-01', $this->dimensionRelationships($dims, 3_333_333, 1_666_667));
+        $marchRevisionId = $this->createDimensionMonth(
+            '2026-03-01',
+            $this->dimensionRelationships($dims, 3_333_333, 1_666_667),
+        );
+        $first = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+        $firstLines = $this->detailedJournalLines($first['liability_ids'][0]);
+
+        $correctionId = $this->createDimensionMonth(
+            '2026-03-01',
+            $this->dimensionRelationships($dims, 6_333_333, 1_666_667),
+            $marchRevisionId,
+        );
+        $correction = $this->materializer->materialize($this->supplierId, $correctionId, $this->actorId);
+
+        self::assertSame('posted', $correction['posting']['status'] ?? null, (string) json_encode($correction));
+        self::assertSame(12_600, (int) $this->liability($correction['liability_ids'][0])['amount_minor']);
+        // Jednotky A: 23,33 / 23,33 / 44,33 Kč → S1 16,33 + 16,33 + 31,03; S2 7,00 + 7,00 + 13,30.
+        // Jednotky B: 3 × 11,67 Kč (haléř navíc dostaly největší zbytky).
+        self::assertSame([
+            '379|credit|126.00||',
+            "548|debit|27.30|S2|{$dims['str']}:{$dims['s2']}",
+            "548|debit|35.01||{$dims['zak']}:{$dims['z1']}",
+            "548|debit|63.69|S1|{$dims['str']}:{$dims['s1']}",
+        ], $this->detailedJournalLines($correction['liability_ids'][0]));
+        self::assertSame($firstLines, $this->detailedJournalLines($first['liability_ids'][0]));
+    }
+
+    /**
+     * Firma, jejíž vztahy nenesou žádnou mzdovou dimenzi, má předpis bajtově
+     * stejný jako dřív: jedna dvojice 548/379, bez střediska a bez dimenzí řádku,
+     * i když má víc vztahů a snapshot je zná.
+     */
+    public function testFirmWithoutDimensionsKeepsTheSinglePairByteForByte(): void
+    {
+        $this->makeDoubleEntry();
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $plain = [['base' => 3_333_333, 'dimensions' => []], ['base' => 1_666_667, 'dimensions' => []]];
+        $this->createDimensionMonth('2026-01-01', $plain);
+        $this->createDimensionMonth('2026-02-01', $plain);
+        $marchRevisionId = $this->createDimensionMonth('2026-03-01', $plain);
+
+        $result = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+
+        self::assertSame('posted', $result['posting']['status'] ?? null);
+        self::assertSame(['379|credit|630.00||', '548|debit|630.00||'], $this->detailedJournalLines($result['liability_ids'][0]));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT line.id, account.account_code, line.side, CAST(line.amount AS CHAR) AS amount,
+                    line.cost_center, line.project_id
+               FROM journal_entries entry
+               JOIN journal_entry_lines line ON line.supplier_id = entry.supplier_id AND line.entry_id = entry.id
+               JOIN chart_of_accounts account ON account.supplier_id = line.supplier_id AND account.id = line.account_id
+              WHERE entry.supplier_id = ? AND entry.source_type = "payroll_accident_insurance" AND entry.source_id = ?
+              ORDER BY line.id'
+        );
+        $statement->execute([$this->supplierId, $result['liability_ids'][0]]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        // Pořadí řádků jako dřív: náklad, pak závazek.
+        self::assertSame(
+            [['548', 'debit', '630.00', null, null], ['379', 'credit', '630.00', null, null]],
+            array_map(static fn (array $row): array => [
+                $row['account_code'], $row['side'], $row['amount'], $row['cost_center'], $row['project_id'],
+            ], $rows),
+        );
+    }
+
+    /** @return array{str:int,s1:int,s2:int,zak:int,z1:int} */
+    private function createCompanyDimensions(): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE supplier SET dimensions_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        $ids = [];
+        foreach ([['str', 'STR', 'Středisko', 'cost_center'], ['zak', 'ZAK', 'Zakázka', 'custom']] as [$key, $code, $name, $kind]) {
+            $pdo->prepare('INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, ?, ?, ?)')
+                ->execute([$this->supplierId, $code, $name, $kind]);
+            $ids[$key] = (int) $pdo->lastInsertId();
+        }
+        foreach ([['s1', 'str', 'S1'], ['s2', 'str', 'S2'], ['z1', 'zak', 'Z1']] as [$key, $typeKey, $code]) {
+            $pdo->prepare('INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, ?, ?)')
+                ->execute([$ids[$typeKey], $this->supplierId, $code, "Syntetická hodnota {$code}"]);
+            $ids[$key] = (int) $pdo->lastInsertId();
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Vztah A rozdělený 70/30 na střediska S1/S2, vztah B celý na zakázku Z1.
+     *
+     * @param array{str:int,s1:int,s2:int,zak:int,z1:int} $dims
+     * @return list<array{base:int,dimensions:list<array<string,mixed>>}>
+     */
+    private function dimensionRelationships(array $dims, int $baseA, int $baseB): array
+    {
+        return [
+            ['base' => $baseA, 'dimensions' => [
+                ['type' => 'cost_center', 'code' => 'S1', 'share_bp' => 7_000,
+                 'dimension_type_id' => $dims['str'], 'dimension_value_id' => $dims['s1']],
+                ['type' => 'cost_center', 'code' => 'S2', 'share_bp' => 3_000,
+                 'dimension_type_id' => $dims['str'], 'dimension_value_id' => $dims['s2']],
+            ]],
+            ['base' => $baseB, 'dimensions' => [
+                ['type' => 'project', 'code' => 'Z1',
+                 'dimension_type_id' => $dims['zak'], 'dimension_value_id' => $dims['z1']],
+            ]],
+        ];
+    }
+
+    /**
+     * Schválený měsíc s více pracovními vztahy a jejich zmrazenými mzdovými
+     * dimenzemi ve vstupním snapshotu revize. S `$previousRevisionId` vznikne
+     * opravná revize téhož běhu.
+     *
+     * @param list<array{base:int,dimensions:list<array<string,mixed>>}> $relationships
+     */
+    private function createDimensionMonth(string $periodStart, array $relationships, ?int $previousRevisionId = null): int
+    {
+        $pdo = $this->db->pdo();
+        $paymentDate = (new \DateTimeImmutable($periodStart))
+            ->modify('+1 month')->modify('10 days')->format('Y-m-d');
+        if ($previousRevisionId === null) {
+            $pdo->prepare(
+                'INSERT INTO payroll_runs
+                    (supplier_id, office_id, period_start, payment_date, status, current_revision_no)
+                 VALUES (?, ?, ?, ?, "approved", 1)',
+            )->execute([$this->supplierId, $this->officeId, $periodStart, $paymentDate]);
+            $runId = (int) $pdo->lastInsertId();
+            $revisionNo = 1;
+        } else {
+            $statement = $pdo->prepare(
+                'SELECT id, current_revision_no FROM payroll_runs WHERE supplier_id = ? AND period_start = ?',
+            );
+            $statement->execute([$this->supplierId, $periodStart]);
+            $run = $statement->fetch(PDO::FETCH_ASSOC);
+            self::assertIsArray($run);
+            $runId = (int) $run['id'];
+            $revisionNo = (int) $run['current_revision_no'] + 1;
+        }
+        $created = [];
+        $people = [];
+        foreach ($relationships as $index => $relationship) {
+            $ids = $this->createResultEmployment("dimension-{$periodStart}-{$runId}-{$revisionNo}-{$index}", 'employment', $periodStart);
+            $created[] = $ids;
+            $people[] = [
+                'employee' => ['id' => $ids['employee_id']],
+                'employments' => [[
+                    'employment' => [
+                        'id' => $ids['employment_id'],
+                        'employee_id' => $ids['employee_id'],
+                        'relation_type' => 'employment',
+                    ],
+                    'inputs' => [],
+                    'dimensions' => $relationship['dimensions'],
+                ]],
+            ];
+        }
+        $input = json_encode([
+            'schema_version' => 'payroll-run-input.v2',
+            'supplier_id' => $this->supplierId,
+            'period_start' => $periodStart,
+            'payment_date' => $paymentDate,
+            'office_id' => $this->officeId,
+            'people' => $people,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $result = '{"schema_version":"payroll-run-result.v2"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, previous_revision_id,
+                 revision_kind, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, ?, ?, ?, "approved", "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionNo,
+            $previousRevisionId,
+            $previousRevisionId === null ? 'regular' : 'correction',
+            str_repeat('a', 64),
+            $input,
+            hash('sha256', $input),
+            $result,
+            hash('sha256', $result),
+            hash('sha256', "synthetic-accident-dimension:{$runId}:{$revisionNo}", true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE payroll_runs SET current_revision_no = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$revisionNo, $this->supplierId, $runId]);
+
+        $total = array_sum(array_column($relationships, 'base'));
+        $this->storeSocialResult($revisionId, $periodStart, $input, [
+            'calculation_date' => (new \DateTimeImmutable($periodStart))
+                ->modify('last day of this month')->format('Y-m-d'),
+            'status' => 'calculated',
+            'participating_assessment_base_minor_units' => $total,
+            'capped_assessment_base_minor_units' => $total,
+            'employee_contribution_minor_units' => 0,
+            'employer_contribution_before_discount_minor_units' => 0,
+            'part_time_discount_assessment_base_minor_units' => 0,
+            'part_time_discount_minor_units' => 0,
+            'employer_contribution_minor_units' => 0,
+            'issues' => [],
+            'ruleset_id' => 'cz-social-2026',
+            'ruleset_hash' => str_repeat('b', 64),
+        ], array_map(static fn (array $relationship): array => [
+            'relationship_id' => 'r-employment',
+            'kind' => 'employment',
+            'participation' => ['status' => 'participates'],
+            'assessment_base_minor_units' => $relationship['base'],
+            'capped_assessment_base_minor_units' => $relationship['base'],
+        ], $relationships), $created);
+
+        return $revisionId;
+    }
+
+    /**
+     * Řádky předpisu jako `účet|strana|částka|středisko|typ:hodnota,…`, seřazené.
+     *
+     * @return list<string>
+     */
+    private function detailedJournalLines(int $liabilityId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.account_code, line.side, CAST(line.amount AS CHAR) AS amount,
+                    COALESCE(line.cost_center, "") AS cost_center,
+                    COALESCE((SELECT GROUP_CONCAT(CONCAT(dimension.dimension_type_id, ":", dimension.dimension_value_id)
+                                                  ORDER BY dimension.dimension_type_id SEPARATOR ",")
+                                FROM journal_entry_line_dimensions dimension
+                               WHERE dimension.supplier_id = line.supplier_id AND dimension.line_id = line.id), "") AS dims
+               FROM journal_entries entry
+               JOIN journal_entry_lines line ON line.supplier_id = entry.supplier_id AND line.entry_id = entry.id
+               JOIN chart_of_accounts account ON account.supplier_id = line.supplier_id AND account.id = line.account_id
+              WHERE entry.supplier_id = ? AND entry.source_type = "payroll_accident_insurance" AND entry.source_id = ?'
+        );
+        $statement->execute([$this->supplierId, $liabilityId]);
+        $lines = array_map(
+            static fn (array $row): string => implode('|', [
+                $row['account_code'], $row['side'], $row['amount'], $row['cost_center'], $row['dims'],
+            ]),
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+        );
+        sort($lines, SORT_STRING);
+
+        return $lines;
+    }
+
+    /**
      * Opravná revize měsíce: nové revision_no, `correction`, ukazatel na
      * předchozí revizi a přepočtený vyměřovací základ. Běh se přepne na novou
      * revizi, protože materializér bere jen tu aktuální schválenou.
@@ -859,32 +1167,20 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
      *
      * @param array<string,mixed> $socialResult
      * @param list<array<string,mixed>> $relationships
+     *
+     * @param list<array{employee_id:int,employment_id:int}> $existing už založené osoby a vztahy (v pořadí `$relationships`)
      */
-    private function storeSocialResult(int $revisionId, string $periodStart, string $input, array $socialResult, array $relationships): void
+    private function storeSocialResult(int $revisionId, string $periodStart, string $input, array $socialResult, array $relationships, array $existing = []): void
     {
         $pdo = $this->db->pdo();
         $people = [];
         foreach ($relationships as $index => $relationship) {
-            $pdo->prepare(
-                'INSERT INTO payroll_employees
-                    (supplier_id, full_name, taxpayer_type, employment_type,
-                     tax_declaration_signed, tax_credit_taxpayer, child_count,
-                     monthly_gross, auto_post, is_active)
-                 VALUES (?, "Syntetická osoba výsledku", "employee", "hpp", 1, 1, 0, 10000, 0, 1)',
-            )->execute([$this->supplierId]);
-            $employeeId = (int) $pdo->lastInsertId();
-            $pdo->prepare(
-                'INSERT INTO payroll_employments
-                    (supplier_id, employee_id, code, relation_type, status, start_date)
-                 VALUES (?, ?, ?, ?, "active", ?)',
-            )->execute([
-                $this->supplierId,
-                $employeeId,
-                'result-' . $revisionId . '-' . $index,
-                $relationship['kind'] === 'corporate_body' ? 'statutory_body' : 'employment',
-                $periodStart,
-            ]);
-            $employmentId = (int) $pdo->lastInsertId();
+            ['employee_id' => $employeeId, 'employment_id' => $employmentId] = $existing[$index]
+                ?? $this->createResultEmployment(
+                    'result-' . $revisionId . '-' . $index,
+                    $relationship['kind'] === 'corporate_body' ? 'statutory_body' : 'employment',
+                    $periodStart,
+                );
             $pdo->prepare(
                 'INSERT INTO payroll_run_persons (supplier_id, revision_id, period_start, employee_id)
                  VALUES (?, ?, ?, ?)',
@@ -920,6 +1216,27 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             $people,
             $this->actorId,
         );
+    }
+
+    /** @return array{employee_id:int,employment_id:int} */
+    private function createResultEmployment(string $code, string $relationType, string $periodStart): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Syntetická osoba výsledku", "employee", "hpp", 1, 1, 0, 10000, 0, 1)',
+        )->execute([$this->supplierId]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status, start_date)
+             VALUES (?, ?, ?, ?, "active", ?)',
+        )->execute([$this->supplierId, $employeeId, $code, $relationType, $periodStart]);
+
+        return ['employee_id' => $employeeId, 'employment_id' => (int) $pdo->lastInsertId()];
     }
 
     private function setStartPeriod(string $startPeriod): void

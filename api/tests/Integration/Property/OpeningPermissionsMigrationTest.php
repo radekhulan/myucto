@@ -111,7 +111,7 @@ final class OpeningPermissionsMigrationTest extends TestCase
     private function createDatabase(): void
     {
         $config = Config::load(dirname(__DIR__, 4));
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->database = 'myucto_opening_roles_' . bin2hex(random_bytes(6)) . '_test';
         $this->server = new PDO(sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $config->get('db.host'), $config->get('db.port', 3306)), $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $this->server->exec("CREATE DATABASE `{$this->database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
@@ -144,6 +144,7 @@ final class OpeningPermissionsMigrationTest extends TestCase
     private function assertEffectiveLevels(int $roleId, array $levels): void
     {
         $catalog = new PermissionCatalog();
+        $config = new Config([]);
         $resolver = new PermissionResolver($this->db, new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db)), $catalog);
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/')->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role_id' => $roleId]);
         $role = $resolver->resolveDefault($request);

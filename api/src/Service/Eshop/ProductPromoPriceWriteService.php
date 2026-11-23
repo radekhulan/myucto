@@ -6,11 +6,13 @@ namespace MyInvoice\Service\Eshop;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemPromoPriceRepository;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class ProductPromoPriceWriteService
 {
     private const MAX_ROWS = 50;
     private const QTY_MODES = ['stock', 'limited', 'unlimited'];
+    private const MAX_PRICE = '9999999999.999999';
 
     public function __construct(
         private readonly Connection $db,
@@ -96,8 +98,11 @@ final class ProductPromoPriceWriteService
             throw new EshopException('validation_failed', 'Neplatný kód měny (ISO 4217, 3 znaky).', 400);
         }
         $price = $this->numberOrNull($row['promo_price'] ?? null);
-        if ($price === null || bccomp($price, '0', 2) < 0) {
+        if ($price === null || preg_match('/^-?\d+(?:\.\d+)?$/D', $price) !== 1 || bccomp($price, '0', UnitPricePrecision::DECIMALS) < 0) {
             throw new EshopException('validation_failed', 'Akční cena musí být nezáporné číslo.', 400);
+        }
+        if (!UnitPricePrecision::isWithinPrecision($price) || bccomp($price, self::MAX_PRICE, UnitPricePrecision::DECIMALS) > 0) {
+            throw new EshopException('validation_failed', 'Akční cena smí mít nejvýše šest desetinných míst a deset míst před čárkou.', 400);
         }
         $mode = (string) ($row['qty_mode'] ?? 'stock');
         if (!in_array($mode, self::QTY_MODES, true)) {
@@ -121,7 +126,7 @@ final class ProductPromoPriceWriteService
 
         return [
             'currency_code' => $currency,
-            'promo_price' => bcadd($price, '0', 2),
+            'promo_price' => bcadd($price, '0', UnitPricePrecision::DECIMALS),
             'label' => $this->limitedString($row['label'] ?? null, 60, 'Název akce'),
             'valid_from' => $from,
             'valid_to' => $to,

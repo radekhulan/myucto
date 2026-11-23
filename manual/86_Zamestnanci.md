@@ -96,11 +96,40 @@ dolů:
 má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 
 > [!TIP]
-> Víc lidí najednou doplníte tlačítky nad seznamem: **Doplnit výchozí zákonné
-> údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní pojišťovny hromadně**
-> a **Doplnit místo výkonu práce**.
-> Skončené dohody ukončíte najednou tlačítkem **Ukončit skončené dohody**
-> ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)).
+> Víc lidí najednou doplníte v nabídce **Další funkce** nad seznamem: **Doplnit
+> výchozí zákonné údaje**, **Výplatní pravidla z karet osob**, **Podepsaná
+> prohlášení hromadně**, **Zdravotní pojišťovny hromadně**, **Doplnit místo
+> výkonu práce** a **Upravit podmínky vybraných vztahů**
+> ([§ 86.6.1](#8661-hromadna-uprava-podminek-vybranych-vztahu)).
+> **Výplatní pravidla z karet osob** nabídne všechny osoby s trvajícím vztahem,
+> které výplatní pravidlo nemají, a doplní je stejně jako tlačítko v kontrole
+> před během ([§ 80](80_Mzdove_behy.md)).
+> Skončené dohody ukončíte najednou akcí **Ukončit skončené dohody**
+> ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
+> je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.
+> Jak hromadné akce použít v měsíci se stovkami lidí, popisuje kapitola
+> [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
+
+### 86.3.1 Další DPP osoby, která má otevřenou dohodu
+
+Brigádníkovi se vyplatí sjednat jednu dlouhodobou DPP (třeba do konce roku)
+místo nové dohody ke každé akci. Jedna dohoda znamená jednu registraci u ČSSZ,
+každou novou je potřeba znovu přihlásit a po skončení odhlásit.
+
+Když osobě přidáváte DPP akcí **Přidat pracovní vztah** a osoba už má otevřenou
+DPP (plánovanou, aktivní nebo přerušenou, bez konce nebo s koncem v den nástupu
+nové dohody či později), aplikace novou dohodu hned nezaloží. Formulář ukáže
+otevřenou dohodu a nabídne:
+
+- **Použít dohodu …**: nová DPP nevznikne. Má-li nová dohoda pozdější
+  sjednaný konec, otevřené dohodě se konec prodlouží (tlačítko pak říká, do
+  kdy). Použít jde jen dohodu, která nástup nové už pokrývá.
+- **Přesto založit novou DPP**: například souběžná druhá dohoda na jinou
+  činnost.
+
+Otevřená DPP, která začíná až po nástupu nové, zakládání nezastaví. Aplikace ji
+po uložení jen připomene; jde-li o tutéž dohodu, posuňte její nástup a novou
+zrušte.
 
 ## 86.4 Krok za krokem: zákonná evidence osoby
 
@@ -120,6 +149,14 @@ a pojistného. Vede se po celých měsících.
    **Uložit vše** dole na kartě.
 6. Prohlášení poplatníka zapište v sekci **Prohlášení poplatníka k dani** jako
    **Podepsáno** nebo **Nepodepsáno**. Doplnit běžné údaje ho nezapíše.
+   U podepsaného prohlášení vyplňte den podpisu. **Platí od** se u nového
+   záznamu doplní samo podle § 38k ZDP (měsíc nástupu při podpisu do 30 dnů
+   po nástupu, leden při podpisu do 15. února, jinak měsíc po podpisu)
+   a karta napíše, proč vyšel daný měsíc. Je-li ten měsíc uzavřený schválenou
+   mzdou, doplní se první otevřený měsíc; slevu za uzavřené měsíce dorovná
+   roční zúčtování, nebo otevřete opravu mzdového běhu. Začátek můžete
+   přepsat. Když dni podpisu neodpovídá nebo leží v uzavřeném období, karta
+   to u záznamu napíše. Uložení to neblokuje.
    Podepsaná prohlášení více lidí zapíšete najednou podle
    [§ 86.4.1](#8641-podepsana-prohlaseni-hromadne).
 
@@ -151,16 +188,24 @@ nemusíte je zapisovat po jednom.
 1. V seznamu zaměstnanců klikněte na **Podepsaná prohlášení hromadně**. Ze
    souhrnu **Doplnit výchozí zákonné údaje** vede na tentýž dialog odkaz
    u chybějícího prohlášení.
-2. Vyplňte **Zdaňovací rok** a **Datum podpisu** (výchozí je dnešek). Náhled
-   ukáže, od kterého měsíce se podpis zapíše:
-   - od ledna, je-li prohlášení podepsané před začátkem roku nebo v lednu,
-   - jinak od měsíce podpisu, za dřívější měsíce se sleva neuplatní,
+2. Vyplňte **Zdaňovací rok** a **Datum podpisu** (výchozí je dnešek). První
+   měsíc slevy určuje § 38k ZDP a náhled ho ukáže u každé osoby:
+   - **od měsíce nástupu**, podepsal-li zaměstnanec prohlášení nejpozději
+     30\. den po nástupu, i když podpis spadne do dalšího měsíce (brigádník
+     nastoupí 25. 6. a podepíše 2. 7., sleva i záloha místo srážkové daně
+     platí už za červen),
+   - **od ledna**, podepsal-li stávající zaměstnanec prohlášení nejpozději
+     15\. února zdaňovacího roku (nebo už v předchozím roce),
+   - jinak **od měsíce následujícího po podpisu** (podpis 10. 3. platí od
+     dubna),
    - nikdy do měsíců uzavřených schválenou mzdou; v tom případě až od
-     prvního měsíce po nich. Je-li uzavřený celý rok, nezapíše se nic.
+     prvního měsíce po nich a slevu za uzavřené měsíce dorovná roční
+     zúčtování. Náhled to u osoby napíše. Je-li uzavřený celý rok, nebo
+     prohlášení platí až od dalšího roku, nezapíše se nic.
 3. Projděte seznam osob. Nabízí ty, kterým v roce trvá pracovní vztah:
-   - **Zapíše se** - u osoby vznikne záznam **Podepsáno**; předchozí
-     **Nepodepsáno** nebo **Neověřeno** se dnem před podpisem ukončí, případně
-     se nahradí;
+   - **Zapíše se** - u osoby vznikne záznam **Podepsáno** od jejího prvního
+     měsíce; předchozí **Nepodepsáno** nebo **Neověřeno** se dnem před ním
+     ukončí, případně se nahradí;
    - **Na rok už podepsáno** - osoba se přeskočí, záznam se nepřepíše;
    - **Předchozí záznam končí dřív** - řada by nenavazovala, zapište na kartě
      osoby.
@@ -213,22 +258,157 @@ uplatnit." Prohlášení poplatníka musí být v daném měsíci **Podepsáno**
    **Platí od**.
 3. Klikněte na **Uložit vše**. Předchozí hodnota zůstane v historii.
 
-**Ostatní podmínky vztahu** (úvazek, účtárna, druh činnosti, režim pojištění,
-místo výkonu práce):
+**Podmínky konkrétního vztahu** (odměňování, úvazek, účtárna, druh činnosti,
+režim pojištění, místo výkonu práce):
 
 1. Otevřete kartu pracovního vztahu a upravte pole v části **Základní údaje**,
    případně ve sbalené části **Další údaje**.
-2. Vyplňte **Účinnost podmínek od**. Nová verze může začít nejdřív den po
-   začátku poslední verze. Pole **Důvod změny** je nepovinné.
-3. Klikněte na **Uložit vše**.
+2. Zvolte, **Jak změnu uložit**. Dokud z platné verze podmínek není
+   zúčtovaná žádná mzda, je výchozí **Opravit platné podmínky**, i při změně
+   způsobu odměňování nebo sazby. Je-li z platné verze už zúčtováno, karta
+   předvolí **Od data platí nové podmínky** a jako **Účinnost podmínek od**
+   nabídne první den prvního nezúčtovaného měsíce. Nová verze může začít
+   nejdřív den po začátku poslední verze a ne v zúčtovaném měsíci.
+3. Zvolený způsob a datum jsou vidět nad volbou i v liště **Uložit vše**
+   (například „Uloží se jako nová verze podmínek účinná od 1. 3. 2026“).
+4. Klikněte na **Uložit vše**.
+
+**Oprava účinnosti platné verze.** Mají-li podmínky platit od jiného dne,
+než od kterého je platná verze uložená (typicky ručně založená dohoda
+s nástupem 7. 2., jejíž podmínky platí až ode dne zápisu), opravte v části
+**Termíny** pole **Účinnost platných podmínek od** a uložte jako opravu.
+Nová verze nevznikne. Účinnost jde posunout jen za předchozí verzi a mimo
+zúčtované měsíce.
 
 **Jak poznáte, že je hotovo:** V časové ose vztahu přibude nová verze
 podmínek a předchozí je uzavřená dnem před novou účinností.
+
+**Hodinová mzda a odměna.** Na kartě pracovního vztahu zvolte hodinový způsob
+odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)**, druh podkladu
+(mzdový výměr, smlouva, dohoda, vnitřní předpis nebo kolektivní smlouva)
+a jeho označení či odkaz. Po přepnutí na hodinový režim karta podklad
+předvyplní: u pracovního poměru **Mzdový výměr** s označením „Mzdový výměr
+účinný od“ a datem účinnosti verze, u DPP a DPČ **Dohodu** s názvem dohody.
+Předvyplněné označení sleduje změnu data účinnosti, dokud ho nepřepíšete.
+Sazba může mít dvě desetinná
+místa. Každý souběžný vztah má vlastní způsob odměňování a vlastní historii.
+U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
+pravděpodobným hodinovým výdělkem.
+
+Volba **Dosavadní režim (bez výslovného určení)** zachovává původní zpracování, například dohodu
+bez sjednané měsíční částky. Nabízí se jen vztahu, jehož poslední verze podmínek
+způsob odměňování výslovně neurčuje; z měsíčního nebo hodinového odměňování se
+na ni vrátit nelze. Změnu sazby i přechod mezi měsíčním
+a hodinovým odměňováním můžete uložit novou verzí s účinností během
+měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
+účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad
+nelze nahradit odhadem. Má-li vztah aktivní pravidelný předpis základní
+mzdy, karta po pokusu o uložení nabídne tlačítko **Ukončit předpis … k … a
+uložit**: předpis skončí den před účinností nové hodinové verze ve stejném
+uložení, takže se mzda nevyplatí dvakrát. Starší verze podmínek, které měsíční
+mzdu dosud přebíraly z pracovního vztahu, dostanou při přechodu tutéž částku
+zapsanou výslovně, takže se mzda za minulé měsíce nezmění.
+
+Importuje-li se vztahu mzda jako hotová částka (například hodinová mzda
+z docházky) v měsíci účinnosti, ve třech měsících před ním nebo později,
+karta přechod na hodinový výpočet neuloží hned. Hodinový výpočet ze směn by
+totiž každý další import odmítl. Nabídne **Nastavit jen pravděpodobný
+výdělek**, který způsob odměňování vrátí a otevře pole pravděpodobného
+výdělku, nebo **Přesto přepnout na hodinový výpočet**, když mzdu nově
+počítáte ze směn a import hodinové mzdy ukončíte.
+
+**Chyby a varování u pole.** Neprojde-li uložení kvůli konkrétnímu údaji,
+karta ho orámuje červeně, hlášku napíše přímo pod něj a na pole najede;
+je-li ve sbalených **Dalších údajích**, sama je rozbalí. Údaj, který byl
+uložený už dříve a v této změně se nemění, uložení neblokuje. Neprojde-li
+kontrolou číselníku (například místo výkonu práce nebo druh činnosti),
+uložení proběhne, pole se orámuje žlutě s vysvětlením a pod formulářem
+zůstane souhrn **Uloženo** s odkazem **Ukázat pole**. Opravte ho před
+přípravou podání; tvrdě se kontroluje až tam.
+
+Karta upozorní na sazbu pod hodinovým minimem pro běžný stanovený týden
+podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto
+minimum nesnižuje; při kratší zákonné týdenní době může být minimum vyšší.
+Upozornění samo mzdu ani doplatek nevytváří.
+
+Hodinovou mzdu a její jednotlivé nároky zkontrolujete v
+[rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+Výpočet používá přesné schválené hodiny a účinné sazby; příplatkové
+vrstvy se dokládají samostatně. V zásadách lze doložit také režim
+[posouzení minimální mzdy](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek):
+hodinový je výchozí, měsíční pouze pro pracovní poměr s předchozím
+rozhodnutím a platností. Jiná stanovená týdenní doba vyžaduje vlastní
+podklad a není totožná s kratším sjednaným úvazkem. Výpočet obsahuje
+minimum i doplatek. Schválený běh uchová rozpis sazeb, hodin a nároků
+pro výplatní pásku; pozdější změna podmínek jej nepřepočítá.
+Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
+Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
+hodinový způsob odměňování zůstávají podporované.
 
 > [!TIP]
 > Změna mzdy ani úvazku se ČSSZ nehlásí, projeví se v nejbližším měsíčním
 > hlášení. Změnu adresy, jména nebo pojišťovny ale ohlásíte do 8 dnů, viz
 > [§ 85.8](85_Podani_a_hlaseni.md#858-krok-za-krokem-zmena-udaju-zamestnance-a3).
+
+Na kartě vztahu jsou u **Účast na sociálním pojištění**, **Účast na
+zdravotním pojištění** a **Daňový režim** povolené jen volby, se kterými výpočet
+počítá (automaticky, záloha). Ostatní jsou vypnuté s vysvětlením. Má-li vztah
+z dřívějška uloženou nepodporovanou volbu, karta ji ukáže s upozorněním, že
+mzdu zastaví; vraťte ji na výchozí hodnotu.
+
+### 86.6.1 Hromadná úprava podmínek vybraných vztahů
+
+Máte-li desítky brigádníků na DPP se stejnou sazbou, profesí nebo pracovištěm,
+nemusíte otevírat kartu každého vztahu.
+
+1. V seznamu zaměstnanců otevřete **Další funkce** a klikněte na **Upravit
+   podmínky vybraných vztahů**.
+2. Zvolte měsíc a **Druh vztahu** (výchozí je DPP). Dialog nabídne vztahy, které
+   v měsíci trvají. Odškrtněte ty, kterých se změna netýká.
+3. Vyplňte jen údaje, které chcete změnit. Prázdné pole zůstane beze změny:
+   - **Sjednaná hodinová sazba** přepne vztah na hodinové odměňování jako
+     na kartě, mzda se pak počítá z odpracovaných směn. Podklad odměňování
+     můžete zadat, jinak zůstane uložený a u DPP a DPČ se doplní dohoda.
+     Vztahům, kterým se mzda nebo hodiny za zvolený měsíc nebo poslední tři
+     měsíce importují z docházky, sazbu nenastavíme: z importovaného souhrnu
+     hodin hodinový výpočet mzdu nespočítá a výpočet ze směn by další import
+     zablokoval. Seznam je označí štítkem **mzda z importu**; zadejte jim
+     pravděpodobný výdělek, mzdu ze sazby a hodin dopočte import docházky.
+   - **Pravděpodobný hodinový výdělek** (§ 355 ZP) vyžaduje odůvodnění, z čeho
+     jste ho stanovili.
+   - **CZ-ISCO** vyberete v našeptávači.
+   - **Druh činnosti** nabízí jen kódy, které k zvolenému druhu vztahu patří.
+     Při výběru „Všechny druhy" se nenabízí.
+   - **Místo výkonu práce** je obec z číselníku ČSSZ a stát pracoviště.
+   - **Vrátit účast na pojištění na „automaticky“ a daň na „zálohu“** se
+     nabídne, když některý vztah má ruční přepsání účasti nebo daňového
+     režimu (štítek **ruční přepsání účasti/daně**). Výpočet ruční přepsání
+     nepodporuje a mzdu takového vztahu vždy zastaví; zákonné zařazení
+     (účast podle druhu vztahu a příjmu, srážková daň podle § 6 odst. 4 ZDP)
+     si odvodí sám.
+4. Zvolte režim. **Doplnit jen prázdné údaje** (výchozí) nesahá na údaj, který
+   vztah už má. **Přepsat vyplněné údaje** ho nahradí.
+5. Klikněte na **Upravit … vztahů**. Výsledek ukáže po řádcích, co se upravilo,
+   co se vynechalo a proč. Jméno osoby vede na kartu vztahu.
+
+Úprava se zapíše stejně, jak by ji uložila karta vztahu:
+
+- **oprava** platné verze podmínek, dokud z ní není zúčtovaná žádná mzda,
+- **nová verze** od prvního dne prvního nezúčtovaného měsíce, je-li z platné
+  verze už zúčtovaná nebo vyplacená mzda. Zúčtované měsíce zůstanou beze
+  změny a nová verze převezme ostatní údaje z té předchozí.
+
+Seznam vztahů tyto vztahy označí štítkem **nová verze od MM/RRRR** a výsledek
+u každého řádku uvede, zda šlo o opravu, nebo o novou verzi. Vztah se vynechá,
+když:
+
+- jeho mzdu za některý měsíc platné verze drží schválený nebo zamčený běh,
+  nebo je za něj připravené měsíční hlášení JMHZ. Nejdřív mzdu otevřete
+  k opravě,
+- je ukončený, jeho platná verze začíná až po zvoleném měsíci, nebo zvolený
+  druh činnosti k jeho druhu vztahu nepatří.
+
+Chyba jednoho vztahu ostatní nezastaví.
 
 ## 86.7 Krok za krokem: identifikátory od ČSSZ (OIČ a ID PPV)
 
@@ -313,27 +493,95 @@ checklistu jsou splněné a odhláška A2 je přijatá.
 Nenastoupil-li zaměstnanec vůbec, klikněte na **Označit nenástup** a podejte
 storno A8 nebo ukončení předregistrace P2.
 
+Vztah, který vůbec neměl vzniknout (například ho import registrací založil
+z cizích podkladů a ČSSZ o něm neví), smažete tlačítkem **Smazat pracovní
+vztah**. Smaže se i s podmínkami, checklistem, docházkou, nepodaným profilem
+registrace A1 a návrhy hlášení změn registrace. Smazat ho nejde, jakmile
+z aplikace odešla nebo se připravila registrace ČSSZ, má identifikátory vztahu
+od ČSSZ, hlášení JMHZ, mzdový běh (i zrušený), mzdové vstupy, pracovní cesty
+nebo vydaný doklad. Schválenou docházku nejdřív znovu otevřete. Mzdový vstup
+se nemaže, jen ruší, a zůstává u vztahu i zrušený; vstupy, které patří jinému
+vztahu téže osoby, přesunete sloučením (viz níže). Hláška u tlačítka vždy
+řekne, co smazání drží a za jaké období, u mzdových vstupů nabídne rovnou
+jejich seznam.
+
+Vznikl-li vztah s nesprávným druhem (například import registrace převzal
+dohodu o provedení práce jako pracovní poměr), opravíte ho na kartě vztahu
+tlačítkem **Další akce vztahu → Opravit druh vztahu** (pod podmínkami vztahu,
+vedle změn stavu). Docházka i mzdové vstupy v konceptu
+zůstanou u vztahu a druh činnosti pro ČSSZ se nastaví podle nového druhu.
+Oprava nejde, jakmile je vztah zahrnutý ve mzdovém běhu nebo v hlášení JMHZ,
+má schválené mzdové vstupy, schválenou docházku nebo průměrný výdělek, nebo
+když k němu aplikace už připravila registraci ČSSZ. Pokud jste vztah
+u ČSSZ přihlásili s nesprávným druhem činnosti, podejte tam opravu registrace.
+
+Má-li osoba za stejné období **dva vztahy**, typicky vztah s registrací
+z importu registrací ČSSZ a ručně založenou dohodu, na kterou jste
+naimportovali docházku a mzdové vstupy, použijte na kartě ručního vztahu
+**Další akce vztahu → Sloučit do jiného vztahu**. Vyberte cílový vztah téže
+osoby, tedy ten, který je správný pro ČSSZ a JMHZ. Docházka (pracovní měsíce,
+souhrny importu, časové záznamy a směny), mzdové vstupy v konceptu,
+nepřítomnosti, kalendáře a pravidla příplatků se přesunou k cíli a ruční vztah
+se smaže. Volba **Převzít druh, nástup, konec a odměňování z tohoto vztahu**
+(výchozí) nastaví cíli druh vztahu, dřívější z obou nástupů, konec na dobu
+určitou a hodinovou sazbu ze slučovaného vztahu. Bez ní zůstanou podmínky
+cíle beze změny. Na časové ose cíle zůstane záznam **Sloučen jiný vztah**.
+
+Schválenou docházku a schválené mzdové vstupy slučovaného vztahu sloučení samo
+vrátí do konceptu, protože se posuzovaly podle něj. Mění-li se převzetím
+podmínek druh cílového vztahu, vrátí stejně i schválení cílového vztahu. Po
+sloučení proto měsíce u cílového vztahu zkontrolujte a znovu schvalte. Ručně
+zadané vstupy cílového vztahu (např. nulová měsíční mzda) ani jeho prázdný
+pracovní měsíc sloučení nevadí.
+
+Převzatý profil registrace A1 z importu registrací ani návrh hlášení změny
+sloučení nebrání; zmizí se slučovaným vztahem, stejně jako jeho průměrný
+výdělek, který si cílový vztah spočítá znovu. Sloučení nejde, pokud má
+slučovaný vztah z aplikace podanou nebo připravenou registraci ČSSZ nebo
+identifikátory vztahu od ČSSZ, hlášení JMHZ, mzdový běh, převzaté výsledky
+mezd z předchozího programu, zamčené mzdové vstupy, knihu dovolené nebo
+případ nemocenské. Hláška u mzdového běhu jmenuje jeho období a stav. Nejde ani do ukončeného či archivovaného vztahu, do vztahu
+ve mzdovém běhu za měsíce, kterých se přesun týká, a když docházku za stejný
+měsíc mají oba vztahy (časové záznamy, souhrn importu nebo vstupy z importu
+docházky). Posune-li se
+nástup nebo změní druh registrovaného vztahu, aplikace vás upozorní, že máte
+u ČSSZ podat opravu registrace. Import docházky páruje lidi podle osobního
+čísla; liší-li se osobní čísla obou vztahů, upravte po sloučení osobní číslo
+cílového vztahu.
+
 ### 86.9.1 Hromadné ukončení skončených dohod
 
 Brigádníci na DPP a DPČ mívají krátké dohody. Aby seznam nezůstal plný lidí,
 kteří už nepracují, ukončíte skončené vztahy najednou tlačítkem **Ukončit
 skončené dohody** nad seznamem zaměstnanců. Číslo v závorce je počet vztahů,
 které aplikace navrhuje ukončit. Tlačítko vidí jen uživatel s právem měnit
-pracovní vztahy. Nic se neděje samo, vždy rozhodujete vy.
+pracovní vztahy. Až na dohody popsané v odstavci **Automatické ukončení
+dohod** níže se nic neděje samo, rozhodujete vy.
 
-1. Klikněte na **Ukončit skončené dohody**. Otevře se náhled ve třech skupinách:
+1. Klikněte na **Ukončit skončené dohody** (nad seznamem, nebo v **Další funkce**). Otevře se náhled ve třech skupinách:
    - **Uplynul sjednaný konec**: aktivní nebo přerušený vztah (jakéhokoli druhu),
-     jehož sjednaný konec už uplynul. Navržené datum ukončení je sjednaný konec.
+     jehož sjednaný konec už uplynul. Sjednaný konec je datum konce vztahu,
+     a není-li vyplněné, konec na dobu určitou z platných podmínek. Navržené
+     datum ukončení je sjednaný konec. Jen tato skupina je předvybraná.
+     Náhled se vztahuje k mzdovému běhu: otevřený z kontroly běhu k jeho
+     období, ze Zaměstnanců k nejstaršímu neschválenému běhu. Předvyberou se
+     a do počtu na tlačítku i v souhrnu se započtou jen vztahy se sjednaným
+     koncem před obdobím běhu, tedy ty, které kontrola hlásí; pozdější konce
+     zůstanou v nabídce nezaškrtnuté. Bez neschváleného běhu se počítají
+     všechny konce k dnešku.
    - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která
-     za zvolený počet měsíců (výchozí 3, včetně běžného měsíce) nemá žádný
-     nenulový mzdový vstup ani docházku. Navržené datum je poslední den měsíce
-     poslední aktivity, bez aktivity poslední den měsíce nástupu. Je-li už
-     zúčtovaný pozdější měsíc, navrhne se jeho poslední den, aby ukončení
-     neodporovalo odeslanému hlášení. Nulový vstup a nulový řádek mzdového běhu
-     se za aktivitu nepovažují.
+     za zvolený počet měsíců (výchozí 3) do posledního zpracovaného mzdového
+     měsíce (měsíc poslední schválené mzdy, bez schválené mzdy do běžného
+     měsíce) nemá žádný nenulový mzdový vstup ani docházku. Dohoda s prací
+     v měsících, které ještě nejsou zpracované, se tak nenabídne. Navržené
+     datum je poslední den měsíce poslední aktivity, bez aktivity poslední den
+     měsíce nástupu. Je-li už zúčtovaný pozdější měsíc, navrhne se jeho
+     poslední den, aby ukončení neodporovalo odeslanému hlášení. Nulový vstup
+     a nulový řádek mzdového běhu se za aktivitu nepovažují. Skupina není
+     předvybraná, vztahy v ní vyberete sami.
    - **Ukončené vztahy k archivaci**: vztahy ukončené před více než zvoleným
      počtem měsíců (výchozí 12). Archivace jen odklidí vztah ze seznamu a jde
-     vrátit akcí **Vrátit z archivu**.
+     vrátit akcí **Vrátit z archivu**. Ani tato skupina není předvybraná.
 2. Počet měsíců bez aktivity a počet měsíců před archivací změníte nahoře
    a kliknete na **Načíst náhled**.
 3. Zkontrolujte výběr. U ukončení můžete změnit datum, ukončit lze jen k dnešku
@@ -345,11 +593,43 @@ pracovní vztahy. Nic se neděje samo, vždy rozhodujete vy.
 5. Výsledek ukáže počet provedených a u každého vztahu, který se nepovedl,
    důvod (například vztah mezitím změnil někdo jiný). Ostatní vztahy se tím
    nezastaví.
+6. Dialog otevřený tlačítkem z kontroly mzdového běhu nebo z průvodce měsícem
+   vás po **Zavřít** vrátí zpět tam, odkud jste přišli. Stejně se vracejí
+   i ostatní hromadné opravy otevřené z kontroly běhu.
 
 Každý vztah se ukončí stejně jako tlačítkem **Ukončit** na jeho kartě: projde
 stejnými kontrolami, zapíše se do časové osy a založí výstupní checklist.
 Odhlášku (A2, HOZ) a další kroky podle § 86.9 je potřeba vyřídit i u hromadně
 ukončených vztahů.
+
+**Automatické ukončení dohod.** DPP a DPČ, které jsou aktivní nebo přerušené
+a jejichž sjednaný konec už uplynul, ukončí aplikace sama každou noc
+(plánovaná úloha `cron-payroll-end-agreements`, viz
+[§ 5](05_Po_instalaci.md)). Ukončí je ke dni sjednaného konce stejnou cestou
+jako tlačítko **Ukončit skončené dohody**: se stejnými kontrolami, záznamem
+v časové ose, výstupním checklistem a auditní stopou, kde je jako autor
+uvedený systém. Dohodu, která má po sjednaném konci ještě mzdový vstup,
+docházku nebo zúčtovanou mzdu, nechá aktivní. Ta zůstane ve skupině
+**Uplynul sjednaný konec** označená **Vyžaduje kontrolu** a datum konce
+posoudíte vy. Pracovní poměr na dobu určitou se sám neukončuje, protože
+pokračováním v práci se mění na dobu neurčitou; ten ukončíte ručně.
+
+**Oprava ukončeného vztahu pro JMHZ.** U ukončeného vztahu jde dál opravit
+údaje, které popisují vztah pro JMHZ: místo výkonu práce (včetně obce
+a adresy pracoviště), CZ-ISCO, druh činnosti, primární vztah a pravděpodobný
+výdělek. Opravíte je na kartě vztahu, akcí **Doplnit místo výkonu práce**
+i hromadnou úpravou podmínek; ukládá se vždy jako oprava platné verze
+a datum konce vztahu se nemění. Platí to, dokud za měsíce opravované verze
+není hlášení JMHZ zmrazené ani podané. Pak aplikace opravu odmítne a řekne,
+o které hlášení jde: vraťte ukončení vztahu, údaje opravte, vztah znovu
+ukončete a podejte opravné hlášení. Mzdu, úvazek ani data u ukončeného
+vztahu takto neopravíte, k tomu je potřeba vrátit ukončení.
+
+Má-li ukončený vztah mzdový vstup za měsíc po svém konci, dostane se do
+mzdového běhu toho měsíce jen kvůli tomuto vstupu. Kontrola běhu pak hlásí
+„vstup za MM/RRRR je na vztahu ukončeném DD. MM. RRRR" s odkazem na vstupy
+vztahu. Jde-li o doplatek po skončení, potvrďte na kartě vztahu odložený
+příjem; jinak vstup zrušte nebo ho zadejte na trvající vztah.
 
 ## 86.10 Krok za krokem: personální spis
 
@@ -702,8 +982,9 @@ nemění.
 
 Kód `D` dává jen dosažení důchodového věku; předčasný starobní důchod ho
 nezakládá a odečítané doby po dosažení věku neruší. Starobní důchod v plné výši ukončuje odečítané doby a od roku
-2025 i vedení ročního evidenčního listu; měsíc, od kterého výplata náleží
-(u důchodu přiznaného uprostřed měsíce měsíc přiznání), se ještě vede. Invalidní
+2025 i vedení ročního evidenčního listu a údajů ELDP v měsíčním hlášení; měsíc,
+od kterého výplata náleží (u důchodu přiznaného uprostřed měsíce měsíc přiznání),
+se ještě vede. Invalidní
 a cizí důchody kód `D` nezakládají. Import přihlášek REGZEC doplní pobíraný
 důchod do prázdné evidence; vyplněnou nemění a rozdíl jen ohlásí.
 
@@ -845,7 +1126,8 @@ o výpočtu, podání i zaúčtování:
 |---|---:|---:|
 | pracovní poměr mimo výkon funkce, zaměstnání malého rozsahu, DPP, DPČ | 521 | 331 |
 | příjem společníka ze závislé činnosti | 522 | 366 |
-| odměna za výkon funkce člena orgánu | 523 | 366 |
+| odměna za výkon funkce člena orgánu, který je společníkem | 523 | 366 |
+| odměna za výkon funkce člena orgánu, který společníkem není | 523 | 331 nebo 366 |
 | pojistné hrazené zaměstnavatelem | 524 | 336 |
 
 Odměna jednatele za výkon funkce není totéž co pracovní poměr jednatele mimo
@@ -854,6 +1136,14 @@ osoby. Převzatý vztah z Mzdové rekapitulace zachovává dosavadní kontaci; p
 ostrým použitím zkontrolujte právní titul, protože starší karta
 „jednatel-společník" nerozliší smlouvu o výkonu funkce od ostatní závislé
 činnosti. Výchozí účty nastavíte v [Nastavení mezd](90_Nastaveni_mezd.md).
+
+U vztahu **odměna za výkon funkce** zaškrtněte na kartě vztahu **Člen orgánu je
+zároveň společníkem**, je-li jednatel společníkem. Jeho odměna se pak účtuje
+523/366 a pojistné, daň i zápočet čisté mzdy jdou z 366 (366/336, 366/342,
+366/365). U jednatele, který společníkem není, se odměna účtuje 523/331, má-li
+firma v nastavení mezd vyplněnou předkontaci **Odměna jednatele, který není
+společníkem**; jinak jde jako dřív proti 366. Nově zakládaná firma ji má
+předvyplněnou. Změna platí pro běhy přepočítané po uložení.
 
 ### 86.12.8 Životní cyklus vztahu
 
@@ -879,7 +1169,20 @@ pojišťovně se odvozují od **skutečného** nástupu, jinak od plánovaného.
 
 ### 86.12.9 Sjednané podmínky, souběhy a srážková daň
 
-Každé uložení změny podmínek založí další účinný interval a předchozí uzavře
+Chybí-li u pracovního poměru, zaměstnání malého rozsahu, DPP nebo DPČ obec
+nebo stát pracoviště pro formulář JMHZ s vykonávanou pozicí, karta vztahu
+na to upozorní i při sbalených dalších údajích. Tlačítko **Doplnit pracoviště**
+otevře přímo chybějící pole.
+Obec vyberte z číselníku, doplňte stát a uložte podmínky.
+
+Zpětná oprava platné verze podmínek i hromadné doplnění pracoviště vyžadují
+otevřenou opravu všech vyúčtovaných měsíců, do kterých tato verze zasahuje.
+Otevření opravy dubna nestačí, pokud stejná verze platí i ve vyúčtovaném
+březnu. Po změně se otevřená revize označí jako zastaralá: zvolte
+**Obnovit podklady**, mzdy znovu přepočítejte a novou revizi schvalte.
+Změnu platnou až do budoucna uložte jako novou verzi podmínek.
+
+Uložení nové verze podmínek založí další účinný interval a předchozí uzavře
 dnem před novou účinností; starší mzdové období tak pozdější změna nepřepíše.
 Historie drží uzavření smlouvy, plánovaný a skutečný nástup a dobu určitou,
 úvazek, týdenní hodiny, místo práce, pravidelné pracoviště, CZ-ISCO a druh
@@ -892,7 +1195,8 @@ A1 i změna A3) jen pětimístnou kategorii. Se čtyřmístným kódem se přihl
 zastaví a vyzve k výběru kategorie; aplikace ji sama nedoplní, protože
 podskupina má obvykle několik kategorií.
 
-Karta vztahu má v hlavním sloupci **Základní údaje** (pravidelná hrubá mzda,
+Karta vztahu má v hlavním sloupci **Základní údaje** (způsob odměňování,
+měsíční částka nebo sjednaná hodinová sazba s podkladem sjednání,
 týdenní pracovní doba, **Úvazek (%)**, **Výjimka z výměry dovolené (týdny)**,
 pravděpodobný výdělek, **Mzdová účtárna**, **Druh činnosti**, **Bližší určení
 pracovněprávního vztahu**, **Režim nároku na stravování**, primární vztah)
@@ -1004,9 +1308,14 @@ nepotvrdil; zmrazený snímek si poznamená, že hodnota vznikla výkladem
 výchozího stavu.
 
 **Místo výkonu práce.** Obec se vybírá našeptávačem, stát z připnuté nabídky;
-obec, kód obce a stát se ukládají jen jako úplná trojice a aplikace kontroluje
-shodu názvu s kódem i platnost státu podle číselníků CISOB a CZEM. Podmínky před
-začátkem účinnosti připnutých číselníků nelze označit jako ověřené. Budoucí
+kód obce a stát se ukládají jen spolu a aplikace ověřuje platnost kódu obce
+a státu podle číselníků CISOB a CZEM. Zdrojem pravdy je kód obce: prázdné místo
+výkonu práce doplní úředním názvem obce. Místo výkonu práce zůstává volným textem
+smlouvy (mzdový výměr, A1); když se od úředního názvu liší (třeba „Praha" místo
+„Hlavní město Praha"), uložení proběhne, karta ukáže u pole žluté varování
+s úředním názvem a příprava měsíčního hlášení JMHZ vztah zastaví, dokud se název
+neopraví. Podmínky před začátkem účinnosti připnutých číselníků nelze označit
+jako ověřené. Budoucí
 změnu lze naplánovat, ale přesahuje-li vykazované období ověřené pokrytí
 číselníku, mzdový snímek ji označí jako neověřenou a bez novějšího snímku
 číselníku se neodešle.
@@ -1083,6 +1392,22 @@ a nezakládejte kvůli tomu druhou kartu osoby. Zobrazení stačí oprávnění 
 mzdy, uložení potřebuje současně oprávnění spravovat zaměstnance i pracovní
 vztahy (nejde o pravidlo čtyř očí).
 
+OIČ má osoba jediné a nemění se. Má-li brigádník dohody po měsících a OIČ
+přišlo v protokolu ČSSZ až k pozdější dohodě, opište totéž OIČ i k dřívější
+dohodě spolu s jejím ID PPV: aplikace jen posune začátek platnosti OIČ na den
+dřívější dohody a posun zapíše do auditní stopy. Jiné číslo, než přidělil
+protokol, neuloží. Už odeslaná hlášení se tím nemění, nově připravené hlášení
+za dřívější měsíc čísla nese.
+
+Chybí-li čísla proto, že přihláška teprve čeká, sekce to řekne: přihláška je
+připravená a neodešla (odešlete ji v **K odeslání**), nebo byla odeslána a čeká
+na protokol ČSSZ. Výsledek si aplikace stahuje sama a čísla doplní; ručně ho
+stáhnete tlačítkem **Zjistit výsledek** v části **Registrace vztahu na ČSSZ**.
+Čísla v té chvíli ručně neopisujte. Přidělí-li protokol číslo v nesprávném
+tvaru (OIČ nesplní kontrolní číslici), aplikace přihlášku uzavře jako přijatou,
+číslo nepřevezme a u podání zobrazí nález s postupem: ověřit číslo v Seznamu
+zaměstnanců na ePortálu ČSSZ a opsat ho sem.
+
 ### 86.12.13 Výzvy a žádosti v důchodovém pojištění
 
 Část povinností vzniká až výzvou nebo žádostí a lhůta běží od doručení.
@@ -1143,9 +1468,13 @@ nebo u pojišťovny, mzdový běh to ohlásí jako **varování**, ne blokaci: m
 práci náleží bez ohledu na přihlášku. Varování je nutné vzít na vědomí. Ozve se,
 jen když platí všechno naráz: položka nástupního checklistu je nesplněná,
 k vztahu není evidovaná odpovídající povinnost podání, vztah není
-**Nenastoupil** ani archivovaný, nástup už nastal a vztah zakládá účast na
-pojištění. Dohoda s automatickým posouzením účasti, vztah bez účasti i cizinec
-s A1 tedy mlčí. Přihlášku podanou mimo aplikaci odškrtněte v checklistu, u víc
+**Nenastoupil** ani archivovaný, nástup už nastal a vztah registraci dluží.
+Registraci u ČSSZ (REGZEC A1) dluží každá DPP a DPČ bez ohledu na účast na
+pojištění, tedy i dohoda pod rozhodným příjmem a cizinec s A1. U ostatních
+vztahů rozhoduje účast na pojištění. U dohody bez účasti je to jen
+připomínka, schválení běhu na výjimku nečeká. Oznámení zdravotní pojišťovně se ozve jen
+u vztahu s účastí na zdravotním pojištění, dohoda bez účasti u něj mlčí.
+Přihlášku podanou mimo aplikaci odškrtněte v checklistu, u víc
 lidí hromadně v panelu **Zákonné termíny**; nástup před 1. 7. 2026 je v sekci
 **Bez termínu**.
 
@@ -1206,6 +1535,15 @@ zákoníku práce; ve formuláři potvrzení je volba zamčená) a založí se
 proplacení dovolené a odstupné jako vstupy posledního běhu. Schválení A2
 i vydání potvrzení odmítne údaj, který záznamu odporuje. Bez záznamu se obě
 místa vyplňují ručně.
+
+Blok **Navazující úkony po skončení** nabízí odkazy na **Podání > ELDP**
+s předvybranou osobou, vztahem a rokem skončení, na **Dokumenty při skončení
+vztahu** s potvrzením o zaměstnání a pro Úřad práce a na roční **Dokumenty**
+s potvrzením o zdanitelných příjmech. Odkazy samy dokumenty nevytvářejí.
+U sbaleného skončeného vztahu nejprve otevřete jeho detail. Pokud daňové
+potvrzení hlásí nedoloženou úhradu mzdy, v **Mzdy > Platby > Spárování úhrad**
+spárujte skutečnou úhradu s bankovním pohybem nebo zaúčtovaným pokladním
+dokladem a pak potvrzení vytvořte znovu. Export plateb úhradu nedokládá.
 
 #### Způsob a důvod skončení
 
@@ -1386,3 +1724,4 @@ Podání, které aplikace nepodporuje, dokončete ručně.
 - [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md): zápočtový list a potvrzení
 - [Srážky a exekuce](88_Srazky_a_exekuce.md) a [Dohody o srážkách](87_Dohody_o_srazkach.md)
 - [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
+- [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md): hromadné nástroje v pořadí měsíce

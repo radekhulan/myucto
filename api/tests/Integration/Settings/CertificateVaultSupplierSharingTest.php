@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Epo\EpoSigningCredentialService;
 use MyInvoice\Service\Signing\CertificateVaultSupplierSharing;
+use MyInvoice\Service\Signing\CertificateVaultUsage;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Support\OpensslConfigTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -38,6 +39,7 @@ final class CertificateVaultSupplierSharingTest extends TestCase
     private EpoSigningCredentialRepository $vault;
     private EpoSigningCredentialService $credentialService;
     private CertificateVaultSupplierSharing $sharing;
+    private CertificateVaultUsage $usage;
     private int $userId;
     private int $signerRole;
     private int $source;
@@ -63,6 +65,7 @@ final class CertificateVaultSupplierSharingTest extends TestCase
         $this->vault = $container->get(EpoSigningCredentialRepository::class);
         $this->credentialService = $container->get(EpoSigningCredentialService::class);
         $this->sharing = $container->get(CertificateVaultSupplierSharing::class);
+        $this->usage = $container->get(CertificateVaultUsage::class);
 
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -366,6 +369,91 @@ final class CertificateVaultSupplierSharingTest extends TestCase
             false,
         ));
         self::assertFalse($this->vault->isEnabledForSupplier($credentialId, $this->permitted));
+    }
+
+    public function testOverviewUsesReadPermissionAndOnlyPublishesTheOwnersCertificateMetadata(): void
+    {
+        $credentialId = $this->vaultRow('2020-01-01 00:00:00', '2099-01-01 00:00:00');
+        foreach ([$this->source, $this->readOnly, $this->noSigning, $this->foreign] as $supplier) {
+            $this->vault->setSupplierEnabled($credentialId, $this->userId, $supplier, true, $this->userId);
+        }
+
+        $pdo = $this->db->pdo();
+        $payroll = $pdo->prepare(
+            'INSERT INTO payroll_submission_signing_profiles
+                (supplier_id, environment, credential_id, owner_user_id, cssz_registered_serial)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $payroll->execute([$this->source, 'production', $credentialId, $this->userId, '10']);
+        $payroll->execute([$this->source, 'test', $credentialId, $this->userId, 'ff']);
+        $payroll->execute([$this->readOnly, 'test', $credentialId, $this->userId, null]);
+        $pdo->prepare(
+            "INSERT INTO submission_channel_credentials
+                (supplier_id, environment, channel, label, box_id, credential_id)
+             VALUES (?, 'test', 'isds', 'Synthetic company credential', 'abc1234', ?)"
+        )->execute([$this->readOnly, $credentialId]);
+
+        $rows = $this->usage->companies($this->request(), $credentialId, $this->userId);
+        self::assertNotNull($rows);
+        $rows = array_column($rows, null, 'supplier_id');
+        self::assertSame([$this->source, $this->permitted, $this->readOnly, $this->alreadyCovered], array_keys($rows));
+        self::assertSame(['supplier_id', 'name', 'epo', 'payroll', 'databox'], array_keys($rows[$this->source]));
+        self::assertSame('eligible', $rows[$this->source]['epo']);
+        self::assertSame('disabled', $rows[$this->permitted]['epo']);
+        self::assertSame([
+            ['environment' => 'production', 'registration' => 'matches'],
+            ['environment' => 'test', 'registration' => 'mismatch'],
+        ], $rows[$this->source]['payroll']);
+        self::assertSame([['environment' => 'test', 'registration' => 'missing']], $rows[$this->readOnly]['payroll']);
+        self::assertSame([[
+            'environment' => 'test',
+            'box_id' => 'abc1234',
+            'source' => 'company',
+            'operations' => ['send', 'receive', 'receipts'],
+        ]], $rows[$this->readOnly]['databox']);
+        self::assertStringNotContainsString('enc:v1:synthetic', (string) json_encode($rows));
+        self::assertNull($this->usage->companies($this->request(), $credentialId, $this->userId + 1));
+
+        $expiredId = $this->vaultRow('2000-01-01 00:00:00', '2001-01-01 00:00:00');
+        $this->vault->setSupplierEnabled($expiredId, $this->userId, $this->source, true, $this->userId);
+        $expired = $this->usage->companies($this->request(), $expiredId, $this->userId);
+        self::assertSame('invalid', array_column($expired, 'epo', 'supplier_id')[$this->source]);
+    }
+
+    public function testSharedDataboxUsageIsScopedAndBlocksCertificateDeletion(): void
+    {
+        if (!$this->db->hasTable('isds_access_profiles')) {
+            self::markTestSkipped('Migrace přístupových údajů ISDS neproběhla.');
+        }
+        $credentialId = $this->vaultRow('2020-01-01 00:00:00', '2099-01-01 00:00:00');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO isds_access_profiles
+                (owner_user_id, scope, environment, method, box_id, label, certificate_id, secret_context)
+             VALUES (?, 'shared', 'production', 'certificate', 'abc5678', 'Synthetic shared access', ?, ?)"
+        )->execute([$this->userId, $credentialId, bin2hex(random_bytes(16))]);
+        $profileId = (int) $pdo->lastInsertId();
+        $grant = $pdo->prepare(
+            'INSERT INTO isds_access_profile_suppliers (profile_id, supplier_id, can_send, can_receive, can_receipts)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $grant->execute([$profileId, $this->permitted, 1, 0, 1]);
+        $grant->execute([$profileId, $this->noSigning, 1, 1, 0]);
+
+        $companies = array_column($this->usage->companies($this->request(), $credentialId, $this->userId), null, 'supplier_id');
+        self::assertArrayNotHasKey($this->noSigning, $companies);
+        self::assertSame('disabled', $companies[$this->permitted]['epo']);
+        self::assertSame([[
+            'environment' => 'production',
+            'box_id' => 'abc5678',
+            'source' => 'shared',
+            'operations' => ['send', 'receipts'],
+        ]], $companies[$this->permitted]['databox']);
+        self::assertSame('in_use', $this->vault->deleteOwnedUnlessInUse($credentialId, $this->userId)['status']);
+        self::assertSame(1, $this->vault->usage($credentialId)['data_box_channels']);
+
+        $pdo->prepare('DELETE FROM isds_access_profiles WHERE id = ?')->execute([$profileId]);
+        self::assertSame('deleted', $this->vault->deleteOwnedUnlessInUse($credentialId, $this->userId)['status']);
     }
 
     private function uploadIntoSource(): int

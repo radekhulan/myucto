@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -19,6 +20,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\SalesQuote\QuoteException;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceService;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
@@ -117,6 +120,17 @@ final class UncancelInvoiceAction
             );
         }
 
+        // Zrušení storna maže zápisy faktury i stornovacího dokladu v deníku: ruční účetní
+        // úkon jen z relace. Bez zápisů (daňová evidence, nezaúčtovaná faktura) token smí.
+        $entries = $pdo->prepare(
+            "SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'invoice' AND source_id IN (?, ?) LIMIT 1"
+        );
+        $entries->execute([$supplierId, $id, $cancellationId]);
+        if ($entries->fetchColumn() !== false
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Zrušení storna zaúčtované faktury'))) {
+            return $deny;
+        }
+
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -132,6 +146,9 @@ final class UncancelInvoiceAction
             $pdo->beginTransaction();
         }
         try {
+            if ($invoice['invoice_type'] === 'invoice' && $this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                QuoteInvoiceService::assertUncancelCanRestoreQuoteItems($pdo, $supplierId, $id, $this->db->hasTable('sales_quote_orders'));
+            }
             $purge = $this->journalPurge->purge($supplierId, 'invoice', [$id, $cancellationId], $meta, 'invoice_uncancel');
             if ($purge['blocked'] !== null) {
                 if ($ownTx && $pdo->inTransaction()) {
@@ -180,6 +197,11 @@ final class UncancelInvoiceAction
             if ($ownTx) {
                 $pdo->commit();
             }
+        } catch (QuoteException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (StockException $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();

@@ -38,4 +38,19 @@ describe('usePayrollLabels', () => {
     expect(labels.employmentExitReadinessLabel('future_readiness'))
       .toBe('payroll.people.exit_documents.blockers.unknown')
   })
+
+  it('u identifikátoru nepřevzatého z protokolu ČSSZ dá vlastní návod místo obecné rady', () => {
+    const labels = usePayrollLabels()
+
+    for (const code of ['registration_receipt_oic_invalid', 'registration_receipt_id_ppv_invalid']) {
+      expect(labels.submissionIssueMessage(code))
+        .toBe(`payroll.submissions.overview.issue_message.${code}`)
+      expect(labels.submissionIssueRemediation('remote', code))
+        .toBe(`payroll.submissions.overview.issue_code_remediation.${code}`)
+    }
+    expect(labels.submissionIssueRemediation('remote', 'jmhz_protocol_untrusted'))
+      .toBe('payroll.submissions.overview.issue_remediation.remote')
+    expect(labels.submissionIssueRemediation('remote'))
+      .toBe('payroll.submissions.overview.issue_remediation.remote')
+  })
 })

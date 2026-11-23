@@ -508,7 +508,7 @@ final class PayrollSubmissionQueueAction
     ): ?Response {
         // Odeslání úředního podání jménem firmy se nikdy nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Fronta odchozích podání je dostupná jen z přihlášené relace.');
         }
         $error = null;

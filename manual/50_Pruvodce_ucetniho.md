@@ -33,7 +33,7 @@ Kapitolu otevřete, když:
 1. **Podvojné účetnictví zapnuté u firmy.** Sekce **Účetnictví** a **Nástroje** se zobrazují jen firmě v podvojném účetnictví. Zapnutí a aktivaci řeší `Nástroje → Aktivace a doúčtování`.
 2. **Oprávnění k účetnictví.** Fronty **Automat**, **K doúčtování**, **Doúčtovat doklady** a **Úplnost dokladů** se zobrazí jen s oprávněním k účetnictví. Ruční zápisy v deníku vyžadují oprávnění k zápisu do deníku.
 3. **Účtový rozvrh a předkontace.** Základ je hotový po zapnutí účetnictví. U firmy s importovanou historií sestaví první sadu pravidel `Nástroje → Asistent nastavení účtování` ([Asistent nastavení účtování](65_Sablony.md#658-krok-za-krokem-asistent-nastaveni-uctovani)).
-4. **Pochopte jedno pravidlo.** Vystavení nebo přijetí dokladu a jeho zaúčtování jsou dva oddělené kroky. Dokud doklad není zaúčtovaný, nepromítne se do hlavní knihy, výsledovky, rozvahy ani do kontroly DPH. Podrobně v [§ 50.10.1](#50101-co-je-zauctovano-a-proc-na-tom-vsechno-stoji).
+4. **Pochopte jedno pravidlo.** Vystavení nebo přijetí dokladu a jeho zaúčtování jsou dva oddělené kroky. Dokud doklad není zaúčtovaný, nepromítne se do hlavní knihy, výsledovky ani rozvahy. Evidence DPH se řídí samostatně stavem dokladu a rozhodným obdobím; kontrola proti účtu 343 může čekat na zaúčtování. Podrobně v [§ 50.10.1](#50101-co-je-zauctovano-a-proc-na-tom-vsechno-stoji).
 
 > [!TIP]
 > Chcete-li vědět, kolik dokladů čeká na zaúčtování, otevřete dlaždici **Akce pro tebe** na [Přehledu](10_Prehled.md). Badge **Nezaúčtováno** vidíte i v seznamech faktur.
@@ -75,10 +75,11 @@ Celý postup vede uzávěrkový průvodce v `Nástroje → Uzávěrka` ([Uzávě
 4. [Dohadné položky a časové rozlišení](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni), včetně návrhů předplacených nákladů a zvolené politiky drobného majetku. Návrhy vycházejí z pravidel nákladů označených jako **opakovaný předplacený náklad**. Jde o doporučení jen ke čtení, které uzávěrka zaúčtuje až po vašem potvrzení.
 5. [Opravné položky k pohledávkám](72_Uzaverka.md#7245-krok-6-opravne-polozky-k-pohledavkam). Navazují na saldokonto z [§ 50.4](#504-krok-za-krokem-mesicni-prace).
 6. [Daň z příjmů](72_Uzaverka.md#7246-krok-7-dan-z-prijmu): mezikrok na stránce [Daň z příjmů](43_Dan_z_prijmu.md).
-7. [Zásoby](72_Uzaverka.md#7247-krok-8-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
-8. [Uzavření knih a otevření nového roku](72_Uzaverka.md#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku).
-9. **Uzávěrkový balíček.** Před schválením stáhněte doložitelný ZIP sestav, inventarizací a daňových podkladů.
-10. [Schválení závěrky](72_Uzaverka.md#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi): rozdělení výsledku hospodaření (431 → 428/429/364).
+7. [Odložená daň](72_Uzaverka.md#7247-krok-8-odlozena-dan): po splatné dani z příjmů posuďte a zaúčtujte odloženou daň, případně krok přeskočte. Povinná je jen pro účetní jednotky s povinným auditem a konsolidační celky, uzavření knih neblokuje.
+8. [Zásoby](72_Uzaverka.md#7248-krok-9-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
+9. [Uzavření knih a otevření nového roku](72_Uzaverka.md#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku).
+10. **Uzávěrkový balíček.** Před schválením stáhněte doložitelný ZIP sestav, inventarizací a daňových podkladů.
+11. [Schválení závěrky](72_Uzaverka.md#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi): rozdělení výsledku hospodaření podle rámce firmy. Účty 431 → 428/429/364 platí pro rámec 500; v rámci 504 se pracuje s výsledkem na 931 a příslušnými účty 9xx.
 
 Po celý rok si držte po ruce [**Rozvahu**](57_Rozvaha.md) a [**Výsledovku**](58_Vysledovka_druhova.md) jako průběžnou kontrolu, jestli výsledek hospodaření ve výsledovce sedí s řádkem A.V. rozvahy. U firem s bankovním úvěrem zkontrolujte i řádek nákladových úroků (562).
 
@@ -489,7 +490,10 @@ který není vydanou ani přijatou fakturou. Zadejte titul, protistranu, částk
 v CZK, datum vzniku a splatnosti. Cizoměnové položky tato agenda zatím
 nepřijímá, protože by vyžadovaly kurzové přecenění při uzávěrce.
 V podvojném účetnictví vyberte účet
-pohledávky nebo závazku a protiúčet podle skutečného případu. Před potvrzením
+pohledávky nebo závazku a protiúčet podle skutečného případu, nebo je nechte
+prázdné a doplní je účetní profil druhu (nastavení v okně **Druhy** tlačítkem
+**Účtování**, viz [§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+Profil určuje i kontaci úhrady z banky a z pokladny. Před potvrzením
 je položka konceptem. Tlačítko **Zaúčtovat** vytvoří jediný zápis v deníku a
 přidělí číslo řady OP nebo OZ. Storno vytvoří opravný zápis; položku s
 přiřazenou úhradou je třeba nejprve od úhrady odpojit.
@@ -498,14 +502,126 @@ Zadáte nový účet, protiúčet, datum a důvod. Systém v jedné operaci stor
 původní zápis a vytvoří nový, doklad si zachová ID a číslo. Datum musí
 spadat do otevřeného období.
 
+Pole **Účet protistrany** je nepovinné. Zadejte český účet ve tvaru
+`předčíslí-číslo/kód banky` (například `19-1000000005/0100`) nebo IBAN.
+Český účet se ověří kontrolou modulo 11, IBAN kontrolními číslicemi. Český
+IBAN se uloží jako národní číslo účtu s kódem banky. Účet se zobrazí na detailu
+a opakování ho přenáší do každé nově vzniklé položky. Podle účtu aplikace
+nabízí úhrady z banky. U potvrzené nebo zaúčtované položky účet doplníte či
+opravíte přímo v detailu tlačítkem **Upravit** u pole **Účet protistrany**.
+Změna nemění zaúčtování ani saldo a zapíše se do aktivity položky.
+
+V podvojném účetnictví lze v sekci **Účtování** u pohledávky vyplnit **Časové rozlišení výnosu**
+a u závazku **Časové rozlišení nákladu**, tedy období **Od**–**Do**, do kterého výnos
+či náklad patří (roční nájem, licence, pojistné nebo předplatné placené předem). Pozná-li
+aplikace období z názvu položky (např. „Předplatné na rok 2027“ nebo „Nájem od 1. 10. 2026 do 30. 9. 2027“), nabídne ho k převzetí.
+Položka se zaúčtuje celá. Uzávěrka pak z výsledkových účtů jejího zápisu
+(u pohledávky třída 6, u závazku třída 5, včetně přeúčtování dvojic) odloží část
+připadající na dny za rozvahovým dnem, výnos na 384 a náklad na 381, a otevření
+dalšího roku ji rozpustí zpět. Z položky zaúčtované jen proti rozvahovému účtu nebo
+proti účtu opačné strany (pohledávka bez účtu třídy 6, závazek bez účtu třídy 5) uzávěrka
+nic neodloží. Zápis, který už nese účet odkladu (381 u závazku, 384 u pohledávky), se
+neodkládá podruhé; odklad zaúčtovaný ručně samostatným zápisem uzávěrka nepozná, u položky
+s obdobím ho proto nezadávejte. Storno nebo přeúčtování položky
+(i jen její dvojice) v pozdějším roce funguje jako dobropis: uzávěrka roku storna
+vrátí zbylou odloženou část na původní účty a nový zápis se odloží znovu na své účty.
+Stejně se započte i storno nebo oprava zpětně datovaná do dřívějšího roku
+(viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
+Období se zadává spolu se začátkem i koncem. V daňové evidenci ho zadat nejde.
+Změna strany (pohledávka ↔ závazek) období vymaže, protože se mění jeho význam; návrat na původní stranu před uložením ho vrátí.
+U zaúčtované položky ho nastavíte nebo zrušíte v detailu ikonou tužky
+u pole **Časové rozlišení výnosu**, resp. **Časové rozlišení nákladu** v kartě **Údaje položky**
+(prázdná pole Od a Do rozlišení zruší). U položky bez vlastního zápisu (v daňové evidenci, potvrzené,
+stornované nebo převzaté ze zůstatku deníku) uložené období jen zrušíte ikonou křížku u stejného pole;
+znovu ho jde zadat až u zaúčtované položky s vlastním zápisem. Zápis v deníku se
+tím nemění a změna se zapíše do aktivity položky. Položku v uzavřeném, revidovaném či schváleném
+účetním období (kteréhokoli zápisu, ze kterého uzávěrka odkládá) už změnit nelze, rozlišení je součástí
+uzávěrky. Zaúčtoval-li krok **Časové rozlišení** probíhající uzávěrky odklad (výnosů u pohledávky, nákladů
+u závazku), nejdřív ho v uzávěrce vraťte, pak období změňte a krok spusťte znovu. Stejně se hlídá smazání
+konceptu s obdobím. Uzávěrka si odklad položky uloží a další rok rozpouští právě jej, stejně jako u řádků
+faktur. Opakování období
+do nově vzniklých položek nepřenáší.
+
+Má-li se náklad či výnos rozpouštět průběžně po měsících nebo sledovat jako smlouva, založte v detailu
+položky z panelu **Časové rozlišení** položku agendy [Časové rozlišení](125_Casove_rozliseni.md). Položku
+s takovou vazbou uzávěrka neodkládá a rozpouští ji agenda.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
-přiřadit volnou bankovní či pokladní úhradu. Částečná úhrada sníží zbývající
-částku. U zaúčtované položky musí být bankovní nebo pokladní zápis veden
-proti stejnému účtu pohledávky či závazku. Cizoměnové úhrady vyžadují
-samostatné kurzové vypořádání a v této agendě se automaticky nepárují.
+akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
+zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr
+nabízí platby seřazené podle síly shody a u každé ukáže důvod:
+
+| Pořadí | Shoda |
+|---|---|
+| 1 | variabilní symbol, účet protistrany a částka splátky |
+| 2 | variabilní symbol |
+| 3 | účet protistrany a částka splátky |
+| 4 | částka splátky, platba nejvýše 15 dní od splatnosti splátky |
+| 5 | celý zbývající dluh |
+| 6 | částka splátky dál od splatnosti |
+| 7 | jen účet protistrany |
+
+Částka splátky znamená neuhrazený zbytek splátky z kalendáře, tolerance je
+±0,01 Kč. Bez hledání se pod shodami nabízejí i nejnovější volné platby.
+Částečná úhrada sníží zbývající částku, přeplatek aplikace odmítne. U
+zaúčtované položky musí být bankovní nebo pokladní zápis veden proti stejnému
+účtu pohledávky či závazku. Úhrady v cizí měně tato agenda nepřiřazuje,
+vyžadují samostatné kurzové vypořádání.
 Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
 zaúčtujete znovu, přiřaďte ji k položce znovu ve stejné částce. Původní
 úhrada tak zůstane správně započtená v historickém saldu před stornem.
+
+Má-li položka **splátkový kalendář**, každá úhrada se váže ke splátce. Platba
+ve výši neuhrazeného zbytku některé splátky uhradí tuto splátku, jiná platba
+hradí první neuhrazenou splátku. Část platby nad zbytek splátky pokryje další
+neuhrazené splátky podle pořadí; platba zůstává u položky jedním řádkem
+a saldo se nemění. Stejně podle pořadí se započte i část uhrazená mimo banku a
+pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
+**Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
+Podle zbytků splátek počítá i předpověď cash-flow.
+
+**Automatické párování z banky.** Volba **Automaticky párovat ostatní
+pohledávky a závazky** v Nastavení firmy na záložce **Daně a účetnictví** je výchozí vypnutá.
+Se zapnutou volbou MyÚčto při importu výpisu a při **Přepárovat výpis** přiřadí
+bankovní pohyb ostatní položce samo, ale jen když pohyb nespárovala žádná
+faktura a právě jedna položka má jistou shodu:
+
+| Jistá shoda | Podmínka |
+|---|---|
+| VS a účet | variabilní symbol i účet protistrany |
+| VS a splátka | variabilní symbol a částka příští neuhrazené splátky |
+| VS a zbytek | variabilní symbol a celý zbývající dluh |
+| Účet a splátka | účet protistrany a částka příští neuhrazené splátky splatné nejvýše 15 dní od platby |
+
+Platba vyšší než zbývající dluh se automaticky nepřiřadí nikdy. Přiřazení
+jde stejnou cestou jako ruční párování: nezaúčtovaný pohyb se zaúčtuje proti
+účtu položky (v daňové evidenci se nic neúčtuje) a uzavřené období nebo pohyb
+zaúčtovaný jinam přiřazení zastaví. Slabší nebo nejednoznačná shoda zůstane
+k ručnímu výběru v okně **Spárovat** u pohybu. Automaticky přiřazená úhrada má
+v detailu položky štítek **automaticky** s důvodem shody. Přiřazení, které
+zrušíte nebo které storno zápisu pohybu stornuje, automatika znovu nevytvoří.
+
+Opakované platby bez VS lze vázat na položku i **pravidlem účtování banky**
+s vybranou položkou (pole **Přiřadit k ostatní položce**, viz
+[§ 29.13.14](29_Banka.md#291314-pravidla-uctovani-opakovanych-plateb)).
+Pravidlo účtuje na účet položky a úhradu k ní přiřadí jedním zápisem; když
+položku uhradit nejde, vytvoří jen návrh ke kontrole.
+
+Potvrzený nebo zaúčtovaný **závazek s účtem protistrany** zaplatíte i
+[platebním příkazem](26_Platebni_prikazy.md#26812-ostatni-zavazky) spolu s přijatými
+fakturami. Stránka **Nákup → Platební příkazy** nabízí nejbližší neuhrazenou splátku,
+bez kalendáře celý zbytek, s účtem protistrany a variabilním symbolem z položky.
+Zařazená splátka se podruhé nenabídne, dokud příkaz nesmažete. Zařazení závazek
+neuhradí: úhrada se zapíše až přiřazením odchozí platby z výpisu, jako u jiné platby.
+
+U úvěru, půjčky nebo leasingu je částkou položky jistina. Splátky lze rozdělit
+na jistinu, úrok a poplatek a nechat si je spočítat jako anuitní nebo lineární
+splácení. Platba splátky se pak rozdělí nejdřív na úrok, potom poplatek a nakonec
+jistinu. Saldo položky snižuje jen jistina, úrok a poplatek se v podvojném
+účetnictví zaúčtují s úhradou z banky do nákladů nebo výnosů (výchozí 562 a 568
+u přijatého úvěru, 662 a 668 u poskytnuté půjčky) a předpověď cash-flow počítá
+s celou splátkou. Podrobnosti v
+[§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
 
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.

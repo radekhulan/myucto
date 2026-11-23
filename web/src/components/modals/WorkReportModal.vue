@@ -17,18 +17,25 @@
  *      c. PUT /api/invoices/{id} — synchronizace DVOU souhrnných položek faktury:
  *         „Práce" (= title výkazu) a „Materiál" (= material_title). Každá nese svou sazbu DPH;
  *         InvoiceMath dopočítá DPH zdola/shora dle prices_include_vat dokladu.
+ *   Cenové ujednání: uložení drží snapshot, přenos položek proběhne jen po výslovné volbě.
  *   3. emit('saved') → parent reload
  *
  * Oba výkazy se ukládají (i schvalují) společně — sdílí jednu work_reports řádku.
  */
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { invoicesApi, type WorkReportItem, type WorkReportMaterial } from '@/api/invoices'
+import { invoicesApi, type WorkReportItem, type WorkReportMaterial, type InvoiceItem } from '@/api/invoices'
 import { codebooksApi, type Unit, type VatRate } from '@/api/codebooks'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
+import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
+import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
+import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
@@ -37,6 +44,7 @@ import { durationTotal, validateDurationInputs, workHours, workRowTotal } from '
 const { t, locale } = useI18n()
 const toast = useToast()
 const supplierStore = useSupplierStore()
+const displayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
 
 const props = defineProps<{
   modelValue: boolean
@@ -48,11 +56,23 @@ const emit = defineEmits<{
 }>()
 
 const loading = ref(false)
+const loadFailed = ref(false)
 const saving = ref(false)
 const error = ref('')
 const modalContent = ref<HTMLElement | null>(null)
 
 // ── Výkaz práce ──
+const billingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
+const billingTemplateId = ref<number | null>(null)
+const billingPeriod = ref('')
+const billingStale = ref(false)
+const billingReportId = ref<number | null>(null)
+const billingCurrentPreview = ref<WorkReportBillingPreview | null>(null)
+const billingPending = ref(false)
+const billingLegacyItemId = ref<number | null>(null)
+const invoiceItems = ref<InvoiceItem[]>([])
+const projectName = ref('')
+const reverseCharge = ref(false)
 const wrOpen = ref(false)
 const wrTitle = ref('')
 const wrItems = ref<WorkReportItem[]>([])
@@ -118,19 +138,36 @@ const matTotal = computed(() =>
 
 const canSave = computed(() =>
   // Lze uložit i prázdný stav, pokud výkaz existoval — tím se smaže (vč. položek faktury).
-  (workItemsValid.value.length > 0 || matItemsValid.value.length > 0 || wrExistedOnLoad.value) && !saving.value
+  (workItemsValid.value.length > 0 || !!billingSnapshot.value || matItemsValid.value.length > 0 || wrExistedOnLoad.value) && !saving.value && !loading.value && !loadFailed.value
 )
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   error.value = ''
   try {
     const [inv, wr, unitsList, vatList] = await Promise.all([
       invoicesApi.get(props.invoiceId),
-      invoicesApi.getWorkReport(props.invoiceId).catch(() => null),
+      invoicesApi.getWorkReport(props.invoiceId),
       codebooksApi.units().catch(() => [] as Unit[]),
       codebooksApi.vatRates('CZ').catch(() => [] as VatRate[]),
     ])
+    invoiceItems.value = inv.items.filter(item => item.item_kind !== 'discount')
+    billingLegacyItemId.value = null
+    billingReportId.value = wr?.id ?? null
+    billingCurrentPreview.value = wr?.billing_preview ?? null
+    billingSnapshot.value = wr?.billing_snapshot ?? null
+    billingTemplateId.value = wr?.billing_template_id ?? null
+    billingPeriod.value = wr?.billing_period ?? (inv.tax_date || inv.issue_date || '').slice(0, 7)
+    billingStale.value = !!wr?.billing_stale
+    billingPending.value = false
+    reverseCharge.value = !!inv.reverse_charge
+    projectName.value = inv.project_name ?? ''
+    if (!wr && inv.project_billing_template_id) {
+      const template = (await workReportBillingApi.list().catch(() => [])).find(item => item.id === inv.project_billing_template_id)
+      if (template && template.currency === inv.currency) { billingTemplateId.value = template.id; billingSnapshot.value = JSON.parse(JSON.stringify(template)) }
+    }
+    displayOptions.value = wr?.display_options ?? null
     wrExistedOnLoad.value = !!wr
     projectId.value = inv.project_id ?? null
     currency.value = inv.currency || 'CZK'
@@ -152,7 +189,7 @@ async function load() {
     workVatRateId.value = supplierIsVatPayer.value
       ? (wr?.vat_rate_id ?? rateIdByPercent(21) ?? defaultVatRateId.value)
       : (zeroVatRateId() ?? defaultVatRateId.value)
-    wrOpen.value = wrItems.value.length > 0
+    wrOpen.value = wrItems.value.length > 0 || !!billingSnapshot.value
 
     // ── Materiál ── (sekce zabalená, dokud nemá řádky)
     matTitle.value = wr?.material_title || t('invoice.wr_material_title')
@@ -163,6 +200,7 @@ async function load() {
       : (zeroVatRateId() ?? defaultVatRateId.value)
     matOpen.value = matItems.value.length > 0
   } catch (e: any) {
+    loadFailed.value = true
     error.value = apiErrorMessage(e, t('common.error'))
   } finally {
     loading.value = false
@@ -174,7 +212,7 @@ function openWork() {
   if (wrItems.value.length === 0) addItem()
   wrOpen.value = true
 }
-function closeWork() { wrItems.value = []; wrOpen.value = false }
+function closeWork() { wrItems.value = []; billingSnapshot.value = null; billingTemplateId.value = null; billingPending.value = false; wrOpen.value = false }
 
 // ── Práce: řádky ──
 function addItem() {
@@ -275,10 +313,13 @@ function syncRow(
 async function save() {
   if (modalContent.value && !validateDurationInputs(modalContent.value)) return
   if (!canSave.value) return
+  if (billingSaveNeedsConfirmation({ snapshot: billingSnapshot.value, stale: billingStale.value, pending: billingPending.value,
+    reportId: billingReportId.value, preview: billingCurrentPreview.value, invoiceItems: invoiceItems.value })
+    && !confirm(t('work_report_billing.save_unsynced_confirm', { description: wrTitle.value || t('invoice.work_report') }))) return
   saving.value = true
   error.value = ''
   try {
-    const nothingLeft = workItemsValid.value.length === 0 && matItemsValid.value.length === 0
+    const nothingLeft = workItemsValid.value.length === 0 && matItemsValid.value.length === 0 && !billingSnapshot.value
     if (nothingLeft) {
       // Oba výkazy prázdné → smaž celou work_reports řádku (jinak by zůstala prázdná).
       try {
@@ -290,6 +331,10 @@ async function save() {
       // 1. Uložit výkaz práce (title + sazba + řádky; i prázdné řádky → drží sazbu/title).
       await invoicesApi.saveWorkReport(props.invoiceId, {
         project_id: projectId.value,
+        billing_template_id: billingTemplateId.value,
+        billing_snapshot: billingSnapshot.value,
+        ...(billingSnapshot.value ? { billing_period: billingPeriod.value || null } : {}),
+        display_options: displayOptions.value,
         title: wrTitle.value.trim() || t('invoice.work_report'),
         vat_rate_id: workVatRateId.value,
         items: workItemsValid.value.map((it, idx) => ({
@@ -321,14 +366,15 @@ async function save() {
     const inv = await invoicesApi.get(props.invoiceId)
     // Slevové položky (item_kind='discount') jsou generované z discount_percent — do payloadu nepatří.
     inv.items = inv.items.filter(it => it.item_kind !== 'discount') as any
+    const legacyItemIndex = billingLegacyItemId.value == null ? -1 : inv.items.findIndex(item => item.id === billingLegacyItemId.value)
 
     const workDesc = wrTitle.value.trim() || t('invoice.work_report')
     const matDesc = matTitle.value.trim() || t('invoice.wr_material_title')
 
-    syncRow(inv.items as any[], origWorkTitle.value, workDesc, totalAmount.value, workVatRateId.value, workItemsValid.value.length > 0, true)
+    if (!billingSnapshot.value) syncRow(inv.items as any[], origWorkTitle.value, workDesc, totalAmount.value, workVatRateId.value, workItemsValid.value.length > 0, true)
     syncRow(inv.items as any[], origMatTitle.value, matDesc, matTotal.value, matVatRateId.value, matItemsValid.value.length > 0, false)
 
-    await invoicesApi.update(props.invoiceId, {
+    const updatedInvoice = await invoicesApi.update(props.invoiceId, {
       invoice_type: inv.invoice_type,
       client_id: inv.client_id,
       project_id: inv.project_id,
@@ -337,6 +383,7 @@ async function save() {
       due_date: inv.due_date,
       currency_id: inv.currency_id,
       reverse_charge: !!inv.reverse_charge,
+      prices_include_vat: !!inv.prices_include_vat,
       language: inv.language,
       varsymbol: inv.varsymbol,
       payment_method: inv.payment_method,
@@ -354,7 +401,11 @@ async function save() {
       })) as any,
     } as any)
 
-    toast.success(t('invoice.wr_saved_and_synced'))
+    if (billingSnapshot.value && billingPending.value) {
+      const preview = await workReportBillingApi.preview(props.invoiceId)
+      await workReportBillingApi.transfer(props.invoiceId, preview.fingerprint, false, legacyItemIndex < 0 ? undefined : updatedInvoice.items[legacyItemIndex]?.id)
+    }
+    toast.success(t(billingSnapshot.value ? 'work_report_billing.saved' : 'invoice.wr_saved_and_synced'))
     emit('saved')
     close()
   } catch (e: any) {
@@ -377,10 +428,11 @@ onMounted(() => {
   <Modal v-if="modelValue" :title="t('invoice.wr_btn')" width-class="max-w-4xl" @close="close">
       <div v-if="loading" class="p-8 text-center text-neutral-500">{{ t('common.loading') }}</div>
 
+      <div v-else-if="loadFailed" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
       <div v-else ref="modalContent" class="space-y-6">
         <!-- ════════ Sekce: Výkaz práce ════════ -->
         <section class="space-y-4">
-          <div class="flex items-center justify-between gap-3 border-b border-neutral-200 pb-1">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-1">
             <h4 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h4>
             <button v-if="!wrOpen" type="button" @click="openWork"
                     class="cursor-pointer px-3 h-8 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md inline-flex items-center gap-1.5">
@@ -408,6 +460,10 @@ onMounted(() => {
             </div>
           </div>
 
+          <ReportBillingEditor v-model:snapshot="billingSnapshot" v-model:template-id="billingTemplateId" v-model:period="billingPeriod" v-model:legacy-item-id="billingLegacyItemId" :invoice-items="invoiceItems"
+            :currency="currency" :title="wrTitle" :items="wrItems" :project-name="projectName" :vat-rate-id="workVatRateId"
+            :prices-include-vat="pricesIncludeVat" :reverse-charge="reverseCharge" :stale="billingStale" :pending="billingPending"
+            @transfer="billingPending = true" @changed="billingPending = false; billingStale = true" />
           <!-- Desktop: tabulka -->
           <div class="hidden md:block overflow-x-auto">
             <table class="w-full text-sm">
@@ -417,8 +473,8 @@ onMounted(() => {
                   <th class="px-3 py-2 text-left font-medium">{{ t('invoice.wr_description') }}</th>
                   <th class="px-3 py-2 text-left font-medium w-28">{{ t('invoice.wr_date') }}</th>
                   <th class="px-3 py-2 text-right font-medium w-24">{{ t('invoice.wr_hours') }}</th>
-                  <th class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
-                  <th class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.totals.total') }}</th>
+                  <th v-if="!billingSnapshot" class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
+                  <th v-if="!billingSnapshot" class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.totals.total') }}</th>
                   <th class="px-2 py-2 w-10"></th>
                 </tr>
               </thead>
@@ -444,11 +500,11 @@ onMounted(() => {
                     <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
-                  <td class="px-3 py-1.5">
+                  <td v-if="!billingSnapshot" class="px-3 py-1.5">
                     <input v-model.number="it.rate" type="number" step="0.000001" min="0"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
-                  <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
+                  <td v-if="!billingSnapshot" class="px-3 py-1.5 text-right font-mono text-neutral-700">
                     {{ workRowTotal(it).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
                   </td>
                   <td class="px-2 py-1.5 text-center">
@@ -470,11 +526,11 @@ onMounted(() => {
                     <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ durationTotal(workItemsValid) ?? totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h
                   </td>
                   <td v-else></td>
-                  <td></td>
-                  <td v-if="wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
+                  <td v-if="!billingSnapshot"></td>
+                  <td v-if="!billingSnapshot && wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
                     {{ totalAmount.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}
                   </td>
-                  <td v-else colspan="2"></td>
+                  <td v-else-if="!billingSnapshot" colspan="2"></td>
                 </tr>
               </tfoot>
             </table>
@@ -508,13 +564,13 @@ onMounted(() => {
                     <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
-                  <div>
+                  <div v-if="!billingSnapshot">
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('invoice.wr_rate') }}</label>
                     <input v-model.number="it.rate" type="number" step="0.000001" min="0" inputmode="decimal"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
                 </div>
-                <div class="flex items-baseline justify-between text-sm">
+                <div v-if="!billingSnapshot" class="flex items-baseline justify-between text-sm">
                   <span class="text-xs text-neutral-500">{{ t('invoice.totals.total') }}</span>
                   <span class="font-mono font-medium">
                     {{ workRowTotal(it).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}
@@ -530,7 +586,7 @@ onMounted(() => {
               </button>
               <div v-if="wrItems.length > 0" class="flex items-baseline justify-between text-sm font-semibold">
                 <span class="font-mono"><span class="text-neutral-400 font-normal mr-1">Σ</span>{{ durationTotal(workItemsValid) ?? totalHours.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
-                <span class="font-mono">{{ totalAmount.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}</span>
+                <span v-if="!billingSnapshot" class="font-mono">{{ totalAmount.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} {{ currency }}</span>
               </div>
             </div>
           </div>
@@ -539,7 +595,7 @@ onMounted(() => {
 
         <!-- ════════ Sekce: Výkaz materiálu ════════ -->
         <section class="space-y-4">
-          <div class="flex items-center justify-between gap-3 border-b border-neutral-200 pb-1">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-1">
             <h4 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report_material') }}</h4>
             <button v-if="!matOpen" type="button" @click="openMat"
                     class="cursor-pointer px-3 h-8 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md inline-flex items-center gap-1.5">
@@ -610,7 +666,7 @@ onMounted(() => {
                     </select>
                   </td>
                   <td class="px-3 py-1.5">
-                    <input v-model.number="m.unit_price" type="number" step="0.01" min="0"
+                    <input v-model.number="m.unit_price" type="number" step="any" min="0"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
                   <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
@@ -672,7 +728,7 @@ onMounted(() => {
                   </div>
                   <div>
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ unitPriceHeaderLabel }}</label>
-                    <input v-model.number="m.unit_price" type="number" step="0.01" min="0" inputmode="decimal"
+                    <input v-model.number="m.unit_price" type="number" step="any" min="0" inputmode="decimal"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
                 </div>
@@ -698,24 +754,27 @@ onMounted(() => {
           </div>
         </section>
 
+        <WorkReportDisplaySettings v-model="displayOptions" inheritable
+          :defaults="supplierStore.currentSupplier?.work_report_display_options" />
+
         <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           {{ error }}
         </div>
 
-        <p class="text-xs text-neutral-500">
+        <p v-if="!billingSnapshot" class="text-xs text-neutral-500">
           ℹ {{ t('invoice.wr_sync_note') }}
         </p>
       </div>
 
       <template #footer>
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <button @click="close"
-                class="cursor-pointer h-10 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">
-          {{ t('common.cancel') }}
+                :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}
         </button>
         <button @click="save" :disabled="!canSave"
-                class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
-          {{ saving ? t('common.saving') : t('invoice.wr_save_and_sync') }}
+                :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ saving ? t('common.saving') : t(billingSnapshot ? 'common.save' : 'invoice.wr_save_and_sync') }}
         </button>
       </div>
       </template>

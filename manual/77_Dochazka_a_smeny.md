@@ -19,9 +19,10 @@ Kapitolu otevřete, když:
 <!-- cols: 26 40 34 -->
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
-| na začátku měsíce | Rozvrhnout směny | `Mzdy → Docházka a směny`, **Rozvrhnout směny podle kalendáře** |
+| na začátku měsíce | Rozvrhnout směny (jen nepravidelná pracovní doba) | `Mzdy → Docházka a směny`, u řádku **Další → Rozvrhnout směny podle kalendáře** |
 | průběžně | Zapisovat skutečnost, přesčas a příznaky | `Mzdy → Docházka a směny` |
-| před mzdovým během | Schválit měsíc docházky | `Mzdy → Docházka a směny`, **Schválit měsíc** |
+| průběžně | Zadat dovolenou, nemoc a jinou nepřítomnost | `Mzdy → Docházka a směny`, **Zadat nepřítomnost** nebo u řádku **Nepřítomnost** |
+| před mzdovým během | Schválit měsíc docházky všem | `Mzdy → Docházka a směny`, **Schválit měsíc všem** |
 | jednou při sjednání | Nastavit sazby příplatků | `Mzdy → Nastavení mezd`, záložka **Politiky a připravenost**; karta pracovního vztahu |
 
 ## 77.2 Než začnete
@@ -42,19 +43,58 @@ Kapitolu otevřete, když:
 
 ## 77.3 Krok za krokem: docházka za měsíc
 
+**Sjednaná hodinová sazba** se eviduje na kartě pracovního vztahu odděleně
+od docházky a průměrného výdělku. Samotná sazba není mzdovou částkou:
+[hodinový výpočet](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
+potřebuje také přesně doložené a schválené hodiny. Sazba nenahrazuje
+schválený průměr pro příplatky. Pole **Hodinová sazba**
+v importu docházky znamená pravděpodobný výdělek, nikoli sjednanou sazbu.
+Nemá-li řádek podkladů žádnou částku mzdy, jen odpracované hodiny a sazbu,
+import z nich mzdu dopočte (sazba × odpracované hodiny, na haléře) a vytvoří
+mzdový vstup složky **Hodinová mzda podle docházky**. Souhrn importu ukáže,
+komu a za kolik mzda vznikne a komu ne: bez hodin v podkladech mzda nevznikne
+a vztahu s hodinovým odměňováním na kartě ji import nevytvoří, protože
+z importovaného souhrnu hodin ho mzdový běh nespočítá. Takovému vztahu
+přepněte na kartě způsob odměňování na měsíční (u dohody stačí 0 Kč)
+a načtěte náhled znovu. Proto karta i hromadná úprava podmínek nedovolí
+přepnout vztah s hodinami z importu na hodinové odměňování bez výslovného
+potvrzení.
+Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
+
+Nesou-li podklady odpracované hodiny nebo dny, je volba **Zapsat souhrn
+docházky do pracovních měsíců** v kroku Souhrn zapnutá. Bez ní se hodiny
+a dny do pracovních měsíců neuloží a chybí pro průměr na náhrady i pro
+měsíční hlášení. Schválený měsíc import nezmění. Volba **Převzít osobní
+čísla z podkladů** přeskočí číslo, které má ve firmě nebo v podkladech víc
+osob (například „1“); takové číslo se nepoužije ani k párování. Součty
+v souhrnu počítají jen osoby, které vstup opravdu dostanou. Složku, jejíž
+sloupec je v celém souboru prázdný, import nehlásí ani nezakládá.
+
+Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
+odpracovaný čas, nepřítomnosti a schválení měsíce všem.
+
 1. Otevřete `Mzdy → Docházka a směny` a zvolte měsíc v poli **Období**.
-2. Zkontrolujte pracovní kalendář, úvazek a naplánované směny. Chybí-li
-   směny, klikněte na **Rozvrhnout směny podle kalendáře**. Směny potřebuje
-   i náhrada mzdy při nemoci a za dovolenou.
+2. Dovolenou, nemoc, ošetřovné a jiné nepřítomnosti zadejte tlačítkem
+   **Zadat nepřítomnost** (nebo **Nepřítomnost** u řádku zaměstnance).
+   Mřížka pak tyto dny vynechá. U nepravidelné pracovní doby zkontrolujte
+   naplánované směny: u řádku **Další → Rozvrhnout směny podle kalendáře**.
+   Směny potřebuje náhrada mzdy při nemoci a za dovolenou.
 3. Doplňte skutečně odpracovaný čas (**Skutečně odpracovaný čas**). V měsíční
    mřížce můžete použít **Vyplnit pracovní dny**, **Zkopírovat minulý měsíc**
    nebo **Import z CSV nebo XLSX** a změny uložit tlačítkem **Uložit mřížku**.
    Noční,
    víkendovou, svátkovou práci a ztížené prostředí zapište jako příznak
-   **k** odpracované době, ne místo ní.
+   **k** odpracované době, ne místo ní. Noc a víkend zapisovat nemusíte:
+   bez příznaku je hodinový výpočet odvodí ze směny sám (viz
+   [Noc a víkend odvozené ze směn](#noc-a-vikend-odvozene-ze-smen)).
 4. U směny s pracovní pohotovostí vyplňte **Pohotovost (min)**.
 5. Porovnejte docházku s absencemi, svátky a změnami vztahu.
-6. Vyřešte varování a klikněte na **Schválit měsíc**.
+6. Klikněte na **Schválit měsíc všem**. Dialog hromadného schválení předvyplní
+   souhrn pro každý vztah. Pokud pracovnímu poměru nepokryje fond odpracovaná
+   doba spolu se svátky v pracovní dny, dialog to ukáže a nabídne **Doplnit
+   chybějící pracovní dny podle kalendáře**. Vztahy s nepřítomností schválíte tlačítkem
+   **Schválit jednotlivě** přímo z dialogu. Jednotlivý měsíc schválíte také
+   tlačítkem **Schválit měsíc** u řádku.
 7. V dialogu **Potvrzení pracovního souhrnu JMHZ** zkontrolujte předvyplněné
    hodiny (fond, **Skutečně odpracováno**, neodpracované hodiny po druzích),
    výslovně odpovězte na otázky **Byly v měsíci neodpracované hodiny?**
@@ -69,9 +109,59 @@ a období je připravené pro [mzdový běh](80_Mzdove_behy.md).
 > [!WARNING]
 > Docházku schvalte dřív, než u mzdového běhu kliknete na **Spočítat mzdy**.
 > Po uzamčení vstupů se příplatky do běhu nedostanou a schválení měsíce
-> skončí chybou.
+> s příplatky skončí chybou. Pak v mzdovém běhu klikněte na **Zrušit běh**,
+> měsíc schvalte a v běhu dejte **Začít znovu a spočítat**.
 
 ## 77.4 Krok za krokem: import docházky z CSV nebo XLSX
+
+Pro doložení hodin bez vedení jednotlivých docházkových záznamů slouží také
+ruční souhrn v [Rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79811-dolozene-odpracovane-hodiny).
+Je to samostatný zdroj za celý měsíc vztahu: jeho hodiny se s docházkou ani
+importem nesčítají. Nahrazení zdroje vyžaduje výslovné potvrzení a důvod,
+schválený měsíc je nutné nejprve znovu otevřít. Schválení ručního souhrnu
+hodin samo nepotvrzuje všechny údaje pro JMHZ.
+
+Ruční souhrn a změnu zdroje lze použít jen u vztahu s hodinovým
+odměňováním v daném měsíci. Přehled měsíce i historie ukazují hodiny
+vybraného zdroje. Při použití souhrnu se původní denní zápisy zobrazují
+odděleně jako nepoužité; denní mřížka je uzamčená. Chcete-li je znovu
+použít, změňte výslovně zdroj podkladů. Importovaný měsíc měsíčně
+odměňovaného vztahu se v přehledu i mřížce zobrazuje jako dosud.
+
+Měsíc, který bere hodiny z importu docházky, přepnete na směny jedním krokem
+tlačítkem **Počítat ze směn** u zaměstnance v `Mzdy → Docházka a směny` nebo
+v panelu **Podklady hodin**. Po potvrzení v dialogu se zruší neschválené
+mzdové vstupy z importu tohoto vztahu za měsíc (aby se nevyplatily vedle
+hodin ze směn dvakrát) a zdroj hodin se přepne na docházku. Schválené nebo
+zamčené vstupy z importu se nemění: akce se pak neprovede a hláška řekne,
+kolik jich je. Vraťte je v Mzdových vstupech do konceptu (u zamčených nejdřív
+znovu otevřete mzdový běh) a akci opakujte. Obecná změna zdroje v panelu
+**Podklady hodin** → **Změnit vybraný zdroj hodin** vyžaduje, aby importované
+vstupy byly zrušené předem. Doba, kterou nelze přesně vyjádřit celými minutami,
+se zachová v přesném zápisu a nepřepočítává se na zaokrouhlené minuty.
+
+U vztahu, který v měsíci nemá hodinovou odměnu ani sjednanou měsíční mzdu
+(typicky brigádník na DPP s hotovými částkami z importu), nabízí docházka
+u zaměstnance i panel **Podklady hodin** akci **Zapisovat směny, částky
+ponechat**. Zdroj hodin se přepne na směny a importované mzdové vstupy
+zůstanou beze změny: mzda se u takového vztahu z hodin nepočítá, takže se nic
+nevyplatí dvakrát. Hodiny pro JMHZ a evidenci pracovní doby se pak berou ze
+směn, příplatky a odměna za pohotovost se ze směn nepočítají, dokud jsou
+importované vstupy aktivní. Akci stačí právo zápisu docházky. U vztahu
+s hodinovou odměnou nebo měsíční mzdou ji server odmítne: hodinová mzda by
+se ze směn spočítala znovu (použijte **Počítat ze směn**) a u měsíční mzdy
+rozhoduje zdroj hodin o krácení, proto zůstává souhrn importu.
+
+Má-li měsíc publikovaný rozpis směn, nabídne potvrzovací dialog obou akcí
+volbu **Převzít rozpis směn jako odpracovaný čas**. Je předem zapnutá, když
+měsíc nemá žádný časový záznam. Každá publikovaná směna měsíce se v téže
+operaci zapíše jako časový záznam běžné práce se stejným začátkem, koncem,
+přestávkou a časovým pásmem; záznam nese odkaz na svou směnu. Platí pro něj
+stejné kontroly jako pro ručně zapsaný záznam (otevřený měsíc, překryv).
+
+Původní souhrn importu zůstává v historii měsíce. Liší-li se součet hodin
+ze směn od hodin původního souhrnu, ukáže docházka u zaměstnance i v dialogu
+schválení nenápadné upozornění s oběma čísly. Schválení neblokuje.
 
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.
 2. Vyberte soubor CSV nebo XLSX s povinnými sloupci (viz
@@ -103,6 +193,18 @@ svátek či ve ztíženém prostředí.
 
 **Jak poznáte, že je hotovo:** Zásada je v části **Platná zásada** a měsíc
 s prací ve svátek nebo ve ztíženém prostředí jde schválit.
+
+Datum **Platí od** je povinné a vyplňujete ho výslovně podle sjednání.
+Začátek platnosti zásady, podle které se ještě nepočítalo, jde posunout:
+u platné zásady v **Opravit zásadu**, u starší verze odkazem **Posunout
+začátek** v seznamu starších verzí. Navazovala-li předchozí verze (končila
+den před začátkem), posune se její konec s ním, takže mezi verzemi nevznikne
+den bez zásady ani den se dvěma. Byla-li předchozí verze ukončena dřív, zůstane
+mezera a nový začátek do předchozí verze zasáhnout nesmí. Konec posouvané
+verze ani následující verze se nemění. Pokud by posun zasáhl do měsíce, za
+který už mzdový běh tohoto vztahu zmrazil podklady (zamknutý, spočítaný nebo
+schválený, ne zrušený), odmítne se s uvedením měsíce. Použitou zásadu měňte
+novou verzí od dosud nezmrazeného období.
 
 ## 77.6 Krok za krokem: náhradní volno za přesčas
 
@@ -162,8 +264,16 @@ Nepřítomnosti patří do [absencí](76_Absence_a_dovolena.md). Schválené
 absence předvyplní neodpracované hodiny v pracovním souhrnu JMHZ podle druhu.
 Hodiny neplaceného volna, výkonu veřejné funkce, neplacené překážky na straně
 zaměstnance a trvání vztahu po neplatném skončení se navrhnou v bloku
-**Neplacené volno**. Čísla aplikace sama nezaokrouhluje ani nedopočítává,
-potvrzujete je vy.
+**Neplacené volno**. Čísla aplikace sama nedopočítává, potvrzujete je vy.
+Hlášení přijímá hodiny nejvýše na tři desetinná místa, takže odpracovanou dobu
+ze zápisů v minutách (například 32 h 25 min) navrhne zaokrouhlenou na tisícinu
+hodiny (32,417 h) a u pole to uvede.
+
+U dohody (DPP, DPČ) se týdenní úvazek do hlášení neuvádí: dialog místo pole
+ukáže „Neuvádí se (do hlášení jde kód 99)", jak to chtějí pokyny MPSV
+k atributu 10261. Dní v evidenčním stavu je u dohody vždy 0. Sjednaný úvazek
+za měsíc se u dohody bez rozvrhu navrhne jako odpracovaná doba včetně
+dovolené (předpokládaný rozsah podle pokynů k atributu 10260).
 
 #### Historie po měsících
 
@@ -286,6 +396,15 @@ najednou, aplikace to zastaví.
 | § 117 | Příplatek za práci ve ztíženém pracovním prostředí | `PRIPLATEK_ZTIZENE_PROSTREDI` |
 | § 118 | Příplatek za práci v sobotu a v neděli | `PRIPLATEK_VIKEND` |
 
+U měsíční mzdy schválení docházky s přesčasem založí vedle příplatku i
+**dosaženou mzdu za přesčas** (§ 114 odst. 1) složkou `MZDA_HODINOVA`:
+sjednaná měsíční mzda z podmínek vztahu dělená fondem měsíce včetně svátků,
+krát hodiny přesčasu, zaokrouhleno na celé koruny. Náleží i tehdy, když se
+místo příplatku poskytuje náhradní volno; nenáleží, je-li mzda sjednána
+s přihlédnutím k práci přesčas (§ 114 odst. 3). Chybí-li v podmínkách vztahu
+sjednaná měsíční mzda, částka se neodhaduje a dosaženou mzdu doplňte ručně
+ve mzdových vstupech.
+
 #### Odměna za pracovní pohotovost (§ 140)
 
 Minuty pohotovosti se zadávají u směny v poli **Pohotovost (min)**. Při
@@ -309,6 +428,27 @@ nesčítají a příplatky se **sčítají vedle sebe a nevylučují se**:
 
 - přesčas odpracovaný v noci o víkendu nese **tři** příplatky současně,
 - práce ve svátek, který padne na sobotu, nese **dva** (§ 115 i § 118).
+
+#### Noc a víkend odvozené ze směn
+
+U hodinově odměňovaného vztahu se doba noční práce a práce v sobotu a neděli
+odvodí ze zapsané běžné práce a přesčasu automaticky, pokud k ní v úseku
+nezapíšete příznak noc nebo víkend:
+
+- noc je doba v nočním okně legislativní sady (22 až 6 hodin),
+- víkend je sobota a neděle v místním čase směny,
+- přestávka, u které není známo, kdy proběhla, se klade mimo příplatkovou
+  dobu. Příplatková doba je tedy kratší z hrubé doby v okně a čisté doby
+  záznamu. Je to výklad ve prospěch zaměstnance: zákon stanoví minimum
+  a vyšší plnění je přípustné.
+
+Příklad: směna od soboty 18:00 do neděle 2:30 s přestávkou 30 minut má noc
+4:30 h a víkend 8:00 h. Bez přestávky by víkend byl 8:30 h.
+
+Zapíšete-li k odpracované době příznak noc nebo víkend, platí zapsaná doba
+(ruční přebití) a odvození se pro daný druh nepoužije. Práce ve svátek se
+neodvozuje, zapisuje se dál příznakem. V náhledu hodinové mzdy je u nároku
+uvedeno, že doba byla odvozena automaticky ze směn.
 
 #### Z čeho se počítají
 
@@ -373,7 +513,9 @@ vztahu; počet vlivů jde přepsat i u jednotlivého zápisu docházky.
 
 Zásady se **verzují podle platnosti**: nová kolektivní smlouva je nová verze
 od data účinnosti, stará zůstává v historii a mzdy spočítané podle ní se
-nemění. Opravit jde jen verzi, která právě platí a nemá konec platnosti.
+nemění. Sazby a režimy jde opravit jen u verze, která právě platí a nemá
+konec platnosti; začátek platnosti jde posunout u každé verze, podle které se
+ještě nepočítalo ([§ 77.5](#775-krok-za-krokem-sjednani-priplatku-u-pracovniho-vztahu)).
 Vyplněním **Ukončit platnost k** se zásada uzavře a od dalšího dne platí
 zákonný výchozí stav.
 
@@ -432,6 +574,13 @@ rozsahem:
 
 Podkladem jsou odpracované hodiny ze schválené docházky, u firmy po
 přechodu v průběhu roku i hodiny převzaté z předchozího programu.
+Je-li vybraný ruční souhrn, použije se jeho aktuální schválená revize
+včetně zlomků hodin; potvrzení JMHZ pro samotný limit není potřeba.
+Staré nahrazené denní zápisy ani jejich výkazový souhrn se nepřičítají.
+DPP i DPČ se posuzují bez zaokrouhlení přesné doby na minuty: také
+`300,001` hodin DPP už překračuje roční limit. Schválená nula je známý
+součet; neúplný nebo znovu otevřený ruční podklad vyvolá upozornění,
+že rozsah nelze ověřit, místo falešné nuly.
 Překročení se u revize běhu objeví jako upozornění se jménem, obdobím
 a průměrem a s odkazem na podmínky vztahu. Výpočet ani schválení nezastaví:
 odpracovanou práci je potřeba zaplatit, jen je třeba upravit rozsah práce
@@ -448,6 +597,35 @@ upozornění při dosažení prahu nebo překročení limitu. Přehled po osobá
 v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
 **DPP u limitu 300 h**.
 
+### 77.9.7 Pracovní doba mladistvých
+
+Mladistvý je zaměstnanec mladší 18 let (§ 350 odst. 2 zákoníku práce); věk se
+počítá z data narození osoby ke každému dni. Den 18. narozenin a dny po něm se
+už nekontrolují. Bez data narození se kontrola neprovede.
+
+Aplikace kontroluje skutečně odpracované časové záznamy (běžná práce
+a přesčas), ne plán směn. Doba všech pracovněprávních vztahů osoby u firmy se
+sčítá. Den a týden záznamu určuje jeho místní začátek, týden začíná pondělím.
+
+| Kontrola | Pravidlo |
+|---|---|
+| Délka směny (§ 79a) | v jednotlivém dni nejvýše 8 h (8:00 projde, 8:01 ne) |
+| Týdenní doba (§ 79a) | nejvýše 40 h za týden |
+| Odpočinek mezi směnami (§ 90 odst. 1) | nejméně 12 h mezi koncem poslední práce dne a začátkem práce dalšího dne |
+| Noční práce (§ 245 odst. 1) | žádná práce v noční době 22:00 až 6:00 |
+| Přestávka (§ 88 odst. 1) | záznam bez přestávky delší než 4,5 h |
+
+Výjimku pro mladistvého staršího 16 let (noční práce nejvýše 1 h, potřebná
+pro přípravu na povolání a navazující na denní práci) aplikace sama nepozná;
+nález ji jen připomene. Přestávka se posuzuje jen u záznamu, který žádnou
+přestávku nemá, protože její poloha uvnitř záznamu se neeviduje.
+
+Nálezy se v `Mzdy → Docházka a směny` zobrazí u zaměstnance v bloku
+**Pracovní doba mladistvého** s dnem a konkrétními hodnotami, v dialogu
+schválení měsíce jako upozornění a v kontrole mzdového běhu jako varování.
+Mzdu neovlivňují a nic neblokují: odpracovanou dobu je potřeba zaplatit,
+jen je třeba upravit rozvrh práce.
+
 ## 77.10 Související kapitoly
 
 - [Absence a dovolená](76_Absence_a_dovolena.md): nepřítomnosti a náhradní
@@ -458,3 +636,11 @@ v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
 - [Zaměstnanci](86_Zamestnanci.md): pracovní vztah, kalendář a zásady
   příplatků.
 - [Nastavení mezd](90_Nastaveni_mezd.md): firemní sazby příplatků.
+
+Placené náhradní volno za práci ve svátek je v potvrzení pracovního
+souhrnu JMHZ samostatné pole, pokud je tato nepřítomnost v měsíci
+skutečně evidovaná a podklad ji podporuje. Zkontrolujte předvyplněné
+hodiny; jsou již součástí neodpracovaných i placených hodin a do
+úhrnů se nepřičítají podruhé. Nezaměňujte je s neplaceným náhradním
+volnem za přesčas. Historické souhrny bez tohoto údaje se zpětně
+nedoplňují.

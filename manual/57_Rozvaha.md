@@ -31,7 +31,7 @@ Rozvaha je dostupná jen pro podvojné účetnictví.
 3. V poli **Rozvahový den** zvolte datum uvnitř období. Prázdná hodnota znamená dřívější z posledního dne období a dneška.
 4. V poli **Rozsah** ponechte **Automaticky (dle kategorie ÚJ)**, nebo zvolte **Plný rozsah**, **Zkrácený - malá ÚJ** či **Zkrácený - mikro ÚJ**.
 5. Podle potřeby přepněte **Kč / tis. Kč**. Mění jen zobrazení, výpočet i export zůstávají v korunách.
-6. Pro průběžnou rozvahu ke klientské výsledovce zaškrtněte **Průběžné časové rozlišení**. Přesah dokladů s obdobím od–do za rozvahovým dnem se ukáže na 381 a 384 a výsledek běžného období se upraví stejně jako ve výsledovce ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni)).
+6. Pro průběžnou rozvahu ke klientské výsledovce zaškrtněte **Průběžné časové rozlišení a odpisy**. Přesah dokladů s obdobím od–do za rozvahovým dnem se ukáže na 381 a 384, oprávky majetku zahrnou odpisy za uplynulé měsíce a výsledek běžného období se upraví stejně jako ve výsledovce ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)).
 7. Zkontrolujte kontrolu **Aktiva = Pasiva** (porovnává **Aktiva netto** a **Pasiva celkem** na haléře).
 8. Podezřelý řádek rozbalte kliknutím. Uvidíte **Účty řádku**, částku a u aktiv cíl Brutto nebo korekce. Kód účtu otevře opis od začátku období do rozvahového dne.
 9. Klikněte na **Export PDF** nebo **Export XLSX**.
@@ -68,10 +68,14 @@ Podrobnosti jsou v [§ 57.7.7](#5777-mapovani-uctu-pro-konkretni-firmu).
 
 ## 57.5 Krok za krokem: rozvaha po účtech
 
+Následující členění a název **Účet 702 (po účtech)** platí pro rámec 500.
+V rámci 504 se odpovídající záložka jmenuje **Průběžný účetní přehled**
+a používá členění tohoto rámce.
+
 1. Otevřete `Účetnictví → Rozvaha` a zvolte záložku **Účet 702 (po účtech)**.
 2. Nastavte **Rozvahový den**. Rozsah výkazu se tu nepoužívá.
-3. Projděte účty tříd 0 až 4. Přepínač **Zobrazit analytiky** analytiky skryje.
-4. Klikněte na účet. Otevře se opis od začátku období do rozvahového dne.
+3. Projděte aktiva vlevo a pasiva vpravo. Přepínač **Zobrazit analytiky** analytiky skryje, **Skrýt nulové účty** schová účty bez zůstatku a pohybu.
+4. Klikněte na účet. Otevře se inventura účtu, odtud vede opis i otevřené položky.
 5. Zkontrolujte zvýrazněný řádek **Výsledek hospodaření** pod součtem rozvahových účtů.
 6. Klikněte na **Export PDF** nebo **Export XLSX**.
 
@@ -101,9 +105,9 @@ Podrobnosti jsou v [§ 57.7.7](#5777-mapovani-uctu-pro-konkretni-firmu).
   mikro účetní jednotku.
 - **Kč / tis. Kč** mění pouze obrazovkové zobrazení. Výpočet i export zůstávají
   v korunách.
-- **Průběžné časové rozlišení** přičte k zůstatkům deníku odklad dokladů s obdobím
-  od–do na 381 a 384 k rozvahovému dni mimo deník; pravidla popisuje
-  [§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni). Výchozí je
+- **Průběžné časové rozlišení a odpisy** přičte k zůstatkům deníku odklad dokladů s obdobím
+  od–do na 381 a 384 a dosud nezaúčtované účetní odpisy majetku za uplynulé měsíce k rozvahovému dni mimo deník; pravidla popisuje
+  [§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy). Výchozí je
   vypnuté a volba platí společně s výsledovkou.
 
 Systém vybere verzi definice výkazu platnou k rozvahovému dni. Její kód se
@@ -312,22 +316,32 @@ rozdílných řádků přílohy.
 
 ### 57.7.8 Rozvaha po účtech
 
-Záložka **Účet 702 (po účtech)** nad rozvahou ukáže místo zákonné struktury seznam
-rozvahových účtů tříd 0 až 4 se zůstatkem k rozvahovému dni. Účty jsou
-seřazené po třídách, pod syntetikou jsou její analytiky (přepínač
-**Zobrazit analytiky** je skryje). Syntetika má ve sloupcích **Zůstatek MD**
-a **Zůstatek D** součet debetních a kreditních zůstatků svých analytik, bez
-vzájemného započtení, takže kladný běžný účet a kontokorent zůstanou každý na
-své straně. Každá třída má svůj součet.
+Záložka **Účet 702 (po účtech)** nad rozvahou ukáže místo zákonné struktury
+rozvahové účty tříd 0 až 4, aktiva vlevo a pasiva vpravo na jednom řádku. Stranu
+určuje typ účtu, ne zůstatek: pohledávka v kreditu zůstává v aktivech se záporným
+znaménkem. Účty jsou seřazené po třídách, pod syntetikou jsou její analytiky
+(přepínač **Zobrazit analytiky** je skryje).
 
-Pod součtem rozvahových účtů je zvýrazněný řádek **Výsledek hospodaření**
-(zisk zeleně, ztráta červeně) jako rozdíl `Σ MD - Σ D`. Je k dispozici
-kdykoli během roku bez uzávěrky. Zůstatky jsou vždy před uzavřením účetních
+Každá strana má sloupce **Počáteční stav**, **Obrat** měsíce rozvahového dne, **Obrat
+od** začátku období a **Konečný stav**. Sloupce mají znaménko podle typu účtu: aktiva
+`MD − Dal`, pasiva a vlastní kapitál `Dal − MD`, takže u každého účtu platí
+`počáteční stav + obrat od začátku období = konečný stav`. Oprávky jsou v aktivech
+záporně, účet 429 v pasivech také. Zůstatek na neobvyklé straně podle účtové osnovy je
+červeně. Oprávky ani účty bez určené strany (261, 343, 395, 431) neobvyklé nejsou.
+
+Přepínač **Skrýt nulové účty** schová účty, které mají ve všech čtyřech sloupcích
+nulu, takže žádný součet nezmění. Účet s počátečním stavem a konečným stavem 0 se
+ukáže, protože v něm je pohyb. Účty bez jediného zápisu sestava neobsahuje.
+
+Pod součty stran je zvýrazněný řádek **Výsledek hospodaření** (zisk zeleně, ztráta
+červeně) jako `aktiva celkem − pasiva celkem` a pod ním **Pasiva s výsledkem
+hospodaření**, která se rovnají aktivům. Bez uzávěrky je výsledek k dispozici
+kdykoli během roku. Zůstatky jsou vždy před uzavřením účetních
 knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled k poslednímu
 dni období ukazuje přesně to, co uzávěrka převedla na konečný účet rozvažný 702.
 
-Kliknutím na účet se otevře jeho opis od začátku období do rozvahového dne.
-Rozvahový den a filtr dimenze platí stejně jako u výkazu, rozsah výkazu se
+Kliknutím na účet se otevře jeho inventura ([Opis účtu](55_Hlavni_kniha.md#5585-opis-uctu)) s rozsahem
+od začátku období do rozvahového dne. Rozvahový den a filtr dimenze platí stejně jako u výkazu, rozsah výkazu se
 tu nepoužívá. Když se výsledek z rozvahových účtů neliší od výsledku
 z výsledkových účtů ([Výsledovka po účtech](58_Vysledovka_druhova.md#5876-vysledovka-po-uctech)), je vše v pořádku;
 rozdíl stránka ohlásí nad tabulkou a obvykle ukazuje na chybu v počátečních
@@ -336,8 +350,8 @@ stavech nebo v uzávěrce minulého roku. Při filtru dimenze obsahují rozvahov
 lišit může; stránka to pak ukáže jen jako upozornění a za výsledek dimenze
 platí výsledovka.
 
-Export PDF a XLSX z této záložky vytvoří rozvahu po účtech v jednotce zvolené
-přepínačem **Kč / tis. Kč**.
+Export XLSX i PDF z této záložky má stejný tvar jako obrazovka včetně přepínačů, jednotky
+**Kč / tis. Kč** a červeně označené neobvyklé strany. PDF se tiskne na šířku stránky.
 
 ## 57.8 Související kapitoly
 

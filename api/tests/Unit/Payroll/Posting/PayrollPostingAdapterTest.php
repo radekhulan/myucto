@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Posting;
 
 use MyInvoice\Repository\Payroll\PayrollPostingBatchRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryForm;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingAdapter;
@@ -111,6 +113,7 @@ final class PayrollPostingAdapterTest extends TestCase
             $posting,
             $ownership,
             $builder,
+            $this->compositeForms(),
         );
         $result = $adapter->post(
             10,
@@ -169,6 +172,7 @@ final class PayrollPostingAdapterTest extends TestCase
             $posting,
             $ownership,
             $builder,
+            $this->compositeForms(),
         ))->post(
             10,
             77,
@@ -231,6 +235,7 @@ final class PayrollPostingAdapterTest extends TestCase
             $posting,
             $ownership,
             $builder,
+            $this->compositeForms(),
         ))->post(
             10,
             77,
@@ -274,6 +279,7 @@ final class PayrollPostingAdapterTest extends TestCase
             $posting,
             $ownership,
             $builder,
+            $this->compositeForms(),
         ))->post(
             10,
             77,
@@ -294,6 +300,14 @@ final class PayrollPostingAdapterTest extends TestCase
         $this->expectException(\OverflowException::class);
         $this->expectExceptionMessage('bezpečný rozsah');
         $decimal->invoke(null, 100_000_000_000_001);
+    }
+
+    private function compositeForms(): EntryFormService
+    {
+        $forms = $this->createStub(EntryFormService::class);
+        $forms->method('formAt')->willReturn(EntryForm::Composite);
+
+        return $forms;
     }
 
     /** @param array<string,mixed> $value */

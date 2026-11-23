@@ -54,6 +54,42 @@ export function allocationsHaveMixedDeduction(allocations: Pick<PurchaseVatAlloc
 }
 
 /**
+ * Jednotný nárok všech alokací rozpisu ve tvaru hlavičky (procento jako serverové
+ * PurchaseVatTreatment::syncAllocationsWithHeader). Prázdný nebo smíšený rozpis → null.
+ */
+export function uniformAllocationDeduction(
+  allocations: Pick<PurchaseVatAllocation, 'vat_deduction' | 'vat_deduction_percent'>[],
+): Pick<HeaderVat, 'vat_deduction' | 'vat_deduction_percent'> | null {
+  if (allocations.length === 0 || allocationsHaveMixedDeduction(allocations)) return null
+  const [mode, percent] = deductionKey(allocations[0].vat_deduction, allocations[0].vat_deduction_percent).split(':')
+  return {
+    vat_deduction: mode as VatDeduction,
+    vat_deduction_percent: mode === 'none' ? 0 : mode === 'proportional' ? Number(percent) : 100,
+  }
+}
+
+/**
+ * Nárok, který má editor propsat do hlavičky po změně rozpisu. Jen když rozpis nese jednotný
+ * nárok, ten se oproti `baselineKey` (poslední propsaný nebo načtený stav) změnil a dodavatel
+ * je plátce (u neplátce má přednost vynucené „bez nároku"). Jinak null.
+ */
+export function headerDeductionFromAllocations(
+  allocations: Pick<PurchaseVatAllocation, 'vat_deduction' | 'vat_deduction_percent'>[],
+  baselineKey: string | null,
+  vendorIsVatPayer: boolean,
+): Pick<HeaderVat, 'vat_deduction' | 'vat_deduction_percent'> | null {
+  const uniform = uniformAllocationDeduction(allocations)
+  if (!uniform || !vendorIsVatPayer) return null
+  return deductionKey(uniform.vat_deduction, uniform.vat_deduction_percent) === baselineKey ? null : uniform
+}
+
+/** Klíč jednotného nároku rozpisu (null = prázdný nebo smíšený rozpis). */
+export function allocationDeductionKey(allocations: Pick<PurchaseVatAllocation, 'vat_deduction' | 'vat_deduction_percent'>[]): string | null {
+  const uniform = uniformAllocationDeduction(allocations)
+  return uniform ? deductionKey(uniform.vat_deduction, uniform.vat_deduction_percent) : null
+}
+
+/**
  * Stav položky v evidenci DPH: `effectiveCode` je kód, se kterým položka do evidence jde
  * (vlastní, jinak kód hlavičky, stejně jako evidence DPH).
  */

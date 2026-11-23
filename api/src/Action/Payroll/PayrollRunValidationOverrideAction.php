@@ -242,6 +242,8 @@ final class PayrollRunValidationOverrideAction
             return Json::error($response, 'not_found', $e->getMessage(), 404);
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
 
         return Json::ok($response, $payload);
@@ -299,7 +301,7 @@ final class PayrollRunValidationOverrideAction
         string $permission,
         AccessLevel $level,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

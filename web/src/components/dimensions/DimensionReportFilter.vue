@@ -7,10 +7,15 @@ import { useDimensions } from '@/composables/useDimensions'
 /**
  * Filtr sestavy na hodnotu dimenze. Model = id hodnoty (nebo null) a příznak, zda
  * brát i podřízené hodnoty (výchozí ano — nadřízená hodnota = celá větev).
+ * Ve filtru na víc hodnot ({@link DimensionReportFilters}) je jedním řádkem a příznak
+ * podřízených nese společně pro všechny řádky (`hideDescendants`).
  */
 const props = defineProps<{
   valueId: number | null
   descendants: boolean
+  hideDescendants?: boolean
+  /** Jen tento typ dimenze (filtr, který přijímá hodnoty jediného typu). */
+  lockTypeId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +29,12 @@ const typeId = ref<number | null>(null)
 
 onMounted(() => { void dims.load() })
 
-const activeTypes = computed(() => dims.types.value.filter(ty => ty.is_active))
+const activeTypes = computed(() => dims.types.value.filter(ty => ty.is_active
+  && (props.lockTypeId == null || ty.id === props.lockTypeId)))
+
+watch(() => props.lockTypeId, (locked) => {
+  if (locked != null && !props.valueId) typeId.value = locked
+}, { immediate: true })
 
 // Vybraná hodnota určuje typ (např. filtr převzatý z URL).
 watch([() => props.valueId, () => dims.valueById.value], () => {
@@ -52,7 +62,7 @@ function changeType(event: Event) {
       <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.filter_value') }}</label>
       <DimensionPicker :type-id="typeId" :model-value="valueId" @update:model-value="emit('update:valueId', $event)" />
     </div>
-    <label v-if="valueId" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
+    <label v-if="valueId && !hideDescendants" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
       <input type="checkbox" :checked="descendants" class="rounded border-neutral-300"
              @change="emit('update:descendants', ($event.target as HTMLInputElement).checked)" />
       {{ t('dimensions.filter_descendants') }}

@@ -24,7 +24,7 @@ final class ChargeIssuanceLockContextTest extends TestCase
         $config = Bootstrap::buildContainer()->get(Config::class);
         $source = (string) $config->get('db.name');
         self::assertStringEndsWith('_test', $source);
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $owned = 'myucto_s3_lock_' . bin2hex(random_bytes(5)) . '_test';
         $server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -76,7 +76,7 @@ final class ChargeIssuanceLockContextTest extends TestCase
         } finally {
             foreach ($connections as $db) { if ($db->pdo()->inTransaction()) $db->pdo()->rollBack(); $db->close(); }
             self::assertMatchesRegularExpression('/^myucto_s3_lock_[a-f0-9]{10}_test$/D', $owned);
-            $server->exec('DROP DATABASE ' . DatabaseCloner::quote($owned));
+            DatabaseCloner::dropDatabase($server, $owned);
         }
     }
 }

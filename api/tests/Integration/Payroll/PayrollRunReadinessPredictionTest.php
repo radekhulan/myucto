@@ -1,0 +1,463 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
+use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Kontrola před během předpovídá blokace, které se dřív ukázaly až později.
+ *
+ * Simulace února: kontrola hlásila dvě osoby bez prohlášení, zamknutí
+ * s výpočtem jich pak zastavilo šestnáct. Kontrola teď posuzuje stav
+ * prohlášení nad týmž snímkem a týmž pravidlem jako výpočet.
+ */
+#[Group('integration')]
+final class PayrollRunReadinessPredictionTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    private Connection $db;
+    private PayrollRunSnapshotBuilder $builder;
+    private PayrollRunReadinessService $readiness;
+    private \MyInvoice\Action\Payroll\PayrollPeopleAction $peopleAction;
+    private int $supplierId;
+    private int $actorId;
+    private int $officeId;
+
+    protected function setUp(): void
+    {
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $this->db = $container->get(Connection::class);
+        $this->builder = $container->get(PayrollRunSnapshotBuilder::class);
+        $this->readiness = $container->get(PayrollRunReadinessService::class);
+        $this->peopleAction = $container->get(\MyInvoice\Action\Payroll\PayrollPeopleAction::class);
+        $pdo = $this->db->pdo();
+        $sourceSupplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        if ($sourceSupplierId <= 0) {
+            $this->markTestSkipped('Chybí zdrojová firma.');
+        }
+        $pdo->beginTransaction();
+        $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO users (email, password_hash, name, role, locale, is_active)
+             VALUES (?, ?, "Synthetic prediction", "readonly", "cs", 1)'
+        )->execute([
+            'prediction-' . bin2hex(random_bytes(4)) . '@invalid.example',
+            '$2y$10$uses.only.synthetic.placeholder.hash00000000000000000',
+        ]);
+        $this->actorId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "setup", "2026-01-01", ?, NOW())'
+        )->execute([$this->supplierId, $this->actorId]);
+        $container->get(PayrollEmployerPolicyRepository::class)->create($this->supplierId, [
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'payday_day' => 10,
+            'payday_month_offset' => 1,
+            'payday_business_day_rule' => 'previous_business_day',
+            'balance_rounding_mode' => 'exact_minor_units',
+            'home_office_policy' => 'not_used',
+            'travel_expense_policy' => 'not_used',
+            'automatic_posting_enabled' => true,
+            'delivery_channel' => 'disabled',
+            'delivery_verified_on' => null,
+            'source_kind' => 'manual',
+            'source_reference' => 'synthetic:prediction-policy',
+        ], $this->actorId);
+        $pdo->prepare('INSERT INTO payroll_offices (supplier_id, code, name, is_active) VALUES (?, "PRED", "Syntetická účtárna", 1)')
+            ->execute([$this->supplierId]);
+        $this->officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", "0012345678", "synthetic:prediction")'
+        )->execute([$this->supplierId, $this->officeId]);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->db->pdo()->inTransaction()) {
+            $this->db->pdo()->rollBack();
+        }
+    }
+
+    public function testReadinessPredictsEveryPersonTheCalculationStopsOnTaxDeclaration(): void
+    {
+        // Prohlášení zapsané až od poloviny února: katalog mezer (záznam
+        // kdykoli v období) ho bral za doplněné, zmrazená evidence k začátku
+        // měsíce ho nevidí a výpočet osobu zastaví.
+        [$endedId] = $this->employment('Syntetická Pozdní');
+        $this->declaration($endedId, 'signed', '2026-02-15', null);
+        [$missingId] = $this->employment('Syntetický Bez prohlášení');
+        [$signedId] = $this->employment('Syntetická Podepsaná');
+        $this->declaration($signedId, 'signed', '2026-01-01', null);
+        [$unverifiedId] = $this->employment('Syntetický Neověřený');
+        $this->declaration($unverifiedId, 'unverified', '2026-01-01', null);
+        foreach ([$endedId, $missingId, $signedId, $unverifiedId] as $employeeId) {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_person_tax_residences
+                    (supplier_id, employee_id, residence, country_code, effective_from, evidence_reference)
+                 VALUES (?, ?, "czech-resident", "CZ", "2026-01-01", "synthetic:prediction")'
+            )->execute([$this->supplierId, $employeeId]);
+        }
+
+        $snapshot = $this->builder->build($this->supplierId, '2026-02-01', '2026-03-10');
+        $blocked = [];
+        foreach ((new PayrollRunStatutoryInputAssembler())->assemble($snapshot->data)->issues as $issue) {
+            if (in_array($issue->code, ['tax_declaration_evidence_missing', 'tax_declaration_evidence_unverified'], true)) {
+                $blocked[] = (int) substr((string) $issue->personReference, strlen('employee:'));
+            }
+        }
+        sort($blocked);
+        // Bez účinného záznamu o prohlášení je osoba „nepodepsaná" (zákonný
+        // výchozí stav, audit 12. 11. 2026 ř. 9); zastaví jen výslovné „neověřeno".
+        $expected = [$unverifiedId];
+        self::assertSame($expected, $blocked, 'Výpočet zastaví právě tyhle osoby.');
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $finding = self::finding($result['findings'], 'tax_declaration_evidence_missing');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertSame(1, $finding['entity_total']);
+        $predicted = array_column($finding['entities'], 'entity_id');
+        sort($predicted);
+        self::assertSame($expected, $predicted);
+        self::assertSame('blocker', $finding['severity']);
+        self::assertCount(1, $finding['bulk_actions']);
+        self::assertSame('declaration_signed', $finding['bulk_actions'][0]['kind']);
+        self::assertSame(1, $finding['bulk_actions'][0]['count']);
+        // Hromadný podpis se zúží na dotčené osoby; bez výčtu dialog nabídl
+        // všechny osoby roku včetně výslovně nepodepsaných.
+        $bulkIds = $finding['bulk_actions'][0]['employee_ids'] ?? [];
+        sort($bulkIds);
+        self::assertSame($expected, $bulkIds);
+        self::assertArrayNotHasKey('bulk_employee_ids', $finding);
+        self::assertStringContainsString('Syntetický Neověřený', $finding['message']);
+        self::assertStringNotContainsString('Syntetická Pozdní', $finding['message']);
+
+        // Tatáž věc nevisí podruhé v katalogu mezer s jiným počtem.
+        $gaps = self::finding($result['findings'], 'person_data_gap');
+        foreach ($gaps['entities'] ?? [] as $entity) {
+            self::assertNotContains('tax_declaration', $entity['gaps'] ?? []);
+        }
+    }
+
+    /**
+     * U 150 nálezů bylo dosažitelných jen 25: „dalších 125 se do přehledu
+     * nevešlo" a zbytek nebylo kde najít. Nález teď vede na seznam zaměstnanců
+     * zúžený týmž snímkem a výběrem validací a počty sedí.
+     */
+    public function testTruncatedFindingLinksToPeopleListWithEveryAffectedPerson(): void
+    {
+        $employeeIds = [];
+        for ($index = 1; $index <= 30; $index++) {
+            [$employeeIds[]] = $this->employment(sprintf('Syntetický Hromadný %02d', $index));
+        }
+        sort($employeeIds);
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $time = self::finding($result['findings'], 'time_month_missing');
+        $inputs = self::finding($result['findings'], 'employment_without_inputs');
+        self::assertNotNull($time, json_encode(array_column($result['findings'], 'code')));
+        self::assertNotNull($inputs, json_encode(array_column($result['findings'], 'code')));
+
+        foreach ([$time, $inputs] as $finding) {
+            self::assertSame(30, $finding['entity_total']);
+            self::assertCount(25, $finding['entities']);
+            self::assertSame(30, $finding['people_total']);
+            parse_str((string) parse_url((string) $finding['people_list_path'], PHP_URL_QUERY), $query);
+            self::assertSame('/payroll/people', parse_url((string) $finding['people_list_path'], PHP_URL_PATH));
+            self::assertSame(
+                ['filter' => 'run_finding', 'finding' => $finding['code'], 'period' => '2026-02', 'payment_date' => '2026-03-10'],
+                $query,
+            );
+            self::assertSame(
+                $employeeIds,
+                $this->readiness->findingEmployeeIds($this->supplierId, '2026-02-01', '2026-03-10', $finding['code']),
+            );
+
+            // Seznam zaměstnanců zúžený odkazem vrátí všech 30 osob, ne 25.
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('GET', '/api/payroll/people')
+                ->withQueryParams($query + ['limit' => '100'])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actorId, 'role' => 'admin'])
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+            $response = $this->peopleAction->list($request, new \Slim\Psr7\Response());
+            self::assertSame(200, $response->getStatusCode());
+            $response->getBody()->rewind();
+            $page = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame(30, $page['total']);
+            $listed = array_map('intval', array_column($page['items'], 'id'));
+            sort($listed);
+            self::assertSame($employeeIds, $listed);
+        }
+
+        // Dvě různé skupiny nesmí mít totožný obecný nadpis.
+        self::assertNotSame($time['message'], $inputs['message']);
+        self::assertStringNotContainsString('je třeba doplnit podklady', $time['message']);
+        self::assertStringNotContainsString('je třeba doplnit podklady', $inputs['message']);
+        self::assertStringContainsString('pracovní dobu', $time['message']);
+        self::assertStringContainsString('mzdovou složku', $inputs['message']);
+        // Nadpis nejmenuje jednu z osob, ty jsou ve výčtu.
+        self::assertStringNotContainsString('Syntetický Hromadný', $time['message']);
+        self::assertStringNotContainsString('Syntetický Hromadný', $inputs['message']);
+
+        // Nález, který se vešel celý, odkaz na seznam nepotřebuje.
+        $whole = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        foreach ($whole['findings'] as $finding) {
+            if ($finding['entity_total'] <= count($finding['entities'])) {
+                self::assertArrayNotHasKey('people_list_path', $finding, $finding['code']);
+            }
+        }
+    }
+
+    /**
+     * Agentura s DPP: „chybí jméno a příjmení" u osob, jejichž jméno je na
+     * kartě vidět. Hlášení bere křestní jméno a příjmení z identity platné
+     * v období; nález říká, že identita začíná až později. Mzdy to nezdrží.
+     */
+    public function testMissingNameExplainsIdentityStartingLater(): void
+    {
+        [$laterId] = $this->employment('Syntetická Pozdní identita');
+        [$noneId] = $this->employment('Syntetický Bez identity');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history (supplier_id, employee_id, full_name, first_name, last_name, effective_from)
+             VALUES (?, ?, "Syntetická Pozdní identita", "Syntetická", "Pozdní identita", "2026-03-16")'
+        )->execute([$this->supplierId, $laterId]);
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $finding = self::finding($result['findings'], 'person_data_gap');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertSame('anytime', $finding['impact']);
+        self::assertStringNotContainsString('spočítat odvody', $finding['message']);
+        self::assertStringContainsString('Mzdy se spočítají i bez nich', $finding['message']);
+        self::assertStringStartsWith('Za období 02/2026 chybí zákonné údaje', $finding['message']);
+        $messages = array_column($finding['entities'], 'message', 'entity_id');
+        self::assertStringContainsString('identita je zapsaná až od 16. 3. 2026', $messages[$laterId]);
+        self::assertStringContainsString('křestní jméno a příjmení zvlášť', $messages[$noneId]);
+    }
+
+    public function testPeopleListRejectsRunFindingFilterWithoutFindingOrPeriod(): void
+    {
+        foreach ([
+            ['filter' => 'run_finding'],
+            ['filter' => 'run_finding', 'finding' => 'time_month_missing'],
+            ['filter' => 'run_finding', 'finding' => 'Time Month', 'period' => '2026-02'],
+            ['filter' => 'run_finding', 'finding' => 'time_month_missing', 'period' => '2026-02', 'payment_date' => '2026-02-31'],
+        ] as $query) {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('GET', '/api/payroll/people')
+                ->withQueryParams($query)
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actorId, 'role' => 'admin'])
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+
+            self::assertSame(422, $this->peopleAction->list($request, new \Slim\Psr7\Response())->getStatusCode(), json_encode($query));
+        }
+    }
+
+    public function testReadinessPredictsUndecidedAnnualSettlementRequestBeforeJmhzFreeze(): void
+    {
+        // Únor: hlášení se ptá, zda zaměstnanec požádal o roční zúčtování za
+        // předchozí rok. Zmrazení hlášení ho bez odpovědi zastaví, kontrola
+        // před během o tom dřív mlčela. Platí pro každý únor, za který jde
+        // hlášení připravit, tedy i únor 2026 (viz konec testu).
+        [$withoutRowId] = $this->employment('Syntetický Bez žádosti');
+        [$unknownId] = $this->employment('Syntetická Nevím');
+        [$decidedId] = $this->employment('Syntetický Nepožádal');
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_annual_settlement_requests
+                (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+             VALUES (?, ?, 2026, ?, ?, ?)'
+        );
+        $insert->execute([$this->supplierId, $unknownId, 'unknown', $this->actorId, $this->actorId]);
+        $insert->execute([$this->supplierId, $decidedId, 'not_requested', $this->actorId, $this->actorId]);
+        // Podepsané prohlášení v roce 2026: o zúčtování požádat mohla, „nepožádal"
+        // u ní musí potvrdit účetní. Osoba bez prohlášení požádat nemohla.
+        $this->declaration($unknownId, 'signed', '2026-03-01', '2026-06-30');
+
+        $result = $this->readiness->inspect($this->supplierId, '2027-02-01', '2027-03-10');
+
+        $finding = self::finding($result['findings'], 'jmhz_annual_request_status_unresolved');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertNull(self::finding($result['findings'], 'jmhz_annual_request_source_missing'));
+        self::assertSame(2, $finding['entity_total']);
+        $ids = array_column($finding['entities'], 'entity_id');
+        sort($ids);
+        $expected = [$withoutRowId, $unknownId];
+        sort($expected);
+        self::assertSame($expected, $ids);
+        // Tlačítka nesou dotčené osoby: bezpečnou skupinu (bez prohlášení,
+        // rok mzdy pokrývají celý) zvlášť od osob, u kterých je žádost fakt.
+        self::assertSame([
+            ['kind' => 'annual_settlement_request_safe', 'count' => 1, 'employee_ids' => [$withoutRowId]],
+            ['kind' => 'annual_settlement_request', 'count' => 1, 'employee_ids' => [$unknownId]],
+        ], $finding['bulk_actions']);
+        self::assertStringContainsString('Syntetická Nevím', $finding['message']);
+        self::assertStringContainsString('1 z nich nemá za rok 2026 podepsané prohlášení', $finding['message']);
+        self::assertStringContainsString('U zbývajících 1 s podepsaným prohlášením', $finding['message']);
+        // Odkaz nese rok zúčtování (rok před hlášením), ne rok podle dneška,
+        // a zúžení na nerozhodnuté osoby.
+        self::assertSame('/payroll/annual-settlement?year=2026&state=request_undecided', $finding['remediation_path']);
+        foreach ($finding['entities'] as $entity) {
+            self::assertSame(
+                '/payroll/annual-settlement?year=2026&state=request_undecided&person=' . $entity['entity_id'],
+                $entity['remediation_path'],
+            );
+        }
+
+        // Tlačítko vede na Roční zúčtování zúžené na tytéž osoby.
+        $repository = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository::class);
+        $listed = $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided');
+        $listedIds = array_map(static fn (array $item): int => (int) $item['employee_id'], $listed['items']);
+        sort($listedIds);
+        self::assertSame($expected, $listedIds);
+        self::assertSame(2, $listed['total']);
+        // Zúžení na osoby z tlačítka: jen ony, i když jsou nerozhodnutí další.
+        [$otherId] = $this->employment('Syntetický Mimo hlášení');
+        self::assertSame(3, $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided')['total']);
+        $narrowed = $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided', [$withoutRowId]);
+        self::assertSame(1, $narrowed['total']);
+        self::assertSame([$withoutRowId], array_map(static fn (array $item): int => (int) $item['employee_id'], $narrowed['items']));
+        self::assertNotContains($otherId, $expected);
+
+        // Mimo leden a únor se stav žádosti nehlásí.
+        $march = $this->readiness->inspect($this->supplierId, '2027-03-01', '2027-04-10');
+        self::assertNull(self::finding($march['findings'], 'jmhz_annual_request_status_unresolved'));
+
+        // Únor 2026: hlášení za něj jde připravit stejně jako za pozdější
+        // měsíce (podává se dodatečně) a příprava se na žádost za rok 2025
+        // ptá také. Kontrola ji proto hlásí i před zákonným startem JMHZ
+        // 1. 4. 2026, jako informaci, která mzdový běh nezastaví.
+        $insert2025 = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_annual_settlement_requests
+                (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+             VALUES (?, ?, 2025, ?, ?, ?)'
+        );
+        $insert2025->execute([$this->supplierId, $unknownId, 'unknown', $this->actorId, $this->actorId]);
+        $insert2025->execute([$this->supplierId, $decidedId, 'not_requested', $this->actorId, $this->actorId]);
+        $february2026 = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $early = self::finding($february2026['findings'], 'jmhz_annual_request_status_unresolved');
+        self::assertNotNull($early, json_encode(array_column($february2026['findings'], 'code')));
+        $earlyIds = array_column($early['entities'], 'entity_id');
+        sort($earlyIds);
+        $expectedEarly = [...$expected, $otherId];
+        sort($expectedEarly);
+        self::assertSame($expectedEarly, $earlyIds);
+        self::assertSame('/payroll/annual-settlement?year=2025&state=request_undecided', $early['remediation_path']);
+        // Rok 2025 mzdy v aplikaci nepokrývají (start 01/2026): chybějící
+        // prohlášení nic nedokazuje, nic se nepředvybírá jako bezpečné.
+        self::assertSame(['annual_settlement_request'], array_column($early['bulk_actions'], 'kind'));
+        self::assertSame(3, $early['bulk_actions'][0]['count']);
+        self::assertSame($expectedEarly, $early['bulk_actions'][0]['employee_ids']);
+        self::assertStringNotContainsString('bezpečná odpověď', $early['message']);
+        self::assertSame('info', $early['severity']);
+        self::assertSame('anytime', $early['impact']);
+        $march2026 = $this->readiness->inspect($this->supplierId, '2026-03-01', '2026-04-10');
+        self::assertNull(self::finding($march2026['findings'], 'jmhz_annual_request_status_unresolved'));
+    }
+
+    public function testChangedEmploymentTermsMarkOpenRevisionAsStale(): void
+    {
+        // Změna hlavního vztahu a místa výkonu po zamknutí: přepočet počítal
+        // ze starého snímku a seznam běhů tvrdil, že se podklady nezměnily.
+        [, $employmentId] = $this->employment('Syntetický Přeřazený');
+        [$colleagueId] = $this->employment('Syntetická Beze změny');
+        $snapshot = $this->builder->build($this->supplierId, '2026-02-01', '2026-03-10');
+        $frozen = json_decode($snapshot->json, true, flags: JSON_THROW_ON_ERROR);
+        $detector = new \MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector($this->builder);
+
+        self::assertSame(0, $detector->detect($this->supplierId, $frozen)->total(), 'Bez změny žádný posun.');
+
+        // Zápis jako u hromadného doplnění místa výkonu: bez zvýšení row_version.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET work_place = "Syntetické místo", is_primary = 0
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+
+        $drift = $detector->detect($this->supplierId, $frozen);
+        self::assertSame(1, $drift->employmentTermsChanged);
+        self::assertSame(1, $drift->total());
+        self::assertSame(1, $drift->toArray()['employment_terms_changed']);
+
+        // Oprava jména výpočet nemění a schválení kvůli ní stát nemá.
+        $this->db->pdo()->prepare('UPDATE payroll_employees SET full_name = "Syntetický Přejmenovaný" WHERE id = ?')
+            ->execute([$colleagueId]);
+        self::assertSame(1, $detector->detect($this->supplierId, $frozen)->total());
+    }
+
+    /**
+     * @param list<array<string,mixed>> $findings
+     * @return array<string,mixed>|null
+     */
+    private static function finding(array $findings, string $code): ?array
+    {
+        foreach ($findings as $finding) {
+            if ($finding['code'] === $code) {
+                return $finding;
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array{int,int} */
+    private function employment(string $name, string $relation = 'employment'): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, ?, "employee", 1)')
+            ->execute([$this->supplierId, $name]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status) VALUES (?, ?, "ready")')
+            ->execute([$this->supplierId, $employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type, status, start_date, actual_start_date, is_primary)
+             VALUES (?, ?, ?, "1", ?, "active", "2026-01-01", "2026-01-01", 1)'
+        )->execute([$this->supplierId, $employeeId, $this->officeId, $relation]);
+        $employmentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_events
+                (supplier_id, employment_id, event_type, from_status, to_status, effective_on, note, diff_json, created_by)
+             VALUES (?, ?, "created", NULL, "active", "2026-01-01", NULL, "{}", ?)'
+        )->execute([$this->supplierId, $employmentId, $this->actorId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, office_id, effective_from, planned_start_on, actual_start_on,
+                 weekly_hours, workload_basis_points, social_insurance_participation,
+                 health_insurance_participation, tax_regime, tax_declaration_signed, is_primary)
+             VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01", 40, 10000, "automatic", "automatic", "advance", 1, 1)'
+        )->execute([$this->supplierId, $employmentId, $this->officeId]);
+
+        return [$employeeId, $employmentId];
+    }
+
+    private function declaration(int $employeeId, string $status, string $from, ?string $to): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, signed_on, effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $status,
+            $status === 'signed' ? $from : null,
+            $from,
+            $to,
+            $status === 'unverified' ? null : 'synthetic:prediction',
+        ]);
+    }
+}

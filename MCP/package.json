@@ -17,7 +17,8 @@
   ],
   "scripts": {
     "start": "node src/index.mjs",
-    "build": "node build.mjs",
+    "build": "node generate-api-manifest.mjs --check && node build.mjs",
+    "generate:api": "node generate-api-manifest.mjs",
     "test": "node --test --test-concurrency=8",
     "check": "node --check src/index.mjs && node --check src/client.mjs && node --check src/tools.mjs && node --check src/update.mjs && node --check src/version.mjs && node --test --test-concurrency=8"
   },

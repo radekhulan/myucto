@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { publicPurchaseApprovalApi, type PublicPurchaseApproval } from '@/api/purchaseApprovals'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import PdfFrame from '@/components/documents/PdfFrame.vue'
 
 /**
  * Veřejná stránka schválení přijatého dokladu z e-mailu (bez přihlášení, token v odkazu).
@@ -92,7 +93,7 @@ async function submit(decision: 'approve' | 'reject') {
         </div>
         <div class="text-sm min-w-0">
           <div v-if="data?.company.name" class="font-semibold truncate" data-test="public-company">{{ data.company.name }}</div>
-          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="brand-tld">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ t('purchase_approval.public.page_title') }}</div>
         </div>
       </div>
@@ -203,8 +204,8 @@ async function submit(decision: 'approve' | 'reject') {
                 </template>
                 <span v-else class="text-sm text-neutral-500">{{ t('purchase_approval.public.no_pdf') }}</span>
               </div>
-              <iframe v-if="showPdf && data.invoice.has_pdf" :src="`${publicPurchaseApprovalApi.pdfUrl(token)}#view=FitH`"
-                      :title="t('purchase_approval.public.pdf')" class="w-full h-[70vh] border border-neutral-200 rounded-md" />
+              <PdfFrame v-if="showPdf && data.invoice.has_pdf" :src="publicPurchaseApprovalApi.pdfUrl(token)"
+                        :title="t('purchase_approval.public.pdf')" class="block w-full h-[70vh] border border-neutral-200 rounded-md" />
             </div>
 
             <div class="bg-surface border border-neutral-200 rounded-xl p-6 shadow-sm space-y-4">

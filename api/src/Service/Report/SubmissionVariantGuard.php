@@ -132,18 +132,42 @@ final class SubmissionVariantGuard
         if ($forma !== 'B') {
             return [];
         }
-        $prior = $this->submissions->findLatestForPeriod($supplierId, $formCode, $year, $month, $quarter, ['B', 'O']);
-        if ($prior === null) {
+        $filedAt = $this->filedAt($supplierId, $formCode, $year, $month, $quarter, ['B', 'O']);
+        if ($filedAt === null) {
             return [];
         }
 
         return [sprintf(
             'Za toto období už je evidované podané tvrzení (%s). Další ŘÁDNÉ podání ho '
                 . 'nenahrazuje — do lhůty se oprava podává jako %s, po lhůtě jako %s.',
-            (string) ($prior['submitted_at'] ?? $prior['generated_at'] ?? ''),
+            $filedAt,
             $correctiveLabel,
             $followUpLabel,
         )];
+    }
+
+    /**
+     * Rozhodný čas podání za období, je-li evidované (`submitted` i `accepted`, dodejka
+     * není podmínkou). Z téhož údaje vzniká varování o už podaném tvrzení i stav karty
+     * s termínem podání, aby si UI a varování nemohly odporovat.
+     *
+     * @param list<string> $forms formy, které se počítají jako podání v řádné lhůtě
+     */
+    public function filedAt(
+        int $supplierId,
+        string $formCode,
+        int $year,
+        ?int $month,
+        ?int $quarter,
+        array $forms,
+    ): ?string {
+        $prior = $this->submissions->findLatestForPeriod($supplierId, $formCode, $year, $month, $quarter, $forms);
+        if ($prior === null) {
+            return null;
+        }
+        $at = (string) ($prior['submitted_at'] ?? $prior['generated_at'] ?? '');
+
+        return $at === '' ? null : $at;
     }
 
     /**

@@ -27,7 +27,7 @@ final class AutomationWizardAction
     public function apply(Request $request, Response $response): Response
     {
         if (!RequestAuthorization::allows($request, 'bank.rules', AccessLevel::WRITE)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

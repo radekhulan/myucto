@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
@@ -36,7 +35,7 @@ final class PayrollSurchargeMaterializationTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
@@ -77,6 +76,72 @@ final class PayrollSurchargeMaterializationTest extends TestCase
         if (isset($this->db)) {
             $this->db->close();
         }
+    }
+
+    public function testDirectMaterializationCannotPayArchivedEntriesOfManualSummary(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $this->db->pdo()->prepare('UPDATE payroll_time_months SET work_source = "manual_summary" WHERE supplier_id = ? AND employment_id = ? AND period_start = ?')
+            ->execute([$this->supplierId, $this->employmentId, self::PERIOD]);
+        $result = $this->materialize();
+        self::assertSame('manual_summary', $result['skipped_reason']);
+        self::assertTrue($result['requires_manual_review']);
+        self::assertSame(0, $result['written_count']);
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND employment_id = ?');
+        $count->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testHourlyIntervalBeforeMonthlyTermsBelongsToHourlyClaimMaterializer(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $this->hourlyTerms('2026-06-01', '2026-06-15');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on,
+            remuneration_type, monthly_gross_minor) VALUES (?, ?, "2026-06-16", "2026-01-01", "monthly", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $result = $this->materialize();
+        self::assertSame('hourly_claims', $result['skipped_reason']);
+        self::assertSame(0, $result['written_count']);
+        self::assertSame(0, $this->inputCount('PRIPLATEK_PRESCAS'));
+        self::assertSame(0, $this->ledgerCount());
+    }
+
+    /**
+     * Měsíc přepnutý na směny s ponechanými částkami z importu docházky:
+     * příplatky nesou importované vstupy, výpočet ze směn by je zaplatil podruhé.
+     */
+    public function testActiveAttendanceImportInputsKeepSurchargesFromShifts(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $pdo = $this->db->pdo();
+        $component = (int) $pdo->query('SELECT id FROM payroll_component_definitions WHERE supplier_id = ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn();
+        $employee = (int) $pdo->query('SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId)->fetchColumn();
+        $pdo->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, status, source_kind, external_id)
+            VALUES (?, ?, ?, ?, ?, 50000, "draft", "manual", ?)')
+            ->execute([$this->supplierId, $employee, $this->employmentId, $component, self::PERIOD, 'attendance:2026-06:' . $this->employmentId . ':PRIPLATKY']);
+
+        $result = $this->materialize();
+
+        self::assertSame('import_inputs', $result['skipped_reason']);
+        self::assertSame(0, $result['written_count']);
+        self::assertSame(0, $this->inputCount('PRIPLATEK_PRESCAS'));
+    }
+
+    public function testHourlyTermsOutsidePeriodDoNotChangeLegacySurchargeCalculation(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $this->hourlyTerms('2026-07-01', null);
+        $result = $this->materialize();
+        self::assertSame(1, $result['written_count']);
+        self::assertSame(10000, $this->approvedTotal('PRIPLATEK_PRESCAS'));
+    }
+
+    private function hourlyTerms(string $from, ?string $to): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, effective_to, planned_start_on,
+            remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, monthly_gross_minor)
+            VALUES (?, ?, ?, ?, "2026-01-01", "hourly", 20000, "contract", "Syntetická smlouva", NULL)')
+            ->execute([$this->supplierId, $this->employmentId, $from, $to]);
     }
 
     public function testFirstMaterializationCreatesApprovedInput(): void

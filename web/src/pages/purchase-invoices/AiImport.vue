@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, inject, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { integrationsApi, type AiExtractResult, type AiExtractionStatus, type AiProvider } from '@/api/integrations'
@@ -14,6 +14,10 @@ import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
+import { windowContextKey } from '@/workspace/windowContext'
+import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -38,6 +42,13 @@ const clientUsage = computed(() => aiCreds.value?.client_ai_extraction_usage)
 const quotaRejected = ref(false)
 const quotaExhausted = computed(() => auth.isClientRole && (quotaRejected.value || (clientUsage.value?.remaining ?? 1) <= 0))
 const canStartExtraction = computed(() => canExtract.value && !quotaExhausted.value)
+const capturePreviewOnlyReason = computed(() => {
+  if (quotaExhausted.value) return t('aiGateway.client_extraction_limit_reached')
+  if (auth.isClientRole && !canExtract.value) return t('aiGateway.client_extraction_unavailable')
+  if (!aiConfigured.value) return t('aiGateway.not_configured_body')
+  if (!canExtract.value) return t('common.error')
+  return undefined
+})
 const requestModel = computed(() => auth.isClientRole ? undefined : aiPerRequestModel.value || undefined)
 const canEditKind = computed(() => auth.canWrite('purchase_invoices'))
 const aiDefaultModel = computed(() => providerInfo.value?.default_model ?? '')
@@ -63,9 +74,36 @@ const aiPdfFile = ref<File | null>(null)
 const aiExtracting = ref(false)
 const aiResult = ref<AiExtractResult | null>(null)
 const aiPerRequestModel = ref('')  // empty = použít default
+// Jednorázová volba pro toto nahrání: doklad bez rozpisu položek, jeden řádek na sazbu DPH.
+const aiWithoutItems = ref(false)
+
+/** Celý výběr; výřezy se do něj vrátí na svá místa a extrakce se spustí najednou. */
+const crop = usePhotoCropQueue(files => useAiFiles(files))
+
+/**
+ * Fotka z mobilní nabídky Nákup („Vyfotit doklad"): projde ořezem a rovnou se
+ * vytěží. Uživatel klepnutím na dlaždici řekl, co chce, další tlačítko by jen zdržovalo.
+ */
+const windowContext = inject(windowContextKey, null)
+const captureCrop = usePhotoCropQueue(files => {
+  if (capturePreviewOnlyReason.value) return
+  useAiFiles(files)
+  if (aiPdfFile.value) void runAiExtract()
+})
+
+/**
+ * Fotka papírového dokladu jde nejdřív do ořezu: server fotku jen zmenší, takže
+ * čím víc je v záběru stolu, tím míň pixelů zbyde na čísla, která z dokladu čte
+ * AI. Z „Vyfotit“ přichází fotka ořezaná už z dialogu, proto tlačítko volá
+ * {@link useAiFiles} a tudy nechodí.
+ */
+function acceptAiFiles(files: File[]) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
+  crop.start(files)
+}
 
 // Přijme 1..N souborů z file-pickeru i drag&drop: 1 = single-file flow, více = dávka.
-function acceptAiFiles(files: File[]) {
+function useAiFiles(files: File[]) {
   if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
   const pdfs = files.filter(f =>
     f.type === 'application/pdf' || f.type.startsWith('image/') ||
@@ -130,7 +168,7 @@ async function runAiBatch() {
       item.status = 'processing'
       try {
         const model = requestModel.value
-        const r = await integrationsApi.extractPdfAi(item.file, model, aiBatchId.value)
+        const r = await integrationsApi.extractPdfAi(item.file, model, aiBatchId.value, aiWithoutItems.value)
         if (version !== contextVersion) return
         item.result = r
         item.status = r.ok ? 'ok' : 'failed'
@@ -232,7 +270,7 @@ async function runAiExtract() {
   try {
     const model = requestModel.value
     // I jednotlivý doklad je dávka (o jednom kusu) — jinak by ho „Poslední import" neukázal.
-    const result = await integrationsApi.extractPdfAi(aiPdfFile.value, model, newBatchId())
+    const result = await integrationsApi.extractPdfAi(aiPdfFile.value, model, newBatchId(), aiWithoutItems.value)
     if (version !== contextVersion) return
     aiResult.value = result
     if (aiResult.value.ok) {
@@ -268,6 +306,16 @@ async function runAiExtract() {
   }
 }
 
+// Doklad spojený z více částí jde do stejného vytěžení jako jeden nahraný soubor.
+function importMerged(file: File) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value) return
+  aiBatchQueue.value = []
+  aiBatchId.value = ''
+  aiPdfFile.value = file
+  aiResult.value = null
+  void runAiExtract()
+}
+
 /** Doklad jiné firmy: kde skončil (faktura v ní, nebo její příchozí doklady). */
 function targetLabel(result: AiExtractResult): string {
   const company = result.target_supplier_name ?? ''
@@ -280,14 +328,22 @@ function gotoInvoice(id: number) {
   router.push(`/purchase-invoices/${id}`)
 }
 
+watch(credsLoaded, loaded => {
+  if (!loaded) return
+  const file = windowContext?.takePurchaseCapture?.()
+  if (file && !aiExtracting.value && !aiBatchRunning.value) captureCrop.start([file])
+})
+
 watch(() => suppliers.currentSupplierId, () => {
   contextVersion++
   aiCreds.value = null
   quotaRejected.value = false
   credsLoaded.value = false
+  captureCrop.cancel()
   aiPdfFile.value = null
   aiResult.value = null
   aiPerRequestModel.value = ''
+  aiWithoutItems.value = false
   aiBatchQueue.value = []
   aiBatchId.value = ''
   aiBatchRunning.value = false
@@ -339,7 +395,8 @@ watch(() => suppliers.currentSupplierId, () => {
 
       <div class="space-y-3">
         <div v-if="!quotaExhausted" class="flex flex-wrap gap-2 justify-end">
-          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => acceptAiFiles([f])" />
+          <!-- Z „Vyfotit“ jde fotka už ořezaná, do ořezu podruhé nemá chodit. -->
+          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => useAiFiles([f])" />
         </div>
         <label class="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition"
           :class="aiDragOver
@@ -363,6 +420,15 @@ watch(() => suppliers.currentSupplierId, () => {
             <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
           </select>
         </div>
+
+        <label data-test="ai-without-items" class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer">
+          <input v-model="aiWithoutItems" type="checkbox" :disabled="aiExtracting || aiBatchRunning"
+                 class="mt-0.5 w-4 h-4 accent-primary-600" />
+          <span>
+            {{ t('integrations.ai.without_items') }}
+            <span class="block text-xs text-neutral-500">{{ t('integrations.ai.without_items_hint') }}</span>
+          </span>
+        </label>
 
         <button type="button" @click="runAiExtract" :disabled="!canStartExtraction || !aiPdfFile || aiExtracting || aiBatchRunning"
                 :class="[btnFilled('primary'), 'w-full whitespace-nowrap']">
@@ -535,6 +601,13 @@ watch(() => suppliers.currentSupplierId, () => {
         </details>
       </div>
     </div>
+    <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
+      :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
+    <PhotoCropDialog v-if="captureCrop.current.value" :file="captureCrop.current.value" :preview-only-reason="capturePreviewOnlyReason"
+      @done="captureCrop.done" @cancel="captureCrop.cancel" />
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />
   </div>
 </template>

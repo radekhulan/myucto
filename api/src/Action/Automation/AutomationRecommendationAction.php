@@ -29,6 +29,7 @@ final class AutomationRecommendationAction
             RequestAuthorization::isSuperadmin($request),
             $query,
             RequestAuthorization::boundSupplierId($request),
+            $request,
         ));
     }
 
@@ -40,6 +41,7 @@ final class AutomationRecommendationAction
         return Json::ok($response, $this->recommendations->requestRefresh(
             (int) ($user['id'] ?? 0), RequestAuthorization::isSuperadmin($request), $query['suppliers'],
             RequestAuthorization::boundSupplierId($request),
+            $request,
         ), 202);
     }
 

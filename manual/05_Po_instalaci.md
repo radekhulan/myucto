@@ -59,8 +59,14 @@ stránka `Systém → Plánované úlohy` nehlásí chybějící úlohy.
 
 ## 5.5 Krok za krokem: naplánování úloh (cron)
 
-V adresáři `cmd/` jsou připravené wrappery `.cmd` (Windows Task Scheduler) i
-`.sh` (Linux cron). Zvolte **právě jeden** způsob plánování:
+Dodávaný **Docker image spouští cron uvnitř kontejneru** a při startu
+sestaví rozvrh podle konfigurace instalace. Neplánujte k němu stejné úlohy
+ještě na hostiteli. Stav ověřte v `Systém → Plánované úlohy`; po změně
+nastavení ovlivňujícího výběr úloh restartujte kontejner.
+
+Pro nativní instalaci nebo vlastní image bez vestavěného cronu jsou
+v adresáři `cmd/` připravené wrappery `.cmd` (Windows Task Scheduler)
+i `.sh` (Linux cron). Zvolte **právě jeden** způsob plánování:
 
 - **Jeden dispatcher.** Naplánujte pouze `cron-dispatch` každou minutu. Sám
   spouští úlohy v jejich časech a levnou kontrolou přeskočí ty, které nemají práci.
@@ -156,7 +162,9 @@ php api/bin/delete-company.php --id=7 --confirm=<IČO>   # smaže firmu se všem
 před zopakováním převodu do čisté firmy. Smazání potvrzuje IČO firmy a běží v jedné
 transakci. `--files` smaže i soubory firmy v úložišti. Má-li firma mzdová podání
 nebo jiné záznamy jen pro přidávání, je potřeba `--immutable`. Smazání nejde vrátit,
-proto si předem zálohujte databázi.
+proto si předem zálohujte databázi. Stejně maže firmu i aplikace (`Systém → Firmy`,
+viz [§ 95.11](95_Multi_supplier.md#9511-krok-za-krokem-smazat-firmu)); auditní log
+(`activity_log`) zůstává zachovaný v obou případech.
 
 > [!WARNING]
 > `reset.php` maže **uživatelská data**, ne instalaci. Globální číselníky (země, sazby
@@ -191,26 +199,46 @@ proto si předem zálohujte databázi.
 | `cron-backup-personnel` | 1× denně 02:45; personální spisy zaměstnanců, záměrně samostatná záloha |
 | `cron-bank-scan` | každých 30 min |
 | `cron-bank-email-notices` | každých 30 min |
+| `cron-bank-connections` | každých 15 min; aktivní API napojení bank, jednotlivé banky si hlídají vlastní odstup |
+| `cron-logbook-odometer-source` | 1× denně 03:30; jen při napojeném zdroji kilometrů vozidla |
+| `cron-payment-thanks` | každou minutu; fronta poděkování za přijaté platby |
 | `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po-Pá |
+| `cron-scheduled-pohoda-export` | 1× denně 06:30; jen se zapnutou volbou `export.scheduled_pohoda` (automatický export do Pohody), jinak skončí bez práce |
 | `cron-send-approval-reminders` | 1× denně 09:15, Po-Pá |
 | `cron-purchase-approval-reminders` | 1× denně 09:20, Po-Pá |
 | `cron-document-request-reminders` | 1× denně 09:30, Po-Pá |
 | `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní odstup |
+| `cron-eet-dispatch` | každou minutu; dokončuje odeslání čekajících tržeb EET |
+| `cron-jmhz-poll` | každých 10 min; kontrola výsledků odeslaných mzdových podání |
+| `cron-jmhz-source-monitor` | 1× denně 07:00; volitelný monitoring zdrojových specifikací, výchozí vypnutý (`payroll.jmhz_source_monitor`) |
 | `cron-generate-recurring-invoices` | 1× denně 06:30 |
+| `cron-generate-other-items` | 1× denně 06:35; opakované ostatní pohledávky a závazky |
+| `cron-payroll-document-worker` | každou minutu; fronta výplatních pásek a dalších mzdových dokumentů |
+| `cron-payroll-period-export-worker` | každou minutu; dokončení mzdových exportů na pozadí |
+| `cron-catalog-worker` | každou minutu; importy, přepočty a další úlohy katalogu na pozadí |
 | `cron-automation-digest` | každou hodinu v ranním okně 06:00-08:00 |
 | `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
 | `cron-shoptet-orders` | každých 15 min; jen firmy se zapnutým automatickým stahováním objednávek ze Shoptetu, interval určuje firma ([§ 37.5](39_Shoptet.md)) |
 | `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
 | `cron-payroll-registration-changes` | 1× denně 05:00; jen firmy se zapnutými mzdami. Hledá změny hlásitelné do registru pojištěnců (ČSSZ) a zakládá návrh povinnosti s termínem, nic neodesílá. Denní běh stačí: lhůta je osm dnů ([§ 85.14.4](85_Podani_a_hlaseni.md#85144-fronta-k-odeslani)). Bez ní se změna zjistí jen tehdy, když někdo otevře kartu zaměstnance, a lhůta uteče |
+| `cron-payroll-end-agreements` | 1× denně 00:30; jen firmy se zapnutými mzdami. Ukončí DPP a DPČ, kterým uplynul sjednaný konec, ke dni tohoto konce. Dohodu s mzdovým vstupem, docházkou nebo zúčtovanou mzdou po konci nechá k posouzení ([§ 86.9.1](86_Zamestnanci.md#8691-hromadne-ukonceni-skoncenych-dohod)) |
 | `cron-vat-clearing` | 1× měsíčně 1. dne 04:30; interní doklad zúčtování DPH za skončené období ([§ 84.3.3](66_Ucetni_osnova.md#6686-mesicni-zuctovani-dph)) |
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
 | `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |
 | `cron-cnb-rates` | 1× denně 15:00; stahuje kurzovní lístek ČNB do kurzové historie a dohání mezery za posledních 30 dnů. Bez ní se kurzy plní jen náhodně při prvním dotazu a cizoměnová úhrada ke dni bez kurzu se nemá čím ocenit |
 | `cron-license-renew` | každou hodinu v 15. minutě; server se běžně kontroluje 1× denně, kolem platby a při prodlení 1× za hodinu |
+| `cron-maintenance-notice` | každých 15 minut; ohlášení plánované údržby od provozovatele (ve spravovaném provozu povinné, jinak volitelné přes `maintenance_notice.enabled`) |
 | `cron-version-check` | 1× denně 06:00; kontrola dostupné aktualizace |
+| `cron-storage-usage` | každou hodinu v 15. minutě, jen spravovaný provoz; měření spotřeby úložiště |
 | `cron-dispatch` | každou minutu, pouze v režimu jednoho dispatcheru |
+
+Tabulka uvádí výchozí rozvrh. Skutečný výběr závisí na zapnutých modulech,
+napojeních a nastavení instalace; například frontové úlohy bez práce mohou
+zůstat neaktivní. Aktuální rozvrh a stav ověřujte v `Systém → Plánované
+úlohy`. Ve spravovaném provozu může frekvenci záloh a obnovy licence
+určovat provozovatel.
 
 ### 5.9.4 Šifrování záloh
 
@@ -274,7 +302,7 @@ Nejdřív se musíte znovu ověřit passkeyem, nebo přihlašovacím heslem a k�
 z autentikátoru, máte-li ho zapnutý. Každé odhalení se zapisuje do protokolu
 činnosti (kdo a kdy, samotné heslo nikdy).
 
-Stránka je doplněk **Kompletního exportu dat** (§ 88.6.2), ne jeho náhrada.
+Stránka doplňuje **Systém → Kompletní export dat**.
 Export je jednorázový balíček aktuálního stavu jedné firmy na vyžádání, tady
 leží historie automatických záloh celé instalace.
 

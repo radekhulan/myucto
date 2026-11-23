@@ -7,12 +7,17 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
+use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -33,6 +38,10 @@ final class SetPurchaseInvoiceItemsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
+        private readonly \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction $advanceDeduction,
+        private readonly PurchaseAdvanceLinks $advanceLinks,
+        private readonly Connection $db,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -91,10 +100,46 @@ final class SetPurchaseInvoiceItemsAction
 
         // Hlavička se tu nemění: přenesení v ní už bylo, kód 40/41 je vědomá tuzemská
         // položka smíšeného dokladu ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}).
-        $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
-        $this->calc->recompute($id);
+        $items = StoredPurchaseItemColumns::carryOver($items, (array) ($existing['items'] ?? []));
+        // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
+        $isDraft = (string) ($existing['status'] ?? '') === 'draft';
+        $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
+        // Řádky a přepočet záloh faktury (PurchaseAdvanceLinks::sync) v jedné transakci:
+        // odpočet zálohy nad její částku řádky neuloží a doklad zůstane beze změny.
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT set_purchase_items');
+        }
+        try {
+            $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
+            if ($isDraft) {
+                $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
+            }
+            $this->calc->recompute($id);
+            $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+            $this->advanceLinks->sync($supplierId, $id);
+            if ($ownTx) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif (!$ownTx && $pdo->inTransaction() && !TransactionFailure::aborted($e)) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT set_purchase_items');
+                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
+            }
+            if ($e instanceof PurchaseAdvanceLinkException) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
+            }
+            throw $e;
+        }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $user =(array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.items_updated', $user['id'] ?? null, 'purchase_invoice', $id,
             ['count' => count($items)], $ip, $request->getHeaderLine('User-Agent'));

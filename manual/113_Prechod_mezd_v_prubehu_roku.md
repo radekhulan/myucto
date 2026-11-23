@@ -37,7 +37,9 @@ Nepřepočítávají se a nic se z nich znovu neúčtuje ani nepodává.
 1. **První mzdové období** je nastavené při zapnutí mezd na
    `Mzdy → Přehled mezd`. Za převzaté se považují měsíce roku zahájení před
    tímto obdobím. Když mzdy začínají lednem, převzatá část roku neexistuje
-   a nic z této kapitoly se neukáže.
+   a nic z této kapitoly se neukáže. Během nastavení mezd jde období změnit
+   volbou **Změnit první mzdové období** v nabídce „…" na téže stránce
+   (viz [75.7](75_Uplne_mzdy.md)).
 2. **Zaměstnanci a pracovní vztahy** jsou založené (ručně nebo převodem).
    Převod z [PAMICA](108_Prechod_z_PAMICA.md), [PREMIER](109_Prechod_z_PREMIER.md)
    nebo [import hlášení JMHZ](90_Nastaveni_mezd.md#9010-krok-za-krokem-import-zamestnancu-z-jmhz-a-registraci)
@@ -64,6 +66,36 @@ Použijte pro měsíce, ze kterých nemáte export ani hlášení.
 
 **Jak poznáte, že je hotovo:** Uložení zapíše převzaté mzdy i počáteční
 stavy najednou a kontrola převzetí u osoby nehlásí chybějící měsíce.
+
+### Doplnění z přijatých hlášení JMHZ
+
+Máte-li přijatá hlášení předchozího programu naimportovaná na záložce **JMHZ**,
+nemusíte čísla opisovat. Hodí se to i k doplnění měsíců, které jste zadali jen
+zčásti.
+
+1. V bloku **Ruční zadání převzatých mezd** vyberte zaměstnance.
+2. Klikněte na **Doplnit z přijatých hlášení**. Formulář doplní prázdná pole:
+   sociální pojištění, zdravotní pojištění zaměstnance, zálohu, dny pojištění
+   a odpracovanou dobu. Čísla, která už vyplněná jsou, nechá být.
+3. Přečtěte si poznámku pod tabulkou. Co hlášení nenese, aplikace dopočítá
+   stejně jako ve vlastním mzdovém běhu a vyjmenuje to: **ZP zaměstnavatel**,
+   **Základ ZP**, **Dopočet ZP do minima** a **Čistá mzda**. Zaměstnanci
+   se souběhem vztahů se tyto údaje nedopočítávají a vyplníte je sami.
+4. Zkontrolujte čísla a klikněte na **Uložit převzaté měsíce**. Tlačítko samo
+   nic neukládá.
+
+**Jak poznáte, že je hotovo:** Na záložce **Kontrola převzetí** zmizí nález
+o ručně převzatém měsíci bez dnů účasti nebo pojistného.
+
+> [!TIP]
+> Po podaném měsíčním hlášení už nejde změnit základ sociálního pojištění a daň
+> převzatých měsíců, protože z nich podané hlášení vyšlo. Dny, odvody, zdravotní
+> pojištění a čistou mzdu doplnit lze. Formulář to řekne v poznámce nad tabulkou.
+
+Převzatý běh je neměnný snímek. Chcete-li, aby doložení plateb ukazovalo opravená
+čísla, zrušte a znovu převezměte měsíc podle
+[§ 80.9](80_Mzdove_behy.md#809-krok-za-krokem-prevzate-mesice-roku-prechodu).
+Evidenční list ani daňové doklady z převzatého běhu nečerpají.
 
 ## 113.4 Krok za krokem: import převzatých mezd ze souboru
 
@@ -146,6 +178,15 @@ a finanční správa ale mají jiné údaje.
 **Jak poznáte, že je hotovo:** Po přijetí opravného hlášení a jeho importu
 nález zmizí. Převod ani uzávěrku nález neblokuje.
 
+### Ručně převzaté mzdě chybí údaje z hlášení
+
+Nález **Ručně převzaté mzdě chybí údaje z přijatého hlášení JMHZ** znamená, že
+ČSSZ má z hlášení správná čísla a nula je jen v ručně zadané převzaté mzdě.
+Opravné hlášení kvůli tomu nepodávejte. Klikněte u nálezu na **Převzatá mzda**
+a doplňte měsíce podle [§ 113.3](#1133-krok-za-krokem-rucni-zadani-prevzatych-mezd).
+Podat opravné hlášení má smysl jen tehdy, když je nula v převzaté mzdě opravdu
+správná.
+
 ## 113.9 Když něco nejde
 
 <!-- cols: 30 34 36 -->
@@ -217,6 +258,11 @@ by hlášení vzniklo. Opravu podejte tam, odkud šlo řádné hlášení (před
 program nebo portál ČSSZ). Opravené úhrny potom promítněte do převzatých mezd
 i počátečních stavů, ať roční doklady odpovídají podanému.
 
+Odlišný případ je měsíc s vlastním schváleným vypočteným během v MyÚčtu,
+za který řádné hlášení odeslal jiný program. Na něj lze navázat opravu
+z původního XML nebo GUID, viz [§ 85.14.14.1](85_Podani_a_hlaseni.md#8514141-navazani-opravy-na-radne-podani-z-jineho-programu).
+Pouhý import historických úhrnů tento předpoklad nesplňuje.
+
 ### 113.10.6 Co kontrola převzetí hlídá
 
 - **Chybějící počáteční stavy:** komu v převzatých měsících trval vztah, ale
@@ -266,6 +312,9 @@ z hlášení JMHZ, se se svým hlášením neporovnává.
 
 Nález je jen upozornění s rozpadem rozdílů a prokliky na kartu osoby,
 převzatou mzdu a importované hlášení. Převod ani uzávěrku neblokuje.
+
+Ručně nebo tabulkou převzatý měsíc, kterému v rozdílných veličinách jen chybí
+číslo, se ukáže zvlášť jako neúplná převzatá mzda s pokynem mzdu doplnit.
 
 #### Úkoly založené převzetím
 

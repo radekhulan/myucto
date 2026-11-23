@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-const calls = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const calls = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), delete: vi.fn() }))
 const scope = vi.hoisted(() => ({ requested: '5' as string | null, domainLocked: false, currentSupplierId: 5 }))
 vi.mock('@/api/client', () => ({ api: calls }))
 vi.mock('@/workspace/supplierContext', () => ({ requestSupplierId: () => scope.requested }))
@@ -11,6 +11,7 @@ beforeEach(() => {
   scope.requested = '5'; scope.domainLocked = false; scope.currentSupplierId = 5
   calls.get.mockResolvedValue({ data: {} })
   calls.post.mockResolvedValue({ data: {} })
+  calls.delete.mockResolvedValue({ data: {} })
 })
 
 it('reads members, detail, claims and reconciliation pinned to the captured supplier with cursor paging', async () => {
@@ -54,10 +55,58 @@ it('posts exactly the documented bodies and never supplies an actor', async () =
   }
 })
 
+it('sends list filters with an explicit blank year for a title spanning all periods', async () => {
+  await api.members(5,0,50,{search:'Synthetic',title_key:'SYNTHETIC',year:null,payment_status:'unproven'})
+  expect(calls.get.mock.calls[0]?.[1].params).toEqual({after_id:0,limit:50,search:'Synthetic',title_key:'SYNTHETIC',year:'',payment_status:'unproven'})
+})
+
 it('refuses requests captured before a supplier switch', () => {
   scope.requested = '6'
   expect(() => api.members(5)).toThrow('nonprofit_membership_supplier_changed')
   expect(() => api.confirm(5, {} as never)).toThrow('nonprofit_membership_supplier_changed')
   expect(calls.get).not.toHaveBeenCalled()
   expect(calls.post).not.toHaveBeenCalled()
+})
+
+it('uses paginated titles, full selection validation and date-dependent allowed accounts', async () => {
+  await api.titles(5,2026,'SYNTHETIC')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/titles', {headers:{'X-Supplier-Id':'5'},params:{year:2026,after_title_key:'SYNTHETIC',limit:100}})
+  const filters={year:2026,payment_status:'unproven' as const}
+  await api.selectionCheck(5,[1,90],filters)
+  expect(calls.post).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/members/selection-check',{member_ids:[1,90],filters},{headers:{'X-Supplier-Id':'5'}})
+  await api.rates(5,0,true,'2026-04-01')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/rates',{headers:{'X-Supplier-Id':'5'},params:{after_id:0,active_only:1,date:'2026-04-01'}})
+  await api.cancelBatch(5,7)
+  expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/cancel',{}])
+  await api.renewBatch(5,7)
+  expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/renew-preview',{}])
+})
+
+it('deletes a member with the confirmed contact and number as query parameters', async () => {
+  await api.deleteMember(5, 9, { client_id: 3, member_number: 'M-1' })
+  expect(calls.delete).toHaveBeenCalledWith('/accounting/nonprofit-membership/members/9',
+    { headers: { 'X-Supplier-Id': '5' }, params: { expected_client_id: 3, expected_member_number: 'M-1' } })
+})
+
+it('stáhne export s filtry seznamu a chybu z Blob odpovědi převede na kód', async () => {
+  calls.get.mockResolvedValueOnce({ data: new Blob(['x']), headers: { 'content-disposition': 'attachment; filename="clenove-2026-06-01.xlsx"' } })
+  const file = await api.exportMembers(5, 'xlsx', { search: '', year: null, title_key: 'T', payment_status: 'all' })
+  expect(file.filename).toBe('clenove-2026-06-01.xlsx')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/members/export',
+    { headers: { 'X-Supplier-Id': '5' }, responseType: 'blob', params: { format: 'xlsx', search: '', year: '', title_key: 'T', payment_status: 'all' } })
+  const rejection = { response: { status: 422, data: new Blob([JSON.stringify({ error: { code: 'nonprofit_membership_list_year_required' } })]) } }
+  calls.get.mockRejectedValueOnce(rejection)
+  await expect(api.exportMembers(5, 'csv', {})).rejects.toBe(rejection)
+  expect(rejection.response.data).toEqual({ error: { code: 'nonprofit_membership_list_year_required' } })
+})
+
+it('import pošle soubor jako multipart, náhled bez otisku a potvrzení s ním', async () => {
+  const file = new File(['x'], 'clenove.csv')
+  await api.importMembers(5, file, null)
+  await api.importMembers(5, file, 'a'.repeat(64))
+  const [first, second] = calls.post.mock.calls
+  expect(first![0]).toBe('/accounting/nonprofit-membership/members/import')
+  expect(first![2].headers).toEqual({ 'X-Supplier-Id': '5', 'Content-Type': 'multipart/form-data' })
+  expect([...(first![1] as FormData).entries()].map(([k, v]) => [k, typeof v === 'string' ? v : 'file'])).toEqual([['file', 'file'], ['dry_run', '1']])
+  expect([...(second![1] as FormData).entries()].map(([k, v]) => [k, typeof v === 'string' ? v : 'file'])).toEqual([['file', 'file'], ['dry_run', '0'], ['preview_hash', 'a'.repeat(64)]])
 })

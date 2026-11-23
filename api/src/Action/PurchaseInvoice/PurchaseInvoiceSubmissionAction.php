@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Action\Admin\Import\AiExtractPdfAction;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SubmitsDocumentOriginals;
 use MyInvoice\Http\SupplierGuard;
@@ -34,6 +35,7 @@ final class PurchaseInvoiceSubmissionAction
     use SubmitsDocumentOriginals;
 
     private const STATUSES = ['submitted', 'processing', 'needs_information', 'processed', 'rejected'];
+    private const SOURCES = ['portal', 'document_request', 'staff', 'email'];
 
     public function __construct(
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
@@ -302,12 +304,15 @@ final class PurchaseInvoiceSubmissionAction
         $q = $request->getQueryParams();
         $status = isset($q['status']) && in_array((string) $q['status'], self::STATUSES, true)
             ? (string) $q['status'] : null;
+        $via = isset($q['via']) && in_array((string) $q['via'], self::SOURCES, true)
+            ? (string) $q['via'] : null;
         $supplierId = SupplierGuard::currentId($request);
         $page = $this->submissions->paginate(
             $supplierId,
             $status,
             (int) ($q['limit'] ?? 50),
             (int) ($q['offset'] ?? 0),
+            $via,
         );
         $page['items'] = $this->submissionDimensions->attach($supplierId, $page['items']);
         $page['items'] = $this->withMoveSuggestions($request, $supplierId, $page['items']);
@@ -359,12 +364,14 @@ final class PurchaseInvoiceSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $userId = $this->userId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
         try {
             $result = $this->processing->extract(
                 $id,
                 $supplierId,
                 $userId,
                 RequestAuthorization::allows($request, 'purchase_invoices.scan', AccessLevel::WRITE),
+                AiExtractPdfAction::withoutItemsRequested($body),
             );
         } catch (PurchaseInvoiceSubmissionException $e) {
             $this->audit($request, 'purchase_invoice_submission.extraction_failed', $id, [
@@ -496,6 +503,8 @@ final class PurchaseInvoiceSubmissionAction
     private function deny(Request $request, Response $response, bool $write = false): ?Response
     {
         $level = $write ? AccessLevel::WRITE : AccessLevel::READ;
+        // Příchozí fronta je strana účetní. Interní role s `documents.submit` předává
+        // přes portál (PortalPurchaseInvoiceSubmissionAction); sem ji pustí jen `documents.inbox`.
         if (RequestAuthorization::isClientType($request)
             || !RequestAuthorization::allows($request, 'documents.inbox', $level)) {
             return Json::error($response, 'forbidden', 'K příchozím dokladům nemáte oprávnění.', 403);

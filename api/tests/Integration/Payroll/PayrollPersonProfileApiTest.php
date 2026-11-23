@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -50,7 +49,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonProfileAction::class);
             $this->validator = $container->get(PayrollPersonProfileValidator::class);
@@ -448,6 +447,26 @@ final class PayrollPersonProfileApiTest extends TestCase
             $this->put($this->supplierId, $this->employeeId, $address)->getStatusCode(),
         );
         self::assertSame($before, $this->secretStorage());
+    }
+
+    public function testForeignAddressMayOmitPostalCodeButCzechMayNot(): void
+    {
+        $czech = $this->completePayload();
+        $czech['addresses'][0]['postal_code'] = '';
+        self::assertSame(422, $this->put($this->supplierId, $this->employeeId, $czech)->getStatusCode());
+
+        $foreign = $this->completePayload();
+        $foreign['addresses'][0] = array_replace($foreign['addresses'][0], [
+            'street_line' => 'Shevchenka 12',
+            'city' => 'Lviv',
+            'postal_code' => '',
+            'country_code' => 'UA',
+        ]);
+        $response = $this->put($this->supplierId, $this->employeeId, $foreign);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $stored = $this->db->pdo()->prepare('SELECT postal_code, country_code FROM payroll_person_addresses WHERE supplier_id = ? ORDER BY id DESC LIMIT 1');
+        $stored->execute([$this->supplierId]);
+        self::assertSame(['postal_code' => '', 'country_code' => 'UA'], $stored->fetch(\PDO::FETCH_ASSOC));
     }
 
     public function testStoredOverlapAndStaleVersionAreRejectedWithoutMutation(): void

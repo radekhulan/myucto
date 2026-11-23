@@ -11,6 +11,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSnapshotCompression;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 
@@ -57,6 +58,7 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzAnnualEvidenceService $annualEvidence,
         private JmhzEmployerAnnualEvidenceService $employerAnnualEvidence,
         private PayrollDependantJmhzIdentityRepository $childIdentities,
+        private JmhzRunExclusionDeferral $runExclusions,
     ) {}
 
     public function loadVerified(
@@ -143,7 +145,7 @@ final readonly class JmhzPreparationSnapshotService
         }
         $idempotencyHash = hash('sha256', $idempotencyKey, true);
 
-        return $this->repository->transaction(function () use (
+        $result = $this->repository->transaction(function () use (
             $supplierId,
             $sourceRevisionId,
             $environment,
@@ -365,6 +367,9 @@ final readonly class JmhzPreparationSnapshotService
             $this->verifyStored($stored);
             return $this->result($stored, true);
         });
+        $this->runExclusions->deferExcluded($supplierId, $result, $createdBy);
+
+        return $result;
     }
 
     /**
@@ -441,6 +446,7 @@ final readonly class JmhzPreparationSnapshotService
         $eldpSource = $createdBy === null
             ? null
             : $this->eldpEvidence->lockSourceForPreparation($supplierId, $sourceRevisionId);
+        $eldpStored = null;
         foreach ($people as $person) {
             if (!is_array($person) || array_is_list($person)) {
                 continue;
@@ -462,6 +468,11 @@ final readonly class JmhzPreparationSnapshotService
                     ? $employment['id']
                     : 0;
                 if ($employeeId > 0 && $employmentId > 0) {
+                    $eldpStored ??= $this->eldpEvidence->storedForPreparation(
+                        $supplierId,
+                        $environment,
+                        $sourceRevisionId,
+                    );
                     $eldpState = $this->eldpEvidence->ensureForPreparation(
                         $supplierId,
                         $environment,
@@ -469,6 +480,7 @@ final readonly class JmhzPreparationSnapshotService
                         $employmentId,
                         $createdBy,
                         $eldpSource,
+                        $eldpStored,
                     );
                     $eldp = $eldpState['snapshot'];
                     if ($eldp !== null) {
@@ -553,7 +565,7 @@ final readonly class JmhzPreparationSnapshotService
      * totéž zvládne jedním dotazem přes celou firmu.
      *
      * @param array<string,mixed> $input snímek vstupů (`payroll-run-input.v2`)
-     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>,message?:string}>
      */
     public function probeIssues(
         int $supplierId,
@@ -564,6 +576,9 @@ final readonly class JmhzPreparationSnapshotService
     ): array {
         $issues = [];
         $checkedComponents = [];
+        $checkedOffices = [];
+        $periodStart = substr($periodEnd, 0, 8) . '01';
+        $termsChecked = self::monthlyReportBuildable($periodStart);
         $people = $input['people'] ?? [];
         if (!is_array($people) || !array_is_list($people)) {
             return [];
@@ -580,6 +595,22 @@ final readonly class JmhzPreparationSnapshotService
             if (!is_array($employments) || !array_is_list($employments)) {
                 continue;
             }
+            /*
+             * Otázka, zda tytéž děti vyživuje i jiná osoba (10453): sestavení
+             * hlášení se na nezodpovězené zastaví až po schválení mzdy, kdy
+             * odpověď stojí opravnou revizi. Posuzuje se týmž pravidlem.
+             */
+            if ($employeeId > 0 && $employments !== []) {
+                $caregiverIssue = $this->builder->childCaregiverReadinessIssue($person);
+                if ($caregiverIssue !== null) {
+                    $issues[] = [
+                        'code' => $caregiverIssue,
+                        'entity_type' => 'employee',
+                        'entity_id' => $employeeId,
+                        'attribute_ids' => ['10453'],
+                    ];
+                }
+            }
             foreach ($employments as $entry) {
                 if (!is_array($entry) || array_is_list($entry)) {
                     continue;
@@ -588,6 +619,29 @@ final readonly class JmhzPreparationSnapshotService
                 $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
                     ? $employment['id']
                     : 0;
+                /*
+                 * Variabilní symbol registrace u ČSSZ (10221) se s účtárnou
+                 * vztahu zmrazí do snímku běhu. Neplatný (kontrolní číslice,
+                 * kód okresu) zastaví sestavení hlášení až po schválení mzdy
+                 * a oprava stojí opravnou revizi; kontroluje se týmž pravidlem
+                 * ({@see CsszEmployerVariableSymbol::invalidReason()}).
+                 */
+                $officeId = is_array($employment) ? ($employment['office_id'] ?? null) : null;
+                $registration = is_array($employment) ? ($employment['office_registration'] ?? null) : null;
+                $symbol = is_array($registration) ? ($registration['social_security_variable_symbol'] ?? null) : null;
+                if (is_int($officeId) && $officeId > 0 && is_string($symbol) && !isset($checkedOffices[$officeId])) {
+                    $checkedOffices[$officeId] = true;
+                    $invalidReason = CsszEmployerVariableSymbol::invalidReason($symbol);
+                    if ($invalidReason !== null) {
+                        $issues[] = [
+                            'code' => 'jmhz_office_variable_symbol_invalid',
+                            'entity_type' => 'office',
+                            'entity_id' => $officeId,
+                            'attribute_ids' => ['10221'],
+                            'message' => JmhzScenario1DocumentResolver::invalidVariableSymbolMessage($symbol, $invalidReason),
+                        ];
+                    }
+                }
                 if (!$skipIdentity && $employeeId > 0 && $employmentId > 0) {
                     $identity = $this->identitySupplement(
                         $supplierId,
@@ -600,6 +654,19 @@ final readonly class JmhzPreparationSnapshotService
                         $issues[] = self::identityIssue($employmentId, $identity);
                     }
                 }
+                /*
+                 * Místo výkonu práce, druh činnosti a scénář formuláře: příprava
+                 * hlášení je hlídá a dřív se ozvaly až po schválení mzdy, kdy
+                 * náprava stojí přípravu znovu. Kontrolují se touž cestou jako
+                 * v přípravě. U ročníku, jehož hlášení aplikace ještě sestavit
+                 * neumí (01/2027), je blokací samotná verze specifikace;
+                 * pracoviště by tam svádělo k doplňování, které nic nevyřeší.
+                 */
+                if ($termsChecked && $employmentId > 0) {
+                    foreach ($this->builder->termReadinessIssues($entry, $employmentId, $periodStart) as $issue) {
+                        $issues[] = $issue;
+                    }
+                }
                 $inputRows = $entry['inputs'] ?? [];
                 if (!is_array($inputRows) || !array_is_list($inputRows)) {
                     continue;
@@ -608,7 +675,8 @@ final readonly class JmhzPreparationSnapshotService
                  * Chybějící schválený průměr (10345) se dřív ukázal až u zmrazení
                  * hlášení, tedy po schválení revize. Stejně jako zmrazení ho tu
                  * nežádáme u měsíce bez příjmu (nulový formulář, viz
-                 * JmhzZeroReportProfile); jinak průměr patří do snímku vstupů.
+                 * JmhzZeroReportProfile) ani u scénáře, jehož formulář pole nemá;
+                 * jinak průměr patří do snímku vstupů.
                  */
                 if ($employmentId > 0
                     && ($entry['average_earning'] ?? null) === null
@@ -616,6 +684,7 @@ final readonly class JmhzPreparationSnapshotService
                         static fn (mixed $row): mixed => is_array($row) ? ($row['amount_minor'] ?? null) : null,
                         $inputRows,
                     ))
+                    && $this->builder->averageEarningRequired($entry, substr($periodEnd, 0, 8) . '01')
                 ) {
                     $issues[] = [
                         'code' => 'jmhz_average_hourly_earning_missing',
@@ -654,8 +723,93 @@ final readonly class JmhzPreparationSnapshotService
                 }
             }
         }
+        // Roční údaje zaměstnavatele (prosinec, od 2027 každý měsíc): touž
+        // cestou jako příprava, aby je účetní doplnila před schválením mzdy.
+        // Platí i pro ročník, jehož hlášení aplikace zatím sestavit neumí:
+        // na rozdíl od pracoviště je to údaj, který účetní doplnit může
+        // a po aktualizaci aplikace by na něm příprava stála.
+        foreach (JmhzPreparationSnapshotBuilder::employerAnnualIssues(
+            $supplierId,
+            $periodStart,
+            $this->employerAnnualEvidence->snapshotForPreparation($supplierId, $periodStart),
+        ) as $issue) {
+            $issues[] = $issue;
+        }
+        /*
+         * Stav žádosti o roční zúčtování (10319) v lednu a únoru. Zmrazení ho
+         * vyžaduje u každé osoby hlášení, a dřív se ozval až tam — po schválení
+         * běhu, typicky u desítek brigádníků naráz.
+         */
+        $employeeIds = [];
+        foreach ($people as $person) {
+            $employeeId = is_array($person) && is_array($person['employee'] ?? null)
+                ? ($person['employee']['id'] ?? null)
+                : null;
+            if (is_int($employeeId) && $employeeId > 0) {
+                $employeeIds[] = $employeeId;
+            }
+        }
+        foreach ($this->annualEvidence->requestIssuesForProbe(
+            $supplierId,
+            $employeeIds,
+            substr($periodEnd, 0, 8) . '01',
+        ) as $employeeId => $code) {
+            $issues[] = [
+                'code' => $code,
+                'entity_type' => 'employee',
+                'entity_id' => $employeeId,
+                'attribute_ids' => ['10319'],
+            ];
+        }
 
         return $issues;
+    }
+
+    /**
+     * Nálezy nad údaji ZMRAZENÝMI ve snímku běhu, které {@see self::probeIssues()}
+     * posuzuje týmž pravidlem jako sestavení hlášení. Podle nich jde po blokaci
+     * poznat, jestli je údaj mezitím opravený a zbývá jen opravná revize
+     * ({@see JmhzFrozenSourceAdvisor}). Podmínky vztahu se u ročníku, který
+     * aplikace sestavit neumí, neposuzují, proto se tam ani neporovnávají.
+     *
+     * @return list<string>
+     */
+    public static function probedFrozenCodes(string $periodStart): array
+    {
+        $codes = [
+            'jmhz_office_variable_symbol_invalid',
+            'jmhz_scenario1_child_credit_caregiver_unknown',
+            'jmhz_scenario1_child_credit_caregiver_inconsistent',
+            'jmhz_average_hourly_earning_missing',
+        ];
+        if (!self::monthlyReportBuildable($periodStart)) {
+            return $codes;
+        }
+
+        return [
+            ...$codes,
+            'jmhz_workplace_codebooks_unverified',
+            'jmhz_verified_boolean_missing',
+            'jmhz_apz_instrument_missing',
+            'jmhz_temporary_assignment_user_missing',
+            'jmhz_risk_categorization_missing',
+            'jmhz_scenario_activity_code_missing',
+            'jmhz_scenario_activity_code_invalid',
+            'jmhz_scenario_relationship_detail_missing',
+            'jmhz_scenario_relationship_detail_invalid',
+            'jmhz_scenario_relationship_detail_not_applicable',
+        ];
+    }
+
+    private static function monthlyReportBuildable(string $periodStart): bool
+    {
+        try {
+            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($periodStart));
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -695,7 +849,7 @@ final readonly class JmhzPreparationSnapshotService
         string $periodEnd,
     ): array|string {
         try {
-            $identity = $this->identities->sensitiveSnapshotSourceAt(
+            $resolved = $this->identities->sensitivePreparationIdentityAt(
                 $supplierId,
                 $employeeId,
                 $employmentId,
@@ -706,17 +860,13 @@ final readonly class JmhzPreparationSnapshotService
             return $exception instanceof PayrollRegistrationIdentitySnapshotException
                 ? $exception->validationCode
                 : 'jmhz_identity_incomplete';
+        } catch (\InvalidArgumentException) {
+            return 'jmhz_identity_incomplete';
         }
-
-        try {
-            $jmhz = $this->identities->sensitiveJmhzIdentityAt(
-                $supplierId,
-                $employeeId,
-                $employmentId,
-                $environment,
-                $periodEnd,
-            );
-        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+        $identity = $resolved['source'];
+        $jmhz = $resolved['jmhz'];
+        $exception = $resolved['identifier_error'];
+        if ($exception instanceof PayrollRegistrationIdentitySnapshotException) {
             if (!in_array(
                 $exception->validationCode,
                 self::IDENTIFIERS_NOT_ASSIGNED_YET,
@@ -738,7 +888,8 @@ final readonly class JmhzPreparationSnapshotService
                 'person_external_identifier' => null,
                 'jmhz_employment_external_identifier' => null,
             ];
-        } catch (\DomainException) {
+        }
+        if ($exception !== null || $jmhz === null) {
             return 'jmhz_identity_incomplete';
         }
 

@@ -551,7 +551,7 @@ const TOOL_GROUPS = computed(() => [
   {
     title: 'Účetnictví — jen čtení',
     tools: 'list_accounting_periods, trial_balance, balance_sheet, income_statement, general_ledger, '
-      + 'account_statement, saldo, chart_of_accounts, list_journal_entries, get_journal_entry, cash_journal',
+      + 'account_statement, saldo, chart_of_accounts, list_journal_entries, get_journal_entry, journal_entry_form, cash_journal',
   },
   {
     title: 'Statistika a přehledy',

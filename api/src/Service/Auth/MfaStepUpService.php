@@ -37,13 +37,36 @@ final class MfaStepUpService
      */
     public const OPERATION_BACKUP_PASSWORD = 'backup.password';
 
+    /**
+     * Propojení nebo odpojení identity u poskytovatele. Přidává (nebo bere)
+     * účtu cestu dovnitř, proto stejné ověření jako registrace passkey.
+     */
+    public const OPERATION_OIDC_LINK = 'oidc.link';
+
     public static function domainActivationOperation(int $domainId): string
     {
         if ($domainId < 1) throw new \InvalidArgumentException('Neplatné ID domény.');
         return 'domain.activate:' . $domainId;
     }
 
-    private const METHODS = ['passkey', 'totp', 'recovery'];
+    /**
+     * Reset MFA jiného uživatele superadminem. Proof je vázaný na konkrétní účet,
+     * takže potvrzení jednoho resetu nejde použít na jiný. Záložní kód ho
+     * potvrdit nesmí (není v RECOVERY_OPERATIONS): odebírá cizímu účtu faktory.
+     */
+    public static function userMfaResetOperation(int $userId): string
+    {
+        if ($userId < 1) throw new \InvalidArgumentException('Neplatné ID uživatele.');
+        return 'user.mfa_reset:' . $userId;
+    }
+
+    /**
+     * `oidc` = čerstvé přihlášení u poskytovatele identity s `prompt=login`
+     * (OidcLoginService). U poskytovatele, kterému instalace svěřuje celé
+     * přihlášení včetně MFA, je to rovnocenné passkey. Neprochází
+     * `allowed_mfa_methods`, ten seznam se týká místních faktorů.
+     */
+    private const METHODS = ['passkey', 'totp', 'recovery', 'oidc'];
 
     /**
      * Co smí autorizovat ZÁLOŽNÍ KÓD. Úmyslně užší množina než u skutečných faktorů:
@@ -67,6 +90,7 @@ final class MfaStepUpService
         private readonly MfaStepUpProofStore $proofs,
         private readonly MfaPolicyService $policy,
         private readonly PasskeyCredentialRepository $credentials,
+        private readonly ?LoginPolicyService $loginPolicy = null,
     ) {}
 
     public function assertAllowed(int $userId, string $operation, string $authMethod): string
@@ -75,16 +99,24 @@ final class MfaStepUpService
         if (!in_array($authMethod, self::METHODS, true)) {
             throw new StepUpOperationException('Nepodporovaná metoda step-up ověření.');
         }
+        // Instalace s vynuceným poskytovatelem identity potvrzuje operace jen
+        // jím (viz LoginPolicyService::stepUpMethodAllowed()).
+        if ($this->loginPolicy !== null && !$this->loginPolicy->stepUpMethodAllowed($authMethod)) {
+            throw new StepUpOperationException('Operaci potvrďte přihlášením přes poskytovatele identity organizace.');
+        }
         $isPasskeyRevoke = preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $passkeyMatches) === 1;
         $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;
+        $isUserMfaReset = preg_match('/^user\.mfa_reset:([1-9][0-9]*)$/D', $operation) === 1;
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_TOTP_ENABLE
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES
             && $operation !== self::OPERATION_BACKUP_PASSWORD
+            && $operation !== self::OPERATION_OIDC_LINK
             && !$isPasskeyRevoke
             && !$isDomainActivation
+            && !$isUserMfaReset
         ) {
             throw new StepUpOperationException('Nepovolený účel step-up ověření.');
         }
@@ -116,6 +148,14 @@ final class MfaStepUpService
         // (`allowed_mfa_methods = ['passkey']` + ztracený klíč). Rozsah operací mu
         // omezuje RECOVERY_OPERATIONS výš.
         if ($authMethod === 'recovery') {
+            return $operation;
+        }
+        if ($authMethod === 'oidc') {
+            if (($operation === self::OPERATION_PASSKEY_REGISTER && !$this->policy->isMethodAllowed('passkey'))
+                || ($operation === self::OPERATION_TOTP_ENABLE && !$this->policy->isMethodAllowed('totp'))
+            ) {
+                throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
+            }
             return $operation;
         }
 
@@ -210,6 +250,25 @@ final class MfaStepUpService
             $authMethod,
             $authCredentialId,
         );
+    }
+
+    public function issueInTransaction(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        string $sessionToken,
+        string $operation,
+        string $authMethod,
+        ?int $authCredentialId = null,
+    ): string {
+        if (!$pdo->inTransaction()) throw new \LogicException('Vydání proofu vyžaduje aktivní transakci.');
+        $operation = $this->assertAllowed($userId, $operation, $authMethod);
+        if ($authMethod === 'passkey' && ($authCredentialId === null
+            || $this->credentials->findActiveForUserByIdForUpdate($pdo, $userId, $authCredentialId) === null)
+        ) {
+            throw new StepUpOperationException('Passkey pro step-up není aktivní.');
+        }
+        return $this->proofs->issueInTransaction($pdo, $cutoff, $userId, $sessionToken, $operation, $authMethod, $authCredentialId);
     }
 
     public function consume(

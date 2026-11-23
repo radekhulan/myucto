@@ -36,6 +36,26 @@ enum PayrollRunCommand: string
     case MARK_PAID = 'mark_paid';
     case CLOSE = 'close';
     case REQUEST_CORRECTION = 'request_correction';
+    /**
+     * „Vzít žádost o opravu zpět" — omylem vyžádaná oprava vrací běh do stavu,
+     * ze kterého se o ni žádalo. Schválená revize se tím nemění, dokud oprava
+     * nebyla otevřená, žádná nová revize nevznikla.
+     */
+    case WITHDRAW_CORRECTION = 'withdraw_correction';
+    /**
+     * „Změnit datum výplaty" před schválením. U běhu se snímkem vznikne nová
+     * revize s novým datem (snímek, lhůty i zákonný výpočet na datu závisí),
+     * u konceptu a zrušeného běhu se změní jen datum.
+     */
+    case CHANGE_PAYMENT_DATE = 'change_payment_date';
+    /**
+     * „Vyřadit osobu z běhu" — nová revize bez osoby, kterou nejde spočítat
+     * (ruční kontrola), aby nezastavila výplatu ostatním. Doplatek jde opravou
+     * běhu za stejné období, viz {@see PayrollRunExclusionFilter}.
+     */
+    case EXCLUDE_EMPLOYEE = 'exclude_employee';
+    /** „Vrátit osobu do běhu" — zruší vyřazení a založí revizi s ní. */
+    case INCLUDE_EMPLOYEE = 'include_employee';
     case REOPEN = 'reopen';
     case CANCEL = 'cancel';
 }

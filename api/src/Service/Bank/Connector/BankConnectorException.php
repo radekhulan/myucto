@@ -28,6 +28,13 @@ final class BankConnectorException extends \RuntimeException
         public readonly ?int $rejectedCount = null,
         /** Bezpečné podrobnosti pro uživatele (např. čísla řádků příkazu), nikdy data banky. */
         public readonly array $details = [],
+        /**
+         * Důvod odmítnutí, jak ho banka vrátila (kód, pole požadavku, text hlášky), očištěný
+         * a zkrácený na šířku sloupců evidence. Ukládá se k odeslání a ukazuje uživateli.
+         *
+         * @var array{code:string,scope:?string,message:?string}|null
+         */
+        public readonly ?array $bankError = null,
     ) {
         parent::__construct($message);
     }

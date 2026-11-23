@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 
 /**
  * Převod evidovaných intervalů nároku na POČET MĚSÍCŮ v roce.
@@ -246,7 +247,8 @@ final class AnnualSettlementClaimMonths
             }
         }
 
-        ksort($byChild);
+        // Pořadí id dítěte, ne textu odkazu (PayrollChildReference).
+        $byChild = PayrollChildReference::sortByDependantId($byChild);
         $children = [];
         $claimedByOtherChildren = [];
         $orders = [];
@@ -297,6 +299,13 @@ final class AnnualSettlementClaimMonths
         // v měsíční větvi (`tax-child-order-gap`). Mezera znamená, že se buď
         // na dítě zapomnělo, nebo je pořadí špatně; obojí mění částku. Kdo
         // žádné dítě neuplatňuje, zvýhodnění nemá a pořadí se neposuzuje.
+        // Výstup v pořadí nároku (§ 35c odst. 1), při shodě podle id dítěte. Kontroly výše
+        // procházejí děti v pořadí id, aby blokátor nezávisel na pořadí řádků.
+        usort($children, static fn (AnnualSettlementChildMonths $a, AnnualSettlementChildMonths $b): int =>
+            PayrollChildReference::compareByClaimOrder($a->order, $a->childReference, $b->order, $b->childReference));
+        usort($claimedByOtherChildren, static fn (array $a, array $b): int =>
+            PayrollChildReference::compareByClaimOrder($a['order'], $a['child_reference'], $b['order'], $b['child_reference']));
+
         ksort($orders);
         if ($children !== []
             && array_keys($orders) !== range(1, count($orders))

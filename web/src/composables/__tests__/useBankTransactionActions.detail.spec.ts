@@ -3,20 +3,23 @@ import { defineComponent, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { useBankTransactionActions, type BankDetailAction, type BankTransactionActions } from '../useBankTransactionActions'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
+import BankPayoutDialog from '@/components/bank/BankPayoutDialog.vue'
+import ActionBar from '@/components/ui/ActionBar.vue'
 import type { BankTransaction, MatchSuggestion, SplitSuggestion } from '@/api/bank'
 
 const mocks = vi.hoisted(() => ({
   bank: { matchCandidates: vi.fn(), splitSuggestions: vi.fn(), matchManual: vi.fn(), matchMultiple: vi.fn(),
-    matchMultiplePurchases: vi.fn(), ignore: vi.fn(), unmatch: vi.fn(), unignore: vi.fn(), createPurchaseInvoice: vi.fn(),
+    matchMultiplePurchases: vi.fn(), matchPayout: vi.fn(), ignore: vi.fn(), unmatch: vi.fn(), unignore: vi.fn(), createPurchaseInvoice: vi.fn(),
     acceptMatchSuggestion: vi.fn(), rejectMatchSuggestion: vi.fn() },
-  isClientRole: false, request: vi.fn(), toast: vi.fn(), push: vi.fn(), canWrite: vi.fn(), canRead: vi.fn(),
+  isClientRole: false, request: vi.fn(), toast: vi.fn(), push: vi.fn(), canWrite: vi.fn(), canRead: vi.fn(), searchOpen: vi.fn(),
   escape: null as null | (() => void),
 }))
 const supplier = reactive({ currentSupplierId: 1 })
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: mocks.canRead, isClientRole: mocks.isClientRole, canWrite: mocks.canWrite }) }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
-vi.mock('@/api/invoices', () => ({ invoicesApi: {} }))
+vi.mock('@/api/invoices', () => ({ invoicesApi: { searchOpen: mocks.searchOpen } }))
 vi.mock('@/api/purchaseInvoices', () => ({ purchaseInvoicesApi: {} }))
 vi.mock('@/api/documentRequests', () => ({ documentRequestsApi: { createFromBankTransaction: mocks.request } }))
 vi.mock('@/api/gopay', () => ({ gopayApi: {} }))
@@ -25,20 +28,23 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toast, error: mocks.toast, info: mocks.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: (_key: string, callback: () => void) => { mocks.escape = callback } }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message, apiErrorCode: () => undefined }))
 
 const wrappers: ReturnType<typeof mount>[] = []
-function setup() {
+function setup(refresh = vi.fn(), fallbackCurrency?: () => string) {
   let actions!: BankTransactionActions
-  wrappers.push(mount(defineComponent({ setup() { actions = useBankTransactionActions({ reload: vi.fn() }); return () => null } })))
+  wrappers.push(mount(defineComponent({ setup() { actions = useBankTransactionActions({ reload: refresh, fallbackCurrency }); return () => null } })))
   return actions
 }
 function row(status: BankTransaction['match_status'] = 'unmatched') {
   return reactive({ id: 7, amount: -25, posted_at: '2099-01-01', currency: 'CZK', match_status: status, ignore_origin: status === 'ignored' ? 'manual' : null } as BankTransaction)
 }
 function close(actions: BankTransactionActions, action: BankDetailAction) {
-  const handlers = { match: actions.closeMatch, create: actions.closeCreate, request: actions.closeRequestDoc, ignore: actions.closeIgnore, unmatch: actions.closeUnmatch }
+  const handlers = { match: actions.closeMatch, payout: actions.closePayout, create: actions.closeCreate, request: actions.closeRequestDoc, ignore: actions.closeIgnore, unmatch: actions.closeUnmatch }
   handlers[action]()
+}
+function payoutRow() {
+  return Object.assign(row(), { amount: 560, source: 'statement' } as const)
 }
 beforeEach(() => {
   vi.resetAllMocks()
@@ -257,14 +263,14 @@ describe('actions opened from bank transaction detail', () => {
     expect(actions.textDetail.value).toBeNull()
   })
 
-  it.each<BankDetailAction>(['create', 'request', 'ignore', 'unmatch'])('does not restore detail after successful %s', async action => {
+  it.each(['create', 'request', 'ignore', 'unmatch'] as const)('does not restore detail after successful %s', async action => {
     const actions = setup(), tx = row(action === 'unmatch' ? 'ignored' : 'unmatched')
     mocks.bank.createPurchaseInvoice.mockResolvedValue({ purchase_invoice_id: 12 })
     mocks.bank.ignore.mockResolvedValue({ ignore_note: null })
     actions.textDetail.value = tx
     await actions.runDetailAction(action)
     actions.createVendorId.value = 3
-    const confirm = { create: actions.submitCreatePurchase, request: actions.submitRequestDoc, ignore: actions.confirmIgnore, unmatch: actions.confirmUnmatch, match: actions.confirmMatch }
+    const confirm = { create: actions.submitCreatePurchase, request: actions.submitRequestDoc, ignore: actions.confirmIgnore, unmatch: actions.confirmUnmatch }
     await confirm[action]()
     close(actions, action)
     await flushPromises()
@@ -297,5 +303,97 @@ describe('actions opened from bank transaction detail', () => {
     await flushPromises()
     expect(actions.textDetail.value).toBeNull()
     expect(actions.matchingTx.value).toBeNull()
+  })
+
+  it('offers payout matching only for unallocated CZK statement credits and eligible staff', () => {
+    const actions = setup(vi.fn(), () => 'EUR')
+    const tx = payoutRow()
+    expect(actions.canRunDetailAction(tx, 'payout')).toBe(true)
+    for (const unavailable of [
+      { amount: -560 }, { currency: null }, { currency: 'EUR' }, { source: 'email_notice' },
+      { match_status: 'manual' }, { match_status: 'auto_partial' }, { match_available: false },
+      { posting: { status: 'posted' } }, { match_reason: 'migration_review' }, { matched_invoice_id: 2 },
+      { matched_other_items: [{ amount: 20 }] },
+    ] as Array<Partial<BankTransaction>>) {
+      expect(actions.canRunDetailAction({ ...tx, ...unavailable }, 'payout')).toBe(false)
+    }
+    mocks.canWrite.mockImplementation(permission => permission === 'bank.match')
+    expect(actions.canRunDetailAction(tx, 'payout')).toBe(false)
+    expect(actions.canRunDetailAction(tx, 'match')).toBe(true)
+    mocks.canWrite.mockReturnValue(true)
+    mocks.isClientRole = true
+    expect(actions.canRunDetailAction(tx, 'payout')).toBe(false)
+  })
+
+  it('uses the advanced tier, keeps the payout dialog after rejection and refreshes after success', async () => {
+    const refresh = vi.fn(), actions = setup(refresh), tx = payoutRow()
+    const allocations = [{ invoice_id: 21, amount_cents: 33600 }, { invoice_id: 22, amount_cents: 22400 }]
+    actions.textDetail.value = tx
+    const wrapper = mount(BankTransactionDialogs, { props: { actions }, global: { stubs: {
+      Modal: { template: '<section><slot /><slot name="footer" /></section>' },
+      ActionBar: true, BankPayoutDialog: true,
+    } } })
+    wrappers.push(wrapper)
+    const action = wrapper.getComponent(ActionBar).props('actions').find(a => a.key === 'payout')
+    expect(action).toMatchObject({ tier: 'advanced', show: true })
+    action?.run?.()
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+    expect(actions.payoutTarget.value).toBe(tx)
+    mocks.bank.matchPayout.mockRejectedValueOnce(new Error('Balance changed'))
+    await actions.confirmPayout(allocations)
+    expect(actions.payoutError.value).toBe('Balance changed')
+    expect(refresh).not.toHaveBeenCalled()
+    actions.closePayout()
+    await flushPromises()
+    expect(actions.textDetail.value).toBe(tx)
+    await actions.runDetailAction('payout')
+    mocks.bank.matchPayout.mockResolvedValueOnce({ matched: true })
+    await actions.confirmPayout(allocations)
+    expect(mocks.bank.matchPayout).toHaveBeenCalledWith(tx.id, allocations)
+    expect(actions.payoutTarget.value).toBeNull()
+    expect(actions.textDetail.value).toBeNull()
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('uses full outstanding balances in cents and only confirms an exact total with two documents', async () => {
+    const document = { currency: 'CZK', client_id: 1, amount_to_pay: 0.30, issue_date: '2099-01-01', invoice_type: 'invoice' }
+    mocks.searchOpen.mockResolvedValue([
+      { ...document, id: 1, remaining_amount: 0.10 },
+      { ...document, id: 2, client_id: 2, remaining_amount: 0.20 },
+      { ...document, id: 3 },
+      { ...document, id: 4, currency: 'EUR' },
+    ])
+    const wrapper = mount(BankPayoutDialog, {
+      props: { transaction: { ...payoutRow(), amount: 0.30 }, saving: false, error: '' },
+      global: { stubs: { Modal: { template: '<section><slot /><slot name="footer" /></section>' }, SearchableSelect: true } },
+    })
+    wrappers.push(wrapper)
+    const picker = () => wrapper.getComponent({ name: 'SearchableSelect' })
+    const optionIds = () => (picker().props('options') as Array<{ value: number }>).map(option => option.value)
+    const confirm = () => wrapper.findAll('button').find(button => button.text() === 'bank.payout.confirm')!
+    const search = async () => {
+      picker().vm.$emit('search', 'Synthetic')
+      await flushPromises()
+    }
+    const select = async (id: number) => {
+      picker().vm.$emit('update:modelValue', id)
+      await flushPromises()
+    }
+    await search()
+    expect(mocks.searchOpen).toHaveBeenCalledWith('Synthetic', 20, 'CZK')
+    expect(optionIds()).toEqual([1, 2, 3])
+    await select(3)
+    expect(confirm().attributes('disabled')).toBeDefined()
+    await wrapper.get('ul button').trigger('click')
+    await search()
+    await select(1)
+    expect(confirm().attributes('disabled')).toBeDefined()
+    await search()
+    expect(optionIds()).toEqual([2, 3])
+    await select(2)
+    expect(confirm().attributes('disabled')).toBeUndefined()
+    await confirm().trigger('click')
+    expect(wrapper.emitted('confirm')).toEqual([[[{ invoice_id: 1, amount_cents: 10 }, { invoice_id: 2, amount_cents: 20 }]]])
   })
 })

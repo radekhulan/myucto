@@ -287,6 +287,8 @@ final class CashJournalDimensionService
         $docs = [];
         if ($m['source_type'] === 'bank') {
             foreach ($defaults->bankDocuments($supplierId, $m['source_id'])['documents'] as $d) {
+                // Členské předpisy existují jen v podvojném účetnictví (deník), daňová evidence je nemá.
+                if ($d['doc_type'] === 'membership_claim') continue;
                 $docs[] = [$d['doc_type'], $d['doc_id'], $d['amount']];
             }
         } elseif ($m['source_type'] === 'cash' && $m['invoice_id'] === null && $m['purchase_invoice_id'] === null) {

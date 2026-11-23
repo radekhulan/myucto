@@ -30,6 +30,7 @@ final class AuthRuntimeConfigContractTest extends TestCase
         foreach ([
             'MYINVOICE_AUTH_REQUIRE_MFA',
             'MYINVOICE_AUTH_MFA_METHODS',
+            'MYINVOICE_OIDC_ENTRA_SKIP_MFA',
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN',
             'MYINVOICE_SESSION_LOCK_AFTER_MINUTES',
         ] as $name) {

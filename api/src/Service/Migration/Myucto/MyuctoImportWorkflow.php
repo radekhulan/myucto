@@ -93,7 +93,8 @@ final class MyuctoImportWorkflow
         string $source,
         ?string $password,
         bool $apply,
-        bool $confirmed
+        bool $confirmed,
+        ?callable $progress = null
     ): array {
         $state = $this->ownedState($supplier, $actor, $token);
         if (($state['status'] ?? '') !== ChunkedUploadStore::STATUS_READY) {
@@ -128,8 +129,8 @@ final class MyuctoImportWorkflow
                     'checked_profile' => null, 'result' => null]);
             }
             try {
-                $package = $this->reader->read($path, $password ?? BackupEncryption::passwordFromConfig($this->config));
-                $report = $this->importer->import($package, $supplier, $actor, $source, !$apply);
+                $package = $this->reader->read($path, $password ?? BackupEncryption::passwordFromConfig($this->config), $progress);
+                $report = $this->importer->import($package, $supplier, $actor, $source, !$apply, $progress);
             } catch (\PDOException $e) {
                 throw $e;
             } catch (\JsonException $e) {
@@ -137,7 +138,8 @@ final class MyuctoImportWorkflow
             } catch (\RuntimeException $e) {
                 throw new MyuctoImportException('import_rejected', $e->getMessage());
             }
-            $root = reset($package['tables']['supplier']);
+            $root = $package['tables']->first('supplier');
+            unset($package);
             $result = ['token' => $token, 'company_name' => $root['company_name'], 'ic' => $root['ic'], 'report' => $report];
             $this->uploads->updateState($supplier, $token, ['checked_source' => $source, 'checked_sha256' => $sha,
                 'checked_profile' => MyuctoImportProfile::VERSION, 'result' => $result]);

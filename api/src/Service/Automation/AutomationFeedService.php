@@ -24,6 +24,7 @@ final class AutomationFeedService
         private readonly BankPostingRuleRepository $rules,
         private readonly LearningStatsProvider $learningStats,
         private readonly BankPostingPreview $previews,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
     ) {}
 
     /**
@@ -34,11 +35,11 @@ final class AutomationFeedService
      *
      * @return list<int>
      */
-    public function allowedSupplierIds(int $userId, bool $isSuperadmin, ?int $boundSupplierId = null): array
+    public function allowedSupplierIds(int $userId, bool $isSuperadmin, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
         $ids = $this->memberAllowedSupplierIds($userId, $isSuperadmin);
-        if ($boundSupplierId === null) return $ids;
-        return in_array($boundSupplierId, $ids, true) ? [$boundSupplierId] : [];
+        if ($boundSupplierId !== null) $ids = in_array($boundSupplierId, $ids, true) ? [$boundSupplierId] : [];
+        return $request !== null ? $this->supplierAccess->filterAllowedSupplierIds($request, $ids) : $ids;
     }
 
     /** @return list<int> */
@@ -69,9 +70,9 @@ final class AutomationFeedService
     }
 
     /** @return array{items:list<array<string,mixed>>,total:int,page:int,per_page:int} */
-    public function feed(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null): array
+    public function feed(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId, $request);
         $suppliers = $query->suppliers === []
             ? $allowed
             : array_values(array_intersect($allowed, array_map('intval', $query->suppliers)));
@@ -155,9 +156,9 @@ final class AutomationFeedService
     }
 
     /** @param list<int> $supplierFilter */
-    public function counts(int $userId, bool $isSuperadmin, ?string $from, ?string $to, array $supplierFilter, ?int $boundSupplierId = null): array
+    public function counts(int $userId, bool $isSuperadmin, ?string $from, ?string $to, array $supplierFilter, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId, $request);
         $ids = $supplierFilter === [] ? $allowed : array_values(array_intersect($allowed, array_map('intval', $supplierFilter)));
         if ($ids === []) return ['auto_today' => 0, 'pending' => 0, 'needs_input' => 0, 'per_supplier' => []];
 
@@ -295,9 +296,9 @@ final class AutomationFeedService
     }
 
     /** @return array{scope:string,items:list<array<string,mixed>>} */
-    public function checklist(int $userId, bool $isSuperadmin, int $supplierId, string $scope, ?string $from, ?string $to, ?int $boundSupplierId = null): array
+    public function checklist(int $userId, bool $isSuperadmin, int $supplierId, string $scope, ?string $from, ?string $to, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $counts = $this->counts($userId, $isSuperadmin, $from, $to, [$supplierId], $boundSupplierId);
+        $counts = $this->counts($userId, $isSuperadmin, $from, $to, [$supplierId], $boundSupplierId, $request);
         $items = [
             ['key' => 'auto_posted_since', 'ok' => true, 'count' => $counts['auto_today'], 'link' => ['route' => '/automation', 'query' => ['tab' => 'auto']]],
             ['key' => 'pending_count', 'ok' => $counts['pending'] === 0, 'count' => $counts['pending'], 'link' => ['route' => '/automation', 'query' => ['tab' => 'pending']]],
@@ -310,9 +311,9 @@ final class AutomationFeedService
     }
 
     /** @return array{items:list<array<string,mixed>>,total:int,page:int,per_page:int} */
-    public function history(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null): array
+    public function history(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId, $request);
         $ids = $query->suppliers === [] ? $allowed : array_values(array_intersect($allowed, $query->suppliers));
         if ($ids === []) return ['items' => [], 'total' => 0, 'page' => $query->page, 'per_page' => $query->perPage];
         [$in, $params] = $this->inClause($ids);
@@ -382,7 +383,7 @@ final class AutomationFeedService
         $stmt = $this->db->pdo()->prepare(
             "SELECT bps.*, bt.posted_at tx_date, DATE(bps.created_at) decision_date,
                     bt.currency tx_currency, bt.description tx_description,
-                    bt.statement_id, bt.amount signed_amount, bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol,
+                    bt.statement_id, bt.amount signed_amount, bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol, bt.card_last4,
                     bs.account_number recipient_account, bs.bank_code recipient_bank,
                     COALESCE(NULLIF(s.display_name,''),s.company_name) supplier_name,
                     r.name rule_name, r.hit_count rule_hit_count, r.approved_streak rule_approved_streak, je.document_no,
@@ -403,6 +404,7 @@ final class AutomationFeedService
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $duplicates = $this->duplicateEntries($rows, $supplierIds);
         $out = [];
+        $ownAccounts = new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db);
         foreach ($rows as $r) {
             $sid = (int) $r['supplier_id'];
             $note = $r['note'] === null ? null : (string) $r['note'];
@@ -411,7 +413,7 @@ final class AutomationFeedService
                 $direction = (float) $r['signed_amount'] >= 0 ? 'incoming' : 'outgoing';
                 $conflicts = [];
                 foreach ($this->rules->findActive($sid, $direction) as $rule) {
-                    if ($this->ruleMatcher->matching($rule, $r)) {
+                    if ($this->ruleMatcher->matching($rule, $ownAccounts->withOwnAccount($sid, $r, $r))) {
                         $conflicts[] = [
                             'id' => $rule['id'], 'name' => $rule['name'],
                             'debit_account_code' => $rule['debit_account_code'],

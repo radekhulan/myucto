@@ -421,6 +421,23 @@ final class PayrollObligationService
             return;
         }
 
+        // Řádné hlášení zmrazené, ale ještě neodeslané (povinnost `open` nebo
+        // `prepared`): opravné hlášení na něj navázat nejde, dokud ho úřad
+        // nepřijme. Samotná věta o opravném hlášení by účetní poslala do slepé
+        // uličky, proto říká obě cesty: neodeslané hlášení zrušit a připravit
+        // znovu ({@see PayrollUnsentSubmissionWithdrawService}), nebo ho
+        // odeslat a změny poslat opravným hlášením.
+        if (in_array($live['status'], ['open', 'prepared'], true)) {
+            throw new \DomainException(
+                "Za období od {$periodStart} už je připravené řádné hlášení agendy "
+                . "{$agendaCode} (povinnost #{$live['id']}), které ještě nebylo odesláno. "
+                . 'Druhé řádné hlášení za totéž období založit nejde. Změnila-li se mzda, '
+                . 'připravené hlášení ve frontě podání zrušte (Mzdy → Podání a hlášení, '
+                . '„Zrušit přípravu“) a připravte ho znovu; nebo ho nejdřív odešlete a změny '
+                . 'pak pošlete opravným hlášením, které lze navázat až na přijaté řádné hlášení.',
+            );
+        }
+
         throw new \DomainException(
             "Za období od {$periodStart} už je evidované řádné hlášení agendy "
             . "{$agendaCode} (povinnost #{$live['id']}). Další změny za tohle "

@@ -240,7 +240,7 @@ final class PayrollJmhzIsdsAction
     ): ?Response {
         // Stejná brána jako u VREP: úřední podání jménem firmy se nespouští
         // přes token, který se dá odcizit a nemá druhý faktor.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

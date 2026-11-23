@@ -39,6 +39,7 @@ final class SupplierResponseExposureTest extends TestCase
     private SettingsAction $action;
     private int $supplierId;
     private int $otherSupplierId;
+    private int $userId;
 
     protected function setUp(): void
     {
@@ -51,6 +52,13 @@ final class SupplierResponseExposureTest extends TestCase
         $pdo->beginTransaction();
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceId);
         $this->otherSupplierId = $this->createIsolatedSupplier($pdo, $sourceId);
+        $roleId = (int) $pdo->query("SELECT id FROM roles WHERE system_key = 'accountant' LIMIT 1")->fetchColumn();
+        self::assertGreaterThan(0, $roleId);
+        $pdo->prepare('INSERT INTO users (email, password_hash, name, role_id) VALUES (?, ?, ?, ?)')
+            ->execute(['supplier-response-' . bin2hex(random_bytes(6)) . '@example.invalid', str_repeat('x', 60), 'Synthetic user', $roleId]);
+        $this->userId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id) VALUES (?, ?), (?, ?)')
+            ->execute([$this->userId, $this->supplierId, $this->userId, $this->otherSupplierId]);
         $pdo->prepare(
             "UPDATE supplier SET health_insurance_number = '9001010001', cssz_vsdp = '1234567890',
                     cssz_ossz_code = '123', logo_path = 'storage/supplier-logos/test.png',
@@ -125,7 +133,7 @@ final class SupplierResponseExposureTest extends TestCase
 
     public function testSupplierByIdWithProfileOnlyReturnsSafeMinimum(): void
     {
-        $request = $this->request(['id' => 999_999_999], $this->role(['profile' => 1]));
+        $request = $this->request(['id' => $this->userId], $this->role(['profile' => 1]));
         $response = $this->action->getSupplierById($request, new Response(), ['id' => (string) $this->supplierId]);
         self::assertSame(200, $response->getStatusCode());
         $data = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
@@ -136,7 +144,7 @@ final class SupplierResponseExposureTest extends TestCase
 
     public function testSupplierByIdFullOnlyForCurrentSupplierWithSettingsRead(): void
     {
-        $request = $this->request(['id' => 999_999_999], $this->role(['profile' => 1, 'settings.company' => 1]));
+        $request = $this->request(['id' => $this->userId], $this->role(['profile' => 1, 'settings.company' => 1]));
 
         $current = json_decode((string) $this->action->getSupplierById($request, new Response(), ['id' => (string) $this->supplierId])->getBody(), true);
         self::assertArrayHasKey('vat_status_history', $current);
@@ -145,6 +153,12 @@ final class SupplierResponseExposureTest extends TestCase
         $other = json_decode((string) $this->action->getSupplierById($request, new Response(), ['id' => (string) $this->otherSupplierId])->getBody(), true);
         self::assertEqualsCanonicalizing(SupplierResponseFields::MINIMAL, array_keys($other),
             'Oprávnění aktuální firmy neopravňuje k plnému detailu jiné firmy.');
+    }
+
+    public function testSupplierByIdRejectsUserWithoutMembership(): void
+    {
+        $request = $this->request(['id' => 999_999_999], $this->role(['profile' => 1]));
+        self::assertSame(404, $this->action->getSupplierById($request, new Response(), ['id' => (string) $this->supplierId])->getStatusCode());
     }
 
     /** @param array<string,int> $permissions */

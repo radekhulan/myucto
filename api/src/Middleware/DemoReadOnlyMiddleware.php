@@ -18,6 +18,14 @@ use Slim\Psr7\Factory\ResponseFactory;
 final class DemoReadOnlyMiddleware implements MiddlewareInterface
 {
     public const ATTR_ENABLED = 'demo.enabled';
+    public const READ_ONLY_MESSAGE = 'Demo režim umožňuje funkce vyzkoušet, změny se ale neukládají.';
+
+    /**
+     * Vydání API tokenu heslem projde jen se zapnutou výjimkou (`demo.password_token_emails`).
+     * Middleware tělo nečte: e-mail ze seznamu kontroluje {@see \MyInvoice\Action\Auth\PasswordTokenAction}
+     * dřív, než ověří heslo.
+     */
+    private const PASSWORD_TOKEN_MUTATION = 'POST /api/auth/password-token';
 
     private const ALLOWED_MUTATIONS = [
         'POST /api/auth/login',
@@ -42,6 +50,8 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
      */
     private const DENIED_READS = [
         '/api/admin/backups',
+        '/api/admin/isds/access',
+        '/api/submissions/isds/access',
         '/api/admin/diagnostics',
         '/api/admin/cron-jobs',
         '/api/admin/update',
@@ -55,6 +65,8 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
         // `sent-emails` čte tentýž `activity_log` jako `activity-log` níž — bez něj
         // by byl seznam nekonzistentní sám se sebou.
         '/api/admin/users',
+        // Aktivní relace nesou e-maily, IP adresy a zařízení skutečných přihlášení.
+        '/api/admin/user-sessions',
         '/api/admin/roles',
         '/api/admin/sent-emails',
         '/api/admin/email-templates',
@@ -76,10 +88,8 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
         // Demo režim ve spravované zákaznické instalaci nemá co dělat; zámek sedí
         // tady, u vynucení, ne jen u zobrazení — jinak by přestalo hlásit demo,
         // ale zápisy by dál blokoval.
-        if (!(new \MyInvoice\Service\System\ManagedModeGuard($this->config))->effectiveFlag(
-            \MyInvoice\Service\System\ManagedModeGuard::KEY_DEMO_ENABLED,
-            (bool) $this->config->get('demo.enabled', false),
-        )) {
+        $demo = new \MyInvoice\Service\Demo\DemoMode($this->config);
+        if (!$demo->enabled()) {
             return $handler->handle($request);
         }
 
@@ -109,6 +119,10 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        if ($method . ' ' . $path === self::PASSWORD_TOKEN_MUTATION && $demo->passwordTokenEmails() !== []) {
+            return $handler->handle($request);
+        }
+
         $route = $this->routes->match($method, $path);
         if ($route !== null
             && $path !== '/api/catalog/exports'
@@ -122,7 +136,7 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
         return Json::error(
             $this->responseFactory->createResponse(403),
             'demo_read_only',
-            'Demo režim umožňuje funkce vyzkoušet, změny se ale neukládají.',
+            self::READ_ONLY_MESSAGE,
             403,
         );
     }
@@ -140,7 +154,7 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
      */
     private function deniedReadLevelMutation(string $path): bool
     {
-        foreach (['/api/automation/recommendations/', '/api/stock/reports/valuation-jobs'] as $prefix) {
+        foreach (['/api/automation/recommendations/', '/api/stock/reports/valuation-jobs', '/api/stock/reports/value-trend-jobs'] as $prefix) {
             if (str_starts_with($path, $prefix)) {
                 return true;
             }

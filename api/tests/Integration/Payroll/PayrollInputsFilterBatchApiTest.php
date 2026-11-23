@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -55,7 +54,7 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
@@ -517,6 +516,12 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
         self::assertSame([$free], $result['cancelled']);
         self::assertSame([$frozen], array_column($result['failed'], 'id'));
         self::assertSame('input_has_movement', $result['failed'][0]['code']);
+        // Zábranu sdílí zrušení, oprava i zaokrouhlení: hláška proto neříká jen
+        // „zrušit ho nelze" a vede na mzdový běh, který vstup drží.
+        $message = (string) $result['failed'][0]['message'];
+        self::assertStringContainsString('nelze změnit ani zrušit', $message);
+        self::assertStringContainsString('Mzdové běhy', $message);
+        self::assertStringNotContainsString('zrušit ho nelze', $message);
     }
 
     /**

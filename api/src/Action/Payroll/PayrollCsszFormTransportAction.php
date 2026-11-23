@@ -178,7 +178,7 @@ final class PayrollCsszFormTransportAction
         Response $response,
         AccessLevel $level = AccessLevel::WRITE,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Odeslání podání ČSSZ vyžaduje přihlášenou relaci účetní.');
         }
         $error = null;

@@ -39,35 +39,26 @@ final class BankMovementListService
         $page = max(1, (int) ($query['page'] ?? 1));
         $perPage = max(1, min(self::MAX_PER_PAGE, (int) ($query['per_page'] ?? 50)));
         $doubleEntry = $this->isDoubleEntry($supplierId);
-        $matchStatus = in_array($query['status'] ?? null, self::MATCH_STATUSES, true) ? (string) $query['status'] : null;
         $result = $this->suggestions->paginateUnposted(
             $supplierId,
             $perPage,
             ($page - 1) * $perPage,
-            [
-                'scope' => $scope,
-                'strict_ownership' => $strictOwnership,
-                'status' => $matchStatus,
-                // Filtr i řazení podle zápisu v deníku dávají smysl jen v podvojném účetnictví.
-                'posting_status' => $doubleEntry ? ($query['posting_status'] ?? null) : null,
-                'year' => isset($query['year']) && (int) $query['year'] > 0 ? (int) $query['year'] : null,
-                'q' => isset($query['q']) ? mb_substr(trim((string) $query['q']), 0, 100) : null,
-                'account' => isset($query['account']) && $query['account'] !== '' ? (string) $query['account'] : null,
-                'sort' => isset($query['sort']) && is_string($query['sort'])
-                    && ($doubleEntry || $query['sort'] !== 'posting') ? $query['sort'] : null,
-                'direction' => isset($query['direction']) && is_string($query['direction']) ? $query['direction'] : null,
-            ],
+            $this->filters($query, $scope, $doubleEntry) + ['strict_ownership' => $strictOwnership],
         );
         $txIds = array_map('intval', array_column($result['items'], 'id'));
         $postingByTx = $this->posting->transactionPostingInfo($supplierId, $txIds);
         $dimensionsByTx = (new DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', $txIds);
-        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry): array {
+        $ruleDimensionTypes = $dimensionsByTx !== null
+            ? (new \MyInvoice\Service\Accounting\Dimension\BankRuleDimensions($this->db))->typesFor($supplierId, $txIds)
+            : [];
+        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $ruleDimensionTypes, $doubleEntry): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
             // Uzavřené účetní období existuje jen v podvojném účetnictví.
             $item['period_closed'] = $doubleEntry && $item['period_closed'];
             if ($dimensionsByTx !== null) {
                 $item['dimensions'] = (object) ($dimensionsByTx[(int) $item['id']] ?? []);
+                $item['rule_dimension_types'] = $ruleDimensionTypes[(int) $item['id']] ?? [];
             }
             return $this->withCzkAmount($supplierId, $item);
         }, $result['items']);
@@ -80,6 +71,43 @@ final class BankMovementListService
             'scope' => $scope,
             'years' => $this->suggestions->transactionYears($supplierId),
             'accounts' => $this->suggestions->transactionAccounts($supplierId),
+        ];
+    }
+
+    /**
+     * „Všech N podle filtru" pro hromadnou akci: id pohybů z výpisů firmy, které
+     * odpovídají týmž filtrům jako {@see list()}, nejvýš `$limit`, a jejich počet.
+     *
+     * @param array<string,mixed> $query query parametry seznamu
+     * @param 'all'|'unposted'    $scope
+     * @return array{ids:list<int>, total:int}
+     */
+    public function listIds(int $supplierId, array $query, string $scope, int $limit): array
+    {
+        return $this->suggestions->listIds($supplierId, $this->filters($query, $scope, $this->isDoubleEntry($supplierId)), $limit);
+    }
+
+    /**
+     * Filtry seznamu z query parametrů.
+     *
+     * @param array<string,mixed> $query
+     * @return array<string,mixed>
+     */
+    private function filters(array $query, string $scope, bool $doubleEntry): array
+    {
+        $matchStatus = in_array($query['status'] ?? null, self::MATCH_STATUSES, true) ? (string) $query['status'] : null;
+        return [
+            'scope' => $scope,
+            'status' => $matchStatus,
+            // Filtr i řazení podle zápisu v deníku dávají smysl jen v podvojném účetnictví.
+            'posting_status' => $doubleEntry ? ($query['posting_status'] ?? null) : null,
+            'year' => isset($query['year']) && (int) $query['year'] > 0 ? (int) $query['year'] : null,
+            'q' => isset($query['q']) ? mb_substr(trim((string) $query['q']), 0, 100) : null,
+            'account' => isset($query['account']) && $query['account'] !== '' ? (string) $query['account'] : null,
+            'sort' => isset($query['sort']) && is_string($query['sort'])
+                && ($doubleEntry || $query['sort'] !== 'posting') ? $query['sort'] : null,
+            'direction' => isset($query['direction']) && is_string($query['direction']) ? $query['direction'] : null,
+            'id' => isset($query['id']) && (int) $query['id'] > 0 ? (int) $query['id'] : null,
         ];
     }
 

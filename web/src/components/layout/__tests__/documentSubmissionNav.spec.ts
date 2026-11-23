@@ -18,6 +18,9 @@ const profiles = {
   client: { isSuperadmin: false, isClientRole: true, isCompanyAdminRole: false, isAccountantRole: false },
 }
 
+// Výchozí systémové interní role rozsah klienta nemají, dostane ho jen role, které ho správce přidělí.
+const CLIENT_SCOPE_DEFAULTS = ['documents.submit', 'reports.submissions', 'settings.signing_profiles']
+
 const layout = readFileSync(resolve(__dirname, '../AppLayout.vue'), 'utf8')
 const source = ts.createSourceFile('AppLayout.ts', layout.slice(layout.indexOf('>') + 1, layout.indexOf('</script>')), ts.ScriptTarget.Latest, true)
 const required = new Set(['navSections', 'accountantFirst', 'navPermission', 'filterNavigation', 'canExtractPurchase'])
@@ -31,18 +34,18 @@ const navigationCode = ts.transpileModule(declarations.map(declaration => declar
   compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
 }).outputText
 
-function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}) {
+function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean>; demo?: boolean } = {}) {
   const profile = profiles[role]
-  const can = (permission: string) => profile.isSuperadmin
-    || (permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
+  const can = (permission: string, access = 'read') => profile.isSuperadmin
+    || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (CLIENT_SCOPE_DEFAULTS.includes(permission) ? profile.isClientRole : true))
   const auth = {
     ...profile,
     isAdminPlusRole: false, hasCommercialFeatures: true, hasPayrollFeatures: true,
-    isManagedInstallation: false, isDemo: false, can, canRead: can, canWrite: can,
+    isManagedInstallation: false, isDemo: options.demo === true, can, canRead: can, canWrite: (permission: string) => can(permission, 'write'),
   }
   const evaluate = new Function('computed', 'auth', 'supplierStore', 'clientExperience', 't', 'ICONS',
     'approvalCount', 'accountantSigningProfilesEnabled', 'hostingAttention', 'automationStore', 'canUsePurchaseAiExtraction', 'OPERATIONAL_SETTINGS_KEYS', 'hasFrameworkScope', `${navigationCode}\nreturn navSections;`)
-  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true } },
+  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true, stock_enabled: options.stockEnabled } },
     ref(auth.isClientRole), (key: string) => key, new Proxy({}, { get: (_, key) => String(key) }),
     { pending: ref(0) }, ref(false), ref(null), { actionable: 0 }, canUsePurchaseAiExtraction, OPERATIONAL_SETTINGS_KEYS, hasFrameworkScope) as ComputedRef<NavSection[]>
   return mount(defineComponent({
@@ -62,6 +65,23 @@ describe('AppLayout document submission navigation', () => {
     const wrapper = renderNavigation(role)
     expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(0)
     expect(wrapper.find('a[href="/purchase-invoices/incoming"]').exists()).toBe(true)
+  })
+
+  it('interní role s právem předávat doklady má odkaz v Dokumentech stejně jako superadmin', () => {
+    const wrapper = renderNavigation('accountant', { 'documents.submit': true, 'documents.requests': false })
+    expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(1)
+    expect(wrapper.get('[data-section="documents"] a[href="/portal/purchase-invoice-submissions"]').text()).toBe('nav.submit_documents')
+    // Bez interních Požadavků klientovi vidí požadavky účetní na své straně.
+    expect(wrapper.findAll('[data-section="documents"] a[href="/portal/document-requests"]')).toHaveLength(1)
+    expect(wrapper.find('a[href="/document-requests"]').exists()).toBe(false)
+  })
+
+  it('interní roli s interními požadavky nezdvojuje položku Požadavky', () => {
+    const wrapper = renderNavigation('accountant', { 'documents.submit': true })
+    expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(1)
+    expect(wrapper.find('a[href="/portal/document-requests"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/document-requests"]').exists()).toBe(true)
+    expect(renderNavigation('superadmin').find('a[href="/portal/document-requests"]').exists()).toBe(false)
   })
 })
 
@@ -88,6 +108,8 @@ describe('AppLayout company settings navigation', () => {
     expect(renderNavigation('accountant', base).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.branding': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.payment_qr': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.company.write': true, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.email_templates': true }).find(portal).exists()).toBe(true)
   })
 
@@ -95,6 +117,7 @@ describe('AppLayout company settings navigation', () => {
     const none = Object.fromEntries(OPERATIONAL_SETTINGS_KEYS.map(key => [key, false]))
     expect(renderNavigation('client', none).find(portal).exists()).toBe(false)
     expect(renderNavigation('client', { ...none, 'settings.branding': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('client', { ...none, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
   })
 })
 
@@ -117,5 +140,57 @@ describe('AppLayout client tax submissions', () => {
     expect(allowed.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
     expect(renderNavigation('client', { 'reports.submissions': false, reports: true })
       .find('a[href="/reports/submissions"]').exists()).toBe(false)
+  })
+
+  it('interní role bez agendy výkazů vidí archiv připravených podání jen s vlastním právem', () => {
+    const scoped = renderNavigation('accountant', { 'reports.submissions': true, reports: false })
+    expect(scoped.findAll('a[href="/reports/submissions"]')).toHaveLength(1)
+    expect(scoped.find('a[href="/reports/dph"]').exists()).toBe(false)
+    expect(renderNavigation('accountant', { 'reports.submissions': false, reports: false })
+      .find('a[href="/reports/submissions"]').exists()).toBe(false)
+    expect(renderNavigation('accountant').findAll('a[href="/reports/submissions"]')).toHaveLength(1)
+  })
+})
+
+describe('AppLayout firemní podpisové profily', () => {
+  it('interní role s firemními podpisy dostane Nastavení firmy, jinak ne', () => {
+    const none = Object.fromEntries(OPERATIONAL_SETTINGS_KEYS.map(key => [key, false]))
+    const base = { ...none, 'settings.company.write': true }
+    expect(renderNavigation('accountant', base).find('a[href="/portal/settings"]').exists()).toBe(false)
+    expect(renderNavigation('accountant', { ...base, 'settings.signing_profiles': true }).find('a[href="/portal/settings"]').exists()).toBe(true)
+    expect(renderNavigation('client', { ...none, 'settings.signing_profiles': true }).find('a[href="/portal/settings"]').exists()).toBe(true)
+  })
+})
+
+
+describe('AppLayout a položka menu pro účtování výkazů', () => {
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s bez skladu nemá šablony v menu (otevírají se z Ceníku)', role => {
+    const wrapper = renderNavigation(role, { price_list: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s se skladem má šablony v menu místo Ceníku', role => {
+    const wrapper = renderNavigation(role, { price_list: true }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez práva na Ceník šablony v menu nejsou ani se skladem', () => {
+    const wrapper = renderNavigation('accountant', { price_list: false }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('AppLayout na ukázkové instanci', () => {
+  it('superadmin v demu nemá v menu Uživatele (ani Aktivní relace), mimo demo ano', () => {
+    const demo = renderNavigation('superadmin', {}, { demo: true })
+    expect(demo.find('a[href="/admin/users"]').exists()).toBe(false)
+    demo.unmount()
+    const regular = renderNavigation('superadmin')
+    expect(regular.find('a[href="/admin/users"]').exists()).toBe(true)
+    regular.unmount()
   })
 })

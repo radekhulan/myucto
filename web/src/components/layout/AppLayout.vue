@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { OPERATIONAL_SETTINGS_KEYS } from '@/security/permissions'
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -20,6 +20,7 @@ import GlobalSearch from './GlobalSearch.vue'
 import CommandPalette from './CommandPalette.vue'
 import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import FullscreenToggle from './FullscreenToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import AppBrand from './AppBrand.vue'
 import AppMenuToggle from './AppMenuToggle.vue'
@@ -28,14 +29,22 @@ import { APP_BRAND_LINK, APP_HEADER, APP_HEADER_ROW, DRAWER_ITEM, DRAWER_ITEM_AC
 import DesktopMenuBar from './DesktopMenuBar.vue'
 import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
+import MobileTabBar, { type MobileTab } from './MobileTabBar.vue'
+import MobileNavSheet, { type SheetAction, type SheetLink } from './MobileNavSheet.vue'
+
+// Stav účtů a pokladen se načítá až s nabídkou Peníze, ne s layoutem.
+const MobileMoneySummary = defineAsyncComponent(() => import('./MobileMoneySummary.vue'))
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
+import MaintenanceNoticeBanner from './MaintenanceNoticeBanner.vue'
 import InstancePreviewBar from './InstancePreviewBar.vue'
 import { instanceStatus } from '@/api/instanceStatus'
 import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import WorkspaceWindowSwitcher from '@/components/workspace/WorkspaceWindowSwitcher.vue'
+import WorkspaceWindowTabs from '@/components/workspace/WorkspaceWindowTabs.vue'
+import { windowTabKey } from '@/workspace/windowTabs'
 import WorkspaceWindowButton from '@/components/workspace/WorkspaceWindowButton.vue'
 import WorkspaceReloadButton from '@/components/workspace/WorkspaceReloadButton.vue'
 import WorkspaceFavorites from '@/components/workspace/WorkspaceFavorites.vue'
@@ -44,6 +53,7 @@ import { getWindowManager } from '@/workspace/windowRegistry'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { useToast } from '@/composables/useToast'
+import { ssoErrorCode, takeSsoNotice } from '@/security/oidc'
 import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/composables/useKeyboardShortcuts'
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
@@ -357,6 +367,8 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/recurring', label: t('nav.recurring'), icon: ICONS.recurring, newTo: '/recurring/new' },
           { to: '/projects', label: t('nav.projects'), icon: ICONS.projects, newTo: '/projects/new' },
           ...(!isStockEnabled ? [{ to: '/admin/price-list', label: t('nav.price_list'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
+          // Se skladem Ceník v menu není, šablony účtování výkazů mají vlastní položku.
+          ...(isStockEnabled ? [{ to: '/admin/work-report-billing-templates', label: t('nav.work_report_billing_templates'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
         ],
       },
       {
@@ -480,9 +492,19 @@ const navSections = computed<NavSection[]>(() => {
         // 2) Obchodní data. Předěl nese položka bez zvláštního oprávnění, aby se nikomu neztratil.
         { to: '/clients',          label: t('nav.clients'),    icon: ICONS.clients,   newTo: '/clients/new', dividerBefore: true },
         { to: '/projects',         label: t('nav.projects'),   icon: ICONS.projects },
+        ...(auth.hasCommercialFeatures ? [{ to: '/sales-quotes', label: t('nav.sales_quotes'), icon: ICONS.documents, newTo: '/sales-quotes/new', permission: 'sales_quotes' as const, newPermission: 'sales_quotes.write' as const }] : []),
         ...(!isStockEnabled ? [{
           to: '/admin/price-list',
           label: t('nav.price_list'),
+          icon: ICONS.price_list,
+          permission: 'price_list' as PermissionKey,
+          access: 'read' as const,
+        }] : []),
+        // Se skladem Ceník v menu není (nahrazuje ho katalog), šablony účtování
+        // výkazů proto mají vlastní položku; bez skladu se otevírají z Ceníku.
+        ...(isStockEnabled ? [{
+          to: '/admin/work-report-billing-templates',
+          label: t('nav.work_report_billing_templates'),
           icon: ICONS.price_list,
           permission: 'price_list' as PermissionKey,
           access: 'read' as const,
@@ -499,6 +521,7 @@ const navSections = computed<NavSection[]>(() => {
         // 1) Doklady a jejich pořízení.
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
         { to: '/purchase-invoices/incoming', label: t('nav.incoming_documents'), icon: ICONS.documents, permission: 'documents.inbox' as PermissionKey },
+        { to: '/purchase-invoices/email', label: t('nav.email_documents'), icon: ICONS.email, permission: 'documents.inbox' as PermissionKey },
         // AI import přijaté faktury (§12b) — denní operativa účetní (nahrát PDF → draft PF);
         // nastavení AI brány (klíče, DPA) zůstává v adminu (Firma → AI nastavení).
         // Samostatné oprávnění extrakce zrcadlí backend; readonly ji nevidí.
@@ -554,7 +577,12 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'neutral',
       items: [
         { to: '/documents', label: t('nav.documents'), icon: ICONS.documents },
-        ...(auth.isSuperadmin ? [{ to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey }] : []),
+        { to: '/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc },
+        // Předání dokladů účetní řídí právo `documents.submit` (klient i interní role).
+        { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
+        // Požadavky účetní na straně předávajícího. Kdo vidí interní Požadavky klientovi
+        // (`documents.requests`), má je tam, druhá položka se stejným názvem by mátla.
+        ...(!auth.canRead('documents.requests') ? [{ to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey }] : []),
         { to: '/documents/scan-attach', label: t('scan_attach.nav'), icon: ICONS.documents, permission: 'documents.upload' },
         { to: '/logbook', label: t('nav.logbook'), icon: ICONS.logbook, newTo: '/logbook?tab=trips&new=trip' },
         ...(svjScope && auth.hasCommercialFeatures ? [
@@ -599,37 +627,43 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_taxes'),
       accent: 'danger',
       items: [
+        // 1) DPH.
         { to: '/reports/dph',         label: t('nav.reports_dph'),         icon: ICONS.tax_dph },
         { to: '/reports/kh',          label: t('nav.reports_kh'),          icon: ICONS.tax_kh },
         { to: '/reports/dph-book',    label: t('nav.reports_dph_book'),    icon: ICONS.tax_book },
+        // DPH podle dimenze: rozpad evidence DPH po hodnotách dimenze, jen se zapnutými dimenzemi.
+        ...(dimensionsEnabled ? [{ to: '/reports/vat-by-dimension', label: t('nav.reports_vat_by_dimension'), icon: ICONS.tax_book }] : []),
         { to: '/reports/shv',         label: t('nav.reports_shv'),         icon: ICONS.tax_shv },
         // OSS hned za souhrnným hlášením: obojí je hlášení plnění do jiných členských
         // států, účetní je vyplňuje ve stejné části měsíce.
         ...(ossEnabled ? [{ to: '/reports/oss', label: t('nav.reports_oss'), icon: ICONS.tax_shv }] : []),
-        // Daň z příjmů je komerční modul: základ daně se počítá z výsledku
+        // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
+        // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
+        ...(auth.hasCommercialFeatures ? [
+          { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
+        ] : []),
+        // 2) Daň z příjmů je komerční modul: základ daně se počítá z výsledku
         // hospodaření nebo z peněžního deníku a obojí je za licencí.
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+          { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income, dividerBefore: true },
           // Oznámení o příjmech do zahraničí a zajištění daně (§ 38da, § 38e).
           // Patří sem, ne ke mzdám: § 38da odst. 5 písm. b) vylučuje příjmy
           // podle § 6 odst. 4 a § 38e poslední větou vylučuje závislou činnost,
           // takže se mezd netýkají. Obrazovka byla dostupná jen přímou adresou.
           { to: '/reports/foreign-income', label: t('nav.reports_foreign_income'), icon: ICONS.tax_income },
         ] : []),
-        // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
-        // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
-        ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
-        ] : []),
-        { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin },
-        { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         ...(isOsvc && auth.hasCommercialFeatures ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
+        // 3) Kontroly a podklady.
+        { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin, dividerBefore: true },
+        { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
-        // Úplně dole: EPO podání a archív je poslední krok měsíční agendy — výkaz se
+        // 4) Úplně dole: EPO podání a archív je poslední krok měsíční agendy — výkaz se
         // nejdřív postaví výše v sekci a teďka se podá. Komerční modul (EPO napojení),
         // proto stejné hradítko jako u ostatních placených položek téhle sekce.
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
+          // Bez agendy výkazů stačí archiv připravených podání (`reports.submissions`).
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, dividerBefore: true,
+            permission: (auth.canRead('reports') ? 'reports' : 'reports.submissions') as PermissionKey },
         ] : []),
         // Datová schránka i pro firmu bez mezd: odesílá daňová podání a přijímá
         // doručenky a zprávy od FÚ. Ve Mzdách zůstává taky, tam patří k podáním.
@@ -644,21 +678,35 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_accounting'),
       accent: 'primary',
       items: [
+        // 1) Účetní doklady.
         { to: '/accounting/journal',        label: t('nav.accounting_journal'),  icon: ICONS.accounting, newTo: '/accounting/journal/new' },
-        { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting' },
+        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
+        // Interní doklady (ID) hned pod ostatními pohledávkami a závazky: zápočty, přeúčtování, odpisy, kurzové rozdíly.
+        { to: '/accounting/internal-documents', label: t('nav.internal_documents'), icon: ICONS.documents, permission: 'accounting' as PermissionKey, newTo: '/accounting/internal-documents/new' },
+        // Časové rozlišení (381/384) hned pod interními doklady: položky s plánem rozpouštění.
+        { to: '/accounting/accruals', label: t('nav.accruals'), icon: ICONS.recurring, permission: 'accounting.accruals' as PermissionKey, newTo: '/accounting/accruals/new', newPermission: 'accounting.accruals.write' as PermissionKey },
+        // 2) Automatizace a doúčtování.
+        { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting', dividerBefore: true },
         { to: '/accounting/ai-assistant',   label: t('nav.ai_assistant'),        icon: ICONS.ai, permission: 'accounting' },
         { to: '/accounting/manual-posting-queue', label: t('nav.manual_posting_queue'), icon: ICONS.approvals, permission: 'accounting' },
         // Doúčtování nezaúčtovaných dokladů — po importu historie je to jediná cesta,
         // jak je dostat do deníku. Automatika účtování je háček na vznik dokladu, ne
         // zametač existujících, a hromadné zaúčtování ze seznamu má strop 500 dokladů.
         { to: '/accounting/posting-backfill', label: t('nav.posting_backfill'), icon: ICONS.accounting, permission: 'accounting' },
-        { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book },
+        { to: '/accounting/journal-rebook', label: t('nav.journal_rebook'), icon: ICONS.accounting, permission: 'accounting' },
+        // 3) Sestavy.
+        { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book, dividerBefore: true },
         { to: '/accounting/trial-balance',    label: t('nav.accounting_trial_balance'),    icon: ICONS.stats },
         { to: '/accounting/balance-sheet',    label: t('nav.accounting_balance_sheet'),    icon: ICONS.reports },
         { to: '/accounting/income-statement', label: t('nav.accounting_income_statement'), icon: ICONS.tax_income },
         { to: '/accounting/income-statement-by-function', label: t('nav.accounting_income_statement_by_function'), icon: ICONS.tax_income },
         ...(dimensionsEnabled ? [{ to: '/accounting/dimension-profit', label: t('nav.accounting_dimension_profit'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
         ...(nonprofitScope ? [{ to: '/accounting/nonprofit-dppo', label: t('nonprofitDppo.title'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
+        { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
+        // 4) Ostatní: kontroly a nastavení. Předěl nese položka bez zvláštního oprávnění, aby se nikomu neztratil.
+        { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals, dividerBefore: true },
+        { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
+        { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/statement-mapping', label: t('nav.accounting_statement_mapping'), icon: ICONS.codebooks, permission: 'accounting' },
         ...(nonprofitScope ? [
           { to: '/accounting/securities/debt', label: t('securitiesDebt.title'), icon: ICONS.accounting, permission: 'accounting' as PermissionKey },
@@ -666,13 +714,6 @@ const navSections = computed<NavSection[]>(() => {
         ...(conversionScope ? [
           { to: '/accounting/framework-conversion', label: t('nav.framework_conversion'), icon: ICONS.accounting, permission: 'accounting' as PermissionKey },
         ] : []),
-        { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
-        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
-        // Interní doklady (ID) hned pod ostatními pohledávkami a závazky: zápočty, přeúčtování, odpisy, kurzové rozdíly.
-        { to: '/accounting/internal-documents', label: t('nav.internal_documents'), icon: ICONS.documents, permission: 'accounting' as PermissionKey, newTo: '/accounting/internal-documents/new' },
-        { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
-        { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },
-        { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
         { to: '/accounting/parallel-run',     label: t('nav.accounting_parallel_run'),     icon: ICONS.approvals, permission: 'accounting' },
         // Mzdová rekapitulace zůstává ZDE záměrně: položky nejdou přetáhnout mezi
         // sekcemi (useNavOrder), takže přesun do Nástrojů by byl nevratný.
@@ -689,6 +730,7 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_tools'),
       accent: 'primaryDeep',
       items: [
+        // 1) Nastavení účtování.
         { to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' },
         { to: '/accounting/setup-assistant', label: t('nav.accounting_setup_assistant'), icon: ICONS.ai, permission: 'accounting' },
         ...(dimensionsEnabled && nonprofitScope ? [{ to: '/accounting/joint-allocations', label: t('jointAllocations.title'), icon: ICONS.reports, permission: 'accounting' as PermissionKey }] : []),
@@ -697,27 +739,28 @@ const navSections = computed<NavSection[]>(() => {
         ...(auth.canRead('accounting.templates') ? [] : [{ to: '/admin/bank-rule-templates', label: t('nav.bank_rule_templates'), icon: ICONS.bank, permission: 'bank.rules' as PermissionKey }]),
         { to: '/accounting/accounts',       label: t('nav.accounting_accounts'), icon: ICONS.codebooks },
         { to: '/accounting/offsets',          label: t('nav.accounting_offsets'),          icon: ICONS.coin },
-        { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
-        { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports },
+        // 2) Daňové a inventurní přehledy.
+        { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports, dividerBefore: true },
         { to: '/accounting/section18-statements', label: t('nav.accounting_section18'), icon: ICONS.reports },
         { to: '/reports/related-parties', label: t('nav.reports_related_parties'), icon: ICONS.clients },
         { to: '/reports/s74b', label: t('nav.reports_s74b'), icon: ICONS.recurring },
         // Audit UI mezer 2026-07: dříve backend-only funkce zpřístupněné v menu.
         { to: '/reports/vat-coefficient', label: t('nav.reports_vat_coefficient'), icon: ICONS.tax_income },
         { to: '/reports/s46', label: t('nav.reports_s46'), icon: ICONS.coin },
+        // 3) Uzávěrka, období a správa. Uzávěrka: účetní období vytažená ze záložky Nástrojů
+        // do vlastní položky menu (jen podvojné účetnictví).
+        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals, dividerBefore: true },
+        { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
+        ...(nonprofitScope ? [
+          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals, dividerBefore: true },
+          { to: '/accounting/nonprofit-funding', label: t('nonprofitFunding.title'), icon: ICONS.approvals },
+          { to: '/accounting/nonprofit-membership', label: t('nonprofitMembership.title'), icon: ICONS.approvals },
+        ] : []),
         { to: '/accounting/retention', label: t('nav.accounting_retention'), icon: ICONS.tax_archive },
         // Nástroje — jedna položka, uvnitř záložky pro méně používané/setup funkce
         // (archivy, kurzový režim, repo sazba, předkontace). Hromadný export je
         // samostatná stránka v sekci Daně.
         { to: '/utilities', label: t('nav.accounting_settings'), icon: ICONS.exports },
-        // Uzávěrka — účetní období vytažená ze záložky Nástrojů do vlastní top-level
-        // položky menu (jen podvojné účetnictví).
-        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals },
-        ...(nonprofitScope ? [
-          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals },
-          { to: '/accounting/nonprofit-funding', label: t('nonprofitFunding.title'), icon: ICONS.approvals },
-          { to: '/accounting/nonprofit-membership', label: t('nonprofitMembership.title'), icon: ICONS.approvals },
-        ] : []),
         // EPO podání a archív se přesunulo dolů do sekce Daně — archív podání patří
         // k výkazům, které se jím podávají, ne mezi setup nástroje.
       ],
@@ -772,12 +815,14 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         // 1) Měsíční sled — přehled je rozcestník, zbytek jde v pořadí kroků.
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/month-guide', label: t('nav.payroll_month_guide'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/travel', label: t('nav.payroll_travel'), icon: ICONS.logbook, permission: 'payroll' as PermissionKey },
         { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
+        { to: '/payroll/posting-detail', label: t('nav.payroll_posting_detail'), icon: ICONS.reports, permission: 'payroll.reports' as PermissionKey },
         { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
         { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
         // Roční zúčtování stojí hned za dokumenty, protože je to jejich roční
@@ -840,11 +885,10 @@ const navSections = computed<NavSection[]>(() => {
       { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
       { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
       ...(dimensionsEnabled ? [{ to: '/company/dimensions', label: t('nav.dimensions'), icon: ICONS.codebooks, permission: 'accounting' as PermissionKey }] : []),
-      { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
+      { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens, dividerBefore: true },
       { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
-      { to: '/eet/records',                label: t('eet.records.nav'),     icon: ICONS.cash, permission: 'eet' as PermissionKey },
+      { to: '/eet/records',                label: t('eet.records.nav'),     icon: ICONS.cash, permission: 'eet' as PermissionKey, dividerBefore: true },
       { to: '/eet/settings',               label: t('eet.nav'),             icon: ICONS.cash, permission: 'eet.settings' as PermissionKey },
-      { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
     ],
   })
 
@@ -862,9 +906,11 @@ const navSections = computed<NavSection[]>(() => {
         ] : []),
         ...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers', label: t('nav.suppliers'), icon: ICONS.suppliers }] : []),
         ...(isAdmin ? [
-          { to: '/admin/users',        label: t('nav.users'),      icon: ICONS.users },
+          // Uživatelé a jejich relace jsou na ukázkové instanci skutečné účty, ne demo data.
+          ...(auth.isDemo ? [] : [{ to: '/admin/users', label: t('nav.users'), icon: ICONS.users }]),
           { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
           { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },
+          ...(auth.isDemo ? [] : [{ to: '/admin/access-credentials', label: t('nav.access_credentials'), icon: ICONS.api_tokens }]),
           { to: '/admin/activity-log', label: t('nav.log'),        icon: ICONS.log },
           { to: '/admin/cron-jobs',    label: t('nav.cron_jobs'),  icon: ICONS.cron },
           { to: '/admin/update',       label: t('nav.updates'),    icon: ICONS.updates },
@@ -991,15 +1037,15 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
     items: section.items.filter(item => {
       if (item.external) return true
       if (item.to.startsWith('/portal/settings')) {
-        const allowed = OPERATIONAL_SETTINGS_KEYS.some(permission =>
-          (permission !== 'settings.signing_profiles' || auth.isClientRole) && auth.canWrite(permission))
+        const allowed = OPERATIONAL_SETTINGS_KEYS.some(permission => auth.canWrite(permission))
         if (!allowed || clientExperience.value) return allowed
         // Interní menu má Branding samostatně, QR a šablony v Nastavení firmy
         // a superadmin odesílací profily v Systém → E-maily. Druhá položka se
-        // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde.
+        // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde; firemní
+        // podpisové profily mají jen tady.
         if (auth.isSuperadmin) return false
-        return auth.canWrite('settings.email_profiles') || (!auth.canWrite('settings.company.write')
-          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.email_templates')))
+        return auth.canWrite('settings.email_profiles') || auth.canWrite('settings.signing_profiles') || (!auth.canWrite('settings.company.write')
+          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.invoice_defaults') || auth.canWrite('settings.email_templates')))
       }
       const permission = navPermission(item)
       if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.canWrite('settings.company.write')
@@ -1243,6 +1289,16 @@ function sectionAccent(fullPath: string): string {
 }
 const activeSectionAccent = computed(() => sectionAccent(workspace.activeFullPath))
 
+/** Agenda stránky = položka menu, ke které patří (seznam, detail i úprava faktury sdílejí jednu záložku). */
+function sectionAgenda(fullPath: string): string {
+  const resolved = router.resolve(fullPath)
+  for (const section of orderedNav.value) {
+    const item = section.items.find(candidate => !candidate.external && isActive(candidate, resolved))
+    if (item) return item.to
+  }
+  return `/${resolved.path.split('/')[1] ?? ''}`
+}
+
 /** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => {
   const actions = [
@@ -1343,6 +1399,10 @@ const shortcutActions = computed<ShortcutAction[]>(() => {
   }, {
     id: 'windows.favorites', label: t('favorites.title'), group: 'general',
   }, {
+    id: 'windows.new_tab', label: t('workspace.tab_new'), group: 'general',
+  }, {
+    id: 'windows.close_tab', label: t('workspace.tab_close'), group: 'general',
+  }, {
     // Registruje se vždy, i když v aktuální agendě zakládat nejde — jinak by
     // zkratka zmizela z nastavení v profilu. Prázdné `to` handler ignoruje.
     id: 'create.contextual',
@@ -1400,6 +1460,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
     && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 
+/** Zavře záložku aktivního panelu se všemi jejími okny. */
+function closeActiveTab(): void {
+  const active = workspace.windows.find(window => window.paneId === workspace.activePaneId)
+  if (!active) return
+  const key = windowTabKey(active)
+  void getWindowManager()?.closeWindows(workspace.windows.filter(window => windowTabKey(window) === key).map(window => window.id))
+}
+
 function onGlobalShortcut(event: KeyboardEvent): void {
   if (event.repeat || event.isComposing || sessionSecurity.privacyCurtain) return
   const target = event.target instanceof HTMLElement ? event.target : null
@@ -1427,6 +1495,8 @@ function onGlobalShortcut(event: KeyboardEvent): void {
       else if (action.id === 'windows.next') void manager?.next()
       else if (action.id === 'windows.recent') void manager?.toggleRecent()
       else if (action.id === 'windows.reload' && !workspace.companySwitching) void manager?.reloadPane(workspace.activePaneId)
+      else if (action.id === 'windows.new_tab' && !workspace.companySwitching) void manager?.openTab()
+      else if (action.id === 'windows.close_tab' && !workspace.companySwitching) closeActiveTab()
     }
     return
   }
@@ -1447,17 +1517,12 @@ function onGlobalShortcut(event: KeyboardEvent): void {
   }
 }
 
-/** Ploché položky menu pro globální search (našeptávač skáče přímo na body menu). */
-const flatNavItems = computed(() =>
-  navSections.value.flatMap(s => s.items.map(it => ({ to: it.to, label: it.label, icon: it.icon, external: it.external })))
-)
-
 /**
- * Totéž pro paletu příkazů, ale s kontextem sekce: název jde pod položku jako
- * popisek („Vydané faktury" / Prodej) a accent barví ikonu, takže se výsledky
- * dají rozeznat podle barev, ne jen čtením.
+ * Ploché položky menu pro globální hledání (pole Alt+Q, paleta Ctrl+K i nová
+ * záložka) s kontextem sekce: název jde pod položku jako popisek („Vydané
+ * faktury" / Prodej) a accent barví ikonu.
  */
-const paletteNavItems = computed(() =>
+const searchMenuItems = computed(() =>
   navSections.value.flatMap(s => s.items.map(it => ({
     to: it.to,
     label: it.label,
@@ -1560,9 +1625,238 @@ function syncActivePaneTitle(): void {
   })
 }
 
+// ── Telefon: spodní lišta agend ──
+// Na výšku (bez lišty ikon) nese navigaci spodní lišta Přehled / Prodej / Nákup /
+// Peníze / Menu. Agendy otevírají nabídku s velkými dlaždicemi, Menu celé menu
+// se všemi sekcemi (daně, účetnictví, mzdy, firma, systém).
+type MobileSheetKey = 'sales' | 'purchase' | 'bank_cash'
+const MOBILE_SHEET_KEYS: MobileSheetKey[] = ['sales', 'purchase', 'bank_cash']
+const MOBILE_SHEET_ACCENT: Record<MobileSheetKey, 'primary' | 'warning' | 'success'> = {
+  sales: 'primary',
+  purchase: 'warning',
+  bank_cash: 'success',
+}
+const MOBILE_ICONS = {
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  camera: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9zM15 13a3 3 0 11-6 0 3 3 0 016 0z',
+  receipt: 'M9 14l2 2 4-4M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2z',
+  cashIn: 'M12 4v12m0 0l-4-4m4 4l4-4M4 20h16',
+  cashOut: 'M12 16V4m0 0L8 8m4-4l4 4M4 20h16',
+  search: 'M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z',
+  plus: 'M12 5v14M5 12h14',
+}
+
+const phoneNavigation = computed(() => !isDesktop.value && !tabletNavigationRail.value)
+/** Zásuvka a nabídky na telefonu leží mezi hlavičkou a spodní lištou, obě zůstávají vidět. */
+const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }
+const openDrawerSections = ref<Set<string>>(new Set())
+
+function drawerSectionOpen(key: string): boolean {
+  return openDrawerSections.value.has(key)
+}
+
+function toggleDrawerSection(key: string): void {
+  const next = new Set(openDrawerSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  openDrawerSections.value = next
+}
+
+// Při otevření úplného menu je rozbalená sekce, ve které uživatel právě je.
+watch(mobileOpen, open => {
+  if (!open || !phoneNavigation.value) return
+  const current = orderedNav.value.find(section => sectionIsCurrent(section))
+  openDrawerSections.value = new Set(current ? [current.key] : [])
+})
+const mobileSheet = ref<MobileSheetKey | null>(null)
+
+function mobileSection(key: string): NavSection | undefined {
+  return orderedNav.value.find(section => section.key === key)
+}
+
+function sectionIsCurrent(section: NavSection | undefined): boolean {
+  return !!section?.items.some(item => !item.external && isActive(item))
+}
+
+const homeTarget = computed(() => (clientExperience.value ? '/portal' : '/'))
+
+/** Sekce menu, které na telefonu patří pod záložku (Dokumenty jsou v nabídce Peníze). */
+const MOBILE_TAB_SECTIONS: Record<MobileSheetKey, string[]> = {
+  sales: ['sales'],
+  purchase: ['purchase'],
+  bank_cash: ['bank_cash', 'documents'],
+}
+
+function tabIsCurrent(key: MobileSheetKey): boolean {
+  return MOBILE_TAB_SECTIONS[key].some(section => sectionIsCurrent(mobileSection(section)))
+}
+
+const mobileTabs = computed<MobileTab[]>(() => {
+  const anySheetCurrent = MOBILE_SHEET_KEYS.some(key => tabIsCurrent(key))
+  const tabs: MobileTab[] = [{
+    key: 'home',
+    label: t('nav.dashboard'),
+    icon: ICONS.dashboard,
+    current: activeRoute.value.path === homeTarget.value && !mobileSheet.value && !mobileOpen.value,
+    open: false,
+  }]
+  const labels: Record<MobileSheetKey, string> = {
+    sales: t('nav.section_sales'),
+    purchase: t('nav.section_purchase'),
+    bank_cash: t('nav.section_bank_cash'),
+  }
+  const icons: Record<MobileSheetKey, string> = {
+    sales: ICONS.invoices,
+    purchase: ICONS.purchase,
+    bank_cash: ICONS.coin,
+  }
+  for (const key of MOBILE_SHEET_KEYS) {
+    const section = mobileSection(key)
+    if (!section) continue
+    tabs.push({
+      key,
+      label: labels[key],
+      icon: icons[key],
+      current: tabIsCurrent(key) && !mobileOpen.value && !mobileSheet.value,
+      open: mobileSheet.value === key,
+      badge: section.items.reduce((sum, item) => sum + (item.badge ?? 0), 0) || undefined,
+    })
+  }
+  tabs.push({
+    key: 'menu',
+    label: t('nav.mobile.menu'),
+    icon: MOBILE_ICONS.menu,
+    current: !anySheetCurrent && activeRoute.value.path !== homeTarget.value && !mobileSheet.value && !mobileOpen.value,
+    open: mobileOpen.value,
+  })
+  return tabs
+})
+
+function onMobileTab(key: string): void {
+  quickAddOpen.value = false
+  if (key === 'home') {
+    mobileSheet.value = null
+    mobileOpen.value = false
+    void workspaceNavigation.navigate(homeTarget.value)
+    return
+  }
+  if (key === 'menu') {
+    mobileSheet.value = null
+    mobileOpen.value = !mobileOpen.value
+    return
+  }
+  mobileOpen.value = false
+  mobileSheet.value = mobileSheet.value === key ? null : key as MobileSheetKey
+}
+
+function openMobileSearch(): void {
+  mobileSheet.value = null
+  quickAddOpen.value = false
+  mobileOpen.value = true
+  void nextTick(() => mobileSearchRef.value?.focus())
+}
+
+/** Velké dlaždice nabídky: nejčastější kroky agendy, každý jen s právem k němu. */
+const mobileSheetActions = computed<SheetAction[]>(() => {
+  const key = mobileSheet.value
+  if (!key) return []
+  const can = (to: string) => canCreate({ to, label: '', icon: '', newTo: to })
+  const actions: SheetAction[] = []
+  if (key === 'sales') {
+    if (can('/invoices/new')) {
+      actions.push({ key: 'invoice', to: '/invoices/new', label: t('nav.mobile.issue_invoice'), hint: t('nav.mobile.issue_invoice_hint'), icon: ICONS.invoices })
+      if (supplierStore.currentSupplier?.is_vat_payer !== false && !clientExperience.value) {
+        actions.push({ key: 'receipt', to: '/invoices/new?simplified=1', label: t('nav.mobile.receipt'), hint: t('nav.mobile.receipt_hint'), icon: MOBILE_ICONS.receipt })
+      }
+    }
+    if (auth.canRead('invoices')) {
+      actions.push({ key: 'invoices', to: '/invoices', label: t('nav.invoices'), hint: t('nav.mobile.issued_invoices_hint'), icon: ICONS.invoices })
+    }
+    if (can('/clients/new')) {
+      actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), hint: t('nav.mobile.new_client_hint'), icon: ICONS.clients })
+    }
+  } else if (key === 'purchase') {
+    if (canExtractPurchase.value) {
+      actions.push({ key: 'capture', capture: true, label: t('nav.mobile.capture_document'), hint: t('nav.mobile.capture_document_hint'), icon: MOBILE_ICONS.camera })
+      actions.push({ key: 'ai_upload', to: '/purchase-invoices/ai-import', label: t('nav.mobile.upload_document'), hint: t('nav.mobile.upload_document_hint'), icon: ICONS.imports })
+    }
+    if (can('/purchase-invoices/new')) {
+      actions.push({ key: 'purchase', to: '/purchase-invoices/new', label: t('nav.quick_purchase'), hint: t('nav.mobile.purchase_hint'), icon: ICONS.purchase })
+    }
+    if (can('/clients/new?role=vendor')) {
+      actions.push({ key: 'vendor', to: '/clients/new?role=vendor', label: t('nav.mobile.new_vendor'), hint: t('nav.mobile.new_vendor_hint'), icon: ICONS.suppliers })
+    }
+  } else {
+    const items = mobileSection('bank_cash')?.items ?? []
+    if (items.some(item => item.to === '/accounting/cash') && can('/accounting/cash/new')) {
+      actions.push({ key: 'cash_in', to: '/accounting/cash/new?doc_type=in', label: t('nav.mobile.cash_in'), hint: t('nav.mobile.cash_in_hint'), icon: MOBILE_ICONS.cashIn })
+      actions.push({ key: 'cash_out', to: '/accounting/cash/new?doc_type=out', label: t('nav.mobile.cash_out'), hint: t('nav.mobile.cash_out_hint'), icon: MOBILE_ICONS.cashOut })
+    }
+    if (!clientExperience.value && auth.canRead('invoices')) {
+      actions.push({ key: 'receivables', to: '/invoices?unpaid=1', label: t('nav.mobile.receivables'), hint: t('nav.mobile.receivables_hint'), icon: ICONS.invoices })
+    }
+    if (!clientExperience.value && auth.canRead('purchase_invoices')) {
+      actions.push({ key: 'payables', to: '/purchase-invoices?unpaid=1', label: t('nav.mobile.payables'), hint: t('nav.mobile.payables_hint'), icon: ICONS.payment_orders })
+    }
+    if (!clientExperience.value && auth.canRead('bank')) {
+      actions.push({ key: 'bank_movements', to: '/bank?tab=all_movements', label: t('nav.mobile.bank_movements'), hint: t('nav.mobile.bank_movements_hint'), icon: ICONS.bank })
+    }
+    // Kniha jízd je v sekci Dokumenty: zápis jízdy z auta je typicky telefonní úkon.
+    const logbook = mobileSection('documents')?.items.find(item => item.to === '/logbook')
+    if (logbook && canCreate(logbook)) {
+      actions.push({ key: 'trip', to: createTarget(logbook), label: t('nav.mobile.log_trip'), hint: t('nav.mobile.log_trip_hint'), icon: ICONS.logbook })
+    }
+  }
+  return actions
+})
+
+const mobileSheetLinks = computed<SheetLink[]>(() => {
+  const section = mobileSheet.value ? mobileSection(mobileSheet.value) : undefined
+  return (section?.items ?? []).map(item => ({
+    to: item.to,
+    label: item.label,
+    icon: item.icon,
+    external: item.external,
+    badge: item.badge,
+    active: !item.external && isActive(item),
+  }))
+})
+
+/** Druhá skupina odkazů v nabídce: Peníze nesou i Dokumenty (šestá záložka by se nevešla). */
+const mobileSheetMoreLinks = computed<SheetLink[]>(() => {
+  if (mobileSheet.value !== 'bank_cash') return []
+  return (mobileSection('documents')?.items ?? []).map(item => ({
+    to: item.to,
+    label: item.label,
+    icon: item.icon,
+    external: item.external,
+    badge: item.badge,
+    active: !item.external && isActive(item),
+  }))
+})
+const mobileSheetMoreLabel = computed(() => mobileSection('documents')?.title ?? '')
+
+const mobileMoneyBank = computed(() => mobileSheet.value === 'bank_cash' && !clientExperience.value && auth.canRead('bank'))
+const mobileMoneyCash = computed(() => mobileSheet.value === 'bank_cash'
+  && (mobileSection('bank_cash')?.items.some(item => item.to === '/accounting/cash') ?? false)
+  && auth.canRead('cash'))
+
+function onMobileCapture(file: File): void {
+  mobileSheet.value = null
+  const manager = getWindowManager()
+  if (!manager) {
+    toast.error(t('workspace.load_error'))
+    return
+  }
+  void manager.openPurchaseCapture(file, supplierStore.currentSupplierId, workspace.activePaneId)
+}
+
+watch(phoneNavigation, phone => { if (!phone) mobileSheet.value = null })
+
 // Zavři mobile drawer + popupy po navigaci
 watch([() => workspace.activeFullPath, () => workspace.layoutRevision], () => {
   mobileOpen.value = false
+  mobileSheet.value = null
   userMenuOpen.value = false
   quickAddOpen.value = false
   syncActivePaneTitle()
@@ -1599,6 +1893,9 @@ const licenseBanner = computed<{ variant: 'primary' | 'warning' | 'danger'; text
   return null
 })
 
+/** První věta textu banneru (před pomlčkou) pro telefon. */
+const licenseBannerShort = computed(() => licenseBanner.value?.text.split(/ [-—] /)[0].replace(/[.\s]+$/, '') ?? '')
+
 const versionInfo = ref<PublicVersion | null>(null)
 
 /*
@@ -1612,6 +1909,10 @@ function demoReadOnly(): void {
 }
 
 onMounted(async () => {
+  // Jednorázová hláška po návratu od poskytovatele identity (propojení / chyba).
+  const ssoNotice = takeSsoNotice()
+  if (ssoNotice?.kind === 'linked') toast.success(t('sso.linked_toast'))
+  else if (ssoNotice?.kind === 'error') toast.error(t(`sso.errors.${ssoErrorCode(ssoNotice.code)}`))
   void ensurePrefsLoaded()   // F5: prefetch per-user UI stavu (filtry + preference tabulek)
   void keyboardShortcuts.load()
   window.addEventListener('keydown', onGlobalShortcut)
@@ -1736,7 +2037,58 @@ onBeforeUnmount(() => {
             @logout="logout"
           />
 
-          <AppMenuToggle v-if="!tabletNavigationRail" v-model="mobileOpen" />
+          <!-- Telefon: hledání a zakládání vpravo nahoře, menu je ve spodní liště. -->
+          <template v-if="phoneNavigation">
+            <!-- Okna jsou nahoře: počítadlo ukazuje rozpracované doklady bez otevírání menu. -->
+            <WorkspaceWindowButton class="lg:hidden h-10! w-10! rounded-full! border border-neutral-200 text-neutral-700!" data-testid="mobile-windows" />
+            <WorkspaceReloadButton class="lg:hidden h-10! w-10! rounded-full! border border-neutral-200 text-neutral-700!" />
+            <button
+              type="button"
+              class="lg:hidden inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-neutral-200 text-neutral-700 hover:bg-neutral-100"
+              :aria-label="t('nav.mobile.search')"
+              :title="t('nav.mobile.search')"
+              data-testid="mobile-search"
+              @click="openMobileSearch"
+            >
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="MOBILE_ICONS.search" />
+              </svg>
+            </button>
+            <div v-if="quickActions.length > 0" class="relative lg:hidden">
+              <button
+                type="button"
+                class="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-primary-400 text-[#211A4B] shadow-sm transition-colors hover:bg-primary-300 active:translate-y-px"
+                :aria-label="t('nav.quick_new')"
+                :title="t('nav.quick_new')"
+                :aria-expanded="quickAddOpen"
+                aria-haspopup="menu"
+                data-testid="mobile-quick-add"
+                @click="quickAddOpen = !quickAddOpen; mobileSheet = null; mobileOpen = false"
+              >
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="MOBILE_ICONS.plus" />
+                </svg>
+              </button>
+              <div v-if="quickAddOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="quickAddOpen = false"></div>
+              <div v-if="quickAddOpen" class="absolute right-0 top-full z-40 mt-2 w-64 max-h-[calc(100dvh-var(--app-header-height,3rem)-var(--app-footer-height,3rem)-1rem)] overflow-y-auto overscroll-contain rounded-xl border border-neutral-200 bg-surface py-1 shadow-xl" role="menu">
+                <WorkspaceNavLink
+                  v-for="action in quickActions"
+                  :key="action.to"
+                  :to="action.to"
+                  fresh
+                  class="flex items-center gap-3 px-3 py-3 text-[15px] text-neutral-700 hover:bg-neutral-50 hover:text-primary-700"
+                  role="menuitem"
+                  @click="quickAddOpen = false"
+                >
+                  <svg class="h-5 w-5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="action.icon" />
+                  </svg>
+                  <span>{{ action.label }}</span>
+                </WorkspaceNavLink>
+              </div>
+            </div>
+          </template>
+          <AppMenuToggle v-else-if="!tabletNavigationRail" v-model="mobileOpen" />
         </div>
       </div>
 
@@ -1770,6 +2122,7 @@ onBeforeUnmount(() => {
       <div
         v-if="mobileOpen" @click="mobileOpen = false"
         class="lg:hidden fixed inset-0 bg-black/50 z-20"
+        :style="phoneNavigation ? phoneOverlayStyle : undefined"
         aria-hidden="true"
       ></div>
 
@@ -1791,17 +2144,48 @@ onBeforeUnmount(() => {
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
           mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0',
         ]"
+        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        data-testid="app-drawer"
       >
         <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-slim px-2.5 py-3">
           <!-- Globální vyhledávač (před Přehled) — našeptává menu + hledá klienty/faktury -->
           <div class="lg:hidden">
-            <GlobalSearch ref="mobileSearchRef" :menu-items="flatNavItems" @navigated="mobileOpen = false" />
+            <GlobalSearch ref="mobileSearchRef" :menu-items="searchMenuItems" :quick-actions="quickActions" @navigated="mobileOpen = false" />
           </div>
 
           <template v-for="(section, si) in orderedNav" :key="section.key">
+            <!-- Telefon: sekce jako rozbalovací řádky, jinak by úplné menu bylo
+                 nekonečný seznam. Otevřená je sekce, ve které uživatel je. -->
+            <button
+              v-if="section.title && phoneNavigation"
+              type="button"
+              class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-3 text-left text-[15px] font-semibold text-neutral-800 hover:bg-neutral-100"
+              :class="si === 0 ? '' : 'mt-0.5'"
+              :aria-expanded="drawerSectionOpen(section.key)"
+              :data-section="section.key"
+              @click="toggleDrawerSection(section.key)"
+            >
+              <span
+                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-100"
+                aria-hidden="true"
+              >
+                <svg class="h-[18px] w-[18px] text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="sectionIcon(section)" />
+                </svg>
+              </span>
+              <span class="min-w-0 flex-1 truncate">{{ section.title }}</span>
+              <span class="h-2 w-2 shrink-0 rounded-full" :class="section.accent ? ACCENT_DOT[section.accent] : 'bg-neutral-400'" aria-hidden="true"></span>
+              <svg
+                class="h-4 w-4 shrink-0 text-neutral-400 transition-transform"
+                :class="drawerSectionOpen(section.key) ? 'rotate-180' : ''"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
             <!-- Section title — soft pill; §10: chytni za hlavičku a přetáhni celý blok -->
             <div
-              v-if="section.title"
+              v-else-if="section.title"
               :class="[
                 si === 0 ? 'pt-1 pb-1.5' : 'pt-2.5 pb-1.5 mt-2',
                 // Hairline mezi sekcemi. Při přetahování ho nahradí silnější
@@ -1854,8 +2238,9 @@ onBeforeUnmount(() => {
                  Levá lišta v barvě sekce váže položky k hlavičce nad nimi; sekce
                  bez nadpisu (Nápověda) ji nemá, není co rámovat. -->
             <div
+              v-show="!phoneNavigation || !section.title || drawerSectionOpen(section.key)"
               :class="section.title
-                ? ['ml-2 border-l-2', section.accent ? ACCENT_RAIL[section.accent] : 'border-neutral-200']
+                ? ['border-l-2', section.accent ? ACCENT_RAIL[section.accent] : 'border-neutral-200', phoneNavigation ? 'mb-2 ml-6' : 'ml-2']
                 : ''"
             >
             <template v-for="item in section.items" :key="item.to">
@@ -1896,6 +2281,7 @@ onBeforeUnmount(() => {
                   exact-active-class=""
                   :class="[
                     DRAWER_ITEM,
+                    'max-lg:py-2.5 max-lg:text-[15px]',
                     isActive(item)
                       ? DRAWER_ITEM_ACTIVE
                       : item.accent
@@ -1931,7 +2317,7 @@ onBeforeUnmount(() => {
                   :draggable="false"
                   :title="t('nav.quick_new')"
                   :aria-label="t('nav.quick_new')"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded-md text-neutral-400 hover:text-primary-700 hover:bg-primary-100 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+                  class="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 max-lg:w-8 max-lg:h-8 rounded-md text-neutral-400 hover:text-primary-700 hover:bg-primary-100 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
                 >
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8m4-4H8M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
@@ -1959,7 +2345,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <!-- Mobile only: profil + ovládání relace (na dně sidebaru) -->
-        <div class="lg:hidden shrink-0 border-t border-neutral-200 px-4 py-3 bg-neutral-50 space-y-3">
+        <div class="lg:hidden shrink-0 border-t border-neutral-200 bg-neutral-50" :class="phoneNavigation ? 'space-y-2 px-3 py-2.5' : 'space-y-3 px-4 py-3'">
           <div class="flex items-center justify-between">
             <WorkspaceNavLink
               to="/profile/password"
@@ -1982,17 +2368,44 @@ onBeforeUnmount(() => {
               </svg>
             </a>
           </div>
-          <div class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
+          <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
+               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
+               Zamknutí a odhlášení jsou pro obě podoby tatáž tlačítka, mění se jen vzhled. -->
+          <div :class="phoneNavigation ? 'flex flex-wrap items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
+            <template v-if="phoneNavigation">
+              <LanguageToggle class="h-9! w-10!" />
+              <ThemeToggle class="h-9! w-10!" />
+              <FullscreenToggle />
+              <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
+            </template>
             <button
               v-if="canLockSession"
+              type="button"
+              class="cursor-pointer h-9 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface"
+              :class="phoneNavigation ? 'ml-auto inline-flex w-9 shrink-0 items-center justify-center' : 'w-full px-2 text-sm'"
+              :title="phoneNavigation ? t('session_lock.lock_now') : undefined"
+              :aria-label="phoneNavigation ? t('session_lock.lock_now') : undefined"
               @click="sessionSecurity.lock"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface"
-            >{{ t('session_lock.lock_now') }}</button>
+            >
+              <svg v-if="phoneNavigation" class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v10H5V11z" />
+              </svg>
+              <template v-else>{{ t('session_lock.lock_now') }}</template>
+            </button>
             <button
-              @click="logout"
+              type="button"
+              class="cursor-pointer h-9 border border-neutral-300 rounded-md text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
+              :class="phoneNavigation
+                ? ['inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3', canLockSession ? '' : 'ml-auto']
+                : 'w-full px-2'"
               :disabled="logoutBusy"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
-            >{{ t('nav.logout') }}</button>
+              @click="logout"
+            >
+              <svg v-if="phoneNavigation" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
+              </svg>
+              {{ t('nav.logout') }}
+            </button>
           </div>
           <!-- Klávesové zkratky tu byly, ale na dotykovém zařízení je není čím
                vyvolat — odkaz jen zabíral místo na dně zásuvky. Na desktopu
@@ -2002,14 +2415,15 @@ onBeforeUnmount(() => {
 
       <!-- ── HLAVNÍ OBSAH ── -->
       <div class="flex-1 min-w-0 flex flex-col">
+        <WorkspaceWindowTabs :accent-for="sectionAccent" :disabled="tabletNavigationRail" />
         <!-- Paleta příkazů (Ctrl/⌘+K) — sama si registruje zkratku i teleport,
              stačí ji mít v layoutu jednou. -->
-        <CommandPalette ref="paletteRef" :nav-items="paletteNavItems" :quick-actions="quickActions" />
+        <CommandPalette ref="paletteRef" :nav-items="searchMenuItems" :quick-actions="quickActions" />
         <WorkspaceWindowSwitcher />
         <WorkspaceFavorites />
 
         <main
-          class="flex-1 px-5 sm:px-8 py-6 w-full"
+          class="flex-1 px-4 py-4 sm:px-8 sm:py-6 w-full"
           :class="workspace.paneCount > 1 ? 'workspace-main-multi' : 'workspace-main-single'"
           :data-accent="activeSectionAccent"
         >
@@ -2020,28 +2434,31 @@ onBeforeUnmount(() => {
                dokud backend nic nehlásí (zdravá instalace, vypnutý režim nebo
                zatím NEZMĚŘENÁ spotřeba). -->
           <StorageQuotaBanner />
+          <MaintenanceNoticeBanner poll />
           <div
             v-if="licenseBanner"
-            class="mb-5 rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"
+            class="mb-3 sm:mb-5 rounded-lg border px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
             :class="BANNER_CLASS[licenseBanner.variant]"
           >
-            <span>{{ licenseBanner.text }}</span>
+            <span class="max-md:hidden">{{ licenseBanner.text }}</span>
+            <!-- Telefon: jen první věta, celé znění by zabralo čtvrtinu obrazovky. -->
+            <span class="hidden max-md:inline font-medium">{{ licenseBannerShort }}</span>
             <span class="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <a v-if="['trial', 'trial_expired', 'degraded'].includes(auth.license?.state ?? '')" href="https://myucto.cz/licence" target="_blank" rel="noopener" class="font-medium underline whitespace-nowrap" data-license-buy>
+              <a v-if="['trial', 'trial_expired', 'degraded'].includes(auth.license?.state ?? '')" href="https://myucto.cz/objednavka" target="_blank" rel="noopener" class="font-medium underline whitespace-nowrap" data-license-buy>
                 {{ t('license.banner_buy_web') }}
               </a>
-              <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
+              <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap max-md:hidden">
                 {{ auth.license?.state === 'overage' ? t('license.banner_upgrade_cta') : t('license.banner_cta') }}
               </WorkspaceNavLink>
             </span>
           </div>
-          <WorkspaceHost :accent-for="sectionAccent" />
+          <WorkspaceHost :accent-for="sectionAccent" :agenda-for="sectionAgenda" :menu-items="searchMenuItems" />
         </main>
 
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
              takže nosí i stejnou tmavou plochu. Světlá patička pod tmavou lištou
              působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
-        <footer ref="appFooter" class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
+        <footer ref="appFooter" class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
           <!-- Pod 2xl nese pravý sloupec i ikony oblíbených, oken a panelů, takže má
                šířku podle obsahu (`auto`) a zužuje se hledání vlevo; jinak by přetekl
                přes přepínač firmy uprostřed. -->
@@ -2050,7 +2467,8 @@ onBeforeUnmount(() => {
               <div class="min-w-0 flex-1">
                 <GlobalSearch
                   ref="desktopSearchRef"
-                  :menu-items="flatNavItems"
+                  :menu-items="searchMenuItems"
+                  :quick-actions="quickActions"
                   placement="above"
                   compact
                   :shortcut="searchShortcutLabel"
@@ -2188,7 +2606,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
+          <MobileTabBar v-if="phoneNavigation" class="lg:hidden" :tabs="mobileTabs" :label="t('nav.main_menu')" @select="onMobileTab" />
+          <div v-else class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
             <div class="flex items-center gap-1.5">
               <button
                 v-if="compactNavigationFits"
@@ -2252,6 +2671,47 @@ onBeforeUnmount(() => {
         </footer>
       </div>
     </div>
+
+    <!-- ── TELEFON: nabídka agendy nad spodní lištou ── -->
+    <template v-if="phoneNavigation">
+      <Transition
+        enter-active-class="transition-opacity duration-200"
+        enter-from-class="opacity-0"
+        leave-active-class="transition-opacity duration-150"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="mobileSheet" class="lg:hidden fixed inset-x-0 z-20 bg-black/40" :style="phoneOverlayStyle" aria-hidden="true" @click="mobileSheet = null"></div>
+      </Transition>
+      <Transition
+        enter-active-class="transition-transform duration-200 ease-out"
+        enter-from-class="translate-y-full"
+        leave-active-class="transition-transform duration-150 ease-in"
+        leave-to-class="translate-y-full"
+      >
+        <div
+          v-if="mobileSheet"
+          :key="mobileSheet"
+          class="lg:hidden pointer-events-none fixed inset-x-0 z-20 flex flex-col justify-end pt-6"
+          :style="phoneOverlayStyle"
+        >
+          <MobileNavSheet
+            class="pointer-events-auto"
+            :title="mobileSection(mobileSheet)?.title ?? ''"
+            :accent="MOBILE_SHEET_ACCENT[mobileSheet]"
+            :actions="mobileSheetActions"
+            :links="mobileSheetLinks"
+            :close-label="t('common.close')"
+            :links-label="t('nav.mobile.all_in_section')"
+            :more-links="mobileSheetMoreLinks"
+            :more-links-label="mobileSheetMoreLabel"
+            @close="mobileSheet = null"
+            @capture="onMobileCapture"
+          >
+            <MobileMoneySummary v-if="mobileMoneyBank || mobileMoneyCash" :show-bank="mobileMoneyBank" :show-cash="mobileMoneyCash" />
+          </MobileNavSheet>
+        </div>
+      </Transition>
+    </template>
 
     <!-- ── MODÁL: Podpora autora ── -->
     <div v-if="supportOpen" class="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto"

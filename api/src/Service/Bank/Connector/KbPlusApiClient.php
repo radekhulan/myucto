@@ -375,12 +375,12 @@ final class KbPlusApiClient
             }
         }
         try {
-            $payload = json_encode(
+            $payload = BankPaymentJson::encode(
                 ['batchPaymentDataCollectionRequest' => $payments],
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
                 64,
             );
-        } catch (\JsonException) {
+        } catch (\JsonException|\LogicException) {
             throw $this->invalidPaymentOrder('KB+ dávku nelze bezpečně serializovat.');
         }
         if (strlen($payload) > self::MAX_RESPONSE_BYTES) {
@@ -930,11 +930,9 @@ final class KbPlusApiClient
             && $this->isPaymentAccount($payment['debtorAccount'] ?? null)
             && $this->isPaymentAccount($payment['creditorAccount'] ?? null)
             && is_array($amount)
-            && (is_int($amount['value'] ?? null) || is_float($amount['value'] ?? null))
-            && is_finite((float) $amount['value'])
-            && $amount['value'] >= 0.01
-            && $amount['value'] <= 1000000000000000
-            && round((float) $amount['value'], 2) === (float) $amount['value']
+            && ($amount['value'] ?? null) instanceof BankPaymentAmount
+            && $amount['value']->minor >= 1
+            && $amount['value']->minor <= 100000000000000000
             && is_string($amount['currency'] ?? null)
             && preg_match('/^[A-Z]{3}$/D', $amount['currency']) === 1
             && is_string($payment['requestedExecutionDate'] ?? null)

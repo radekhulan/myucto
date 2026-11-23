@@ -15,6 +15,39 @@ final class BalanceItemImporterTest extends TestCase
         return ['side' => $side, 'cents' => $cents, 'entry_date' => $date, 'account_code' => $account];
     }
 
+    public function testClosedSymbolGroupDropsOutButZeroSymbolDoesNot(): void
+    {
+        $rest = BalanceItemImporter::withoutClosedSymbols([
+            self::line('debit', 5000, '2026-01-01') + ['pairing_symbol' => '123'],
+            self::line('credit', 5000, '2026-09-01') + ['pairing_symbol' => '123'],
+            self::line('debit', 700, '2026-01-01') + ['pairing_symbol' => '0'],
+            self::line('credit', 700, '2026-01-02') + ['pairing_symbol' => '0'],
+            self::line('debit', 900, '2026-01-03') + ['pairing_symbol' => '456'],
+        ]);
+        self::assertSame([700, 700, 900], array_column($rest, 'cents'));
+    }
+
+    public function testOverpaidLineTakesOnlyTheExcess(): void
+    {
+        $group = [
+            self::line('credit', 2257900, '2026-07-01') + ['line_no' => 2],
+            self::line('credit', 100, '2026-07-02') + ['line_no' => 4],
+        ];
+        $line = BalanceItemImporter::overpaidLine($group, -1831300, true, 0);
+        self::assertSame(1831300, $line['cents']);
+        self::assertSame(2, $line['line_no']);
+        self::assertNull(BalanceItemImporter::overpaidLine($group, 500, true, 0), 'Skupina není přeplacená.');
+        self::assertNull(BalanceItemImporter::overpaidLine($group, -1831300, true, 1831300), 'Položka přeplatku už existuje.');
+    }
+
+    public function testNarrowingKeepsDifferenceFromGrowing(): void
+    {
+        $lines = [self::line('credit', 6000, '2026-01-01'), self::line('credit', 3000, '2026-01-02')];
+        self::assertCount(2, BalanceItemImporter::narrowing($lines, -9000, true));
+        self::assertSame([6000], array_column(BalanceItemImporter::narrowing($lines, -7000, true), 'cents'));
+        self::assertSame([], BalanceItemImporter::narrowing($lines, 500, true));
+    }
+
     public function testReturnedPaymentCancelsAcrossPartners(): void
     {
         $rest = BalanceItemImporter::withoutReturns([

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Report;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 
 /**
  * Křížová kontrola DPHDP3 ↔ KH ↔ SH ↔ obrat účtu 343 (audit 2026-07, C8').
@@ -265,6 +266,8 @@ final class VatCrossCheckService
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         // Platby proformy, ke kterým nevznikl vůbec žádný živý DDKP ani finální doklad.
+        // Platba, ze které daň přiznal původní program (úhrada minulého roku z POHODY, platby
+        // převzaté z Money S3), DDKP v MyÚčtu nemá a mít nebude.
         $missing = $this->db->pdo()->prepare(
             "SELECT p.id, p.varsymbol, 'missing' AS invoice_type,
                     SUM(ip.amount) AS total_with_vat, MIN(ip.paid_on) AS tax_date
@@ -274,6 +277,7 @@ final class VatCrossCheckService
                 AND p.invoice_type = 'proforma'
                 AND p.reverse_charge = 0
                 AND ip.paid_on BETWEEN ? AND ?
+                AND NOT " . TakenOverPayment::isTaxDeclaredByOriginSql('ip') . "
                 AND NOT EXISTS (
                     SELECT 1 FROM invoices c
                      WHERE c.supplier_id = p.supplier_id
@@ -361,14 +365,17 @@ final class VatCrossCheckService
                 . "\0" . ($r['code'] ?? '')
                 . "\0" . (empty($r['is_reverse_charge']) ? '0' : '1')
                 . (empty($r['classification_reverse_charge']) ? '0' : '1')
-                . (empty($r['rc_self_assessed_vat']) ? '0' : '1');
+                . (empty($r['rc_self_assessed_vat']) ? '0' : '1')
+                . (empty($r['vat_deduction_none']) ? '0' : '1');
             if (!isset($groups[$key])) {
                 $groups[$key] = array_intersect_key($r, self::GROUP_FIELDS);
                 $groups[$key]['base_czk'] = 0.0;
                 $groups[$key]['vat_czk'] = 0.0;
+                $groups[$key]['deduction_vat_czk'] = 0.0;
             }
             $groups[$key]['base_czk'] += (float) $r['base_czk'];
             $groups[$key]['vat_czk']  += (float) $r['vat_czk'];
+            $groups[$key]['deduction_vat_czk'] += (float) ($r['deduction_vat_czk'] ?? $r['vat_czk']);
         }
         return array_values($groups);
     }
@@ -381,6 +388,7 @@ final class VatCrossCheckService
         'country_iso2' => true, 'country_is_eu' => true,
         'dphdp3_line' => true, 'code' => true,
         'is_reverse_charge' => true, 'classification_reverse_charge' => true, 'rc_self_assessed_vat' => true,
+        'vat_deduction_none' => true,
     ];
 
     /** Má aspoň jeden nález blokovat stažení (nenulový tvrdý rozdíl)? */
@@ -765,13 +773,17 @@ final class VatCrossCheckService
         }
 
         $claimIds = $bookedOnlyPurchase;
+        $cashClaimIds = $bookedOnlyCash;
         foreach ($declaredOnly as $k) {
             [$type, $id] = array_pad(explode(':', (string) $k, 2), 2, '0');
             if ($type === 'purchase_invoice') {
                 $claimIds[] = (int) $id;
+            } elseif ($type === 'cash') {
+                $cashClaimIds[] = (int) $id;
             }
         }
         $claimInfo = $this->ledger->purchaseClaimInfo($supplierId, $claimIds);
+        $cashClaim = $this->ledger->cashClaimInfo($supplierId, $cashClaimIds);
         $outside = $this->entry343Outside($supplierId, $accountId, $declaredOnly, $start, $end);
         $saleNo = $this->docNumbersByIds($supplierId, 'invoices', 'varsymbol', $bookedOnlySale);
         $cashNo = $this->docNumbersByIds($supplierId, 'cash_documents', 'doc_number', $bookedOnlyCash);
@@ -792,7 +804,8 @@ final class VatCrossCheckService
             if (abs($v['declared']) <= self::EPS && abs($v['booked']) > self::EPS) {
                 // Deník ano, přiznání ne. timing_73 smí dostat JEN doklad, který v claim
                 // období reálně vstoupí do přiznání — tj. splní tytéž filtry jako
-                // fetchPurchases (status, advance, nárok na odpočet). Poměrný nárok § 75
+                // fetchPurchases (status, advance, nárok na odpočet); výdajový pokladní
+                // doklad viz větev 'cash' níže. Poměrný nárok § 75
                 // timing nedostane nikdy (procento krácení je per doklad). Krácený nárok
                 // § 76 ano: evidence nese plnou daň (ř. 40k/41k) stejně jako předpis 343
                 // a koeficient se uplatní až souhrnně na ř. 52, takže posun je přesný.
@@ -816,16 +829,40 @@ final class VatCrossCheckService
                     $number ??= $saleNo[$id] ?? null;
                 } elseif ($type === 'cash') {
                     $number ??= $cashNo[$id] ?? null;
+                    // Výdajový pokladní doklad je přijaté plnění jako přijatá faktura: zápis
+                    // 343 k datu účetního případu, odpočet až v období daňového data dokladu
+                    // (§ 73, typicky účtenka proplacená později). timing_73 jen když evidence
+                    // DPH doklad zařadí do jiného období a jeho příspěvek k dani tam odpovídá
+                    // zaúčtovanému netu. Zařazení i příspěvek určuje VatLedgerService
+                    // (cashClaimInfo), ne vlastní kopie filtrů.
+                    $cinfo = $cashClaim[$id] ?? null;
+                    if ($cinfo !== null
+                        && $cinfo['doc_type'] === 'out'
+                        && !$cinfo['proportional']
+                        && ($cinfo['claim_date'] > $end || $cinfo['claim_date'] < $start)
+                        && abs($cinfo['tax_contribution'] - $v['booked']) <= self::ACCOUNT_343_TOLERANCE
+                    ) {
+                        $reason = 'timing_73';
+                        $claimPeriod = substr($cinfo['claim_date'], 0, 7);
+                    }
                 }
             } elseif (abs($v['booked']) <= self::EPS && abs($v['declared']) > self::EPS) {
                 // Přiznání ano, deník v období ne. Zrcadlový timing_73 náleží JEN přijatému
-                // dokladu s plným nárokem, jehož živý net mimo období odpovídá přiznanému
-                // příspěvku — sale/cash zápis v jiném období není § 73 posun a odlišná
-                // částka je věcný rozdíl.
+                // plnění s plným nárokem (přijatá faktura nebo výdajový pokladní doklad),
+                // jehož živý net mimo období odpovídá přiznanému příspěvku. Zápis vydané
+                // faktury nebo příjmového pokladního dokladu (tržby) v jiném období není
+                // § 73 posun a odlišná částka je věcný rozdíl.
                 if (isset($outside[$k])) {
-                    $info = $type === 'purchase_invoice' ? ($claimInfo[$id] ?? null) : null;
-                    $isTiming = $info !== null
-                        && $info['vat_deduction'] !== 'proportional'
+                    if ($type === 'purchase_invoice') {
+                        $info = $claimInfo[$id] ?? null;
+                        $fullClaim = $info !== null && $info['vat_deduction'] !== 'proportional';
+                    } elseif ($type === 'cash') {
+                        $cinfo = $cashClaim[$id] ?? null;
+                        $fullClaim = $cinfo !== null && $cinfo['doc_type'] === 'out' && !$cinfo['proportional'];
+                    } else {
+                        $fullClaim = false;
+                    }
+                    $isTiming = $fullClaim
                         && abs($outside[$k]['net'] - $v['declared']) <= self::ACCOUNT_343_TOLERANCE;
                     if ($isTiming) {
                         $reason = 'timing_73';
@@ -896,15 +933,12 @@ final class VatCrossCheckService
      * accountTurnovers (posted_at NOT NULL, bez filtru reversed_by — storno páry se vynetují,
      * entry_date BETWEEN, analytiky přes parent_id) PLUS níže popsané vyloučení úhrad/vratek DPH.
      *
-     * VYLOUČENÍ ÚHRAD/VRATEK DPH: zápis z banky/pokladny (source_type IN ('bank','cash')),
-     * jehož 343 řádek stojí VÝHRADNĚ proti peněžnímu účtu (211/221/261) a NEobsahuje žádnou
-     * jinou (základovou/nákladovou/výnosovou) protistranu, je vypořádání JIŽ PŘIZNANÉ daně
-     * minulého období na FÚ (nebo vratka nadměrného odpočtu) — pohybuje 343, ale není plněním
-     * období a v přiznání za období nemá protějšek. Kdyby se do obratu započítal, kontrola by
-     * hlásila falešný „nevysvětlený rozdíl" ve výši úhrady a zablokovala stažení. Podmínka
-     * NOT EXISTS (jiná než 343/peněžní protistrana) záměrně NEVYLUČUJE reálné pokladní DPH
-     * doklady (211/6xx/343) ani DPH z bankovních poplatků (568/343/221) — ty základovou/
-     * nákladovou stranu mají, takže zůstávají a dál se řádně smiřují.
+     * VYLOUČENÍ ÚHRAD/VRATEK DPH ({@see Vat343Turnover::settlementLineSql()}, sdílené s kontrolou
+     * 343 po dimenzích): úhrada daně finančnímu úřadu nebo vratka nadměrného odpočtu pohybuje
+     * 343, ale není plněním období a v přiznání za období nemá protějšek. Kdyby se do obratu
+     * započítala, kontrola by hlásila falešný „nevysvětlený rozdíl" ve výši úhrady a zablokovala
+     * stažení. Reálné pokladní DPH doklady (211/6xx/343) ani DPH z bankovních poplatků
+     * (568/343/221) se nevylučují — ty základovou/nákladovou stranu mají a dál se smiřují.
      *
      * @return array<string, array{net:float, entry_date:string}>
      *         klíč "{source_type}:{source_id}" | "manual:{entry_id}" (zápis bez zdroje)
@@ -932,25 +966,9 @@ final class VatCrossCheckService
                 -- uzávěrkový zápis padne jen do Q4, takže dřívější volání za jedno období
                 -- na něj většinou nenarazilo. Je to přitom stejný druh výjimky jako
                 -- vyloučení úhrad DPH níž — jen na něj nikdo nepomyslel.
-                AND e.source_type NOT IN ('closing', 'opening')
-                AND NOT (
-                    e.source_type IN ('bank', 'cash')
-                    AND EXISTS (
-                        SELECT 1 FROM journal_entry_lines ml
-                          JOIN chart_of_accounts mca ON mca.id = ml.account_id
-                         WHERE ml.entry_id = e.id
-                           AND (mca.account_code LIKE '211%' OR mca.account_code LIKE '221%' OR mca.account_code LIKE '261%')
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM journal_entry_lines ol
-                          JOIN chart_of_accounts oca ON oca.id = ol.account_id
-                         WHERE ol.entry_id = e.id
-                           AND oca.account_code NOT LIKE '343%'
-                           AND oca.account_code NOT LIKE '211%'
-                           AND oca.account_code NOT LIKE '221%'
-                           AND oca.account_code NOT LIKE '261%'
-                    )
-                )
+                AND NOT " . Vat343Turnover::bookTransferSql('e') . "
+                -- Úhrada vlastní daně finančnímu úřadu nebo vratka odpočtu (Vat343Turnover).
+                AND NOT " . Vat343Turnover::settlementLineSql('l', 'e') . "
               GROUP BY doc_key
              HAVING ABS(net) > 0.004"
         );
@@ -967,8 +985,9 @@ final class VatCrossCheckService
 
     /**
      * Příspěvek dokladu k dani z přiznání (výstup − vstup), týž klíč jako booked343ByDoc.
-     * sale → +vat_czk; purchase → −vat_czk; purchase RC samovyměření → 0 (výstup i vstup
-     * se vyruší — shodně s předpisem MD 343 / D 343). Mapování klíče = countUnpostedDphDocs:
+     * sale → +vat_czk; purchase → −vat_czk; purchase RC samovyměření → výstup − zrcadlový
+     * odpočet (plný nárok 0, bez nároku +vat_czk, § 75 jen nekrácená část — shodně
+     * s předpisem 343 v PostingService::reverseChargeVatSplit()). Mapování klíče = countUnpostedDphDocs:
      * document_kind='cash' → 'cash', sale → 'invoice', jinak 'purchase_invoice'.
      *
      * @param list<array<string,mixed>> $rows
@@ -987,7 +1006,17 @@ final class VatCrossCheckService
             if ($r['source'] === 'sale') {
                 $contribution = (float) $r['vat_czk'];
             } elseif (VatLedgerService::isSelfAssessedRow($r)) {
-                $contribution = 0.0;
+                // Shodně s VatClassificationMapper::projectDphLines(): bez nároku (§ 72/4)
+                // přiznání zrcadlový odpočet ř. 43/44 potlačí, takže zbývá jen daň na výstupu.
+                // U poměrného nároku § 75 jde do odpočtu jen deduction_vat_czk. Řádek bez
+                // řádku přiznání do přiznání nevstupuje vůbec.
+                if (($r['dphdp3_line'] ?? null) === null) {
+                    $contribution = 0.0;
+                } elseif (!empty($r['vat_deduction_none'])) {
+                    $contribution = (float) $r['vat_czk'];
+                } else {
+                    $contribution = (float) $r['vat_czk'] - (float) ($r['deduction_vat_czk'] ?? $r['vat_czk']);
+                }
             } else {
                 $contribution = -(float) $r['vat_czk'];
             }

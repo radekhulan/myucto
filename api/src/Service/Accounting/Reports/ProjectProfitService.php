@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 use PDO;
 
 /**
@@ -220,15 +221,19 @@ final class ProjectProfitService
         $add($stmt->fetchAll(PDO::FETCH_ASSOC), 'revenue');
 
         // Náklad — přijaté faktury. Zálohové doklady se vynechávají: konečná faktura
-        // je vyúčtuje, takže by se náklad akce započítal dvakrát.
+        // je vyúčtuje, takže by se náklad akce započítal dvakrát. Daňový doklad k platbě
+        // (DDKP) nákladem není nikdy, náklad nese konečná faktura bez odpočtu zálohy
+        // ({@see PurchaseCostSql}), stejně jako v ostatních přehledech nákladů.
         [$dateWhere, $dateParams] = self::dateClause('COALESCE(pi.tax_date, pi.issue_date)', $from, $to);
         $projWhere = $projectId !== null ? ' AND pi.project_id = ?' : '';
+        $cost = PurchaseCostSql::cost('pi', $isVatPayer) . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)";
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pi.project_id, SUM(' . $amount('pi') . ') AS total
-               FROM purchase_invoices pi
+            'SELECT pi.project_id, SUM(' . $cost . ') AS total
+               FROM purchase_invoices pi' . PurchaseCostSql::deductionJoin('pi', $supplierId) . '
+          LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ? AND pi.project_id IS NOT NULL
                 AND pi.status <> \'cancelled\'
-                AND pi.document_kind <> \'advance\''
+                AND pi.document_kind NOT IN (\'advance\', \'tax_document\')'
             . $projWhere . $dateWhere . ' GROUP BY pi.project_id'
         );
         $stmt->execute(array_merge([$supplierId], $projectId !== null ? [$projectId] : [], $dateParams));

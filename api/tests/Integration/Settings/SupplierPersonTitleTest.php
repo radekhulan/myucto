@@ -103,7 +103,7 @@ final class SupplierPersonTitleTest extends TestCase
     {
         $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/supplier')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin', 'is_superadmin' => true])
             ->withParsedBody($body);
         return $byId
             ? $this->action->updateSupplierById($request, new Response(), ['id' => (string) $this->supplierId])

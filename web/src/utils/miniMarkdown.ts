@@ -20,7 +20,7 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
 
-export function renderMarkdown(md: string): string {
+export function renderMarkdown(md: string, quoteImageUrl?: (id: number) => string | undefined): string {
   if (!md) return ''
   const lines = md.replace(/\r\n/g, '\n').split('\n')
   const out: string[] = []
@@ -57,7 +57,7 @@ export function renderMarkdown(md: string): string {
     if (li) {
       while (li.length > 1 && li[li.length - 1].trim() === '') li.pop()
       const block = li.slice(1).some(l => l.trim() === '' || /^\s*([-*]|\d+\.)\s+/.test(l))
-      out.push('<li>' + (block ? renderMarkdown(li.join('\n')) : joinLines(li)) + '</li>')
+      out.push('<li>' + (block ? renderMarkdown(li.join('\n'), quoteImageUrl) : joinLines(li)) + '</li>')
       li = null
     }
   }
@@ -84,7 +84,14 @@ export function renderMarkdown(md: string): string {
   }
 
   function inline(s: string): string {
-    let r = escapeHtml(s)
+    const images: string[] = []
+    const withImageMarkers = quoteImageUrl ? s.replace(/!\[([^\]\n]*)\]\(quote-file:(\d+)\)/g, (_match, alt: string, id: string) => {
+      const url = quoteImageUrl(Number(id))
+      if (!url || !/^\/api\/sales-quotes\/\d+\/files\/\d+(?:\?|$)/.test(url)) return alt
+      const index = images.push(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" data-quote-file="${id}">`) - 1
+      return `\u0001${index}\u0002`
+    }) : s
+    let r = escapeHtml(withImageMarkers)
     r = r.replace(/`([^`]+)`/g, '<code>$1</code>')
     r = r.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     r = r.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '<em>$1</em>')
@@ -96,7 +103,7 @@ export function renderMarkdown(md: string): string {
         ? `<a href="${url}" target="_blank" rel="noopener">${text}</a>`
         : text,
     )
-    return r
+    return images.length ? r.replace(/\u0001(\d+)\u0002/g, (_match, index: string) => images[Number(index)] ?? '') : r
   }
 
   for (let i = 0; i < lines.length; i++) {

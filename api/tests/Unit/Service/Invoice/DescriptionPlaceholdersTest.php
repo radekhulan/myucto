@@ -154,4 +154,17 @@ final class DescriptionPlaceholdersTest extends TestCase
             \MyInvoice\Service\Invoice\MonthSynchronizer::syncTo($evaluated, self::ref()),
         );
     }
+
+    public function testUnknownTokensListsOnlyWhatApplyLeavesUntouched(): void
+    {
+        $known = '{YYYY}{YY}{M}{MM}{MMMM}{Q}{D}{DD}{DATE}{DATE+1Y-1D}{BOM}{EOM-1}{MM+8}{Q-1}{YYYY+8M}';
+        self::assertSame([], DescriptionPlaceholders::unknownTokens('Nájem ' . $known));
+        self::assertSame([], DescriptionPlaceholders::unknownTokens('Bez znaků 03/2026'));
+        self::assertSame(['{FOO}', '{mm}'], DescriptionPlaceholders::unknownTokens('A {FOO} {MM} {mm} {FOO}'));
+        self::assertSame(['{MM+1000}'], DescriptionPlaceholders::unknownTokens('{MM+1000}'));
+        self::assertSame(['{'], DescriptionPlaceholders::unknownTokens('Nájem {MM'));
+        self::assertSame(['}'], DescriptionPlaceholders::unknownTokens('Nájem MM}'));
+        // Faktury dál nechávají neznámé tokeny v textu beze změny.
+        self::assertSame('A {FOO} 05', DescriptionPlaceholders::apply('A {FOO} {MM}', self::ref('2026-05-15'), 'cs'));
+    }
 }

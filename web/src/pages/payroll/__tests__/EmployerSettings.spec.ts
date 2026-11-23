@@ -99,6 +99,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   other_deductions_credit: '379',
   enforcement_deductions_credit: '379',
   enforcement_fee_revenue_credit: '648',
+  statutory_nonpartner_gross_credit: '331',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',
@@ -257,6 +258,8 @@ describe('EmployerSettings — účtová osnova', () => {
       social_security_variable_symbol: '0012345678',
       source_reference: 'synthetic-approved-source',
     }))
+    // Po uložení se dialog zavře sám; dřív zůstal otevřený s prázdným formulářem.
+    expect(document.querySelector('[data-registration-vs]')).toBeNull()
     wrapper.unmount()
   })
 

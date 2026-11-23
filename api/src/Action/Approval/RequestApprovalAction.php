@@ -50,6 +50,7 @@ final class RequestApprovalAction
         private readonly AutoIssueAndSendService $autoIssue,
         private readonly PdfArchiveService $pdfArchive,
         private readonly RecipientResolver $recipients,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -65,16 +66,25 @@ final class RequestApprovalAction
         if (empty($invoice['project_id']) || !($invoice['project_requires_approval'] ?? false)) {
             return Json::error($response, 'not_required', 'Zakázka nevyžaduje schválení výkazu.', 409);
         }
+        if (InvoiceAmountPolicy::hasMissingManualPrice((array) ($invoice['items'] ?? []))) {
+            return Json::error($response, 'manual_price_missing', InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE, 422);
+        }
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),
-                $invoice['parent_invoice_id'] ?? null,
+                InvoiceAmountPolicy::advanceLinkId($invoice),
             )
             && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
             && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
                 && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
         ) {
             return Json::error($response, 'invalid_amount', InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE, 409);
+        }
+
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
 
         // Příjemci — jednotný resolver (#86), účel `approvals`: kontakty klienta

@@ -29,6 +29,10 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
+vi.mock('@/composables/useFormat', () => ({
+  formatDate: (value: string) => value,
+}))
+
 import EmploymentJmhzIdentityPanel from '@/pages/payroll/EmploymentJmhzIdentityPanel.vue'
 
 const missing = {
@@ -281,5 +285,42 @@ describe('EmploymentJmhzIdentityPanel', () => {
     expect(wrapper.get('[data-test="jmhz-identity-save"]').attributes('disabled'))
       .toBeDefined()
     expect(wrapper.text()).toContain('payroll.people.jmhz_identity.permission_required')
+  })
+
+  /*
+   * Holé „Chybí" svádí k ručnímu opisu čísla, které ještě nikdo nepřidělil:
+   * přihláška teprve čeká ve frontě nebo na protokol ČSSZ.
+   */
+  it('u přihlášky na cestě řekne, na co se čeká, místo výzvy k doplnění', async () => {
+    m.get.mockResolvedValue({
+      ...missing,
+      pending_registration: { submission_id: 31, state: 'awaiting_result', submitted_on: '2026-11-11' },
+    })
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.get('[data-test="jmhz-identity-pending-registration"]').text())
+      .toBe('payroll.people.jmhz_identity.pending_awaiting')
+    expect(wrapper.text()).toContain('payroll.people.jmhz_identity.pending_badge.awaiting_result')
+    expect(wrapper.text()).not.toContain('payroll.people.jmhz_identity.incomplete')
+
+    m.get.mockResolvedValue({
+      ...missing,
+      pending_registration: { submission_id: 31, state: 'queued', submitted_on: null },
+    })
+    const queued = mountPanel()
+    await openPanel(queued)
+
+    expect(queued.get('[data-test="jmhz-identity-pending-registration"]').text())
+      .toBe('payroll.people.jmhz_identity.pending_queued')
+    expect(queued.text()).toContain('payroll.people.jmhz_identity.pending_badge.queued')
+  })
+
+  it('bez přihlášky na cestě zůstane výzva k doplnění', async () => {
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.find('[data-test="jmhz-identity-pending-registration"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.people.jmhz_identity.incomplete')
   })
 })

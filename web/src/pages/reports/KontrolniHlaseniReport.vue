@@ -12,6 +12,7 @@ import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
 import PendingApprovalVatNotice from '@/components/reports/PendingApprovalVatNotice.vue'
 import VatBookSectionActions from '@/components/reports/VatBookSectionActions.vue'
+import SubmissionDeadlineCard from '@/components/reports/SubmissionDeadlineCard.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -37,6 +38,10 @@ function sectionBookRoute(section: string) {
 }
 const loading = ref(true)
 const error = ref('')
+const postFilingDocs = computed(() => preview.value?.post_filing_changes?.documents ?? [])
+function formatAmount(value: number): string {
+  return new Intl.NumberFormat(locale.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+}
 
 type KhSectionRow = {
   code: string
@@ -122,14 +127,6 @@ const monthOptions = computed(() =>
 )
 // Distinct roky z dat (issue #33).
 const yearOptions = useYearOptions('combined', year)
-
-const daysToDeadline = computed(() => {
-  if (!preview.value?.summary.submission_deadline) return null
-  const d = new Date(preview.value.summary.submission_deadline)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-})
 
 watch([ready, year, month, effectivePeriod, variant, dZjist, cJedVyzvy], () => {
   if (!ready.value) {
@@ -246,19 +243,33 @@ onMounted(() => { void initialize() })
 
       <PendingApprovalVatNotice :findings="crossCheck" />
 
-      <!-- Deadline card -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
-        <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">{{ t('reports.dph.deadline') }}</div>
-        <div class="text-xl font-bold font-mono"
-          :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-900'">
-          {{ preview.summary.submission_deadline }}
-        </div>
-        <div class="text-xs mt-1"
-          :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-500'">
-          <template v-if="daysToDeadline !== null && daysToDeadline >= 0">{{ t('reports.dph.deadline_in', { n: daysToDeadline }) }}</template>
-          <template v-else-if="daysToDeadline !== null">{{ t('reports.dph.deadline_passed', { n: Math.abs(daysToDeadline) }) }}</template>
-        </div>
+      <!-- Rozdíly dnešního hlášení proti podanému XML -->
+      <div v-if="postFilingDocs.length > 0" data-testid="kh-post-filing"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 space-y-2">
+        <strong>{{ t('reports.kh.post_filing.title') }}</strong>
+        <p class="text-xs">{{ t('reports.kh.post_filing.hint') }}</p>
+        <ul class="list-disc list-inside">
+          <li v-for="d in postFilingDocs" :key="d.section + d.status + d.doc_number">
+            <span class="font-mono">{{ d.section }}</span>
+            <span v-if="d.doc_number" class="font-mono"> {{ d.doc_number }}</span>
+            - {{ t(`reports.kh.post_filing.status.${d.status}`) }}
+            <span class="text-xs text-neutral-500">
+              <template v-if="d.filed">{{ t('reports.kh.post_filing.filed') }}: {{ formatAmount(d.filed.base) }} / {{ formatAmount(d.filed.vat) }}</template>
+              <template v-if="d.filed && d.current"> · </template>
+              <template v-if="d.current">{{ t('reports.kh.post_filing.current') }}: {{ formatAmount(d.current.base) }} / {{ formatAmount(d.current.vat) }}</template>
+            </span>
+          </li>
+        </ul>
+        <RouterLink
+          v-if="preview.post_filing_changes?.submission"
+          :to="`/reports/submissions/${preview.post_filing_changes.submission.id}/kh-evidence`"
+          class="text-xs font-medium underline hover:no-underline"
+          data-testid="kh-post-filing-evidence"
+        >{{ t('reports.kh.post_filing.evidence') }}</RouterLink>
       </div>
+
+      <!-- Deadline card -->
+      <SubmissionDeadlineCard :deadline="preview.summary.submission_deadline" :filed-at="preview.summary.filed_at" />
 
       <!-- Sekce A — plnění s povinností přiznat daň -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

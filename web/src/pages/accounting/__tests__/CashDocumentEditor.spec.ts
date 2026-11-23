@@ -22,6 +22,10 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastWarning: vi.fn(),
   push: vi.fn(),
+  byEntity: vi.fn(),
+  docUpload: vi.fn(),
+  docAddLink: vi.fn(),
+  docRemove: vi.fn(),
 }))
 
 vi.mock('@/api/cash', () => ({
@@ -69,6 +73,29 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery, params: m.routeParams }),
   useRouter: () => ({ push: m.push, replace: m.replace }),
 }))
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: { flags: { preview_open: true } } }),
+  patchPagePrefs: vi.fn(),
+}))
+vi.mock('@/api/documents', () => ({
+  documentsApi: {
+    byEntity: m.byEntity, upload: m.docUpload, addLink: m.docAddLink, remove: m.docRemove,
+    previewUrl: (id: number) => `/documents/${id}/preview`, thumbUrl: () => '', downloadUrl: () => '',
+  },
+}))
+
+vi.mock('@/api/numberSeries', () => ({
+  numberSeriesApi: {
+    options: vi.fn().mockResolvedValue({
+      kind: 'cash_receipt', multiple: true, default_id: 1,
+      series: [
+        { id: 1, name: 'Příjmové', label: '', storage: 'native', prefix: 'PPD', template: '{PREFIX}-{YYYY}-{NNNN}', valid_to: null },
+        { id: 2, name: 'Pokladna B', label: '', storage: 'native', prefix: 'PB', template: '{PREFIX}-{YYYY}-{NNNN}', valid_to: null },
+      ],
+    }),
+  },
+}))
 
 import CashDocumentEditor from '@/pages/accounting/CashDocumentEditor.vue'
 
@@ -106,6 +133,82 @@ describe('CashDocumentEditor.vue', () => {
     m.clientsList.mockResolvedValue({ data: [] })
     m.createDocument.mockResolvedValue({ id: 1, doc_number: 'PPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
     m.searchUnpaid.mockResolvedValue({ items: [], truncated: false })
+    m.byEntity.mockResolvedValue([])
+  })
+
+  it('u uloženého konceptu ukáže přílohu vedle formuláře a na novém dokladu přílohy nečte', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 976, right: 976 } as DOMRect)
+    const fresh = await mountEditor()
+    expect(m.byEntity).not.toHaveBeenCalled()
+    expect(fresh.find('[data-test="cash-preview-toggle"]').exists()).toBe(false)
+
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, status: 'draft', register_id: 1, doc_type: 'out', purpose: 'other', issue_date: '2093-03-01', tax_date: null,
+      partner_name: null, partner_ic: null, partner_dic: null, description: 'Účtenka', vat_mode: 'none', total_amount: 100,
+      amount_foreign: null, fx_rate: null, invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null, vat_lines: [],
+    })
+    m.byEntity.mockResolvedValue([{ id: 7, title: 'uctenka.pdf', doc_type: 'pdf', size_bytes: 1, has_thumb: false }])
+    const edit = await mountEditor()
+
+    expect(m.byEntity).toHaveBeenCalledWith('cash_document', 42)
+    expect(edit.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
+    expect(edit.get('iframe').attributes('src')).toContain('/documents/7/preview')
+    width.mockRestore()
+  })
+
+  async function pickOriginal(wrapper: Awaited<ReturnType<typeof mountEditor>>) {
+    const input = wrapper.get('[data-test="cash-original-file"]')
+    const file = new File(['%PDF-1.4'], 'uctenka.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+  }
+
+  it('nový doklad ukáže vybraný originál vedle formuláře a po uložení ho nahraje a připojí', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 976, right: 976 } as DOMRect)
+    const createUrl = vi.fn(() => 'blob:cash-original')
+    const revokeUrl = vi.fn()
+    Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: revokeUrl })
+    m.createDocument.mockResolvedValue({ id: 55, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
+    m.docUpload.mockResolvedValue({ root_ids: [91], errors: [] })
+    m.docAddLink.mockResolvedValue([])
+    const wrapper = await mountEditor()
+    await pickOriginal(wrapper)
+
+    expect(m.docUpload).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
+    expect(wrapper.get('embed').attributes('src')).toBe('blob:cash-original')
+
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Účtenka'
+    await vm.save(false)
+
+    expect(m.docUpload).toHaveBeenCalledWith([expect.objectContaining({ name: 'uctenka.pdf' })], { zipMode: 'keep' })
+    expect(m.docAddLink).toHaveBeenCalledWith(91, 'cash_document', 55)
+    expect(m.docRemove).not.toHaveBeenCalled()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:cash-original')
+    expect(m.push).toHaveBeenCalledWith('/accounting/cash')
+    width.mockRestore()
+  })
+
+  it('když se originál nepodaří připojit, smaže nahraný dokument a doklad nechá uložený', async () => {
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    m.createDocument.mockResolvedValue({ id: 56, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
+    m.docUpload.mockResolvedValue({ root_ids: [92], errors: [] })
+    m.docAddLink.mockRejectedValue(new Error('403'))
+    m.docRemove.mockResolvedValue({ ok: true })
+    const wrapper = await mountEditor()
+    await pickOriginal(wrapper)
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Účtenka'
+    await vm.save(false)
+
+    expect(m.docRemove).toHaveBeenCalledWith(92)
+    expect(m.toastWarning).toHaveBeenCalledWith('cash.original.attach_failed')
+    expect(m.push).toHaveBeenCalledWith('/accounting/cash')
   })
 
   it('nákup nabídne aktivní nákladové účty a zvolenou analytiku promítne do náhledu i payloadu', async () => {
@@ -321,6 +424,19 @@ describe('CashDocumentEditor.vue', () => {
   })
 
   // ── M-16: koncept / PUT / post jsou z UI dosažitelné ──────────────────────
+  it('nápověda k číslu ukazuje vybranou řadu, ne napevno PPD', async () => {
+    const wrapper = await mountEditor()
+    await (wrapper.vm as any).$nextTick()
+    expect(wrapper.find('[data-test="cash-number-hint"]').text()).toContain('"series":"PPD"')
+
+    const select = wrapper.find('select option[value="2"]').element.parentElement as HTMLSelectElement
+    select.value = '2'
+    await select.dispatchEvent(new Event('change'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cash-number-hint"]').text()).toContain('"series":"PB"')
+  })
+
   it('„Uložit jako koncept" pošle post:false', async () => {
     m.createDocument.mockResolvedValue({ id: 7, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
     const wrapper = await mountEditor()
@@ -637,6 +753,84 @@ describe('CashDocumentEditor: partner u úhrady faktury', () => {
     expect(m.updateDocument).toHaveBeenCalledWith(42, expect.objectContaining({
       invoice_id: 5, partner_name: 'Klient s.r.o.', partner_ic: '12345679', partner_dic: null,
     }))
+  })
+})
+
+// ── #39: cizoměnový doklad hrazený korunami z korunové pokladny ─────────────────
+describe('CashDocumentEditor: korunová úhrada cizoměnového dokladu', () => {
+  const eurPurchase = {
+    id: 7, kind: 'purchase_invoice', number: 'PF-EUR-1', partner_name: 'Dodavatel GmbH', partner_ic: null, partner_dic: null,
+    total: 1000, paid: 0, remaining: 1000, currency_code: 'EUR', issued_on: '2093-01-01', document_kind: 'invoice',
+    exchange_rate: 24, remaining_czk: 24000, czk_tolerance: 960,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    for (const key of Object.keys(m.routeParams)) delete m.routeParams[key]
+    m.listRegisters.mockResolvedValue([register()])
+    m.listRulePresets.mockResolvedValue([])
+    m.listAccounts.mockResolvedValue([])
+    m.listPostingRules.mockResolvedValue({})
+    m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 10000)])
+    m.clientsList.mockResolvedValue({ data: [] })
+    m.createDocument.mockResolvedValue({ id: 1, doc_number: 'VPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
+  })
+
+  it('předvyplní koruny podle kurzu dokladu, nechá je upravit a ukáže kurzovou ztrátu v náhledu', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.doc_type = 'out'
+    vm.form.purpose = 'purchase_payment'
+    await flushPromises()
+
+    vm.pickUnpaid(eurPurchase)
+    await flushPromises()
+    expect(vm.form.total_amount).toBe(24000)
+    expect(vm.amountReadonly).toBe(false)
+    expect(wrapper.find('[data-test="cash-fx-settlement"]').exists()).toBe(true)
+
+    vm.form.total_amount = 24500
+    await flushPromises()
+    expect(wrapper.find('[data-test="cash-fx-difference"]').text()).toContain('cash.form.fx_settlement_loss')
+    expect(vm.previewLines).toEqual([
+      { account_code: '321', side: 'debit', amount: 24000 },
+      { account_code: '211.100', side: 'credit', amount: 24500 },
+      { account_code: '563', side: 'debit', amount: 500 },
+    ])
+
+    await vm.save(true)
+    expect(m.createDocument).toHaveBeenCalledWith(expect.objectContaining({
+      purchase_invoice_id: 7, total_amount: 24500, amount_foreign: null,
+    }))
+  })
+
+  it('korunová částka mimo toleranci se u přijatého dokladu ohlásí', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.doc_type = 'out'
+    vm.form.purpose = 'purchase_payment'
+    await flushPromises()
+    vm.pickUnpaid(eurPurchase)
+    vm.form.total_amount = 12000
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cash-fx-out-of-tolerance"]').exists()).toBe(true)
+  })
+
+  it('kurzový zisk u vydané faktury jde na 663', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'invoice_payment'
+    await flushPromises()
+    vm.pickUnpaid({ ...eurPurchase, kind: 'invoice', document_kind: undefined, invoice_type: 'invoice' })
+    vm.form.total_amount = 24500
+    await flushPromises()
+
+    expect(vm.previewLines).toEqual([
+      { account_code: '211.100', side: 'debit', amount: 24500 },
+      { account_code: '311', side: 'credit', amount: 24000 },
+      { account_code: '663', side: 'credit', amount: 500 },
+    ])
   })
 })
 

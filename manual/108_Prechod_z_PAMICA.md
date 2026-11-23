@@ -10,9 +10,11 @@
 Průvodce převede personalistiku a mzdy z datového souboru mzdového programu
 PAMICA, nebo z databáze PAMICA SQL, do firmy v MyÚčtu, i do firmy, která
 účetnictví z POHODY nepřevádí. Stejnou cestou se převádějí i mzdy z **POHODA
-Mzdy**, je to tentýž mzdový modul STORMWARE se stejným formátem dat. Účetnictví
-tento průvodce nepřevádí, to je samostatná kapitola
-[Přechod z POHODY](107_Prechod_z_POHODY.md).
+Mzdy**, je to tentýž mzdový modul STORMWARE se stejným formátem dat, a mzdy
+vedené **přímo v POHODĚ v agendě Mzdy** (datový soubor `StwPh_<IČO>_<rok>.mdb`):
+jejich export má jinou stavbu, převod ji rozpozná a přizpůsobí sám
+([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)). Účetnictví tento průvodce
+nepřevádí, to je samostatná kapitola [Přechod z POHODY](107_Prechod_z_POHODY.md).
 
 ## 108.1 Kdy to potřebujete
 
@@ -22,6 +24,8 @@ tento průvodce nepřevádí, to je samostatná kapitola
   měsíců, srážky, dovolenou a podání, která PAMICA odeslala.
 - Převod skončil chybou nebo rozdílem v protokolu.
 - Chcete po převodu ověřit, že přepočet v MyÚčtu sedí na to, co PAMICA podala.
+- Mzdy počítáte dál v PAMICA a do účetnictví v MyÚčtu chcete každý měsíc
+  načíst jen jejich zaúčtování ([§ 108.10](#10810-mesicni-zauctovani-mezd-z-pamicy-xml)).
 
 <!-- cols: 24 40 36 -->
 | Fáze | Co udělat | Kde |
@@ -66,7 +70,7 @@ Vyberte cestu podle toho, kde mzdy běží.
 |---|---|---|
 | Datový soubor PAMICA | Běžná instalace s `Mzdy*.mdb` | `Export-Pamica.cmd` |
 | PAMICA SQL | Mzdy běží na SQL Serveru | `Export-PamicaSQL.cmd` |
-| POHODA Mzdy | Mzdy z POHODY | `Export-PohodaMdb.cmd` (viz [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)) |
+| POHODA Mzdy, agenda Mzdy v POHODĚ | Mzdy z POHODY | `Export-PohodaMdb.cmd` (viz [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)) |
 
 **Příprava (všechny cesty):**
 
@@ -116,7 +120,8 @@ nehlásí chybu. Parametry a konfigurace jsou v
 4. Nastavte volby:
    - **Převáděné měsíce** (od - do, prázdné = všechny uzavřené měsíce exportu),
    - **Převzatou docházku a mzdové vstupy rovnou schválit** (výchozí zapnuto),
-   - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je),
+   - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je; čísla
+     z hlášení JMHZ přijatých ČSSZ se převezmou i bez něj),
    - u začátku vedení mezd před zpracovanými měsíci volbu **Posunout začátek na
      MM/RRRR a převést** (výchozí), nebo **Převést bez posunu začátku**
      (vyžaduje potvrzení). Firma bez začátku vedení mezd žádnou volbu nemá;
@@ -199,6 +204,9 @@ který už prošel, přeskočí; změněný měsíc počítaný MyÚčtem převe
 | Nepřítomnost bez schváleného průměru | Chybí průměr čtvrtletí | Doplňte průměr a převod zopakujte |
 | Účet finančního úřadu nebo OSSZ nezaložen | V exportu chybí závazek pod předčíslím, nebo jsou pod ním dva účty | Doplňte účet ručně v Nastavení mezd |
 | Lhůta NEMPRI u převzatého případu dávky nesedí | PAMICA NEMPRI podala, nebo naopak nepodala | Použijte **NEMPRI podal předchozí program** nebo **Předchozí program NEMPRI nepodal** |
+| **Mzdy POHODY za … nesedí samy se sebou** | Mzda z agendy Mzdy v POHODĚ nese částku ve sloupci, který převod nezná, nebo byl export upraven | Porovnejte mzdu v POHODĚ, chybějící složku doplňte ručně a rozdíl vědomě přijměte ([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)) |
+| **Převzaté mzdy za … nesedí na mzdy POHODY** | Převzatý úhrn měsíce se liší od mezd POHODY | Podívejte se do protokolu na veličinu a měsíc; převod zopakujte, rozdíl nepřijímejte bez vysvětlení |
+| Mzda nemá vazbu na pracovní poměr (RefPomer) | Export míchá mzdy PAMICA a POHODY, nebo je neúplný | Vyexportujte mzdy znovu aktuálním nástrojem |
 
 ## 108.9 Podrobnosti a pravidla
 
@@ -270,7 +278,8 @@ PAMICA za firmu podala (§ 108.9.12). Binární sloupec, který nejde přečíst
 ZIPu vypíše počty řádků po tabulkách, kolik podání se přečetlo a které tabulky
 s daty export vědomě nebere (protokoly změn, odeslané e-maily, nastavení oken).
 
-V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců.
+V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců;
+mzdy vedené přímo v POHODĚ mají navíc štítek *agenda Mzdy v POHODĚ*.
 Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO.
 
 Po nahrání server export na pozadí rozbalí a přečte; průvodce mezitím ukazuje,
@@ -284,8 +293,9 @@ převodu hned.
 Přechází-li firma z POHODY zároveň s účetnictvím i se mzdami z **POHODA
 Mzdy**, použije se místo tohoto nástroje `Export-PohodaMdb.cmd` popsaný
 v [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru) - vzniklý
-`91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce; sám o sobě je
-formátem shodný s exportem z PAMICA.
+`91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce. Mzdy vedené přímo
+v POHODĚ v něm nemají pracovní poměry ani položky mezd; převod to pozná sám
+([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)).
 
 #### 108.9.1.4 Export z PAMICA SQL
 
@@ -361,7 +371,7 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | děti s daňovým zvýhodněním (1., 2. a 3. dítě) | vyživované osoby s nárokem daného pořadí, od měsíce podepsaného prohlášení |
 | prohlášení poplatníka u zpracovaných mezd | prohlášení poplatníka po měsících |
 | pracoviště s kódem obce, CZ-ISCO | podmínky vztahu (pracoviště JMHZ) |
-| OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci |
+| OIČ a ID PPV | identifikátory ČSSZ: z přijatých hlášení JMHZ samy, jinak s potvrzením v průvodci |
 | datum skončení pracovního poměru | skončení vztahu k tomuto dni |
 | odeslané registrace a odhlášky ČSSZ, oznámení pojišťovnám, ELDP | splněné položky Zákonných termínů |
 | úhrny mezd za měsíce před začátkem vedení mezd v MyÚčtu | počáteční stavy kumulací |
@@ -379,8 +389,10 @@ zapíše jako *neověřenou* a protokol vypíše osobní čísla. Důvod (např�
 státní pojištěnec nebo držitel průkazu ZTP/P) doplňte v zákonné evidenci
 osoby; dokud chybí, mzdový běh za tyto měsíce nepůjde spočítat.
 
-OIČ a ID PPV se převezmou jen tehdy, když v kroku *Náhled a volby* potvrdíte,
-že čísla v PAMICA pocházejí z protokolů ČSSZ. OIČ s chybnou kontrolní číslicí
+OIČ a ID PPV, která nesou hlášení JMHZ přijatá ČSSZ, převod převezme sám:
+ČSSZ by hlášení s neznámým číslem nepřijala. Ostatní čísla (jen na kartě, nebo
+v hlášení odeslaném, ale nepřijatém) se převezmou jen tehdy, když v kroku
+*Náhled a volby* potvrdíte, že pocházejí z protokolů ČSSZ. OIČ s chybnou kontrolní číslicí
 převod vynechá a vypíše osobní čísla.
 
 Položku Zákonných termínů převod odškrtne jen tam, kde PAMICA nese doklad:
@@ -447,7 +459,10 @@ založí převod výchozí (výplatní termín 10. den následujícího měsíce
 zaokrouhlený na celé koruny, zákonné příplatky); bez ní mzdový běh nejde.
 Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Počáteční
 stavy kumulací převod zapíše jen tehdy, když má firma začátek vedení mezd
-nastavený; jiný než navržený začátek nastavte ještě před převodem.
+nastavený; jiný než navržený začátek nastavte ještě před převodem. Nezahrnuje-li
+licence mzdový doplněk, modul Mzdy zapnout nejde: kontrola před převodem to
+ohlásí jako chybu a mzdy se převedou až po rozšíření licence
+(`Aktivace → Zakoupení`).
 
 **Převáděné měsíce.** V kroku *Náhled a volby* jde převod omezit na rozsah
 měsíců **Od měsíce** - **Do měsíce** (obě meze včetně). Bez vyplnění se převedou
@@ -653,10 +668,12 @@ se zůstatek nepřevede a protokol na to upozorní.
   u nepřítomnosti jako poznámku, ale nepoužije ji: náhradu si MyÚčto počítá
   z průměrného výdělku a rozvržených směn. Vnucená cizí částka by ten výpočet
   obešla.
-- **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
-  účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
-  zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého
-  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.9.11).
+- **Zaúčtování mezd (`MZzauct`).** Převod celých mezd účetní zápisy
+  nepřenáší: mzdy se do účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního
+  nastavení. Převzaté zápisy by proti převedeným dokladům vyrobily duplicitu.
+  Z převzatého zaúčtování se bere jen podklad pro nastavení kontací
+  (§ 108.9.11). Kdo mzdy dál počítá v PAMICE a do MyÚčta převádět nebude,
+  načítá zaúčtování každého měsíce zvlášť (§ 108.10).
 - **Zákonné pojištění odpovědnosti zaměstnavatele.** Export ho nevede.
 
 ### 108.9.7 Nemocenská přes přelom
@@ -796,8 +813,10 @@ Kontace mezd (které mzdové plnění jde na který účet) má původní progra
 nastavené a export je nese. MyÚčto z nich odvodí **návrh nastavení**, takže
 je nemusíte naklikat znovu.
 
-Není to import účetních zápisů. Mzdy se zaúčtují až v MyÚčtu podle tohoto
-nastavení; převzaté zápisy by proti převedeným dokladům vznikly dvakrát.
+Není to import účetních zápisů. Mzdy převedené do MyÚčta se zaúčtují až
+v MyÚčtu podle tohoto nastavení; převzaté zápisy by proti převedeným dokladům
+vznikly dvakrát. Zaúčtování mezd, které dál počítá PAMICA, se načítá
+samostatně (§ 108.10).
 
 U každého mzdového plnění obrazovka ukáže, **z čeho odvozený účet vyšel**:
 kolik řádků převzatého zaúčtování za ním stojí, kolik přes něj prošlo peněz
@@ -840,7 +859,7 @@ chybí, a to stejnými zápisy jako údaje z karet:
 | fond pracovní doby a stanovená týdenní doba | týdenní pracovní doba a úvazek, jen vztahu bez týdenní doby |
 | druh činnosti, upřesnění vztahu, CZ-ISCO | podmínky vztahu, jen prázdná pole |
 | obec, kód obce a stát pracoviště, sjednané místo výkonu práce | pracoviště JMHZ, jen vztahu bez kódu obce a se shodným místem výkonu práce |
-| OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci a jen chybějící |
+| OIČ a ID PPV | identifikátory ČSSZ, jen chybějící: z přijatých hlášení samy, jinak s potvrzením v průvodci |
 | průměrný hodinový výdělek | schválený průměr čtvrtletí, které průměr ze zpracovaných mezd nemá |
 | vyživované děti z prohlášení poplatníka | vyživované osoby, jen osobě, která žádnou nemá |
 | zda tytéž děti vyživuje jiná osoba v domácnosti a kdo to je | odpověď u nároků na zvýhodnění (jen dosud nezodpovězených), u kladné odpovědi i jméno a datum narození té osoby (z rodného čísla, když ho hlášení neuvádí) |
@@ -915,7 +934,202 @@ spočítaný mzdový běh. Potom převod volbu nemění. Zákonné zaokrouhlení
 (§ 142 odst. 2 zákoníku práce) zapnete v Nastavení mezd
 ([§ 90.3](90_Nastaveni_mezd.md#903-krok-za-krokem-zamestnavatel-a-mzdove-uctarny)).
 
-## 108.10 Související kapitoly
+### 108.9.14 Mzdy vedené přímo v POHODĚ
+
+Vede-li firma mzdy přímo v POHODĚ (agenda Mzdy v datovém souboru
+`StwPh_<IČO>_<rok>.mdb`, bez programu PAMICA), vytvoří `Export-PohodaMdb.cmd`
+tentýž `91_mzdy.xml` se stejnými jmény tabulek a sloupců, ale s jinou stavbou:
+
+- **pracovní poměry nejsou zvlášť**: nástup, druh zaměstnání, úvazek
+  a pojišťovna jsou na kartě zaměstnance, každý zaměstnanec má jediný vztah,
+- **mzda nemá položky**: částky a hodiny (základní mzda, náhrada za dovolenou
+  a za svátek, stravenkový paušál, hodiny nemoci) jsou sloupce zpracované mzdy,
+- **doby nepřítomnosti s daty** (dovolená, pracovní neschopnost) jsou na kartě
+  zaměstnance, náhrada mzdy při nemoci v rozpisu náhrad,
+- **karta dovolené** je ve sloupcích karty zaměstnance a **zaúčtování mezd**
+  vede POHODA interními doklady účetnictví, ne v exportu mezd.
+
+Převod takový export pozná sám: v exportu nejsou pracovní poměry a mzdy nemají
+vazbu na poměr. V náhledu u agendy ukáže štítek *agenda Mzdy v POHODĚ*,
+kontrola před převodem i protokol napíšou, že mzdy vede POHODA. Pak export
+přizpůsobí tvaru mezd PAMICA a pokračuje stejnou cestou jako u PAMICA, se
+stejnými volbami (schválení převzatých podkladů, začátek vedení mezd,
+potvrzení identifikátorů ČSSZ, rozsah měsíců).
+
+<!-- cols: 34 66 -->
+| V POHODĚ | V MyÚčtu |
+|---|---|
+| karta zaměstnance | osoba a jediný pracovní vztah: nástup, druh zaměstnání (0 pracovní poměr, 3 dohoda o pracovní činnosti, 108 dohoda o provedení práce), týdenní úvazek, středisko, CZ-ISCO, ID PPV |
+| základní mzda měsíční (druh mzdy 1) | měsíční mzda vztahu se sjednanou částkou; hodinová mzda (druh 2) jen tehdy, když ji mzda doloží součinem hodin a sazby |
+| náhrada za svátek | hodiny svátku v souhrnu docházky (svátek POHODA do odpracovaných hodin nepočítá) |
+| náhrada za dovolenou a dovolená na kartě | hodiny dovolené v souhrnu docházky, doba s daty do evidence |
+| pracovní neschopnost na kartě a rozpis náhrad | nepřítomnost s daty, případ nemoci s vyčerpanými dny náhrady mzdy |
+| stravenkový paušál | složka *Příspěvek na stravování - osvobozená část* |
+| slevy a děti na kartě | slevy na dani a děti (prohlášení poplatníka) |
+| zvláštní sazba daně | srážková daň místo zálohy |
+| karta dovolené (nárok, převod, krácení, čerpání v hodinách) | zůstatek dovolené |
+| zpracovaná mzda | převzatý měsíc s úhrny POHODY (hrubá a čistá mzda, pojistné, záloha a srážková daň, slevy, bonus, výplata) |
+
+**Co převod nezná, nehádá.** Nenulový sloupec mzdy, jehož význam na mzdách
+ověřený není (přesčasy, příplatky, prémie, osobní ohodnocení, náhrady za
+překážky, benefity, srážky ze mzdy), základní mzda jiného druhu, hodiny nemoci
+bez doby na kartě a doba na kartě neznámého druhu se do mzdových vstupů
+nepřevedou. Protokol je vypíše jako **Položky mezd POHODY, které převod nezná**
+se jménem sloupce, počtem mezd, částkou a hodinami. V převzatých měsících jsou
+v úhrnech POHODY; v měsících, které počítá MyÚčto, je doplňte v `Mzdy → Vstupy`
+nebo `Mzdy → Absence`.
+
+**Co se nepřevede vůbec.** Trvalé srážky a exekuce z karet zaměstnanců (export
+nenese jejich rozpis po mzdách; protokol uvede jejich počet, zadejte je
+v `Mzdy → Srážky a exekuce`) a návrh kontací mezd (export účty nenese,
+zaúčtování mezd převádí převod účetnictví).
+
+**Kontrola proti mzdám POHODY.** Na konci převodu, v kroku *Kontrola převzetí
+mezd*, převod porovná za každý převzatý měsíc úhrny uložené v MyÚčtu s mzdami
+POHODY: hrubou mzdu, sociální a zdravotní pojištění zaměstnance
+i zaměstnavatele, zálohu a srážkovou daň, uplatněné slevy na dani, daňový
+bonus, čistou mzdu a částku k výplatě. Každý měsíc má v protokolu řádek
+s úhrny a výsledkem *sedí* nebo *ROZDÍL*. Zároveň ověří každou mzdu samu se
+sebou: hrubá mzda je součtem převedených a známých sloupců, čistá mzda je
+hrubá po pojistném a dani, záloha sedí na slevy, náhrada mzdy na rozpis náhrad
+a výplata na čistou mzdu s náhradou, bonusem a stravným po srážkách. Nesoulad
+je **rozdíl k přijetí**: zkouška nanečisto ho ukáže, ostrý převod bez jeho
+přijetí skončí chybou.
+
+## 108.10 Měsíční zaúčtování mezd z PAMICY (XML)
+
+**Cesta: `Systém → Přechod z jiných účetních systémů → PAMICA`** (soubor
+rozpozná i `Nákup → Import`)
+
+Když mzdy dál počítá PAMICA a v MyÚčtu vedete účetnictví, nepřevádíte mzdy,
+ale každý měsíc načtete jen jejich **zaúčtování**: mzdové náklady a závazky
+z mezd. Je to samostatná cesta, nezávislá na převodu celých mezd výše;
+zaměstnance ani mzdové vstupy nezakládá. Funkce je pro firmy v podvojném
+účetnictví.
+
+> [!WARNING]
+> Za měsíc, jehož zaúčtování načítáte z PAMICY, nepočítejte mzdy v modulu
+> Mzdy v MyÚčtu. Zaúčtování mzdového běhu by mzdové náklady a závazky
+> zaúčtovalo podruhé.
+
+### 108.10.1 Export zaúčtování z PAMICY
+
+1. V PAMICA zpracujte mzdy měsíce a otevřete jejich zaúčtování.
+2. Předkontace nastavte **přímo na účty** ve tvaru MD/Dal, například
+   `521000/331000` pro hrubé mzdy nebo `524000/336001` pro sociální pojištění
+   placené firmou. Používá-li PAMICA **zkratky předkontací POHODY** (např.
+   `7Int`, `4Oz`), přiřadíte jim účty při prvním načtení (§ 108.10.2).
+3. Závazky na čisté mzdy zaměstnanců veďte **bez zaúčtování** (předkontace
+   `BEZ` s účtem závazku, například `BEZ331000`). Závazek na účtu 331 vznikl
+   už zaúčtováním hrubé mzdy, výplata se jen eviduje k úhradě.
+4. Zaúčtování nechte vytvořit **souhrnně za firmu**, ne po zaměstnancích.
+   Interní doklad pak nese jeden řádek za každou dvojici účtů a v účetnictví
+   nejsou mzdy jednotlivých lidí. Závazky na výplatu zůstávají po
+   zaměstnancích, protože každý má vlastní účet pro platební příkaz.
+5. Zaúčtování vyvezte do XML pro POHODU. Vznikne soubor
+   `_PAMICA_<IČO>_<číslo>.xml` v kódování Windows-1250; soubor neupravujte.
+
+### 108.10.2 Nahrání a náhled
+
+V průvodci PAMICA v kroku **Export z PAMICA** vyberte místo ZIP souboru
+toto XML a klikněte **Nahrát**. Průvodce formát pozná sám a místo převodu
+mezd ukáže náhled zaúčtování. XML, které zaúčtováním mezd není, pokračuje
+převodem mezd jako dosud.
+
+Stejný soubor rozpozná i import v `Nákup → Import`. Přijaté faktury z něj
+nevzniknou: soubor se z dávky vyčlení, ostatní soubory se importují jako
+obvykle a u vyčleněného souboru je tlačítko **Zobrazit náhled
+zaúčtování**. Náhled i načtení jsou stejné jako v průvodci. Soubor zabalený
+v ZIP nahrajte do průvodce samostatně.
+
+**Zkratky předkontací.** Nese-li soubor místo dvojic účtů zkratky
+předkontací (`7Int` pro interní doklad mzdových nákladů, `2Oz`, `4Oz`
+a další pro ostatní závazky), MyÚčto nejdřív ukáže tabulku zkratek, ke
+kterým firma ještě nemá účty. U každé zkratky jsou vzorové řádky ze
+souboru s částkou. Každé zkratce vyberte z účtové osnovy **účet MD a účet
+Dal**: zkratka vždy znamená celou dvojici účtů, oba účty musí být v osnově
+a nesmí být stejné. Syntetický účet, který se v osnově člení na analytiky,
+přiřadit nejde: vyberte jeho analytiku (např. `331.000`). Po kliknutí
+**Uložit a načíst náhled** se přiřazení uloží pro firmu a náhled se načte
+znovu. Příští měsíc se uložené zkratky použijí samy a tabulka se ukáže jen
+pro nové zkratky. U řádků se zkratkou náhled zkratku zobrazí vedle účtů.
+
+**Úprava přiřazení zkratek.** Tlačítko **Upravit přiřazení zkratek** je
+pod náhledem vždy, když je nahraný soubor. Z hotového náhledu otevře
+zkratky použité v souboru, a když se náhled sestavit nepodaří (například
+závazek má položky na různých účtech Dal, protože jedna zkratka míří na
+`331` a druhá na `331.000`), otevře všechna uložená přiřazení firmy. Chybová
+hláška jmenuje zkratky, ze kterých účty vzešly. Po uložení se náhled načte
+znovu. Změna platí pro toto a další načtení, už načtené doklady nemění.
+
+Náhled nic neukládá. Ukáže měsíc a párovací symbol PAMICY (např.
+`MZ202603`), interní doklad s řádky MD a Dal a ostatní závazky
+s protistranou, variabilním a konstantním symbolem, splatností, účtem
+protistrany, zaúčtováním nebo příznakem *bez zaúčtování* a částkou. Nad
+nimi jsou kontroly:
+
+<!-- cols: 30 70 -->
+| Kontrola | Co znamená |
+|---|---|
+| IČO | IČO v souboru se musí shodovat s IČO firmy. Soubor jiné firmy se nenačte. |
+| Měsíc | Pro datum účetního případu musí existovat účetní období a měsíc nesmí být uzamčený ani v uzavřeném období. |
+| Načtení | Stejný měsíc (IČO a párovací symbol) ještě nebyl načten (§ 108.10.4). |
+| Účty | Každý účet PAMICY musí mít účet v účtové osnově (pravidla níže). |
+| Účet 331 | Co interní doklad zaúčtuje na Dal účtu zaměstnanců, musí ostatní závazky srazit na MD nebo převzít jako závazky bez zaúčtování. Rozdíl náhled ukáže jako upozornění. |
+| Závazek na účtu hrubých mezd | Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy (typicky 331). Obvykle jde o prohozené účty MD a Dal u zkratky (daň správně `331 / 342`, pojistné `331 / 336`). Načtení zastaví; čisté mzdy bez zaúčtování se netýká. |
+| Účet protistrany | Neplatné číslo účtu náhled ohlásí; závazek se načte bez něj a účet doplníte v jeho detailu. |
+
+**Účty.** PAMICA uvádí účty šestimístně. MyÚčto hledá v účtové osnově
+nejdřív stejný kód, potom analytiku s tečkou (`336001` → `336.001`)
+a u analytiky `000` syntetiku (`521000` → `521`), pokud ji osnova analyticky
+nečlení. Chybí-li analytika pod existující syntetikou, náhled ji navrhne
+a po zaškrtnutí **Založit chybějící analytické účty** ji načtení založí se
+stejným typem jako syntetika. Chybějící syntetický účet načtení zastaví,
+založte ho v `Účetnictví → Účtová osnova`. Účty přiřazené zkratkám jsou už
+účty osnovy MyÚčta a používají se tak, jak jsou.
+
+### 108.10.3 Co vznikne
+
+Po kliknutí **Načíst zaúčtování** vznikne v jedné transakci (chyba kdekoli
+vrátí vše zpět):
+
+- **Interní doklad** v `Účetnictví → Interní doklady`, zaúčtovaný k datu
+  účetního případu z PAMICY s číslem z řady interních dokladů. Například
+  hrubé mzdy 30 000 Kč jako zápis `521 / 331`.
+- **Ostatní závazky** v `Ostatní závazky`, každý se svou protistranou,
+  variabilním symbolem, splatností a účtem protistrany. Konstantní symbol je
+  v poznámce. Závazek se zaúčtováním má na straně Dal účet závazku
+  a na straně MD účty položek. Například sociální pojištění 9 570 Kč:
+  `524 / 336.001` 7 440 Kč (pojistné placené firmou) a `331 / 336.001`
+  2 130 Kč (pojistné zaměstnanců).
+- **Závazky bez zaúčtování** (čisté mzdy) se jen potvrdí, vlastní zápis
+  v deníku nemají a leží na účtu 331. Výplata z banky je pak zaúčtuje
+  `331 / 221` a účet 331 se vyrovná.
+
+Protistranu dohledá MyÚčto v adresáři podle názvu, jinak založí novou kartu.
+U zaměstnance se na kartu zapíše jen jméno; adresa ani jiné osobní údaje
+z PAMICY se nepřebírají. Výplata v hotovosti je závazek bez protistrany.
+
+Závazky pak platíte jako ostatní závazky: jdou do platebního příkazu
+a úhrada se spáruje z bankovního výpisu.
+
+### 108.10.4 Ochrana proti druhému načtení
+
+Načtení se pamatuje podle IČO a párovacího symbolu měsíce. Druhé nahrání
+téhož měsíce, i z nového exportu s jiným číslem, MyÚčto odmítne se zprávou,
+kdy byl měsíc načten. Opravu načtete znovu až po stornu interního dokladu
+a všech ostatních závazků z prvního načtení.
+
+### 108.10.5 Oprávnění
+
+Náhled vidí uživatel se čtením účetnictví a ostatních závazků. Načtení
+zakládá a účtuje interní doklad a ostatní závazky, proto potřebuje zápis
+ručních zápisů deníku, jejich zaúčtování a zápis ostatních závazků
+(`accounting.journal.write`, `accounting.journal.post`, `other_items`).
+Založení chybějících analytik navíc vyžaduje zápis do účetnictví
+(`accounting`). Načtení se zapíše do historie aktivit.
+
+## 108.11 Související kapitoly
 
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)
 - [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)

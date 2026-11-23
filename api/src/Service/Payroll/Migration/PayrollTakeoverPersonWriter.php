@@ -225,6 +225,9 @@ final class PayrollTakeoverPersonWriter
                 $manual('tax_residence');
             }
         }
+        // Převod přebírá měsíce, za které původní program ke slevě přihlížel,
+        // tedy už uplatněný výsledek § 38k ZDP; z dne podpisu se nic neodvozuje
+        // (TaxDeclarationEffectiveMonth platí pro nové podpisy).
         if (($sections['tax_declarations'] ?? []) === [] && $person->taxDeclarations !== []) {
             $rows = [];
             foreach ($person->taxDeclarations as $run) {

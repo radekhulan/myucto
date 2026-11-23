@@ -17,7 +17,7 @@ import {
   type PurchaseDocumentKind,
   type ImportBatch,
 } from '@/api/purchaseInvoices'
-import { formatMoney, formatMoneyWhole, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useToast } from '@/composables/useToast'
@@ -28,6 +28,11 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { purchaseListFilterParams } from '@/api/listQueries'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
@@ -44,6 +49,8 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import { needsReview } from '@/utils/purchaseReview'
 import ApprovalStatusBadge from '@/components/purchase/ApprovalStatusBadge.vue'
 import { approvalErrorMessage } from '@/api/purchaseApprovals'
@@ -58,6 +65,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
+import { mergeMonthGroups } from '@/utils/monthGroups'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
@@ -109,6 +117,8 @@ const approvalFilter = ref<'' | 'pending' | 'approved' | 'rejected'>('')
 const paymentOrderedFilter = ref<'' | '1' | '0'>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
+const structuredSourceFilter = ref<'' | '1' | '0'>('')
+const visualDocumentFilter = ref<'' | '1' | '0'>('')
 const currencyFilter = ref('')
 const vendorFilter = ref<number | ''>('')
 const vendors = ref<Client[]>([])
@@ -119,6 +129,9 @@ const projects = ref<Project[]>([])
 // Filtr na dávku hromadného AI importu (#232) — proklik z obrazovky importu.
 const importBatchFilter = ref('')
 const importBatches = ref<ImportBatch[]>([])
+// Hodnoty dimenzí (stejný výběr jako v účetním deníku); jen u firmy se zapnutými dimenzemi.
+const dimensionValueIds = ref<number[]>([])
+const dimensionDescendants = ref(true)
 
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají)
 const activeFilterCount = computed(() => {
@@ -138,7 +151,10 @@ const activeFilterCount = computed(() => {
   if (approvalFilter.value) n++
   if (paymentOrderedFilter.value) n++
   if (bookedFilter.value) n++
+  if (structuredSourceFilter.value) n++
+  if (visualDocumentFilter.value) n++
   if (importBatchFilter.value) n++
+  if (dimensionValueIds.value.length) n++
   return n
 })
 
@@ -184,7 +200,12 @@ const filterChips = computed<FilterChip[]>(() => {
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: t(bookedFilter.value === '1' ? 'common.booked_badge' : 'common.unbooked_badge') })
   }
+  if (visualDocumentFilter.value) chips.push({ key: 'has_visual_document', value: `${t('purchase_invoice.filters.has_visual_document')}: ${t('purchase_invoice.filters.document_' + (visualDocumentFilter.value === '1' ? 'present' : 'missing'))}` })
+  if (structuredSourceFilter.value) chips.push({ key: 'has_structured_source', value: `${t('purchase_invoice.filters.has_structured_source')}: ${t('purchase_invoice.filters.document_' + (structuredSourceFilter.value === '1' ? 'present' : 'missing'))}` })
   if (importBatchFilter.value) chips.push({ key: 'importBatch', value: t('purchase_invoice.filters.import_batch') })
+  if (dimensionValueIds.value.length) {
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dimensions, dimensionValueIds.value, dimensionDescendants.value, t) })
+  }
   return chips
 })
 
@@ -206,7 +227,10 @@ function clearFilter(key: string) {
     case 'approval': approvalFilter.value = ''; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
     case 'booked': bookedFilter.value = ''; break
+    case 'has_structured_source': structuredSourceFilter.value = ''; break
+    case 'has_visual_document': visualDocumentFilter.value = ''; break
     case 'importBatch': importBatchFilter.value = ''; break
+    case 'dimension': dimensionValueIds.value = []; dimensionDescendants.value = true; break
   }
 }
 
@@ -311,6 +335,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
   { key: 'vendor', labelKey: 'purchase_invoice.fields.vendor', required: true },
   { key: 'vendor_ic', labelKey: 'common.ic' },
+  { key: 'vendor_dic', labelKey: 'common.dic', defaultHidden: true },
   { key: 'vendor_number', labelKey: 'purchase_invoice.col_vendor_number' },
   { key: 'kind', labelKey: 'purchase_invoice.fields.document_kind' },
   { key: 'issue_date', labelKey: 'purchase_invoice.fields.issue_date', defaultHidden: true },
@@ -368,6 +393,7 @@ function extraFieldValue(inv: PurchaseInvoiceListItem, key: string): string {
 }
 function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    vendor_dic: inv.vendor_dic || '—',
     country: inv.country || '—',
     vat_classification: inv.vat_classification_codes?.join(', ') || '—',
     vat_return_lines: inv.vat_return_lines?.join(', ') || '—',
@@ -482,6 +508,8 @@ onMounted(async () => {
   }
   // Dávky hromadného AI importu pro „dohledat import" dropdown (#232).
   purchaseInvoicesApi.listImportBatches().then(b => { importBatches.value = b }).catch(() => {})
+  // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
+  dimensions.load().catch(() => { /* chip ukáže #id */ })
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   loadFiltersFromQuery(route.query)
   load()
@@ -498,6 +526,8 @@ function loadFiltersFromQuery(q: typeof route.query) {
     ? q.approval_status : ''
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
+  structuredSourceFilter.value = q.has_structured_source === '1' ? '1' : (q.has_structured_source === '0' ? '0' : '')
+  visualDocumentFilter.value = q.has_visual_document === '1' ? '1' : (q.has_visual_document === '0' ? '0' : '')
   statusFilter.value = typeof q.status === 'string' ? (q.status as PurchaseInvoiceStatus) : ''
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
@@ -515,6 +545,10 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // Proklik z importu obvykle přijde bez roku — přepnout na „všechny roky", ať se
   // dávka neschová kvůli defaultu na aktuální rok.
   if (importBatchFilter.value && typeof q.year !== 'string') yearFilter.value = ''
+  // Nové pole se stejnými hodnotami by zbytečně spustilo watch a druhé načtení seznamu.
+  const dimensionIds = parseDimensionValueIds(q.dimension_value_id)
+  if (dimensionIds.join(',') !== dimensionValueIds.value.join(',')) dimensionValueIds.value = dimensionIds
+  dimensionDescendants.value = q.dimension_descendants !== '0'
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
@@ -539,7 +573,13 @@ function buildQuery(): Record<string, string> {
   if (approvalFilter.value) q.approval_status = approvalFilter.value
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (bookedFilter.value) q.booked = bookedFilter.value
+  if (structuredSourceFilter.value) q.has_structured_source = structuredSourceFilter.value
+  if (visualDocumentFilter.value) q.has_visual_document = visualDocumentFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
+  if (dimensionValueIds.value.length) {
+    q.dimension_value_id = dimensionValueIdsParam(dimensionValueIds.value) as string
+    if (!dimensionDescendants.value) q.dimension_descendants = '0'
+  }
   if (search.value) q.q = search.value
   return q
 }
@@ -559,8 +599,8 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter,
-       currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter, structuredSourceFilter, visualDocumentFilter,
+       currencyFilter, vendorFilter, projectFilter, importBatchFilter, dimensionValueIds, dimensionDescendants], () => {
   syncFiltersToUrl()
   load()
 })
@@ -590,10 +630,14 @@ watch(() => route.query, (newQ) => {
     approvalFilter.value = ''
     paymentOrderedFilter.value = ''
     bookedFilter.value = ''
+    structuredSourceFilter.value = ''
+    visualDocumentFilter.value = ''
     currencyFilter.value = ''
     vendorFilter.value = ''
     projectFilter.value = ''
     importBatchFilter.value = ''
+    if (dimensionValueIds.value.length) dimensionValueIds.value = []
+    dimensionDescendants.value = true
     search.value = ''
     // Uvolnit po flush (watch effects)
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -601,29 +645,7 @@ watch(() => route.query, (newQ) => {
 })
 
 function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGroup[]): PurchaseMonthGroup[] {
-  const byMonth = new Map<string, PurchaseMonthGroup>()
-  for (const g of existing) byMonth.set(g.month, { ...g, invoices: [...g.invoices], totals_per_currency: [...g.totals_per_currency] })
-  for (const g of incoming) {
-    const cur = byMonth.get(g.month)
-    if (!cur) {
-      byMonth.set(g.month, { ...g, invoices: [...g.invoices], totals_per_currency: [...g.totals_per_currency] })
-      continue
-    }
-    const seenIds = new Set(cur.invoices.map(i => i.id))
-    for (const inv of g.invoices) if (!seenIds.has(inv.id)) cur.invoices.push(inv)
-    cur.count = cur.invoices.length
-    for (const t of g.totals_per_currency) {
-      const found = cur.totals_per_currency.find(x => x.currency === t.currency)
-      if (found) {
-        found.without_vat = (found.without_vat ?? 0) + (t.without_vat ?? 0)
-        found.vat = (found.vat ?? 0) + (t.vat ?? 0)
-        found.with_vat = (found.with_vat ?? 0) + (t.with_vat ?? 0)
-      } else {
-        cur.totals_per_currency.push({ ...t })
-      }
-    }
-  }
-  return Array.from(byMonth.values())
+  return mergeMonthGroups(existing, incoming)
 }
 
 /**
@@ -707,6 +729,7 @@ async function refreshLoadedPages() {
 // při listování za hranici načtených řádků (useListNavigation).
 type PurchaseListParams = NonNullable<Parameters<typeof purchaseInvoicesApi.listGrouped>[0]>
 let loadedParams: PurchaseListParams = {}
+const purchaseBookUrl = (format: 'pdf' | 'xlsx') => purchaseInvoicesApi.bookUrl(listParams(), format)
 function listParams(): PurchaseListParams {
   return {
     status:        statusFilter.value || undefined,
@@ -727,7 +750,11 @@ function listParams(): PurchaseListParams {
     approval_status: approvalFilter.value || undefined,
     payment_ordered: paymentOrderedFilter.value || undefined,
     booked:        bookedFilter.value  || undefined,
+    has_structured_source: structuredSourceFilter.value || undefined,
+    has_visual_document: visualDocumentFilter.value || undefined,
     import_batch_id: importBatchFilter.value || undefined,
+    dimension_value_id: dimensionValueIdsParam(dimensionValueIds.value),
+    dimension_descendants: dimensionValueIds.value.length ? dimensionDescendants.value : undefined,
     q:             search.value       || undefined,
     per_page: 50,
     sort_key: tbl.sort.value?.key,
@@ -744,6 +771,13 @@ function listParams(): PurchaseListParams {
     include_review: dimensions.enabled.value,
   }
 }
+const bulk = useListBulkActions({
+  target: 'purchase_invoice',
+  selectedIds,
+  listQuery: () => purchaseListFilterParams(listParams()),
+  total,
+})
+const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
 const listNav = useListNavigationSource('purchase-invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -1056,6 +1090,14 @@ async function bulkSetKind() {
 }
 useWindowRefresh(refreshLoadedPages,
   () => !loading.value && !loadingMore.value && !bulkBusy.value && selectedIds.value.length === 0)
+
+// Telefon: patička rozbalených filtrů. Stav rozbalení drží FilterBar, proto se zavírá
+// jeho vlastním přepínačem; „Zobrazit" pak posune stránku na začátek seznamu.
+function closeFilterPanel(event: MouseEvent, reveal = false) {
+  const bar = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('[data-print-hide]')
+  bar?.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')?.click()
+  if (reveal) bar?.scrollIntoView?.({ block: 'start' })
+}
 </script>
 
 <template>
@@ -1065,15 +1107,15 @@ useWindowRefresh(refreshLoadedPages,
       <div>
         <h1 class="text-2xl font-semibold">{{ t('purchase_invoice.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">
-          {{ t('purchase_invoice.subtitle') }}
+          <span class="max-md:hidden">{{ t('purchase_invoice.subtitle') }}</span>
           <template v-if="!loading && total > 0">
-            <span class="ml-2 whitespace-nowrap">· {{ t('purchase_invoice.summary_count', { count: total }) }}</span>
+            <span class="md:ml-2 whitespace-nowrap"><span class="max-md:hidden">· </span>{{ t('purchase_invoice.summary_count', { count: total }) }}</span>
             <span v-if="loadedCount < total" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
           </template>
         </p>
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-center gap-2 flex-wrap max-md:w-full">
         <template v-if="vendorFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
           <RouterLink :to="{ name: 'client-detail', params: { id: vendorFilter } }" :class="btnOutline('neutral')" data-test="filter-vendor-detail">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
@@ -1089,10 +1131,18 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           {{ t('purchase_invoice.extraction_review.open_count', { count: reviewableIds.length }) }}
         </button>
+        <InvoiceBookMenu
+          v-if="auth.canRead('purchase_invoices')"
+          :label="t('invoice.book_received')"
+          :url-for="purchaseBookUrl"
+          fallback-filename="kniha-prijatych-faktur"
+          class="max-md:-order-1"
+        />
+        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="purchase-more-actions" />
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"
-          :class="btnFilled('primary')"
+          :class="[btnFilled('primary'), 'max-md:order-first max-md:flex-1 max-md:justify-center max-md:h-10']"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('purchase_invoice.new') }}
@@ -1165,6 +1215,11 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.delete', { n: draftsSelected.length }) }}
         </button>
+        <button v-if="bulk.canUse.value" type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
+          data-test="purchase-bulk-open" @click="bulk.open">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+          {{ t('bulk_actions.menu') }}
+        </button>
     </BulkActionBar>
 
     <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
@@ -1213,7 +1268,7 @@ useWindowRefresh(refreshLoadedPages,
       @clear-all="clearAllFilters"
     >
       <template #primary>
-        <div class="relative flex-1 min-w-56">
+        <div class="relative flex-1 min-w-56 max-md:min-w-0 max-md:basis-full">
           <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
@@ -1222,7 +1277,7 @@ useWindowRefresh(refreshLoadedPages,
             v-model="search"
             type="search"
             :placeholder="t('purchase_invoice.filters.search_placeholder')"
-            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
           />
         </div>
       </template>
@@ -1318,6 +1373,20 @@ useWindowRefresh(refreshLoadedPages,
           <option value="1">{{ t('purchase_invoice.filters.payment_ordered_yes') }}</option>
           <option value="0">{{ t('purchase_invoice.filters.payment_ordered_no') }}</option>
         </select>
+        <select v-model="visualDocumentFilter" data-test="has_visual_document-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('purchase_invoice.filters.has_visual_document_hint')">
+          <option value="">{{ t('purchase_invoice.filters.has_visual_document_all') }}</option>
+          <option value="1">{{ t('purchase_invoice.filters.has_visual_document_present') }}</option>
+          <option value="0">{{ t('purchase_invoice.filters.has_visual_document_missing') }}</option>
+        </select>
+        <select v-model="structuredSourceFilter" data-test="has_structured_source-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('purchase_invoice.filters.has_structured_source_hint')">
+          <option value="">{{ t('purchase_invoice.filters.has_structured_source_all') }}</option>
+          <option value="1">{{ t('purchase_invoice.filters.has_structured_source_present') }}</option>
+          <option value="0">{{ t('purchase_invoice.filters.has_structured_source_missing') }}</option>
+        </select>
         <select v-if="isDoubleEntry" v-model="bookedFilter"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('common.booked_filter_all')">
@@ -1336,11 +1405,26 @@ useWindowRefresh(refreshLoadedPages,
             {{ formatDate(b.created_at) }} · {{ t('purchase_invoice.filters.import_batch_count', { n: b.count }) }}
           </option>
         </select>
+        <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
+        <div v-if="dimensions.enabled.value" class="basis-full flex flex-col gap-1" data-test="purchase-dimension-filter">
+          <DimensionReportFilters :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+            @update:value-ids="dimensionValueIds = $event" @update:descendants="dimensionDescendants = $event" />
+          <p class="text-xs text-neutral-500">{{ t('dimensions.document_filter_hint') }}</p>
+        </div>
+        <!-- Telefon: rozbalené filtry zaberou celou obrazovku, zavřít je jde dole bez scrollu nahoru. -->
+        <div data-test="phone-filter-footer" class="hidden max-md:flex max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 basis-full gap-2 rounded-lg border border-neutral-200 bg-surface p-2 shadow-lg">
+          <button type="button" data-test="phone-filter-close" :class="btnOutline('neutral')" class="h-11 justify-center" @click="closeFilterPanel($event)">
+            {{ t('common.close') }}
+          </button>
+          <button type="button" data-test="phone-filter-show" :class="btnFilled('primary')" class="h-11 flex-1 justify-center whitespace-nowrap" @click="closeFilterPanel($event, true)">
+            {{ t('purchase_invoice.filters.show_results', { count: total }) }}
+          </button>
+        </div>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
-        <button type="button" :class="btnOutline('neutral')" @click="toggleGrouping">
+        <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-          {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
+          <span class="max-md:hidden">{{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}</span><span class="hidden max-md:inline">{{ groupByMonth ? t('invoice.view_continuous_short') : t('invoice.view_monthly') }}</span>
         </button>
         <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
         <TableColorsMenu :ctrl="tbl" :colors="colors" />
@@ -1358,7 +1442,7 @@ useWindowRefresh(refreshLoadedPages,
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState v-if="search || statusFilter || kindFilter" variant="filtered"
+      <EmptyState v-if="search || activeFilterCount" variant="filtered"
         :title="t('purchase_invoice.empty_filtered')"
         :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
       <EmptyState v-else icon="inbox"
@@ -1453,6 +1537,7 @@ useWindowRefresh(refreshLoadedPages,
                     <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
                   <td v-else-if="c.key === 'vendor_ic'" :data-custom-color="!!colors.color('vendor_ic')" :style="colors.cellStyle('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
+                  <td v-else-if="c.key === 'vendor_dic'" :data-custom-color="!!colors.color('vendor_dic')" :style="colors.cellStyle('vendor_dic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_dic || '—' }}</td>
                   <td v-else-if="c.key === 'vendor_number'" :data-custom-color="!!colors.color('vendor_number')" :style="colors.cellStyle('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span
@@ -1614,7 +1699,7 @@ useWindowRefresh(refreshLoadedPages,
                         <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
                           <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </tr>
                       </tbody>
@@ -1640,17 +1725,19 @@ useWindowRefresh(refreshLoadedPages,
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <WorkspaceDragHandle />
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(inv.id)"
-                @change="toggleSelected(inv.id)"
-                @click.stop
-                class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-              />
+              <!-- Telefon: zaškrtávátko s plochou 44 px (label kolem, mimo telefon display:contents). -->
+              <label data-test="card-select-hit" class="contents max-md:flex max-md:shrink-0 max-md:items-start max-md:justify-center max-md:w-11 max-md:h-11 max-md:-m-3 max-md:p-3 max-md:cursor-pointer" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(inv.id)"
+                  @change="toggleSelected(inv.id)"
+                  @click.stop
+                  class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                />
+              </label>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
-                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')">
+                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5 max-md:items-start max-md:whitespace-normal" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')">
                     <span
                       v-if="inv.extraction_warning"
                       :title="t('purchase_invoice.extraction.needs_review_tooltip')"
@@ -1671,7 +1758,7 @@ useWindowRefresh(refreshLoadedPages,
                         <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/>
                       </svg>
                     </span>
-                    <span class="truncate">{{ inv.vendor_company_name }}</span>
+                    <span class="truncate max-md:whitespace-normal max-md:line-clamp-2 max-md:break-words" data-test="card-vendor-name">{{ inv.vendor_company_name }}</span>
                   </div>
                   <div class="font-mono text-sm whitespace-nowrap" :data-custom-color="!!colors.color('amount')" :style="colors.cellStyle('amount')">
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
@@ -1750,5 +1837,9 @@ useWindowRefresh(refreshLoadedPages,
     <JournalSourceDrawer v-if="previewInvoiceId" :purchase-invoice-id="previewInvoiceId" @close="previewInvoiceId = null"
       @focus-entry="id => router.push({ name: 'accounting-journal', query: { entry_id: String(id) } })" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
+    <BulkActionsDialog v-if="bulk.dialog.value" target="purchase_invoice"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="load()" />
   </div>
 </template>

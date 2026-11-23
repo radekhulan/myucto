@@ -14,6 +14,8 @@ const { t } = useI18n()
       prepaid: format(spread.prepaid_expense),
       deferred: format(spread.deferred_revenue),
       documents: spread.documents,
+      depreciation: format(spread.depreciation ?? 0),
+      assets: spread.depreciation_assets ?? 0,
     }) }}
   </p>
   <p v-else class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600"

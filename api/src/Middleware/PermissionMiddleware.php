@@ -28,12 +28,18 @@ final class PermissionMiddleware implements MiddlewareInterface
     public const PUBLIC_OR_SELF = [
         '/api/health', '/api/version', '/api/openapi.yaml', '/api/docs', '/api/reference', '/api/scalar',
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
-        '/api/auth/setup-crpdph-lookup', '/api/auth/setup-sample', '/api/auth/login',
+        '/api/auth/setup-crpdph-lookup', '/api/auth/setup-sample', '/api/auth/login', '/api/auth/password-token',
         '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/authorize', '/api/auth/domain-login/exchange',
         '/api/auth/logout', '/api/auth/me', '/api/auth/api-me', '/api/auth/forgot', '/api/auth/reset',
         '/api/auth/change-password', '/api/auth/totp/status', '/api/auth/totp/setup',
         '/api/auth/totp/enable', '/api/csrf-token',
+        '/api/auth/oidc/entra/login', '/api/auth/oidc/entra/callback',
+        '/api/auth/oidc/identities', '/api/auth/oidc/entra/link', '/api/auth/oidc/entra/step-up',
+        '/api/auth/oidc/google/login', '/api/auth/oidc/google/callback',
+        '/api/auth/oidc/apple/login', '/api/auth/oidc/apple/callback',
+        '/api/auth/oidc/seznam/login', '/api/auth/oidc/seznam/callback',
+        '/api/auth/oidc/google/link', '/api/auth/oidc/apple/link', '/api/auth/oidc/seznam/link',
         '/mcp', '/.well-known/oauth-protected-resource',
         '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server',
         '/oauth/register', '/oauth/authorize', '/oauth/token', '/api/mcp/settings', '/api/mcp/grants',
@@ -94,7 +100,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         if ($route->kind !== RoutePermissionMap::SUPERADMIN) {
             $access = $this->supplierAccess->resolve($request);
             if ($access->denied) {
-                return Json::error($this->responseFactory->createResponse(403), 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+                return Json::error($this->responseFactory->createResponse(403), 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
             }
         }
 
@@ -109,11 +115,18 @@ final class PermissionMiddleware implements MiddlewareInterface
             ? 'bank.match' : $route->key;
         if ($permission !== null && array_any([$permission, ...$route->alternativeKeys],
             fn (string $key): bool => $this->checker->allows($role, $key, $route->minimum))) {
+            // Banka a sklad mají pro klienta vlastní úzké akce nad katalogem `client`;
+            // interní role je dostává přes interní práva, proto hranice podle typu role.
             if ($role->isClientType() && (!ClientBankRoutePolicy::allows($method, $path, $route->key)
-                || !ClientStockRoutePolicy::allows($method, $path, $route->key)
-                || !ClientTaxSubmissionPolicy::allowsRoute($method, $path)
-                || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
-                    && !RequestAuthorization::isSessionAuth($request)))) {
+                || !ClientStockRoutePolicy::allows($method, $path, $route->key))) {
+                return $this->forbidden($request);
+            }
+            // Archiv připravených podání rozhoduje rozsah práv, ne typ role: stejnou hranici
+            // má i interní role s `reports.submissions` bez agendy výkazů.
+            if (RequestAuthorization::roleUsesClientTaxSubmissionScope($role)
+                && (!ClientTaxSubmissionPolicy::allowsRoute($method, $path)
+                    || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
+                        && !RequestAuthorization::actsAsSession($request)))) {
                 return $this->forbidden($request);
             }
             // Agendy NNO/504 a SVJ: oprávnění nestačí, firma musí být tou organizací.
@@ -166,7 +179,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         return Json::error(
             $this->responseFactory->createResponse(403),
             'forbidden_permission',
-            'Pro tuto akci nemáš oprávnění.',
+            'Pro tuto akci nemáte oprávnění.',
             403,
         );
     }

@@ -98,7 +98,11 @@ final class InvoiceEditorOssPayloadContractTest extends TestCase
     private static function editorItemPayloadRegion(string $vue): string
     {
         $vue = self::stripLineComments($vue);
-        $anchor = strpos($vue, 'items: form.value.items.map(');
+        // Payload skládá funkce nad předaným seznamem položek (uložení i náhled zápisu).
+        $anchor = strpos($vue, 'items: items.map(');
+        if ($anchor === false) {
+            $anchor = strpos($vue, 'items: form.value.items.map(');
+        }
         if ($anchor === false) {
             return '';
         }

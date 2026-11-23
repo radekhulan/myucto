@@ -13,7 +13,7 @@ import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { btnFilled, btnOutline, BTN_DISABLED_NOTE, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
 
 /*
@@ -21,6 +21,16 @@ import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
  * každé ukončení pak jde serverem přes stejný přechod stavu jako na kartě
  * vztahu, takže chyba jedné položky se ukáže u ní a ostatní projdou.
  */
+const props = defineProps<{
+  /**
+   * Mzdové období (`RRRR-MM`), ze kterého se dialog otevřel. Kontrola před
+   * během hlásí dohody se sjednaným koncem PŘED obdobím; dialog pak předvybere
+   * právě je. Dřív období ignoroval a předvybral všechny uplynulé konce
+   * k dnešku, takže tlačítko „(20)" otevřelo 42 zaškrtnutých vztahů.
+   */
+  period?: string | null
+}>()
+
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'applied', result: PayrollBulkClosureResult): void
@@ -42,6 +52,25 @@ const applyError = ref('')
 const result = ref<PayrollBulkClosureResult | null>(null)
 const selected = reactive<Record<number, boolean>>({})
 const dates = reactive<Record<number, string>>({})
+
+const runPeriod = computed(() => (props.period && /^\d{4}-(0[1-9]|1[0-2])$/.test(props.period) ? props.period : null))
+
+/** Kolik uplynulých konců je před obdobím běhu a kolik až po jeho začátku. */
+const periodSplit = computed(() => {
+  const expired = (preview.value?.items ?? []).filter(item => item.group === 'expired')
+  const before = expired.filter(item => item.before_period === true).length
+  return { before, later: expired.length - before }
+})
+
+/*
+ * Otevřeno z mzdového běhu: počet skončených dohod je ten, který hlásí jeho
+ * kontrola (konec před obdobím). Dřív dlaždice ukazovala všechny konce
+ * k dnešku a kontrola za únor „20" stála proti dialogu „44".
+ */
+function groupCount(group: PayrollBulkClosureGroup): number {
+  if (group === 'expired' && runPeriod.value) return periodSplit.value.before
+  return preview.value?.summary[group] ?? 0
+}
 
 const itemsByGroup = computed(() => {
   const groups: Record<PayrollBulkClosureGroup, PayrollBulkClosureItem[]> = { expired: [], inactive: [], archive: [] }
@@ -73,14 +102,22 @@ async function loadPreview() {
     preview.value = await payrollApi.bulkClosurePreview({
       inactivity_months: inactivityMonths.value,
       archive_after_months: archiveAfterMonths.value,
+      ...(runPeriod.value ? { period: runPeriod.value } : {}),
     })
     for (const key of Object.keys(selected)) delete selected[Number(key)]
     for (const key of Object.keys(dates)) delete dates[Number(key)]
     let preselected = 0
     for (const item of preview.value.items) {
-      // Položka s prací nebo zúčtovanou mzdou po datu konce se nepředvybírá —
-      // datum konce u ní musí posoudit člověk.
-      const pick = item.blocked_reason === null && preselected < preview.value.max_items
+      // Předvybírá se jen uplynulý sjednaný konec. Nečinnost je jen návrh
+      // (vstupy za nezpracované měsíce ještě nemusí být zadané) a archivace
+      // úklid; obojí vybírá účetní sama. Položka s prací nebo zúčtovanou
+      // mzdou po datu konce se nepředvybírá, datum musí posoudit člověk.
+      // Z mzdového běhu se předvyberou jen konce před jeho obdobím, tedy
+      // přesně ty, které spočítala kontrola; pozdější zůstanou v nabídce.
+      const pick = item.group === 'expired'
+        && item.blocked_reason === null
+        && (!runPeriod.value || item.before_period === true)
+        && preselected < preview.value.max_items
       selected[item.employment_id] = pick
       if (pick) preselected++
       dates[item.employment_id] = item.proposed_on
@@ -207,13 +244,25 @@ onMounted(loadPreview)
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <article v-for="group in GROUPS" :key="group" class="rounded-lg bg-neutral-50 p-3">
             <p class="text-xs text-neutral-500">{{ t(`payroll.bulk_closure.groups.${group}.summary`) }}</p>
-            <p class="mt-1 text-lg font-semibold" :data-test="`bulk-closure-count-${group}`">{{ preview.summary[group] }}</p>
+            <p class="mt-1 text-lg font-semibold" :data-test="`bulk-closure-count-${group}`">{{ groupCount(group) }}</p>
           </article>
           <article class="rounded-lg p-3" :class="preview.summary.blocked ? 'bg-warning-50' : 'bg-neutral-50'">
             <p class="text-xs" :class="preview.summary.blocked ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll.bulk_closure.summary_blocked') }}</p>
             <p class="mt-1 text-lg font-semibold" :class="preview.summary.blocked ? 'text-warning-700' : ''">{{ preview.summary.blocked }}</p>
           </article>
         </div>
+
+        <!-- Otevřeno z mzdového běhu: proč je předvybráno jen tolik, kolik hlásila kontrola. -->
+        <p
+          v-if="runPeriod && (periodSplit.before > 0 || periodSplit.later > 0)"
+          class="rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800"
+          data-test="bulk-closure-period-note"
+        >
+          {{ t('payroll.bulk_closure.period_note', { period: formatPeriod(runPeriod), count: periodSplit.before }, periodSplit.before) }}
+          <template v-if="periodSplit.later > 0">
+            {{ t('payroll.bulk_closure.period_later', { count: periodSplit.later }, periodSplit.later) }}
+          </template>
+        </p>
 
         <p v-if="preview.items.length === 0" class="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-600" data-test="bulk-closure-empty">
           {{ t('payroll.bulk_closure.empty') }}
@@ -229,7 +278,7 @@ onMounted(loadPreview)
             <div>
               <h3 class="text-sm font-semibold text-neutral-900">{{ t(`payroll.bulk_closure.groups.${group}.title`) }}</h3>
               <p class="text-xs text-neutral-500">
-                {{ t(`payroll.bulk_closure.groups.${group}.hint`, { months: group === 'archive' ? preview.archive_after_months : preview.inactivity_months }) }}
+                {{ t(`payroll.bulk_closure.groups.${group}.hint`, { months: group === 'archive' ? preview.archive_after_months : preview.inactivity_months, date: formatDate(preview.activity_reference_on) }) }}
               </p>
             </div>
             <label class="flex items-center gap-2 text-xs text-neutral-600">

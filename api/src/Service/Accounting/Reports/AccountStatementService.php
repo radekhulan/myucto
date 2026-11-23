@@ -7,13 +7,23 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\AccountBalanceSign;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
  * Opis účtu (Epic F2): stránkovaný výpis pohybů účtu (vč. analytik pod
- * syntetikou) s běžícím zůstatkem. PS k `from` dle okna R6; balance = kladné = MD.
+ * syntetikou) s běžícím zůstatkem. PS k `from` dle okna R6; balance = kladné = MD,
+ * `*_signed` = se znaménkem podle typu účtu ({@see AccountBalanceSign}).
  * Řazení entry_date, entry_id, line_no (deterministické) — running_delta počítá
- * window funkce nad celým rozsahem, takže stránkování zůstatky nemění.
+ * window funkce nad celým rozsahem, takže stránkování ani filtr protiúčtu zůstatky nemění.
+ *
+ * Jednoduchý zápis (firma má {@see EntryFormService::hasAnySingle()}): pohyb nese jediný
+ * protiúčet (`counter_account_id`, `pair_no`, `pair_status`, viz {@see JournalLineContext}),
+ * filtr a součty jdou podle dvojic. Řádek staršího zápisu 1 : N se rozbalí na pohyby po
+ * dílech (`pair_piece` 1..n) s průběžným zůstatkem dopočteným v PHP; nic se nezapisuje.
+ * Stránkování zůstává po řádcích deníku, rozbalení stránku jen prodlouží. Firma bez
+ * jednoduchého zápisu dostane přesně dnešní výstup i SQL.
  */
 final class AccountStatementService
 {
@@ -22,17 +32,37 @@ final class AccountStatementService
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalLineContext $context,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
+     * @param AccountStatementScope|null $scope zúžení podle řádku hlavní knihy (rozbalený
+     *        měsíc ukazuje tytéž řádky, které kniha sčítá do obratu). Součty podle protiúčtu
+     *        se s filtry knihy nepočítají.
      * @return array<string,mixed> struktura dle spec §2.6
      */
-    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false): array
+    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null, ?AccountStatementScope $scope = null): array
     {
+        $scope ??= new AccountStatementScope();
+        $filters = $scope->filters;
+        if ($filters !== [] && $counterAccountId !== null) {
+            // Rozdělení obratu podle protiúčtu počítá s celými řádky; díl rozpadu dimenze ani
+            // zúžení na zápisy protistrany v něm nejsou.
+            throw new ReportException('validation_failed', 'Filtr protiúčtu nejde kombinovat s filtrem dimenze, dodavatele, odběratele ani položky.', 422);
+        }
         $account = $this->accounts->findById($supplierId, $accountId, $to);
         if ($account === null) {
             throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
         }
+        $counterAccount = null;
+        if ($counterAccountId !== null) {
+            $counterAccount = $this->accounts->findById($supplierId, $counterAccountId, $to);
+            if ($counterAccount === null) {
+                throw new ReportException('account_not_found', 'Protiúčet #' . $counterAccountId . ' neexistuje.', 404);
+            }
+        }
+        $type = (string) $account['account_type'];
+        $normalSide = $account['normal_side'] !== null ? (string) $account['normal_side'] : null;
 
         $period = $this->periods->findForDate($supplierId, $from);
         $periodStart = $period !== null ? (string) $period['starts_on'] : $from;
@@ -41,15 +71,18 @@ final class AccountStatementService
         // otevírací zápis započítá dvakrát a KS vyjde jako dvojnásobek PS.
         $excludeClosing = !$afterClosing;
 
-        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing);
-        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing);
+        $pairs = $this->entryForms->hasAnySingle($supplierId);
+
+        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing, $scope);
+        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId, $pairs, $scope);
 
         $page = max(1, $page);
         $perPage = max(1, $perPage);
-        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing);
+        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId, $pairs, $scope);
 
         $items = [];
         foreach ($lines as $l) {
+            $balance = round($opening + (float) $l['running_delta'], 2);
             $items[] = [
                 'entry_id'    => (int) $l['entry_id'],
                 'entry_date'  => (string) $l['entry_date'],
@@ -58,8 +91,11 @@ final class AccountStatementService
                 'source_type' => (string) $l['source_type'],
                 'source_id'   => $l['source_id'],
                 'side'        => (string) $l['side'],
+                'is_red_storno' => $l['is_red_storno'],
                 'amount'      => JournalLineAmount::signed($l),
-                'balance'     => round($opening + (float) $l['running_delta'], 2),
+                'balance'     => $balance,
+                'balance_signed'  => AccountBalanceSign::signed($balance, $type),
+                'balance_unusual' => AccountBalanceSign::isUnusual($balance, $normalSide),
                 // Účet ŘÁDKU — u syntetiky je opis složený z analytik, bez tohohle
                 // sloupce nešlo poznat, na které z nich pohyb visí.
                 'account_id'   => (int) $l['line_account_id'],
@@ -72,6 +108,7 @@ final class AccountStatementService
                 'source_doc_number'       => $l['source_doc_number'],
                 'source_register_id'        => $l['source_register_id'],
                 'source_asset_id'           => $l['source_asset_id'],
+                'source_accrual_item_id'    => $l['source_accrual_item_id'] ?? null,
                 'source_asset_name'         => $l['source_asset_name'],
                 'source_settlement_doc_type' => $l['source_settlement_doc_type'],
                 'source_settlement_doc_id'  => $l['source_settlement_doc_id'],
@@ -83,26 +120,147 @@ final class AccountStatementService
                 ]),
             ];
         }
-        $items = $this->context->enrich($supplierId, $items);
+        $items = $this->context->enrich($supplierId, $items, $pairs);
+        if ($pairs) {
+            $items = self::expandPieces($items, $counterAccountId, $type, $normalSide);
+        }
 
-        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
+        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing, $scope);
+        // Součty jdou přes všechny pohyby účtu a stránkováním se nemění, stačí první stránka.
+        $counterTotals = $page === 1 && $filters === []
+            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing, $pairs, $scope), $turnovers)
+            : null;
+        $closing = round($opening + $turnovers['md'] - $turnovers['d'], 2);
 
-        return [
+        $out = [
             'account' => [
-                'id'          => (int) $account['id'],
-                'code'        => (string) $account['account_code'],
-                'name'        => (string) $account['name'],
-                'type'        => (string) $account['account_type'],
-                'normal_side' => $account['normal_side'],
+                'id'           => (int) $account['id'],
+                'code'         => (string) $account['account_code'],
+                'name'         => (string) $account['name'],
+                'type'         => $type,
+                'normal_side'  => $account['normal_side'],
+                'balance_sign' => AccountBalanceSign::factor($type),
             ],
             'opening_balance' => $opening,
+            'opening_balance_signed'  => AccountBalanceSign::signed($opening, $type),
+            'opening_balance_unusual' => AccountBalanceSign::isUnusual($opening, $normalSide),
             'items'           => $items,
             'total'           => $total,
             'page'            => $page,
             'per_page'        => $perPage,
-            'closing_balance' => round($opening + $turnovers['md'] - $turnovers['d'], 2),
+            'closing_balance' => $closing,
+            'closing_balance_signed'  => AccountBalanceSign::signed($closing, $type),
+            'closing_balance_unusual' => AccountBalanceSign::isUnusual($closing, $normalSide),
             'turnover_md'     => $turnovers['md'],
             'turnover_d'      => $turnovers['d'],
+            'counter_totals'  => $counterTotals,
+            'counter_filter'  => $counterAccount === null || $counterTotals === null ? null : self::counterFilter($counterAccount, $counterTotals),
+            'vendor'          => $filters['vendor'] ?? null,
+            'client'          => $filters['client'] ?? null,
+            'item'            => $filters['item'] ?? null,
+            'dimension'       => isset($filters['dimension']) ? $filters['dimension']->toArray() : null,
+            'opening_date'    => $scope->openingDate,
+            'include_analytics' => $scope->withAnalytics,
+        ];
+        if ($pairs) {
+            $out['layout'] = 'pairs';
+        }
+        return $out;
+    }
+
+    /**
+     * Rozbalí řádky starších zápisů 1 : N na pohyby po dílech (jediný protiúčet na pohyb).
+     * Zůstatek po každém dílu se dopočte od zůstatku před řádkem; poslední díl končí na
+     * zůstatku řádku. S filtrem protiúčtu zůstanou jen díly filtrovaného účtu (a jeho
+     * analytik), zůstatek je dál zůstatek celého účtu.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private static function expandPieces(array $items, ?int $counterAccountId, string $type, ?string $normalSide): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $movements = JournalLineContext::pieceMovements($item);
+            unset($item['pair_pieces']);
+            if ($movements === null) {
+                $out[] = $item + ['pair_piece' => null];
+                continue;
+            }
+            $debit = $item['side'] === 'debit';
+            $effect = static fn (int $signedCents): int => $debit ? $signedCents : -$signedCents;
+            $balance = (int) round((float) $item['balance'] * 100) - $effect((int) round((float) $item['amount'] * 100));
+            foreach ($movements as ['row' => $row, 'piece' => $piece]) {
+                $balance += $effect((int) round($row['amount'] * 100));
+                if ($counterAccountId !== null
+                    && $piece['counter_account_id'] !== $counterAccountId
+                    && $piece['counter_parent_id'] !== $counterAccountId
+                ) {
+                    continue;
+                }
+                $row['balance'] = round($balance / 100, 2);
+                $row['balance_signed'] = AccountBalanceSign::signed($row['balance'], $type);
+                $row['balance_unusual'] = AccountBalanceSign::isUnusual($row['balance'], $normalSide);
+                $out[] = $row;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Součty podle protiúčtu na haléře. Poměrné dělení složeného zápisu může po zaokrouhlení
+     * řádků odskočit od obratu o haléř; zbytek se přičte k řádku s největší částkou, aby
+     * Σ protiúčtů == obrat účtu.
+     *
+     * @param list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}> $rows
+     * @param array{md:float, d:float} $turnovers
+     * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
+     */
+    public static function reconcileCounterTotals(array $rows, array $turnovers): array
+    {
+        foreach (['md', 'd'] as $side) {
+            $sum = 0;
+            $largest = null;
+            foreach ($rows as $i => $row) {
+                $rows[$i][$side] = round($row[$side], 2);
+                $sum += (int) round($rows[$i][$side] * 100);
+                if ($largest === null || abs($rows[$i][$side]) > abs($rows[$largest][$side])) {
+                    $largest = $i;
+                }
+            }
+            $residue = (int) round($turnovers[$side] * 100) - $sum;
+            if ($residue !== 0 && $largest !== null) {
+                $rows[$largest][$side] = round($rows[$largest][$side] + $residue / 100, 2);
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Součet filtrovaného protiúčtu včetně jeho analytik. Jde o podíl na obratu, ne o součet
+     * zobrazených řádků: řádek složeného zápisu se ukáže celý, do protiúčtu patří jen jeho díl.
+     *
+     * @param array<string,mixed> $counterAccount
+     * @param list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}> $totals
+     * @return array{account_id:int, account_code:string, name:string, md:float, d:float}
+     */
+    private static function counterFilter(array $counterAccount, array $totals): array
+    {
+        $id = (int) $counterAccount['id'];
+        $md = 0.0;
+        $d = 0.0;
+        foreach ($totals as $row) {
+            if ($row['account_id'] === $id || $row['parent_id'] === $id) {
+                $md += $row['md'];
+                $d += $row['d'];
+            }
+        }
+        return [
+            'account_id'   => $id,
+            'account_code' => (string) $counterAccount['account_code'],
+            'name'         => (string) $counterAccount['name'],
+            'md'           => round($md, 2),
+            'd'            => round($d, 2),
         ];
     }
 }

@@ -19,6 +19,7 @@ use MyInvoice\Service\Migration\Premier\PremierVat;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -386,15 +387,22 @@ final class PremierImportTest extends TestCase
      * Přeplatek bankovní úhrady jedné faktury, který interní doklad přeúčtoval na jinou
      * fakturu, je platbou té druhé - jinak by zůstala v saldu otevřená, přestože 311 je na nule.
      */
-    public function testPaymentReassignedByInternalDocumentPaysTheOtherInvoice(): void
+    #[DataProvider('reassignedPaymentSources')]
+    public function testPaymentReassignedByInternalDocumentPaysTheOtherInvoice(bool $cash, bool $sameDay): void
     {
         $supplierId = $this->supplier();
-        $backup = $this->backup(false, ['payment_reassigned' => true]);
+        $backup = $this->backup(false, ['payment_reassigned' => true, 'payment_reassigned_cash' => $cash, 'payment_reassigned_same_day' => $sameDay]);
         $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
-        $payments = "SELECT i.varsymbol, p.amount, t.source_ref FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
-                       LEFT JOIN bank_transactions t ON t.id = p.bank_transaction_id WHERE p.supplier_id = ? ORDER BY i.varsymbol, p.id";
-        $expected = [['250001', '12100.00', 'BV 2 #14'], ['250009', '1210.00', 'BV 9 #96']];
+        $payments = "SELECT i.varsymbol, p.amount, p.source, p.paid_on, COALESCE(t.source_ref, c.doc_number)
+                       FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
+                       LEFT JOIN bank_transactions t ON t.id = p.bank_transaction_id
+                       LEFT JOIN cash_documents c ON c.invoice_payment_id = p.id AND c.supplier_id = p.supplier_id
+                      WHERE p.supplier_id = ? ORDER BY i.varsymbol, p.id";
+        $expected = [
+            ['250001', '12100.00', $cash ? 'cash' : 'bank', '2025-02-20', $cash ? 'PP2/2025' : 'BV 2 #14'],
+            ['250009', '1210.00', 'bank', $sameDay ? '2025-02-20' : '2025-03-10', 'BV 9 #96'],
+        ];
         self::assertSame($expected, $this->fetch($payments, $supplierId));
         $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1);
         self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)],
@@ -403,6 +411,15 @@ final class PremierImportTest extends TestCase
         $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame($expected, $this->fetch($payments, $supplierId), 'Opakovaný převod přeúčtovanou platbu nezdvojí.');
+    }
+
+    /** @return iterable<string,array{bool,bool}> */
+    public static function reassignedPaymentSources(): iterable
+    {
+        yield 'banka' => [false, false];
+        // Lexikografické bank|id před cash|id nesmí přesunout přeplatek na starší úhradu.
+        yield 'pokladna před bankou' => [true, false];
+        yield 'pokladna před bankou ve stejný den' => [true, true];
     }
 
     /**

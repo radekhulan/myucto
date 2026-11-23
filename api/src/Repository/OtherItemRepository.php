@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\OtherItemInstallmentCoverage;
 use MyInvoice\Service\Accounting\OtherItemSort;
 use PDO;
 
@@ -15,17 +16,22 @@ final class OtherItemRepository
     public function find(int $supplierId, int $id, bool $lock = false): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT oi.*, COALESCE(a.paid_amount, 0) + oi.settled_outside_amount AS paid_amount,
-                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) AS remaining_amount
+            'SELECT oi.*, ' . self::PAID_SQL . ' + oi.settled_outside_amount AS paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' AS remaining_amount
                FROM other_items oi
-               LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
-                           WHERE reversed_on IS NULL GROUP BY other_item_id) a
-                 ON a.other_item_id = oi.id
               WHERE oi.supplier_id = ? AND oi.id = ? AND oi.deleted_at IS NULL' . ($lock ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
+        // Název druhu zvlášť a bez zámku: JOIN v zamykacím čtení by zamkl i řádek druhu
+        // a serializoval všechny položky stejného druhu (i s úpravou druhu v Nástrojích).
+        $row['kind_name'] = null;
+        if ($row['kind_id'] !== null) {
+            $kind = $this->db->pdo()->prepare('SELECT name FROM other_item_kinds WHERE id = ? AND supplier_id = ?');
+            $kind->execute([(int) $row['kind_id'], $supplierId]);
+            $row['kind_name'] = $kind->fetchColumn() ?: null;
+        }
         $row['posting_lines'] = $this->postingLines($supplierId, $id);
         if ($row['posting_lines'] === [] && $row['counter_account_code'] !== null) {
             $row['posting_lines'] = [[
@@ -58,20 +64,55 @@ final class OtherItemRepository
         }
     }
 
-    public function list(int $supplierId, array $filters, int $page, int $perPage): array
+    /**
+     * Spárované úhrady jedné položky (bez storen) po indexu uq_other_item_bank; sdílí je detail
+     * (find) i výpis, takže stav položky je v obou stejný. Úhrady se čtou jen pro položky ve výběru
+     * (okno splatnosti), ne jedním souhrnem přes všechny úhrady firmy: ten by s historií rostl,
+     * i když výběr zůstává stejný (měření v PR).
+     */
+    private const PAID_SQL = '(SELECT COALESCE(SUM(a.amount), 0) FROM other_item_allocations a
+        WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL)';
+
+    /**
+     * Otevřená = ještě je co zaplatit: zbytek jistiny, nebo u splátek rozdělených na jistinu, úrok
+     * a poplatek nezaplacený úrok či poplatek (stejně jako stav ve výpisu a v detailu podle
+     * OtherItemService::payableOf). Úhrada nese úrok a poplatek nejvýš do výše plánovaných,
+     * takže rozdíl součtů je přesně zbývající úrok a poplatek splátek.
+     */
+    private const OPEN_PAYMENT_SQL = '(oi.amount - oi.settled_outside_amount > ' . self::PAID_SQL . '
+        OR (SELECT COALESCE(SUM(COALESCE(ins.interest_amount, 0) + COALESCE(ins.fee_amount, 0)), 0) FROM other_item_installments ins
+             WHERE ins.supplier_id = oi.supplier_id AND ins.other_item_id = oi.id)
+         > (SELECT COALESCE(SUM(a.interest_amount + a.fee_amount), 0) FROM other_item_allocations a
+             WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL))';
+
+    /**
+     * Výběr ručních položek výpisu: tabulka (s indexem okna splatnosti), WHERE a parametry.
+     * Jediné místo podmínek filtru; sdílí ho výpis, jeho součty a kniha ({@see bookOrderedIds()}).
+     *
+     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
+     * @return array{0:string, 1:string, 2:list<mixed>}
+     */
+    private function listWhere(int $supplierId, array $filters): array
     {
         $where = ['oi.supplier_id = ?', 'oi.deleted_at IS NULL'];
         $params = [$supplierId];
-        foreach (['side', 'kind'] as $field) {
-            if (!empty($filters[$field])) {
-                $where[] = 'oi.' . $field . ' = ?';
-                $params[] = $filters[$field];
-            }
+        if (!empty($filters['side'])) {
+            $where[] = 'oi.side = ?';
+            $params[] = $filters['side'];
+        }
+        // Vlastní druh se filtruje podle kind_id; vestavěný podle kind bez vlastního druhu,
+        // jinak by „other“ vracel i položky vlastních druhů (ty nesou kind = other).
+        if (!empty($filters['kind_id'])) {
+            $where[] = 'oi.kind_id = ?';
+            $params[] = (int) $filters['kind_id'];
+        } elseif (!empty($filters['kind'])) {
+            $where[] = 'oi.kind = ? AND oi.kind_id IS NULL';
+            $params[] = $filters['kind'];
         }
         if (!empty($filters['status']) && $filters['status'] !== 'all') {
             if ($filters['status'] === 'open') {
                 $where[] = "oi.status IN ('draft','confirmed','posted')";
-                $where[] = 'oi.amount - oi.settled_outside_amount > COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a WHERE a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id AND a.reversed_on IS NULL), 0)';
+                $where[] = self::OPEN_PAYMENT_SQL;
             } else {
                 $where[] = 'oi.status = ?';
                 $params[] = $filters['status'];
@@ -91,39 +132,183 @@ final class OtherItemRepository
             $params[] = $filters['to'];
         }
         $whereSql = implode(' AND ', $where);
-        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM other_items oi WHERE ' . $whereSql);
+        // S oknem splatnosti optimalizátor podíl okna přeceňuje a volí sken celé tabulky (všech firem),
+        // i když index splatnosti čte jen výběr (měření v PR). Otevřené bez dolní meze čtou po indexu
+        // historii firmy do konce okna: uhrazenost se neukládá, index ji přeskočit nemůže.
+        $table = 'other_items oi' . (!empty($filters['from']) || !empty($filters['to']) ? ' FORCE INDEX (idx_other_item_due)' : '');
+        return [$table, $whereSql, $params];
+    }
+
+    public function list(int $supplierId, array $filters, int $page, int $perPage): array
+    {
+        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM ' . $table . ' WHERE ' . $whereSql);
         $count->execute($params);
         $total = (int) $count->fetchColumn();
         $offset = ($page - 1) * $perPage;
         $stmt = $this->db->pdo()->prepare(
-            'SELECT oi.*, COALESCE(a.paid_amount, 0) + oi.settled_outside_amount paid_amount,
-                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) remaining_amount
-               FROM other_items oi
-               LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
-                           WHERE reversed_on IS NULL GROUP BY other_item_id) a
-                 ON a.other_item_id = oi.id
+            'SELECT oi.*, ' . self::PAID_SQL . ' + oi.settled_outside_amount paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount,
+                    k.name kind_name
+               FROM ' . $table . '
+               LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
               WHERE ' . $whereSql . '
               ORDER BY ' . OtherItemSort::orderBy($filters) . ' LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset
         );
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        $counts = $this->documentCounts($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $items));
+        foreach ($items as &$item) {
+            $item['document_count'] = $counts[(int) $item['id']] ?? 0;
+        }
+        unset($item);
+        $result = ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        if ($page === 1) {
+            $result['totals'] = $this->remainingTotals($table, $whereSql, $params);
+        }
+        return $result;
+    }
+
+    /**
+     * Počet připojených dokumentů pro řádky stránky jedním dotazem (index document_links
+     * supplier_id, entity_type, entity_id), vzor InternalDocumentRepository.
+     *
+     * @param list<int> $ids
+     * @return array<int,int>
+     */
+    private function documentCounts(int $supplierId, array $ids): array
+    {
+        if ($ids === []) return [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT dl.entity_id, COUNT(*)
+               FROM document_links dl
+              WHERE dl.supplier_id = ? AND dl.entity_type = 'other_item' AND dl.entity_id IN ({$in})
+              GROUP BY dl.entity_id"
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+    }
+
+    /**
+     * Zbývá uhradit za celý výběr (ne jen načtenou stránku), po straně a měně: pohledávky
+     * a závazky ani dvě měny se nesčítají. Jen potvrzené a zaúčtované položky — koncept
+     * ještě dluhem není, storno už ne. Přeplatek jedné položky nesnižuje dluh jiné (záporný zůstatek se počítá jako nula).
+     * Totéž pravidlo sčítá kniha za běhu z tisknutých řádků ({@see \MyInvoice\Service\Accounting\OtherItemBook\OtherItemBook}),
+     * shodu hlídá OtherItemBookTest.
+     *
+     * @param list<mixed> $params
+     * @return list<array{side:string,currency:string,remaining_amount:float}>
+     */
+    private function remainingTotals(string $table, string $whereSql, array $params): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT oi.side, oi.currency,
+                    SUM(GREATEST(oi.amount - oi.settled_outside_amount - " . self::PAID_SQL . ", 0)) remaining_amount
+               FROM " . $table . "
+              WHERE " . $whereSql . " AND oi.status IN ('confirmed','posted')
+              GROUP BY oi.side, oi.currency
+              ORDER BY oi.side, oi.currency"
+        );
+        $stmt->execute($params);
+        return array_map(static fn (array $row): array => [
+            'side' => (string) $row['side'],
+            'currency' => (string) $row['currency'],
+            'remaining_amount' => round((float) $row['remaining_amount'], 2),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Seřazená id knihy nad výběrem výpisu ({@see listWhere()}) jedním dotazem: jeden filesort
+     * (u zbývá uhradit jedno vyhodnocení úhrad na řádek) místo řazení celého výběru v každé
+     * dávce. Množina i pořadí jsou pevné od začátku exportu, takže změna řadicí hodnoty během
+     * sázení (párování úhrady, přečíslování) řádek nevynechá ani nezdvojí, a není potřeba
+     * transakce přes celé sázení (zámek metadat). V PHP zůstane jen pole celých čísel; řádky
+     * se čtou po dávkách ({@see bookRows()}).
+     *
+     * Řazení převezme zvolené řazení výpisu ({@see OtherItemSort::selected()}), jinak je podle
+     * čísla dokladu jako kniha faktur.
+     *
+     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
+     * @return list<int>
+     */
+    public function bookOrderedIds(int $supplierId, array $filters): array
+    {
+        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        [$key, $dir] = self::bookOrder($filters);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oi.id FROM ' . $table . ' WHERE ' . $whereSql . ' ORDER BY ' . $key . ' ' . $dir . ', oi.id ' . $dir
+        );
+        $stmt->execute($params);
+        $ids = [];
+        while (($id = $stmt->fetchColumn()) !== false) $ids[] = (int) $id;
+        return $ids;
+    }
+
+    /**
+     * Řádky knihy pro dávku id v pořadí `$ids`. Položka smazaná během exportu vypadne; ostatní
+     * se vytisknou s aktuálními hodnotami, i když mezitím přestaly odpovídat filtru (například
+     * koncept potvrzený během sázení). Pevná je množina a pořadí, ne obsah, stejně jako u knihy
+     * faktur; jinak by byla potřeba transakce přes celé sázení se zámkem metadat.
+     *
+     * @param list<int> $ids
+     * @return list<array<string,mixed>>
+     */
+    public function bookRows(int $supplierId, array $ids): array
+    {
+        if ($ids === []) return [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oi.id, oi.side, oi.kind, oi.kind_id, k.name kind_name, oi.title, oi.partner_name,
+                    oi.document_no, oi.variable_symbol, oi.issued_on, oi.accounting_on, oi.due_on,
+                    oi.currency, oi.amount, oi.status, oi.journal_entry_id, oi.posted_at,
+                    ' . self::PAID_SQL . ' + oi.settled_outside_amount paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount
+               FROM other_items oi
+               LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
+              WHERE oi.supplier_id = ? AND oi.deleted_at IS NULL AND oi.id IN (' . $in . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $byId = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), null, 'id');
+        $out = [];
+        foreach ($ids as $id) {
+            if (isset($byId[$id])) $out[] = $byId[$id];
+        }
+        return $out;
+    }
+
+    /**
+     * Řadicí výraz knihy a směr, stejný jako ORDER BY výpisu ({@see OtherItemSort::orderBy()}).
+     * Dotaz knihy vybírá jen id, proto zbývá uhradit jako celý výraz místo aliasu výpisu.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:'ASC'|'DESC'}
+     */
+    private static function bookOrder(array $filters): array
+    {
+        $sort = OtherItemSort::selected($filters) ?? ['key' => 'document_no', 'dir' => 'ASC'];
+        $key = $sort['key'] === 'remaining_amount'
+            ? '(oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ')'
+            : OtherItemSort::column($sort['key']);
+        return [$key, $sort['dir']];
     }
 
     public function insert(int $supplierId, array $data, ?int $userId): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO other_items
-              (supplier_id, side, kind, title, partner_id, partner_name, issued_on, accounting_on,
-               due_on, currency, amount, exchange_rate, amount_czk, variable_symbol,
+              (supplier_id, side, kind, kind_id, title, partner_id, partner_name, issued_on, accounting_on,
+               due_on, accrual_from, accrual_to, currency, amount, exchange_rate, amount_czk, variable_symbol,
+               counterparty_account, counterparty_bank_code,
                account_code, counter_account_code, note, created_by, updated_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
-            $supplierId, $data['side'], $data['kind'], $data['title'], $data['partner_id'],
+            $supplierId, $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'],
             $data['partner_name'], $data['issued_on'], $data['accounting_on'], $data['due_on'],
-            $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
-            $data['variable_symbol'], $data['account_code'], $data['counter_account_code'],
+            $data['accrual_from'] ?? null, $data['accrual_to'] ?? null, $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
+            $data['variable_symbol'], $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null,
+            $data['account_code'], $data['counter_account_code'],
             $data['note'], $userId, $userId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
@@ -132,16 +317,19 @@ final class OtherItemRepository
     public function updateDraft(int $supplierId, int $id, array $data, ?int $userId): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE other_items SET side = ?, kind = ?, title = ?, partner_id = ?, partner_name = ?,
-                    issued_on = ?, accounting_on = ?, due_on = ?, currency = ?, amount = ?,
-                    exchange_rate = ?, amount_czk = ?, variable_symbol = ?, account_code = ?,
+            'UPDATE other_items SET side = ?, kind = ?, kind_id = ?, title = ?, partner_id = ?, partner_name = ?,
+                    issued_on = ?, accounting_on = ?, due_on = ?, accrual_from = ?, accrual_to = ?, currency = ?, amount = ?,
+                    exchange_rate = ?, amount_czk = ?, variable_symbol = ?, counterparty_account = ?,
+                    counterparty_bank_code = ?, account_code = ?,
                     counter_account_code = ?, note = ?, updated_by = ?, row_version = row_version + 1
               WHERE id = ? AND supplier_id = ? AND status = \'draft\' AND deleted_at IS NULL'
         );
         $stmt->execute([
-            $data['side'], $data['kind'], $data['title'], $data['partner_id'], $data['partner_name'],
-            $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['currency'], $data['amount'],
-            $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'], $data['account_code'],
+            $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'], $data['partner_name'],
+            $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['accrual_from'] ?? null, $data['accrual_to'] ?? null,
+            $data['currency'], $data['amount'],
+            $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'],
+            $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null, $data['account_code'],
             $data['counter_account_code'], $data['note'], $userId, $id, $supplierId,
         ]);
     }
@@ -173,6 +361,14 @@ final class OtherItemRepository
         $stmt->execute([$status, $number, $entryId, $id, $supplierId]);
     }
 
+    /** Účet a protiúčet doplněné při zaúčtování z účetního profilu druhu. */
+    public function storePostedAccounts(int $supplierId, int $id, string $accountCode, ?string $counterCode): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE other_items SET account_code = ?, counter_account_code = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$accountCode, $counterCode, $id, $supplierId]);
+    }
+
     public function setUnposted(int $supplierId, int $id, ?int $userId): void
     {
         $this->db->pdo()->prepare(
@@ -201,5 +397,51 @@ final class OtherItemRepository
         );
         $stmt->execute([$accountCode, $counterCode, $accountingOn, $entryId, $reversalId,
             $userId, $id, $supplierId]);
+    }
+
+    /**
+     * Stav splátek položek ({@see OtherItemInstallmentCoverage::compute}) třemi dotazy bez
+     * ohledu na počet položek. Položka bez splátek v mapě chybí.
+     *
+     * @param list<int> $itemIds
+     * @param bool $lock zamknout aktivní úhrady (přiřazení úhrady pod zámkem položky)
+     * @return array<int, list<array<string,mixed>>>
+     */
+    public function installmentCoverage(int $supplierId, array $itemIds, ?string $today = null, bool $lock = false): array
+    {
+        $itemIds = array_values(array_unique(array_map('intval', $itemIds)));
+        if ($itemIds === []) return [];
+        $in = implode(',', array_fill(0, count($itemIds), '?'));
+        $pdo = $this->db->pdo();
+        $installments = $pdo->prepare("SELECT id, other_item_id, position, due_on, amount,
+                principal_amount, interest_amount, fee_amount FROM other_item_installments
+            WHERE supplier_id = ? AND other_item_id IN ({$in}) ORDER BY other_item_id, position");
+        $installments->execute([$supplierId, ...$itemIds]);
+        $plan = [];
+        foreach ($installments->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $plan[(int) $row['other_item_id']][] = $row;
+        }
+        if ($plan === []) return [];
+        $planned = array_keys($plan);
+        $in = implode(',', array_fill(0, count($planned), '?'));
+        $allocations = $pdo->prepare("SELECT other_item_id, installment_id, amount, interest_amount, fee_amount
+            FROM other_item_allocations
+            WHERE supplier_id = ? AND other_item_id IN ({$in}) AND reversed_on IS NULL
+            ORDER BY other_item_id, payment_on, id" . ($lock ? ' FOR UPDATE' : ''));
+        $allocations->execute([$supplierId, ...$planned]);
+        $paid = [];
+        foreach ($allocations->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $paid[(int) $row['other_item_id']][] = $row;
+        }
+        $settled = $pdo->prepare("SELECT id, settled_outside_amount FROM other_items WHERE supplier_id = ? AND id IN ({$in})");
+        $settled->execute([$supplierId, ...$planned]);
+        $outside = $settled->fetchAll(PDO::FETCH_KEY_PAIR);
+        $today ??= (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $result = [];
+        foreach ($plan as $itemId => $rows) {
+            $result[$itemId] = OtherItemInstallmentCoverage::compute($rows, $paid[$itemId] ?? [],
+                (float) ($outside[$itemId] ?? 0), $today);
+        }
+        return $result;
     }
 }

@@ -719,7 +719,9 @@ final class StereoNxImportTest extends TestCase
         $preview = $this->json($this->call('preview', $body, $token));
         self::assertSame(SyntheticStereoNxTables::identity()['dic'], $preview['companies'][0]['profile_suggestions']['dic']);
         self::assertSame('Aktuální název', $preview['companies'][0]['profile_current']['company_name']);
-        $limited = $this->request($body)->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', false, ['utilities.import' => 2]));
+        // Nastavení firmy zapisuje jen člen firmy, stejně jako za SupplierScopeMiddleware.
+        $this->db->pdo()->prepare('INSERT INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')->execute([$this->userId, $this->supplierId]);
+        $limited =$this->request($body)->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', false, ['utilities.import' => 2]));
         $denied = $this->action->fillCompanyProfile($limited, (new ResponseFactory())->createResponse(), ['token' => $token]);
         self::assertSame(403, $denied->getStatusCode());
         self::assertSame('', $this->scalar('SELECT dic FROM supplier WHERE id = ?', [$this->supplierId]));

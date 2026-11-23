@@ -72,6 +72,7 @@ final class SouhrnneHlaseniBuilder
         private readonly VatLedgerService $ledger,
         // Archiv podání — stav, který ve VIES vznikl řádným hlášením a předchozími následnými.
         private readonly TaxSubmissionRepository $submissions,
+        private readonly SubmissionVariantGuard $variantGuard,
     ) {}
 
     /**
@@ -320,6 +321,11 @@ final class SouhrnneHlaseniBuilder
                 )), 2),
                 'rows'                => $rows,
                 'submission_deadline' => $deadline,
+                // Řádné hlášení už evidované → karta termínu nehlásí prodlení. Následné má
+                // vlastní lhůtu od zjištění, tam odpočet zůstává.
+                'filed_at'            => $isFollowUp ? null : $this->variantGuard->filedAt(
+                    $supplierId, 'dphshv', $year, $quarter !== null ? null : $month, $quarter, ['R'],
+                ),
                 'variant'             => $variant,
                 'shvies_forma'        => $forma,
                 'is_follow_up'        => $isFollowUp,
@@ -506,6 +512,17 @@ final class SouhrnneHlaseniBuilder
     }
 
     /**
+     * Vstupuje řádek vydaného dokladu do souhrnného hlášení? Kód plnění 20/31/22
+     * a odběratel z jiného členského státu EU. Totéž pravidlo používá vynucená
+     * úprava faktury přes API token ({@see \MyInvoice\Action\Invoice\UpdateInvoiceAction}).
+     */
+    public static function entersSummaryReport(?string $code, ?string $countryIso2, bool $countryIsEu): bool
+    {
+        return $code !== null && isset(self::VAT_CODE_TO_SH_TYPE[$code])
+            && $countryIsEu && $countryIso2 !== null && $countryIso2 !== 'CZ';
+    }
+
+    /**
      * Sebere EU dodávky (vystavené faktury s VAT kódem 20/22 + EU klient s DIČ).
      * Agreguje per (k_stat, vat_id, sh_type).
      *
@@ -533,8 +550,7 @@ final class SouhrnneHlaseniBuilder
         foreach ($this->ledger->iterateRows($supplierId, $start, $end, includeDrafts: false) as $r) {
             if ($r['source'] !== 'sale') continue;
             $code = $r['code'];
-            if ($code === null || !isset(self::VAT_CODE_TO_SH_TYPE[$code])) continue;
-            if (!$r['country_is_eu'] || $r['country_iso2'] === 'CZ' || $r['country_iso2'] === null) continue;
+            if (!self::entersSummaryReport($code, $r['country_iso2'], (bool) $r['country_is_eu'])) continue;
 
             // k_stat = stát, který DIČ přidělil (prefix DIČ má přednost před zemí adresy),
             // c_vat = DIČ BEZ TOHOTO prefixu (XSD: „bez kódu státu"). Obojí určuje jedna

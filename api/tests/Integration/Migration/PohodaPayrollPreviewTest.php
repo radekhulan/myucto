@@ -11,11 +11,14 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImportJobService;
 use MyInvoice\Service\Migration\Pohoda\PohodaUploads;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Fixtures\Pohoda\LargeSyntheticPohodaPayroll;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaPayroll;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -208,6 +211,39 @@ final class PohodaPayrollPreviewTest extends TestCase
         $retry = $this->show($token, ['retry' => '1']);
         self::assertSame('processing', $retry['status']);
         self::assertNotSame($failed, $retry['job_id']);
+    }
+
+    /**
+     * Mzdy firmy v exportu, které nejde převzít (modul Mzdy vypnutý nebo licence bez mzdového
+     * doplňku), náhled výrazně ohlásí: kolik zaměstnanců a za jaké měsíce, proč a co dělat.
+     * Firma se zapnutými mzdami upozornění nedostane. Náhled zároveň nese stav modulu Sklad.
+     */
+    public function testShowWarnsAboutPayrollThatCannotBeTakenOver(): void
+    {
+        $token = $this->upload(['ico' => SyntheticPohodaPayroll::ICO, 'employees' => 4, 'months' => 10, 'payslips' => 40,
+            'first' => '2026-01', 'last' => '2026-10', 'last_overall' => '2026-10', 'exported_on' => '2026-11-02', 'open' => []], null);
+        $licensed = $this->container->get(PayrollModuleAccess::class)->isLicensed();
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
+
+        $body = $this->show($token);
+
+        $notice = $body[PayrollMigrationNotice::RESPONSE_KEY] ?? null;
+        self::assertIsArray($notice, json_encode($body));
+        self::assertSame(PayrollMigrationNotice::CODE, $notice['code']);
+        self::assertSame('warning', $notice['level']);
+        self::assertSame($licensed ? PayrollMigrationNotice::REASON_MODULE_DISABLED : PayrollMigrationNotice::REASON_UNLICENSED, $notice['reason']);
+        self::assertSame(['employees' => 4, 'months' => 10, 'first' => '2026-01', 'last' => '2026-10'],
+            array_intersect_key($notice['context'], array_flip(['employees', 'months', 'first', 'last'])));
+        self::assertStringContainsString('mzdy 4 zaměstnanců za 01/2026 až 10/2026', $notice['message']);
+        self::assertSame(['enabled' => false, 'can_enable' => $this->container->get(CommercialFeatureAccess::class)->isAvailable()], $body['stock_module']);
+
+        if (!$licensed) {
+            self::markTestIncomplete('Licence bez mzdového doplňku: firmu se zapnutými mzdami nejde ověřit.');
+        }
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1, stock_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        $enabled = $this->show($token);
+        self::assertArrayNotHasKey(PayrollMigrationNotice::RESPONSE_KEY, $enabled);
+        self::assertSame(['enabled' => true, 'can_enable' => true], $enabled['stock_module']);
     }
 
     /**

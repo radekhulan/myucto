@@ -20,7 +20,8 @@
    popsáno v [kapitole 15](15_Faktura_editor.md).
 2. **Funkční odesílání e-mailů.** Zkontrolujte ho tlačítkem **Test odeslání**
    (detail faktury, nabídka **Další akce**, část **Pokročilé**), které pošle
-   e-mail jen vám, ne klientovi.
+   testovací e-mail na adresu aktuální firmy. Chybí-li platná adresa firmy,
+   použije se výchozí odesílací adresa instalace (`smtp.from_email`).
 3. **Platný bankovní účet v měně faktury**, jinak se v PDF nezobrazí QR platba
    (viz [§ 16.10.7](#16107-qr-platba)). Účty spravujete v `Peníze → Bankovní účty`, záložce **Měny a účty**.
 4. **E-mail klienta.** Vyplňte ho na kartě klienta nebo v kontaktech klienta,
@@ -38,8 +39,9 @@
 
 2. Volitelně si PDF prohlédněte v náhledu na detailu nebo tlačítkem **Zobrazit PDF**.
 3. Klikněte na **Odeslat klientovi**. Stejným tlačítkem odešlete i už odeslanou fakturu znovu.
-4. V okně zkontrolujte příjemce. Jsou předvyplnění podle kontaktů klienta
-   (účel Doklady), e-mailů zakázky a hlavního e-mailu, duplicity jsou sloučené.
+4. V okně zkontrolujte příjemce. Přednost mají aktivní kontakty klienta pro účel
+   **Doklady**. Hlavní e-mail je náhradní příjemce; nastavení zakázky může
+   adresy doplnit nebo nahradit. Duplicity jsou sloučené.
    Seznam můžete upravit, přidat kopii (CC), skrytou kopii (BCC) a poznámku do e-mailu.
 5. Potvrďte odeslání.
 
@@ -54,8 +56,8 @@ záznam s adresami příjemců. V sekci **Historie PDF** je u odeslané verze ze
 štítek **Odesláno** a seznam příjemců.
 
 > [!TIP]
-> Před prvním ostrým odesláním použijte **Test odeslání**. E-mail přijde jen
-> vám a ověříte šablonu, SMTP i vzhled PDF bez rizika.
+> Před prvním ostrým odesláním použijte **Test odeslání**. Předem zkontrolujte
+> e-mail aktuální firmy, kam test dorazí. Ověříte šablonu, SMTP i vzhled PDF.
 
 Příloha navíc k PDF (smlouva, předávací protokol) se přidává v sekci **Přílohy
 e-mailu** na detailu, viz [§ 16.10.9](#16109-prilohy-e-mailu).
@@ -80,6 +82,14 @@ uložené ve vámi zvolené složce.
 > Firefox a Safari dialog Uložit jako nepodporují, PDF se tam stáhne do výchozí
 > složky prohlížeče. Totéž platí u přijaté faktury.
 
+Samostatný soubor **ISDOC** stáhnete na detailu vydané faktury přes
+**Další akce → Pokročilé → Stáhnout ISDOC**. Není potřeba posílat fakturu e-mailem.
+Akce je dostupná i uživateli s právem čtení faktur a nezávisí na nastavení ISDOC
+příloh e-mailů ani veřejné web faktury. Koncepty a stornované faktury ji nenabízejí;
+u nájemních a zálohových kalendářů ji najdete na jednotlivých vydaných dokladech splátek.
+Soubor má název `Faktura-<číslo faktury>.isdoc`; pokud je zapnutý podpis výstupu
+**Vydaná faktura**, export použije stejný podpisový profil.
+
 ## 16.5 Krok za krokem: Zaevidovat platbu nebo částečnou úhradu
 
 1. Otevřete detail faktury.
@@ -99,7 +109,10 @@ nebo Zaplaceno a v sumaci jsou řádky **Uhrazeno** a **Zbývá uhradit**.
 > [!WARNING]
 > Platbu navázanou na bankovní transakci nesmažete křížkem. Použijte **Zrušit
 > spárování** v detailu výpisu. Platbu s vystaveným daňovým dokladem smažete až po
-> smazání nebo stornu tohoto dokladu.
+> smazání nebo stornu tohoto dokladu. Úhrada se zdrojem **Převzato**, která nese
+> uhrazenou část z doby před převodem z POHODY (úhrada v minulém roce, dorovnání
+> úhrady), má místo křížku zámek a nesmaže ji ani **Zrušit úhradu**. Opravuje ji
+> opakovaný převod.
 
 U zálohové faktury a plátce DPH vzniká při částečné úhradě i daňový doklad
 k přijaté platbě, viz [§ 16.10.2](#16102-platby-a-castecne-uhrady).
@@ -205,9 +218,9 @@ Detail ukazuje:
   klasifikace DPH (kód i popis), zjednodušený daňový doklad § 30, ceny zadané
   včetně DPH, osvobození od daně z příjmů i s důvodem a kategorie tržby.
 - **Náhled PDF** - vložený náhled, který lze otevřít na celou obrazovku.
-- **Zdrojové PDF z importu** - jen u faktur naimportovaných z iDokladu nebo
-  Fakturoidu: původní PDF dokladu tak, jak dorazilo ze zdrojového systému
-  (náhled a stažení). Je oddělené od vygenerovaného PDF, viz [21. Importy](21_Importy.md).
+- **Originál PDF** - původní PDF dokladu, oddělené od vygenerovaného PDF (náhled
+  a stažení). Import z iDokladu nebo Fakturoidu ho uloží sám (viz
+  [21. Importy](21_Importy.md)), k ostatním fakturám ho lze nahrát ručně, viz níže.
 - **Activity log** - kdo a kdy fakturu vytvořil, vystavil, odeslal a označil jako zaplacenou.
 
 Otevřete-li detail ze seznamu faktur, vlevo od odkazu **Zpět na seznam** jsou šipky
@@ -226,7 +239,40 @@ Akční tlačítka vpravo nahoře závisí na stavu faktury:
 \* Jen v podvojném účetnictví a dokud faktura nemá štítek **Zaúčtováno**, viz
 [§ 16.10.3](#16103-zauctovani-do-deniku).
 
-**Test odeslání** a **Test upomínky** pošlou e-mail jen na váš e-mail, ne klientovi.
+**Test odeslání** a **Test upomínky** posílají na e-mail aktuální firmy,
+případně na výchozí odesílací adresu instalace. Stav faktury ani počítadlo
+upomínek testem nemění.
+
+#### Originál PDF dokladu
+
+Faktura převzatá z jiného systému (například z POHODY) nebo vystavená mimo aplikaci
+může nést svůj původní PDF doklad. Box **Originál PDF** v detailu faktury nabízí:
+
+- **Nahrát originál PDF** - když faktura originál nemá; soubor lze vybrat tlačítkem
+  nebo přetáhnout na box.
+- **Nahradit** - nahraje jiný soubor místo stávajícího originálu.
+- **Odebrat** - originál z faktury odstraní.
+
+Nahrát lze jen PDF do 20 MiB; kontroluje se obsah souboru, ne přípona. Originál je
+jen archivovaná kopie: nemění stav, částky ani zaúčtování faktury, a proto jde nahrát
+i u zaúčtované faktury nebo v uzamčeném období. Ovládání vidí uživatel s právem
+upravovat vydané faktury. Nahrání, náhrada i odebrání se zapíší do aktivity faktury.
+
+**Hromadné nahrání.** V seznamu vydaných faktur v nabídce **…** je akce **Nahrát
+originály PDF**. Vyberte nebo přetáhněte víc PDF souborů najednou (nejvýše 500).
+Ke každému souboru se podle názvu najde faktura firmy: číslo faktury nebo variabilní
+symbol musí být v názvu jako samostatná část, nezáleží na diakritice, velikosti písmen
+ani oddělovačích. `FV-2026-001.pdf` i `Faktura fv 2026 001.pdf` patří k faktuře
+FV-2026-001, `FV-2026-0012.pdf` k ní nepatří. Náhled ukáže soubory:
+
+| Stav | Význam |
+|---|---|
+| Spárováno | Soubor patří jedné faktuře. Má-li faktura už originál, náhled upozorní, že ho soubor nahradí. |
+| Nespárováno | Název neobsahuje číslo žádné faktury firmy, nebo soubor není PDF. |
+| Nejednoznačné | Název sedí na víc faktur, nebo na tutéž fakturu míří víc souborů. |
+
+Tlačítko **Nahrát spárované** nahraje jen spárované soubory; nespárované
+a nejednoznačné nahrajte ručně v detailu faktury.
 
 ### 16.10.2 Platby a částečné úhrady
 
@@ -335,43 +381,42 @@ Vygenerované PDF obsahuje:
    maďarský Adószám (viz [§ 18.7.3](18_Klienti.md#1873-slovensky-klient-a-narodni-danova-cisla)).
 3. **Číslo faktury** a **typ** (Faktura, Proforma, Dobropis, Storno).
 4. **Data** - vystaveno, DUZP, splatnost. Se zapnutou volbou **Tisknout na faktuře,
-   kdo ji vystavil** (Nastavení → Fakturace) přibude řádek **Vystavil** se jménem
+   kdo ji vystavil** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`) přibude řádek **Vystavil** se jménem
    uživatele, který doklad vystavil. Jméno se uloží při vystavení, takže pozdější
    přejmenování uživatele už vystavený doklad nezmění. Doklad vystavený před zapnutím
    této evidence, převzatý importem nebo zobrazený jako koncept ukáže autora dokladu.
    Doklad vystavený bez přihlášeného uživatele (schválení výkazu klientem přes odkaz
    nebo pravidelná fakturace spuštěná automaticky) ukáže také autora. Stejné jméno vidíte
    v detailu faktury. U už vystavených dokladů se řádek objeví až po přegenerování
-   jejich PDF (například po úpravě dokladu nebo aktualizaci aplikace), dříve vytvořené
-   PDF se samo nemění.
+   jejich PDF (například po úpravě dokladu), dříve uložené PDF se samo nemění.
 5. **Bankovní spojení** - číslo účtu nebo IBAN, BIC, banka, variabilní symbol.
-   Se zapnutou volbou **Bankovní spojení v patičce PDF faktury** (`Nastavení → Doklady`,
+   Se zapnutou volbou **Bankovní spojení jen v patičce PDF faktury (nestandardní umístění)** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) se číslo účtu, IBAN, BIC a banka tisknou v patičce každé strany
    a platební panel u součtu ukáže jen QR platbu v rámečku s popiskem. Variabilní symbol
    zůstává v údajích dokladu nad položkami. Uhrazená faktura, platba hotově nebo kartou
    a vyúčtování k vrácení vypadají stejně jako bez volby. Projeví se na konceptech a na PDF
-   vytvořených po zapnutí, už vygenerovaná PDF vystavených dokladů se nemění.
+   vytvořených po zapnutí. Již uložená PDF vystavených dokladů zůstávají zachována.
 6. **Položky** - tabulka (Popis, Množství, Cena, DPH, Celkem). U položky s vybranými
    kusy skladové karty se pod popisem vypíšou sériová čísla („Výr. č.: …“, například VIN)
    nebo šarže s expirací a množstvím („Šarže: …“), viz [§ 37.5.1](37_Sklad.md#3751-vydej-fakturou).
    Textový řádek ([§ 15.9.3](15_Faktura_editor.md#1593-polozky)) se tiskne přes celou
    šířku tabulky, bez množství a cen.
-   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (`Nastavení → Doklady`,
+   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) má tabulka místo sloupce Cena/j sloupce **Cena/j před slevou**, **Sleva**
    a **Cena/j po slevě**, pokud má faktura aspoň jednu položku se slevou z ceníkové ceny.
    Položka bez ceníkové ceny nebo s přirážkou ukáže jen výslednou cenu. U faktury s cenami
    včetně DPH jsou obě ceny bez DPH. Ceníková cena nemění částky dokladu ani export ISDOC
    a POHODA. Slevu lze zadat i přímo u řádku v editoru, viz
    [§ 15.9.3](15_Faktura_editor.md#1593-polozky).
-   Faktury s mnoha položkami zhustí volba **Kompaktní řádky položek na PDF faktury**
-   (`Nastavení → Doklady`, výchozí vypnuto): tabulka položek má menší odsazení a písmo,
+   Faktury s mnoha položkami zhustí volba **Kompaktní řádky položek na PDF faktury (nestandardní vzhled)**
+   (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`, výchozí vypnuto): tabulka položek má menší odsazení a písmo,
    sloupec popisu je širší na úkor rezervy číselných sloupců (milionové částky se do nich
    pořád vejdou) a rozpis balení („celkem 80 ks“) i sériová čísla a šarže se tisknou drobným
    písmem za popisem položky na stejném řádku. Faktura s 50 položkami a dvouřádkovými názvy
    dílů má místo čtyř stran dvě, se sloupci rozpisu slevy u řádku místo pěti tři.
    Volba mění jen vzhled tabulky, částky ani ostatní části dokladu ne. Projeví se na
-   konceptech a na PDF vytvořených po zapnutí, už vygenerovaná PDF vystavených dokladů
-   se nemění.
+   konceptech a na PDF vytvořených po zapnutí. Již uložená PDF vystavených dokladů
+   zůstávají zachována. PDF může také zobrazit rozpis základního množství a počtu balení.
 7. **Sumář** - mezisoučet, sleva, rozpis DPH, **CELKEM**.
 8. **Přepočet do CZK** (EUR a cizí měna) - u českého odběratele kurz ČNB a tabulka
    základů a DPH v CZK; u zahraničního odběratele pouze česká DPH v CZK, pokud na
@@ -380,7 +425,14 @@ Vygenerované PDF obsahuje:
 10. **Patičku** - text z Nastavení dodavatele (volitelný).
 11. **Druhou stranu s výkazem víceprací** (volitelně). Má-li faktura výkaz, je
     položka „Výkaz víceprací“ v tabulce položek podtržený odkaz, který přeskočí
-    přímo na stránku s výkazem.
+    přímo na stránku s výkazem. Při ceníku práce se na této straně zobrazí detailní
+    časový rozpis a cenová rekapitulace; viditelnost hodin, sazby a částek respektuje
+    nastavení zobrazení výkazu.
+
+   Výchozí sloupce a kompaktní rozvržení výkazu práce nastavíte interně v `Firma → Nastavení`,
+   klientsky v `Firma → Nastavení firmy → Branding`. Výkaz vystavené faktury si zachová
+   původní podobu i po přegenerování PDF. Nové nastavení se použije u konceptů bez vlastní
+   výjimky; podrobnosti uvádí [§ 15.9.6](15_Faktura_editor.md#1596-vykaz-vicepraci).
 
 > [!TIP]
 > **Branding hlavičky.** Má-li dodavatel v Nastavení zapnutý branding, PDF přebere jeho
@@ -390,7 +442,7 @@ Vygenerované PDF obsahuje:
 > (dobropis červená, storno šedá).
 
 **Úsporná černobílá faktura.** Pro tisk na černobílé tiskárně zapněte v `Firma → Branding`
-volbu **Úsporná černobílá faktura (PDF)**. PDF faktury i výkazu víceprací pak nemá žádné
+volbu **Úsporná černobílá faktura (nestandardní vzhled)**. PDF faktury i výkazu víceprací pak nemá žádné
 barevné ani tmavé plochy (hlavička tabulky položek, řádky **Celkem** a **K úhradě**, bloky
 dodavatele a odběratele, platební panel, poznámky, přepočet do CZK ani podbarvené sudé
 řádky). Text je černý, oddělení dělají tenké čáry, odběratele a platební panel ohraničuje
@@ -488,10 +540,13 @@ převod** a jen na nezaplacenou zbývající částku. Zaplacená faktura ani pl
 
 ### 16.10.8 Odesílání e-mailem
 
-**Příjemci.** E-mail jde na adresy z kontaktů klienta (účel Doklady), fakturační
-e-maily zakázky (až 3 dodatečné adresy) a hlavní e-mail klienta. V okně odeslání
-je můžete upravit. Předmět a tělo se berou ze šablony nového dokladu (česky nebo
-anglicky podle jazyka klienta), viz [96. Nastavení](96_Nastaveni.md). Předmět
+**Příjemci.** Přednost mají aktivní kontakty klienta pro účel **Doklady**
+s rozlišením Komu, Kopie a Skrytá kopie. Hlavní e-mail klienta se použije,
+pokud pro daný účel nejsou kontakty. Při chybějícím příjemci Komu jej aplikace
+doplní jen tehdy, když tato adresa už není mezi Kopie nebo Skrytá kopie. Fakturační
+e-maily zakázky se použijí podle jejího režimu: automaticky, přidáním nebo
+nahrazením příjemců. V okně odeslání můžete výsledný seznam upravit. Předmět
+a tělo se berou ze šablony nového dokladu podle **jazyka uloženého na faktuře**, viz [96. Nastavení](96_Nastaveni.md). Předmět
 i název přiloženého PDF lze předepsat pro konkrétního klienta, viz
 [§ 18.4.1](18_Klienti.md#1841-predmet-e-mailu-a-nazev-prilozeneho-pdf). Po odeslání
 se stav faktury změní na Odesláno a v activity logu je záznam s adresami příjemců.
@@ -649,8 +704,13 @@ faktury. Doklad v uzavřeném účetním období upraví i s tímto právem jen 
 skladová omezení níže platí pro všechny. U zaúčtované faktury přeúčtuje změna částek,
 DPH nebo položek zápis v deníku, proto k ní role kromě tohoto práva potřebuje i
 **Zaúčtovat doklad**. Bez něj úpravu odmítne a dovolí změnit jen neúčetní údaje
-(texty, poznámky, splatnost). Úpravu ani výkaz vystavené faktury nejde vynutit
-přes API token, jen v aplikaci.
+(texty, poznámky, splatnost). Přes API lze úpravu vynutit tokenem s výslovně
+přidělenou schopností **Úprava vystavených faktur přes API (force)**
+([§ 103.9.7.2](103_API.md#103972-uprava-vystavene-faktury-pres-api-token)),
+případně tokenem s **Plným zápisem**
+([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)). Token
+nepřekoná ochranu podaných a uzavřených období; schopnost upravit fakturu
+sama neuděluje práva k dalším agendám.
 
 Variabilní symbol je neměnný, úprava ho nezmění. Chcete-li číslo změnit, vystavte
 storno nebo dobropis a fakturu znovu pod novým číslem.
@@ -710,9 +770,13 @@ k DPH), zobrazí se před smazáním velké varování: zásah změní DPH a kon
 hlášení za už vykázané období a je na odpovědnost účetního. Po zaškrtnutí potvrzení
 se zápis i faktura smažou; přehlasovaný zámek je v activity logu.
 
-Když zápis smazat nejde (uzavřené období), zůstává aktivní retenční ochrana
-účetních a daňových záznamů. V běžící retenční lhůtě proto použijte storno nebo
-dobropis.
+Když zápis smazat nejde (uzavřené období, řádek pohledávky spárovaný s jiným zápisem
+v okruhu otevřených položek nebo rozepsaný na doklady saldokonta), zůstává aktivní
+retenční ochrana účetních a daňových záznamů. V běžící retenční lhůtě proto použijte
+storno nebo dobropis. Brání-li smazání zápisu okruh párování nebo rozpad saldokonta,
+hláška to řekne: okruh zrušte v opisu účtu na záložce **Otevřené položky - párování**
+([kap. 55.8.5.1](55_Hlavni_kniha.md)), resp. přiřazení v saldokontu, a fakturu pak
+smažte i se zápisem.
 
 Před skutečným smazáním systém ukáže podrobné varování podle stavu (jiné pro
 vystavenou, odeslanou, zaplacenou a stornovanou) s doporučenou alternativou
@@ -744,7 +808,9 @@ Storno nejde zrušit, když:
 - faktura spadá do uzavřeného účetního období nebo uzamčené části účetnictví
   (například po podaném přiznání k DPH), protože by se vrátila do už uzavřené
   evidence DPH,
-- storno je zaúčtované v deníku a zápisy nejde smazat,
+- storno je zaúčtované v deníku a zápisy nejde smazat (například je řádek faktury
+  nebo storna spárovaný s jiným zápisem v okruhu otevřených položek; okruh mezi
+  fakturou a jejím stornem smazání nebrání),
 - faktura je zrušená vystaveným dobropisem. Dobropis dostal zákazník, ruší se jeho
   vlastním stornem.
 

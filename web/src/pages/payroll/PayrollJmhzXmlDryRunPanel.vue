@@ -8,6 +8,7 @@ import {
   payrollApi,
   type PayrollJmhzControlFinding,
   type PayrollJmhzControlReport,
+  type PayrollJmhzDeferralContext,
   type PayrollJmhzPvpojOffice,
   type PayrollJmhzXmlDryRun,
   type PayrollJmhzXmlDryRunBlocker,
@@ -26,9 +27,12 @@ import {
   jmhzErrorMessage,
   jmhzRemediationKind,
   jmhzRemediationTarget,
+  ANNUAL_REQUEST_CODES,
+  annualSettlementRequestTarget,
 } from './jmhzBlockerRemediation'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import PayrollJmhzDeferralList from './PayrollJmhzDeferralList.vue'
+import JmhzBulkDefer from './JmhzBulkDefer.vue'
 
 const workplaceBulkDialogRun = ref<PayrollRun | null>(null)
 
@@ -189,7 +193,7 @@ async function run(payrollRun: PayrollRun) {
  * „neznámá blokace" s odkazem na podporu, když server příčinu zná.
  */
 function blockerLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
-  return jmhzBlockerLabel(t, te, blocker)
+  return jmhzBlockerLabel(t, te, blocker, locale.value)
 }
 
 /**
@@ -198,6 +202,10 @@ function blockerLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
  */
 function blockerStep(blocker: PayrollJmhzXmlDryRunBlocker): string {
   if (locale.value === 'cs' && blocker.action) return blocker.action
+  // Nález, u kterého obecný krok druhu nápravy radí špatně (např. nevyhlášený
+  // číselník obcí: „podejte ručně přes ePortál" by bylo zavádějící).
+  const codeStep = `payroll.jmhz_gate.code_steps.${blocker.code}`
+  if (te(codeStep)) return t(codeStep)
   return t(`payroll.jmhz_gate.steps.${jmhzRemediationKind(blocker)}`)
 }
 
@@ -376,10 +384,28 @@ function blockerUsesSharedTarget(code: string): boolean {
 }
 
 function blockerUsesAgendaTarget(group: BlockerGroup): boolean {
-  return blockerUsesSharedTarget(group.blocker.code) || group.entityIds.length > 10
+  return blockerUsesSharedTarget(group.blocker.code)
+    || ANNUAL_REQUEST_CODES.includes(group.blocker.code)
+    || group.entityIds.length > 10
+}
+
+/**
+ * Nerozhodnutá žádost o roční zúčtování se řeší hromadně: Roční zúčtování
+ * za minulý rok zúžené na nerozhodnuté osoby tohoto hlášení, všechny vybrané.
+ * Dřív odkaz otevřel stránku bez filtru a dotčené osoby se hledaly ručně.
+ */
+function annualRequestGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw {
+  const employeeIds = group.blocker.entity_type === 'employment'
+    ? group.entityIds
+      .map(id => remediationEmployments.value.find(item => item.id === id)?.employee_id ?? null)
+      .filter((id): id is number => id !== null)
+    : group.entityIds
+  const here = typeof window === 'undefined' ? null : `${window.location.pathname}${window.location.search}`
+  return annualSettlementRequestTarget(payrollRun.period_start.slice(0, 7), employeeIds, true, here)
 }
 
 function blockerGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw | null {
+  if (ANNUAL_REQUEST_CODES.includes(group.blocker.code)) return annualRequestGroupTarget(group, payrollRun)
   return blockerUsesAgendaTarget(group)
     ? blockerTarget(group.blocker, null, payrollRun)
     : blockerTarget(group.blocker, group.blocker.entity_id, payrollRun)
@@ -456,13 +482,17 @@ interface ControlGroup {
  * podání zneplatní, propustná ho nechá projít s chybnými daty a mezera
  * v pokrytí znamená, že jsme kontrolu vůbec nevykonali.
  */
-function controlGroups(report: PayrollJmhzControlReport): ControlGroup[] {
+function controlGroups(report: PayrollJmhzControlReport, result?: PayrollJmhzXmlDryRun): ControlGroup[] {
+  // Před koncem měsíce selžou kontroly 43, 44 a 90 jen kvůli dnešnímu datu.
+  // Říká to jedna věta závory; vypsat je jako „nepropustné vady" by účetní
+  // poslalo hledat chybu v údajích, které jsou v pořádku.
+  const dateOnly = periodNotFinished(result) ? (result?.date_only_control_ids ?? []) : []
   return ([
     {
       key: 'blocking',
       title: 'payroll.submissions.overview.jmhz_controls_blocking',
       tone: 'border-danger-500/30 bg-danger-50 text-danger-700',
-      findings: report.blocking,
+      findings: report.blocking.filter(finding => !dateOnly.includes(finding.control_id)),
     },
     {
       key: 'gaps',
@@ -477,6 +507,41 @@ function controlGroups(report: PayrollJmhzControlReport): ControlGroup[] {
       findings: report.warnings,
     },
   ] satisfies ControlGroup[]).filter(group => group.findings.length > 0)
+}
+
+/**
+ * Nálezy, které má smysl ukázat jako kroky k doplnění.
+ *
+ * U ročníku, který aplikace ještě neumí sestavit (číselníky obcí a států pro
+ * rok nejsou vyhlášené), nese důvod, radu i termín závora nahoře. Nález
+ * číselníků u každého vztahu by vedle ní stál jako krok, na kterém účetní
+ * nemá co udělat, a počítal by se do „N kroků k doplnění".
+ */
+function visibleBlockers(result: PayrollJmhzXmlDryRun): PayrollJmhzXmlDryRunBlocker[] {
+  return result.preparation_gate?.code === 'jmhz_spec_version_unavailable'
+    ? result.blockers.filter(blocker => blocker.code !== 'jmhz_workplace_codebooks_not_published')
+    : result.blockers
+}
+
+/** Hlášené období ještě neskončilo: hlášení půjde zmrazit až od data v závoře. */
+function periodNotFinished(result?: PayrollJmhzXmlDryRun | null): boolean {
+  return result?.preparation_gate?.code === 'jmhz_period_not_finished'
+}
+
+/**
+ * Nadpis výsledku testu, který neprošel až do „lze odeslat". Dřív tu stála
+ * jediná věta o nevykonaném katalogu kontrol, i když katalog proběhl celý
+ * a hlášení zastavila konkrétní kontrola, nebo jen datum.
+ */
+function incompleteTitle(result: PayrollJmhzXmlDryRun): string {
+  if (result.waiting_for_period_end) return t('payroll.submissions.overview.jmhz_dry_run_waiting')
+  if ((result.controls?.blocking.length ?? 0) > 0) return t('payroll.submissions.overview.jmhz_dry_run_controls_failed')
+  return t('payroll.submissions.overview.jmhz_dry_run_incomplete')
+}
+
+/** Mzdové běhy měsíce, kde se po opravě údaje čteného ze schváleného běhu otevírá oprava. */
+function revisionTarget(payrollRun: PayrollRun): RouteLocationRaw {
+  return { name: 'payroll-runs', query: { period: payrollRun.period_start.slice(0, 7) } }
 }
 
 /**
@@ -537,6 +602,44 @@ function canDefer(blocker: PayrollJmhzXmlDryRunBlocker, entityId: number | null)
     && deferralEmploymentId(blocker, entityId) !== null
 }
 
+function bulkDeferral(payrollRun: PayrollRun): PayrollJmhzDeferralContext | null {
+  const result = state(payrollRun)?.result
+  const revision = revisionId(payrollRun)
+  if (!result || revision === null) return null
+  const people = new Set<string>()
+  let firm = 0
+  for (const blocker of result.blockers) {
+    if (blocker.deferrable !== true || blocker.entity_id === null) {
+      firm++
+      continue
+    }
+    const employee = blocker.entity_type === 'employment'
+      ? remediationEmployments.value.find(item => item.id === blocker.entity_id)?.employee_id ?? `employment:${blocker.entity_id}`
+      : blocker.entity_id
+    people.add(String(employee))
+  }
+  if (people.size === 0) return null
+  return {
+    preparation_id: result.preparation_id,
+    environment: 'test',
+    office_id: selectedOffice.value[revision] ?? null,
+    employment_ids: null,
+    count: people.size,
+    firm_blocker_count: firm,
+  }
+}
+
+async function afterBulkDefer(payrollRun: PayrollRun) {
+  const revision = revisionId(payrollRun)
+  if (revision === null) return
+  deferralRefresh.value = { ...deferralRefresh.value, [revision]: (deferralRefresh.value[revision] ?? 0) + 1 }
+  await run(payrollRun)
+}
+
+async function afterDeferralChange(payrollRun: PayrollRun) {
+  if (state(payrollRun)?.result) await run(payrollRun)
+}
+
 function askDefer(payrollRun: PayrollRun, blocker: PayrollJmhzXmlDryRunBlocker, entityId: number, index: number) {
   const revision = revisionId(payrollRun)
   const employmentId = deferralEmploymentId(blocker, entityId)
@@ -575,7 +678,7 @@ async function confirmDefer() {
   draft.error = ''
   try {
     await payrollApi.deferJmhzEmployment({
-      environment: props.environment,
+      environment: 'test',
       preparationId: result.preparation_id,
       employmentId: draft.employmentId,
       officeId: selectedOffice.value[draft.revision] ?? null,
@@ -722,24 +825,37 @@ async function copyXml(payrollRun: PayrollRun) {
         </p>
 
         <template v-if="state(payrollRun)?.result">
+          <!--
+            Závora přípravy: období ještě neskončilo, nebo ročník hlášení
+            aplikace neumí sestavit. Účetní to vlastními údaji nezmění, proto
+            to stojí nahoře jednou větou s datem, ne jako další krok k doplnění.
+          -->
+          <p
+            v-if="state(payrollRun)!.result!.preparation_gate"
+            class="mt-3 rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-900"
+            :data-test="`jmhz-dry-run-gate-${payrollRun.revision_id}`"
+          >
+            {{ state(payrollRun)!.result!.preparation_gate!.message }}
+          </p>
           <div
             v-if="state(payrollRun)!.result!.status !== 'blocked'"
             class="mt-3 rounded-lg p-3"
-            :class="state(payrollRun)!.result!.status === 'dry_run_valid'
+            :class="state(payrollRun)!.result!.status === 'dry_run_valid' || state(payrollRun)!.result!.waiting_for_period_end
               ? 'border border-success-500/30 bg-success-50'
               : 'border border-warning-500/30 bg-warning-50'"
           >
             <p
               class="text-sm font-medium"
-              :class="state(payrollRun)!.result!.status === 'dry_run_valid'
+              :class="state(payrollRun)!.result!.status === 'dry_run_valid' || state(payrollRun)!.result!.waiting_for_period_end
                 ? 'text-success-700'
                 : 'text-warning-700'"
+              data-test="jmhz-dry-run-status"
             >
               {{ state(payrollRun)!.result!.status === 'dry_run_valid'
                 ? t('payroll.submissions.overview.jmhz_dry_run_valid', {
                   version: state(payrollRun)!.result!.schema?.data_version ?? '',
                 })
-                : t('payroll.submissions.overview.jmhz_dry_run_incomplete') }}
+                : incompleteTitle(state(payrollRun)!.result!) }}
             </p>
             <p
               class="mt-1 break-all text-xs"
@@ -795,7 +911,7 @@ async function copyXml(payrollRun: PayrollRun) {
                 </ul>
               </details>
               <div
-                v-for="group in controlGroups(state(payrollRun)!.result!.controls!)"
+                v-for="group in controlGroups(state(payrollRun)!.result!.controls!, state(payrollRun)!.result!)"
                 :key="group.key"
                 class="rounded-lg border p-3"
                 :class="group.tone"
@@ -902,15 +1018,28 @@ async function copyXml(payrollRun: PayrollRun) {
             v-else
             class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3"
           >
-            <p class="text-sm font-medium text-warning-700">
-              {{ t('payroll.submissions.overview.jmhz_dry_run_blocked', {
-                count: groupedBlockers(state(payrollRun)!.result!.blockers).length,
-                records: state(payrollRun)!.result!.blockers.length,
-              }) }}
+            <p class="text-sm font-medium text-warning-700" data-test="jmhz-dry-run-blocked-title">
+              {{ visibleBlockers(state(payrollRun)!.result!).length === 0
+                ? t('payroll.submissions.overview.jmhz_dry_run_blocked_nothing_to_fix')
+                : t('payroll.submissions.overview.jmhz_dry_run_blocked', {
+                  steps: t('payroll.submissions.overview.jmhz_dry_run_blocked_steps', {
+                    count: groupedBlockers(visibleBlockers(state(payrollRun)!.result!)).length,
+                  }, groupedBlockers(visibleBlockers(state(payrollRun)!.result!)).length),
+                  records: t('payroll.submissions.overview.jmhz_dry_run_blocked_records', {
+                    count: visibleBlockers(state(payrollRun)!.result!).length,
+                  }, visibleBlockers(state(payrollRun)!.result!).length),
+                }) }}
             </p>
+            <JmhzBulkDefer
+              v-if="canWrite && bulkDeferral(payrollRun)"
+              class="mt-3"
+              :context="bulkDeferral(payrollRun)!"
+              :can-write="canWrite"
+              @deferred="afterBulkDefer(payrollRun)"
+            />
             <ul class="mt-3 space-y-3 text-sm text-warning-700">
               <li
-                v-for="group in groupedBlockers(state(payrollRun)!.result!.blockers)"
+                v-for="group in groupedBlockers(visibleBlockers(state(payrollRun)!.result!))"
                 :key="group.key"
                 class="rounded-lg border border-warning-500/20 bg-surface/60 p-3"
                 data-test="jmhz-dry-run-blocker"
@@ -932,6 +1061,24 @@ async function copyXml(payrollRun: PayrollRun) {
                       {{ t('payroll.submissions.overview.jmhz_dry_run_blocker_occurrences', {
                         count: group.count,
                       }) }}
+                    </p>
+                    <!--
+                      Údaj čtený ze schváleného běhu: samotná oprava nález
+                      neodstraní, test by dál ukazoval totéž.
+                    -->
+                    <p
+                      v-if="group.blocker.needs_revision"
+                      class="mt-2 text-xs"
+                      data-test="jmhz-dry-run-revision-hint"
+                    >
+                      {{ t('payroll.jmhz_gate.freeze_blockers.revision_hint') }}
+                      <RouterLink
+                        :to="revisionTarget(payrollRun)"
+                        class="font-medium underline decoration-dotted underline-offset-4"
+                        data-test="jmhz-dry-run-revision-link"
+                      >
+                        {{ t('payroll.jmhz_gate.freeze_blockers.open_run') }}
+                      </RouterLink>
                     </p>
                   </div>
                   <button
@@ -1165,6 +1312,9 @@ async function copyXml(payrollRun: PayrollRun) {
           :environment="environment"
           :can-write="canWrite"
           :refresh-key="deferralRefresh[payrollRun.revision_id] ?? 0"
+          :preparation-id="state(payrollRun)?.result?.preparation_id ?? null"
+          :office-id="selectedOffice[payrollRun.revision_id] ?? null"
+          @changed="afterDeferralChange(payrollRun)"
         />
 
         <p

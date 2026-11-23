@@ -299,10 +299,15 @@ final class JournalSettlementService
      * páruje na doklady. Přebírá ho jen převod: přeplatek zaúčtovaný z výpisu přímo na účet
      * jiný program dokladem nevede, předpisem je tedy řádek toho pohybu.
      *
+     * Převod z programu, který saldo vede po řádcích deníku (`$fromConversion`, Helios): otevřená
+     * skupina saldokonta zdroje bez dokladu v MyÚčtu dostane položku nad kterýmkoli živým řádkem
+     * své skupiny na saldokontním účtu, i nad zaúčtováním dokladu nebo řádkem v cizí měně
+     * (ne nad červeným stornem: předpis položky se páruje podle strany řádku). Volá jen převod.
+     *
      * @param array<string,mixed> $input {line_id, amount, partner_id?, partner_name?, variable_symbol?, title?, due_on?, note?}
      * @return array{item:array<string,mixed>, allocation_id:int, line:array<string,mixed>}
      */
-    public function createOtherItem(int $supplierId, array $input, ?int $userId, bool $fromPayment = false): array
+    public function createOtherItem(int $supplierId, array $input, ?int $userId, bool $fromPayment = false, bool $fromConversion = false): array
     {
         $lineId = (int) ($input['line_id'] ?? 0);
         $amount = self::amount($input['amount'] ?? null);
@@ -314,10 +319,14 @@ final class JournalSettlementService
             $this->repo->lockForAllocation($supplierId, [$lineId], []);
             $line = $this->repo->lines($supplierId, [$lineId])[$lineId]
                 ?? throw new JournalSettlementException('line_not_found', 'Řádek zápisu nenalezen.', 404);
-            $this->assertLine($supplierId, $line, null, SaldoService::DEFAULT_ACCOUNTS, $fromPayment
-                ? [...JournalSettlementRepository::ALLOCATABLE_SOURCES, ...JournalSettlementRepository::PAYMENT_SOURCES]
-                : JournalSettlementRepository::ALLOCATABLE_SOURCES);
-            if ($this->repo->hasCountedLink($supplierId, $line['entry_id'])) {
+            if ($fromConversion) {
+                $this->assertConversionLine($supplierId, $line);
+            } else {
+                $this->assertLine($supplierId, $line, null, SaldoService::DEFAULT_ACCOUNTS, $fromPayment
+                    ? [...JournalSettlementRepository::ALLOCATABLE_SOURCES, ...JournalSettlementRepository::PAYMENT_SOURCES]
+                    : JournalSettlementRepository::ALLOCATABLE_SOURCES);
+            }
+            if (!$fromPayment && !$fromConversion && $this->repo->hasCountedLink($supplierId, $line['entry_id'])) {
                 throw new JournalSettlementException('entry_linked', 'Zápis už je navázaný na doklad, zůstatek bez dokladu z něj založit nelze.', 409);
             }
             $free = round($line['amount'] - $this->repo->usedOnLine($supplierId, $line), 2);
@@ -583,6 +592,26 @@ final class JournalSettlementService
      * @param list<string> $sources druhy zápisu, jejichž řádek se smí rozepsat
      * @return array{id:int, code:string, name:string, account_type:string, normal_side:?string}
      */
+    /** Řádek pro položku z převodu: živý, na saldokontním účtu, ne červené storno; zdroj a měna nevadí. */
+    private function assertConversionLine(int $supplierId, array $line): void
+    {
+        $ref = $line['document_no'] ?? ('#' . $line['entry_id']);
+        if (!$line['posted'] || $line['reversed'] || $line['is_reversal']) {
+            throw new JournalSettlementException('line_not_live', 'Zápis ' . $ref . ' není zaúčtovaný, nebo je stornovaný.', 409);
+        }
+        if ($line['duplicate_line_no']) {
+            throw new JournalSettlementException('line_ambiguous', 'Zápis ' . $ref . ' má víc řádků se stejným pořadím, řádek nelze jednoznačně rozepsat.', 409);
+        }
+        if ($line['is_red_storno']) {
+            throw new JournalSettlementException('line_red_storno', 'Řádek červeného storna nelze rozepsat na doklady.', 409);
+        }
+        $code = substr($line['synthetic_code'], 0, 3);
+        $account = in_array($code, SaldoService::DEFAULT_ACCOUNTS, true) ? $this->saldo->resolveAccount($supplierId, $code) : null;
+        if ($account === null || $account['id'] !== $line['synthetic_id']) {
+            throw new JournalSettlementException('account_not_saldo', 'Řádek zápisu ' . $ref . ' není na saldokontním účtu.', 409);
+        }
+    }
+
     private function assertLine(int $supplierId, array $line, ?string $side, array $allowedCodes, array $sources = JournalSettlementRepository::ALLOCATABLE_SOURCES): array
     {
         $ref = $line['document_no'] ?? ('#' . $line['entry_id']);

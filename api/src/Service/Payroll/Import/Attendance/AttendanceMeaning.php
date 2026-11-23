@@ -27,7 +27,7 @@ final class AttendanceMeaning
     ];
 
     /** Stavy párování osoby na pracovní vztah ({@see AttendancePersonMatcher}). */
-    public const MATCH_STATUSES = ['linked', 'matched', 'ambiguous', 'not_found'];
+    public const MATCH_STATUSES = ['linked', 'matched', 'ambiguous', 'conflict', 'not_found'];
 
     public const IGNORE = 'ignore';
     public const PERSON_NAME = 'person_name';
@@ -51,6 +51,37 @@ final class AttendanceMeaning
         'hourly_rate',
         'end_date',
         'bank_account',
+        'worked_days',
+        ...self::REGISTRATION,
+    ];
+
+    /**
+     * Údaje pro registraci ČSSZ ({@see AttendanceRegistrationData}). Nové osobě
+     * se zapíšou při založení, existující jen doplní, co v evidenci chybí.
+     */
+    public const REGISTRATION = [
+        'address_street',
+        'address_house_number',
+        'address_city',
+        'address_postal_code',
+        'address_country',
+        'citizenship',
+        'cz_isco_code',
+        'activity_code',
+        'workplace',
+        'tax_residence',
+        'tax_declaration',
+        'tax_declaration_from',
+        'education_code',
+        'employment_status_code',
+        'birth_surname',
+        'birth_place',
+        'birth_country',
+        'work_mode_code',
+        'continuous_operation',
+        'workplace_city',
+        'position_name',
+        'leadership',
     ];
 
     /** Měsíční souhrny hodin, které jdou do evidence dávky. */

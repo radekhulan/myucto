@@ -89,6 +89,30 @@ final class AdvanceDeductionAllocationTest extends TestCase
         self::assertSame([20 => 300.0, 21 => 300.0], $result['unmatched']);
     }
 
+    public function testForeignAdvanceIsPairedByReference(): void
+    {
+        $foreign = ['fifo' => false] + self::advance(10, '2025-01-01', 900.0, 'vendor:7');
+        $result = AdvanceDeductionMatcher::allocate(
+            [],
+            [$foreign],
+            [['fifo' => false] + self::deduction(20, '2025-02-01', 1200.0, [10], 'vendor:7')],
+        );
+        self::assertSame([20 => [10 => 900.0]], $result['deductions']);
+        self::assertSame([20 => 300.0], $result['unmatched']);
+    }
+
+    public function testFinalInvoiceDoesNotDeductAdvanceItIsLinkedTo(): void
+    {
+        // Proformu 10 čerpá faktura vazbou; zbytek strany čerpání jde na další zálohu i přes odkaz na 10.
+        $result = AdvanceDeductionMatcher::allocate(
+            [],
+            [self::advance(10, '2025-01-01', 1000.0), self::advance(11, '2025-01-02', 2000.0)],
+            [['skip' => [10]] + self::deduction(20, '2025-02-01', 2000.0, [10])],
+        );
+        self::assertSame([20 => [11 => 2000.0]], $result['deductions']);
+        self::assertSame([], $result['unmatched']);
+    }
+
     public function testCarriedAdvancesFromYearBeforeConversion(): void
     {
         self::assertSame(['ico:1' => 1000.0], AdvanceDeductionMatcher::carriedAdvances(['ico:1' => [

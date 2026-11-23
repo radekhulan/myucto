@@ -154,10 +154,7 @@ final class CashDocumentAction
         try {
             $this->service->updateDraft($supplierId, $id, $body);
             $this->log($request, 'cash.document_updated', $id, []);
-            try {
-                $this->attachmentChecks->recheckEntity($supplierId, 'cash_document', $id);
-            } catch (\Throwable) {
-            }
+            $this->attachmentChecks->recheckEntityAfterCommit($supplierId, 'cash_document', $id);
             return Json::ok($response, $this->service->get($supplierId, $id));
         } catch (\Throwable $e) {
             return $this->mapCashError($response, $e);

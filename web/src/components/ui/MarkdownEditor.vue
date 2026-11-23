@@ -23,10 +23,14 @@ const props = withDefaults(defineProps<{
   rows?: number
   disabled?: boolean
   placeholder?: string
+  imageLabel?: string
+  images?: Array<{ id: number; name: string; url: string }>
 }>(), {
   rows: 6,
   disabled: false,
   placeholder: undefined,
+  imageLabel: undefined,
+  images: () => [],
 })
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
@@ -35,7 +39,7 @@ const { t } = useI18n()
 const area = ref<HTMLTextAreaElement | null>(null)
 const preview = ref(false)
 const text = computed(() => props.modelValue ?? '')
-const rendered = computed(() => renderMarkdown(text.value))
+const rendered = computed(() => renderMarkdown(text.value, props.images.length ? id => props.images.find(image => image.id === id)?.url : undefined))
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
@@ -201,6 +205,16 @@ const quote = () => prefixLines('> ')
 const shortcuts: Record<string, () => Promise<void>> = { b: bold, i: italic, e: code }
 const shiftShortcuts: Record<string, () => Promise<void>> = { KeyX: strike, Digit8: bullet, Digit7: numbered, Period: quote }
 
+function insertImage(event: Event): void {
+  const el = area.value
+  const select = event.target as HTMLSelectElement
+  const image = props.images.find(file => file.id === Number(select.value))
+  select.value = ''
+  if (!el || !image) return
+  const alt = image.name.replace(/[\[\]\r\n]/g, ' ')
+  replaceRange(el, el.selectionStart, el.selectionEnd, `![${alt}](quote-file:${image.id})`)
+}
+
 function onKeydown(e: KeyboardEvent): void {
   // AltGr na Windows posílá Ctrl+Alt — to je psaní znaků (@, {…}), ne zkratka.
   if (!(e.ctrlKey || e.metaKey) || e.altKey || props.disabled) return
@@ -267,7 +281,13 @@ const toolButton = 'cursor-pointer h-7 px-2 rounded border border-neutral-300 bg
           <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" />
         </svg>
       </button>
+      <select v-if="images.length" class="h-7 max-w-48 rounded border border-neutral-300 bg-surface px-1 text-xs"
+        :disabled="disabled || preview" :aria-label="imageLabel" @change="insertImage">
+        <option value="">{{ imageLabel }}</option>
+        <option v-for="image in images" :key="image.id" :value="image.id">{{ image.name }}</option>
+      </select>
       <span class="ml-auto flex items-center gap-2">
+        <slot name="toolbar" />
         <span class="hidden sm:inline text-[11px] text-neutral-400 cursor-help" :title="shortcutHelp">{{ t('markdown_editor.hint') }}</span>
         <button type="button" :class="[toolButton, preview ? 'bg-neutral-100 text-neutral-900' : '']"
           :aria-pressed="preview" @click="preview = !preview">
@@ -290,6 +310,7 @@ const toolButton = 'cursor-pointer h-7 px-2 rounded border border-neutral-300 bg
 </template>
 
 <style scoped>
+.markdown-preview :deep(img) { max-width: 100%; max-height: 22rem; object-fit: contain; }
 /* Minimální typografie náhledu — projekt nemá @tailwindcss/typography. */
 .markdown-preview :deep(h1),
 .markdown-preview :deep(h2),

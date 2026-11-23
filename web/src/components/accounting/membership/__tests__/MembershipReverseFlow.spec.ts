@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Flow from '../MembershipReverseFlow.vue'
+import { formatDateRange } from '../membershipFormat'
 import type { ClaimRow, MembershipPreview } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -12,8 +13,8 @@ vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; variant?: string; disabled?: boolean; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-variant': a.variant, disabled: a.disabled, onClick: a.run }, a.label))),
 })
 const DateInput = defineComponent({
   props: ['modelValue'], emits: ['update:modelValue'],
@@ -24,7 +25,7 @@ const claim = (overrides: Partial<ClaimRow> = {}): ClaimRow => ({
   claim_id: 31, case_id: 44, operation_id: 8, member_id: 9, client_id: 3, amount_cents: 120050, reversal_claim_id: null,
   accounting_date: '2026-03-01', due_date: '2026-03-31', journal_entry_id: 100, receivable_line_id: 200, line_no: 1, account_id: 7,
   posted_at: '2026-03-01 10:00:00', reversed_by: null, title_key: 'DUES-2026', period_from: '2026-01-01', period_to: '2026-12-31',
-  settlement: { status: 'unreconciled', paid_cents: null, open_cents: null, pairing_id: null, evidence: 'no_native_pairing' }, ...overrides,
+  settlement: { status: 'unreconciled', paid_cents: 0, open_cents: 120050, pairing_id: null, evidence: 'no_native_pairing' }, ...overrides,
 })
 const hash = 'b'.repeat(64)
 const preview = (): MembershipPreview => ({
@@ -36,7 +37,7 @@ const preview = (): MembershipPreview => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, claim: claim(), periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>) {
@@ -70,7 +71,7 @@ describe('Membership reverse flow', () => {
   it.each(['cs', 'en'])('renders translated %s texts and the picked claim without any hidden id field', async locale => {
     const w = mounted({}, locale)
     await fill(w)
-    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.reverseTitle)
+    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.reverseHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     expect(w.get('[data-section="reverse-claim"]').text()).toContain('DUES-2026')
     expect(w.find('[data-field="case-id"]').exists()).toBe(false)
@@ -167,6 +168,33 @@ describe('Membership reverse flow', () => {
     await flushPromises()
     expect(w.find('[data-action="reverse-preview"]').exists()).toBe(false)
     expect(api.preview).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('previews as a neutral step and colours only the confirmation of the reversal as destructive', async () => {
+    const w = mounted()
+    await fill(w)
+    expect(w.get('[data-action="reverse-preview"]').attributes('data-variant')).toBe('primary')
+    await review(w)
+    expect(w.get('[data-action="confirm"]').attributes('data-variant')).toBe('danger')
+    w.unmount()
+  })
+
+  it('shows the claim and the period choice in the app date format', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-field="reverse-claim-period"]').text()).toBe(formatDateRange('2026-01-01', '2026-12-31'))
+    expect(w.get('[data-section="reverse-claim"]').text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(w.get('[data-field="reverse-period"]').text()).toContain(formatDateRange('2000-01-01', '2099-12-31'))
+    w.unmount()
+  })
+
+  it('does not show the internal case version in the reversal preview', async () => {
+    const w = mounted()
+    await fill(w)
+    await review(w)
+    expect(w.get('[data-section="reverse-preview"]').text()).not.toContain(cs.nonprofitMembership.caseVersion)
+    expect(w.get('[data-section="reverse-preview"]').text()).not.toMatch(/verze|version/i)
     w.unmount()
   })
 })

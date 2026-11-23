@@ -26,6 +26,12 @@ final class AutomationRecommendationBankCoverageTest extends BankPostingTestCase
         self::assertCount(1, $this->ideas(), 'An unrelated prefix does not cover the proposed account.');
         $this->coverageRule(['amount_min' => 740, 'amount_max' => 745]);
         self::assertCount(1, $this->ideas(), 'Covering one sample is not coverage of the entire group.');
+        $this->db->pdo()->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, '__TEST own', '3000000004', '0100', '0100', 'CZK', '3000000004', 'current', 'manual', 1)"
+        )->execute([$this->supplierId]);
+        $this->coverageRule(['amount_min' => 700, 'amount_max' => 800, 'bank_account_id' => (int) $this->db->pdo()->lastInsertId()]);
+        self::assertCount(1, $this->ideas(), 'A rule limited to one own account does not cover payments of the other accounts.');
         $this->coverageRule(['amount_min' => 700, 'amount_max' => 800]);
         self::assertSame([], $this->ideas(), 'A broader active rule makes the new rule redundant.');
     }

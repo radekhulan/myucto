@@ -5,16 +5,22 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger;
+use MyInvoice\Service\Payroll\PayrollHourlyWagePreview;
 use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeSource;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollAchievedWage;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollQuickSurchargeCalculator;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode;
@@ -25,6 +31,8 @@ use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargePolicy;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeRuleset;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeService;
 use PDO;
+use Psr\Log\LoggerInterface;
+use Psrogoggerinterface;
 
 final class PayrollQuickInputRepository
 {
@@ -162,6 +170,8 @@ final class PayrollQuickInputRepository
         private readonly PayrollSurchargeClaimRepository $surchargeClaims,
         private readonly PayrollWageProrationService $wageProration,
         private readonly PayrollClosedRunGuard $closedRuns,
+        private readonly LoggerInterface $logger,
+        private readonly PayrollTimeRepository $time,
     ) {}
 
     /**
@@ -767,6 +777,8 @@ final class PayrollQuickInputRepository
                  )
              SELECT employment.id AS employment_id, employment.employee_id,
                     employment.code AS employment_code, employment.relation_type,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     employment.start_date,
@@ -827,14 +839,7 @@ final class PayrollQuickInputRepository
                 AND average.employment_id = employment.id
                 AND average.applicable_year = ?
                 AND average.applicable_quarter = ?
-              WHERE employment.effective_status IN ("active", "suspended", "ended")
-                AND COALESCE(
-                      employment.actual_start_date,
-                      employment.start_date,
-                      CASE WHEN employment.is_legacy_projection = 1
-                           THEN "1900-01-01" ELSE NULL END
-                    ) <= ?
-                AND (employment.end_date IS NULL OR employment.end_date >= ?)'
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()
             . $employmentFilter
             . ' ORDER BY employee.full_name, employment.is_primary DESC, employment.id'
             . ($employmentIds === null ? ' LIMIT ? OFFSET ?' : '')
@@ -845,14 +850,15 @@ final class PayrollQuickInputRepository
             $periodEnd,
             $supplierId,
             $periodEnd,
+            $periodStart,
+            $periodEnd,
             $periodEnd,
             $periodEnd,
             $periodStart,
             $periodStart,
             $year,
             $quarter,
-            $periodEnd,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($employmentIds ?? ($focusEmploymentId === null ? [] : [$focusEmploymentId])),
             ...$searchClause['params'],
         ];
@@ -957,6 +963,8 @@ final class PayrollQuickInputRepository
              SELECT recurring.*, component.code AS component_code,
                     component.component_kind, component.value_kind,
                     component.tax_treatment,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     COALESCE(
@@ -991,6 +999,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $periodEnd,
             $periodEnd,
             $supplierId,
@@ -1029,11 +1039,20 @@ final class PayrollQuickInputRepository
             $periodStart,
             $employmentIdsOnPage,
         );
+        [$hourlyPreviews, $failedPreviews] = $this->hourlyPreviews($supplierId, $periodStart, $rows);
+        // Podklady hodin se čtou jen pro vztahy s hodinovým výpočtem; čistě
+        // měsíční firma na ně nepoloží jediný dotaz.
+        $hourlyRows = array_values(array_filter($rows, static fn (array $row): bool =>
+            (bool) ($row['hourly_remuneration_in_period'] ?? false) || isset($hourlyPreviews[(int) $row['employment_id']])));
+        $workedTime = $hourlyRows === [] ? [] : $this->workedTimeForPage(
+            $supplierId, $periodStart, $periodEnd, $hourlyRows,
+            array_map(static fn (array $row): int => (int) $row['employment_id'], $hourlyRows),
+        );
 
         $items = [];
         foreach ($rows as $row) {
             $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
-            $items[] = $this->buildItem(
+            $item = $this->buildItem(
                 $supplierId,
                 $period,
                 $row,
@@ -1048,8 +1067,159 @@ final class PayrollQuickInputRepository
                 $policies[$employmentId] ?? $employerDefault,
                 $claims[$employmentId] ?? [],
             );
+            $item['worked_time'] = $workedTime[$employmentId] ?? null;
+            $preview = $hourlyPreviews[$employmentId] ?? null;
+            if (isset($failedPreviews[$employmentId])) {
+                $item['blockers'][] = 'hourly_preview_unavailable';
+            }
+            if ($preview !== null) {
+                unset($preview['_source_snapshot']);
+                foreach ($preview['blockers'] as $blocker) $item['blockers'][] = (string) $blocker['code'];
+                $item['blockers'] = array_values(array_unique($item['blockers']));
+            }
+            $item['hourly_wage_preview'] = $preview;
+            // Hodinová mzda vzniká jako vstup až zamčením podkladů běhu. Dokud
+            // ve vstupech není, náhled hrubého příjmu ji připočte z náhledu
+            // hodinové mzdy; potom by ji započítal dvakrát.
+            $item['hourly_claims_in_inputs'] = false;
+            foreach ($byEmployment[$employmentId] ?? [] as $input) {
+                if ($input['status'] !== 'cancelled'
+                    && str_starts_with((string) ($input['external_id'] ?? ''), 'hourly-wage:')
+                ) {
+                    $item['hourly_claims_in_inputs'] = true;
+                    break;
+                }
+            }
+            $items[] = $item;
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Náhled hodinové mzdy stránky. Chyba podkladů jednoho vztahu nesmí shodit
+     * rychlý vstup ostatním. Při selhání dávky se opakuje jen nad vztahy,
+     * kterých se hodinový výpočet týká (hodinové podmínky nebo vypořádání
+     * dřívějších nároků), a dávka se dělí napůl, dokud se vadný vztah
+     * neoddělí. Vadný vztah dostane blokaci a chyba se zaloguje. Odvolanou
+     * transakci vyhazuje dál.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array{0:array<int,array<string,mixed>>,1:array<int,true>}
+     */
+    private function hourlyPreviews(int $supplierId, string $periodStart, array $rows): array
+    {
+        $preview = new PayrollHourlyWagePreview($this->db);
+        try {
+            return [$preview->forMany($supplierId, $periodStart, $rows), []];
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+            $this->logger->warning('Náhled hodinové mzdy stránky nelze sestavit dávkově, opakuje se po částech.', [
+                'supplier_id' => $supplierId, 'period_start' => $periodStart, 'error' => $e::class . ': ' . $e->getMessage(),
+            ]);
+        }
+        $settlement = [];
+        try {
+            $ids = array_map(static fn (array $row): int => (int) $row['employment_id'], $rows);
+            $settlement = array_fill_keys((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $ids, $periodStart, includeCurrentClaims: true), true);
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+        }
+        $candidates = array_values(array_filter($rows, static fn (array $row): bool =>
+            (bool) ($row['hourly_remuneration_in_period'] ?? false) || isset($settlement[(int) $row['employment_id']])));
+        $result = [];
+        $failed = [];
+        if ($candidates !== []) {
+            $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, $candidates, $result, $failed);
+        }
+        return [$result, $failed];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param array<int,array<string,mixed>> $result
+     * @param array<int,true> $failed
+     */
+    private function hourlyPreviewChunk(PayrollHourlyWagePreview $preview, int $supplierId, string $periodStart, array $rows, array &$result, array &$failed): void
+    {
+        try {
+            $result += $preview->forMany($supplierId, $periodStart, $rows);
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+            if (count($rows) > 1) {
+                $half = intdiv(count($rows), 2);
+                $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, array_slice($rows, 0, $half), $result, $failed);
+                $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, array_slice($rows, $half), $result, $failed);
+                return;
+            }
+            $employmentId = (int) $rows[0]['employment_id'];
+            $failed[$employmentId] = true;
+            $this->logger->warning('Náhled hodinové mzdy vztahu nelze sestavit.', [
+                'supplier_id' => $supplierId, 'employment_id' => $employmentId, 'period_start' => $periodStart,
+                'error' => $e::class . ': ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** @param list<array<string,mixed>> $rows @param list<int> $ids @return array<int,array<string,mixed>> */
+    private function workedTimeForPage(int $supplierId, string $periodStart, string $periodEnd, array $rows, array $ids): array
+    {
+        $evidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $ids, $periodStart);
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $terms = $this->db->pdo()->prepare("SELECT employment_id, effective_from, effective_to FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id IN ($in) AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) ORDER BY employment_id, effective_from, id");
+        $terms->execute([$supplierId, ...$ids, $periodEnd, $periodStart]);
+        $byEmployment = [];
+        foreach ($terms->fetchAll(PDO::FETCH_ASSOC) as $term) $byEmployment[(int) $term['employment_id']][] = $term;
+        $confirmed = $this->db->pdo()->prepare("SELECT month_row.employment_id FROM payroll_time_months month_row JOIN payroll_jmhz_work_month_revisions summary ON summary.supplier_id = month_row.supplier_id AND summary.time_month_id = month_row.id AND summary.time_month_revision_no = month_row.revision_no WHERE month_row.supplier_id = ? AND month_row.period_start = ? AND month_row.status = 'approved' AND month_row.employment_id IN ($in) GROUP BY month_row.employment_id");
+        $confirmed->execute([$supplierId, $periodStart, ...$ids]);
+        $confirmedIds = array_fill_keys(array_map('intval', $confirmed->fetchAll(PDO::FETCH_COLUMN)), true);
+        $imports = $this->db->pdo()->prepare("SELECT DISTINCT employment_id FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND period_start = ? AND employment_id IN ($in)");
+        $imports->execute([$supplierId, $periodStart, ...$ids]);
+        $importIds = array_fill_keys(array_map('intval', $imports->fetchAll(PDO::FETCH_COLUMN)), true);
+        // „Zapisovat směny, částky ponechat" a převzetí rozpisu se nabízí jen
+        // u měsíce ze souhrnu importu; obojí rozhoduje repozitář docházky.
+        $importMonthIds = array_values(array_filter($ids, static fn (int $id): bool => ($evidence[$id]['work_source'] ?? null) === 'import_summary'));
+        $keepable = $this->time->importAmountsKeepableIds($supplierId, $importMonthIds, $periodStart);
+        $publishedShifts = $this->time->publishedShiftsInPeriod($supplierId, $importMonthIds, $periodStart);
+        $result = [];
+        foreach ($rows as $row) {
+            $id = (int) $row['employment_id'];
+            $start = max($periodStart, (string) ($row['actual_start_date'] ?? $row['start_date'] ?? $periodStart));
+            $end = min($periodEnd, (string) ($row['end_date'] ?? $periodEnd));
+            $ranges = [];
+            foreach ($byEmployment[$id] ?? [] as $term) {
+                $from = max($start, (string) $term['effective_from']);
+                $to = min($end, (string) ($term['effective_to'] ?? $end));
+                if ($from <= $to) $ranges[] = ['date_from' => $from, 'date_to' => $to];
+            }
+            $source = $evidence[$id] ?? null;
+            $hasExplicitSource = $source !== null && ($source['work_source'] !== 'entries' || ($source['time_entries'] ?? []) !== []);
+            $value = $source !== null && $source['status'] === 'approved' && $hasExplicitSource
+                ? PayrollWorkedTimeSource::fromSnapshot($source, $periodStart) : null;
+            if ($value !== null && $value['issues'] !== []) $value = null;
+            $result[$id] = [
+                'month' => $source === null ? null : [
+                    'id' => $source['time_month_id'], 'status' => $source['status'],
+                    'revision_no' => $source['revision_no'], 'row_version' => $source['row_version'],
+                    'work_source' => $source['work_source'],
+                ],
+                'manual_summary' => $source['manual_summary'] ?? null,
+                'suggested_segments' => $ranges,
+                'worked_duration_units' => $value['worked_duration_units'] ?? null,
+                'overtime_duration_units' => $value['overtime_duration_units'] ?? null,
+                'worked_days' => $value['worked_days'] ?? null,
+                'jmhz_confirmed' => isset($confirmedIds[$id]),
+                'available_sources' => isset($importIds[$id]) ? ['entries', 'import_summary'] : ['entries'],
+                'import_amounts_keepable' => isset($keepable[$id]),
+                'published_shift_count' => count($publishedShifts[$id] ?? []),
+            ];
+        }
+        return $result;
     }
 
     /**
@@ -1181,22 +1351,14 @@ final class PayrollQuickInputRepository
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
-              WHERE employment.effective_status IN ("active", "suspended", "ended")
-                AND COALESCE(
-                      employment.actual_start_date,
-                      employment.start_date,
-                      CASE WHEN employment.is_legacy_projection = 1
-                           THEN "1900-01-01" ELSE NULL END
-                    ) <= ?
-                AND (employment.end_date IS NULL OR employment.end_date >= ?)'
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()
             . ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
             . $searchClause['sql']
         );
         $stmt->execute([
             $periodEnd,
             $supplierId,
-            $periodEnd,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($focusEmploymentId === null ? [] : [$focusEmploymentId]),
             ...$searchClause['params'],
         ]);
@@ -1248,6 +1410,25 @@ final class PayrollQuickInputRepository
             $pdo->beginTransaction();
         }
         try {
+            $requestedIds = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['employment_id'], $rows)));
+            sort($requestedIds, SORT_NUMERIC);
+            $claimed = [];
+            if ($requestedIds !== []) {
+                $in = implode(',', array_fill(0, count($requestedIds), '?'));
+                $lock = $pdo->prepare("SELECT id FROM payroll_employments WHERE supplier_id = ? AND id IN ($in) ORDER BY id FOR UPDATE");
+                $lock->execute([$supplierId, ...$requestedIds]);
+                $lock->fetchAll(PDO::FETCH_COLUMN);
+                $query = $pdo->prepare("SELECT claim.employment_id, claim.purpose,
+                    SUM(CASE WHEN m.input_id IS NULL OR input.status <> 'cancelled' THEN m.delta_amount_minor ELSE 0 END) AS amount,
+                    SUM(CASE WHEN m.input_id IS NULL OR input.status <> 'cancelled' THEN m.duration_delta_units ELSE 0 END) AS duration
+                    FROM payroll_hourly_wage_claims claim
+                    JOIN payroll_hourly_wage_materializations m ON m.supplier_id = claim.supplier_id AND m.claim_id = claim.id
+                    LEFT JOIN payroll_inputs input ON input.supplier_id = m.supplier_id AND input.id = m.input_id
+                    WHERE claim.supplier_id = ? AND claim.employment_id IN ($in) AND claim.work_period_start = ? AND claim.claim_source = 'hourly_calculation'
+                    GROUP BY claim.employment_id, claim.purpose HAVING amount <> 0 OR duration <> 0");
+                $query->execute([$supplierId, ...$requestedIds, $period . '-01']);
+                foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $claim) $claimed[(int) $claim['employment_id']][(string) $claim['purpose']] = true;
+            }
             $current = $this->forEmployments(
                 $supplierId,
                 $period,
@@ -1258,6 +1439,9 @@ final class PayrollQuickInputRepository
             );
             $items = [];
             foreach ($current['items'] as $item) {
+                $purposes = $claimed[(int) $item['employment_id']] ?? [];
+                $item['_hourly_claimed'] = isset($purposes['ordinary_base']) || isset($purposes['achieved_overtime']);
+                $item['_hourly_overtime_claimed'] = isset($purposes['achieved_overtime']) || isset($purposes['premium_overtime']);
                 $items[(int) $item['employment_id']] = $item;
             }
             $closedRuns = $this->closedRuns->closingRuns($supplierId, $period, array_keys($items));
@@ -1303,7 +1487,7 @@ final class PayrollQuickInputRepository
                     continue;
                 }
 
-                $this->guard($pdo, $collected, $employmentId, 'base', function () use (
+                $baseSaved = $this->guard($pdo, $collected, $employmentId, 'base', function () use (
                     $supplierId,
                     $employmentId,
                     $item,
@@ -1313,6 +1497,18 @@ final class PayrollQuickInputRepository
                     $userId,
                     $autoApprove,
                 ): void {
+                    if (($item['_hourly_claimed'] ?? false) && $row['base_amount_minor'] !== null
+                        && $row['base_amount_minor'] !== $item['base_amount_minor']) {
+                        throw new \DomainException('Základní mzda je již spravována výpočtem hodinové mzdy.');
+                    }
+                    if (($item['hourly_remuneration_in_period'] ?? false) === true) {
+                        if ($row['base_amount_minor'] !== null
+                            && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
+                        ) {
+                            throw new \DomainException(PayrollHourlyRemuneration::MESSAGE);
+                        }
+                        return;
+                    }
                     if ((bool) $item['base_conflict']) {
                         throw new \DomainException(
                             'Základní mzda je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte v měsíčních vstupech.'
@@ -1346,6 +1542,17 @@ final class PayrollQuickInputRepository
                         $autoApprove,
                     );
                 });
+                // Základ zadaný v témže řádku platí už pro přesčas téhož uložení.
+                // Řádek se načetl před uložením, takže bez toho by se dosažená
+                // mzda (§ 114 odst. 1 ZP) počítala z dřívějšího základu, u prvního
+                // zadání měsíce z nuly.
+                if ($baseSaved
+                    && is_int($row['base_amount_minor'])
+                    && !(bool) $item['base_managed_elsewhere']
+                    && ($item['hourly_remuneration_in_period'] ?? false) !== true
+                ) {
+                    $item['base_amount_minor'] = $row['base_amount_minor'];
+                }
 
                 $this->guard($pdo, $collected, $employmentId, 'overtime', function () use (
                     $supplierId,
@@ -1364,6 +1571,10 @@ final class PayrollQuickInputRepository
                     }
                     $overtimeAmount = $row['overtime_amount_minor'];
                     $hours = $row['overtime_hours_milli'];
+                    if (($item['_hourly_overtime_claimed'] ?? false)
+                        && (($hours !== null && $hours !== 0) || ($overtimeAmount !== null && $overtimeAmount !== 0))) {
+                        throw new \DomainException('Přesčasová mzda je již spravována výpočtem hodinové mzdy.');
+                    }
                     if ((bool) $item['overtime_managed_elsewhere']) {
                         if ($row['overtime_mode'] !== 'amount'
                             || (int) $overtimeAmount !== (int) $item['overtime_amount_minor']) {
@@ -1411,14 +1622,20 @@ final class PayrollQuickInputRepository
                             'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
                         );
                     }
-                    $split = $this->overtimeSplit(
-                        $supplierId,
-                        $employmentId,
-                        $period,
-                        $item,
-                        $row,
-                        (int) $hours,
-                    );
+                    try {
+                        $split = $this->overtimeSplit(
+                            $supplierId,
+                            $employmentId,
+                            $period,
+                            $item,
+                            $row,
+                            (int) $hours,
+                        );
+                    } catch (PayrollSurchargeException $exception) {
+                        // Chybějící podklad (základ, kalendář) je vstupní stav
+                        // uživatele: vrací se u pole přesčasu, ne jako pád dávky.
+                        throw new \DomainException($exception->getMessage(), 0, $exception);
+                    }
                     $this->upsertOvertimeParts(
                         $supplierId,
                         (int) $item['employee_id'],
@@ -1607,6 +1824,7 @@ final class PayrollQuickInputRepository
             $managed[$kind->value] = false;
             $managedAmounts[$kind->value] = 0;
         }
+        $hourlyRemuneration = (bool) ($employment['hourly_remuneration_in_period'] ?? false);
         $blockers = [];
         /** @var array<string,bool> $fromAttendance */
         $fromAttendance = [];
@@ -1654,6 +1872,14 @@ final class PayrollQuickInputRepository
             // mapoval přes `$quickSlot`, spadl by cizí hodinový základ do
             // přesčasu a formulář by tvrdil, že přesčas spravuje jiný vstup.
             $managedSlot = self::managedSlot($code, $kind);
+            if ($externalId !== null
+                && str_starts_with($externalId, PayrollSurchargeInputMaterializer::OVERTIME_WAGE_EXTERNAL_PREFIX)
+            ) {
+                // Dosažená mzda za přesčas ze schválené docházky nese stejný kód
+                // jako hodinový základ, ale je to přesčas: nesmí zamknout pole
+                // základní mzdy hláškou „spravuje jiný vstup".
+                $managedSlot = 'overtime';
+            }
             if (($managedSlot === 'overtime' || $managedSlot === 'bonus')
                 && self::hasOwnColumnOrigin($code, $externalId, $overriddenImports)
             ) {
@@ -1855,6 +2081,7 @@ final class PayrollQuickInputRepository
         if (($awayInMonth || $importSummaryMonth || $partialMonth)
             && !$suspendedInMonth
             && !$managed['base']
+            && !$hourlyRemuneration
             && $employment['monthly_gross_minor'] !== null
         ) {
             $proration = ($importSummaryMonth
@@ -1875,8 +2102,11 @@ final class PayrollQuickInputRepository
         $partialProrated = $partialMonth && $proration !== null && $proration['supported'] === true;
         $prorationUnsupported = $proration !== null && $proration['supported'] === false;
 
+        // Hodinovou mzdu počítá výpočet z docházky a pole základu je u ní
+        // zakázané; rada „zadejte základní mzdu ručně" by vedla do slepé uličky.
         $baseRequiresEntry = (($partialMonth && !$partialProrated) || $suspendedInMonth || $prorationUnsupported)
             && !$managed['base']
+            && !$hourlyRemuneration
             && $quick['base'] === null;
         if ($baseRequiresEntry) {
             $blockers[] = match (true) {
@@ -1889,7 +2119,7 @@ final class PayrollQuickInputRepository
         $base = $managed['base']
             ? $managedAmounts['base'] + ($quick['base']['amount_minor'] ?? 0)
             : ($quick['base']['amount_minor'] ?? (
-                $baseRequiresEntry || $employment['monthly_gross_minor'] === null
+                $hourlyRemuneration || $baseRequiresEntry || $employment['monthly_gross_minor'] === null
                     ? 0
                     : ($proration['amount_minor'] ?? PayrollTimeValue::int(
                         $employment['monthly_gross_minor'],
@@ -2042,6 +2272,12 @@ final class PayrollQuickInputRepository
             'suspended_in_month' => $suspendedInMonth,
             'away_in_month' => $awayInMonth,
             'base_amount_minor' => $base,
+            // Sjednaná měsíční mzda z podmínek vztahu; z ní se v kráceném měsíci
+            // počítá dosažená mzda za přesčas ({@see self::overtimeMonthlyBase()}).
+            'agreed_monthly_gross_minor' => $hourlyRemuneration || $employment['monthly_gross_minor'] === null
+                ? null
+                : PayrollTimeValue::int($employment['monthly_gross_minor'], 'monthly_gross_minor'),
+            'hourly_remuneration_in_period' => $hourlyRemuneration,
             'base_managed_elsewhere' => $managed['base'],
             // Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup.
             // Mzdový běh je nevidí, dokud je někdo nevytvoří a neschválí.
@@ -2082,7 +2318,7 @@ final class PayrollQuickInputRepository
                 is_int($averageVersion) ? $averageVersion : null,
             'overtime_hours_relation_supported' => $overtimeHoursRelationSupported,
             'overtime_hours_available' =>
-                $overtimeHoursRelationSupported && is_int($rate) && $rate > 0,
+                !$hourlyRemuneration && $overtimeHoursRelationSupported && is_int($rate) && $rate > 0,
             'overtime_managed_elsewhere' => $managed['overtime'],
             'overtime_conflict' => $conflicts['overtime'],
             'bonus_amount_minor' => $bonus,
@@ -2340,6 +2576,10 @@ final class PayrollQuickInputRepository
             ];
         }
 
+        if (($item['hourly_remuneration_in_period'] ?? false) === true) {
+            throw new \DomainException(PayrollHourlyRemuneration::MESSAGE);
+        }
+
         $rate = $item['overtime_hourly_rate_minor'];
         if (!is_int($rate) || $rate <= 0
             || $row['overtime_average_snapshot_id'] !== $item['overtime_average_snapshot_id']
@@ -2412,8 +2652,17 @@ final class PayrollQuickInputRepository
                 . 'zadejte celkovou částkou.'
             );
         }
-        $baseMinor = PayrollTimeValue::int($item['base_amount_minor'] ?? null, 'base_amount_minor');
-        $wage = PayrollAchievedWage::forMilliHours($baseMinor, $fundMinutes, $hours);
+        $baseMinor = self::overtimeMonthlyBase($item);
+        // Obě poloviny nároku se vyplácejí i hlásí v JMHZ v celých korunách
+        // (§ 142 odst. 2 ZP), stejně jako příplatky § 115 až § 118 o kus níž
+        // a příplatky z docházky. Haléřová částka by zastavila mzdový běh
+        // kontrolou `inputs_not_whole_crowns`.
+        $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
+        $premium = PayrollSurchargeInputMaterializer::wholeCzk($premium, $rounding);
+        $wage = PayrollSurchargeInputMaterializer::wholeCzk(
+            PayrollAchievedWage::forMilliHours($baseMinor, $fundMinutes, $hours),
+            $rounding,
+        );
 
         $common = [
             'schema_version' => 'payroll-quick-overtime-source.v2',
@@ -2430,6 +2679,7 @@ final class PayrollQuickInputRepository
             'ruleset_id' => $ruleset->version->id,
             'ruleset_content_hash' => $ruleset->version->contentHash,
             'rounding' => 'half-up-minor-unit',
+            'wage_rounding' => $rounding->value,
         ];
 
         return [
@@ -2452,6 +2702,32 @@ final class PayrollQuickInputRepository
                 'amount_minor' => $premium,
             ],
         ];
+    }
+
+    /**
+     * Měsíční mzda, ze které se určí dosažená mzda za hodinu přesčasu.
+     *
+     * § 114 odst. 1 ZP přiznává za přesčas „mzdu, na kterou vzniklo za tuto
+     * dobu právo". U měsíční mzdy je to sjednaná měsíční částka dělená fondem
+     * měsíce. V měsíci kráceném pro nepřítomnost, nástup nebo skončení nese
+     * pole základu jen poměrnou část (§ 109 odst. 1 ZP), a dělit ji celým
+     * fondem by hodinu přesčasu podhodnotilo. Proto má v takovém měsíci
+     * přednost sjednaná částka z podmínek vztahu; v plném měsíci platí základ
+     * z řádku, který účetní vidí a potvrzuje.
+     *
+     * @param array<string,mixed> $item
+     */
+    private static function overtimeMonthlyBase(array $item): int
+    {
+        $agreed = $item['agreed_monthly_gross_minor'] ?? null;
+        $shortened = ($item['base_proration'] ?? null) !== null
+            || ($item['away_in_month'] ?? false) === true
+            || ($item['partial_month'] ?? false) === true;
+        if ($shortened && is_int($agreed) && $agreed > 0) {
+            return $agreed;
+        }
+
+        return PayrollTimeValue::int($item['base_amount_minor'] ?? null, 'base_amount_minor');
     }
 
     /**
@@ -2694,6 +2970,11 @@ final class PayrollQuickInputRepository
         ?int $userId,
         bool $autoApprove,
     ): void {
+        if (($item['_hourly_claimed'] ?? false)
+            && in_array($definitions[$code]['component_kind'] ?? null, ['base_wage', 'hourly_wage'], true)
+            && (($entry['amount_minor'] ?? null) !== null || ($entry['revert'] ?? false))) {
+            throw new \DomainException('Základní mzda je již spravována výpočtem hodinové mzdy.');
+        }
         if (in_array($code, self::managedCodes(), true)) {
             throw new \InvalidArgumentException(
                 "Složku {$code} zadávejte v jejím vlastním poli rychlého vstupu."
@@ -3480,9 +3761,9 @@ final class PayrollQuickInputRepository
             // editace téhož pole by pak spadla na 409 „změnil to jiný uživatel".
             // Schválený vstup proto vzniká rovnou, jedním INSERTem.
             if ($autoApprove) {
-                $this->inputs->createApproved($supplierId, $data, $userId);
+                $this->inputs->createApproved($supplierId, $data, $userId, sourceAlreadyGuarded: true);
             } else {
-                $this->inputs->create($supplierId, $data, $userId);
+                $this->inputs->create($supplierId, $data, $userId, sourceAlreadyGuarded: true);
             }
             return;
         }
@@ -3506,9 +3787,13 @@ final class PayrollQuickInputRepository
                 $expectedVersion = $currentVersion;
             }
             if ($status !== 'draft') {
-                throw new \DomainException(
-                    'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $this->db->pdo(),
+                    $supplierId,
+                    $status,
+                    $periodStart,
+                    'rychlým formulářem zrušit',
+                ));
             }
             if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
                 throw new PayrollInputConflictException($currentVersion);
@@ -3535,9 +3820,13 @@ final class PayrollQuickInputRepository
         // S právem schvalovat jde i vlastní dosud nezamčený schválený vstup —
         // jinak by si uživatel první uloženou částkou zabetonoval svůj řádek.
         if ($status !== 'draft' && !($autoApprove && $status === 'approved')) {
-            throw new \DomainException(
-                'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
-            );
+            throw new \DomainException(PayrollInputLockGuidance::message(
+                $this->db->pdo(),
+                $supplierId,
+                $status,
+                $periodStart,
+                'rychlým formulářem přepsat',
+            ));
         }
         if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
             throw new PayrollInputConflictException($currentVersion);
@@ -3569,8 +3858,9 @@ final class PayrollQuickInputRepository
                 $data,
                 $currentVersion,
                 $userId,
+                sourceAlreadyGuarded: true,
             )
-            : $this->inputs->update($supplierId, (int) $row['id'], $data, $currentVersion);
+            : $this->inputs->update($supplierId, (int) $row['id'], $data, $currentVersion, sourceAlreadyGuarded: true);
         if ($updated === null) {
             throw new PayrollInputConflictException($currentVersion);
         }

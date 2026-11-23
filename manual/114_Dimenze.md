@@ -17,7 +17,9 @@ v průvodci uzávěrkou. Samotný zámek data v otevřeném období změnu analy
 
 Při uzavření knih a otevření nového roku se členění rozvahových zůstatků přenáší včetně kombinací dimenzí
 a procentních rozpadů. Počáteční stavy tak zachovávají zůstatky jednotlivých středisek a projektů,
-i když je celý účet v součtu nulový. Podrobnosti jsou v [Uzávěrce](72_Uzaverka.md#7252-krok-10-otevreni-noveho-roku).
+i když je celý účet v součtu nulový. Má-li nový rok už převzatou rozvahu bez dimenzí (převod z jiného systému),
+krok ji převezme po účtech a členění zůstatků do nového roku nepřenese. Podrobnosti jsou
+v [Uzávěrce](72_Uzaverka.md#7252-krok-11-otevreni-noveho-roku).
 
 ## 114.1 Kdy to potřebujete
 
@@ -38,6 +40,7 @@ Kapitolu otevřete, když:
 | jednou při zavedení | Zapnout dimenze a založit typy a hodnoty | `Firma → Nastavení`, box **Dimenze**; `Firma → Dimenze` |
 | při práci s doklady | Vybrat dimenze na faktuře, pokladním dokladu, bankovním pohybu | detail a editor dokladu, panel **Dimenze** |
 | při nové firmě nebo zakázce | Nastavit výchozí dimenze klienta a zakázky | formulář klienta a zakázky, sekce **Výchozí dimenze** |
+| při zavedení bankovního účtu | Nastavit výchozí dimenze účtu pro úroky a poplatky | `Peníze → Bankovní účty`, záložka **Kontace účtů**, sloupec **Výchozí dimenze** |
 | při schvalování nákupu | Rozhodnout o dokladu čekajícím na schválení | `Nákup → Ke schválení` |
 | po skončení období | Zkontrolovat, kterým řádkům dimenze chybí | `Firma → Dimenze`, záložka **Pravidla**, **Zkontrolovat deník** |
 | měsíčně nebo ročně | Zobrazit výsledky po dimenzi | `Grafy → Dimenze`, `Účetnictví → Výkazy po dimenzi` |
@@ -52,9 +55,12 @@ Kapitolu otevřete, když:
    číst účetnictví, měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí
    dimenzí patří k nastavení firmy, skupinu firem spravuje správce firmy.
    Výchozí dimenze klienta a zakázky smí měnit ten, kdo smí upravovat klienta,
-   resp. zakázku. Schvalování řídí oprávnění **Schvalovat přijaté doklady**.
-3. **Podvojné účetnictví** pro sestavy v menu **Grafy → Dimenze** a pro většinu
-   účetních funkcí (účtotvorná dimenze, pravidla, účty produktů).
+   resp. zakázku. Výchozí dimenze bankovního účtu smí měnit uživatel s právem
+   zápisu do účetnictví. Schvalování řídí oprávnění **Schvalovat přijaté doklady**.
+3. **Režim evidence.** Sestavy v **Grafy → Dimenze** fungují v podvojném účetnictví
+   i daňové evidenci; v daňové evidenci vycházejí z peněžního deníku. Podvojné
+   účetnictví vyžadují účtotvorné dimenze a účty produktů. Pravidla dimenzí
+   lze použít i v daňové evidenci s maskami tříd 5 a 6.
 
 ## 114.3 Krok za krokem: zapnout dimenze a založit typy
 
@@ -95,6 +101,23 @@ se objeví na dokladech.
 
 1. Rozbalte zápis v účetním deníku.
 2. Klikněte na **Upravit dimenze** a uložte hodnoty.
+
+**Více vydaných faktur najednou:**
+
+1. Otevřete `Prodej → Vydané faktury` a zaškrtněte doklady. Mohou to být koncepty
+   i vystavené a zaúčtované faktury.
+2. V liště hromadných akcí klikněte na **Nastavit dimenze (N)**.
+3. U každého typu zvolte **Ponechat**, **Nastavit** (a vyberte hodnotu) nebo **Odebrat**.
+4. Klikněte na **Uložit dimenze**.
+
+Změna se týká dimenzí celého dokladu, dimenze položek zůstávají. Položka s vlastní
+hodnotou stejného typu si ji ponechá. Každý doklad se uloží stejně jako z panelu
+**Dimenze** na detailu, takže se změna promítne i do zaúčtovaných řádků deníku.
+Doklad, u kterého změna neprojde (uzavřené účetní období, rozdělení řádku nebo jiný
+analytický účet v zamčeném období), se přeskočí. Souhrn ukáže počet upravených,
+nezměněných a přeskočených dokladů a u každého přeskočeného důvod. Přeskočené doklady
+zůstanou vybrané. Najednou lze upravit nejvýše 500 dokladů. Akci vidí uživatel s právem
+zápisu do účetnictví.
 
 **Jak poznáte, že je hotovo:** doklad nebo pohyb ukazuje dimenze jako štítky a sestavy po dimenzi je zahrnují.
 
@@ -164,7 +187,15 @@ Podrobnosti v [§ 114.11.10](#1141110-pravidla-dimenzi-podle-uctu).
 2. Vyberte typ dimenze a období, přepněte záložku (**Výsledovka**, **Peněžní tok**).
 3. Tlačítkem **Export XLSX** stáhnete aktivní záložku, výsledovku také jako PDF.
 
-**Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených).
+**Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených). Tlačítkem **Přidat dimenzi** zkombinujete víc dimenzí, například projekt a středisko.
+
+**DPH po dimenzích:**
+
+1. Otevřete `Daně → DPH podle dimenze`, zvolte období (měsíc nebo čtvrtletí) a typ dimenze.
+2. Řádky ukazují DPH na výstupu, nárok na odpočet a výsledek po hodnotách a řádek **Bez dimenze**; kontrolní řádek **Rozdíl** proti evidenci DPH musí být nulový.
+3. Kliknutím na hodnotu otevřete Knihu DPH filtrovanou na tuto hodnotu. Postup a pravidla jsou v [kapitole Kniha DPH](42_Kniha_DPH.md#427-krok-za-krokem-sestava-dph-podle-dimenze).
+
+**Filtr v seznamech dokladů:** seznamy vydaných a přijatých faktur mají filtr **Dimenze**. Doklad vyhovuje, když hodnotu nese na hlavičce, na položce nebo v rozpadu, viz [§ 114.11.14](#1141114-sestavy).
 
 **Jak poznáte, že je hotovo:** vidíte výnosy, náklady a zisk po hodnotách a řádek **Celkem**.
 
@@ -335,7 +366,8 @@ ruční úpravu řádků přepíše.
 
 Účetní deník má ve filtrech výběr dimenze: typ, hodnotu a volbu **včetně
 podřízených**. Deník pak ukáže celé zápisy, u kterých aspoň jeden řádek nese
-vybranou hodnotu (nebo hodnotu pod ní). U Střediska se počítají i řádky, které
+vybranou hodnotu (nebo hodnotu pod ní). Při výběru víc dimenzí (tlačítko
+**Přidat dimenzi**) musí všechny vybrané dimenze nést tentýž řádek zápisu. U Střediska se počítají i řádky, které
 nesou jen kód navázaného střediska, stejně jako v sestavách. Filtr se ukládá do
 adresy stránky i do uložených pohledů a platí i pro export deníku do PDF a XLSX.
 
@@ -376,6 +408,83 @@ vytěžení, opakované faktury, automatizace): typ, pro který doklad hodnotu n
 dostane výchozí hodnotu zakázky, jinak klienta. Dimenze uvedená na dokladu
 vždy vyhrává. U pokladního dokladu platí výchozí dimenze jeho zakázky a pak
 dimenze placené faktury, u bankovního pohybu dimenze spárované faktury.
+
+**Výchozí dimenze bankovního účtu.** Vlastní bankovní účet může mít výchozí
+dimenze (jen podvojné účetnictví). Nastavují se v `Peníze → Bankovní účty`
+na záložce **Kontace účtů**, ve sloupci **Výchozí dimenze** tlačítkem **Upravit**,
+a ukládají se spolu s ostatními změnami tlačítkem **Uložit**. Hodí se pro pohyby,
+které nehradí žádný doklad, například úroky, srážkovou daň a poplatky: bez nich
+by pohyb neměl odkud hodnotu vzít a povinná dimenze z pravidla by zaúčtování
+zastavila.
+
+Výchozí dimenze účtu se doplní jen na tyto řádky zápisu pohybu:
+
+- **řádek banky**, tedy analytiku 221 účtu, na kterém pohyb je (u kreditní
+  karty její úvěrový účet 231),
+- **protiúčet pohybu, který nehradí žádný doklad**, například úrok, poplatek
+  nebo srážkovou daň.
+
+Řádky saldokonta hrazených dokladů (311, 321, 314, 324 a další u úhrady faktury,
+zálohy nebo ostatní pohledávky a závazku) dimenzi účtu nedostanou, nesou jen
+dimenze dokladu. Stejně tak peněžní účty a peníze na cestě (211, 221, 261 a účet
+z kontace převodu mezi vlastními účty): u převodu mezi dvěma vlastními účty
+s různými výchozími dimenzemi dostane dimenzi každého účtu jen jeho řádek banky
+a 261 zůstane bez ní. Saldokonto i 261 se tak po dimenzi vyrovnají.
+
+Na každém řádku se typ po typu bere první hodnota z tohoto pořadí:
+
+1. dimenze zadaná u pohybu (panel **Dimenze**),
+2. dimenze hrazených dokladů (faktury, ostatní pohledávky a závazky) včetně
+   jejich výchozích hodnot,
+3. dimenze pravidla účtování bankovních pohybů, podle kterého se pohyb zaúčtoval
+   (viz níže),
+4. výchozí hodnota z pravidla dimenzí podle účtu řádku (pravidlo pro 568
+   je na řádku 568 konkrétnější než bankovní účet),
+5. výchozí dimenze bankovního účtu, na kterém pohyb je.
+
+Typ, který mají všechny hrazené doklady, ale s různými hodnotami, rozdělí
+zaúčtování po řádcích a na řádku banky jako rozpad. Dimenze pravidla ani výchozí
+dimenze účtu ho nepřepíšou.
+
+**Dimenze v pravidle účtování bankovních pohybů.** Pravidlo účtování
+([§ 29.13.14](29_Banka.md#291314-pravidla-uctovani-opakovanych-plateb)) může nést
+hodnoty dimenzí, například zakázku pro platby jedné protistrany. Nastavují se
+v editoru pravidla v části **Dimenze pravidla**. K pohybu se zapíšou až při
+schválení návrhu nebo při automatickém zaúčtování podle pravidla, a to jen typům,
+které pohyb nemá zadané ručně. Návrh sám k pohybu nic nezapíše, takže zamítnutý
+návrh na pohybu žádnou dimenzi z pravidla nenechá. Zapsané hodnoty vidíte v panelu
+**Dimenze** u pohybu. Jsou záznamem stavu v okamžiku zaúčtování: pozdější změna
+pravidla je nezmění, odúčtování pohybu je odebere. Když hodnotu v panelu změníte,
+platí jako ruční dimenze pohybu.
+
+Dimenze pravidla se doplní na stejné řádky jako výchozí dimenze bankovního účtu:
+na řádek banky a u pohybu, který nehradí žádný doklad, na protiúčet. Saldokonto
+hrazených dokladů ani peníze na cestě je nedostanou. Zapíšou se i tehdy, když
+při schválení návrhu změníte účty. Uzavřenou hodnotu dimenze pravidlo k pohybu
+nezapíše.
+
+Pravidlo lze omezit na **vlastní bankovní účet**. Hodí se, když se stejný druh
+pohybu (úrok, poplatek) objevuje na více účtech a každý účet patří jinému
+středisku. Stačí-li jedna hodnota pro všechny pohyby účtu bez ohledu na druh,
+použijte raději výchozí dimenze bankovního účtu. Pravidlo omezené na účet, který
+vypnete v poli **Aktivní**, přestane platit; výjimkou je úvěrový účet kreditní karty,
+jehož pohyby se účtují i po archivaci.
+
+Pravidlo v režimu **Automaticky**, kterému chybí povinná dimenze a nedoplní ji
+ani jedna vrstva, pohyb nezaúčtuje a vytvoří návrh v **Automatice** se stavem
+**Vyžaduje zásah**. Doplňte dimenzi u pohybu nebo v pravidle a návrh schvalte.
+
+Účet vypnutý v poli **Aktivní** své výchozí dimenze u nově účtovaných pohybů
+nepoužije, stejně jako se na jeho analytiku pohyby nepřesměrují. Pohyby, které
+na něm už jsou zaúčtované, si dimenzi účtu ponechají i po deaktivaci. Nastavit
+je lze i úvěrovému účtu kreditní karty; ten je používá i po archivaci na stránce
+Kreditní karty, stejně jako se jeho pohyby dál účtují na 231.
+
+Změna výchozích dimenzí účtu se do už zaúčtovaného pohybu promítne, až když se
+jeho dimenze znovu orazítkují. To se stane při uložení dimenzí pohybu nebo
+hrazeného dokladu, při novém spárování nebo opakovaném importu výpisu, při
+převodu pohybů na kreditní kartu a při přiřazení nebo odpojení úhrady ostatní
+pohledávky či závazku. Přerazítkují se jen pohyby v otevřených obdobích.
 
 Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u dokladů
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.
@@ -488,8 +597,12 @@ Změna dimenzí karty se promítne do jejích už zaúčtovaných zápisů majet
 změnila zápis uzavřeného období, odmítne se celé uložení karty. Přepíší se jen typy, které
 karta určuje: dimenze jiného typu zadaná ručně na řádku zápisu (například projekt
 u odpisu) zůstane. Totéž platí pro ostatní pohledávky a závazky a pro zápočty.
-Drobný majetek dimenze nese z přijaté faktury nákupu; časové rozlišení drobného
-majetku v uzávěrce je souhrnný zápis za období a dimenze nemá.
+Drobný majetek dimenze nese z přijaté faktury nákupu. Časové rozlišení drobného majetku
+v uzávěrce dělí řádek 501 podle dimenzí zápisu dokladu, ze kterého náklad pochází
+([§ 72](72_Uzaverka.md)); karta bez vazby na doklad zůstává mimo vyhlášku 504/2002 Sb.
+na řádku bez dimenzí, u vyhlášky 504/2002 Sb. ji krok odmítne (při poměrném rozlišení a u paušálu, který se dělí podle karet; u paušálu z faktur rozpisu 501
+rozhodují faktury rozpisu). Řádek jde z analytiky účtu 501, na které náklad
+v zápisu dokladu leží; účtotvorná dimenze ho dodatečně nepřesměruje.
 
 ### 114.11.9 Produkt a kategorie
 
@@ -513,10 +626,9 @@ odmítne.
 #### Účet položky vydané faktury
 
 Vydaná faktura i šablona pravidelné fakturace mají u položek volitelný
-**účet položky**. V editoru faktury se pole otevře malou šipkou na konci řádku
-položky (samo se otevře, když už položka účet má), v šabloně pravidelné fakturace
-odkazem **Účty položek** nad položkami. Prázdné pole znamená účet
-produktu, jeho kategorie, pravidlo výnosů, jinak předkontaci dokladu.
+**účet položky**. Pole otevře malá šipka na konci řádku položky (sama se otevře,
+když už položka účet má). Prázdné pole znamená účet produktu, jeho kategorie,
+pravidlo výnosů, jinak předkontaci dokladu.
 
 Na rozdíl od produktu a kategorie (jen třída 6) smí položka nést i rozvahový nebo
 nákladový účet, například přefakturaci na 315 nebo 378. Nepovolené jsou jen
@@ -595,7 +707,13 @@ hodnotu určí pravidlo s delší předponou a vynucení to nejpřísnější.
 
 Pravidla platí pro zaúčtování vystavených a přijatých faktur, pokladních dokladů,
 bankovních pohybů a ručních zápisů. Automatické zápisy (uzávěrka, otevření účtů,
-odpisy, mzdy, přeúčtování DPH, kurzové rozdíly) pravidla neblokují. Při ruční
+odpisy, mzdy, přeúčtování DPH, kurzové rozdíly) pravidla neblokují. Výchozí hodnotu
+pravidla dostanou navíc poplatky a dobropisy poplatků GoPay, uzavření platby kartou
+bez dokladu a nezdaněná část cestovní náhrady vypořádané pokladnou. Tyto zápisy
+před pravidly přebírají i dimenze svého kontextu: GoPay výchozí dimenze bankovního
+účtu, na který chodí výplaty (jen náklady a výnosy), uzavření platby kartou dimenze
+pohybu a výchozí dimenze účtu výpisu, cestovní náhrada mzdové dimenze pracovního
+vztahu navázané na dimenze firmy. Při ruční
 úpravě dimenzí řádků v deníku nejde povinnou dimenzi z řádku odebrat.
 
 Firma bez pravidel účtuje stejně jako dřív.
@@ -678,7 +796,8 @@ Při zaúčtování:
 - Mapa platí podle data účetního případu. Rozvahové účty se nemapují nikdy, DPH
   ani kontrolní hlášení se nemění.
 - Náhled kontace před zaúčtováním ukáže, kam se syntetika přesune.
-- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik.
+- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik
+  a se stejnými dimenzemi, které nese řádek dokladu (viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
 
 Změna dimenze u zaúčtovaného dokladu, která by přesunula řádek na jinou
 analytiku, se do deníku tiše nepromítne: řádek si ponechá dosavadní dimenzi
@@ -691,10 +810,56 @@ zůstaly na syntetice s mapou, typicky doklad bez střediska.
 
 ### 114.11.13 Mzdy
 
-Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení →
-Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže jedno
-středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy nebo
-její skupiny firem.
+Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení
+mezd → Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže
+jedno středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy
+nebo její skupiny firem a jen na odpovídající druh firemní dimenze:
+
+<!-- cols: 30 70 -->
+| Mzdová dimenze | Smí se navázat na |
+|---|---|
+| Středisko | hodnotu firemní dimenze druhu Středisko |
+| Zakázka | hodnotu firemní dimenze druhu Projekt |
+| Činnost | hodnotu jiného druhu než Středisko a Projekt (např. systémová Činnost) |
+
+Vazbu jiného druhu editor ani API neuloží. Starší vazbu jiného druhu úprava
+názvu nebo platnosti nezmění; kontrola před mzdovým během ji ukáže jako
+varování.
+
+#### Mzdy na zakázky krok za krokem
+
+Zakázka se do mzdového zápisu dostane jen přes řetěz mzdová dimenze → firemní
+dimenze → zakázka. Mzdová dimenze Zakázka bez vazby nese jen svůj kód
+v mzdových sestavách; v deníku po ní nezůstane nic a Ekonomika zakázky mzdy
+neuvidí.
+
+1. V `Zakázky` založte zakázku (nebo použijte existující).
+2. V `Firma → Dimenze` u typu druhu **Projekt** založte hodnotu a ve vazbě
+   hodnoty vyberte tuto zakázku ([§ 114.11.2](#114112-typy-a-hodnoty)).
+3. V `Mzdy → Nastavení mezd → Dimenze` klikněte na **Přidat dimenzi** a v poli
+   **Firemní dimenze** vyberte hodnotu z kroku 2. Typ se předvyplní na Zakázka,
+   název a kód podle hodnoty. U existující mzdové zakázky vazbu doplňte úpravou.
+4. Na kartě pracovního vztahu v `Mzdy → Zaměstnanci` přiřaďte vztahu mzdovou
+   zakázku, případně rozpad mezi více zakázek (např. 50 / 50).
+5. Zahajte mzdový běh. Kontrola před během hlásí mzdové dimenze vztahů běhu,
+   které vazbu na firemní dimenzi nemají nebo ji mají na jiný druh, s odkazem
+   na `Mzdy → Nastavení mezd → Dimenze`. Varování běh nezastaví; vazba se
+   zmrazí do vstupů běhu, takže doplněná až po schválení se do zápisu dostane
+   jen opravnou revizí.
+6. Po zaúčtování nesou nákladové řádky 521 a 524 vztahu firemní dimenzi
+   i zakázku. V podvojném účetnictví počítá Ekonomika zakázky z deníku, takže
+   v ní mzdový náklad uvidíte; v daňové evidenci sčítá jen doklady a mzdy
+   v ní nejsou.
+
+**Jak poznáte, že je hotovo:** v účetním deníku mají řádky 521 mzdového
+předpisu vyplněnou zakázku a v detailu zakázky je v Ekonomice zakázky mzdový
+náklad. Editor mzdové dimenze typu Zakázka bez vazby pod polem **Firemní
+dimenze** upozorní, že se zakázka do mzdového zápisu nepropíše.
+
+Firma bez zapnutých firemních dimenzí žádné takové varování nedostane; mzdy
+účtuje s textovým střediskem jako dosud.
+
+#### Zaúčtování
 
 Při zaúčtování schváleného mzdového běhu:
 
@@ -706,7 +871,11 @@ Při zaúčtování schváleného mzdového běhu:
   Haléř, který po dělení zbude, dostane podíl s největším zbytkem, součet tedy
   vždy sedí na haléř.
 - Závazky (331, 336, 342 a další) se na střediska nedělí. Dluží se jako celek.
-- Do deníku se neúčtuje po zaměstnancích. Mzdový předpis zůstává jeden za firmu.
+- Mzdový předpis zůstává jeden za firmu. Řádky jsou souhrnné za účet, stranu
+  a dimenze, pokud firma v `Mzdy → Nastavení mezd → Automatické účtování`
+  nezvolí u **Mzdový předpis** možnost **Po zaměstnancích**. Pak má každý
+  zaměstnanec vlastní řádky s osobním číslem a pojistné zaměstnavatele se
+  rozdělí na jeho pracovní vztahy.
 - Textový kód střediska se na řádky zapisuje dál, sestavy po středisku proto
   fungují i bez vazby.
 
@@ -744,10 +913,39 @@ středisko A a 40 % B se do výsledovky střediska A započte šedesáti procent
 Kontrolní vazby předvahy na celý deník proto s filtrem nemusí sedět. Export do
 PDF i XLSX nese v hlavičce řádek **Dimenze** s vybranou hodnotou.
 
+Tlačítkem **Přidat dimenzi** přidáte do filtru další řádek s typem a hodnotou,
+nejvýše deset hodnot z nejvýše čtyř různých typů dimenzí. Hodnoty různých typů musí platit zároveň na témže řádku deníku:
+filtr Projekt = akce a Středisko = dotace ukáže jen náklady akce hrazené
+z dotace, ne ostatní náklady akce ani jiné náklady dotace. U dvou hodnot
+stejného typu stačí kterákoli z nich (projekt A nebo B). Volba **včetně
+podřízených** platí pro všechny vybrané hodnoty. Řádek s rozpadem se započte
+součinem dílů: náklad rozdělený 60 % na akci a celý z dotace dá 60 %, rozpad
+50 % na akci a 50 % z dotace dá čtvrtinu, zaokrouhlenou na haléře. Proto
+u řádků s rozpadem v obou dimenzích nemusí součet přes všechny kombinace
+hodnot sedět na haléř. Výkazy po dimenzi a peněžní tok po dimenzi pracují dál
+s jedním typem a jednou hodnotou.
+
 Rozvaha po dimenzi dává smysl u projektu nebo zakázky, jejíž doklady nesou
 hodnotu na všech řádcích (dimenze z hlavičky dokladu). Vyrovnaná je jen tehdy,
 když hodnotu nesou obě strany zápisů. Úhrada faktury projektu v bance bez
 projektu nechá pohledávku projektu v rozvaze otevřenou.
+
+#### Filtr na dimenzi v seznamech faktur a v evidenci DPH
+
+Seznamy **vydaných** a **přijatých faktur** mají filtr **Dimenze** se stejným
+výběrem hodnot (tlačítko **Přidat dimenzi**, volba **včetně podřízených**).
+Doklad vyhovuje, když hodnotu nese na hlavičce, na některé položce nebo
+v rozpadu hlavičky či položky. Doklad rozdělený mezi víc hodnot se proto
+ukáže u každé z nich celý. Filtr je součástí uložených filtrů, knihy faktur
+(export seznamu) i hromadných akcí nad filtrem.
+
+**Kniha DPH**, soupisy oddílů kontrolního hlášení a sestava **DPH podle
+dimenze** (`Daně`) dělí DPH dokladu po položkách: položka s vlastní hodnotou
+patří své hodnotě, ostatní položky hodnotě hlavičky, rozpad se dělí podle
+podílů na haléře. Výchozí dimenze klienta, zakázky a produktu ani pravidla
+dimenzí se tu nepoužijí, rozhoduje jen to, co je zadané na dokladu. Evidenci
+DPH lze filtrovat podle hodnot jednoho typu. Podrobnosti a kontrola na
+přiznání a na obrat účtu 343 jsou v [kapitole Kniha DPH](42_Kniha_DPH.md#4295-dimenze-v-evidenci-dph).
 
 #### Výkazy po dimenzi
 
@@ -846,8 +1044,10 @@ pracovat, dokud nebude licence znovu platná.
 Číselník dimenzí a výběry na dokladech vidí uživatel s právem číst účetnictví,
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
 k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
-a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku.
-Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
+a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku. Výchozí
+dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví, stejně
+jako hromadně nastavit dimenze vybraným vydaným fakturám. Přes API token hromadná
+úprava dimenzí nejde. Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
 odeslání ke schválení a jeho zrušení patří ke změně stavu přijaté faktury.
 
 ### 114.11.16 Převod z Money S3
@@ -858,15 +1058,21 @@ dimenze. Podrobnosti v kapitole [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 ### 114.11.17 Systémové dimenze a původ přiřazení
 
 Systémový typ má vlastní identitu nezávislou na názvu a kódu vlastního typu.
-Vlastní typ se stejným kódem se automaticky nepřevádí. Příprava rámce 504
+Vlastní typ se stejným kódem se automaticky nepřevádí. Rámec 504
 rozlišuje činnost (hlavní nebo hospodářskou), druh činnosti a předběžné daňové
-zařazení. Rámec 504 zatím nelze v nastavení firmy aktivovat. Předběžné daňové
+zařazení. Rámec 504 se zapíná v nastavení firmy. Předběžné daňové
 zařazení samo nepotvrzuje daňové posouzení ani nárok na osvobození a systém
 automaticky nevybírá hlavní činnost ani předmět daně.
 
 Označení **Systémová dimenze** znamená, že typ nelze odstranit ani vypnout.
 Označení **Vestavěná hodnota** označuje pevný význam, který nelze přejmenovat,
 přesunout, vyřadit ani smazat. Odpovědnou osobu a poznámky lze upravit.
+Kód vestavěné hodnoty je interní označení jejího významu, proto se ve výběrech,
+štítcích seznamů, sestavách a jejich exportech ukazuje jen její název. Kód
+zůstává v API a v profilu firmy. Hlavní a hospodářská činnost a hodnoty
+předběžného daňového zařazení mají ve výběrech a sestavách název v jazyce
+aplikace; štítky seznamů a exporty je uvádějí česky. Název systémového typu je
+údaj firmy a zobrazuje se tak, jak je uložený.
 Název a význam použité systémové
 hodnoty, její kód a zařazení do stromu zůstávají zachované i v otevřeném období.
 Pro nový význam je nutná nová hodnota. Provozní poznámky a odpovědnou osobu lze
@@ -877,13 +1083,17 @@ převezme z původního zápisu. Pevné systémové hodnoty nelze
 přejmenovat ani ukončit. Tato přísnější pravidla nemění správu vlastních dimenzí.
 
 Přiřazení uchovává známý původ hodnoty, například přímý výběr, výchozí hodnotu
-klienta, zakázky nebo produktu, konkrétní účetní pravidlo či účetní modul. Kopie a
+klienta, zakázky, produktu nebo bankovního účtu, konkrétní účetní pravidlo,
+pravidlo účtování bankovních pohybů či účetní modul. Kopie a
 storno zachovají původ převzatého přiřazení. U starších přiřazení bez doloženého
 původu zůstává původ neznámý; opětovné uložení stejné hodnoty jej nedoplňuje
 odhadem.
 
 Povinné systémové dimenze rámce 504 platí také pro systémové účetní zdroje.
-U závěrky a otevření se kontrolují rozvahové řádky. Nezávislé procentní rozpady
+U závěrky a otevření se kontrolují rozvahové řádky. Když zápis činnost nebo jinou
+povinnou systémovou dimenzi nemá ani po výchozích hodnotách, odmítne se hláškou
+s účtem a chybějící dimenzí. Doplňte ji na doklad nebo zápis, případně nastavte
+pravidlo dimenze s výchozí hodnotou (**Firma → Dimenze → Pravidla**). Nezávislé procentní rozpady
 více systémových os na jednom řádku se odmítnou, protože neurčují jejich
 společné kombinace.
 
@@ -932,8 +1142,9 @@ operace nevytváří další zápis. Předběžné daňové zařazení nenahrazu
 daňové posouzení.
 
 Náhled a historii může číst uživatel s právem číst účetnictví. Klíče,
-zaúčtování a storno vyžadují právo zápisu a přihlášení přes web. Veřejné API
-a MCP poskytují čtení klíčů, zdrojů a historie v rozsahu dostupné firmy.
+zaúčtování a storno vyžadují právo zápisu a přihlášení přes web nebo API
+token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite).
+Běžné API tokeny a MCP poskytují čtení klíčů, zdrojů a historie v rozsahu dostupné firmy.
 
 ## 114.12 Související kapitoly
 

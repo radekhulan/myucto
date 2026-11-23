@@ -27,6 +27,8 @@ use MyInvoice\Repository\ClientRepository;
  *  2. VIES `valid` podle DIČ (zahraniční EU dodavatel, NEBO doověření skupinové
  *     registrace z kroku 1 — `ViesClient::lookup()` skupinové DIČ interně routuje
  *     na CRPDPH, protože VIES DPH skupiny vůbec neeviduje). Nález v CRPDPH = plátce.
+ *     Negativ VIES u dokladu s 8místným IČO, které ARES nepotvrdil, je nezjištěno
+ *     (null), ne neplátce: IČO i DIČ jsou nejspíš špatně přečtené.
  *  3. Nezjištěno (registry nedostupné / 404 / mimo EU) → null (necháme dosavadní
  *     příznak beze změny), NEBO — u skupinové DIČ z kroku 1, kterou se nepodařilo
  *     doověřit — ponecháme ARES negativum (konzervativní fallback, nic nezhoršuje
@@ -116,6 +118,12 @@ final class VendorVatPayerResolver
             try {
                 $v = $this->vies->lookup($dicTrim);
                 if (($v['source'] ?? '') !== 'error') {
+                    // Doklad uvádí české IČO, které ARES nepotvrdil (typicky špatně
+                    // přečtené). Negativ nad DIČ pak dokládá jen to, že neprošlo DIČ,
+                    // ne že subjekt je neplátce — rozhodne doklad nebo uživatel.
+                    if (empty($v['valid']) && strlen($icDigits) === 8 && $aresResult === null) {
+                        return ['is_vat_payer' => null, 'source' => 'unknown'];
+                    }
                     return ['is_vat_payer' => !empty($v['valid']), 'source' => 'vies'];
                 }
             } catch (\Throwable) {

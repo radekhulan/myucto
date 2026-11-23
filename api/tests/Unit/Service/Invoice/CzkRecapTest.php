@@ -9,6 +9,16 @@ use PHPUnit\Framework\TestCase;
 
 final class CzkRecapTest extends TestCase
 {
+    public function testRateDecimalsShowAllSignificantPlaces(): void
+    {
+        self::assertSame(3, CzkRecap::rateDecimals(25.0));
+        self::assertSame(3, CzkRecap::rateDecimals(24.365));
+        self::assertSame(4, CzkRecap::rateDecimals(24.9999));
+        self::assertSame(5, CzkRecap::rateDecimals(0.06123));
+        self::assertSame(6, CzkRecap::rateDecimals(0.0612345678));
+        self::assertSame(4, CzkRecap::build([], 24.9999, '2026-05-03')['rate_decimals']);
+    }
+
     public function testSingleVatGroupBasicConversion(): void
     {
         // 1 000 EUR base + 210 EUR VAT (21 %) × 24,360 = 24 360 + 5 115,60 = 29 475,60 CZK

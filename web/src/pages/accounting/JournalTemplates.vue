@@ -20,6 +20,7 @@ import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { compactDimensions, type DimensionMap } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
+import { apiErrorText, hasAnySingle, linesToPairs } from '@/utils/entryForm'
 
 const props = defineProps<{
   embedded?: boolean
@@ -55,11 +56,31 @@ interface EditableLine {
   dimensions: DimensionMap
 }
 
+/** Dvojice šablony (jednoduchý zápis): účet MD proti účtu Dal s výchozí částkou a textem. */
+interface EditablePair {
+  debit_account_code: string
+  credit_account_code: string
+  default_amount: number | null
+  line_text: string
+  cost_center: string
+  dimensions: DimensionMap
+}
+
 const form = reactive({
   name: '',
   description: '',
   lines: [] as EditableLine[],
 })
+
+// Firma, která někdy zapnula jednoduchý zápis, edituje šablony po dvojicích; ostatní vidí editor beze změny.
+const hasSingleForm = ref(false)
+const pairMode = ref(false)
+const pairRows = ref<EditablePair[]>([])
+const editorOpen = computed(() => form.lines.length > 0 || pairRows.value.length > 0)
+
+function emptyPair(): EditablePair {
+  return { debit_account_code: '', credit_account_code: '', default_amount: null, line_text: '', cost_center: '', dimensions: {} }
+}
 
 const pickable = computed(() =>
   accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)),
@@ -103,6 +124,7 @@ onMounted(async () => {
     } finally { loading.value = false }
     return
   }
+  accountingApi.getEntryForm().then(v => { hasSingleForm.value = hasAnySingle(v.history) }).catch(() => { hasSingleForm.value = false })
   await Promise.all([
     loadTemplates(),
     accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] }),
@@ -114,8 +136,15 @@ function startNew() {
   editingId.value = null
   form.name = ''
   form.description = ''
-  form.lines = [emptyLine(), { ...emptyLine(), side: 'credit' }]
   error.value = ''
+  pairMode.value = hasSingleForm.value && !props.initialDraft
+  if (pairMode.value) {
+    form.lines = []
+    pairRows.value = [emptyPair()]
+  } else {
+    pairRows.value = []
+    form.lines = [emptyLine(), { ...emptyLine(), side: 'credit' }]
+  }
 }
 
 async function editTemplate(tpl: JournalTemplateSummary) {
@@ -132,6 +161,33 @@ function fillForm(detail: JournalTemplateDetail) {
   editingId.value = detail.id
   form.name = detail.name
   form.description = detail.description ?? ''
+  pairRows.value = []
+  pairMode.value = false
+  // Šablona po dvojicích (každý řádek nese pair_no, dvojice má MD a Dal) se edituje jako dvojice.
+  if (detail.lines.length > 0 && detail.lines.every(l => l.pair_no)) {
+    const byNo = new Map<number, typeof detail.lines>()
+    for (const l of detail.lines) byNo.set(l.pair_no!, [...(byNo.get(l.pair_no!) ?? []), l])
+    const rows: EditablePair[] = []
+    for (const [, group] of [...byNo.entries()].sort((a, b) => a[0] - b[0])) {
+      const debit = group.find(l => l.side === 'debit')
+      const credit = group.find(l => l.side === 'credit')
+      if (!debit || !credit) { rows.length = 0; break }
+      rows.push({
+        debit_account_code: debit.account_code,
+        credit_account_code: credit.account_code,
+        default_amount: debit.default_amount,
+        line_text: debit.line_text ?? credit.line_text ?? '',
+        cost_center: debit.cost_center ?? credit.cost_center ?? '',
+        dimensions: { ...(debit.dimensions ?? credit.dimensions ?? {}) },
+      })
+    }
+    if (rows.length) {
+      pairRows.value = rows
+      form.lines = []
+      pairMode.value = true
+      return
+    }
+  }
   form.lines = detail.lines.map(line => ({
     account_code: line.account_code,
     side: line.side,
@@ -143,9 +199,42 @@ function fillForm(detail: JournalTemplateDetail) {
 }
 
 function addLine() { form.lines.push(emptyLine()) }
+function addPair() { pairRows.value.push(emptyPair()) }
+function removePair(index: number) { if (pairRows.value.length > 1) pairRows.value.splice(index, 1) }
+
+/** Řádkovou šablonu převede na dvojice, kde je párování jednoznačné (1 : N, shodné částky). */
+function convertToPairs() {
+  const drafts = linesToPairs(form.lines.map(l => ({
+    account_code: l.account_code.trim(), side: l.side, amount: l.default_amount ?? 0,
+  })))
+  // Šablona bez výchozích částek nejde párovat podle částek; zkusí se aspoň 1 : N bez částek.
+  const hasAmounts = form.lines.every(l => (l.default_amount ?? 0) > 0)
+  if (!drafts || !hasAmounts) {
+    const debits = form.lines.filter(l => l.side === 'debit')
+    const credits = form.lines.filter(l => l.side === 'credit')
+    const hub = debits.length === 1 ? 'debit' : credits.length === 1 ? 'credit' : null
+    if (!hub || debits.length === 0 || credits.length === 0) { error.value = t('accounting.pairs.templates.not_convertible'); return }
+    const hubLine = hub === 'debit' ? debits[0] : credits[0]
+    const others = hub === 'debit' ? credits : debits
+    pairRows.value = others.map(o => ({
+      ...emptyPair(),
+      debit_account_code: hub === 'debit' ? hubLine.account_code : o.account_code,
+      credit_account_code: hub === 'debit' ? o.account_code : hubLine.account_code,
+      default_amount: hasAmounts ? o.default_amount : null,
+      line_text: o.label,
+      cost_center: o.cost_center,
+      dimensions: { ...o.dimensions },
+    }))
+  } else {
+    pairRows.value = drafts.map(d => ({ ...emptyPair(), debit_account_code: d.debit_account_code, credit_account_code: d.credit_account_code, default_amount: d.amount }))
+  }
+  error.value = ''
+  form.lines = []
+  pairMode.value = true
+}
 function removeLine(index: number) { if (form.lines.length > 1) form.lines.splice(index, 1) }
 function cancelEdit() {
-  editingId.value = null; form.name = ''; form.description = ''; form.lines = []
+  editingId.value = null; form.name = ''; form.description = ''; form.lines = []; pairRows.value = []; pairMode.value = false
   if (props.initialDraft) emit('close')
 }
 
@@ -157,19 +246,36 @@ async function saveTemplate() {
   if (loading.value || saving.value) return
   error.value = ''
   if (!form.name.trim()) { error.value = t('accounting.manual.template.name_required'); return }
-  if (form.lines.some(line => !line.account_code.trim())) {
+  if (pairMode.value) {
+    for (const [i, row] of pairRows.value.entries()) {
+      const d = row.debit_account_code.trim()
+      const c = row.credit_account_code.trim()
+      const code = !d ? 'pair_missing_debit_account' : !c ? 'pair_missing_credit_account' : d === c ? 'pair_same_account' : ''
+      if (code) { error.value = `${t('accounting.pairs.pair_label', { n: i + 1 })}: ${t(`accounting.error.${code}`)}`; return }
+    }
+  } else if (form.lines.some(line => !line.account_code.trim())) {
     error.value = t('accounting.templates.account_required')
     return
   }
 
-  const lines: JournalTemplateLinePayload[] = form.lines.map(line => ({
-    account_code: line.account_code.trim(),
-    side: line.side,
-    amount: nullableAmount(line.default_amount),
-    label: line.label.trim() || null,
-    cost_center: line.cost_center.trim() || null,
-    ...(dims.enabled.value ? { dimensions: compactDimensions(line.dimensions) } : {}),
-  }))
+  const lines: JournalTemplateLinePayload[] = pairMode.value
+    ? pairRows.value.flatMap((row, i) => (['debit', 'credit'] as const).map(side => ({
+        pair_no: i + 1,
+        line_text: row.line_text.trim() || null,
+        account_code: (side === 'debit' ? row.debit_account_code : row.credit_account_code).trim(),
+        side,
+        amount: nullableAmount(row.default_amount),
+        cost_center: row.cost_center.trim() || null,
+        ...(dims.enabled.value ? { dimensions: compactDimensions(row.dimensions) } : {}),
+      })))
+    : form.lines.map(line => ({
+        account_code: line.account_code.trim(),
+        side: line.side,
+        amount: nullableAmount(line.default_amount),
+        label: line.label.trim() || null,
+        cost_center: line.cost_center.trim() || null,
+        ...(dims.enabled.value ? { dimensions: compactDimensions(line.dimensions) } : {}),
+      }))
   const payload = {
     name: form.name.trim(),
     description: form.description.trim() || null,
@@ -187,7 +293,7 @@ async function saveTemplate() {
     if (props.initialDraft) emit('saved')
     else { cancelEdit(); await loadTemplates() }
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('common.error')
+    error.value = apiErrorText(e, t)
   } finally {
     saving.value = false
   }
@@ -276,7 +382,7 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
     <datalist :id="`${pageId}-journal-template-cost-centers`">
       <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} / {{ center.name }}</option>
     </datalist>
-    <Modal v-if="auth.canWrite('accounting.templates') && form.lines.length"
+    <Modal v-if="auth.canWrite('accounting.templates') && editorOpen"
       :title="editingId === null ? t('accounting.templates.new') : t('accounting.templates.edit')"
       widthClass="max-w-4xl" @close="cancelEdit">
       <div class="space-y-4">
@@ -294,13 +400,47 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
         </div>
       </div>
 
-      <div>
+      <div v-if="pairMode" data-test="template-pairs">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <label class="text-sm font-medium text-neutral-700">{{ t('accounting.pairs.manual.pairs') }}</label>
+          <button type="button" @click="addPair" :class="btnOutlineSm('neutral')">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('accounting.pairs.add') }}
+          </button>
+        </div>
+        <p class="text-xs text-neutral-500 mb-2">{{ t('accounting.pairs.templates.hint') }}</p>
+        <div class="space-y-2">
+          <div v-for="(row, index) in pairRows" :key="index" class="grid grid-cols-12 gap-2 items-start">
+            <div class="col-span-12 sm:col-span-4 min-w-0">
+              <ChartAccountSelect v-model="row.debit_account_code" :accounts="pickable" :disabled="loading" :aria-label="t('accounting.pairs.col_debit')" />
+            </div>
+            <div class="col-span-12 sm:col-span-4 min-w-0">
+              <ChartAccountSelect v-model="row.credit_account_code" :accounts="pickable" :disabled="loading" :aria-label="t('accounting.pairs.col_credit')" />
+            </div>
+            <input v-model.number="row.default_amount" type="number" min="0" step="0.01" :placeholder="t('accounting.templates.default_amount')" class="col-span-10 sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
+            <button type="button" @click="removePair(index)" :disabled="pairRows.length <= 1" class="col-span-2 sm:col-span-1 h-9 inline-flex items-center justify-center text-danger-500 hover:text-danger-600 disabled:opacity-30" :title="t('accounting.pairs.remove')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            </button>
+            <input v-model="row.line_text" type="text" maxlength="255" :placeholder="t('accounting.pairs.text_placeholder')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="row.cost_center" :list="`${pageId}-journal-template-cost-centers`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DimensionFields v-if="dims.enabled.value" v-model="row.dimensions" compact class="col-span-12" />
+          </div>
+        </div>
+      </div>
+
+      <div v-else>
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <label class="text-sm font-medium text-neutral-700">{{ t('accounting.manual.lines') }}</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <button v-if="hasSingleForm" type="button" @click="convertToPairs" :class="btnOutlineSm('primary')" data-test="template-convert">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+              {{ t('accounting.pairs.templates.convert') }}
+            </button>
           <button type="button" @click="addLine" :class="btnOutlineSm('neutral')">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('accounting.manual.add_line') }}
           </button>
+          </div>
         </div>
         <div class="space-y-2">
           <div v-for="(line, index) in form.lines" :key="index" class="grid grid-cols-12 gap-2 items-start">

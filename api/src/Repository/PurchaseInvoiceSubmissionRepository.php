@@ -15,6 +15,19 @@ use PDO;
  */
 final class PurchaseInvoiceSubmissionRepository
 {
+    /**
+     * Po této době se rozdělané vytěžení považuje za přerušené. Nejdelší řádný běh
+     * jsou dvě AI volání po 180 s (slabý výsledek opakuje silnější model) a dotazy
+     * do ARES/VIES, tedy zhruba 7 minut. Přerušený požadavek (ukončený proces,
+     * výpadek spojení) jinak nechá podání ve stavu `processing`, kde ho fronta
+     * neukáže mezi čekajícími a nedá se znovu vytěžit ani smazat.
+     */
+    public const STALE_PROCESSING_MINUTES = 10;
+
+    private const STALE_PROCESSING_SQL =
+        "(s.status = 'processing' AND s.processing_started_at < NOW() - INTERVAL "
+        . self::STALE_PROCESSING_MINUTES . ' MINUTE)';
+
     private const SELECT = <<<'SQL'
         SELECT s.*,
                d.original_name, d.mime_type, d.doc_type, d.size_bytes,
@@ -51,19 +64,26 @@ final class PurchaseInvoiceSubmissionRepository
     public function __construct(private readonly Connection $db) {}
 
     /** @return array{items:list<array<string,mixed>>,total:int} */
-    public function paginate(int $supplierId, ?string $status, int $limit, int $offset): array
+    public function paginate(int $supplierId, ?string $status, int $limit, int $offset, ?string $via = null): array
     {
         $where = ' WHERE s.supplier_id = ?';
         $params = [$supplierId];
-        if ($status !== null && $status !== '') {
+        if ($status === 'submitted') {
+            // Přerušené vytěžení čeká na zpracování stejně jako nové podání.
+            $where .= " AND (s.status = 'submitted' OR " . self::STALE_PROCESSING_SQL . ')';
+        } elseif ($status !== null && $status !== '') {
             $where .= ' AND s.status = ?';
             $params[] = $status;
+        }
+        if ($via !== null && $via !== '') {
+            $where .= ' AND s.submitted_via = ?';
+            $params[] = $via;
         }
 
         $limit = max(1, min(100, $limit));
         $offset = max(0, $offset);
         $stmt = $this->db->pdo()->prepare(
-            self::SELECT . $where
+            $this->select() . $where
             . " ORDER BY FIELD(s.status, 'submitted','processing','needs_information','processed','rejected'),"
             . ' s.created_at DESC, s.id DESC LIMIT ' . $limit . ' OFFSET ' . $offset
         );
@@ -77,10 +97,41 @@ final class PurchaseInvoiceSubmissionRepository
         ];
     }
 
+    /**
+     * Doklady převzaté z e-mailu: kolik jich přišlo od `$since` a kolik čeká na
+     * zpracování. Výčet stavů drží dotaz na indexu fronty (firma, stav, převzetí).
+     *
+     * @return array{received:int,waiting:int}
+     */
+    public function emailIntakeStats(int $supplierId, string $since): array
+    {
+        $received = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoice_submissions s
+              WHERE s.supplier_id = ?
+                AND s.status IN ('submitted','processing','needs_information','processed','rejected')
+                AND s.created_at >= ?
+                AND s.submitted_via = 'email'"
+        );
+        $received->execute([$supplierId, $since]);
+
+        $waiting = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoice_submissions s
+              WHERE s.supplier_id = ?
+                AND (s.status = 'submitted' OR " . self::STALE_PROCESSING_SQL . ")
+                AND s.submitted_via = 'email'"
+        );
+        $waiting->execute([$supplierId]);
+
+        return [
+            'received' => (int) $received->fetchColumn(),
+            'waiting' => (int) $waiting->fetchColumn(),
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $id, int $supplierId): ?array
     {
-        $stmt = $this->db->pdo()->prepare(self::SELECT . ' WHERE s.id = ? AND s.supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare($this->select() . ' WHERE s.id = ? AND s.supplier_id = ?');
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $this->hydrate($row) : null;
@@ -90,7 +141,7 @@ final class PurchaseInvoiceSubmissionRepository
     public function findByHash(int $supplierId, string $sha256): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            self::SELECT . ' WHERE s.supplier_id = ? AND s.document_sha256 = ? LIMIT 1'
+            $this->select() . ' WHERE s.supplier_id = ? AND s.document_sha256 = ? LIMIT 1'
         );
         $stmt->execute([$supplierId, $sha256]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -124,8 +175,9 @@ final class PurchaseInvoiceSubmissionRepository
     }
 
     /**
-     * Atomicky převezme čekající podání. Stará `processing` lze po 30 minutách
-     * převzít znovu, aby pád workeru nezanechal frontu trvale zaseknutou.
+     * Atomicky převezme čekající podání. Přerušené `processing` lze po
+     * {@see self::STALE_PROCESSING_MINUTES} minutách převzít znovu, aby pád
+     * požadavku nezanechal podání trvale zaseknuté.
      */
     public function claimForExtraction(int $id, int $supplierId): bool
     {
@@ -135,7 +187,8 @@ final class PurchaseInvoiceSubmissionRepository
                     processing_started_at = NOW(), status_reason = NULL
               WHERE id = ? AND supplier_id = ?
                 AND (status = 'submitted'
-                     OR (status = 'processing' AND processing_started_at < NOW() - INTERVAL 30 MINUTE))"
+                     OR (status = 'processing' AND processing_started_at < NOW() - INTERVAL "
+                . self::STALE_PROCESSING_MINUTES . ' MINUTE))'
         );
         $stmt->execute([$id, $supplierId]);
         return $stmt->rowCount() === 1;
@@ -264,7 +317,7 @@ final class PurchaseInvoiceSubmissionRepository
 
     public function findForUpdate(int $id, int $supplierId): ?array
     {
-        $stmt = $this->db->pdo()->prepare(self::SELECT . ' WHERE s.id = ? AND s.supplier_id = ? FOR UPDATE');
+        $stmt = $this->db->pdo()->prepare($this->select() . ' WHERE s.id = ? AND s.supplier_id = ? FOR UPDATE');
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $this->hydrate($row) : null;
@@ -274,19 +327,22 @@ final class PurchaseInvoiceSubmissionRepository
      * Vyřadí podání z fronty. Zpracované podání se nemaže — na jeho originálu
      * stojí vazba k existující faktuře; nejdřív musí zmizet ta faktura, což
      * podání vrátí do fronty. Rozdělané `processing` taky ne, doběhlo by do
-     * prázdna. Vrací smazaný řádek pro navazující úklid a auditní zápis.
+     * prázdna; přerušené (viz {@see self::STALE_PROCESSING_MINUTES}) už ano.
+     * Vrací smazaný řádek pro navazující úklid a auditní zápis.
      *
      * @return array<string,mixed>|null
      */
-    public function deleteFromQueue(int $id, int $supplierId, ?int $ownerId = null, bool $pendingOnly = false): ?array
+    public function deleteFromQueue(int $id, int $supplierId, ?int $ownerId = null, bool $clientScope = false): ?array
     {
         $row = $this->find($id, $supplierId);
-        if ($row === null || !in_array((string) $row['status'], ['submitted', 'needs_information', 'rejected'], true)) {
+        if ($row === null || (!in_array((string) $row['status'], ['submitted', 'needs_information', 'rejected'], true)
+            && !$row['processing_stale'])) {
             return null;
         }
+        $staleProcessing = str_replace('s.', 'purchase_invoice_submissions.', self::STALE_PROCESSING_SQL);
         $sql = "DELETE FROM purchase_invoice_submissions
                   WHERE id = ? AND supplier_id = ? AND purchase_invoice_id IS NULL
-                    AND status IN ('submitted','needs_information','rejected')
+                    AND (status IN ('submitted','needs_information','rejected') OR {$staleProcessing})
                     AND NOT EXISTS (
                         SELECT 1 FROM document_links dl
                         JOIN documents linked ON linked.id = dl.document_id AND linked.supplier_id = dl.supplier_id
@@ -303,8 +359,9 @@ final class PurchaseInvoiceSubmissionRepository
             $sql .= ' AND submitted_by = ?';
             $params[] = $ownerId;
         }
-        if ($pendingOnly) {
-            $sql .= " AND status = 'submitted' AND processing_started_at IS NULL AND extraction_status <> 'running'";
+        if ($clientScope) {
+            $sql .= " AND (status IN ('rejected','needs_information')
+                          OR (status = 'submitted' AND processing_started_at IS NULL AND extraction_status <> 'running'))";
         }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
@@ -324,9 +381,15 @@ final class PurchaseInvoiceSubmissionRepository
         return $stmt->rowCount() === 1;
     }
 
+    private function select(): string
+    {
+        return str_replace('SELECT s.*,', 'SELECT s.*, ' . self::STALE_PROCESSING_SQL . ' AS processing_stale,', self::SELECT);
+    }
+
     /** @param array<string,mixed> $row @return array<string,mixed> */
     private function hydrate(array $row): array
     {
+        $row['processing_stale'] = !empty($row['processing_stale']);
         foreach (['id','supplier_id','document_id','bank_transaction_id','supersedes_submission_id',
             'submitted_by','purchase_invoice_id','processed_by','size_bytes','request_count',
             'replacement_submission_id'] as $key) {

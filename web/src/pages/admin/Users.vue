@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type AdminSupplierSearchItem, type AdminUser, type UserSupplierAssignment } from '@/api/admin'
 import { rolesApi, type RoleListItem } from '@/api/roles'
@@ -7,10 +7,17 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import UserExternalIdentitiesAdmin from '@/components/settings/UserExternalIdentitiesAdmin.vue'
+import UserMfaResetAdmin from '@/components/settings/UserMfaResetAdmin.vue'
+import ActiveSessions from '@/components/security/ActiveSessions.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+// Identity cizích účtů spravuje jen superadmin (canManageExternalIdentities).
+const ssoEnabled = computed(() => auth.isSuperadmin && (auth.setupStatus?.sso_providers ?? []).length > 0)
+const { passwordAllowed, enforced: ssoEnforced, localFactorsAllowed } = useSsoEnforcement()
 
 /**
  * Limit aktivních účtů je varování: správce může stále založit účet
@@ -21,6 +28,22 @@ const seatWarning = computed(() => {
   if (auth.newUserBlocked === 'seat_limit') return t('users.seat_blocked_limit')
   return ''
 })
+const tab = ref<'users' | 'sessions'>('users')
+const USER_TABS = [
+  { key: 'users', label: 'users.title', icon: ICONS.user },
+  { key: 'sessions', label: 'user_sessions.title', icon: ICONS.lock },
+] as const
+
+/** Šipky vlevo a vpravo přepínají záložky (WAI-ARIA tabs). */
+function onTabKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const index = USER_TABS.findIndex(item => item.key === tab.value)
+  const next = USER_TABS[(index + (event.key === 'ArrowRight' ? 1 : USER_TABS.length - 1)) % USER_TABS.length]
+  tab.value = next.key
+  const list = (event.currentTarget as HTMLElement | null)?.parentElement
+  void nextTick(() => list?.querySelector<HTMLElement>(`[data-tab="${next.key}"]`)?.focus())
+}
 const users = ref<AdminUser[]>([])
 const roles = ref<RoleListItem[]>([])
 const loading = ref(false)
@@ -218,10 +241,12 @@ async function save() {
     }
     // ⚠️ Neodeslaná pozvánka nesmí zmizet se zavřeným formulářem. Účet už
     // existuje a jeho heslo je náhodné — dokud odkaz nedorazí, je nepoužitelný.
+    // Při vynuceném přihlášení přes organizaci server místo odkazu na heslo
+    // posílá pozvánku k propojení účtu (UserAdminAction::create).
     if (inviteFailed.value) {
-      toast.error(t('users.invite_failed'))
+      toast.error(t(ssoEnforced.value ? 'users.sso_invite_failed' : 'users.invite_failed'))
     } else if (creating && form.password === '') {
-      toast.success(t('users.invite_sent'))
+      toast.success(t(ssoEnforced.value ? 'users.sso_invite_sent' : 'users.invite_sent'))
     }
     showForm.value = false
     await load()
@@ -262,12 +287,36 @@ onMounted(load)
 
 <template>
   <div>
-    <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button v-if="tab === 'users'" :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
+    <!-- Přepínač pohledů je záložka, ne tlačítko: tlačítka na stránce jsou akce. -->
+    <div role="tablist" class="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-neutral-200" :aria-label="t('users.title')">
+      <button v-for="item in USER_TABS" :key="item.key" type="button" role="tab" :data-tab="item.key" :data-sessions-tab="item.key === 'sessions' ? '' : undefined"
+        :aria-selected="tab === item.key" :tabindex="tab === item.key ? 0 : -1"
+        class="-mb-px inline-flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors"
+        :class="tab === item.key ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+        @click="tab = item.key" @keydown="onTabKey">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="item.icon" /></svg>{{ t(item.label) }}
+      </button>
+    </div>
+    <ActiveSessions v-if="tab === 'sessions'" />
+    <template v-else>
     <p v-if="seatWarning" class="mb-4 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
     <div v-if="loading" class="py-12 text-center text-neutral-500">{{ t('common.loading') }}</div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
       <div v-for="user in users" :key="user.id" class="p-3 border-b border-neutral-100 flex flex-wrap items-center gap-3" :class="{ 'opacity-50': !user.is_active }">
         <div class="min-w-0 flex-1"><div class="font-medium truncate">{{ user.name }}</div><div class="text-xs text-neutral-500 font-mono truncate">{{ user.email }}</div></div>
+        <span v-if="ssoEnforced" class="flex flex-wrap gap-1" data-field="user-sso">
+          <span v-if="user.sso_identity" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700 max-w-[18rem] truncate"
+            :title="t('users.sso_linked_hint', { name: user.sso_identity.display_name ?? '-', last: (user.sso_identity.last_used_at ?? '-').replace('T', ' ').slice(0, 16) })">
+            {{ t('users.sso_linked', { account: user.sso_identity.email ?? user.sso_identity.display_name ?? '?' }) }}
+          </span>
+          <span v-else class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.sso_not_linked_hint')">{{ t('users.sso_not_linked') }}</span>
+        </span>
+        <span v-if="user.mfa && localFactorsAllowed" class="flex flex-wrap gap-1" data-field="user-mfa">
+          <span v-if="user.mfa.totp" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_totp_hint')">{{ t('users.mfa_totp') }}</span>
+          <span v-if="user.mfa.passkeys > 0" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_passkeys_hint', { count: user.mfa.passkeys })">{{ t('users.mfa_passkeys', { count: user.mfa.passkeys }) }}</span>
+          <span v-if="!user.mfa.totp && user.mfa.passkeys === 0" class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.mfa_none_hint')">{{ t('users.mfa_none') }}</span>
+        </span>
         <span class="text-xs px-2 py-1 rounded" :class="roleBadge(user.role)">{{ user.role.name }}</span>
         <span v-if="user.is_superadmin || user.role.system_key === 'superadmin'">🔒</span>
         <button :class="btnOutline('primary')" @click="openEdit(user)">{{ t('common.edit') }}</button>
@@ -280,6 +329,7 @@ onMounted(load)
       </div>
     </div>
 
+    </template>
     <div v-if="showForm" class="fixed inset-0 z-50 bg-black/40 p-4 overflow-y-auto" @click.self="showForm=false">
       <form class="bg-surface max-w-2xl mx-auto my-6 rounded-xl shadow-lg p-5 space-y-4" @submit.prevent="save">
         <h2 class="text-lg font-semibold">{{ form.id === null ? t('users.new_title') : t('users.edit_title', { email: form.email }) }}</h2>
@@ -292,20 +342,26 @@ onMounted(load)
         </div>
         <p class="text-sm text-neutral-500">{{ t('users.seat_policy_hint') }}</p>
         <label v-if="form.id !== null" class="flex gap-2 items-center"><input v-model="form.is_active" :disabled="editingLastActiveSuperadmin" type="checkbox" />{{ t('common.active') }}<span v-if="editingLastActiveSuperadmin" class="text-xs text-neutral-500">— {{ t('users.is_last_admin_lock') }}</span></label>
-        <label class="text-sm">
+        <!-- Vynucené přihlášení přes organizaci: heslo ani odkaz na jeho nastavení se nenabízí. -->
+        <label v-if="passwordAllowed" class="text-sm">
           <span class="block font-medium mb-1">{{ t('auth.password') }} <span class="font-normal text-neutral-500">— {{ t('common.optional') }}</span></span>
           <input v-model="form.password" type="password" autocomplete="new-password" :placeholder="t('users.password_invite_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('users.password_invite_hint') }}</span>
         </label>
+        <p v-else-if="form.id === null" class="text-sm text-neutral-600" data-user-sso-invite-hint>{{ t('users.sso_invite_hint') }}</p>
 
         <!-- ⚠️ Jen u existujícího účtu. U nového se odkaz pošle sám při uložení,
              dřív ho není komu poslat — uživatel ještě neexistuje. -->
-        <div v-if="form.id !== null" class="text-sm">
+        <div v-if="passwordAllowed && form.id !== null" class="text-sm">
           <button type="button" :disabled="sendingLink" class="h-9 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-60" data-user-password-link @click="sendPasswordLink">
             {{ sendingLink ? t('users.password_link_sending') : t('users.password_link_cta') }}
           </button>
           <p v-if="linkSent" class="mt-1 text-xs text-success-700">{{ t('users.password_link_sent') }}</p>
         </div>
+
+        <UserExternalIdentitiesAdmin v-if="form.id !== null && ssoEnabled" :user-id="form.id" :email="form.email" />
+
+        <UserMfaResetAdmin v-if="form.id !== null && localFactorsAllowed" :user-id="form.id" @reset="load" />
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
           <div><h3 class="font-medium">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope' : 'users.suppliers_title') }}<RequiredMark v-if="!selectedIsInstanceAdmin" /></h3><p class="text-xs text-neutral-500">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope_hint' : 'users.suppliers_hint') }}</p></div>

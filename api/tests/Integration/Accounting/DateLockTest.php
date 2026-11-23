@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
@@ -286,7 +287,55 @@ final class DateLockTest extends TestCase
         self::assertSame(1, $auditCount, 'Změna zámku se zapíše do activity_log.');
     }
 
+    // (h) hlavní účetní s právem accounting.period_lock posouvá zámek, ale zpět přes
+    //     podané DPH ani přes uzavřené období ne; správce období ano.
+    public function testChiefAccountantMovesLockButNotBackOverFiledVatOrClosedPeriod(): void
+    {
+        $action = $this->container->get(PeriodLockAction::class);
+        $chief = new EffectiveRole(9901, 'Hlavní účetní', 'staff', true,
+            ['accounting' => 2, 'accounting.journal.write' => 2, 'accounting.period_lock' => 2]);
+        $plain = new EffectiveRole(9902, 'Účetní bez zámku', 'staff', true,
+            ['accounting' => 2, 'accounting.journal.write' => 2]);
+
+        self::assertSame(403, $action->update($this->roleRequest($plain, ['locked_until' => self::YEAR . '-03-31', 'reason' => 'uzávěrka 1Q']), new Psr7Response())->getStatusCode());
+
+        $forward = $action->update($this->roleRequest($chief, ['locked_until' => self::YEAR . '-06-30', 'reason' => 'uzávěrka 2Q']), new Psr7Response());
+        self::assertSame(200, $forward->getStatusCode(), (string) $forward->getBody());
+        $back = $action->update($this->roleRequest($chief, ['locked_until' => self::YEAR . '-05-31', 'reason' => 'oprava května']), new Psr7Response());
+        self::assertSame(200, $back->getStatusCode(), (string) $back->getBody());
+        self::assertSame(self::YEAR . '-05-31', $this->settings->getLockedUntil($this->supplierId));
+
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_submissions (supplier_id, form_code, period_year, period_month, form_variant, xml_content, xml_size_bytes, xml_sha256, status, submitted_at)
+             VALUES (?, 'dphdp3', ?, 4, 'B', '<x/>', 4, ?, 'submitted', NOW())"
+        )->execute([$this->supplierId, self::YEAR, hash('sha256', '<x/>')]);
+        foreach ([self::YEAR . '-03-31', null] as $target) {
+            $filed = $action->update($this->roleRequest($chief, ['locked_until' => $target, 'reason' => 'oprava dubna']), new Psr7Response());
+            self::assertSame(409, $filed->getStatusCode());
+            self::assertSame('period_lock_filed_vat', json_decode((string) $filed->getBody(), true)['error']['code'] ?? null);
+        }
+        self::assertSame(self::YEAR . '-05-31', $this->settings->getLockedUntil($this->supplierId));
+
+        $prior = $this->periods->create($this->supplierId, self::YEAR - 1, (self::YEAR - 1) . '-01-01', (self::YEAR - 1) . '-12-31');
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$prior]);
+        $this->db->pdo()->prepare("DELETE FROM tax_submissions WHERE supplier_id = ? AND period_year = ?")->execute([$this->supplierId, self::YEAR]);
+        $this->settings->setLockedUntil($this->supplierId, self::YEAR . '-01-31');
+        $closed = $action->update($this->roleRequest($chief, ['locked_until' => (self::YEAR - 1) . '-06-30', 'reason' => 'oprava loňska']), new Psr7Response());
+        self::assertSame(409, $closed->getStatusCode());
+        self::assertSame('period_lock_closed_period', json_decode((string) $closed->getBody(), true)['error']['code'] ?? null);
+
+        // Správce účetních období posune zámek zpět jako dosud.
+        $admin = $action->update($this->adminRequest('admin', ['locked_until' => (self::YEAR - 1) . '-06-30', 'reason' => 'oprava loňska']), new Psr7Response());
+        self::assertSame(200, $admin->getStatusCode());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** @param array<string,mixed> $body */
+    private function roleRequest(EffectiveRole $role, array $body): \Psr\Http\Message\ServerRequestInterface
+    {
+        return $this->adminRequest('accountant', $body)->withAttribute('auth.effective_role', $role);
+    }
 
     /** @return list<array{account_code:string, side:'debit'|'credit', amount:float}> */
     private function manualLines(): array

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -44,7 +43,7 @@ final class PayrollPaymentPostingServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $service = $container->get(PayrollPaymentReconciliationService::class);
@@ -149,7 +148,7 @@ final class PayrollPaymentPostingServiceTest extends TestCase
         ));
         self::assertSame('liability_posted_elsewhere', $this->posting($unpostedMatch->id)['posting_skipped_reason']);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
 
         $withPremium = $this->insertLiability($revisionId, 'statutory_insurance', '-q1');
         $premium = $container->get(PayrollAccidentInsurancePosting::class)->post(

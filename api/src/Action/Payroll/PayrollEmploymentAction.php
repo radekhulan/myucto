@@ -5,20 +5,29 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollDeletionException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard;
 use MyInvoice\Repository\Payroll\PayrollMealEntitlementBasisLockedException;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\PayrollEmploymentMergeService;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollFieldValidationException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
+use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -33,6 +42,10 @@ final class PayrollEmploymentAction
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmploymentDeletionRepository $deletion,
+        private readonly PayrollEmploymentMergeService $merge,
+        private readonly PayrollHourlyWageCollisionGuard $wageGuard,
+        private readonly PayrollOpenAgreements $openAgreements,
+        private readonly ?PayrollRulesetProvider $rulesets = null,
     ) {}
 
     public function jmhzEvidenceOptions(Request $request, Response $response): Response
@@ -41,6 +54,25 @@ final class PayrollEmploymentAction
             return $error;
         }
         return Json::ok($response, ['options' => $this->jmhzEvidence->options()]);
+    }
+
+    public function remunerationOptions(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorizeRead($request, $response)) !== null) return $error;
+        $date = $request->getQueryParams()['effective_from'] ?? null;
+        if (!is_string($date) || !IsoDate::isValid($date)) {
+            return Json::error($response, 'validation_failed', 'Datum účinnosti není platné.', 422);
+        }
+        try {
+            $version = $this->rulesets?->forCalculation(PayrollRulesetDomain::EmploymentThresholds, $date);
+        } catch (PayrollRulesetException) {
+            $version = null;
+        }
+        $floor = $version === null ? null : MinimumWageFloor::fromVersion($version);
+        return Json::ok($response, [
+            'minimum_hourly_40h_minor' => $floor?->baseHourlyMinor,
+            'ruleset_id' => $floor?->rulesetId,
+        ]);
     }
 
     public function jmhzMunicipalities(Request $request, Response $response): Response
@@ -71,11 +103,80 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
+            $body = $this->body($request);
+            $supplierId = $this->currentSupplierId($request);
+            $employeeId = (int) $args['id'];
+            $data = $this->validator->create($body, $warnings);
+            if ($data['relation_type'] === 'dpp') {
+                $start = (string) $data['terms']['planned_start_on'];
+                $end = $data['terms']['fixed_term_end_on'];
+                $reuseId = $body['use_open_agreement'] ?? null;
+                if ($reuseId !== null) {
+                    if (!is_int($reuseId) || $reuseId <= 0) {
+                        throw new \InvalidArgumentException('Otevřená dohoda k použití není platná.');
+                    }
+                    $reused = $this->openAgreements->reuse(
+                        $supplierId,
+                        $reuseId,
+                        $employeeId,
+                        $start,
+                        $end,
+                        $this->userId($request),
+                        $this->ip($request),
+                        $request->getHeaderLine('User-Agent'),
+                    );
+                    $employment = null;
+                    foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $row) {
+                        if ((int) $row['id'] === $reused['employment_id']) {
+                            $employment = $row;
+                        }
+                    }
+
+                    return Json::ok($response, [
+                        'employment' => $employment,
+                        'reused' => true,
+                        'extended_to' => $reused['extended_to'],
+                        'warnings' => [],
+                    ]);
+                }
+                // Další DPP vedle otevřené, kterou jde použít, jen na výslovné
+                // potvrzení — viz PayrollOpenAgreements. Otevřená dohoda, která
+                // začíná až po nástupu nové, se jen ohlásí.
+                if (($body['confirm_new_agreement'] ?? false) !== true) {
+                    $open = $this->openAgreements->openFor($supplierId, $employeeId, $start);
+                    $reusable = array_filter(
+                        $open,
+                        static fn (array $agreement): bool => PayrollOpenAgreements::reusableFor($agreement, $start),
+                    );
+                    foreach ($reusable === [] ? $open : [] as $agreement) {
+                        $warnings[] = [
+                            'field' => 'planned_start_on',
+                            'code' => 'open_agreement_later',
+                            'message' => "Osoba má otevřenou DPP {$agreement['code']}, která začíná až "
+                                . PayrollOpenAgreements::czechDate((string) $agreement['start_date'])
+                                . '. Jde-li o tutéž dohodu, posuňte její nástup a novou zrušte.',
+                        ];
+                    }
+                    if ($reusable !== []) {
+                        return Json::error(
+                            $response,
+                            'open_agreement_exists',
+                            'Osoba už má otevřenou dohodu o provedení práce. ' . PayrollOpenAgreements::GUIDANCE,
+                            409,
+                            ['open_agreements' => array_map(
+                                static fn (array $agreement): array => PayrollOpenAgreements::describe($agreement, $start, $end),
+                                $open,
+                            )],
+                        );
+                    }
+                }
+            }
             $employment = $this->employments->create(
-                $this->currentSupplierId($request),
-                (int) $args['id'],
-                $this->validator->create($this->body($request)),
+                $supplierId,
+                $employeeId,
+                $data,
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),
@@ -83,7 +184,7 @@ final class PayrollEmploymentAction
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment], 201);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings], 201);
     }
 
     /** @param array{id:string} $args */
@@ -92,6 +193,7 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
             $body = $this->body($request);
             $supplierId = $this->currentSupplierId($request);
@@ -103,6 +205,7 @@ final class PayrollEmploymentAction
                 $body,
                 true,
             );
+            $current = $this->employments->currentTerms($supplierId, $employmentId);
             $terms = $this->validator->terms(
                 $body,
                 // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
@@ -116,7 +219,12 @@ final class PayrollEmploymentAction
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
+                // Číselníkové kontroly polí, která se proti uložené verzi
+                // nemění, uložení neblokují — vrátí se jako varování.
+                $current,
+                $warnings,
             );
+            $this->assertHourlySwitchKeepsImports($supplierId, $employmentId, $current, $terms, $body);
             $employment = $this->employments->addTerms(
                 $supplierId,
                 $employmentId,
@@ -129,11 +237,12 @@ final class PayrollEmploymentAction
                 // a do nové verze se přenese hodnota předchozí verze.
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
+                $this->endRecurringBase($body),
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment]);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings]);
     }
 
     /**
@@ -162,6 +271,7 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
             $body = $this->body($request);
             $supplierId = $this->currentSupplierId($request);
@@ -181,12 +291,13 @@ final class PayrollEmploymentAction
             if (!is_bool($correctEffectiveFrom)) {
                 throw new \InvalidArgumentException('Pole correct_effective_from musí být boolean.');
             }
-            if (!RequestAuthorization::isSessionAuth($request)) {
+            if (!RequestAuthorization::actsAsSession($request)) {
                 $correctEffectiveFrom = false;
             }
             if (!$correctEffectiveFrom) {
                 $body['effective_from'] = $current;
             }
+            $currentTerms = $this->employments->currentTerms($supplierId, $employmentId);
             $terms = $this->validator->terms(
                 $body,
                 $this->employments->currentCzIscoCode($supplierId, $employmentId),
@@ -195,7 +306,10 @@ final class PayrollEmploymentAction
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
+                $currentTerms,
+                $warnings,
             );
+            $this->assertHourlySwitchKeepsImports($supplierId, $employmentId, $currentTerms, $terms, $body);
             $employment = $this->employments->correctTerms(
                 $supplierId,
                 $employmentId,
@@ -207,11 +321,12 @@ final class PayrollEmploymentAction
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
                 $correctEffectiveFrom,
+                $this->endRecurringBase($body),
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment]);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings]);
     }
 
     /**
@@ -246,6 +361,99 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['employment' => $employment]);
     }
 
+    /**
+     * Oprava druhu vztahu založeného s nesprávným druhem. Pojistky (běh,
+     * podání, schválené vstupy a docházka…) hlídá repozitář pod zámkem vztahu.
+     *
+     * @param array{id:string} $args
+     */
+    public function changeRelationType(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $relationType = $body['relation_type'] ?? null;
+            if (!is_string($relationType)
+                || !in_array($relationType, PayrollEmploymentRepository::RELATION_TYPE_CORRECTABLE, true)
+            ) {
+                throw new PayrollFieldValidationException(
+                    'Vyberte druh vztahu: pracovní poměr, zaměstnání malého rozsahu, DPP nebo DPČ.',
+                    'relation_type',
+                );
+            }
+            $note = $body['note'] ?? null;
+            if ($note !== null && !is_string($note)) {
+                throw new PayrollFieldValidationException('Důvod opravy musí být text.', 'note');
+            }
+            $note = $note === null ? null : mb_substr(trim($note), 0, 500);
+            $result = $this->employments->changeRelationType(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $relationType,
+                $this->validator->rowVersion($body),
+                $note === '' ? null : $note,
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Sloučení vztahu do jiného vztahu téže osoby: data se přesunou k cíli
+     * a tento vztah se smaže. Pojistky hlídá služba pod zámkem obou vztahů.
+     *
+     * @param array{id:string} $args
+     */
+    public function mergeInto(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $targetId = $body['target_employment_id'] ?? null;
+            if (!is_int($targetId) || $targetId <= 0) {
+                throw new PayrollFieldValidationException('Vyberte vztah, do kterého se má tento vztah sloučit.', 'target_employment_id');
+            }
+            $targetVersion = $body['target_row_version'] ?? null;
+            if (!is_int($targetVersion) || $targetVersion <= 0) {
+                throw new PayrollFieldValidationException('Chybí verze cílového vztahu.', 'target_row_version');
+            }
+            $adoptTerms = $body['adopt_terms'] ?? false;
+            if (!is_bool($adoptTerms)) {
+                throw new PayrollFieldValidationException('Převzetí podmínek musí být ano, nebo ne.', 'adopt_terms');
+            }
+            $note = $body['note'] ?? null;
+            if ($note !== null && !is_string($note)) {
+                throw new PayrollFieldValidationException('Poznámka musí být text.', 'note');
+            }
+            $note = $note === null ? null : mb_substr(trim($note), 0, 500);
+            $result = $this->merge->merge(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $targetId,
+                $this->validator->rowVersion($body),
+                $targetVersion,
+                $adoptTerms,
+                $note === '' ? null : $note,
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, $result);
+    }
+
     /** @param array{id:string} $args */
     public function setMealEntitlementBasis(
         Request $request,
@@ -261,6 +469,42 @@ final class PayrollEmploymentAction
                 $this->currentSupplierId($request),
                 (int) $args['id'],
                 $this->validator->requiredMealEntitlementBasis($body),
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
+    /**
+     * Člen statutárního orgánu je zároveň společníkem (odměna za výkon funkce
+     * proti 366 místo 331, viz PayrollAccountingDefaults::relationGrossCredit()).
+     *
+     * @param array{id:string} $args
+     */
+    public function setStatutoryPartner(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $partner = $body['statutory_partner'] ?? null;
+            if (!is_bool($partner)) {
+                throw new \InvalidArgumentException('statutory_partner musí být true nebo false.');
+            }
+            $employment = $this->employments->setStatutoryPartner(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $partner,
                 $this->validator->rowVersion($body),
                 $this->userId($request),
                 $this->ip($request),
@@ -391,7 +635,7 @@ final class PayrollEmploymentAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && RequestAuthorization::isBearerAuth($request)) {
+        if (!$allowBearer && RequestAuthorization::isRestrictedBearer($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -412,7 +656,7 @@ final class PayrollEmploymentAction
 
     private function authorizeRead(Request $request, Response $response): ?Response
     {
-        if (RequestAuthorization::isBearerAuth($request)) {
+        if (RequestAuthorization::isRestrictedBearer($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -441,7 +685,7 @@ final class PayrollEmploymentAction
         array $body,
         bool $newTerms,
     ): array {
-        if (!RequestAuthorization::isBearerAuth($request)) {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
             return $this->withStoredTerms($supplierId, $employmentId, $body);
         }
         $allowed = [
@@ -470,6 +714,9 @@ final class PayrollEmploymentAction
         $current = $this->employments->currentTerms($supplierId, $employmentId);
         if ($current === null) {
             throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek.');
+        }
+        if (($current['remuneration_type'] ?? null) === 'hourly') {
+            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
         }
         return [...$current, ...$body];
     }
@@ -509,6 +756,70 @@ final class PayrollEmploymentAction
         }
 
         return [...$current, ...$body];
+    }
+
+    /**
+     * Přechod na hodinové odměňování u vztahu, kterému se mzda importuje jako
+     * hotová částka (typicky docházka), by tiše zablokoval každý další import:
+     * {@see PayrollHourlyWageCollisionGuard::externalInputs()} ho pak odmítne.
+     * Bez výslovného `confirm_imported_wage_switch` se proto přechod neuloží
+     * a odpověď nabídne náhradu: pravděpodobný výdělek. Detekce je táž jako
+     * v hromadné úpravě podmínek.
+     *
+     * @param array<string,mixed>|null $current
+     * @param array<string,mixed> $terms
+     * @param array<string,mixed> $body
+     */
+    private function assertHourlySwitchKeepsImports(
+        int $supplierId,
+        int $employmentId,
+        ?array $current,
+        array $terms,
+        array $body,
+    ): void {
+        if ($terms['remuneration_type'] !== 'hourly'
+            || ($current['remuneration_type'] ?? null) === 'hourly'
+        ) {
+            return;
+        }
+        $confirmed = $body['confirm_imported_wage_switch'] ?? false;
+        if (!is_bool($confirmed)) {
+            throw new PayrollFieldValidationException(
+                'Pole confirm_imported_wage_switch musí být boolean.',
+                'confirm_imported_wage_switch',
+            );
+        }
+        if ($confirmed || $this->wageGuard->employmentsBlockingHourlySwitch(
+            $supplierId,
+            [$employmentId],
+            (string) $terms['effective_from'],
+        ) === []) {
+            return;
+        }
+        throw new PayrollFieldValidationException(
+            'Mzda nebo hodiny se k vztahu importují z docházky; hodinový výpočet z importovaného souhrnu '
+                . 'aplikace nepočítá a ze směn by další import zablokoval. Nastavte místo sazby pravděpodobný '
+                . 'výdělek (mzdu ze sazby a hodin dopočte import), nebo potvrďte, že mzdu budete nově počítat '
+                . 'z odpracovaných směn a import hodinové mzdy ukončíte.',
+            'remuneration_type',
+            'hourly_rate_imported_wage',
+        );
+    }
+
+    /**
+     * Výslovný souhlas s ukončením aktivního předpisu měsíční základní mzdy
+     * ke dni před účinností hodinové verze. Bez něj repozitář přechod odmítne.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function endRecurringBase(array $body): bool
+    {
+        $value = $body['end_recurring_base'] ?? false;
+        if (!is_bool($value)) {
+            throw new PayrollFieldValidationException('Pole end_recurring_base musí být boolean.', 'end_recurring_base');
+        }
+
+        return $value;
     }
 
     /** @return array<string,mixed> */
@@ -593,6 +904,7 @@ final class PayrollEmploymentAction
                 'validation_failed',
                 $e->getMessage(),
                 422,
+                PayrollFieldValidationException::responseExtra($e),
             ),
             $e instanceof \PDOException && $e->getCode() === '23000' => Json::error(
                 $response,

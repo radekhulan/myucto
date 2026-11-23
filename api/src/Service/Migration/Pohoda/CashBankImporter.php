@@ -36,6 +36,7 @@ final class CashBankImporter
         private readonly PohodaImportRepository $map,
         private readonly SupplierBankAccountRepository $bankAccounts,
         private readonly MigratedCashNumber $cashNumbers,
+        private readonly PohodaForeignBank $foreign,
     ) {}
 
     public function importCash(PohodaContext $ctx): void
@@ -52,14 +53,20 @@ final class CashBankImporter
             }
         }
         $vouchers = iterator_to_array($ctx->export->records('cash', 'voucher'), false);
-        // Pokladna bez účtu v číselníku: účet 211 z deníku jejích dokladů.
+        // Pokladna bez účtu v číselníku: účet 211 z deníku jejích dokladů. Pokladnu zakládají
+        // její doklady v roce, ne zápisy v deníku: agenda daňové evidence deník nemá a doklad
+        // bez zaúčtování (počáteční stav pokladny) v něm chybí i v podvojném účetnictví.
         $votes = [];
+        $used = [];
         foreach ($vouchers as $r) {
             $h = PohodaXml::get($r, 'voucherHeader');
             if ($ctx->skipsDate(PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'datePayment'))) {
                 continue;
             }
             $code = PohodaXml::text($h, 'cashAccount/ids');
+            if ($code !== '') {
+                $used[$code] = true;
+            }
             $account = $ctx->cashAccountsByNumber[PohodaXml::text($h, 'number/numberRequested')] ?? null;
             if ($account !== null) {
                 $votes[$code][$account] = ($votes[$code][$account] ?? 0) + 1;
@@ -72,7 +79,7 @@ final class CashBankImporter
                 arsort($votes[$code]);
                 $reg['account'] = (string) array_key_first($votes[$code]);
             }
-            if (!isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
+            if (!isset($used[$code]) && !isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
                 continue; // pokladna bez dokladů v roce se nezakládá
             }
             $registerIds[$code] = $this->ensureRegister($ctx, $code, $reg['name'], $reg['account']);
@@ -100,6 +107,10 @@ final class CashBankImporter
                 $p->warn(self::STEP_CASH, 'number_or_date_missing', "Pokladní doklad {$number} nemá číslo nebo datum, nepřevzat.");
                 continue;
             }
+            if ($ctx->skipsDate($issue)) {
+                $p->count(self::STEP_CASH, 'later_year_skipped');
+                continue;
+            }
             // Doklad bez zaúčtování k začátku období (počáteční stav pokladny, doklady přelomu
             // roku) je v počátečních stavech - naváže se na otevírací zápis.
             $inOpening = PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting' && $issue <= $periodStart;
@@ -113,10 +124,6 @@ final class CashBankImporter
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_CASH)) {
-                continue;
-            }
-            if ($ctx->skipsDate($issue)) {
-                $p->count(self::STEP_CASH, 'later_year_skipped');
                 continue;
             }
             $registerId = $registerIds[PohodaXml::text($h, 'cashAccount/ids')] ?? null;
@@ -159,6 +166,15 @@ final class CashBankImporter
                     }
                 }
             }
+            // Pokladní doklad má v MyÚčtu jediné datum DPH, které určuje období i datum v KH.
+            // Bere se datum odpočtu z POHODY (`dateTax`), aby přiznání sedělo na podané;
+            // DUZP z dokladu dodavatele („Datum KH DPH") v jiném dni protokol ohlásí.
+            $taxDate = PohodaXml::date($h, 'dateTax') ?? $issue;
+            $khDate = PohodaXml::date($h, 'dateKHDPH');
+            if ($vatLines !== [] && $khDate !== null && $khDate !== $taxDate) {
+                $p->count(self::STEP_CASH, 'kh_date_differs');
+                $p->info(self::STEP_CASH, 'kh_date_differs', "Pokladní doklad {$number}: DUZP z dokladu (datum KH DPH {$khDate}) se liší od data odpočtu {$taxDate}. Pokladní doklad nese jediné datum DPH, převzato datum odpočtu - v kontrolním hlášení bude {$taxDate}.", ['document_no' => $number]);
+            }
             $numberText = $this->cashNumbers->allocate($ctx->supplierId, [$number, $number . '/' . substr($issue, 0, 4)], $p, self::STEP_CASH, $number . ' z ' . $issue);
             $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
             $ruleKey = null;
@@ -180,7 +196,7 @@ final class CashBankImporter
                 $withoutAccounting ? 'other' : ($isOut ? 'purchase' : 'sale'),
                 $numberText,
                 $issue,
-                PohodaXml::date($h, 'dateTax') ?? $issue,
+                $taxDate,
                 $partner['name'] !== '' ? mb_substr($partner['name'], 0, 255) : null,
                 $partner['ico'] !== '' ? $partner['ico'] : null,
                 $partner['dic'] !== '' ? mb_substr($partner['dic'], 0, 20) : null,
@@ -217,17 +233,22 @@ final class CashBankImporter
             $h = PohodaXml::get($r, 'bankAccountHeader');
             $code = PohodaXml::text($h, 'ids');
             $number = ltrim(PohodaXml::text($h, 'numberAccount'), '0') === '' ? '' : PohodaXml::text($h, 'numberAccount');
+            $declared = strtoupper(trim(PohodaXml::text($h, 'currency/ids')));
             $accounts[$code] = [
                 'number' => $number,
                 'bank' => PohodaXml::text($h, 'codeBank'),
                 'iban' => str_replace(' ', '', PohodaXml::text($h, 'IBAN')),
                 'label' => trim(PohodaXml::text($h, 'nameBank') . ' ' . $code),
                 'analytic' => AccountCode::fromMoney(PohodaXml::text($h, 'analyticAccount/ids')),
+                // Měna účtu z datového souboru (`sUcet.RefCM`); XML ji nenese, určí se z dokladů.
+                'declared' => preg_match('/^[A-Z]{3}$/D', $declared) === 1 ? $declared : null,
+                'currency' => 'CZK',
             ];
         }
 
         $byStatement = [];
         $openingDocs = [];
+        $docCurrencies = [];
         $count = 0;
         $periodStart = $ctx->periodStart();
         foreach ($ctx->export->records('bank', 'bank') as $r) {
@@ -242,8 +263,17 @@ final class CashBankImporter
                 $p->count(self::STEP_BANK, 'later_year_skipped');
                 continue;
             }
+            $fx = PohodaForeignBank::documentAmounts($r);
+            if ($fx['czk'] !== 0.0 || ($fx['foreign'] ?? 0.0) !== 0.0) {
+                $docCurrencies[$code][$fx['currency'] ?? 'CZK'] = ($docCurrencies[$code][$fx['currency'] ?? 'CZK'] ?? 0) + 1;
+            }
             if (self::isOpeningBalance($h, $date, $periodStart)) {
-                $openingDocs[$code] = ($openingDocs[$code] ?? 0) + StatementBalanceService::cents(number_format(self::amount($r), 2, '.', ''));
+                $openingDocs[$code] ??= ['czk' => 0, 'foreign' => [], 'rate' => null];
+                $openingDocs[$code]['czk'] += StatementBalanceService::cents(number_format($fx['czk'], 2, '.', ''));
+                if ($fx['currency'] !== null && $fx['foreign'] !== null) {
+                    $openingDocs[$code]['foreign'][$fx['currency']] = ($openingDocs[$code]['foreign'][$fx['currency']] ?? 0) + PohodaForeignBank::cents($fx['foreign']);
+                    $openingDocs[$code]['rate'] ??= $fx['rate'];
+                }
                 $p->count(self::STEP_BANK, 'opening_balances');
                 continue;
             }
@@ -251,13 +281,27 @@ final class CashBankImporter
             $byStatement[$code][$statement][] = $r;
             $count++;
         }
+        foreach (array_keys($byStatement + $openingDocs) as $code) {
+            $accounts[$code] ??= ['number' => '', 'bank' => '', 'iban' => '', 'label' => (string) $code, 'analytic' => null, 'declared' => null, 'currency' => 'CZK'];
+            $accounts[$code]['currency'] = self::accountCurrency($ctx, (string) $code, $accounts[$code]['declared'], $docCurrencies[$code] ?? []);
+        }
         if (!$ctx->dryRun) {
-            $this->registerAccounts($ctx, $accounts, array_keys($byStatement));
+            $this->registerAccounts($ctx, $accounts, array_map('strval', array_keys($byStatement)));
         }
 
         $existingStatements = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION);
+        $statementCurrency = $this->statementCurrencies($ctx->supplierId, array_values($existingStatements));
         $writer = new BankStatementImportWriter($this->db, 'pohoda');
+
+        // Analytika 221 společná více účtům: u účtu v cizí měně by se na ní míchala měna
+        // s korunami a její počáteční stav v deníku není stavem účtu.
+        $analyticUse = [];
+        foreach (array_keys($byStatement) as $code) {
+            if ($accounts[$code]['analytic'] !== null) {
+                $analyticUse[$accounts[$code]['analytic']][] = (string) $code;
+            }
+        }
 
         $done = 0;
         $seenKeys = [];
@@ -276,29 +320,49 @@ final class CashBankImporter
                 $sortDate[$statementNo] = $dates === [] ? '9999-12-31' : max($dates);
             }
             uksort($statements, static fn (string|int $a, string|int $b): int => ($sortDate[$a] <=> $sortDate[$b]) ?: strnatcmp((string) $a, (string) $b));
-            $meta = $accounts[$code] ?? ['number' => '', 'bank' => '', 'iban' => '', 'label' => $code, 'analytic' => null];
+            $meta = $accounts[$code];
+            $currency = $meta['currency'];
+            $foreignAccount = $currency !== 'CZK';
             $running = null;
             $accountId = $meta['analytic'] !== null ? ($ctx->accountIds[$meta['analytic']] ?? null) : null;
-            if ($accountId !== null && $ctx->period !== null) {
+            if ($foreignAccount && $accountId !== null && count($analyticUse[$meta['analytic']] ?? []) > 1) {
+                $p->warn(self::STEP_BANK, 'foreign_account_shared_analytic', sprintf(
+                    'Bankovní účet %s v %s má v POHODĚ analytiku %s společnou s účty %s. Deník analytiky zůstává v Kč bez měny a počáteční stav účtu v měně se z deníku neurčí.',
+                    $code, $currency, $meta['analytic'], implode(', ', array_diff($analyticUse[$meta['analytic']], [(string) $code])),
+                ), ['account' => $code]);
+                $accountId = null;
+            }
+            if ($foreignAccount) {
+                $running = $this->foreignOpening($ctx, (string) $code, $currency, $openingDocs[$code] ?? null, $accountId, $writer);
+            } elseif ($accountId !== null && $ctx->period !== null) {
                 $running = StatementBalanceService::cents(number_format($writer->ledgerOpening($ctx->supplierId, (int) $ctx->period['id'], $accountId), 2, '.', ''));
-                if (isset($openingDocs[$code]) && $openingDocs[$code] !== $running) {
+                if (isset($openingDocs[$code]) && $openingDocs[$code]['czk'] !== $running) {
                     $p->warn(self::STEP_BANK, 'opening_mismatch', sprintf(
                         'Počáteční stav bankovního účtu %s v Pohodě (%s Kč) nesedí s počátečním stavem jeho analytiky v deníku (%s Kč), výpisy navazují na deník.',
-                        $code, number_format($openingDocs[$code] / 100, 2, ',', ' '), number_format($running / 100, 2, ',', ' '),
+                        $code, number_format($openingDocs[$code]['czk'] / 100, 2, ',', ' '), number_format($running / 100, 2, ',', ' '),
                     ));
                 }
             } elseif (isset($openingDocs[$code])) {
-                $running = $openingDocs[$code];
+                $running = $openingDocs[$code]['czk'];
+            } elseif ($ctx->taxEvidence) {
+                $p->warn(self::STEP_BANK, 'account_without_opening', "Bankovní účet {$code} nemá v POHODĚ doklad počátečního stavu, výpisy jsou bez počátečního stavu.");
             } else {
                 $p->warn(self::STEP_BANK, 'account_without_analytic', "Bankovní účet {$code} nemá v Pohodě analytiku 221, výpisy jsou bez počátečního stavu.");
             }
+            $opening = $running;
+            // Účet v cizí měně převedený dřív v Kč: jeho výpisy a pohyby se převedou na měnu
+            // účtu ({@see PohodaForeignBank::convertStatements()}) a stavy celého řetězu se
+            // spočtou znovu od počátečního stavu v měně.
+            $legacy = [];
+            $legacyTx = [];
+            $chain = [];
             // Stavy převzatých výpisů mohl dorovnat výpis banky ({@see \MyInvoice\Service\Bank\ImportedStatementRebase}):
             // nové výpisy navazují na první už převzatý, ne na deník.
             $firstExisting = $existingStatements['stmt|' . $code . '|' . $ctx->year() . '|' . array_key_first($statements)] ?? null;
-            if ($firstExisting !== null) {
-                $opening = $this->db->pdo()->prepare('SELECT prev_balance FROM bank_statements WHERE id = ? AND supplier_id = ?');
-                $opening->execute([$firstExisting, $ctx->supplierId]);
-                $prev = $opening->fetchColumn();
+            if ($firstExisting !== null && ($statementCurrency[$firstExisting] ?? $currency) === $currency) {
+                $prevStmt = $this->db->pdo()->prepare('SELECT prev_balance FROM bank_statements WHERE id = ? AND supplier_id = ?');
+                $prevStmt->execute([$firstExisting, $ctx->supplierId]);
+                $prev = $prevStmt->fetchColumn();
                 if ($prev !== false && $prev !== null) {
                     $running = StatementBalanceService::cents((string) $prev);
                 }
@@ -322,11 +386,14 @@ final class CashBankImporter
                 if ($isNewStatement) {
                     $statementId = $writer->createStatement(
                         $ctx->supplierId, $mapKey, sprintf('%s %s/%d', $code, $statementNo, $ctx->year()), $meta['number'] !== '' ? $meta['number'] : (string) $code,
-                        $meta['bank'], 'CZK', $lastDate, $ctx->userOrNull(),
+                        $meta['bank'], $currency, $lastDate, $ctx->userOrNull(),
                     );
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
                     $p->count(self::STEP_BANK, 'statements');
+                } elseif ($foreignAccount && ($statementCurrency[$statementId] ?? 'CZK') === 'CZK') {
+                    $legacy[$statementId] = true;
                 }
+                $chain[] = $statementId;
 
                 $added = 0;
                 $credit = 0;
@@ -335,7 +402,16 @@ final class CashBankImporter
                     $h = PohodaXml::get($r, 'bankHeader');
                     $number = PohodaXml::text($h, 'number');
                     $date = PohodaXml::date($h, 'datePayment') ?? (string) PohodaXml::date($h, 'dateStatement');
-                    $amount = self::amount($r);
+                    $fx = PohodaForeignBank::documentAmounts($r);
+                    $czk = $fx['czk'];
+                    $amount = $czk;
+                    $rate = null;
+                    if ($foreignAccount) {
+                        [$amount, $rate] = $this->foreignAmount($ctx, (string) $code, $currency, $fx, $date, $number);
+                        if ($amount === null) {
+                            continue;
+                        }
+                    }
                     $cents = StatementBalanceService::cents(number_format($amount, 2, '.', ''));
                     if ($cents >= 0) {
                         $credit += $cents;
@@ -350,9 +426,16 @@ final class CashBankImporter
                         $txKey .= '#' . $seenKeys[$txKey];
                         $p->count(self::STEP_BANK, 'duplicate_numbers');
                     }
+                    // Vazby a kontroly převodu (deník, saldo, úhrady) porovnávají v Kč.
                     if (isset($existingTx[$txKey])) {
-                        $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date];
+                        $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date, 'amount' => $czk];
                         self::rememberReferences($ctx, $r, $existingTx[$txKey]);
+                        if ($foreignAccount) {
+                            $ctx->foreignBankTx[$existingTx[$txKey]] = ['foreign' => $amount, 'czk' => $czk, 'rate' => (float) $rate, 'currency' => $currency, 'account_id' => $accountId];
+                            if (isset($legacy[$statementId])) {
+                                $legacyTx[$existingTx[$txKey]] = ['foreign' => $amount, 'czk' => $czk, 'rate' => (float) $rate];
+                            }
+                        }
                         $p->count(self::STEP_BANK, 'existing');
                         continue;
                     }
@@ -368,7 +451,7 @@ final class CashBankImporter
                         'source_ref' => mb_substr($number, 0, 190),
                         'posted_at' => $date,
                         'amount' => number_format($amount, 2, '.', ''),
-                        'currency' => 'CZK',
+                        'currency' => $currency,
                         'variable_symbol' => $vs,
                         'constant_symbol' => preg_match('/^\d{1,10}$/', $constant) === 1 && ltrim($constant, '0') !== '' ? $constant : null,
                         'specific_symbol' => preg_match('/^\d{1,20}$/', $specific) === 1 && ltrim($specific, '0') !== '' ? $specific : null,
@@ -379,7 +462,10 @@ final class CashBankImporter
                         'bank_ref' => mb_substr($number, 0, 40),
                     ]);
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
-                    $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date];
+                    $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date, 'amount' => $czk];
+                    if ($foreignAccount) {
+                        $ctx->foreignBankTx[$id] = ['foreign' => $amount, 'czk' => $czk, 'rate' => (float) $rate, 'currency' => $currency, 'account_id' => $accountId];
+                    }
                     self::rememberReferences($ctx, $r, $id);
                     $added++;
                     $p->count(self::STEP_BANK, 'transactions');
@@ -398,8 +484,151 @@ final class CashBankImporter
                     $running += $credit - $debit;
                 }
             }
+            if ($legacy !== []) {
+                $converted = $this->foreign->convertStatements($ctx->supplierId, $currency, array_keys($legacy), $legacyTx, null);
+                $this->foreign->rechain($ctx->supplierId, $chain, $opening);
+                $p->count(self::STEP_BANK, 'foreign_filled', $converted['transactions']);
+                $p->info(self::STEP_BANK, 'foreign_account_converted', sprintf(
+                    'Bankovní účet %s je v POHODĚ veden v %s, dřívější převod ho převzal v Kč: %d pohybů a %d výpisů převedeno na %s, stavy výpisů spočteny znovu od počátečního stavu.',
+                    $code, $currency, $converted['transactions'], count($legacy), $currency,
+                ), ['account' => $code, 'currency' => $currency]);
+            }
         }
         $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * Měna bankovního účtu: z číselníku účtů (převod datového souboru), jinak z dokladů účtu.
+     * POHODA vede doklady účtu v jeho měně, cizí měnu nese každý doklad (`foreignCurrency`).
+     * Účet, jehož doklady jsou v cizí měně jen zčásti, zůstane v Kč s upozorněním.
+     *
+     * @param array<string,int> $docs měna dokladu (CZK = bez cizí měny) => počet dokladů
+     */
+    private static function accountCurrency(PohodaContext $ctx, string $code, ?string $declared, array $docs): string
+    {
+        $foreign = array_diff_key($docs, ['CZK' => true]);
+        if ($declared !== null) {
+            if ($declared !== 'CZK' && (count($foreign) > 1 || ($docs['CZK'] ?? 0) > 0)) {
+                $ctx->protocol->warn(self::STEP_BANK, 'bank_account_currency_mixed', sprintf(
+                    'Bankovní účet %s je v POHODĚ veden v %s, ale část jeho dokladů cizí měnu %s nenese. Doklady se převedou v %s, zkontrolujte jejich částky.',
+                    $code, $declared, $declared, $declared,
+                ), ['account' => $code, 'currency' => $declared]);
+            }
+            return $declared;
+        }
+        if ($foreign === []) {
+            return 'CZK';
+        }
+        arsort($foreign);
+        $currency = (string) array_key_first($foreign);
+        $total = array_sum($docs);
+        if (count($foreign) === 1 && $foreign[$currency] >= 0.95 * $total) {
+            return $currency;
+        }
+        $ctx->protocol->warn(self::STEP_BANK, 'bank_account_currency_ambiguous', sprintf(
+            'Bankovní účet %s: doklady jsou v různých měnách (%s), měnu účtu nelze určit. Účet se převede v Kč, zkontrolujte ho.',
+            $code, implode(', ', array_map(static fn (string $c, int $n): string => "{$c} {$n}×", array_keys($docs), $docs)),
+        ), ['account' => $code]);
+        return 'CZK';
+    }
+
+    /**
+     * Částka pohybu účtu v cizí měně a kurz. Doklad bez částky v měně účtu se přepočte kurzem
+     * ČNB k datu pohybu z uložených kurzů; bez kurzu se nepřevezme (null).
+     *
+     * @param array{czk:float,currency:?string,foreign:?float,rate:?float} $fx
+     * @return array{0:?float,1:?float}
+     */
+    private function foreignAmount(PohodaContext $ctx, string $code, string $currency, array $fx, string $date, string $number): array
+    {
+        if ($fx['currency'] === $currency && $fx['foreign'] !== null) {
+            if ($fx['foreign'] === 0.0 && $fx['czk'] !== 0.0) {
+                // Uzávěrka kurzových rozdílů: pohyb jen v Kč, na účtu v měně nic.
+                $ctx->protocol->count(self::STEP_BANK, 'fx_differences');
+            }
+            return [$fx['foreign'], $fx['rate'] ?? $this->foreign->cachedRate($currency, $date)];
+        }
+        $rate = $this->foreign->cachedRate($currency, $date);
+        if ($rate === null) {
+            $ctx->protocol->warn(self::STEP_BANK, 'bank_foreign_amount_missing', sprintf(
+                'Bankovní doklad %s účtu %s v %s nenese částku v měně a kurz ČNB k %s není k dispozici, nepřevzat.', $number, $code, $currency, $date,
+            ), ['document_no' => $number, 'account' => $code]);
+            return [null, null];
+        }
+        $ctx->protocol->count(self::STEP_BANK, 'foreign_amount_from_rate');
+        return [round($fx['czk'] / $rate, 2), $rate];
+    }
+
+    /**
+     * Počáteční stav účtu v cizí měně (v haléřích měny): z dokladu počátečního stavu, jinak
+     * z korunového počátečního stavu analytiky v deníku přepočteného kurzem ČNB posledního dne
+     * před obdobím (tím kurzem POHODA účet ke konci roku přeceňuje). Otevírací zápis analytiky
+     * dostane stav v měně v {@see PohodaImporter} ({@see PohodaContext::$foreignBankOpenings}).
+     *
+     * @param array{czk:int,foreign:array<string,int>,rate:?float}|null $doc
+     */
+    private function foreignOpening(PohodaContext $ctx, string $code, string $currency, ?array $doc, ?int $accountId, BankStatementImportWriter $writer): ?int
+    {
+        $p = $ctx->protocol;
+        $ledger = $accountId !== null && $ctx->period !== null
+            ? StatementBalanceService::cents(number_format($writer->ledgerOpening($ctx->supplierId, (int) $ctx->period['id'], $accountId), 2, '.', ''))
+            : null;
+        $foreign = $doc['foreign'][$currency] ?? null;
+        $rate = null;
+        if ($foreign !== null) {
+            $rate = $ledger !== null && $foreign !== 0 && $ledger !== 0 ? round(abs($ledger / $foreign), 6) : $doc['rate'];
+            if ($ledger !== null && $doc['rate'] !== null && abs((int) round($foreign * $doc['rate']) - $ledger) > 100) {
+                $p->warn(self::STEP_BANK, 'opening_mismatch', sprintf(
+                    'Počáteční stav bankovního účtu %s v Pohodě (%s %s, kurz %s) nesedí s počátečním stavem jeho analytiky v deníku (%s Kč).',
+                    $code, number_format($foreign / 100, 2, ',', ' '), $currency, number_format($doc['rate'], 3, ',', ' '), number_format($ledger / 100, 2, ',', ' '),
+                ));
+            }
+        } elseif ($ledger !== null) {
+            if ($ledger === 0) {
+                $foreign = 0;
+            } else {
+                $day = (new \DateTimeImmutable($ctx->periodStart()))->modify('-1 day')->format('Y-m-d');
+                $rate = $this->foreign->cachedRate($currency, $day);
+                if ($rate === null) {
+                    $p->warn(self::STEP_BANK, 'foreign_opening_unknown', sprintf(
+                        'Bankovní účet %s v %s: počáteční stav v měně v POHODĚ není a kurz ČNB k %s pro přepočet z deníku (%s Kč) chybí. Výpisy jsou bez počátečního stavu.',
+                        $code, $currency, $day, number_format($ledger / 100, 2, ',', ' '),
+                    ));
+                    return null;
+                }
+                $foreign = (int) round($ledger / $rate);
+                $p->info(self::STEP_BANK, 'foreign_opening_from_ledger', sprintf(
+                    'Bankovní účet %s: počáteční stav %s %s spočten z deníku (%s Kč) kurzem ČNB %s k %s.',
+                    $code, number_format($foreign / 100, 2, ',', ' '), $currency, number_format($ledger / 100, 2, ',', ' '), number_format($rate, 3, ',', ' '), $day,
+                ));
+            }
+        } else {
+            $p->warn(self::STEP_BANK, 'account_without_opening', "Bankovní účet {$code} v {$currency} nemá v POHODĚ počáteční stav v měně, výpisy jsou bez počátečního stavu.");
+            return null;
+        }
+        if ($accountId !== null && $ctx->period !== null && $foreign !== 0 && $rate !== null) {
+            $ctx->foreignBankOpenings[] = ['account_id' => $accountId, 'period_id' => (int) $ctx->period['id'], 'currency' => $currency,
+                'foreign' => $foreign / 100, 'rate' => $rate];
+        }
+        return $foreign;
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int,string> bank_statements.id => měna výpisu
+     */
+    private function statementCurrencies(int $supplierId, array $ids): array
+    {
+        $out = [];
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            $stmt = $this->db->pdo()->prepare('SELECT id, COALESCE(currency, "CZK") FROM bank_statements WHERE supplier_id = ? AND id IN ('
+                . implode(',', array_fill(0, count($chunk), '?')) . ')');
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$id, $currency]) {
+                $out[(int) $id] = (string) $currency;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -428,19 +657,6 @@ final class CashBankImporter
         if ($out !== []) {
             $ctx->bankSymbols[$txId] = array_map('strval', array_keys($out));
         }
-    }
-
-    /**
-     * Částka pohybu: součet rekapitulace, výdej se znaménkem minus. Příjem se zápornou
-     * částkou (vratka odchozí platby) zůstává záporný.
-     */
-    private static function amount(array $r): float
-    {
-        $summary = PohodaXml::get($r, 'bankSummary/homeCurrency');
-        $total = PohodaXml::num($summary, 'priceNone') + PohodaXml::num($summary, 'priceLowSum')
-            + PohodaXml::num($summary, 'priceHighSum') + PohodaXml::num($summary, 'price3Sum') + PohodaXml::num($summary, 'round/priceRound');
-        $sign = PohodaXml::text($r, 'bankHeader/bankType') === 'expense' ? -1 : 1;
-        return round($sign * $total, 2);
     }
 
     /**
@@ -513,11 +729,13 @@ final class CashBankImporter
 
     /**
      * Vlastní bankovní účty z Pohody do evidence účtů firmy (se zachováním analytiky 221)
-     * a mezi účty firmy v měnách: první použitý účet doplní korunovou měnu bez čísla účtu,
-     * každý další použitý účet dostane vlastní řádek, jinak by ho tab Účty ani zůstatky
-     * banky neukázaly.
+     * a mezi účty firmy v měnách: první použitý korunový účet doplní korunovou měnu bez čísla
+     * účtu, účet v cizí měně řádek své měny ({@see BankAccountRegistrar::linkCompanyAccounts()}),
+     * každý další použitý účet dostane vlastní řádek, jinak by ho tab Účty ani zůstatky banky
+     * neukázaly. Účet v cizí měně, který dřívější převod zaevidoval v Kč, se přepojí na svou
+     * měnu ({@see BankAccountRegistrar::adoptForeignAccount()}).
      *
-     * @param array<string,array{number:string,bank:string,iban:string,label:string,analytic:?string}> $accounts
+     * @param array<string,array{number:string,bank:string,iban:string,label:string,analytic:?string,currency:string}> $accounts
      * @param list<string> $used kódy účtů s pohyby v roce
      */
     private function registerAccounts(PohodaContext $ctx, array $accounts, array $used): void
@@ -529,7 +747,7 @@ final class CashBankImporter
                 'number' => $a['number'],
                 'bank' => $a['bank'],
                 'iban' => $a['iban'],
-                'currency' => 'CZK',
+                'currency' => $a['currency'],
                 'label' => $a['label'],
                 'suffix' => $a['analytic'] !== null && str_starts_with($a['analytic'], '221.') ? substr($a['analytic'], 4) : null,
             ];
@@ -537,7 +755,7 @@ final class CashBankImporter
         $registered = $registrar->register($ctx->supplierId, $company, $ctx->protocol, self::STEP_BANK);
         $primary = null;
         foreach ($used as $code) {
-            if (($accounts[$code]['number'] ?? '') !== '') {
+            if (($accounts[$code]['number'] ?? '') !== '' && $accounts[$code]['currency'] === 'CZK') {
                 $primary = $accounts[$code];
                 break;
             }
@@ -547,5 +765,19 @@ final class CashBankImporter
             $registrar->fillCurrencyAccount($ctx->supplierId, 'CZK', $primary['number'], $primary['bank'] ?: null, $primary['iban'] ?: null);
         }
         $registrar->linkCompanyAccounts($ctx->supplierId, $company, $used, $registered, $ctx->protocol, self::STEP_BANK, false);
+        foreach ($used as $code) {
+            $a = $company[$code] ?? null;
+            if ($a === null || $a['currency'] === 'CZK' || $a['number'] === '') {
+                continue;
+            }
+            $shared = false;
+            foreach ($company as $other => $b) {
+                $shared = $shared || ($other !== $code && $b['currency'] === 'CZK' && $b['number'] !== ''
+                    && BankAccountRegistrar::accountKey($b['number'], $b['bank']) === BankAccountRegistrar::accountKey($a['number'], $a['bank']));
+            }
+            foreach ($registrar->adoptForeignAccount($ctx->supplierId, $a, $shared, true) as $change) {
+                $ctx->protocol->info(self::STEP_BANK, 'foreign_account_registered', "Bankovní účet {$code}: {$change}.", ['account' => $code]);
+            }
+        }
     }
 }

@@ -140,6 +140,18 @@ final class DashboardWidgetDataTest extends TestCase
         self::assertSame('Synthetic secret project', $full['drafts']['data']['items'][0]['project_name']);
     }
 
+    public function testDocumentRequestLinkMatchesGrantedViewForStaff(): void
+    {
+        $service = $this->container->get(DashboardWidgetDataService::class);
+        $widgets = [['id' => 'requests', 'type' => 'documents.requests', 'options' => (object) []]];
+
+        $submitOnly = (array) $service->query($this->request('staff', ['documents.submit' => 1]), $widgets)['widgets'];
+        self::assertSame('/portal/document-requests', $submitOnly['requests']['data']['links']['list']);
+
+        $manage = (array) $service->query($this->request('staff', ['documents.requests' => 1]), $widgets)['widgets'];
+        self::assertSame('/document-requests', $manage['requests']['data']['links']['list']);
+    }
+
     public function testApprovalsLinkNeedsOnlyApprovalPermissionAndVatLinkKeepsReportPeriod(): void
     {
         $service = $this->container->get(DashboardWidgetDataService::class);

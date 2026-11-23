@@ -31,8 +31,8 @@ final class KontrolniHlaseniAction
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
-        // Fronta „doklady změněné po podání" — podklad pro rozhodnutí o opravném hlášení.
-        private readonly \MyInvoice\Service\Report\VatPostFilingChangesService $postFilingChanges,
+        // Rozdíly proti podanému KH — podklad pro rozhodnutí o opravném hlášení.
+        private readonly \MyInvoice\Service\Report\KhEvidenceService $evidence,
         private readonly \MyInvoice\Service\Report\VatCrossCheckService $crossCheck,
     ) {}
 
@@ -76,20 +76,15 @@ final class KontrolniHlaseniAction
         } catch (\Throwable $e) {
             return ReportBuildError::toJson($response, $e);
         }
-        // Fronta „doklady změněné po podání" — bez ní nemá UI z čeho nabídnout opravné
-        // hlášení, protože samo nepozná, že je období už podané. Fail-open: je to podklad
-        // k rozhodnutí, ne součást výkazu, a její selhání nesmí shodit náhled.
+        // Rozdíly proti podanému KH. Rychlá odpověď na výzvu oddíly nemá, není co porovnat.
+        // Fail-open: je to podklad k rozhodnutí, ne součást výkazu, a jeho selhání nesmí
+        // shodit náhled.
         $postFiling = ['has_filing' => false, 'snapshot_available' => false, 'submission' => null, 'documents' => []];
-        try {
-            $postFiling = $this->postFilingChanges->changes(
-                $supplierId,
-                $year,
-                $month,
-                $period ?? 'monthly',
-                'dphkh1',
-                ['B', 'O', 'N', 'E'],
-            );
-        } catch (\Throwable) {
+        if (!in_array($variant, ['vyzva_nulove', 'vyzva_potvrzeni'], true)) {
+            try {
+                $postFiling = $this->evidence->postFilingChanges($supplierId, $year, $month, $period ?? 'monthly', (string) $result['xml']);
+            } catch (\Throwable) {
+            }
         }
 
         return Json::ok($response, [

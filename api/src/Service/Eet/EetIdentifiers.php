@@ -30,7 +30,7 @@ final class EetIdentifiers
 
     public const ENVIRONMENTS = ['playground', 'production'];
     public const REGIMES = ['standard', 'exempt', 'eet_off'];
-    public const UNIT_KINDS = ['premises', 'online', 'vehicle', 'mobile', 'other'];
+    public const UNIT_KINDS = ['premises', 'mobile', 'vending', 'online', 'vehicle', 'taxpayer', 'other'];
 
     public static function isEic(string $value): bool
     {

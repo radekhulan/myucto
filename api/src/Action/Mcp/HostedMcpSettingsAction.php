@@ -18,6 +18,7 @@ final class HostedMcpSettingsAction
         private readonly HostedMcp $hosted,
         private readonly NodeBridge $bridge,
         private readonly ?\MyInvoice\Service\Mcp\McpResourcePolicy $resources = null,
+        private readonly ?\MyInvoice\Service\Tenant\SupplierAccessResolver $suppliers = null,
     ) {}
 
     public function show(Request $request, Response $response): Response
@@ -90,9 +91,30 @@ final class HostedMcpSettingsAction
         return [
             'enabled' => $this->hosted->enabled(),
             'node_available' => $this->hosted->nodeAvailable(),
-            'endpoint' => $this->resources?->endpoint($request) ?? $this->hosted->endpoint(),
+            'endpoint' => $this->endpoint($request),
             'managed_by_environment' => $this->hosted->managedByEnvironment(),
             'managed_relay' => $this->hosted->managedRelay(),
         ];
+    }
+
+    /**
+     * Klient na hlavní doméně dostane adresu aktivní klientské domény své
+     * aktuální firmy, jinak kanonickou adresu; obě vedou na připojení vázané
+     * na jednu firmu. Interní role a vlastní doména beze změny.
+     */
+    private function endpoint(Request $request): string
+    {
+        $endpoint = $this->resources?->endpoint($request) ?? $this->hosted->endpoint();
+        if ($this->resources === null || $this->suppliers === null
+            || $endpoint !== $this->resources->canonical()) {
+            return $endpoint;
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if ((int) ($user['id'] ?? 0) < 1 || !$this->resources->isClientUser((int) $user['id'])) {
+            return $endpoint;
+        }
+        $access = $this->suppliers->resolve($request);
+        return !$access->denied && $access->supplierId > 0
+            ? $this->resources->clientEndpoint($access->supplierId) : $endpoint;
     }
 }

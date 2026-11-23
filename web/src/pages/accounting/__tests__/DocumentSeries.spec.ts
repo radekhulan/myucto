@@ -76,8 +76,8 @@ describe('DocumentSeries', () => {
     const wrapper = await mountPage()
     const rows = wrapper.findAll('tbody tr')
 
-    // 12 řad minus 6 deníkových (closing/opening/fx/transfer/manual/offset)
-    expect(rows).toHaveLength(6)
+    // 14 řad minus 6 deníkových (closing/opening/fx/transfer/manual/offset)
+    expect(rows).toHaveLength(8)
     expect(wrapper.text()).toContain('PPD')
     expect(wrapper.text()).not.toContain('UZ')
   })
@@ -86,8 +86,8 @@ describe('DocumentSeries', () => {
     const wrapper = await mountPage()
     const rows = wrapper.findAll('tbody tr')
 
-    // 12 řad z DEFAULT_PREFIXES, žádná zatím uložená
-    expect(rows).toHaveLength(12)
+    // 14 řad z DEFAULT_PREFIXES, žádná zatím uložená
+    expect(rows).toHaveLength(14)
     expect(wrapper.text()).toContain('accounting.closing.series.not_issued')
   })
 
@@ -95,7 +95,7 @@ describe('DocumentSeries', () => {
     m.list.mockResolvedValue([stored()])
     const wrapper = await mountPage()
 
-    expect(wrapper.findAll('tbody tr')).toHaveLength(12)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(14)
     const inputs = wrapper.findAll('tbody tr')[0].findAll('input')
     expect(inputs[0].element.value).toBe('PPD')
     expect(inputs[2].element.value).toBe('5')
@@ -106,6 +106,23 @@ describe('DocumentSeries', () => {
     const wrapper = await mountPage()
 
     expect(wrapper.text()).toContain('26HP00011')
+  })
+
+  it('vlastní řadu druhu ostatní položky označí jeho názvem', async () => {
+    m.list.mockResolvedValue([{ ...stored(), id: 8, series_code: 'other_payable', register_id: 5, prefix: 'NJ', kind_name: 'Syntetické nájemné' }])
+    const wrapper = await mountPage()
+
+    const row = wrapper.findAll('tbody tr').find(tr => tr.find('input').element.value === 'NJ')!
+    expect(row.text()).toContain('accounting.closing.series.codes.other_payable')
+    expect(row.text()).toContain('Syntetické nájemné')
+  })
+
+  it('vlastní řadu vestavěného druhu označí jeho překladem podle strany', async () => {
+    m.list.mockResolvedValue([{ ...stored(), id: 9, series_code: 'other_payable', register_id: 6, prefix: 'NJ', kind_builtin_code: 'rent' }])
+    const wrapper = await mountPage()
+
+    const row = wrapper.findAll('tbody tr').find(tr => tr.find('input').element.value === 'NJ')!
+    expect(row.text()).toContain('other_items.kind_by_side.payable.rent')
   })
 
   it('Uložit odešle jen změněné řady a je vypnuté, dokud se nic nezměnilo', async () => {

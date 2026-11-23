@@ -30,6 +30,18 @@ final class PayrollRegistrationIdentityRequirements
     public const AGENDA_PREZEC = 'PREZEC26';
     public const AGENDA_REGZEC = 'REGZEC25';
 
+    /**
+     * Den podání, od kterého PREZEC nevyžaduje rodné příjmení (ID 10063).
+     *
+     * EDV PREZEC 1.5 (Changelog 9. 9. 2026, zveřejněno 5. 11. 2026) mění
+     * povinnost u akce P1 z „P" na „N"; EDV 1.2 platná pro rok 2026 ji drží
+     * povinnou. XSD PREZEC26 1.2 i 1.5 má `birth/@nam` nepovinný, takže kontrolu
+     * dělá jen ČSSZ podle verze, kterou má nasazenou. Proto rozhoduje den
+     * podání, ne den nástupu: přihláška k lednovému nástupu podaná v prosinci
+     * se ještě kontroluje podle EDV 1.2.
+     */
+    public const PREZEC_BIRTH_SURNAME_OPTIONAL_FROM = '2027-01-01';
+
     /** Panel karty osoby s historií jména a údaji pro registraci. */
     public const PANEL_IDENTITY = 'registration_identity';
 
@@ -126,6 +138,9 @@ final class PayrollRegistrationIdentityRequirements
      * události; `null` je přihláška. U A3 pak `$completion` určuje rozsah
      * dohlášení.
      *
+     * `$filedOn` je den podání; u PREZEC rozhoduje o povinnosti rodného
+     * příjmení ({@see self::birthSurnameRequired()}).
+     *
      * @param array<string,mixed> $identity řádek historie identity
      * @param array<string,mixed> $identifiers birth_number/ecp/vcp → hodnota nebo null
      * @return list<array{field:string,label:string,message:string,panel:string,target:string}>
@@ -137,6 +152,7 @@ final class PayrollRegistrationIdentityRequirements
         ?bool $hasBirthSurname = null,
         ?int $action = null,
         ?string $completion = null,
+        ?string $filedOn = null,
     ): array {
         if ($agenda === self::AGENDA_REGZEC && $action !== null && $action !== 1) {
             // Navazující událost: identifikátor osoby je `ikmpsv` z události,
@@ -155,6 +171,12 @@ final class PayrollRegistrationIdentityRequirements
         }
         $missing = [];
         foreach (self::COMMON_FIELDS as $field) {
+            if ($field === 'birth_surname'
+                && $agenda === self::AGENDA_PREZEC
+                && !self::birthSurnameRequired($agenda, $filedOn)
+            ) {
+                continue;
+            }
             $present = $field === 'birth_surname' && $hasBirthSurname !== null
                 ? $hasBirthSurname
                 : self::filled($identity[$field] ?? null);
@@ -199,6 +221,19 @@ final class PayrollRegistrationIdentityRequirements
         }
 
         return $missing;
+    }
+
+    /**
+     * Zda věta dané agendy podaná v daný den musí nést rodné příjmení.
+     * REGZEC ho u přihlášky A1 vyžaduje vždy, PREZEC jen do konce roku 2026
+     * ({@see self::PREZEC_BIRTH_SURNAME_OPTIONAL_FROM}). Bez dne podání platí
+     * přísnější pravidlo.
+     */
+    public static function birthSurnameRequired(?string $agenda, ?string $filedOn): bool
+    {
+        return $agenda !== self::AGENDA_PREZEC
+            || $filedOn === null
+            || $filedOn < self::PREZEC_BIRTH_SURNAME_OPTIONAL_FROM;
     }
 
     /**

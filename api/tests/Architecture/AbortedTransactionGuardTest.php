@@ -18,7 +18,8 @@ use PHPUnit\Framework\TestCase;
  *
  * Brána hlídá:
  *  - široký `catch` (Throwable, Exception, RuntimeException, PDOException) uvnitř okna
- *    otevřené transakce (lexikálně mezi begin/SAVEPOINT a commit/RELEASE/rollBack), který
+ *    otevřené transakce (lexikálně mezi begin/START TRANSACTION/SAVEPOINT
+ *    a commit/COMMIT/RELEASE/rollBack/ROLLBACK), který
  *    chybu nevyhodí dál a neptá se `TransactionFailure::`,
  *  - `ROLLBACK TO SAVEPOINT` v catch bloku, který může chytit PDOException, bez
  *    předchozího `TransactionFailure::` v témže bloku (v celém `api/src`),
@@ -126,6 +127,13 @@ final class AbortedTransactionGuardTest extends TestCase
         self::assertSame([], $stale, 'Výjimka pro metodu, která už neexistuje, nic nekryje.');
     }
 
+    public function testSqlSnapshotWithoutBeginTransactionIsScanned(): void
+    {
+        $run = $this->methods()['Infrastructure/Database/ReadOnlySnapshot.php::run'] ?? null;
+
+        self::assertNotNull($run, 'Soubor, který transakci otevírá jen SQL příkazem, musí brána číst.');
+    }
+
     public function testScannerSeesThroughCommentsAndStrings(): void
     {
         $code = <<<'PHP'
@@ -182,6 +190,18 @@ final class AbortedTransactionGuardTest extends TestCase
                     } catch (\Throwable) {
                     }
                 }
+
+                public function sqlSnapshot(\PDO $pdo): void
+                {
+                    $pdo->exec('START TRANSACTION READ ONLY');
+                    try {
+                    } catch (\Throwable) {
+                    }
+                    $pdo->exec('COMMIT');
+                    try {
+                    } catch (\Throwable) {
+                    }
+                }
             }
             PHP;
         $methods = self::scan($code, 'Probe.php');
@@ -197,6 +217,8 @@ final class AbortedTransactionGuardTest extends TestCase
         self::assertTrue($methods['Probe.php::rethrows']['catches'][0]['throws']);
         self::assertFalse($methods['Probe.php::domainOnly']['rollbacks'][0]['pdoCapable']);
         self::assertFalse($methods['Probe.php::afterCommit']['catches'][0]['inWindow']);
+        self::assertTrue($methods['Probe.php::sqlSnapshot']['catches'][0]['inWindow'], 'START TRANSACTION otevírá okno jako beginTransaction.');
+        self::assertFalse($methods['Probe.php::sqlSnapshot']['catches'][1]['inWindow'], 'COMMIT jako SQL okno zavírá.');
     }
 
     private static function inHelperScope(string $key): bool
@@ -219,7 +241,8 @@ final class AbortedTransactionGuardTest extends TestCase
         }
         $methods = [];
         foreach (SourceCorpus::sources(dirname(__DIR__, 2) . '/src') as $rel => $code) {
-            if (!str_contains($code, 'beginTransaction') && stripos($code, 'SAVEPOINT') === false) {
+            if (!str_contains($code, 'beginTransaction') && stripos($code, 'SAVEPOINT') === false
+                && stripos($code, 'START TRANSACTION') === false) {
                 continue;
             }
             $methods += self::scan($code, str_replace('\\', '/', $rel));
@@ -286,6 +309,10 @@ final class AbortedTransactionGuardTest extends TestCase
                 if (preg_match('/^["\']?\s*SAVEPOINT\b/i', $text) === 1) {
                     $depth++;
                 } elseif (preg_match('/^["\']?\s*(RELEASE|ROLLBACK TO)\s+SAVEPOINT\b/i', $text) === 1) {
+                    $depth = max(0, $depth - 1);
+                } elseif (preg_match('/^["\']?\s*START\s+TRANSACTION\b/i', $text) === 1) {
+                    $depth++;
+                } elseif (preg_match('/^["\']?\s*(COMMIT|ROLLBACK)\s*["\']?$/i', $text) === 1) {
                     $depth = max(0, $depth - 1);
                 }
             } elseif ($id === T_STRING && $text === 'beginTransaction') {

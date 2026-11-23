@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatMoneyMinor, formatDate } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
@@ -22,6 +22,8 @@ const auth = useAuthStore()
 // (a správně zúží v v-if větvích), stejně jako běžné top-level refy v <script setup>.
 const {
   matchBusy, matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
+  membershipCandidates, selectedMembershipClaims, membershipNextCursor, loadingMembershipCandidates, membershipCandidateError, membershipUnavailable,
+  membershipSelectedCents, membershipSelectionValid, toggleMembershipClaim, loadMembershipCandidates, confirmMembershipMatch,
   gopayCandidate, loadingGoPayCandidate, matchingGoPay,
   splitSuggestions, loadingSplit, splitWindow,
   anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
@@ -35,6 +37,15 @@ const {
 function candidateLabel(c: MatchCandidate): string {
   if (c.type === 'other_item') return t(c.side === 'payable' ? 'bank.candidate_other_payable' : 'bank.candidate_other_receivable')
   return c.type === 'invoice' ? t('bank.candidate_issued') : t('bank.candidate_purchase')
+}
+
+/** Důvody shody ostatní položky i členského předpisu (stejný ranker): VS, účet protistrany, splátka, celý zbytek. */
+function matchReasonLabels(reasons: readonly string[] | undefined, installmentPosition?: number | null): string[] {
+  return (reasons || []).map(reason => t(`bank.other_item_match.${reason}`, { number: installmentPosition ?? '' }))
+}
+
+function otherItemReasons(c: MatchCandidate): string[] {
+  return c.type === 'other_item' ? matchReasonLabels(c.match_reasons, c.installment?.position) : []
 }
 
 function candidateBadgeClass(c: MatchCandidate): string {
@@ -133,6 +144,10 @@ function candidateBadgeClass(c: MatchCandidate): string {
                 </span>
                 <span class="font-mono text-sm ml-1">{{ c.ref || `#${c.id}` }}</span>
                 <span v-if="c.party" class="text-xs text-neutral-500 block truncate">{{ c.party }}</span>
+                <span v-if="otherItemReasons(c).length" class="mt-0.5 flex flex-wrap gap-1" data-testid="other-item-reasons">
+                  <span v-for="label in otherItemReasons(c)" :key="label"
+                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-success-50 text-success-700">{{ label }}</span>
+                </span>
               </span>
               <span class="text-right whitespace-nowrap shrink-0">
                 <span class="font-mono text-sm">{{ formatMoney(c.amount, c.currency) }}</span>
@@ -145,6 +160,66 @@ function candidateBadgeClass(c: MatchCandidate): string {
           </li>
         </ul>
       </div>
+
+      <section v-if="matchCtx && matchCtx.amount > 0 && actions.canSeeMembershipCandidates()" class="mb-4" data-testid="membership-bank-match">
+        <h4 class="text-sm font-medium text-neutral-700">{{ t('bank.membership_candidates') }}</h4>
+        <p class="mt-1 mb-2 text-xs text-neutral-500">{{ t('bank.membership_candidates_hint') }}</p>
+        <p v-if="membershipCandidateError" role="alert" class="mb-2 text-sm text-danger-600">{{ membershipCandidateError }}</p>
+        <ul v-if="membershipCandidates.length" class="max-h-56 overflow-auto divide-y divide-neutral-100 rounded-md border border-neutral-200">
+          <li v-for="claim in membershipCandidates" :key="claim.id">
+            <label class="flex items-start gap-2 px-3 py-2">
+              <input type="checkbox" class="mt-1" :checked="selectedMembershipClaims.some(c => c.id === claim.id)"
+                :disabled="matchBusy || !actions.canMatchMembership() || (selectedMembershipClaims.length >= 100 && !selectedMembershipClaims.some(c => c.id === claim.id))" @change="toggleMembershipClaim(claim)" />
+              <span class="min-w-0 flex-1 text-sm">
+                <span class="block font-medium">{{ claim.party }}</span>
+                <span class="block text-xs text-neutral-500">{{ claim.ref }} · {{ formatDate(claim.period_from) }} – {{ formatDate(claim.period_to) }}</span>
+                <span v-if="claim.variable_symbol" class="block text-xs text-neutral-500">{{ t('bank.membership_vs', { vs: claim.variable_symbol }) }}</span>
+                <span v-if="claim.match_reasons?.length" class="mt-0.5 flex flex-wrap gap-1" data-testid="membership-match-reasons">
+                  <span v-for="label in matchReasonLabels(claim.match_reasons)" :key="label"
+                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-success-50 text-success-700">{{ label }}</span>
+                </span>
+              </span>
+              <span class="shrink-0 whitespace-nowrap text-sm tabular-nums">{{ formatMoney(claim.amount, claim.currency) }}</span>
+            </label>
+          </li>
+        </ul>
+        <p v-else-if="membershipUnavailable" class="py-2 text-xs text-neutral-500">{{ t('bank.membership_unavailable') }}</p>
+        <p v-else-if="!loadingMembershipCandidates && !membershipCandidateError && membershipNextCursor === null" class="py-2 text-xs text-neutral-500">{{ t('bank.membership_candidates_empty') }}</p>
+        <p v-if="loadingMembershipCandidates" role="status" class="py-2 text-xs text-neutral-500">{{ t('common.loading') }}</p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button v-if="membershipCandidateError" type="button" :disabled="loadingMembershipCandidates || matchBusy"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+            @click="loadMembershipCandidates()">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg>
+            {{ t('bank.membership_retry') }}
+          </button>
+          <button v-if="membershipNextCursor !== null" type="button" :disabled="loadingMembershipCandidates || matchBusy"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+            @click="loadMembershipCandidates(true)">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+            {{ t('bank.membership_more') }}
+          </button>
+        </div>
+        <div v-if="selectedMembershipClaims.length" class="mt-3 rounded-md border border-primary-200 bg-primary-50 p-3">
+          <p class="text-sm font-medium">{{ t('bank.membership_selected', { count: selectedMembershipClaims.length, amount: formatMoneyMinor(Number(membershipSelectedCents)) }) }}</p>
+          <ul class="my-2 space-y-1">
+            <li v-for="claim in selectedMembershipClaims" :key="claim.id" class="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span>{{ claim.party }} · {{ claim.ref }} · {{ formatMoney(claim.amount, claim.currency) }}</span>
+              <button type="button" :disabled="matchBusy" class="inline-flex items-center gap-1 whitespace-nowrap text-neutral-700 hover:underline disabled:opacity-50" @click="toggleMembershipClaim(claim)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                {{ t('bank.membership_remove') }}
+              </button>
+            </li>
+          </ul>
+          <p v-if="!membershipSelectionValid" class="mb-2 text-xs text-warning-700">{{ t('bank.membership_sum_mismatch') }}</p>
+          <button type="button" :disabled="matchBusy || !membershipSelectionValid || !actions.canMatchMembership()"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-success-600 px-3 py-2 text-sm font-medium text-white hover:bg-success-700 disabled:opacity-50"
+            @click="confirmMembershipMatch">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+            {{ t('bank.membership_confirm') }}
+          </button>
+        </div>
+      </section>
 
       <!-- Sloučená úhrada: kombinace faktur jednoho klienta sečtené na částku platby -->
       <div v-if="matchCtx && matchCtx.amount !== 0" class="mb-4">

@@ -77,6 +77,7 @@ final class PayrollJmhzAbsenceHoursDeriver
         'unpaid_leave' => 0,
         'unexcused' => 0,
         'compensatory_time_off' => 0,
+        'holiday_time_off' => 0,
     ];
 
     /**
@@ -118,6 +119,9 @@ final class PayrollJmhzAbsenceHoursDeriver
         // Náhradní volno za přesčas: mzda za dobu čerpání nepřísluší
         // (§ 114 odst. 1 ZP), takže hodiny jdou jen do úhrnu 10275, ne do 10276.
         'compensatory_time_off' => 'compensatory_time_off',
+        // § 115: placené volno vstupuje i do úhrnu s náhradou, ne do
+        // technického pole neplaceného přesčasového volna.
+        'holiday_compensatory_time_off' => 'holiday_time_off',
     ];
 
     public function __construct(
@@ -291,7 +295,9 @@ final class PayrollJmhzAbsenceHoursDeriver
                     $last = (string) $absence['date_to'];
                     $caps[$last] = min($caps[$last] ?? PHP_INT_MAX, (int) $absence['partial_last_minutes']);
                 }
-                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], false, $caps);
+                // Placené sváteční volno může pokrýt rozvrženou směnu i ve svátek;
+                // souhrn potom tutéž dobu vyřadí z automatického svátečního bloku.
+                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], $bucket === 'holiday_time_off', $caps);
                 continue;
             }
             // Navazující část dlouhé nemoci (pokračování z předchozího měsíce) vlastní
@@ -368,7 +374,8 @@ final class PayrollJmhzAbsenceHoursDeriver
             'paid' => $buckets['vacation']
                 + $buckets['dpn_with_employer_compensation']
                 + $buckets['employee_obstacle_paid']
-                + $buckets['employer_obstacle'],
+                + $buckets['employer_obstacle']
+                + $buckets['holiday_time_off'],
         ];
     }
 }

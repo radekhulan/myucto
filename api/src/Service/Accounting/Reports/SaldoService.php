@@ -259,12 +259,13 @@ final class SaldoService
 
         // O jeden řádek víc, než smí projít — přetečení se pozná, aniž by se celý
         // (potenciálně milionový) seznam musel načíst do paměti.
-        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code'], max(1, $budget) + 1, $partnerId);
+        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code'], max(1, $budget) + 1, $partnerId, withOverdrawnAdvances: true);
 
         /** @var array<int, array{partner_id:int, partner_name:string, total_remaining:float, items:list<array<string,mixed>>}> $byPartner */
         $byPartner = [];
         $openTotalCents = 0;
         $openCount = 0;
+        $otherNumbers = $this->otherPurchaseNumbers($supplierId, $rawItems);
         foreach ($rawItems as $it) {
             if ($partnerId !== null && $it['partner_id'] !== $partnerId) {
                 continue; // pojistka — filtr partnera už provedlo SQL
@@ -309,6 +310,7 @@ final class SaldoService
                 'doc_type'      => $it['doc_type'],
                 'doc_id'        => $it['doc_id'],
                 'doc_no'        => $it['doc_no'],
+                'other_doc_no'  => $it['doc_type'] === 'purchase_invoice' ? ($otherNumbers[$it['doc_id']] ?? null) : null,
                 'issue_date'    => $it['issue_date'],
                 'due_date'      => $it['due_date'],
                 'currency_code' => $it['currency_code'],
@@ -361,6 +363,38 @@ final class SaldoService
                 ? ['advance_deduction_issues' => $this->advances->deductionIssues($supplierId, $acc['code'])]
                 : []),
         ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items položky z {@see SaldoRepository::openItems()}
+     * @return array<int,string> druhé číslo přijaté faktury vedle `doc_no` podle id dokladu
+     */
+    private function otherPurchaseNumbers(int $supplierId, array $items): array
+    {
+        $docNos = [];
+        foreach ($items as $it) {
+            if ($it['doc_type'] === 'purchase_invoice') {
+                $docNos[(int) $it['doc_id']] = (string) $it['doc_no'];
+            }
+        }
+        $out = [];
+        foreach (array_chunk(array_keys($docNos), 1000) as $ids) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, varsymbol, vendor_invoice_number FROM purchase_invoices
+                  WHERE supplier_id = ? AND id IN (' . implode(',', $ids) . ')'
+            );
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                foreach ([$r['varsymbol'], $r['vendor_invoice_number']] as $number) {
+                    $number = trim((string) $number);
+                    if ($number !== '' && $number !== $docNos[(int) $r['id']]) {
+                        $out[(int) $r['id']] = $number;
+                        break;
+                    }
+                }
+            }
+        }
+        return $out;
     }
 
     /**

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollMonthlyAgendaDutyRepository;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -32,7 +31,7 @@ final class PayrollMonthlyAgendaDutyRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Databázové spojení není dostupné.');
@@ -85,6 +84,29 @@ final class PayrollMonthlyAgendaDutyRepositoryTest extends TestCase
         self::assertSame(['111', '201'], $runs[0]['insurer_codes']);
     }
 
+    /**
+     * Pojišťovny se závazkem čte z vypočteného zdravotního výsledku revize;
+     * bez výsledku je `insured_codes` null (agentura s DPP: nikdo pojištěný).
+     */
+    public function testInsuredCodesComeFromCalculatedHealthResult(): void
+    {
+        $runId = $this->createRun('closed');
+        $revisionId = $this->revision($runId, 1, 'approved', ['111', '201']);
+        self::assertNull($this->repository->approvedRunsForPeriod($this->supplierId, self::PERIOD_START)[0]['insured_codes']);
+
+        $result = json_encode(['insurer_liabilities' => [['insurer_code' => '201']]], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_statutory_results
+                (supplier_id, revision_id, calculation_kind, schema_version, result_status, ruleset_id, ruleset_hash,
+                 input_snapshot_json, input_snapshot_hash, result_snapshot_json, result_snapshot_hash, result_set_hash)
+             VALUES (?, ?, "health_insurance", "payroll-health-result.v1", "calculated", "test", ?, "{}", ?, ?, ?, ?)',
+        )->execute([$this->supplierId, $revisionId, str_repeat('a', 64), str_repeat('b', 64), $result, str_repeat('c', 64), str_repeat('d', 64)]);
+
+        $runs = $this->repository->approvedRunsForPeriod($this->supplierId, self::PERIOD_START);
+        self::assertSame(['111', '201'], $runs[0]['insurer_codes']);
+        self::assertSame(['201'], $runs[0]['insured_codes']);
+    }
+
     /** Neschválená revize povinnost nezakládá — není z čeho hlášení sestavit. */
     public function testRunWithoutApprovedRevisionIsNotReported(): void
     {
@@ -129,7 +151,58 @@ final class PayrollMonthlyAgendaDutyRepositoryTest extends TestCase
         ));
     }
 
-    private function createRun(string $status): int
+    /**
+     * Přehled podání volá dotaz při každém otevření, takže nesmí růst
+     * s historií firmy. Dřív počítal JSON funkce nad schválenými revizemi
+     * VŠECH období a to dotázané vybral až potom.
+     *
+     * Měří se počet řádků, které si dotaz v úložišti přečetl: s dvěma roky
+     * historie navíc (24 běhů, 48 schválených revizí) musí zůstat stejný jako
+     * bez ní. Rezerva (6 řádků na kolísání plánu) je hluboko pod počtem
+     * přidaných běhů; původní dotaz jich četl o 24 víc.
+     */
+    public function testHistoryOfOtherPeriodsDoesNotAddRowReads(): void
+    {
+        $runId = $this->createRun('closed');
+        $this->revision($runId, 1, 'approved', ['111', '205']);
+        $query = fn (): array => $this->repository->approvedRunsForPeriod(
+            $this->supplierId,
+            self::PERIOD_START,
+        );
+        $expected = $query();
+        $baseline = $this->rowReads($query);
+
+        for ($month = 0; $month < 24; $month++) {
+            $other = $this->createRun('closed', sprintf('%04d-%02d-01', 2024 + intdiv($month, 12), 1 + $month % 12));
+            $first = $this->revision($other, 1, 'superseded', ['201']);
+            $this->revision($other, 2, 'approved', ['207'], $first);
+        }
+
+        self::assertSame($expected, $query(), 'Historie nesmí změnit výsledek za dotázané období.');
+        self::assertLessThan(
+            $baseline + 6,
+            $this->rowReads($query),
+            'Dotaz četl revize jiných období.',
+        );
+    }
+
+    /** Kolik řádků si úložiště při dotazu přečetlo (čítače `Handler_read_*` relace). */
+    private function rowReads(callable $query): int
+    {
+        $read = fn (): int => array_sum(array_map(
+            'intval',
+            array_column(
+                $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Handler_read%'")->fetchAll(PDO::FETCH_NUM),
+                1,
+            ),
+        ));
+        $before = $read();
+        $query();
+
+        return $read() - $before;
+    }
+
+    private function createRun(string $status, string $periodStart = self::PERIOD_START): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -137,7 +210,7 @@ final class PayrollMonthlyAgendaDutyRepositoryTest extends TestCase
                 (supplier_id, period_start, payment_date, status,
                  current_revision_no)
              VALUES (?, ?, "2026-09-10", ?, 1)',
-        )->execute([$this->supplierId, self::PERIOD_START, $status]);
+        )->execute([$this->supplierId, $periodStart, $status]);
 
         return (int) $pdo->lastInsertId();
     }

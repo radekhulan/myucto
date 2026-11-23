@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { formatDate, formatMoney } from '@/composables/useFormat'
-import { ICONS } from '@/components/ui/buttonStyles'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import { useSidePreview } from '@/composables/useSidePreview'
+import { documentsApi, type DocItem } from '@/api/documents'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import EetCashDocumentBox from '@/components/eet/EetCashDocumentBox.vue'
@@ -21,10 +25,18 @@ defineProps<{ doc: CashDocument; purposeLabel: (purpose: string) => string }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
+
+// Originálem je první příloha, kterou prohlížeč umí zobrazit (sken účtenky nebo PDF).
+const preview = useSidePreview('cash_documents')
+const linkedDocs = ref<DocItem[]>([])
+const original = computed(() => linkedDocs.value.find(d => d.doc_type === 'pdf' || d.doc_type === 'image') ?? null)
 </script>
 
 <template>
-  <div>
+  <!-- Řádek seznamu není dost vysoký na přilepení, panel má jen pevnou výšku. -->
+  <DocumentPreviewSplit :ctrl="preview" :show="!!original && preview.open.value"
+    :src="original ? documentsApi.previewUrl(original.id) : null" :file-name="original?.title" :doc-type="original?.doc_type"
+    side-class="h-[70vh] min-h-[24rem]" isolate-clicks>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
       <div class="space-y-1">
         <div><span class="text-neutral-500">{{ t('cash.col.link') }}:</span> {{ purposeLabel(doc.purpose) }}</div>
@@ -66,14 +78,19 @@ const auth = useAuthStore()
          v kartě, jejíž klik rozbalení zavírá. -->
     <div v-if="auth.canRead('documents')" class="mt-3" data-testid="cash-attachments" @click.stop>
       <!-- Porovnání s vytěženou přílohou — zobrazí se jen u dokladu s vytěženým skenem. -->
-      <div class="mb-2 flex flex-wrap gap-2">
+      <div class="mb-2 flex flex-wrap items-center gap-2">
         <AttachmentCheckBadge entity-type="cash_document" :entity-id="doc.id"
           :can-acknowledge="auth.canWrite('cash.document.write')" />
+        <button v-if="original" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
+          :aria-pressed="preview.open.value" @click="preview.toggle()">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+          {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+        </button>
       </div>
       <LinkedDocumentsPanel entity-type="cash_document" :entity-id="doc.id" uploadable
-        :title="t('linked_documents.title')" />
+        :title="t('linked_documents.title')" @docs="linkedDocs = $event" />
     </div>
     <!-- Dimenze dokladu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
     <DocumentDimensionsPanel class="mt-3" doc-type="cash-documents" :doc-id="doc.id" @click.stop />
-  </div>
+  </DocumentPreviewSplit>
 </template>

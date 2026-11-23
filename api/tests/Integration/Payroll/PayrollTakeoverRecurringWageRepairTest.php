@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollTakeover;
@@ -35,7 +34,7 @@ final class PayrollTakeoverRecurringWageRepairTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $writer = $container->get(PayrollTakeoverEmploymentWriter::class);
         $components = $container->get(PayrollComponentRepository::class);

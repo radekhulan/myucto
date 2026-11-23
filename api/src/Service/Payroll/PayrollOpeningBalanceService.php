@@ -65,6 +65,21 @@ final readonly class PayrollOpeningBalanceService
     ];
 
     /**
+     * Sloupce rozpisu, které podané hlášení z počátečního stavu nebere.
+     *
+     * Zdravotní pojistné se v hlášení vykazuje za měsíc z jeho výpočtu a do
+     * výpočtu pozdějších měsíců kumulace nevstupuje. Doplnit ho tedy jde i po
+     * podání; základ sociálního pojištění a daňové úhrny ne, ty podané hlášení
+     * ovlivnily (roční strop, daňová kumulace).
+     */
+    private const COLUMNS_OUTSIDE_FILED_REPORTS = [
+        'health_assessment_base_minor_units',
+        'health_employee_contribution_minor_units',
+        'health_employer_contribution_minor_units',
+        'health_minimum_top_up_minor_units',
+    ];
+
+    /**
      * Pole kumulace, která se NEZADÁVAJÍ — plynou z rozpisu samotného.
      * Počet uzavřených měsíců je počet řádků, ne částka.
      *
@@ -152,6 +167,65 @@ final readonly class PayrollOpeningBalanceService
     }
 
     /**
+     * Zamyká počáteční stav tahle KONKRÉTNÍ změna? `null` = smí se uložit.
+     *
+     * Podané hlášení zamyká jen to, co z počátečního stavu převzalo. Vydaný roční
+     * doklad a uzavřený rok jsou otiskem celého roku a zamykají všechno.
+     *
+     * @param list<array<string,mixed>> $months normalizovaný nový rozpis
+     */
+    public function lockReasonForChange(int $supplierId, int $employeeId, int $year, array $months): ?string
+    {
+        $lock = $this->accumulators->openingLock($supplierId, $employeeId, $year);
+        if ($lock === null) {
+            return null;
+        }
+        if ($lock['kind'] === 'submission') {
+            $stored = $this->current($supplierId, $employeeId, $year)['months'];
+            if (self::reportedColumns($stored) == self::reportedColumns($months)) {
+                return null;
+            }
+        }
+
+        return $this->lockReason($supplierId, $employeeId, $year);
+    }
+
+    /** Lze u zamčeného roku měnit aspoň údaje mimo podaná hlášení? */
+    public function lockAllowsUnreportedChanges(int $supplierId, int $employeeId, int $year): bool
+    {
+        return ($this->accumulators->openingLock($supplierId, $employeeId, $year)['kind'] ?? null) === 'submission';
+    }
+
+    /**
+     * Rozpis bez sloupců mimo podaná hlášení, nezadaný sloupec je nula.
+     *
+     * @param list<array<string,mixed>> $months
+     * @return array<int,array<string,int>>
+     */
+    public static function reportedColumns(array $months): array
+    {
+        $columns = [];
+        foreach (self::monthColumns() as $map) {
+            foreach (array_keys($map) as $column) {
+                if (!in_array($column, self::COLUMNS_OUTSIDE_FILED_REPORTS, true)) {
+                    $columns[] = $column;
+                }
+            }
+        }
+        $rows = [];
+        foreach ($months as $month) {
+            $row = [];
+            foreach ($columns as $column) {
+                $row[$column] = (int) ($month[$column] ?? 0);
+            }
+            $rows[(int) ($month['month'] ?? 0)] = $row;
+        }
+        ksort($rows, SORT_NUMERIC);
+
+        return $rows;
+    }
+
+    /**
      * Doplní NULOVÉ počáteční stavy tam, kde je nula prokazatelná.
      *
      * Počáteční stav je „co se spočítalo před MyÚčtem". Když firma vede mzdy
@@ -176,6 +250,45 @@ final readonly class PayrollOpeningBalanceService
         array $employeeIds = [],
         ?int $actorUserId = null,
     ): array {
+        $seeded = [];
+        foreach ($this->provableZeroOpeningEmployeeIds($supplierId, $periodStart, $employeeIds) as $employeeId) {
+            try {
+                $this->save(
+                    $supplierId,
+                    $employeeId,
+                    (int) substr($periodStart, 0, 4),
+                    [],
+                    'Automaticky: mzdy za předchozí měsíce roku vede MyÚčto, není co převádět.',
+                    $actorUserId,
+                );
+                $seeded[] = $employeeId;
+            } catch (\Throwable) {
+                // Doplnění je pohodlí, ne podmínka. Když nevyjde (schválená
+                // mzda za rok, souběžný zápis), zůstane ruční cesta.
+                continue;
+            }
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * Zaměstnanci bez počátečních stavů roku, kterým je doplní založení běhu
+     * za dané období ({@see seedProvableZeroOpenings()}).
+     *
+     * Jediné místo pravidla: kontrola před během podle něj nehlásí chybějící
+     * úhrny, které nulou doplní sám běh. Dřív je hlásila jako blokaci a po
+     * založení běhu zmizely, takže účetní doplňovala ručně něco, co aplikace
+     * zná sama (typicky brigádník s dohodou od poloviny měsíce).
+     *
+     * @param list<int> $employeeIds prázdné = všichni zaměstnanci firmy
+     * @return list<int>
+     */
+    public function provableZeroOpeningEmployeeIds(
+        int $supplierId,
+        string $periodStart,
+        array $employeeIds = [],
+    ): array {
         if ($supplierId <= 0
             || preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1) {
             return [];
@@ -189,7 +302,7 @@ final readonly class PayrollOpeningBalanceService
         }
         $firstRun = $this->firstRunPeriod($supplierId, $year);
 
-        $seeded = [];
+        $candidates = [];
         foreach ($this->firstEmploymentStarts($supplierId, $employeeIds) as $employeeId => $firstStart) {
             // Okno „měsíce roku před obdobím, ve kterých u téhle firmy mohl mít
             // příjem" začíná pozdějším z: začátek roku a nástup.
@@ -206,27 +319,20 @@ final readonly class PayrollOpeningBalanceService
                 && ($moduleStart > $windowStart || $firstRun === null || $firstRun > substr($windowStart, 0, 8) . '01')) {
                 continue;
             }
-            if ($this->hasAnyOpening($supplierId, $employeeId, $year)) {
-                continue;
-            }
-            try {
-                $this->save(
-                    $supplierId,
-                    $employeeId,
-                    $year,
-                    [],
-                    'Automaticky: mzdy za předchozí měsíce roku vede MyÚčto, není co převádět.',
-                    $actorUserId,
-                );
-                $seeded[] = $employeeId;
-            } catch (\Throwable) {
-                // Doplnění je pohodlí, ne podmínka. Když nevyjde (schválená
-                // mzda za rok, souběžný zápis), zůstane ruční cesta.
-                continue;
-            }
+            $candidates[] = $employeeId;
         }
+        if ($candidates === []) {
+            return [];
+        }
+        $withOpening = array_fill_keys(
+            $this->accumulators->employeesWithCurrentOpening($supplierId, $year, self::KINDS, $candidates),
+            true,
+        );
 
-        return $seeded;
+        return array_values(array_filter(
+            $candidates,
+            static fn (int $employeeId): bool => !isset($withOpening[$employeeId]),
+        ));
     }
 
     private function firstRunPeriod(int $supplierId, int $year): ?string
@@ -285,17 +391,6 @@ final readonly class PayrollOpeningBalanceService
         return $result;
     }
 
-    private function hasAnyOpening(int $supplierId, int $employeeId, int $year): bool
-    {
-        foreach (self::KINDS as $kind) {
-            if ($this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind) !== null) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /**
      * Uloží počáteční stavy. Opakované uložení TÝCHŽ čísel je replay (repozitář
      * vrátí původní řádek), změna čísel je oprava navázaná na aktuální verzi.
@@ -320,7 +415,7 @@ final readonly class PayrollOpeningBalanceService
         $sourceReference = trim($sourceReference);
         $entered = $months;
         $months = self::normalizedMonths($months);
-        $lockReason = $this->lockReason($supplierId, $employeeId, $year);
+        $lockReason = $this->lockReasonForChange($supplierId, $employeeId, $year, array_values($months));
         if ($lockReason !== null) {
             throw new \DomainException($lockReason);
         }

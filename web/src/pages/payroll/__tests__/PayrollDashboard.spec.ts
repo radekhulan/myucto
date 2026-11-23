@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
   runs: vi.fn(),
   payrollSetupCheck: vi.fn(),
+  setActivation: vi.fn(),
   isSuperadmin: { value: false },
 }))
 
@@ -13,6 +14,7 @@ vi.mock('@/api/payroll', () => ({
     capabilities: m.capabilities,
     runs: m.runs,
     payrollSetupCheck: m.payrollSetupCheck,
+    setActivation: m.setActivation,
   },
 }))
 
@@ -50,7 +52,7 @@ const routerLinkStub = {
 
 const actionBarStub = {
   props: ['actions'],
-  template: '<div data-test="action-bar"><span v-for="a in actions" :key="a.key" :data-action="a.key" v-show="a.show === undefined || a.show">{{ a.label }}</span></div>',
+  template: '<div data-test="action-bar"><span v-for="a in actions" :key="a.key" :data-action="a.key" v-show="a.show === undefined || a.show" @click="a.run && a.run()">{{ a.label }}</span></div>',
 }
 
 function mountDashboard() {
@@ -240,6 +242,27 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(fresh.find('[data-test="setup-guide-stub"]').exists()).toBe(true)
     // Měsíční návod „Jak to funguje" zůstává vedle — jsou to dva různé průvodci.
     expect(fresh.find('[data-test="guide-stub"]').exists()).toBe(true)
+  })
+
+  it('během nastavení dovolí změnit první mzdové období, aktivní mzdy ne', async () => {
+    const base = await m.capabilities()
+    const active = mountDashboard()
+    await flushPromises()
+    expect(active.get<HTMLElement>('[data-action="change-start"]').element.style.display).toBe('none')
+
+    m.capabilities.mockResolvedValue({ ...base, state: { ...base.state, status: 'setup', start_period: '2026-11' } })
+    m.setActivation.mockResolvedValue({ ...base.state, status: 'setup', start_period: '2026-10', row_version: 2 })
+    const setup = mountDashboard()
+    await flushPromises()
+    expect(setup.find('[data-test="change-start"]').exists()).toBe(false)
+    await setup.get('[data-action="change-start"]').trigger('click')
+    expect(setup.get<HTMLInputElement>('[data-test="change-start-period"]').element.value).toBe('2026-11')
+    await setup.get('[data-test="change-start-period"]').setValue('2026-10')
+    await setup.get('[data-test="change-start-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.setActivation).toHaveBeenCalledWith({ enabled: true, start_period: '2026-10', row_version: 1 })
+    expect(setup.find('[data-test="change-start"]').exists()).toBe(false)
   })
 
   it('reports the payroll run state of the current month', async () => {

@@ -99,21 +99,50 @@ final class PohodaAssetPlanTest extends TestCase
     }
 
     /**
-     * Pohyb karty jiného druhu než zařazení (2) a odpisy (7, 8) - například technické
-     * zhodnocení - převod nepřebírá; karta jde ke kontrole, zařazení a odpisy ne.
+     * Pořízení (1), zařazení (2) a odpisy (7, 8) karta převezme beze změny; pohyb druhu, který
+     * převod nezná, pošle kartu ke kontrole.
      */
     public function testUnknownMovementGoesToReview(): void
     {
         $tax = [['Rok' => '2024', 'KcOdpis' => '66000', 'RelUzavreno' => '1'], ['Rok' => '2025', 'KcOdpis' => '133500', 'RelUzavreno' => '1']];
         $plain = PohodaAssetPlan::build(self::card(), $tax, self::months('2024-01', 60, 10000), 2026, '2025-12',
-            [['RelTpPoh' => '2', 'Kc' => '600000'], ['RelTpPoh' => '7', 'Kc' => '66000'], ['RelTpPoh' => '8', 'Kc' => '120000']]);
+            [['RelTpPoh' => '1', 'Kc' => '600000', 'Datum' => '2023-12-15'], ['RelTpPoh' => '2', 'Kc' => '600000'], ['RelTpPoh' => '7', 'Kc' => '66000'], ['RelTpPoh' => '8', 'Kc' => '120000']]);
         self::assertSame([], $plain['review']);
+        self::assertSame([], $plain['improvements']);
 
-        $improved = PohodaAssetPlan::build(self::card(), $tax, self::months('2024-01', 60, 10000), 2026, '2025-12',
-            [['RelTpPoh' => '2', 'Kc' => '600000'], ['RelTpPoh' => '3', 'Kc' => '50000']]);
-        self::assertSame('draft', $improved['card']['status']);
-        self::assertCount(1, $improved['review']);
-        self::assertStringContainsString('3', $improved['review'][0]);
+        $unknown = PohodaAssetPlan::build(self::card(), $tax, self::months('2024-01', 60, 10000), 2026, '2025-12',
+            [['RelTpPoh' => '2', 'Kc' => '600000'], ['RelTpPoh' => '16', 'Kc' => '50000']]);
+        self::assertSame('draft', $unknown['card']['status']);
+        self::assertSame(['pohyb majetku druhu 16 (50 000,00 Kč) převod nezná, doplňte ho na kartě'], $unknown['review']);
+    }
+
+    /**
+     * Technické zhodnocení (3): `IM.Kc` je cena zařazení zvýšená o zhodnocení. Karta převezme
+     * cenu zařazení a zhodnocení s datem; počáteční oprávky smějí pokrýt i zvýšenou cenu.
+     */
+    public function testImprovementIsTakenOverFromMovements(): void
+    {
+        $plan = PohodaAssetPlan::build(self::card(['Kc' => '650000', 'KcDanova' => '650000']), [
+            ['Rok' => '2024', 'KcOdpis' => '66000', 'RelUzavreno' => '1'],
+            ['Rok' => '2025', 'KcOdpis' => '130000', 'RelUzavreno' => '1'],
+        ], self::months('2024-01', 60, 10834), 2026, '2025-12', [
+            ['RelTpPoh' => '1', 'Kc' => '600000', 'Datum' => '2024-01-05'],
+            ['RelTpPoh' => '2', 'Kc' => '600000', 'Datum' => '2024-01-20'],
+            ['RelTpPoh' => '3', 'Kc' => '50000', 'Datum' => '2025-03-10', 'Pozn' => 'Přestavba'],
+        ]);
+
+        self::assertSame([], $plan['review']);
+        self::assertSame('in_use', $plan['card']['status']);
+        self::assertSame(600000.0, $plan['card']['input_price']);
+        self::assertSame([['completed_on' => '2025-03-10', 'amount' => 50000.0, 'description' => 'Přestavba']], $plan['improvements']);
+
+        $early = PohodaAssetPlan::build(self::card(['Kc' => '650000', 'KcDanova' => '650000']), [], self::months('2024-01', 60, 10834), 2026, '2025-12', [
+            ['RelTpPoh' => '2', 'Kc' => '600000'],
+            ['RelTpPoh' => '3', 'Kc' => '50000', 'Datum' => '2023-12-01'],
+        ]);
+        self::assertSame('draft', $early['card']['status']);
+        self::assertSame([], $early['improvements']);
+        self::assertContains('technické zhodnocení 2023-12-01 (50 000,00 Kč) předchází zařazení, převod ho nepřevzal', $early['review']);
     }
 
     /** Rok přerušení odpisů (sazba 0) se do počtu odepsaných let nepočítá - jinak by plán skončil o rok dřív. */

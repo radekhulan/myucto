@@ -10,6 +10,35 @@ import { destroyPaneRuntimes } from '@/workspace/runtimeRegistry'
 describe('WorkspacePane', () => {
   afterEach(() => destroyPaneRuntimes())
 
+  it('externí odkaz v panelu otevře mimo panel a zachová nativní kliknutí', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })
+    await router.push('/')
+    await router.isReady()
+    useWorkspaceStore().resetLayout(2, '/')
+    const wrapper = mount(WorkspacePane, {
+      props: { paneId: 'primary', index: 1, globalRouter: router, showHeader: false },
+      slots: { default: '<a href="https://public.example.test/payroll/order" rel="nofollow"><span data-test="external-label">Synthetic external order</span></a>' },
+      global: { plugins: [pinia, router, i18n] },
+    })
+    const anchor = wrapper.get('a').element as HTMLAnchorElement
+    let preventedInTarget: boolean | undefined
+    anchor.addEventListener('click', event => {
+      preventedInTarget = event.defaultPrevented
+      event.preventDefault()
+    })
+
+    wrapper.get('[data-test="external-label"]').element.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true, cancelable: true }))
+
+    expect(anchor.target).toBe('_blank')
+    expect(anchor.rel).toBe('nofollow noopener')
+    expect(preventedInTarget).toBe(false)
+    expect(router.currentRoute.value.fullPath).toBe('/')
+    wrapper.unmount()
+  })
+
+
   it('neblokuje mezerník ve vnořeném textovém poli', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -18,8 +18,8 @@ final class CashDocumentRepository
     private const COLUMNS =
         'id, supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
          partner_name, partner_ic, partner_dic, description, vat_mode, total_amount, currency_code,
-         fx_rate, amount_foreign, rule_key, counter_account_code, project_id, invoice_id, purchase_invoice_id, invoice_payment_id,
-         journal_entry_id, reversal_entry_id, status, created_by, created_at, updated_at';
+         fx_rate, amount_foreign, settled_document_amount, rule_key, counter_account_code, project_id, invoice_id, purchase_invoice_id, invoice_payment_id,
+         journal_entry_id, reversal_entry_id, status, number_series_id, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -252,6 +252,17 @@ final class CashDocumentRepository
         )->execute([$id, $supplierId]);
     }
 
+    /**
+     * Uhrazená částka v měně hrazeného dokladu u korunové úhrady cizoměnové faktury
+     * (migrace 2299). Zapisuje se při zaúčtování; null = úhrada ve shodné měně.
+     */
+    public function setSettledDocumentAmount(int $supplierId, int $id, ?float $amount): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE cash_documents SET settled_document_amount = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$amount !== null ? JournalLineAmount::decimal($amount) : null, $id, $supplierId]);
+    }
+
     public function setInvoicePaymentId(int $supplierId, int $id, ?int $paymentId): void
     {
         $this->db->pdo()->prepare(
@@ -422,6 +433,7 @@ final class CashDocumentRepository
         $r['total_amount'] = (float) $r['total_amount'];
         $r['fx_rate'] = (float) $r['fx_rate'];
         $r['amount_foreign'] = $r['amount_foreign'] !== null ? (float) $r['amount_foreign'] : null;
+        $r['settled_document_amount'] = ($r['settled_document_amount'] ?? null) !== null ? (float) $r['settled_document_amount'] : null;
         $r['project_id'] = ($r['project_id'] ?? null) !== null ? (int) $r['project_id'] : null;
         $r['invoice_id'] = $r['invoice_id'] !== null ? (int) $r['invoice_id'] : null;
         $r['purchase_invoice_id'] = $r['purchase_invoice_id'] !== null ? (int) $r['purchase_invoice_id'] : null;
@@ -429,6 +441,7 @@ final class CashDocumentRepository
         $r['journal_entry_id'] = $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null;
         $r['reversal_entry_id'] = $r['reversal_entry_id'] !== null ? (int) $r['reversal_entry_id'] : null;
         $r['created_by'] = $r['created_by'] !== null ? (int) $r['created_by'] : null;
+        $r['number_series_id'] = ($r['number_series_id'] ?? null) !== null ? (int) $r['number_series_id'] : null;
         return $r;
     }
 }

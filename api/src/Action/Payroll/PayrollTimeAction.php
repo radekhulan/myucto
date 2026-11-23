@@ -16,7 +16,9 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Time\PayrollEmploymentCalendarProvisioner;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkSummaryConflictException;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkSummaryIncompleteException;
 use MyInvoice\Service\Payroll\Time\PayrollTimeCsvImportService;
 use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
@@ -39,6 +41,8 @@ final class PayrollTimeAction
         private readonly PayrollSurchargeInputMaterializer $surchargeInputs,
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
         private readonly PayrollStandbyInputMaterializer $standbyInputs,
+        private readonly \MyInvoice\Service\Payroll\Absence\AverageEarningBatchService $averageBatch,
+        private readonly PayrollEmploymentCalendarProvisioner $calendars,
     ) {}
 
     public function month(Request $request, Response $response): Response
@@ -119,6 +123,7 @@ final class PayrollTimeAction
                         (int) ($query['limit'] ?? PayrollTimeService::HISTORY_DEFAULT_LIMIT),
                     )),
                     max(0, (int) ($query['offset'] ?? 0)),
+                    max(0, min(1_000_000, (int) ($query['manual_summary_offset'] ?? 0))),
                 ),
                 // Historie jde přes víc měsíců naráz, takže se posílá jen
                 // hranice a označení si dělá výpis řádek po řádku sám.
@@ -160,10 +165,14 @@ final class PayrollTimeAction
             return $error;
         }
         try {
+            $input = $this->input($request);
+            if (($input['from_terms'] ?? false) === true) {
+                return $this->calendarFromTerms($request, $response, $args, $input);
+            }
             $calendar = $this->time->createCalendar(
                 $this->currentSupplierId($request),
                 $this->routeId($args, 'employmentId'),
-                $this->input($request),
+                $input,
                 $this->userId($request),
             );
             $this->audit(
@@ -195,6 +204,65 @@ final class PayrollTimeAction
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);
         }
+    }
+
+    /**
+     * Pracovní kalendář podle týdenní pracovní doby z podmínek vztahu, od
+     * prvního dne vztahu v měsíci.
+     *
+     * Tlačítko „Založit pracovní kalendář" dřív zakládalo pondělí až pátek po
+     * osmi hodinách od 1. dne měsíce bez ohledu na úvazek, takže zaměstnání
+     * malého rozsahu dostalo fond plného úvazku. Pracovní poměr s nástupem
+     * uprostřed měsíce bez kalendáře přitom nešel schválit vůbec (dny od
+     * nástupu nic nepokrývalo). Kalendář se skládá tímtéž pravidlem jako při
+     * importu docházky ({@see PayrollEmploymentCalendarProvisioner}).
+     *
+     * @param array<string,string> $args
+     * @param array<string,mixed> $input
+     */
+    private function calendarFromTerms(Request $request, Response $response, array $args, array $input): Response
+    {
+        $period = $input['period'] ?? null;
+        if (!is_string($period) || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+            throw new \InvalidArgumentException('period musí být měsíc ve tvaru RRRR-MM.');
+        }
+        $employmentId = $this->routeId($args, 'employmentId');
+        $result = $this->calendars->ensureForPeriod(
+            $this->currentSupplierId($request),
+            $employmentId,
+            $period . '-01',
+            $this->userId($request),
+        );
+        if ($result['issue'] !== null) {
+            return Json::error(
+                $response,
+                'payroll_calendar_not_created',
+                PayrollEmploymentCalendarProvisioner::issueMessage($result['issue']),
+                422,
+            );
+        }
+        if ($result['skipped'] !== null) {
+            return Json::error(
+                $response,
+                'payroll_calendar_not_needed',
+                'Dohody a vztahy bez fondu pracovní doby kalendář nepotřebují; fond se odvodí z odpracované doby.',
+                422,
+            );
+        }
+        if ($result['created']) {
+            $this->audit(
+                $request,
+                'payroll.time.calendar_version_created',
+                'payroll_work_calendar',
+                (int) $result['calendar_id'],
+                ['employment_id' => $employmentId, 'from_terms' => true],
+            );
+        }
+
+        return Json::ok($response, [
+            'calendar' => ['id' => $result['calendar_id'], 'employment_id' => $employmentId],
+            'created' => $result['created'],
+        ], $result['created'] ? 201 : 200);
     }
 
     public function shift(Request $request, Response $response): Response
@@ -703,6 +771,82 @@ final class PayrollTimeAction
     }
 
     /** @param array<string,string> $args */
+    public function saveManualSummary(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $result = $this->time->saveManualSummary($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            $this->auditMonth($request, 'payroll.time.manual_summary_saved', $result['month']);
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    public function restoreEntries(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $result = $this->time->restoreEntries($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            if ($result['changed']) {
+                $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            }
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /**
+     * „Počítat ze směn" — zruší neschválené vstupy z importu docházky a přepne
+     * zdroj měsíce na docházku. Ruší mzdové vstupy, proto kromě zápisu docházky
+     * vyžaduje i právo na zápis mzdových vstupů. Varianta `keep_import_inputs`
+     * („Zapisovat směny, částky ponechat") vstupy nemění, stačí jí docházka.
+     *
+     * @param array<string,string> $args
+     */
+    public function switchToEntries(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        $input = $this->input($request);
+        if (($input['keep_import_inputs'] ?? false) !== true
+            && ($error = $this->authorize($request, $response, 'payroll.inputs.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->time->switchImportToEntries($supplierId, $this->routePeriod($args), $input, $this->userId($request));
+            if ($result['changed']) {
+                $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            }
+            $result['probable_average'] = $this->averageBatch->ensureProbableFromRateAfterTimeChange(
+                $supplierId,
+                PayrollTimeValue::int($result['month']['employment_id'] ?? null, 'employment_id'),
+                PayrollTimeValue::string($result['month']['period_start'] ?? null, 'period_start'),
+                $this->userId($request),
+            );
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\MyInvoice\Repository\Payroll\PayrollTimeImportInputsApprovedException $e) {
+            return Json::error($response, 'import_inputs_approved', $e->getMessage(), 409, ['input_ids' => $e->inputIds]);
+        } catch (\MyInvoice\Repository\Payroll\PayrollInputCancellationException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (\MyInvoice\Repository\Payroll\PayrollInputConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
     public function approve(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize(
@@ -740,7 +884,7 @@ final class PayrollTimeAction
                 // měsíc s prací ve svátek bez sjednané zásady nebo s prací ve
                 // ztíženém prostředí bez počtu vlivů NENÍ schválitelná evidence,
                 // protože se z ní nedá spočítat mzda.
-                $surcharges = $this->surchargeInputs->materialize(
+                $surcharges = ($month['work_source'] ?? 'entries') === 'manual_summary' ? ['skipped_reason' => 'manual_summary'] : $this->surchargeInputs->materialize(
                     $supplierId,
                     PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
                     PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
@@ -748,7 +892,7 @@ final class PayrollTimeAction
                 );
                 // Odměna za pracovní pohotovost (§ 140 ZP) ze stejného důvodu
                 // a ve stejné transakci jako příplatky.
-                $standby = $this->standbyInputs->materialize(
+                $standby = ($month['work_source'] ?? 'entries') === 'manual_summary' ? ['skipped_reason' => 'manual_summary'] : $this->standbyInputs->materialize(
                     $supplierId,
                     PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
                     PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
@@ -764,10 +908,19 @@ final class PayrollTimeAction
                 throw $e;
             }
             $this->auditMonth($request, 'payroll.time.month_approved', $month);
+            // Až po commitu a bez vlivu na odpověď: chybí-li hodinovému vztahu
+            // průměr za čtvrtletí, založí se pravděpodobný výdělek ze sazby.
+            $probableAverage = $this->averageBatch->ensureProbableFromRateAfterTimeChange(
+                $supplierId,
+                PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
+                PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
+                $this->userId($request),
+            );
             return Json::ok($response, [
                 'month' => $month,
                 'surcharges' => $surcharges,
                 'standby' => $standby,
+                'probable_average' => $probableAverage,
             ]);
         } catch (PayrollSurchargeException $e) {
             return Json::error($response, $e->reason, $e->getMessage(), 409);
@@ -782,9 +935,58 @@ final class PayrollTimeAction
             );
         } catch (PayrollTimeConflictException $e) {
             return $this->conflict($response, $e);
+        } catch (PayrollJmhzWorkSummaryIncompleteException $e) {
+            return $this->incompleteSummary($request, $response, $args, $e);
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);
         }
+    }
+
+    /**
+     * Neúplný pracovní souhrn: věta jmenuje vztah, chybějící zdroj a krok,
+     * odkaz otevře docházku vztahu v měsíci. Hromadné schválení posílá
+     * desítky vztahů a obecná hláška nešla přiřadit k žádnému z nich.
+     *
+     * @param array<string,string> $args
+     */
+    private function incompleteSummary(
+        Request $request,
+        Response $response,
+        array $args,
+        PayrollJmhzWorkSummaryIncompleteException $e,
+    ): Response {
+        $employmentId = (int) ($this->input($request)['employment_id'] ?? 0);
+        $period = (string) ($args['period'] ?? '');
+        $label = null;
+        if ($employmentId > 0) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee.full_name, employment.code
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.supplier_id = employment.supplier_id
+                    AND employee.id = employment.employee_id
+                  WHERE employment.supplier_id = ? AND employment.id = ?'
+            );
+            $stmt->execute([$this->currentSupplierId($request), $employmentId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                $label = trim((string) $row['full_name']) . ' (' . trim((string) $row['code']) . ')';
+            }
+        }
+
+        return Json::error(
+            $response,
+            'payroll_time_summary_incomplete',
+            ($label === null ? '' : $label . ': ') . $e->getMessage(),
+            422,
+            [
+                'employment_id' => $employmentId > 0 ? $employmentId : null,
+                'issue_codes' => $e->codes(),
+                'remediation_path' => $employmentId > 0
+                    ? "/payroll/time?employment={$employmentId}&period={$period}"
+                    : null,
+            ],
+        );
     }
 
     /** @param array<string,string> $args */
@@ -821,7 +1023,7 @@ final class PayrollTimeAction
         AccessLevel $level,
         bool $allowBearer = false,
     ): ?Response {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Docházka je dostupná pouze z přihlášené relace.');
         }
         $error = null;
@@ -920,7 +1122,9 @@ final class PayrollTimeAction
                     $month['row_version'] ?? null,
                     'row_version',
                 ),
-                'reason_recorded' => $action === 'payroll.time.month_reopened',
+                'reason_recorded' => in_array($action, [
+                    'payroll.time.month_reopened', 'payroll.time.manual_summary_saved', 'payroll.time.source_changed',
+                ], true),
             ],
         );
     }

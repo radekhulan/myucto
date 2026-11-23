@@ -21,11 +21,16 @@ import {
   type EetSettings,
   type EetUnit,
   type EetUnitKind,
+  type EetVehicleKind,
 } from '@/api/eet'
+import { downloadApiFile } from '@/utils/downloadFile'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { authApi } from '@/api/auth'
 import { apiErrorMessage } from '@/api/errors'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { takeSsoStepUpReturn } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 
@@ -35,7 +40,10 @@ const toast = useToast()
 
 const FS_URL = 'https://www.mojedane.cz'
 const EET_START_URL = 'https://eet.gov.cz/cs/zacinam-s-eet/jak-zacit-evidovat'
-const UNIT_KINDS: EetUnitKind[] = ['premises', 'online', 'vehicle', 'mobile', 'other']
+const UNIT_KINDS: EetUnitKind[] = ['premises', 'mobile', 'vending', 'online', 'vehicle', 'taxpayer', 'other']
+const VEHICLE_KINDS: EetVehicleKind[] = ['A', 'N', 'B', 'M', 'V', 'T', 'P', 'L', 'J']
+/** Druhy jednotek, jejichž lokalizací je adresa (S, A, P v DIS+). */
+const ADDRESS_KINDS: EetUnitKind[] = ['premises', 'vending', 'taxpayer']
 const REGIMES: EetRegime[] = ['standard', 'exempt', 'eet_off']
 
 const canWrite = computed(() => auth.canWrite('eet.settings'))
@@ -107,7 +115,11 @@ async function load(silent = false) {
     loading.value = false
   }
 }
-onMounted(() => { void load() })
+onMounted(async () => {
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
+  await load()
+  if (ssoReturn) resumeSsoStepUp(ssoReturn)
+})
 onActivated(() => { if (settings.value) void load(true) })
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -206,26 +218,49 @@ async function runConfirm() {
 }
 
 // ---- Jednotky ----
-interface UnitForm { id: number | null; unit_number: string; name: string; kind: EetUnitKind; valid_from: string; valid_to: string; notified_to_fs: boolean }
+const UNIT_TEXT_FIELDS = [
+  'nace_code', 'activity_note', 'ruian_code', 'street', 'house_number', 'orientation_number',
+  'municipality', 'municipality_part', 'postal_code', 'location_text', 'vehicle_kind_note',
+] as const
+type UnitTextField = typeof UNIT_TEXT_FIELDS[number]
+interface UnitForm extends Record<UnitTextField, string> {
+  id: number | null; unit_number: string; name: string; kind: EetUnitKind; valid_from: string; valid_to: string
+  notified_to_fs: boolean; records_sales: boolean; indirect_representation: boolean; vehicle_kind: EetVehicleKind | ''
+}
 const unitForm = ref<UnitForm | null>(null)
 const unitBusy = ref(false)
+const unitHasAddress = computed(() => !!unitForm.value && ADDRESS_KINDS.includes(unitForm.value.kind))
 function openUnit(u?: EetUnit) {
+  const text = Object.fromEntries(UNIT_TEXT_FIELDS.map(f => [f, u?.[f] == null ? '' : String(u[f])])) as Record<UnitTextField, string>
   unitForm.value = u
-    ? { id: u.id, unit_number: String(u.unit_number), name: u.name, kind: u.kind, valid_from: u.valid_from, valid_to: u.valid_to ?? '', notified_to_fs: u.notified_to_fs }
-    : { id: null, unit_number: '', name: '', kind: 'premises', valid_from: today(), valid_to: '', notified_to_fs: true }
+    ? {
+        ...text, id: u.id, unit_number: u.unit_number === null ? '' : String(u.unit_number), name: u.name, kind: u.kind,
+        valid_from: u.valid_from, valid_to: u.valid_to ?? '', notified_to_fs: u.notified_to_fs,
+        records_sales: u.records_sales, indirect_representation: u.indirect_representation, vehicle_kind: u.vehicle_kind ?? '',
+      }
+    : {
+        ...text, id: null, unit_number: '', name: '', kind: 'premises', valid_from: today(), valid_to: '',
+        notified_to_fs: true, records_sales: true, indirect_representation: false, vehicle_kind: '',
+      }
 }
 async function saveUnit() {
   const f = unitForm.value
   if (!f) return
   unitBusy.value = true
   try {
+    const text = Object.fromEntries(UNIT_TEXT_FIELDS.map(k => [k, f[k].trim() === '' ? null : f[k].trim()]))
     const payload = {
-      unit_number: Number(f.unit_number),
+      ...text,
+      ruian_code: text.ruian_code === null ? null : Number(text.ruian_code),
+      unit_number: f.unit_number.trim() === '' ? null : Number(f.unit_number),
       name: f.name.trim(),
       kind: f.kind,
       valid_from: f.valid_from,
       valid_to: f.valid_to === '' ? null : f.valid_to,
       notified_to_fs: f.notified_to_fs,
+      records_sales: f.records_sales,
+      indirect_representation: f.indirect_representation,
+      vehicle_kind: f.vehicle_kind === '' ? null : f.vehicle_kind,
     }
     if (f.id === null) await eetApi.createUnit(payload)
     else await eetApi.updateUnit(f.id, payload)
@@ -241,7 +276,7 @@ async function saveUnit() {
 function endUnit(u: EetUnit) {
   askConfirm({
     title: t('eet.units.end_title'),
-    message: t('eet.units.end_confirm', { number: u.unit_number, name: u.name }),
+    message: t('eet.units.end_confirm', { number: u.unit_number ?? t('eet.units.no_number'), name: u.name }),
     confirm: t('eet.units.end'),
     variant: 'danger',
     run: async () => {
@@ -256,6 +291,20 @@ function endUnit(u: EetUnit) {
   })
 }
 function unitEnded(u: EetUnit): boolean { return !!u.valid_to && u.valid_to < today() }
+/** Jednotky s číslem z DIS+ — jen ty smějí dostat pokladní zařízení. */
+const numberedUnits = computed(() => units.value.filter(u => u.unit_number !== null))
+const unitsAwaitingDis = computed(() => validUnits.value.filter(u => u.unit_number === null).length)
+const exportBusy = ref(false)
+async function exportForDis(all: boolean) {
+  exportBusy.value = true
+  try {
+    await downloadApiFile(`/eet/units/dis-import${all ? '?all=1' : ''}`, 'eet-jednotky-dis.csv')
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('eet.units.export_failed')))
+  } finally {
+    exportBusy.value = false
+  }
+}
 
 // ---- Zařízení ----
 interface DeviceForm {
@@ -271,7 +320,7 @@ function openDevice(d?: EetDevice) {
         id: d.id, unit_id: d.unit_id, code: d.code, name: d.name ?? '', cash_register_id: d.cash_register_id,
         delegation: d.delegation ?? 'none', delegating_eic: d.delegating_eic ?? '', active: d.active,
       }
-    : { id: null, unit_id: validUnits.value[0]?.id ?? null, code: '', name: '', cash_register_id: null, delegation: 'none', delegating_eic: '', active: true }
+    : { id: null, unit_id: numberedUnits.value[0]?.id ?? null, code: '', name: '', cash_register_id: null, delegation: 'none', delegating_eic: '', active: true }
 }
 // Situace 4 vyžaduje EIČ pověřujícího, situace 5 ho má nepovinně, bez pověření se neuvádí.
 const deviceDelegationIncomplete = computed(() =>
@@ -349,8 +398,33 @@ const passkeySupported = isWebAuthnAvailable()
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true || (auth.user?.passkey_count ?? 0) > 0)
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
+
+// Ověření přes Microsoft: po návratu se znovu otevře nahrání (soubor a heslo
+// k němu se zadají znovu), nebo deaktivace téhož certifikátu.
+const SSO_SCOPE = 'eet-certificates'
+const ssoProof = ref('')
+const ssoVerified = computed(() => stepPasskeyToken.value !== '' && stepPasskeyToken.value === ssoProof.value)
+function resumeSsoStepUp(returned: { token: string; detail: string }) {
+  if (returned.detail === 'upload') {
+    openCertUpload()
+  } else if (returned.detail.startsWith('deactivate:')) {
+    const id = Number(returned.detail.slice('deactivate:'.length))
+    const target = certificates.value.find(c => c.id === id)
+    if (!target) return
+    deactivateCertificate(target)
+  } else {
+    return
+  }
+  stepPasskeyToken.value = returned.token
+  ssoProof.value = returned.token
+  toast.info(t('sso.step_up_done'))
+}
 
 const stepUpMissing = computed(() => {
+  const enforced = ssoEnforcement.enforcedStepUpMissing(stepPasskeyToken.value, ssoVerified.value, stepTotp.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
   if (stepPasskeyToken.value) return ''
   if (!stepPassword.value) return t('eet.certificates.step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(stepTotp.value.trim())) return t('eet.certificates.step_up_totp_missing')
@@ -403,11 +477,11 @@ async function uploadCertificate() {
       password: certForm.value.password,
       environment: certForm.value.environment,
       label: certForm.value.label.trim() || undefined,
-      proof: {
+      proof: await ssoEnforcement.reauthProof('epo.certificate', {
         password: stepPassword.value || undefined,
         totp_code: stepTotp.value.trim() || undefined,
         step_up_token: stepPasskeyToken.value || undefined,
-      },
+      }),
     })
     toast.success(t('eet.certificates.uploaded'))
     closeCertUpload()
@@ -438,11 +512,11 @@ async function runDeactivate() {
   }
   certBusy.value = true
   try {
-    await eetApi.deactivateCertificate(c.id, {
+    await eetApi.deactivateCertificate(c.id, await ssoEnforcement.reauthProof('epo.certificate', {
       password: stepPassword.value || undefined,
       totp_code: stepTotp.value.trim() || undefined,
       step_up_token: stepPasskeyToken.value || undefined,
-    })
+    }))
     toast.success(t('eet.certificates.deactivated'))
     closeDeactivate()
     await load(true)
@@ -640,10 +714,22 @@ const th = 'px-3 py-2 text-left font-medium'
             <h2 class="text-base font-semibold">{{ t('eet.units.title') }}</h2>
             <p class="text-xs text-neutral-500">{{ t('eet.units.hint') }}</p>
           </div>
-          <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="openUnit()">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-            {{ t('eet.units.add') }}
-          </button>
+          <div class="flex flex-wrap gap-2">
+            <button v-if="unitsAwaitingDis > 0" type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportBusy"
+              data-test="eet-units-export" @click="exportForDis(false)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              {{ t('eet.units.export_dis') }}
+            </button>
+            <button v-else-if="validUnits.length > 0" type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="exportBusy"
+              data-test="eet-units-export-all" @click="exportForDis(true)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              {{ t('eet.units.export_dis_all') }}
+            </button>
+            <button v-if="canWrite" type="button" :class="[btnFilled('primary'), 'whitespace-nowrap']" @click="openUnit()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('eet.units.add') }}
+            </button>
+          </div>
         </div>
         <EmptyState v-if="units.length === 0" dense icon="warehouse" :title="t('eet.units.empty')" :message="t('eet.units.empty_hint')" />
         <div v-else class="rounded-lg border border-neutral-200 overflow-hidden">
@@ -661,7 +747,10 @@ const th = 'px-3 py-2 text-left font-medium'
               </thead>
               <tbody :class="divider">
                 <tr v-for="u in units" :key="u.id">
-                  <td class="px-3 py-2 font-mono whitespace-nowrap">{{ u.unit_number }}</td>
+                  <td class="px-3 py-2 font-mono whitespace-nowrap">
+                    <span v-if="u.unit_number !== null">{{ u.unit_number }}</span>
+                    <span v-else :class="[BADGE, BADGE_CLASS.warn, 'font-sans']">{{ t('eet.units.no_number') }}</span>
+                  </td>
                   <td class="px-3 py-2">{{ u.name }}</td>
                   <td class="px-3 py-2 whitespace-nowrap">{{ t(`eet.units.kind.${u.kind}`) }}</td>
                   <td class="px-3 py-2 text-xs text-neutral-600 whitespace-nowrap">
@@ -690,7 +779,7 @@ const th = 'px-3 py-2 text-left font-medium'
           <div class="md:hidden" :class="divider">
             <div v-for="u in units" :key="`m-${u.id}`" class="px-4 py-3 space-y-2">
               <div class="flex items-center justify-between gap-2">
-                <span class="font-medium">{{ u.unit_number }} - {{ u.name }}</span>
+                <span class="font-medium">{{ u.unit_number ?? t('eet.units.no_number') }} - {{ u.name }}</span>
                 <span :class="[BADGE, unitEnded(u) ? BADGE_CLASS.off : BADGE_CLASS.ok]">{{ t(unitEnded(u) ? 'eet.units.status_ended' : 'eet.units.status_valid') }}</span>
               </div>
               <div class="text-xs text-neutral-600">
@@ -718,8 +807,8 @@ const th = 'px-3 py-2 text-left font-medium'
             <h2 class="text-base font-semibold">{{ t('eet.devices.title') }}</h2>
             <p class="text-xs text-neutral-500">{{ t('eet.devices.hint') }}</p>
           </div>
-          <button v-if="canWrite" type="button" :class="btnFilled('primary')" :disabled="units.length === 0"
-            :title="units.length === 0 ? t('eet.devices.need_unit') : undefined" @click="openDevice()">
+          <button v-if="canWrite" type="button" :class="btnFilled('primary')" :disabled="numberedUnits.length === 0"
+            :title="numberedUnits.length === 0 ? t('eet.devices.need_unit') : undefined" @click="openDevice()">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('eet.devices.add') }}
           </button>
@@ -959,11 +1048,11 @@ const th = 'px-3 py-2 text-left font-medium'
     </template>
 
     <!-- Dialog jednotky -->
-    <Modal v-if="unitForm" :title="unitForm.id === null ? t('eet.units.add') : t('eet.units.edit')" width-class="max-w-xl" @close="unitForm = null">
+    <Modal v-if="unitForm" :title="unitForm.id === null ? t('eet.units.add') : t('eet.units.edit')" width-class="max-w-2xl" @close="unitForm = null">
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label :class="formLabel">
           <span>{{ t('eet.units.number') }}</span>
-          <input v-model="unitForm.unit_number" type="text" inputmode="numeric" maxlength="6" :class="formInput" />
+          <input v-model="unitForm.unit_number" type="text" inputmode="numeric" maxlength="9" :class="formInput" />
           <span class="text-xs text-neutral-500">{{ t('eet.units.number_hint') }}</span>
         </label>
         <label :class="formLabel">
@@ -989,10 +1078,86 @@ const th = 'px-3 py-2 text-left font-medium'
           {{ t('eet.units.notified') }}
         </label>
       </div>
+      <div class="mt-4 border-t border-neutral-200 pt-3" data-test="eet-unit-dis">
+        <h3 class="text-sm font-semibold">{{ t('eet.units.dis_section') }}</h3>
+        <p class="mb-3 text-xs text-neutral-500">{{ t('eet.units.dis_hint') }}</p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label :class="formLabel">
+            <span>{{ t('eet.units.nace_code') }}</span>
+            <input v-model="unitForm.nace_code" type="text" inputmode="numeric" maxlength="6" :class="formInput" />
+            <span class="text-xs text-neutral-500">{{ t('eet.units.nace_hint') }}</span>
+          </label>
+          <label :class="formLabel">
+            <span>{{ t('eet.units.activity_note') }}</span>
+            <input v-model="unitForm.activity_note" type="text" maxlength="255" :class="formInput" />
+          </label>
+          <template v-if="unitHasAddress">
+            <label :class="[formLabel, 'sm:col-span-2']">
+              <span>{{ t('eet.units.ruian_code') }}</span>
+              <input v-model="unitForm.ruian_code" type="text" inputmode="numeric" maxlength="9" :class="formInput" />
+            </label>
+            <template v-if="unitForm.ruian_code.trim() === ''">
+              <label :class="formLabel">
+                <span>{{ t('eet.units.street') }}</span>
+                <input v-model="unitForm.street" type="text" maxlength="32" :class="formInput" />
+              </label>
+              <div class="grid grid-cols-2 gap-3">
+                <label :class="formLabel">
+                  <span>{{ t('eet.units.house_number') }}</span>
+                  <input v-model="unitForm.house_number" type="text" maxlength="10" :class="formInput" />
+                </label>
+                <label :class="formLabel">
+                  <span>{{ t('eet.units.orientation_number') }}</span>
+                  <input v-model="unitForm.orientation_number" type="text" maxlength="10" :class="formInput" />
+                </label>
+              </div>
+              <label :class="formLabel">
+                <span>{{ t('eet.units.municipality') }}</span>
+                <input v-model="unitForm.municipality" type="text" maxlength="48" :class="formInput" />
+              </label>
+              <div class="grid grid-cols-2 gap-3">
+                <label :class="formLabel">
+                  <span>{{ t('eet.units.municipality_part') }}</span>
+                  <input v-model="unitForm.municipality_part" type="text" maxlength="48" :class="formInput" />
+                </label>
+                <label :class="formLabel">
+                  <span>{{ t('eet.units.postal_code') }}</span>
+                  <input v-model="unitForm.postal_code" type="text" inputmode="numeric" maxlength="6" :class="formInput" />
+                </label>
+              </div>
+            </template>
+          </template>
+          <template v-if="unitForm.kind === 'vehicle'">
+            <label :class="formLabel">
+              <span>{{ t('eet.units.vehicle_kind') }}</span>
+              <select v-model="unitForm.vehicle_kind" :class="formInput">
+                <option value="">-</option>
+                <option v-for="k in VEHICLE_KINDS" :key="k" :value="k">{{ t(`eet.units.vehicle_kinds.${k}`) }}</option>
+              </select>
+            </label>
+            <label v-if="unitForm.vehicle_kind === 'J'" :class="formLabel">
+              <span>{{ t('eet.units.vehicle_kind_note') }}</span>
+              <input v-model="unitForm.vehicle_kind_note" type="text" maxlength="150" :class="formInput" />
+            </label>
+          </template>
+          <label :class="[formLabel, 'sm:col-span-2']">
+            <span>{{ t(`eet.units.location_text.${unitForm.kind}`) }}</span>
+            <input v-model="unitForm.location_text" type="text" maxlength="255" :class="formInput" />
+          </label>
+          <label class="flex items-center gap-2 text-sm sm:col-span-2">
+            <ToggleSwitch v-model="unitForm.records_sales" :label="t('eet.units.records_sales')" />
+            {{ t('eet.units.records_sales') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm sm:col-span-2">
+            <ToggleSwitch v-model="unitForm.indirect_representation" :label="t('eet.units.indirect_representation')" />
+            {{ t('eet.units.indirect_representation') }}
+          </label>
+        </div>
+      </div>
       <template #footer>
         <div class="flex flex-wrap justify-end gap-2 px-5 py-3">
           <button type="button" :class="btnOutline('neutral')" @click="unitForm = null">{{ t('common.cancel') }}</button>
-          <button type="button" :class="btnFilled('primary')" :disabled="unitBusy || !unitForm.unit_number || !unitForm.name.trim() || !unitForm.valid_from" @click="saveUnit">
+          <button type="button" :class="btnFilled('primary')" :disabled="unitBusy || !unitForm.name.trim() || !unitForm.valid_from" @click="saveUnit">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('common.save') }}
           </button>
@@ -1011,7 +1176,7 @@ const th = 'px-3 py-2 text-left font-medium'
         <label :class="formLabel">
           <span>{{ t('eet.devices.unit') }}</span>
           <select v-model="deviceForm.unit_id" :class="formInput">
-            <option v-for="u in units" :key="u.id" :value="u.id">{{ u.unit_number }} - {{ u.name }}</option>
+            <option v-for="u in numberedUnits" :key="u.id" :value="u.id">{{ u.unit_number }} - {{ u.name }}</option>
           </select>
         </label>
         <label :class="[formLabel, 'sm:col-span-2']">
@@ -1089,28 +1254,32 @@ const th = 'px-3 py-2 text-left font-medium'
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                 {{ passkeyBusy ? t('common.loading') : t('eet.certificates.verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:upload`"
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
+            @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
               <input v-model="stepPassword" type="password" autocomplete="current-password" :class="[formInput, 'mt-1']" />
             </label>
-            <label v-if="hasTotp" class="text-xs text-neutral-600">
+            <label v-if="hasTotp && localFactorsAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_totp') }}
               <input v-model="stepTotp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" :class="[formInput, 'mt-1']" />
             </label>
           </template>
-          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
+          <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
         </div>
       </div>
       <template #footer>
@@ -1131,28 +1300,32 @@ const th = 'px-3 py-2 text-left font-medium'
           {{ t('eet.certificates.deactivate_confirm', { eic: deactivateTarget.eic, env: t(`eet.environment.${deactivateTarget.environment}`) }) }}
         </p>
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                 {{ passkeyBusy ? t('common.loading') : t('eet.certificates.verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:deactivate:${deactivateTarget.id}`"
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
+            @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
               <input v-model="stepPassword" type="password" autocomplete="current-password" :class="[formInput, 'mt-1']" />
             </label>
-            <label v-if="hasTotp" class="text-xs text-neutral-600">
+            <label v-if="hasTotp && localFactorsAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_totp') }}
               <input v-model="stepTotp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" :class="[formInput, 'mt-1']" />
             </label>
           </template>
-          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
+          <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
         </div>
       </div>
       <template #footer>

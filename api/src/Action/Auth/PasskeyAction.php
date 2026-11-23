@@ -54,6 +54,8 @@ final class PasskeyAction
         private readonly PasskeySessionTransitionService $sessionTransitions,
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly MfaRecoveryCodeService $recoveryCodes,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcFlowStore $oidcFlows,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -106,7 +108,20 @@ final class PasskeyAction
         $hasStrongFactor = (int) $user['totp_enabled'] === 1
             || $this->credentials->countActiveForUser($context['user_id']) > 0;
         $requireNoActivePasskey = false;
-        if ($hasStrongFactor) {
+        // Účet bez silného faktoru se prokazuje heslem, nebo proofem z přihlášení
+        // u poskytovatele identity (uživatel přihlášený přes Entra heslo nemá).
+        // Při vynuceném poskytovateli identity se heslo nepoužívá vůbec. První klíč
+        // si pak účet bez faktoru zřídí jen v setup sezení, které právě vzniklo
+        // přihlášením u poskytovatele (Entra jako první faktor + povinné MFA).
+        $proofSupplied = trim((string) ($body['step_up_token'] ?? '')) !== '';
+        $session = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_SESSION, []);
+        $providerSetup = !$hasStrongFactor && !$proofSupplied
+            && $context['assurance_level'] === 'setup'
+            && $this->loginPolicy->isEnforced()
+            && $this->loginPolicy->authMethodAllowed(isset($session['auth_method']) ? (string) $session['auth_method'] : null);
+        if ($providerSetup) {
+            $requireNoActivePasskey = true;
+        } elseif ($hasStrongFactor || $proofSupplied || $this->loginPolicy->isEnforced()) {
             try {
                 $proof = $this->stepUp->consume(
                     trim((string) ($body['step_up_token'] ?? '')),
@@ -292,6 +307,27 @@ final class PasskeyAction
         $credentialPayload = $body['credential'] ?? null;
         $credentialPayload = is_array($credentialPayload) ? $credentialPayload : [];
         $flowToken = trim((string) ($body['flow_token'] ?? ''));
+        $ssoTicketRaw = trim((string) ($body['sso_ticket'] ?? ''));
+        $ssoTicket = null;
+        $binding = null;
+        if ($ssoTicketRaw !== '') {
+            $bindingName = \MyInvoice\Service\Auth\Oidc\OidcFlowStore::bindingCookieName($this->sessionCookies->name());
+            $binding = $request->getCookieParams()[$bindingName] ?? null;
+            $ssoTicket = $this->oidcFlows->peekTicket($ssoTicketRaw, is_string($binding) ? $binding : null);
+            if ($ssoTicket === null) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
+        }
+        $requiredProvider = $this->loginPolicy->requiredProvider();
+        if ($requiredProvider !== null && ($ssoTicket['provider'] ?? null) !== $requiredProvider) {
+            return Json::error(
+                $response,
+                'sso_required',
+                'Přihlaste se přes poskytovatele identity organizace.',
+                403,
+                ['provider' => $requiredProvider],
+            );
+        }
         $loginContext = $this->ceremonies->peekLoginContext($flowToken);
         $discoverable = ($loginContext['purpose'] ?? null)
             === WebAuthnCeremonyStore::PURPOSE_DISCOVERABLE_LOGIN;
@@ -309,6 +345,8 @@ final class PasskeyAction
                     $this->clientIp($request),
                     $request->getHeaderLine('User-Agent'),
                     $candidateUserId,
+                    $ssoTicketRaw !== '' ? $ssoTicketRaw : null,
+                    is_string($binding) ? $binding : null,
                 )
                 : $this->sessionTransitions->completeLogin(
                     $flowToken,
@@ -316,9 +354,35 @@ final class PasskeyAction
                     $this->clientIp($request),
                     $request->getHeaderLine('User-Agent'),
                     (int) ($candidateUserId ?? 0),
+                    $ssoTicketRaw !== '' ? $ssoTicketRaw : null,
+                    is_string($binding) ? $binding : null,
                 );
             $verifiedUserId = (int) $completed['user']['id'];
+            if ($ssoTicket !== null && $ssoTicket['user_id'] !== $verifiedUserId) {
+                $this->sessions->destroy((string) $completed['session']['token']);
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
             $this->bruteForce->recordPasskeySuccess($verifiedUserId);
+            // Passkey bez hesla je taky místní přihlášení a nesmí obejít instalaci,
+            // která vyžaduje poskytovatele identity. Projde jen jako druhý faktor
+            // po přihlášení u poskytovatele. Sezení už vzniklo v transakci
+            // ceremonie, proto se hned zruší.
+            $requiredProvider = $this->loginPolicy->requiredProvider();
+            if ($requiredProvider !== null
+                && $completed['auth_context']->authMethod !== SessionAuthContext::EXTERNAL_PREFIX . $requiredProvider
+            ) {
+                $this->sessions->destroy((string) $completed['session']['token']);
+                $this->logger->log('auth.login_failed', $verifiedUserId, 'user', $verifiedUserId, [
+                    'reason' => 'sso_required', 'provider' => $requiredProvider, 'login_method' => 'passkey',
+                ], $this->clientIp($request), $request->getHeaderLine('User-Agent'));
+                return Json::error(
+                    $response,
+                    'sso_required',
+                    'Váš účet se přihlašuje přes poskytovatele identity organizace.',
+                    403,
+                    ['provider' => $requiredProvider],
+                );
+            }
             return $this->loginIssuer->issuePrepared(
                 $response,
                 $completed['user'],

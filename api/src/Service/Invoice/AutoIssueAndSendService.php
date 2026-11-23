@@ -48,6 +48,8 @@ final class AutoIssueAndSendService
         private readonly DocumentAutoPoster $autoPoster,
         private readonly ClientRepository $clients,
         private readonly InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly InvoiceIssueTaxGate $taxGate,
     ) {}
 
     /**
@@ -69,16 +71,24 @@ final class AutoIssueAndSendService
         $issued = false;
         // 1. Vystavit pokud draft
         if ($invoice['status'] === 'draft') {
+            $this->billing->assertCurrent($invoiceId, (int) $invoice['supplier_id']);
+            if (InvoiceAmountPolicy::hasMissingManualPrice((array) ($invoice['items'] ?? []))) {
+                throw new \DomainException(InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE);
+            }
             if (
                 InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                     (string) ($invoice['invoice_type'] ?? 'invoice'),
-                    $invoice['parent_invoice_id'] ?? null,
+                    InvoiceAmountPolicy::advanceLinkId($invoice),
                 )
                 && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
                 && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
                     && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
             ) {
                 throw new \DomainException(InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE);
+            }
+            // Drobný zákazník bez adresy (#310): stejná brána jako vystavení z editoru.
+            if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+                throw new \DomainException($rejected['message']);
             }
             // VS + snapshoty — pokud už nebyly alokované předem (request-approval flow),
             // alokuj teď.
@@ -90,6 +100,9 @@ final class AutoIssueAndSendService
             if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
             if ($ownTransaction) $pdo->beginTransaction();
             try {
+                $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+                $billingLock->execute([$supplierId, $invoiceId]);
+                $this->billing->assertCurrent($invoiceId, $supplierId);
                 $issue = $pdo->prepare(
                     'UPDATE invoices SET status = "issued" WHERE id = ? AND status = "draft"'
                 );
@@ -244,13 +257,7 @@ final class AutoIssueAndSendService
             $pdo->beginTransaction();
         }
         try {
-            $varsymbol = $this->varsymbol->next(
-                $supplierId,
-                VarsymbolGenerator::seriesTypeFor($invoice),
-                $issueDate,
-                (int) $invoice['client_id'],
-                (int) ($invoice['revenue_category_id'] ?? 0),
-            );
+            [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
             $stmt = $pdo->prepare(
                 'UPDATE invoices SET
                     varsymbol         = ?,
@@ -277,10 +284,12 @@ final class AutoIssueAndSendService
                         $issueDate,
                         (int) $invoice['client_id'],
                         (int) ($invoice['revenue_category_id'] ?? 0),
+                        $usedSeriesId,
                     );
                 }
                 return $this->repo->find($invoiceId) ?? $invoice;
             }
+            $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
             if ($ownTransaction) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();

@@ -350,6 +350,23 @@ final class SmallAssetTest extends BankPostingTestCase
         self::assertSame('VPD-2099-0003', $card['document_ref']);
     }
 
+    /** Levný majetek po statisících kusů: cena za kus na šest míst, cena karty v haléřích. */
+    public function testUnitPriceKeepsSixDecimalsAndCardPriceStaysOnCents(): void
+    {
+        $res = $this->callAction($this->action, 'create', 'POST', 'accountant', [
+            'name' => 'Víčka', 'acquisition_date' => self::YEAR . '-02-01', 'quantity' => 250000, 'unit_price' => 0.004,
+        ]);
+
+        self::assertSame(201, $res['status']);
+        self::assertSame(0.004, $res['body']['card']['unit_price']);
+        self::assertSame(1000.0, (float) $res['body']['card']['price']);
+
+        $tooPrecise = $this->callAction($this->action, 'create', 'POST', 'accountant', [
+            'name' => 'Víčka', 'acquisition_date' => self::YEAR . '-02-01', 'quantity' => 1, 'unit_price' => '0.0000001',
+        ]);
+        self::assertSame(422, $tooPrecise['status']);
+    }
+
     /** Karta bez dokladu je legální — majetek starší než aplikace, dar, vklad. */
     public function testManualCardWithoutAnySourceIsAllowed(): void
     {

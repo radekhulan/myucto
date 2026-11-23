@@ -7,7 +7,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Settings\SettingsAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -51,7 +50,7 @@ final class PayrollFoundationTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->states = $container->get(PayrollModuleStateRepository::class);
             $this->ownership = $container->get(PayrollPeriodOwnershipService::class);

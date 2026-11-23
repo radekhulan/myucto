@@ -94,7 +94,7 @@ final class SupplierEmailTemplateAction
         $requested = trim($request->getHeaderLine(SupplierScopeMiddleware::HEADER_NAME));
         if ($requested === '') $requested = (string) ($request->getQueryParams()['supplier_id'] ?? '');
         if ($requested !== '' && (!ctype_digit($requested) || (int) $requested !== SupplierGuard::currentId($request))) {
-            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
         }
         // SupplierScopeMiddleware has already checked membership and any domain binding.
         if (!OperationalSettingsAccess::emailTemplates($request) || SupplierGuard::currentId($request) <= 0) {

@@ -42,6 +42,7 @@ final class PayrollPeopleRepository
         'needs_data',
         'blocking_data',
         self::FILTER_DPP_HOURS_LIMIT,
+        self::FILTER_RUN_FINDING,
     ];
 
     /**
@@ -51,6 +52,14 @@ final class PayrollPeopleRepository
      * {@see \MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::employeesNearLimit()}.
      */
     public const FILTER_DPP_HOURS_LIMIT = 'dpp_hours_limit';
+
+    /**
+     * Osoby jednoho nálezu kontroly před během (`?finding=<kód>&period=RRRR-MM`).
+     * Množinu dodává volající z téhož snímku a výběru validací, jakým nález
+     * vznikl ({@see \MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::findingEmployeeIds()}),
+     * aby seznam ukázal přesně ty osoby, které přehled nálezů jen spočítal.
+     */
+    public const FILTER_RUN_FINDING = 'run_finding';
 
     public const LIST_DEFAULT_FILTER = 'all';
 
@@ -92,11 +101,11 @@ final class PayrollPeopleRepository
     /**
      * Stránka seznamu osob s tvrdým stropem.
      *
-     * Na KAŽDÝ řádek připadá rozhodnutí o smazatelnosti
-     * ({@see self::withDeletion()}), a to stojí vlastní dotazy. Bez stropu tedy
-     * jeden požadavek vyrobil tolik těžkých dotazů, kolik má firma zaměstnanců.
-     * Strop se ořezává i tady, ne jen na hraně HTTP — repozitář nesmí spoléhat
-     * na to, že ho volající ořízl za něj.
+     * Ke KAŽDÉMU řádku patří rozhodnutí o smazatelnosti. Počítá se pro celou
+     * stránku najednou ({@see PayrollEmployeeDeletionRepository::canDeleteMany()}),
+     * ale poddotazy blokátorů se pořád vyhodnocují pro každou osobu stránky,
+     * proto strop. Ořezává se i tady, ne jen na hraně HTTP — repozitář nesmí
+     * spoléhat na to, že ho volající ořízl za něj.
      *
      * Filtr a hledání se uplatní na stránku i na `total`. Kdyby platily jen na
      * stránku, pager by nabízel stránky, na kterých po zúžení nikdo není.
@@ -149,10 +158,21 @@ final class PayrollPeopleRepository
         $stmt->bindValue($position, $offset, PDO::PARAM_INT);
         $stmt->execute();
 
-        $items = [];
+        $people = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $person = $this->castPerson($this->normalizeRow($row));
-            $items[] = $this->withDeletion($supplierId, $person);
+            $people[] = $this->castPerson($this->normalizeRow($row));
+        }
+        // Smazatelnost celé stránky najednou, ne dotazem na každý řádek.
+        $decisions = $this->deletion->canDeleteMany($supplierId, array_values(array_filter(
+            array_column($people, 'id'),
+            'is_int',
+        )));
+        $items = [];
+        foreach ($people as $person) {
+            $items[] = self::applyDeletion(
+                $person,
+                is_int($person['id']) ? ($decisions[$person['id']] ?? null) : null,
+            );
         }
 
         return ['items' => $items, 'total' => $total];
@@ -181,7 +201,7 @@ final class PayrollPeopleRepository
             $sql .= ' AND ' . PayrollPersonDataGapCatalog::gapExpression(
                 PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
             );
-        } elseif ($filter === self::FILTER_DPP_HOURS_LIMIT) {
+        } elseif ($filter === self::FILTER_DPP_HOURS_LIMIT || $filter === self::FILTER_RUN_FINDING) {
             if ($employeeIds === []) {
                 $sql .= ' AND 1 = 0';
             } else {
@@ -368,6 +388,98 @@ final class PayrollPeopleRepository
         return ['total' => max($total, count($people)), 'people' => $people];
     }
 
+    /**
+     * Osoby, kterým chybí blokující údaj pro KONKRÉTNÍ mzdové období.
+     *
+     * Kontrola před během dřív četla {@see self::activeWithBlockingDataGaps()},
+     * tedy stav k dnešku: dohoda skončená v únoru s rezidencí zapsanou jen na
+     * únor svítila u únorového běhu jako „bez rezidence". Tady se hodnotí jen
+     * lidé s vztahem v období a údaje platné kdykoli v období
+     * ({@see PayrollPersonDataGapCatalog::expressionsForPeriod()}). U každé osoby
+     * se vrací i klíče chybějících údajů, aby nález řekl CO chybí.
+     *
+     * @param list<string> $excludedKeys mezery, které volající posuzuje jinde
+     * @return array{total:int,gap_totals:array<string,int>,people:list<array{id:int,full_name:string,gaps:list<string>}>}
+     */
+    public function blockingDataGapsForPeriod(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        int $limit = 25,
+        array $excludedKeys = [],
+    ): array {
+        $limit = max(1, $limit);
+        $definitions = PayrollPersonDataGapCatalog::definitions();
+        $expressions = array_filter(
+            PayrollPersonDataGapCatalog::expressionsForPeriod($periodStart, $periodEnd),
+            static fn (string $key): bool => $definitions[$key]['severity'] === PayrollPersonDataGapCatalog::SEVERITY_BLOCKING
+                && !in_array($key, $excludedKeys, true),
+            ARRAY_FILTER_USE_KEY,
+        );
+        if ($expressions === []) {
+            return ['total' => 0, 'gap_totals' => [], 'people' => []];
+        }
+        $columns = [];
+        $totals = [];
+        foreach ($expressions as $key => $expression) {
+            $column = PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key;
+            $columns[] = "({$expression}) AS {$column}";
+            // Kolik lidí v CELÉM výsledku má tutéž mezeru: hromadná oprava
+            // v kontrole běhu ukazuje skutečný počet, ne jen vypsaná jména.
+            $totals[] = "SUM(gap_person.{$column}) OVER () AS total_{$column}";
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT gap_person.*,
+                    COUNT(*) OVER () AS total_count,
+                    ' . implode(",\n                    ", $totals) . '
+               FROM (
+                    SELECT employee.id,
+                           ' . self::fullNameExpression() . ' AS full_name,
+                           ' . implode(",\n                           ", $columns)
+            . ' ' . self::fromClause()
+            . ' WHERE employee.supplier_id = ?
+                AND ' . PayrollPersonDataGapCatalog::employedInPeriodExpression($periodStart, $periodEnd)
+            . ' ) gap_person
+              WHERE ' . implode(' OR ', array_map(
+                static fn (string $key): string => 'gap_person.' . PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key . ' = 1',
+                array_keys($expressions),
+            ))
+            . ' ORDER BY gap_person.full_name ASC, gap_person.id ASC
+               LIMIT ?',
+        );
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $people = [];
+        $total = 0;
+        $gapTotals = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $person = $this->normalizeRow($row);
+            $total = $this->intValue($person, 'total_count');
+            foreach (array_keys($expressions) as $key) {
+                $count = (int) ($row['total_' . PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key] ?? 0);
+                if ($count > 0) {
+                    $gapTotals[$key] = $count;
+                }
+            }
+            $gaps = [];
+            foreach (array_keys($expressions) as $key) {
+                if ((int) ($row[PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key] ?? 0) === 1) {
+                    $gaps[] = $key;
+                }
+            }
+            $people[] = [
+                'id' => $this->intValue($person, 'id'),
+                'full_name' => $this->stringValue($person, 'full_name'),
+                'gaps' => $gaps,
+            ];
+        }
+
+        return ['total' => max($total, count($people)), 'gap_totals' => $gapTotals, 'people' => $people];
+    }
+
     public function listOptionsForTenant(int $supplierId): array
     {
         // Tentýž výraz jako stránkovaný seznam — jinak by nabídka značila jiné
@@ -536,9 +648,19 @@ final class PayrollPeopleRepository
     private function withDeletion(int $supplierId, array $person): array
     {
         $employeeId = $person['id'];
-        $decision = is_int($employeeId)
-            ? $this->deletion->canDelete($supplierId, $employeeId)
-            : null;
+
+        return self::applyDeletion(
+            $person,
+            is_int($employeeId) ? $this->deletion->canDelete($supplierId, $employeeId) : null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $person
+     * @return array<string,mixed>
+     */
+    private static function applyDeletion(array $person, ?PayrollDeletionDecision $decision): array
+    {
         $person['can_delete'] = $decision !== null && $decision->canDelete;
         $person['delete_blocker'] = $decision?->blockerPayload();
         $person['delete_cascade'] = $decision === null ? [] : $decision->cascade;
@@ -562,6 +684,28 @@ final class PayrollPeopleRepository
             self::currentIdentityExpression('full_name', $alias),
             $alias,
         );
+    }
+
+    /**
+     * Klíče řazení „příjmení, jméno" pro dotazy mimo seznam osob (přehled osob
+     * ve mzdovém běhu). Stejná pravidla jako {@see self::LIST_SORTS}: osoba bez
+     * strukturovaného jména se řadí podle celého jména, česká collation.
+     *
+     * @return array{last_name:string,first_name:string}
+     */
+    public static function nameSortExpressions(string $alias = 'employee'): array
+    {
+        return [
+            'last_name' => sprintf(
+                "COALESCE(NULLIF(%s, ''), %s) COLLATE utf8mb4_czech_ci",
+                self::currentIdentityExpression('last_name', $alias),
+                self::fullNameExpression($alias),
+            ),
+            'first_name' => sprintf(
+                "NULLIF(%s, '') COLLATE utf8mb4_czech_ci",
+                self::currentIdentityExpression('first_name', $alias),
+            ),
+        ];
     }
 
     /**
@@ -623,6 +767,38 @@ final class PayrollPeopleRepository
                     ? (string) $row['full_name']
                     : sprintf('%s (%s)', (string) $row['full_name'], $code);
             }
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Názvy mzdových účtáren „Název (kód)" pro nálezy a hlášky. Nález na
+     * účtárně bez názvu posílal účetní hádat, které z účtáren se týká.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    public function officeLabels(int $supplierId, array $ids): array
+    {
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, code, name
+               FROM payroll_offices
+              WHERE supplier_id = ? AND id IN (' . $placeholders . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $labels = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) ($row['code'] ?? '');
+            $name = (string) ($row['name'] ?? '');
+            $labels[(int) $row['id']] = $code === '' || $name === ''
+                ? ($name !== '' ? $name : $code)
+                : sprintf('%s (%s)', $name, $code);
         }
 
         return $labels;

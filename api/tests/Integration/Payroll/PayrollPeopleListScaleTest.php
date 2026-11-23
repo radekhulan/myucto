@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Tests\Fixtures\Payroll\PayrollRunScaleFixture;
@@ -39,7 +38,7 @@ final class PayrollPeopleListScaleTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $people = $container->get(PayrollPeopleRepository::class);
         if (!$db instanceof Connection || !$people instanceof PayrollPeopleRepository) {
@@ -173,14 +172,15 @@ final class PayrollPeopleListScaleTest extends TestCase
     }
 
     /**
-     * Cena seznamu se řídí velikostí stránky, ne počtem zaměstnanců.
+     * Počet dotazů seznamu nezávisí na velikosti stránky ani na počtu
+     * zaměstnanců.
      *
-     * Rozhodnutí o smazatelnosti se počítá na řádek, takže úplně bez dotazů na
-     * osobu to nebude. Podstatné je, že přibývají jen s velikostí stránky:
-     * menší stránka musí být levnější a nábor dalších lidí nesmí cenu stránky
-     * o deseti řádcích změnit ani o jeden dotaz.
+     * Rozhodnutí o smazatelnosti se dřív počítalo dotazem na každý řádek
+     * (stránka 25 osob = 25 až 75 dotazů navíc). Teď se počítá pro celou
+     * stránku najednou, takže stránka o čtyřiceti řádcích stojí stejně dotazů
+     * jako stránka o deseti a nábor dalších lidí cenu nezmění ani o jeden.
      */
-    public function testListQueryCountFollowsPageSizeNotHeadcount(): void
+    public function testListQueryCountDependsOnNeitherPageSizeNorHeadcount(): void
     {
         $pdo = $this->db->pdo();
         $this->seed(40);
@@ -191,10 +191,10 @@ final class PayrollPeopleListScaleTest extends TestCase
         $this->seed(60);
         $smallPageBiggerFirm = $this->measure($pdo, 10);
 
-        self::assertLessThan(
-            $fullPage,
+        self::assertSame(
             $smallPage,
-            'Stránka o deseti řádcích musí stát míň dotazů než stránka o čtyřiceti.',
+            $fullPage,
+            'Stránka o čtyřiceti řádcích nesmí stát víc dotazů než stránka o deseti.',
         );
         self::assertSame(
             $smallPage,

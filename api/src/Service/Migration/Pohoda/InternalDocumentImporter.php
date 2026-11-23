@@ -48,7 +48,8 @@ final class InternalDocumentImporter
         $entryIds = [];
         $groups = [];
         foreach ($this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY) as $key => $entryId) {
-            if ((explode('|', (string) $key, 3)[1] ?? '') === PohodaJournal::INTERNAL) {
+            $parts = explode('|', (string) $key, 4);
+            if (($parts[1] ?? '') === PohodaJournal::INTERNAL && !$ctx->skipsDate($parts[3] ?? null)) {
                 $entryIds[] = (int) $entryId;
                 $groups[(int) $entryId] = explode('|', (string) $key, 2)[1];
             }
@@ -60,6 +61,9 @@ final class InternalDocumentImporter
         $settling = self::settlingNumbers($ctx);
         foreach (array_chunk($entryIds, 500) as $chunk) {
             foreach ($this->entries($ctx->supplierId, $chunk) as $entry) {
+                if ($ctx->skipsDate((string) $entry['entry_date'])) {
+                    continue;
+                }
                 if ($entry['document_id'] !== null) {
                     $this->alignDate($ctx->supplierId, $entry);
                     $ctx->protocol->count($step, 'internal_documents_existing');

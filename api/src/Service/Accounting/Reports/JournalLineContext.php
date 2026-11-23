@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalLinePairingRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\DocumentPartnerName;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use PDO;
 
 /**
@@ -21,30 +24,52 @@ use PDO;
  * Partner a VS se berou ze zdrojového dokladu zápisu (vydaná a přijatá faktura,
  * bankovní pohyb, pokladní doklad, zápočet přes hrazený doklad). Měna je měna
  * řádku, jinak měna dokladu, jinak CZK.
+ *
+ * Jednoduchý zápis: u firmy, která ho má aspoň od nějakého data
+ * ({@see EntryFormService::hasAnySingle()}), nese položka navíc `pair_no`,
+ * `counter_account_id` a `pair_status`:
+ *  - `paired`: řádek je ve dvojici, protiúčet je druhý řádek dvojice;
+ *  - `derived`: starší zápis bez dvojic, který jde jednoznačně rozložit (1 : N
+ *    a dvojice se shodnou částkou, každá částka nejvýš jednou na straně); protiúčty
+ *    dílů dává {@see JournalPairer} a shodují se s poměrným dělením v SQL;
+ *  - `composite_mn`: zápis zůstává v původním tvaru (M : N, nejednoznačné dvojice
+ *    se shodnou částkou), protiúčet dnešním pravidlem.
+ * Firma bez jednoduchého zápisu jde beze změny dnešní cestou i dnešním SQL.
  */
 final class JournalLineContext
 {
     private const MAX_COUNTER_ACCOUNTS = 3;
 
+    public const PAIR_STATUS_PAIRED = 'paired';
+    public const PAIR_STATUS_DERIVED = 'derived';
+    public const PAIR_STATUS_COMPOSITE = 'composite_mn';
+
     public function __construct(
         private readonly Connection $db,
         private readonly JournalLinePairingRepository $pairings,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
-     * Každá položka musí nést entry_id, line_no, account_id (účet řádku), side,
+     * Každá položka musí nést entry_id, line_id, line_no, account_id (účet řádku), side,
      * source_type, source_id, currency_code a amount_foreign.
+     *
+     * `$withPieces` (opis účtu): u řádku staršího zápisu 1 : N, který se rozkládá na víc
+     * dvojic, přidá `pair_pieces` = díly {amount_cents, amount_foreign_cents,
+     * counter_account_id, counter_account_code, counter_parent_id} v pořadí dvojic.
+     * Rozbalení na pohyby dělá volající; jen u firmy s jednoduchým zápisem.
      *
      * @param list<array<string,mixed>> $items
      * @return list<array<string,mixed>>
      */
-    public function enrich(int $supplierId, array $items): array
+    public function enrich(int $supplierId, array $items, bool $withPieces = false): array
     {
         if ($items === []) {
             return [];
         }
         $entryIds = array_values(array_unique(array_map(static fn (array $i): int => (int) $i['entry_id'], $items)));
-        $entryLines = $this->entryLines($supplierId, $entryIds);
+        $pairs = $this->entryForms->hasAnySingle($supplierId);
+        $entryLines = $pairs ? $this->pairedEntryLines($supplierId, $entryIds) : $this->entryLines($supplierId, $entryIds);
 
         $refs = [];
         foreach ($items as $it) {
@@ -63,6 +88,9 @@ final class JournalLineContext
         foreach ($items as &$it) {
             $doc = $docs[(string) $it['source_type'] . ':' . (string) ($it['source_id'] ?? '')] ?? null;
             $it['counter_accounts'] = $this->counterAccounts($entryLines[(int) $it['entry_id']] ?? [], $it);
+            if ($pairs) {
+                $it += self::pairContext($entryLines[(int) $it['entry_id']] ?? [], $it, $withPieces);
+            }
             $it['partner'] = $doc['partner'] ?? null;
             $it['variable_symbol'] = $doc['vs'] ?? null;
             $lineCurrency = isset($it['currency_code']) && $it['currency_code'] !== null && $it['currency_code'] !== ''
@@ -78,38 +106,404 @@ final class JournalLineContext
     }
 
     /**
-     * Protiúčty řádku: účty opačné strany téhož zápisu (bez účtu řádku samého);
-     * když žádné nejsou, ostatní účty zápisu.
+     * Jen protiúčty, bez dokladů a párování z {@see enrich()}: rozpis hlavní knihy
+     * je jinak nepoužije a u celého roku by stály tisíce dotazů navíc.
+     * Položka nese entry_id, line_id, account_code, side a is_red_storno základního řádku (účinná strana protiúčtu).
      *
-     * @param list<array{line_no:int, account_code:string, side:string}> $lines
-     * @param array<string,mixed> $item
+     * `$withPairs` (rozpis hlavní knihy): u firmy s jednoduchým zápisem doplní totéž co
+     * opis účtu (`pair_no`, `counter_account_id`, `pair_status`, `pair_pieces`); pohyby
+     * po dílech rozbalí volající přes {@see pieceMovements()}.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
      */
-    private function counterAccounts(array $lines, array $item): ?string
+    public function withCounterAccounts(int $supplierId, array $items, bool $withPairs = false): array
     {
-        $own = (string) ($item['account_code'] ?? '');
-        $opposite = [];
-        $other = [];
-        foreach ($lines as $l) {
-            if ($l['account_code'] === $own) {
-                continue;
-            }
-            $other[$l['account_code']] = true;
-            if ($l['side'] !== $item['side']) {
-                $opposite[$l['account_code']] = true;
+        if ($items === []) {
+            return [];
+        }
+        $entryIds = array_values(array_unique(array_map(static fn (array $i): int => (int) $i['entry_id'], $items)));
+        $pairs = $this->entryForms->hasAnySingle($supplierId);
+        $entryLines = $pairs ? $this->pairedEntryLines($supplierId, $entryIds) : $this->entryLines($supplierId, $entryIds);
+        foreach ($items as &$it) {
+            $it['counter_accounts'] = $this->counterAccounts($entryLines[(int) $it['entry_id']] ?? [], $it);
+            if ($pairs && $withPairs) {
+                $it += self::pairContext($entryLines[(int) $it['entry_id']] ?? [], $it, true);
             }
         }
-        $codes = array_keys($opposite !== [] ? $opposite : $other);
+        unset($it);
+        return $items;
+    }
+
+    /**
+     * Pohyby po dílech řádku staršího zápisu 1 : N (`pair_pieces` z {@see enrich()} nebo
+     * {@see withCounterAccounts()}): každý díl jako samostatný pohyb s jediným protiúčtem,
+     * částkou dílu (červené storno záporně) a pořadím `pair_piece`. Zůstatek dopočítá
+     * volající. Sdílí opis účtu i rozpis hlavní knihy.
+     *
+     * Null = řádek se nerozkládá: nemá díly, nebo položka nese jen podíl řádku (rozpad
+     * dimenze) a díly by nedaly její částku.
+     *
+     * @param array<string,mixed> $item položka se signovanou `amount` (a případně `amount_foreign`)
+     * @return list<array{row:array<string,mixed>, piece:array<string,mixed>}>|null
+     */
+    public static function pieceMovements(array $item): ?array
+    {
+        $pieces = $item['pair_pieces'] ?? null;
+        if ($pieces === null) {
+            return null;
+        }
+        unset($item['pair_pieces']);
+        if (array_sum(array_column($pieces, 'amount_cents')) !== abs((int) round((float) $item['amount'] * 100))) {
+            return null;
+        }
+        $red = !empty($item['is_red_storno']);
+        $out = [];
+        foreach ($pieces as $n => $piece) {
+            $row = $item;
+            $row['amount'] = round(($red ? -$piece['amount_cents'] : $piece['amount_cents']) / 100, 2);
+            if (($row['amount_foreign'] ?? null) !== null && $piece['amount_foreign_cents'] !== null) {
+                $row['amount_foreign'] = round(($red ? -$piece['amount_foreign_cents'] : $piece['amount_foreign_cents']) / 100, 2);
+            }
+            $row['counter_accounts'] = $piece['counter_account_code'];
+            $row['counter_account_id'] = $piece['counter_account_id'];
+            $row['pair_piece'] = $n + 1;
+            $out[] = ['row' => $row, 'piece' => $piece];
+        }
+        return $out;
+    }
+
+    /**
+     * Protiúčty řádku: účty opačné ÚČINNÉ strany téhož zápisu (včetně vlastního účtu,
+     * je-li na opačné straně); u zápisu bez opačné strany ostatní účty zápisu. Zápis
+     * složený z dvojic (pokladní doklad 501 / 211 a 513 / 211) se páruje podle částky:
+     * řádky se shodnou částkou tvoří dvojici, když jich je na obou účinných stranách
+     * stejně. Spárovaný řádek má za protiúčet jen svou dvojici, ostatní řádky jen ostatní
+     * nespárované řádky protistrany. Stejné pravidlo drží filtr i součty
+     * v {@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()},
+     * jinak by řádek ukazoval jiný protiúčet, než podle kterého se dá vyfiltrovat.
+     *
+     * @param array<string,mixed> $entry index zápisu z {@see entryIndex()} ([] = zápis nenalezen)
+     * @param array<string,mixed> $item
+     */
+    private function counterAccounts(array $entry, array $item): ?string
+    {
+        if ($entry === []) {
+            return null;
+        }
+        // Dvojice jednoduchého zápisu: protiúčet je jediný, druhý řádek dvojice.
+        $partner = $entry['partner'][(int) ($item['line_id'] ?? 0)] ?? null;
+        if ($partner !== null) {
+            return $partner['account_code'];
+        }
+        // Starší zápis rozložený na díly: protiúčty dílů (u 1 : N totéž co poměrné dělení).
+        $pieces = $entry['pieces'][(int) ($item['line_id'] ?? 0)] ?? null;
+        if ($pieces !== null) {
+            return self::label(array_fill_keys(array_column($pieces, 'counter_account_code'), true));
+        }
+        $own = (string) ($item['account_code'] ?? '');
+        $ownSide = !empty($item['is_red_storno']) ? ($item['side'] === 'debit' ? 'credit' : 'debit') : $item['side'];
+        $opposite = $ownSide === 'debit' ? 'credit' : 'debit';
+        // Vlastní řádek z deníku podle id (částku bere odtud, položka může nést jen díl řádku;
+        // line_no se v převzatých zápisech opakuje).
+        $ownCents = $entry['by_id'][(int) ($item['line_id'] ?? 0)] ?? null;
+        // Vlastní účet na opačné straně je protiúčtem jako každý jiný (převod v rámci
+        // účtu); součty i filtr mu dávají jeho díl, zobrazení ho proto taky ukáže.
+        $matched = $ownCents !== null && isset($entry['paired'][$ownCents])
+            ? ($entry['pair_label'][$opposite][$ownCents] ?? null)
+            : ($entry['free_label'][$opposite] ?? null);
+        if ($matched !== null) {
+            return $matched;
+        }
+        // Nespárovaný řádek, jehož protistrana je celá spárovaná, protiúčet nemá (součty
+        // ho vedou bez protiúčtu a filtr ho nenajde). Ostatní účty zápisu jako nápověda
+        // jen u jednostranného zápisu bez opačné strany.
+        if (isset($entry['sides'][$opposite])) {
+            return null;
+        }
+        $other = $entry['codes'];
+        unset($other[$own]);
+        return self::label($other);
+    }
+
+    /**
+     * Index zápisu pro {@see counterAccounts()}: dvojice (částky se stejným počtem řádků
+     * na obou účinných stranách) a hotové popisky protiúčtů podle strany a částky.
+     * Spočítá se jednou na zápis, takže zápis o tisících řádků není kvadratický.
+     *
+     * @param list<array{line_id:int, account_code:string, side:string, amount_cents:int}> $lines
+     * @return array<string,mixed>
+     */
+    private static function entryIndex(array $lines): array
+    {
+        $count = [];
+        $byId = [];
+        foreach ($lines as $l) {
+            $count[$l['amount_cents']][$l['side']] = ($count[$l['amount_cents']][$l['side']] ?? 0) + 1;
+            $byId[$l['line_id']] = $l['amount_cents'];
+        }
+        $paired = [];
+        foreach ($count as $cents => $sides) {
+            if (($sides['debit'] ?? 0) === ($sides['credit'] ?? 0)) {
+                $paired[$cents] = true;
+            }
+        }
+        $pair = [];
+        $free = [];
+        $sides = [];
+        $codes = [];
+        foreach ($lines as $l) {
+            $sides[$l['side']] = true;
+            $codes[$l['account_code']] = true;
+            if (isset($paired[$l['amount_cents']])) {
+                $pair[$l['side']][$l['amount_cents']][$l['account_code']] = true;
+            } else {
+                $free[$l['side']][$l['account_code']] = true;
+            }
+        }
+        return [
+            'by_id'      => $byId,
+            'paired'     => $paired,
+            'pair_label' => array_map(static fn (array $byCents): array => array_map(self::label(...), $byCents), $pair),
+            'free_label' => array_map(self::label(...), $free),
+            'sides'      => $sides,
+            'codes'      => $codes,
+        ];
+    }
+
+    /** @param array<string,true> $codes */
+    private static function label(array $codes): ?string
+    {
         if ($codes === []) {
             return null;
         }
+        $codes = array_map('strval', array_keys($codes));
         sort($codes, SORT_STRING);
         $shown = array_slice($codes, 0, self::MAX_COUNTER_ACCOUNTS);
         return implode(', ', $shown) . (count($codes) > self::MAX_COUNTER_ACCOUNTS ? ', …' : '');
     }
 
     /**
+     * Doplňky položky u firmy s jednoduchým zápisem (viz popis třídy).
+     *
+     * @param array<string,mixed> $entry index z {@see pairedEntryLines()}
+     * @param array<string,mixed> $item
+     * @return array{pair_no:?int, counter_account_id:?int, pair_status:?string, pair_pieces?:list<array<string,mixed>>}
+     */
+    private static function pairContext(array $entry, array $item, bool $withPieces): array
+    {
+        $lineId = (int) ($item['line_id'] ?? 0);
+        if ($entry === []) {
+            return ['pair_no' => null, 'counter_account_id' => null, 'pair_status' => null];
+        }
+        $partner = $entry['partner'][$lineId] ?? null;
+        if ($partner !== null) {
+            return [
+                'pair_no'            => $entry['pair_no'][$lineId],
+                'counter_account_id' => $partner['account_id'],
+                'pair_status'        => self::PAIR_STATUS_PAIRED,
+            ];
+        }
+        $pieces = $entry['pieces'][$lineId] ?? null;
+        if ($pieces === null) {
+            return ['pair_no' => null, 'counter_account_id' => null, 'pair_status' => self::PAIR_STATUS_COMPOSITE];
+        }
+        $out = [
+            'pair_no'            => null,
+            'counter_account_id' => count($pieces) === 1 ? $pieces[0]['counter_account_id'] : null,
+            'pair_status'        => self::PAIR_STATUS_DERIVED,
+        ];
+        if ($withPieces && count($pieces) > 1) {
+            $out['pair_pieces'] = $pieces;
+        }
+        return $out;
+    }
+
+    /**
+     * Dvojice staršího zápisu bez `pair_no`, rozloženého za běhu (nic se nezapisuje).
+     * Jen jednoznačné rozložení: každá částka spárovaná podle shody je na obou účinných
+     * stranách nejvýš jednou, její dvojice nemá stejný účet ani rozdílné červené storno;
+     * zbytek je 1 : N. Pak se díly {@see JournalPairer} kryjí s poměrným dělením v SQL
+     * ({@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()}) i s filtrem
+     * protiúčtu. Jinak null: zápis zůstává v původním tvaru (M : N, nejednoznačné dvojice
+     * se shodnou částkou, které rozhodne až převod). Sdílí opis účtu i export deníku.
+     *
+     * @param list<array{line_id:int, account_id:int, side:string, raw_side:string, is_red_storno:bool, amount:string, amount_foreign:?string, amount_cents:int}> $lines
+     * @return list<array{pair_no:int, debit_line_id:int, credit_line_id:int, amount:string, debit_amount_foreign:?string, credit_amount_foreign:?string}>|null
+     */
+    public static function derivedPairs(array $lines): ?array
+    {
+        if ($lines === []) {
+            return null;
+        }
+        $count = [];
+        foreach ($lines as $l) {
+            $count[$l['amount_cents']][$l['side']][] = $l;
+        }
+        foreach ($count as $sides) {
+            $d = $sides['debit'] ?? [];
+            $c = $sides['credit'] ?? [];
+            if ($d !== [] && count($d) === count($c)
+                && (count($d) > 1
+                    || $d[0]['account_id'] === $c[0]['account_id']
+                    || $d[0]['is_red_storno'] !== $c[0]['is_red_storno'])
+            ) {
+                return null;
+            }
+        }
+        $input = [];
+        foreach ($lines as $l) {
+            $input[] = [
+                'id'             => $l['line_id'],
+                'account_id'     => $l['account_id'],
+                'side'           => $l['raw_side'],
+                'is_red_storno'  => $l['is_red_storno'],
+                'amount'         => $l['amount'],
+                'amount_foreign' => $l['amount_foreign'],
+            ];
+        }
+        $result = JournalPairer::pair($input);
+        if ($result['status'] !== JournalPairer::STATUS_PAIRED) {
+            return null;
+        }
+        $byPair = [];
+        foreach ($result['lines'] as $piece) {
+            $byPair[(int) $piece['pair_no']][] = $piece;
+        }
+        // MD a Dal podle ZAPSANÉ strany: červené storno zůstává na svých stranách se
+        // zápornou částkou, stejně jako v deníku.
+        $pairs = [];
+        foreach ($byPair as $pairNo => [$first, $second]) {
+            [$debit, $credit] = $first['side'] === 'debit' ? [$first, $second] : [$second, $first];
+            $pairs[] = [
+                'pair_no'               => $pairNo,
+                'debit_line_id'         => (int) $debit['id'],
+                'credit_line_id'        => (int) $credit['id'],
+                'amount'                => (string) $debit['amount'],
+                'debit_amount_foreign'  => self::nonEmpty($debit['amount_foreign'] ?? null),
+                'credit_amount_foreign' => self::nonEmpty($credit['amount_foreign'] ?? null),
+            ];
+        }
+        return $pairs;
+    }
+
+    /**
+     * Díly řádků z {@see derivedPairs()}: pro každý řádek jeho díly v pořadí dvojic
+     * s protiúčtem dílu.
+     *
+     * @param list<array{line_id:int, account_id:int, account_code:string, parent_id:?int, side:string, raw_side:string, is_red_storno:bool, amount:string, amount_foreign:?string, amount_cents:int}> $lines
+     * @return array<int, list<array{amount_cents:int, amount_foreign_cents:?int, counter_account_id:int, counter_account_code:string, counter_parent_id:?int}>>|null
+     */
+    public static function derivedPieces(array $lines): ?array
+    {
+        $pairs = self::derivedPairs($lines);
+        if ($pairs === null) {
+            return null;
+        }
+        $byId = [];
+        foreach ($lines as $l) {
+            $byId[$l['line_id']] = $l;
+        }
+        $pieces = [];
+        foreach ($pairs as $pair) {
+            foreach ([['debit', 'credit'], ['credit', 'debit']] as [$ownSide, $counterSide]) {
+                $counterLine = $byId[$pair[$counterSide . '_line_id']];
+                $foreign = $pair[$ownSide . '_amount_foreign'];
+                $pieces[$pair[$ownSide . '_line_id']][] = [
+                    'amount_cents'         => JournalLineAmount::cents($pair['amount']),
+                    'amount_foreign_cents' => $foreign !== null ? JournalLineAmount::cents($foreign) : null,
+                    'counter_account_id'   => $counterLine['account_id'],
+                    'counter_account_code' => $counterLine['account_code'],
+                    'counter_parent_id'    => $counterLine['parent_id'],
+                ];
+            }
+        }
+        return $pieces;
+    }
+
+    private static function nonEmpty(mixed $value): ?string
+    {
+        return $value === null || $value === '' ? null : (string) $value;
+    }
+
+    /**
+     * Index zápisů firmy s jednoduchým zápisem: dnešní index nad řádky BEZ dvojice
+     * (shodně s SQL, které páruje podle částky jen mezi nimi), partner každého řádku
+     * dvojice a díly starších zápisů rozložených za běhu ({@see derivedPieces()}).
+     *
      * @param list<int> $entryIds
-     * @return array<int,list<array{line_no:int, account_code:string, side:string}>>
+     * @return array<int,array<string,mixed>>
+     */
+    private function pairedEntryLines(int $supplierId, array $entryIds): array
+    {
+        $raw = [];
+        foreach (array_chunk($entryIds, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT l.id, l.entry_id, l.account_id, ca.account_code, ca.parent_id, l.amount, l.amount_foreign,
+                        l.side AS raw_side, l.is_red_storno, l.pair_no,
+                        CASE WHEN l.is_red_storno = 1
+                             THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
+                             ELSE l.side END AS side
+                   FROM journal_entry_lines l
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  WHERE l.supplier_id = ? AND l.entry_id IN ({$in})
+                  ORDER BY l.entry_id, l.line_no, l.id"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $raw[(int) $r['entry_id']][] = [
+                    'line_id'        => (int) $r['id'],
+                    'account_id'     => (int) $r['account_id'],
+                    'account_code'   => (string) $r['account_code'],
+                    'parent_id'      => $r['parent_id'] === null ? null : (int) $r['parent_id'],
+                    'side'           => (string) $r['side'],
+                    'raw_side'       => (string) $r['raw_side'],
+                    'is_red_storno'  => (bool) $r['is_red_storno'],
+                    'amount'         => (string) $r['amount'],
+                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
+                    'amount_cents'   => JournalLineAmount::cents((string) $r['amount']),
+                    'pair_no'        => $r['pair_no'] === null ? null : (int) $r['pair_no'],
+                ];
+            }
+        }
+        $out = [];
+        foreach ($raw as $entryId => $lines) {
+            $paired = [];
+            $unpaired = [];
+            foreach ($lines as $l) {
+                if ($l['pair_no'] !== null) {
+                    $paired[$l['pair_no']][] = $l;
+                } else {
+                    $unpaired[] = $l;
+                }
+            }
+            $index = self::entryIndex($unpaired);
+            // Strany a účty celého zápisu (nápověda u jednostranného zápisu) jako dnes.
+            foreach ($lines as $l) {
+                $index['sides'][$l['side']] = true;
+                $index['codes'][$l['account_code']] = true;
+            }
+            $index['partner'] = [];
+            $index['pair_no'] = [];
+            foreach ($paired as $pairNo => $pair) {
+                if (count($pair) !== 2) {
+                    continue;
+                }
+                foreach ([[$pair[0], $pair[1]], [$pair[1], $pair[0]]] as [$own, $counter]) {
+                    $index['partner'][$own['line_id']] = $counter;
+                    $index['pair_no'][$own['line_id']] = $pairNo;
+                }
+            }
+            $index['pieces'] = $paired === [] ? (self::derivedPieces($unpaired) ?? []) : [];
+            $out[$entryId] = $index;
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $entryIds
+     * @return array<int,array<string,mixed>> entry_id => index z {@see entryIndex()} (strana = účinná)
      */
     private function entryLines(int $supplierId, array $entryIds): array
     {
@@ -117,7 +511,10 @@ final class JournalLineContext
         foreach (array_chunk($entryIds, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, l.line_no, l.side, ca.account_code
+                "SELECT l.id, l.entry_id, ca.account_code, l.amount,
+                        CASE WHEN l.is_red_storno = 1
+                             THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
+                             ELSE l.side END AS side
                    FROM journal_entry_lines l
                    JOIN chart_of_accounts ca ON ca.id = l.account_id
                   WHERE l.supplier_id = ? AND l.entry_id IN ({$in})"
@@ -125,13 +522,14 @@ final class JournalLineContext
             $stmt->execute([$supplierId, ...$chunk]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $out[(int) $r['entry_id']][] = [
-                    'line_no'      => (int) $r['line_no'],
+                    'line_id'      => (int) $r['id'],
                     'account_code' => (string) $r['account_code'],
                     'side'         => (string) $r['side'],
+                    'amount_cents' => (int) round(((float) $r['amount']) * 100),
                 ];
             }
         }
-        return $out;
+        return array_map(self::entryIndex(...), $out);
     }
 
     /**

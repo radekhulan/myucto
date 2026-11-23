@@ -33,6 +33,7 @@ use Psr\Http\Message\UploadedFileInterface;
  * single-shot operace trvá 10-30s, OK pro user-blocking UX).
  *
  * Body: multipart form-data, field "pdf" = soubor.
+ * ?without_items=1 — doklad bez rozpisu položek, jeden řádek na sazbu DPH.
  * Staff-only ?model=<id z whitelistu provideru> (override per request) — whitelist drží
  * LlmProviderCapabilities (ANTHROPIC_MODELS / OPENAI_MODELS / GEMINI_MODELS).
  */
@@ -136,7 +137,8 @@ final class AiExtractPdfAction
             );
         }
         $result = $this->extractor->extractAndCreate($supplierId, $userId, $bytes, $modelOverride, $originalName, $importBatchId,
-            requireReview: $client, allowModelUpgrade: !$client);
+            requireReview: $client, allowModelUpgrade: !$client,
+            withoutItems: self::withoutItemsRequested($request->getQueryParams()));
 
         // Provenance (F7 §3.7): data_residency_ok=false jen když router odmítl kvůli
         // EU rezidenci (residency_conflict); ISDOC i úspěšná AI cesta = true.
@@ -223,6 +225,17 @@ final class AiExtractPdfAction
             'submission_id' => $submissionId,
             'duplicate' => !empty($created['duplicate']),
         ] + $this->targetInfo($target);
+    }
+
+    /**
+     * Jednorázová volba „Načíst bez položek" (`?without_items=1`): doklad dostane jeden
+     * řádek na sazbu DPH místo rozpisu položek.
+     *
+     * @param array<string,mixed> $params
+     */
+    public static function withoutItemsRequested(array $params): bool
+    {
+        return in_array(strtolower(trim((string) ($params['without_items'] ?? ''))), ['1', 'true', 'yes', 'on'], true);
     }
 
     /** @return array{target_supplier_id:int,target_supplier_name:?string} */

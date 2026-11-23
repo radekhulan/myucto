@@ -18,6 +18,9 @@ api/test-results/
 node_modules/
 web/node_modules/
 MCP/node_modules/
+# i jako symlink do sdílených závislostí (worktree), ten vzor s lomítkem nechytí
+/web/node_modules
+/MCP/node_modules
 MCP/dist/
 web/dist/
 web/dist.bak/
@@ -58,3 +61,9 @@ web/src/i18n/chunks/
 tools/pohoda-export/pohoda-sql.json
 tools/pamica-export/pamica-sql.json
 tools/regression/**/__pycache__/
+/tools/Invoke-MyUctoDeployment.ps1
+/tools/Publish-DeploymentSnapshot.ps1
+/production.sh
+/demo.sh
+/cfg.velin-db.php
+/sync-velin.ps1

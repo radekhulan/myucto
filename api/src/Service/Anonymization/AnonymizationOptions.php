@@ -19,6 +19,9 @@ final readonly class AnonymizationOptions
         public ?string $filesOut = null,
         public ?string $dumpPath = null,
         public ?string $dumpBinary = null,
+        public ?string $sourceKeysPath = null,
+        public ?string $targetKeysPath = null,
+        public bool $olderSource = false,
     ) {}
 
     public static function isSafeDatabaseName(string $name): bool

@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Stock;
 
+use MyInvoice\Action\Stock\StockDocumentAction;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\StockLandedCostRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Stock\StockException;
 use PHPUnit\Framework\Attributes\Group;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
  * Epic SKLAD, plán §8.2 scénář 8 — příjem na sklad z přijaté faktury (PF):
@@ -42,6 +48,7 @@ final class StockReceiptTest extends StockTestCase
             $proposal = $this->receipts->proposeForPurchaseInvoice($supplierId, $piId);
             self::assertSame([], $proposal['lines'], "Návrh pro {$kind} musí být prázdný (UI tlačítko se nenabídne).");
             self::assertSame($kind, $proposal['not_receivable_kind'] ?? null);
+            self::assertSame([], $proposal['uncoded_lines']);
 
             try {
                 $this->receipts->createReceipt($supplierId, $piId, [
@@ -193,5 +200,238 @@ final class StockReceiptTest extends StockTestCase
             static fn (array $line): int => (int) round((float) $line['extra_cost'] * 100),
             $updated['lines'],
         )));
+    }
+
+    /**
+     * Editor u příjemky s uloženými náklady posílá přidaný náklad jako položku
+     * `landed_costs`, ne jako extra_cost řádku (ten server u takové příjemky nebere).
+     * Náklad se uloží k ostatním, rozpustí do řádků a přežije další uložení i zaúčtování.
+     */
+    public function testDraftEditAddsLandedCostFromListAndKeepsItThroughPost(): void
+    {
+        [$supplierId, $draftId, $body] = $this->draftWithPersistedLandedCosts();
+
+        $saved = $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => [
+            ['description' => 'Doprava z faktury', 'amount' => '30.00', 'allocation' => 'by_qty'],
+            ['description' => 'Doprava ručně', 'amount' => '38.00', 'allocation' => 'by_qty'],
+        ]], $this->userId);
+        self::assertSame(['34.00', '34.00'], array_column($saved['lines'], 'extra_cost'));
+        self::assertSame(['30.00', '38.00'], array_column($saved['landed_costs'], 'amount'));
+
+        // Další uložení bez seznamu (hlavička, řádky) náklad ponechá a nepřičte podruhé.
+        $again = $this->documents->updateDraft($supplierId, $draftId, $body, $this->userId);
+        self::assertSame(['34.00', '34.00'], array_column($again['lines'], 'extra_cost'));
+
+        $posted = $this->documents->post($supplierId, $draftId, $this->userId);
+        self::assertSame('posted', $posted['status']);
+        self::assertSame(['34.00', '34.00'], array_column($posted['lines'], 'extra_cost'));
+        self::assertSame(['134.00', '134.00'], array_column($posted['lines'], 'value_total'));
+    }
+
+    /** Uložený náklad jde v seznamu upravit i smazat, řádky se přepočtou. */
+    public function testDraftEditChangesAndRemovesPersistedLandedCosts(): void
+    {
+        [$supplierId, $draftId, $body] = $this->draftWithPersistedLandedCosts();
+        /** @var StockLandedCostRepository $landed */
+        $landed = $this->container->get(StockLandedCostRepository::class);
+
+        $changed = $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => [
+            ['description' => 'Doprava z faktury', 'amount' => '50.00', 'allocation' => 'by_value'],
+        ]], $this->userId);
+        self::assertSame(['25.00', '25.00'], array_column($changed['lines'], 'extra_cost'));
+        self::assertSame('by_value', $landed->listForDocument($supplierId, $draftId)[0]['allocation']);
+
+        $removed = $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => []], $this->userId);
+        self::assertSame(['0.00', '0.00'], array_column($removed['lines'], 'extra_cost'));
+        self::assertSame(['100.00', '100.00'], array_column($removed['lines'], 'value_total'));
+        self::assertSame([], $landed->listForDocument($supplierId, $draftId));
+    }
+
+    /** Příjemka bez uložených nákladů bere extra_cost řádků jako dosud. */
+    public function testDraftWithoutPersistedLandedCostsKeepsLineExtraCost(): void
+    {
+        $supplierId = $this->createSupplier();
+        $body = [
+            'doc_type' => 'receipt',
+            'origin' => 'manual',
+            'warehouse_id' => $this->warehouse($supplierId),
+            'doc_date' => '2099-02-01',
+            'description' => 'Bez uložených nákladů',
+            'lines' => [['stock_item_id' => $this->item($supplierId, 'LC-M'), 'qty' => '1.000', 'unit_cost' => '100.000000', 'extra_cost' => '12.00']],
+        ];
+        $draftId = (int) $this->documents->create($supplierId, $body, $this->userId)['id'];
+        $body['lines'][0]['extra_cost'] = '40.00';
+
+        $updated = $this->documents->updateDraft($supplierId, $draftId, $body, $this->userId);
+
+        self::assertSame(['40.00'], array_column($updated['lines'], 'extra_cost'));
+        self::assertSame([], $updated['landed_costs']);
+    }
+
+    public function testLandedCostsAreRejectedOnNonReceiptDraft(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'LC-I');
+        $this->receiveStock($supplierId, $whId, $itemId, '5', 100.0);
+        $body = [
+            'doc_type' => 'issue', 'origin' => 'manual', 'warehouse_id' => $whId,
+            'doc_date' => '2099-02-01', 'description' => 'Výdej',
+            'lines' => [['stock_item_id' => $itemId, 'qty' => '1.000']],
+        ];
+        $draftId = (int) $this->documents->create($supplierId, $body, $this->userId)['id'];
+
+        foreach ([[['amount' => '10']], []] as $costs) {
+            try {
+                $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => $costs], $this->userId);
+                self::fail('landed_costs u výdejky musí skončit 422.');
+            } catch (StockException $e) {
+                self::assertSame(422, $e->httpStatus);
+            }
+        }
+    }
+
+    /** Prázdný seznam u příjemky bez uložených nákladů nemaže extra_cost řádků. */
+    public function testEmptyLandedCostListKeepsLineExtraCostWithoutStoredCosts(): void
+    {
+        $supplierId = $this->createSupplier();
+        $body = [
+            'doc_type' => 'receipt', 'origin' => 'manual', 'warehouse_id' => $this->warehouse($supplierId),
+            'doc_date' => '2099-02-01', 'description' => 'Ruční náklad na řádku',
+            'lines' => [['stock_item_id' => $this->item($supplierId, 'LC-E'), 'qty' => '1.000', 'unit_cost' => '100.000000', 'extra_cost' => '12.00']],
+        ];
+        $draftId = (int) $this->documents->create($supplierId, $body, $this->userId)['id'];
+
+        $updated = $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => []], $this->userId);
+
+        self::assertSame(['12.00'], array_column($updated['lines'], 'extra_cost'));
+    }
+
+    /**
+     * Příjemka bez uložených nákladů s ručním extra_cost po řádcích (např. založená přes API):
+     * editor přidaný náklad rozpustí v prohlížeči a pošle extra_cost = ruční částka + podíl.
+     * Dvojí uložení ani zaúčtování nic nepřičte ani neubere a seznam nákladů ji nepřepíše.
+     */
+    public function testManualLineExtraCostPlusEditorShareSurvivesSavesAndPost(): void
+    {
+        $supplierId = $this->createSupplier();
+        $body = [
+            'doc_type' => 'receipt', 'origin' => 'manual', 'warehouse_id' => $this->warehouse($supplierId),
+            'doc_date' => '2099-02-01', 'description' => 'Ruční náklady po řádcích',
+            'lines' => [
+                ['stock_item_id' => $this->item($supplierId, 'LC-R1'), 'qty' => '1.000', 'unit_cost' => '100.000000', 'extra_cost' => '7.00'],
+                ['stock_item_id' => $this->item($supplierId, 'LC-R2'), 'qty' => '3.000', 'unit_cost' => '100.000000', 'extra_cost' => '11.00'],
+            ],
+        ];
+        $draftId = (int) $this->documents->create($supplierId, $body, $this->userId)['id'];
+        // Doprava 40 Kč podle množství 1 : 3 = 10 + 30, jak ji rozpustí editor.
+        $body['lines'][0]['extra_cost'] = '17.00';
+        $body['lines'][1]['extra_cost'] = '41.00';
+
+        foreach ([1, 2] as $save) {
+            $saved = $this->documents->updateDraft($supplierId, $draftId, $body, $this->userId);
+            self::assertSame(['17.00', '41.00'], array_column($saved['lines'], 'extra_cost'), "uložení {$save}");
+        }
+        try {
+            $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => [['amount' => '40']]], $this->userId);
+            self::fail('seznam nákladů u příjemky bez uložených nákladů musí skončit 422.');
+        } catch (StockException $e) {
+            self::assertSame(422, $e->httpStatus);
+        }
+
+        $posted = $this->documents->post($supplierId, $draftId, $this->userId);
+        self::assertSame(['17.00', '41.00'], array_column($posted['lines'], 'extra_cost'));
+        self::assertSame(['117.00', '341.00'], array_column($posted['lines'], 'value_total'));
+    }
+
+    /** Neplatná položka ani odkaz na cizí fakturu nesmí uložené náklady smazat. */
+    public function testInvalidLandedCostListLeavesStoredCostsUntouched(): void
+    {
+        [$supplierId, $draftId, $body] = $this->draftWithPersistedLandedCosts();
+        $otherSupplier = $this->createSupplier();
+        $foreignPi = $this->purchaseInvoice($otherSupplier, $this->client($otherSupplier, 'Cizí dodavatel'));
+        $foreignItem = $this->purchaseInvoiceItem($foreignPi, null);
+        /** @var StockLandedCostRepository $landed */
+        $landed = $this->container->get(StockLandedCostRepository::class);
+
+        foreach ([
+            [['amount' => 'abc']],
+            [['amount' => '0']],
+            ['x' => ['amount' => '10']],
+            [['amount' => '10', 'purchase_invoice_item_id' => $foreignItem]],
+        ] as $costs) {
+            try {
+                $this->documents->updateDraft($supplierId, $draftId, $body + ['landed_costs' => $costs], $this->userId);
+                self::fail('neplatný seznam nákladů musí skončit chybou.');
+            } catch (StockException) {
+            }
+            self::assertSame(['30.00'], array_column($landed->listForDocument($supplierId, $draftId), 'amount'));
+        }
+    }
+
+    public function testDocumentApiRejectsInvalidLandedCostFieldsAndKeepsStoredAmounts(): void
+    {
+        [$supplierId, $draftId, $body] = $this->draftWithPersistedLandedCosts();
+        $costs = $this->container->get(StockLandedCostRepository::class);
+        $before = $costs->listForDocument($supplierId, $draftId);
+        $action = $this->container->get(StockDocumentAction::class);
+        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/stock/documents/' . $draftId)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Skladník', 'staff', true, ['stock' => 2, 'accounting' => 2]));
+
+        foreach ([
+            ['description' => str_repeat('ž', 256), 'amount' => '50.00'],
+            ['description' => ['doprava'], 'amount' => '50.00'],
+            ['amount' => ''],
+            ['amount' => '0'],
+            ['amount' => '-10.00'],
+            ['amount' => '0.001'],
+        ] as $invalid) {
+            $response = $action->update(
+                $request->withParsedBody($body + ['landed_costs' => [$invalid]]),
+                (new ResponseFactory())->createResponse(),
+                ['id' => (string) $draftId],
+            );
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('stock.error.invalid_document', json_decode((string) $response->getBody(), true)['error']['code']);
+            self::assertSame($before, $costs->listForDocument($supplierId, $draftId));
+            self::assertSame(['15.00', '15.00'], array_column($this->docsRepo->lines($supplierId, $draftId), 'extra_cost'));
+        }
+    }
+
+    /**
+     * Koncept příjemky s řádky A, B (1 ks po 100 Kč) a uloženým nákladem 30 Kč podle
+     * množství, rozpuštěným jako po založení z faktury (15 + 15).
+     *
+     * @return array{0:int,1:int,2:array<string,mixed>}
+     */
+    private function draftWithPersistedLandedCosts(): array
+    {
+        $supplierId = $this->createSupplier();
+        $body = [
+            'doc_type' => 'receipt',
+            'origin' => 'manual',
+            'warehouse_id' => $this->warehouse($supplierId),
+            'doc_date' => '2099-02-01',
+            'description' => 'Vedlejší náklady seznamem',
+            'lines' => [
+                ['stock_item_id' => $this->item($supplierId, 'LC-A'), 'qty' => '1.000', 'unit_cost' => '100.000000'],
+                ['stock_item_id' => $this->item($supplierId, 'LC-B'), 'qty' => '1.000', 'unit_cost' => '100.000000'],
+            ],
+        ];
+        $draftId = (int) $this->documents->create($supplierId, $body, $this->userId)['id'];
+        /** @var StockLandedCostRepository $landed */
+        $landed = $this->container->get(StockLandedCostRepository::class);
+        $landed->insert($supplierId, [
+            'document_id' => $draftId,
+            'description' => 'Doprava z faktury',
+            'amount' => '30.00',
+            'allocation' => 'by_qty',
+        ]);
+        $allocated = $this->documents->updateDraft($supplierId, $draftId, $body, $this->userId);
+        self::assertSame(['15.00', '15.00'], array_column($allocated['lines'], 'extra_cost'));
+
+        return [$supplierId, $draftId, $body];
     }
 }

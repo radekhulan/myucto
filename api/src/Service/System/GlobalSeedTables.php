@@ -189,10 +189,13 @@ final class GlobalSeedTables
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER = [
+        'work_report_billing_templates', 'scheduled_pohoda_export',
         // Účet, přihlášení a jeho druhé faktory. Bez passkeys a záchranných kódů by
         // se uživatel s vynuceným MFA po resetu nepřihlásil.
         'users', 'sessions', 'trusted_devices', 'login_otps',
         'webauthn_credentials', 'mfa_recovery_codes', 'totp_used_steps',
+        // Propojení s poskytovatelem identity je přihlašovací metoda účtu.
+        'user_external_identities',
         'user_preferences', 'saved_filters', 'user_favorites',
         // Dynamické role a per-firma override zůstávají spolu s uživateli.
         'roles', 'role_permissions', 'user_suppliers',
@@ -200,6 +203,9 @@ final class GlobalSeedTables
         // Identita firmy, skupiny firem, přihlašovací domény, měny, číslování dokladů.
         'supplier', 'supplier_groups', 'supplier_domains', 'branding_profiles',
         'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
+        // Číselník řad je konfigurace firmy stejně jako dosavadní počítadla; výchozí
+        // řady uživatelů zůstávají s uživateli.
+        'number_series', 'number_series_counters', 'number_series_user_defaults',
         // API tokeny (PAT) včetně povolených IP.
         'api_tokens', 'api_token_ips',
         'mcp_server_settings', 'mcp_oauth_clients', 'mcp_oauth_grants',
@@ -210,6 +216,7 @@ final class GlobalSeedTables
         'epo_signing_credentials', 'epo_signing_credential_suppliers',
         'tax_submission_settings', 'submission_channel_credentials',
         'submission_inbox_storage_settings', 'submission_isds_mobile_credentials',
+        'isds_access_profiles', 'isds_access_profile_suppliers', 'isds_access_inbox_owners',
         'isds_gateway_registrations', 'submission_recipients',
         'submission_inbox_categories', 'submission_inbox_category_rules',
         // E-mail / bankovní avíza (konfigurace, NE zpracované zprávy).
@@ -234,6 +241,8 @@ final class GlobalSeedTables
         // VatStatusService; bez ní by firma byla neplátce za všechna období.
         'supplier_vat_status_history', 'supplier_tax_representation_history',
         'supplier_osvc_month_statuses', 'vat_classifications',
+        // Forma účetního zápisu (jednoduchý / složený) v čase je nastavení firmy, ne účetní data.
+        'accounting_entry_form_history',
         // Hraniční: zálohový koeficient § 76 zadává účetní ručně a z dat ho dopočítat
         // nejde; vypořádání (final_percent) se při novém výpočtu přepíše.
         'vat_coefficients',
@@ -252,10 +261,12 @@ final class GlobalSeedTables
         'supplier_accounting_modes', 'supplier_accounting_frameworks',
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
+        // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
+        'other_item_kinds', 'other_item_posting_profiles', 'other_item_settings', 'nonprofit_membership_rates',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
-        'bank_posting_rules', 'bank_rule_templates', 'tax_evidence_bank_rules',
+        'bank_posting_rules', 'bank_posting_rule_dimensions', 'bank_rule_templates', 'tax_evidence_bank_rules',
         'statement_account_overrides', 'statement_function_map',
         'cost_centers', 'dimension_types', 'dimension_values', 'dimension_account_rules',
         'dimension_account_map',
@@ -271,8 +282,9 @@ final class GlobalSeedTables
         // úrazového pojištění, mzdové složky a jejich mapování do JMHZ, střediska,
         // matice agend, skartační lhůty, profily importů a podpisů podání. Hraniční:
         // potvrzené návrhy předkontací mezd (payroll_posting_map_proposals) nesou
-        // mapování mzdových složek na účty, tedy předkontaci mezd.
-        'payroll_module_state', 'payroll_production_qualifications',
+        // mapování mzdových složek na účty, tedy předkontaci mezd. Stejně tak přiřazení
+        // zkratek předkontací PAMICY k účtům (payroll_posting_code_maps).
+        'payroll_module_state', 'payroll_production_qualifications', 'payroll_posting_code_maps',
         'payroll_employer_settings', 'payroll_employer_policies', 'payroll_employer_policy_audit',
         'payroll_offices', 'payroll_office_registration_versions', 'payroll_regzel_employer_profiles',
         'payroll_institutions', 'payroll_institution_accounts', 'payroll_accident_insurance_rates',
@@ -310,13 +322,16 @@ final class GlobalSeedTables
      *   generátor pak padal na `uq_wh_supplier_code` („Duplicate entry '1-HLAVNI'")
      *   a purge už sirotka neuměl uklidit.
      * - pracovní kalendáře, směny a pravidla výplat mají employment/employee (osobní data).
-     * - dimension_defaults jsou výchozí dimenze KLIENTA a projektu, které se mažou.
+     * - dimension_defaults jsou výchozí dimenze klienta, zakázky, produktu a kategorie,
+     *   které se mažou. Výchozí dimenze bankovního účtu jsou konfigurace ponechaného
+     *   účtu, proto zůstanou ({@see self::RESET_KEEP_USERS_SUPPLIER_PARTIAL}).
      * - payroll_period_ownership, accounting_setup_* a tax_advance_schedules jsou stopa
      *   převodu, průvodce nebo párování nad smazanými daty; převod je založí znovu.
      *
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER_WIPES = [
+        'scheduled_pohoda_export_doc', 'scheduled_pohoda_export_run',
         ...\MyInvoice\Service\Nonprofit\Membership\MembershipUseGuard::TABLES,
         ...\MyInvoice\Service\Property\Funds\FundingUseGuard::TABLES,
         ...\MyInvoice\Service\Accounting\Conversion\FrameworkConversionResetCleanup::TABLES,
@@ -325,6 +340,8 @@ final class GlobalSeedTables
         ...\MyInvoice\Service\Nonprofit\Capital\CapitalRepository::TABLES,
         ...\MyInvoice\Repository\Nonprofit\FundingRepository::TABLES,
         'nonprofit_tax_assessments',
+        'nonprofit_membership_batch_members', 'nonprofit_membership_batches',
+        'nonprofit_membership_erasure_items', 'nonprofit_membership_erasure_proposals',
         'nonprofit_tax_assessment_gift_elections', 'nonprofit_tax_assessment_funding_usage', 'nonprofit_tax_assessment_funding_members',
         'nonprofit_tax_snapshot_chunks', 'nonprofit_tax_snapshot_manifests', 'nonprofit_tax_snapshot_manifest_chunks',
         'nonprofit_tax_drafts', 'nonprofit_tax_draft_activities', 'nonprofit_tax_draft_decisions',
@@ -350,9 +367,9 @@ final class GlobalSeedTables
         'accounting_archives', 'accounting_backfill_jobs', 'accounting_balance_inventory',
         'accounting_balance_inventory_items', 'accounting_closing_steps', 'accounting_corrections',
         'accounting_opening_balances', 'accounting_receivable_provisions',
-        'accounting_reclassification_items', 'accounting_setup_proposals', 'accounting_setup_rule_bundles',
+        'accounting_bulk_items', 'accounting_reclassification_items', 'accounting_setup_proposals', 'accounting_setup_rule_bundles',
         'accounting_setup_runs',
-        'activity_log', 'activity_log_chain_head',
+        'activity_log', 'activity_log_chain_head', 'activity_log_redactions',
         'ai_assistant_conversations', 'ai_assistant_messages',
         'ai_daily_usage', 'ai_embeddings', 'ai_jobs', 'ai_metrics', 'ai_suggestions',
         'api_request_log',
@@ -364,7 +381,7 @@ final class GlobalSeedTables
         'bank_api_evidence_months', 'bank_api_months', 'bank_card_merchant_map', 'bank_connector_cooldowns', 'bank_counterparty_map',
         'bank_counterparty_observations', 'bank_email_attachment_ingests', 'bank_email_processed_messages',
         'bank_match_audit', 'bank_match_suggestions', 'bank_payment_order_submissions', 'bank_payment_submission_items',
-        'bank_posting_suggestions', 'bank_statements', 'bank_transaction_imports', 'bank_transactions',
+        'bank_posting_suggestions', 'bank_statement_rebases', 'bank_statements', 'bank_transaction_imports', 'bank_transactions',
         'bank_notice_ignore_transfers',
         'bank_transfer_matches',
         'odometer_source_accounts', 'odometer_source_cars',
@@ -406,10 +423,13 @@ final class GlobalSeedTables
         'journal_entries', 'journal_entry_attachments', 'journal_entry_document_links', 'journal_document_postings',
         'journal_entry_line_dimension_splits', 'journal_entry_line_dimensions', 'journal_entry_lines',
         'journal_settlement_allocations',
-        'journal_entry_notes', 'journal_integrity_findings', 'journal_line_pairing_items',
+        'journal_entry_notes', 'journal_integrity_findings', 'journal_line_pairing', 'journal_line_pairing_items',
         'joint_allocation_batches', 'joint_allocation_cancellations', 'joint_allocation_source_claims',
         'joint_allocation_audit',
         'journal_line_pairings',
+        // Jednoduchý zápis: storna dvojic, posouzení zápisů bez dvojic a běhy převodu
+        // patří k deníku a mažou se s ním.
+        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs',
         'logbook_fuel_scans',
         'login_attempts',
         'mail_outbox', 'mail_rate_limit_events', 'mail_send_log',
@@ -417,14 +437,16 @@ final class GlobalSeedTables
         'manufacturers',
         'mfa_step_up_proofs',
         'oauth_sessions',
+        'oidc_link_invites', 'oidc_login_flows',
         'migration_batch_items', 'migration_parallel_checks',
         'money_s3_import_map', 'money_s3_imports',
         'monthly_report_sends',
         'odometer_readings',
         'offset_agreement_items', 'offset_agreements',
         'oss_filing_evidence',
-        'other_item_allocations', 'other_item_installments', 'other_item_posting_lines',
+        'other_item_allocations', 'other_item_auto_match_blocks', 'other_item_installments', 'other_item_posting_lines', 'other_item_posting_overrides',
         'other_item_schedule_occurrences', 'other_item_schedules', 'other_items',
+        'accrual_entry_links', 'accrual_schedule', 'accrual_items',
         'password_resets',
         'payment_matches', 'payment_order_items', 'payment_orders',
         'purchase_advance_deductions',
@@ -463,7 +485,7 @@ final class GlobalSeedTables
         'payroll_food_service_tip_months', 'payroll_generated_document_hidden',
         'payroll_generated_documents', 'payroll_identity_resolution_tasks', 'payroll_import_links',
         'payroll_imported_jmhz_protocols', 'payroll_input_import_rows', 'payroll_input_imports',
-        'payroll_inputs', 'payroll_insolvency_payment_instructions', 'payroll_jmhz_deferral_submissions',
+        'payroll_inputs', 'payroll_insolvency_payment_instructions', 'payroll_jmhz_deferral_submissions', 'payroll_jmhz_external_roots',
         'payroll_jmhz_deferrals', 'payroll_jmhz_eldp_evidence_snapshots',
         'payroll_jmhz_eldp_idempotency_claims', 'payroll_jmhz_employer_annual_evidence',
         'payroll_jmhz_ordinary_evidence_idempotency_claims', 'payroll_jmhz_ordinary_evidence_snapshots',
@@ -483,6 +505,7 @@ final class GlobalSeedTables
         'payroll_period_export_download_grants', 'payroll_period_export_job_attempts',
         'payroll_period_export_job_part_attempts', 'payroll_period_export_job_parts',
         'payroll_period_export_jobs', 'payroll_period_exports', 'payroll_period_ownership',
+        'payroll_posting_imports',
         'payroll_person_accounts', 'payroll_person_addresses', 'payroll_person_contacts',
         'payroll_person_external_ids', 'payroll_person_foreign_permits',
         'payroll_person_health_coverage_history', 'payroll_person_health_minimum_reductions',
@@ -498,7 +521,7 @@ final class GlobalSeedTables
         'payroll_registration_change_scans', 'payroll_registration_event_snapshots',
         'payroll_registration_identity_snapshots', 'payroll_regzel_payload_snapshots',
         'payroll_risky_savings_contributions', 'payroll_risky_savings_evidence', 'payroll_run_commands',
-        'payroll_run_employments', 'payroll_run_events', 'payroll_run_persons', 'payroll_run_revisions',
+        'payroll_run_employments', 'payroll_run_events', 'payroll_run_exclusions', 'payroll_run_persons', 'payroll_run_revisions',
         'payroll_run_validations', 'payroll_runs', 'payroll_shifts', 'payroll_sickness_case_decisive_months',
         'payroll_sickness_case_work_days', 'payroll_sickness_cases',
         'payroll_sickness_compensation_segments', 'payroll_sickness_events',
@@ -511,12 +534,17 @@ final class GlobalSeedTables
         'payroll_submission_receipts',
         'payroll_submission_transport_attempts', 'payroll_submissions',
         'payroll_surcharge_input_materializations', 'payroll_surcharge_period_claims',
+        'payroll_termination_floor_proofs', 'payroll_standby_floor_proofs', 'payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
+        'payroll_hourly_evidence_revisions', 'payroll_hourly_time_entitlements',
+        'payroll_hourly_time_entitlement_revisions', 'payroll_hourly_included_consumption',
         'payroll_takeover_payment_evidence', 'payroll_takeover_runs',
         'payroll_taxable_income_confirmation_requests', 'payroll_pension_requests', 'payroll_time_entries', 'payroll_time_import_errors',
         'payroll_time_imports', 'payroll_time_month_events', 'payroll_time_month_import_summaries',
+        'payroll_time_month_manual_segments', 'payroll_time_month_manual_summaries',
         'payroll_time_months', 'payroll_travel_compensation_links', 'payroll_wage_statement_revisions',
         'payroll_work_calendars', 'payroll_year_closures',
         'abra_flexi_connections', 'abra_flexi_import_map', 'abra_flexi_imports',
+        'helios_import_map',
         'pohoda_import_map', 'pohoda_imports',
         'premier_import_map', 'premier_imports',
         'price_list_customer_overrides', 'price_list_item_prices', 'price_list_items',
@@ -534,6 +562,8 @@ final class GlobalSeedTables
         'retention_holds',
         'sales_order_fulfillment_links', 'sales_order_invoice_links', 'sales_order_lines',
         'sales_order_operation_keys', 'sales_order_reservations', 'sales_order_returns', 'sales_orders',
+        'sales_quote_counters', 'sales_quote_documents', 'sales_quote_events', 'sales_quote_files',
+        'sales_quote_orders', 'sales_quote_version_files', 'sales_quote_versions', 'sales_quotes',
         'sample_data_entries',
         'scan_batch_items', 'scan_matches',
         'shoptet_import_batches', 'shoptet_orders',
@@ -546,9 +576,9 @@ final class GlobalSeedTables
         'stock_item_attribute_values', 'stock_item_categories', 'stock_item_customer_prices',
         'stock_item_fees', 'stock_item_i18n', 'stock_item_prices', 'stock_item_promo_prices',
         'stock_item_relations', 'stock_item_tags', 'stock_item_templates', 'stock_item_units',
-        'stock_item_vendors', 'stock_items', 'stock_landed_costs', 'stock_levels', 'stock_locales',
+        'stock_item_vendors', 'stock_items', 'stock_landed_costs', 'stock_levels', 'stock_locales', 'stock_sales_retired_skus',
         'stock_media', 'stock_packaging_units', 'stock_price_level_rules', 'stock_price_levels',
-        'stock_pricing_exchange_rates', 'stock_pricing_profiles', 'stock_pricing_rules', 'stock_tags',
+        'stock_pricing_exchange_rates', 'stock_pricing_profiles', 'stock_pricing_rules', 'stock_receipt_invoice_links', 'stock_tags',
         'stock_take_lines', 'stock_takes', 'stock_tracking_allocations', 'stock_tracking_units',
         'stock_valuation_rows', 'stock_valuation_snapshots',
         'submission_defect_notices', 'submission_inbox_messages', 'submission_inbox_polls',
@@ -578,6 +608,7 @@ final class GlobalSeedTables
     public const SAMPLE_MARKERS = [
         'payroll_attendance_sample_seeded_at' => 'payroll_import_profiles',
         'payroll_attendance_myucto_sample_seeded_at' => 'payroll_import_profiles',
+        'payroll_attendance_pamica_sample_seeded_at' => 'payroll_import_profiles',
         'integration_sample_seeded_at'        => 'integration_connections',
     ];
 
@@ -589,6 +620,18 @@ final class GlobalSeedTables
     }
 
     /**
+     * Tabulky ze seznamu mazaných ({@see self::RESET_KEEP_USERS_SUPPLIER_WIPES}), ve kterých
+     * režim `--keep-users-supplier` ponechá řádky patřící ponechané konfiguraci. Hodnota je
+     * podmínka řádků, které se smažou.
+     *
+     * @var array<string, string>
+     */
+    public const RESET_KEEP_USERS_SUPPLIER_PARTIAL = [
+        // Výchozí dimenze vlastního bankovního účtu: účet, typy i hodnoty dimenzí zůstávají.
+        'dimension_defaults' => 'supplier_bank_account_id IS NULL',
+    ];
+
+    /**
      * Keep-list režimu `--keep-users-supplier` a smíšené tabulky, u kterých se v tomto
      * režimu maže jen per-tenant část (ty, které jsou konfigurací, zůstávají celé).
      *
@@ -597,7 +640,8 @@ final class GlobalSeedTables
     public static function resetKeepUsersSupplier(bool $keepCache): array
     {
         $keep = array_values(array_unique(array_merge(self::resetKeep($keepCache), self::RESET_KEEP_USERS_SUPPLIER)));
-        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER));
+        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER))
+            + self::RESET_KEEP_USERS_SUPPLIER_PARTIAL;
 
         return ['keep' => $keep, 'partial' => $partial];
     }

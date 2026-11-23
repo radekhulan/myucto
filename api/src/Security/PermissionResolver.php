@@ -89,6 +89,15 @@ final class PermissionResolver
         return $roleId > 0 ? $this->load($roleId) : EffectiveRole::denied();
     }
 
+    /**
+     * Výchozí role uživatele i s oprávněními, bez requestu. Pro akce, které ověřují
+     * uživatele samy a nemají přihlášené sezení (výměna hesla za API token).
+     */
+    public function forRoleId(int $roleId): EffectiveRole
+    {
+        return $roleId > 0 ? $this->load($roleId) : EffectiveRole::denied();
+    }
+
     private function load(int $roleId): EffectiveRole
     {
         $stmt = $this->db->pdo()->prepare(
@@ -117,12 +126,11 @@ final class PermissionResolver
 
         // Stejná hranice jako v PermissionCheckeru platí i pro matici vrácenou UI.
         // Poškozený nebo historický grant nesmí nabízet zakázané akce v prohlížeči.
-        if ($type === 'client') {
-            if (($permissions['reports.submissions'] ?? 0) > 0) {
-                $permissions['reports.submissions'] = AccessLevel::READ->value;
-            } else {
-                unset($permissions['reports.submit']);
-            }
+        if (($permissions['reports.submissions'] ?? 0) > 0) {
+            $permissions['reports.submissions'] = AccessLevel::READ->value;
+        } elseif ($type === 'client') {
+            // Interní role si legacy `reports.submit` bez archivu ponechává (viz PermissionChecker).
+            unset($permissions['reports.submit']);
         }
 
         return new EffectiveRole(

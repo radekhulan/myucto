@@ -53,6 +53,9 @@ final class PayrollMealShiftEvidenceService
      */
     public const MISSING_ATTENDANCE = 'attendance_missing';
 
+    /** Měsíční souhrn nedokládá dobu jednotlivých směn ani dnů. */
+    public const MANUAL_WORK_SOURCE_REQUIRES_REVIEW = 'manual_work_source_requires_review';
+
     /** Směnový režim má odpracovaný čas, ale chybí publikovaný rozvrh. */
     public const MISSING_SHIFT_SCHEDULE = 'shift_schedule_missing';
 
@@ -106,6 +109,13 @@ final class PayrollMealShiftEvidenceService
             $periodStart,
         );
         $worked = $this->repository->workedIntervals($supplierId, $ids, $periodStart);
+        $manualIds = [];
+        foreach ($employments as $employment) {
+            if (($employment['work_source'] ?? null) === 'manual_summary') {
+                $manualIds[$employment['employment_id']] = true;
+            }
+        }
+        $worked = array_values(array_filter($worked, static fn (array $row): bool => !isset($manualIds[$row['employment_id']])));
         $trips = $this->repository->mealAllowanceTrips($supplierId, $ids, $periodStart);
         $missing = $this->missingEvidence($employments, $shifts, $worked, $periodStart);
 
@@ -189,6 +199,10 @@ final class PayrollMealShiftEvidenceService
         $reasons = [];
         foreach ($employments as $employment) {
             $id = $employment['employment_id'];
+            if (($employment['work_source'] ?? null) === 'manual_summary') {
+                $reasons[self::MANUAL_WORK_SOURCE_REQUIRES_REVIEW] = true;
+                continue;
+            }
             $employmentShifts = $this->forEmployment($shifts, $id);
             $employmentWorked = $this->forEmployment($worked, $id);
             if ($employment['month_status'] === null) {

@@ -54,6 +54,8 @@ nebo z detailu klienta či zakázky).
    (`Nastavení`, záložka **Fakturace**, viz [§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
 10. Klikněte na **Odeslat klientovi**. Odeslání e-mailem je samostatný krok po vystavení.
 
+Koncept lze uložit i bez položek; fakturu bez alespoň jedné položky nelze **vystavit**.
+
 **Jak poznáte, že je hotovo:** v seznamu `Prodej → Vydané faktury` má faktura stav
 **Vystaveno**, po odeslání **Odesláno**.
 
@@ -84,6 +86,21 @@ nebo z detailu klienta či zakázky).
 **Jak poznáte, že je hotovo:** aplikace ohlásí „Pokladní doklad {číslo} byl vystaven a
 zaúčtován.“ a faktura je uhrazená. Pravidla jsou v [§ 15.9.2](#1592-hlavicka).
 
+### 15.3.3 Účtenka z telefonu (zjednodušený daňový doklad)
+
+1. Na telefonu klepněte ve spodní liště na **Prodej** a zvolte dlaždici **Účtenka**.
+   Na počítači otevřete adresu `/invoices/new?simplified=1`.
+2. Editor předvyplní **Zjednodušený daňový doklad**, úhradu **Hotově**, ceny včetně DPH
+   a výchozí korunovou pokladnu. Odběratele vybírat nemusíte.
+3. Doplňte položky a doklad vystavte.
+
+Nad formulářem je řádek **Účtenka** s limitem 10 000 Kč včetně DPH. Tlačítkem
+**Vystavit jako fakturu** volbu zrušíte a pokračujete běžnou fakturou. Dlaždice se
+nabízí jen plátci DPH. Pravidla zjednodušeného dokladu jsou v [§ 15.9.2](#1592-hlavicka).
+
+**Jak poznáte, že je hotovo:** PDF má titulek **Zjednodušený daňový doklad** a při
+zvolené pokladně je doklad rovnou uhrazený.
+
 ## 15.4 Krok za krokem: zálohová faktura a daňový doklad k ní
 
 1. Vytvořte fakturu s typem **Zálohová faktura (proforma)** a vystavte ji. Dostane číslo s
@@ -97,38 +114,167 @@ zaúčtován.“ a faktura je uhrazená. Pravidla jsou v [§ 15.9.2](#1592-hlavi
 **Jak poznáte, že je hotovo:** na obou dokladech je křížový odkaz, na daňovém dokladu je
 odečet zálohy v sumáři.
 
-### 15.4.1 Spárovat už existující zálohu a daňový doklad
+### 15.4.1 Spárovat už existující zálohu a konečnou fakturu (záloha bez DDKP)
+
+Ruční spárování je jen pro zálohu, ke které **není** vystavený daňový doklad k přijaté platbě
+(DDKP), typicky u neplátce DPH, v přenesené daňové povinnosti nebo když záloha a plnění
+proběhly týž den. Spárování odečte úhradu zálohy jen v hlavičce faktury (**Uhrazeno zálohou**),
+základ ani DPH faktury nemění. Má-li záloha DDKP, postupujte podle
+[§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 Pokud už máte v systému oba doklady samostatně (typicky po importu), spárujete je z
 kterékoli strany:
 
-1. V detailu daňového dokladu bez vazby klikněte na **Spárovat se zálohou** a vyberte zálohovou
+1. V detailu konečné faktury bez vazby klikněte na **Spárovat se zálohou** a vyberte zálohovou
    fakturu téhož odběratele. V detailu zálohové faktury klikněte na **Spárovat s daňovým
-   dokladem** a vyberte daňový doklad.
-2. Propojení zrušíte tlačítkem **Zrušit propojení**.
+   dokladem** a vyberte konečnou fakturu.
+2. Propojení zrušíte tlačítkem **Zrušit propojení**. Úhradu zálohy odečtenou v hlavičce faktury
+   zrušení propojení nevrací: faktura dál ukazuje **K úhradě** 0 Kč. Pokud propojení vzniklo
+   omylem, opravte fakturu podle
+   [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 **Jak poznáte, že je hotovo:** zobrazí se zpráva „Záloha propojena.“ Tlačítko se nabídne jen
-tehdy, když u daného odběratele existuje vhodný nespárovaný protějšek.
+tehdy, když u daného odběratele existuje vhodný nespárovaný protějšek. Záloha s navázaným DDKP
+se mezi kandidáty nenabízí a spárování odmítne, protože by se DPH ze zálohy přiznala dvakrát.
 
-### 15.4.2 Čerpat jednu zálohu postupně víc fakturami (milníky)
+### 15.4.2 Čerpat zálohy na faktuře (víc záloh i postupně po milnících)
 
-Typicky smlouva o dílo: klient zaplatí při podpisu zálohu 30 % z ceny díla a každá faktura za
-milník pak odečte 30 % své ceny, dokud se záloha nevyčerpá. Záloha musí být zaplacená a mít
-vystavený daňový doklad k přijaté platbě.
+Konečná faktura může odečíst libovolný počet zaplacených záloh téhož odběratele a měny,
+každou zvlášť zadanou částkou. Jednu zálohu zase může čerpat víc faktur postupně, typicky
+smlouva o dílo: klient zaplatí při podpisu zálohu 30 % z ceny díla a každá faktura za milník
+odečte 30 % své ceny, dokud se záloha nevyčerpá. Čerpat lze jen zálohu, která je zaplacená
+a má vystavený daňový doklad k přijaté platbě.
 
-1. Založte běžnou fakturu s položkami milníku v plné ceně a uložte ji jako koncept.
-2. V detailu konceptu klikněte na **Odečíst zálohu**, vyberte zálohovou fakturu a zadejte
-   čerpanou částku včetně DPH. U zálohy vidíte, kolik z ní ještě zbývá.
-3. Na faktuře přibude záporná položka „Odpočet zálohy“ se základem i DPH v poměru daňového
-   dokladu k záloze. Fakturu zkontrolujte a vystavte.
+1. Založte běžnou fakturu s položkami plnění v plné ceně a uložte ji jako koncept.
+2. V detailu konceptu klikněte na **Odečíst zálohu**. Okno ukazuje **Plnění faktury** a jakou
+   část ještě nekryjí odečtené zálohy.
+3. Vyberte zálohovou fakturu. U každé zálohy vidíte čísla jejích daňových dokladů, kolik
+   z ní ještě zbývá a kolik z ní faktura už čerpá.
+4. Zadejte částku a zvolte, jak ji zadáváte: **s DPH**, **bez DPH**, nebo **% z plnění
+   faktury** (u procenta okno ukáže odpovídající částku s DPH). Výchozí částka je zbytek
+   zálohy, nejvýš ta část plnění, kterou ještě nekryjí jiné zálohy.
+5. Klikněte na **Odečíst**. Na faktuře přibudou záporné položky „Odpočet zálohy“ s číslem
+   zálohové faktury a jejího daňového dokladu, po sazbách DPH v poměru daňového dokladu.
+6. Okno zůstane otevřené: další zálohu přidáte stejně. Seznam **Čerpání na faktuře** ukazuje
+   odečtené zálohy, u každé je tlačítko **Odebrat**. Vybráním zálohy, kterou faktura už čerpá,
+   čerpání upravíte (**Upravit čerpání**).
+7. Okno zavřete, fakturu zkontrolujte a vystavte.
 
-Další milníky čerpají stejnou zálohu stejným postupem. Faktura, která zálohu vyčerpá, odečte
-přesný zbytek základu i daně, takže součet odpočtů sedí na daňový doklad k platbě. Víc, než ze
-zálohy zbývá, odečíst nejde. Odpočet z konceptu odeberete tlačítkem **Odebrat čerpání zálohy**.
+Faktura, která zálohu vyčerpá, odečte přesný zbytek základu i daně, takže součet odpočtů
+všech faktur sedí na daňový doklad k platbě. Víc, než ze zálohy zbývá, odečíst nejde. Čerpá-li
+faktura víc záloh, nesmí odpočty dohromady převýšit plnění faktury. Odpočty všech záloh
+odeberete tlačítkem **Odebrat čerpání záloh** v nabídce akcí.
 
-**Jak poznáte, že je hotovo:** faktura má odkaz na zálohovou fakturu a v položkách odpočet
-zálohy. Při zaúčtování každá faktura zúčtuje ze zálohy (MD 324 / D 311) jen základ, který sama
-odečetla, a zbytek zálohy zůstává na 324 pro další faktury.
+> [!NOTE]
+> Zálohu bez daňového dokladu k přijaté platbě takto čerpat nejde: daň z ní nebyla přiznaná,
+> takže by ji odpočet snížil, aniž by ji kdo přiznal. Takovou zálohu vyúčtujte tlačítkem
+> **Vystavit fakturu k záloze** v detailu zálohové faktury (úhrada zálohy se odečte mimo daň),
+> nebo v saldokontu. Fakturu s odečtenou úhradou zálohy bez daňového dokladu nejde kombinovat
+> s čerpáním dalších záloh.
+
+> [!IMPORTANT]
+> Ve firmě s podvojným účetnictvím musí mít čerpaná záloha úhradu zaúčtovanou bankou nebo
+> pokladnou, nebo musí být převzatá z počátečních stavů (viz
+> [Záloha přijatá před otevřením knih](#zaloha-prijata-pred-otevrenim-knih)). Záloha jen s ruční
+> úhradou se čerpat nedá: okno **Odečíst zálohu** ji ukáže zašedlou s důvodem a vybrat ji nejde. Konečnou fakturu by jinak nešlo zaúčtovat. Totéž platí pro **Vystavit fakturu
+> k záloze** u zálohy s daňovým dokladem k platbě: zaúčtovaná nebo převzatá úhrada musí
+> pokrýt vše, co faktura odečte.
+
+**Jak poznáte, že je hotovo:** faktura čerpající jednu zálohu má odkaz na zálohovou fakturu,
+faktura čerpající víc záloh má pruh **Faktura čerpá zálohy** s odkazy na všechny. V položkách
+je odpočet každé zálohy. Při zaúčtování faktura zúčtuje z každé zálohy (MD 324 / D 311) jen
+základ, který z ní sama odečetla, a zbytek zálohy zůstává na 324 pro další faktury. Kontrolní
+hlášení i přiznání k DPH vykáží rozdíl plnění a odpočtů po sazbách.
+
+### 15.4.3 Konečná faktura k záloze s daňovým dokladem: jak nezdvojit DPH
+
+Plátce DPH přizná daň ze zálohy už v daňovém dokladu k přijaté platbě (DDKP, § 28 odst. 2
+ZDPH) v měsíci platby. Konečná faktura pak musí tutéž úplatu odečíst **odpočtovým řádkem
+se základem a DPH z DDKP** (§ 37a). V přiznání za měsíc konečné faktury tak zůstane jen rozdíl
+mezi DPH plnění a DPH z DDKP. Konečná faktura, která zálohu odečte jen v hlavičce
+(**Uhrazeno zálohou**, K úhradě 0 Kč) a v položkách nese plnou DPH, přizná daň ze zálohy podruhé.
+
+#### Podle čeho MyÚčto páruje
+
+MyÚčto nepáruje zálohu, DDKP a konečnou fakturu podle variabilního symbolu, čísla dokladu ani
+částky. Rozhoduje **vazba mezi doklady**, kterou založí akce v aplikaci nebo převod dat:
+
+| Krok | Jak vznikne vazba | Co se při tom kontroluje |
+|---|---|---|
+| Platba zálohové faktury | Banka nebo pokladna spáruje platbu se zálohou podle variabilního symbolu a částky (stejně jako u každé faktury) | odběratel se nekontroluje, jen platba |
+| DDKP k platbě | Podle volby firmy **Po úhradě zálohové faktury vystavit** vznikne koncept DDKP, nebo ho vystavíte v boxu **Platby** zálohy. DDKP nese vazbu na zálohu i na platbu | plátcovství DPH k datu platby, ne přenesená daňová povinnost |
+| Konečná faktura z detailu zálohy | **Vystavit fakturu k záloze** zkopíruje položky zálohy a za každý DDKP a sazbu přidá odpočtový řádek. Úhradu zálohy bez DDKP odečte v hlavičce | DDKP se hledá jen přes vazbu na zálohu nebo na její platbu |
+| Konečná faktura založená jinak | **Odečíst zálohu** na konceptu přidá odpočtové řádky podle DDKP vybrané zálohy | stejný odběratel a měna, záloha vystavená a zaplacená, s DDKP navázaným na zálohu |
+| Ruční spárování | **Spárovat se zálohou** jen uloží vazbu a odečte úhradu v hlavičce ([§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-konecnou-fakturu-zaloha-bez-ddkp)) | stejný odběratel a měna; zálohu s navázaným DDKP odmítne |
+| AI import vydané faktury z PDF | Žádná. Vznikne koncept s položkami z dokladu v plné výši, odpočet zálohy z PDF se nepřebírá | koncept z ISDOC, který zálohu odečítá, dostane upozornění **Koncept zkontrolujte před vystavením** |
+| Převod z POHODY | Konečná faktura převezme odpočet zálohy z POHODY a vazbu na zálohu. DDKP (interní doklad) dostane vazbu na zálohu podle vazby v exportu, nebo podle čísla zálohy v textu dokladu, sedí-li odběratel i částka | DDKP bez vazby na zálohu nevidí **Odečíst zálohu** ani kontrola ručního spárování |
+
+Stejný variabilní symbol zálohy a konečné faktury proto párování neovlivní. Rozhoduje, zda je
+DDKP navázaný na zálohu: v detailu DDKP je odkaz na zálohovou fakturu, v detailu zálohy
+odkaz na její DDKP.
+
+#### Doporučený postup
+
+**A. Konečnou fakturu vystavujete v MyÚčtu (doporučeno).**
+
+1. Vystavte zálohovou fakturu. Po zaplacení vznikne DDKP (nebo ho vystavte v boxu **Platby**)
+   a vystavte ho nejpozději do 15 dnů od platby.
+2. Po dodání otevřete detail zálohy a klikněte na **Vystavit fakturu k záloze**. Doplňte
+   případné další položky, zkontrolujte DUZP a fakturu vystavte.
+3. Fakturuje-li jedna konečná faktura víc záloh nebo jen část zálohy, založte fakturu jako
+   koncept a použijte **Odečíst zálohu** ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)).
+
+**B. Záloha a DDKP převzaté z POHODY nebo z jiného programu.**
+
+**Navázání převzatého daňového dokladu na zálohu**
+
+1. Otevřete vystavený DDKP. Pokud chybí odkaz na zálohovou fakturu, klikněte na **Navázat na
+   zálohu** a vyberte příslušnou zálohu. Z detailu zálohy můžete stejnou vazbu založit tlačítkem
+   **Navázat daňový doklad**.
+2. Vyberte doklad téhož odběratele ve stejné měně. Součet navázaných dokladů se musí vejít do
+   částky zálohy s tolerancí na zaokrouhlení do 1 Kč, v cizí měně do 0,01. Pokud má záloha
+   jedinou volnou platbu se shodnou částkou, MyÚčto naváže doklad i na ni.
+3. V detailu zálohy zkontrolujte seznam navázaných DDKP. Konečnou fakturu vystavte podle
+   postupu A. Tlačítko **Zrušit vazbu** v detailu DDKP můžete použít, dokud zálohu nečerpá konečná faktura.
+
+**C. Konečnou fakturu vystavujete jinde a do MyÚčta ji jen nahráváte (PDF, ISDOC).**
+
+1. Nahrajte doklad v `Prodej → AI import` ([§ 25.6](25_AI_extrakce.md#256-krok-za-krokem-importovat-vydane-faktury-z-pdf)).
+   Vznikne **koncept** s položkami v plné výši.
+2. Otevřete koncept a klikněte na **Odečíst zálohu**. Vyberte zálohu, ponechte výchozí částku
+   (zbytek zálohy) a klikněte na **Odečíst**.
+3. Zkontrolujte, že odpočet odpovídá odpočtu zálohy na původním dokladu, a fakturu vystavte.
+   Číslo dokladu ponechte z původního dokladu.
+4. **Spárovat se zálohou** u konečné faktury k záloze s DDKP nepoužívejte.
+
+#### Jak poznáte, že odpočet proběhl správně
+
+- **Detail konečné faktury:** v položkách je záporný řádek „Odpočet zálohy …, daňový doklad …“
+  se základem a DPH z DDKP. Sumář ukazuje DPH jen z rozdílu (u plně zálohované faktury
+  0 Kč, případně haléře ze zaokrouhlení) a **K úhradě** 0 Kč. Faktura odkazuje na zálohovou
+  fakturu.
+- **Přiznání k DPH a Kniha DPH:** daň ze zálohy je v měsíci platby (DDKP), v měsíci konečné
+  faktury jen rozdíl. V Knize DPH má konečná faktura základ a daň po odečtení DDKP.
+- **Kontrolní hlášení:** DDKP je v oddílu A.4 (nad 10 000 Kč) nebo A.5 v měsíci platby.
+  Konečná faktura plně krytá zálohou se v A.4 neobjeví, protože její základ i daň jsou nulové.
+  Když je v A.4 nebo A.5 DDKP i konečná faktura se stejným základem a daní, DPH je zdvojená.
+- **Účetní deník:** konečná faktura účtuje výnos a zúčtování zálohy MD 324 / D 311 jen
+  ve výši základu, DPH na 343 neúčtuje.
+
+#### Oprava konečné faktury, která DPH ze zálohy zdvojila
+
+Konečná faktura spárovaná se zálohou jen v hlavičce, nebo bez vazby s plnou DPH, se opravuje
+v období, které ještě není podané:
+
+1. Ověřte, že DDKP je navázaný na zálohu. Chybějící vazbu doplňte podle postupu B.
+2. Chybnou konečnou fakturu smažte (správce firmy, **Smazat** v detailu faktury). Smazáním se
+   zruší i její zápis v deníku.
+3. Konečnou fakturu založte znovu: z detailu zálohy (**Vystavit fakturu k záloze**), nebo
+   nahráním původního dokladu (postup C) a **Odečíst zálohu**. Ponechte původní číslo a DUZP.
+4. Fakturu vystavte a zkontrolujte podle předchozího odstavce.
+
+Je-li období podané, chybnou konečnou fakturu neměňte. Rozdíl opravte dodatečným přiznáním
+a následným KH podle pokynů účetní.
 
 ## 15.5 Krok za krokem: výkaz víceprací a materiálu
 
@@ -181,7 +327,9 @@ Schválení mimo systém (telefonem) zapíše správce, viz [§ 15.9.7](#1597-sc
 1. Je-li to **koncept**, otevřete ho a upravte, nebo ho smažte tlačítkem **Smazat**.
 2. Je-li fakturu potřeba stornovat, otevřete její detail a klikněte na **Storno / dobropis**.
 3. Zvolte, zda jde o interní storno (klientovi se nic neposílá), nebo o dobropis (opravný
-   daňový doklad, který klientovi pošlete).
+   daňový doklad, který klientovi pošlete). Dobropis k zjednodušenému dokladu drobného
+   zákazníka vznikne rovnou jako zjednodušený opravný daňový doklad (§ 45 odst. 2 ZDPH, viz
+   [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)).
 4. Zrušit omylem provedené storno lze tlačítkem **Zrušit storno**.
 
 **Jak poznáte, že je hotovo:** původní faktura má stav **Storno**, případně vznikl dobropis
@@ -194,7 +342,7 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 <!-- cols: 32 34 34 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají | Přidejte položku tlačítkem **+ Přidat položku** |
+| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají. Koncept bez položek uložit lze | Před vystavením přidejte položku tlačítkem **+ Přidat položku** |
 | „Výsledná částka k úhradě musí být větší než 0. Pro čistě záporný nebo nulový doklad použij dobropis.“ | Faktura nesmí skončit zápornou částkou | Vystavte dobropis, nebo zapněte vyúčtování s částkou k vyplacení ([§ 15.9.4](#1594-sumar-vpravo)) |
 | Chyba „Číslo už existuje…“ | Ručně zadané číslo už je u jiné faktury téhož dodavatele | Číslo změňte, nebo pole nechte prázdné |
 | Tlačítko **Vystavit** je zablokované | Zakázka vyžaduje schválení výkazu zákazníkem | Pošlete výkaz ke schválení ([§ 15.6](#156-krok-za-krokem-nechat-vykaz-schvalit-zakaznikem)) |
@@ -202,9 +350,16 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 | „Pokladní doklad se nepodařilo vystavit - doklad je uložený, ale zůstává neuhrazený.“ | Pokladní doklad nemohl vzniknout (zavřené období, smazaná pokladna) | Úhradu dořešte ručně v Pokladně |
 | „Fakturu nelze stornovat - nejdřív vyřešte pokladní doklad, kterým byla hotově inkasována (…)“ | Pokladní doklad nejde zrušit (třeba kvůli uzavřenému období) | Vyřešte pokladní doklad v Pokladně a storno zopakujte |
 | „Tento odkaz byl již použit nebo není platný“ | Schvalovací odkaz je jednorázový | Pošlete výkaz ke schválení znovu |
+| DPH ze zálohy je v přiznání a KH dvakrát (DDKP i konečná faktura se stejným základem a daní) | Konečná faktura odečetla zálohu jen v hlavičce (**Spárovat se zálohou**, AI import) a nese plnou DPH | Opravte fakturu podle [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph) |
+| **Spárovat se zálohou** hlásí, že k záloze existují daňové doklady k přijaté platbě | Ruční spárování by DPH ze zálohy zdvojilo | Na konceptu faktury použijte **Odečíst zálohu**, nebo vystavte fakturu z detailu zálohy |
+| **Odečíst zálohu** zálohu nenabízí | Záloha nemá vystavený DDKP navázaný na zálohu, není zaplacená nebo má jiného odběratele či měnu | V detailu zálohy zkontrolujte platbu a DDKP, postup B v [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph) |
 | Uložení faktury s prodejem majetku skončí chybou | Karta majetku už byla prodána jiným dokladem, nebo je vyřazená | Vyberte jinou kartu, viz [§ 15.9.3](#1593-polozky) |
-| Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
+| Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
 | Pole data se neuloží | Neplatné datum (např. `31. 2.`) | Opravte datum |
+| „Odběratel … je veden jako drobný zákazník bez adresy. Lze mu vystavit jen zjednodušený daňový doklad…“ | Klient je drobný zákazník a doklad není zjednodušená faktura | Zaškrtněte **Zjednodušený daňový doklad**, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
+| „…zjednodušený daňový doklad lze vystavit jen do 10 000 Kč včetně daně…“ u drobného zákazníka | Doklad přesahuje limit § 30 ZDPH | Doplňte na kartě klienta adresu a vystavte běžnou fakturu, nebo prodej snižte |
+| „…Dobropis mu lze vystavit jen jako zjednodušený opravný daňový doklad k vystavenému zjednodušenému daňovému dokladu téhož odběratele…“ | Dobropis drobnému zákazníkovi nemá vazbu na jeho vystavený zjednodušený doklad (§ 45 odst. 2 ZDPH) | Založte dobropis tlačítkem **Storno / dobropis** v detailu původního dokladu, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
+| „Dobropis na … přesahuje částku, kterou lze ještě opravit u zjednodušeného dokladu…“ | Dobropisy k jednomu zjednodušenému dokladu by dohromady přesáhly jeho částku | Snižte částku dobropisu, nebo doplňte na kartě klienta adresu a opravu vystavte jako běžný dobropis |
 
 ## 15.9 Podrobnosti a pravidla
 
@@ -275,7 +430,7 @@ kalendáře** s odkazy na ně.
 **Konečné vyúčtování záloh.** Skutečnou dodávku vyúčtujete běžnou fakturou. Zaplacená splátka
 platebního kalendáře je záloha s daňovým dokladem k platbě, takže ji odečtete stejně jako
 jinou zálohu: akcí **Vystavit fakturu k záloze** v detailu splátky, nebo **Odečíst zálohu**
-v detailu konceptu faktury ([§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)).
+v detailu konceptu faktury ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)).
 Jedna faktura odečítá vždy jen jednu zálohu.
 
 #### Klient a zakázka
@@ -283,6 +438,12 @@ Jedna faktura odečítá vždy jen jednu zálohu.
 - **Klient** (povinný) se vybírá z nabídky, vyhledávat lze podle jména nebo IČO. Při psaní
   se nabízí také firmy vedené pouze jako dodavatelé. Po vystavení faktury se jim doplní role
   odběratele. Prázdný seznam zůstává jen pro odběratele.
+- **ARES / VIES** vedle vybraného klienta porovná jeho kartu s registrem: český klient s IČO
+  se hledá v ARES, ostatní podle DIČ ve VIES. Dialog ukáže uložené a registrové hodnoty názvu,
+  adresy, země, IČO, DIČ a plátcovství DPH (u českého plátce i spolehlivost), rozdíly zvýrazní.
+  Zaškrtnuté rozdíly uloží **Aktualizovat údaje** do karty klienta a editor s nimi dál pracuje.
+  Tlačítko vidí jen uživatel s právem upravovat klienty. Bez IČO i DIČ je neaktivní.
+  Stejné tlačítko mají přijatá faktura u dodavatele a šablona opakované faktury.
 - **Zakázka** (volitelná): má-li klient zakázky, nabídne se jen jeho vlastní. Po výběru
   zakázky se předvyplní hodinová sazba a splatnost.
 - **Cenová hladina dokladu** (jen se zapnutým skladem): nahradí pro tento doklad hladinu
@@ -294,6 +455,17 @@ Jedna faktura odečítá vždy jen jednu zálohu.
   zůstane, jen se nevytiskne na PDF ani webové faktuře (ISDOC, i ten vložený do PDF, odběratele
   nese dál). Výchozí hodnotu nastavíte ve
   `Firma → Nastavení` na záložce **Fakturace** (viz [§ 40.9.10](40_Fakturujeme.md#40910-zjednoduseny-danovy-doklad-30-zdph)).
+- **Drobný zákazník bez adresy** (viz [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)): po výběru
+  takového klienta editor u plátce rovnou zaškrtne **Zjednodušený daňový doklad** a pod ním
+  připomene limit 10 000 Kč včetně DPH. Zrušíte-li zaškrtnutí, změníte typ na zálohovou fakturu
+  nebo přesáhne-li doklad limit, editor zobrazí varování a vystavení se odmítne.
+  Řešením je doplnit na kartě klienta adresu (pak lze vystavit běžnou fakturu), nebo prodej snížit.
+  Dobropis takovému klientovi jde jen jako zjednodušený opravný daňový doklad k jeho vystavenému
+  zjednodušenému dokladu (§ 45 odst. 2 ZDPH) a nejvýše do částky, která z původního dokladu
+  zbývá. Na PDF má titulek **Zjednodušený opravný daňový doklad**. Dobropis z detailu původního
+  dokladu (**Storno / dobropis**) tyto podmínky splní sám.
+  Doklad pošlete zákazníkovi e-mailem stejně jako jakoukoli jinou fakturu. Stejné pravidlo platí
+  i pro pravidelnou fakturaci, automatické vystavení, rychlou účtenku a API.
 
 > [!WARNING]
 > Pokud změníte klienta uprostřed editace, zakázka se vyresetuje (původní patřila jinému
@@ -495,7 +667,7 @@ Kde hotovostní vyrovnání nefunguje:
 |---|---|
 | **Zálohová (proforma) faktura**, storno faktura, splátkový a platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasujte hotově přímo v [Pokladně](32_Pokladna.md#32113-hlavicka-dokladu-a-ucel) |
 | **Pravidelné (opakované) fakturace** | Šablona pole „Pokladna“ nemá. Vygenerovaná faktura sice zdědí způsob úhrady „Hotově“, ale pokladnu ne, takže **žádný doklad nevznikne a faktura zůstane neuhrazená**. Totéž platí pro finální fakturu vystavenou ze zálohy |
-| **Cizoměnová faktura** | Vyrovnání se přeskočí („Cizoměnový doklad z pokladny hradit nelze.“) |
+| **Cizoměnová faktura** | Korunová pokladna ji uhradí v korunách: zbytek přepočtený kurzem faktury, ke dni faktury, bez kurzového rozdílu. Faktura bez kurzu se přeskočí. Platil-li odběratel jinou korunovou částkou, pořiďte úhradu ručně v [Pokladně](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny) |
 | **Valutová pokladna** | Nenabízí se |
 | **Faktura už uhrazená jinou cestou** | Vyrovnání se přeskočí, aby úhradu nezdvojilo |
 
@@ -557,7 +729,8 @@ se nesčítá.
 (`Nastavení → Doklady`) má tabulka položek za cenou sloupec **Sleva %**, a to u skladového
 i ručně zadaného řádku. Zadejte slevu 0 až 100 % (nejvýš dvě desetinná místa, víc se
 zaokrouhlí, znak % můžete připsat). Cena za jednotku se přepočte z ceníkové ceny
-a zaokrouhlí půl nahoru na dvě desetinná místa, i u časové položky. U nízkých cen se proto
+a zaokrouhlí půl nahoru na dvě desetinná místa, i u časové položky. Ceníková cena pod haléř
+(například 0,004 za kus) se zaokrouhlí na šest míst, aby se nevynulovala. U nízkých cen se proto
 procento spočtené ze zaokrouhlené ceny může od zadaného lišit o setiny. Řádek bez ceníkové
 ceny ji převezme z aktuální ceny, takže „1 000,00 a sleva 10 %“ dá cenu 900,00. Ruční změna
 ceny slevu v poli přepočte. Opravíte-li u řádku bez skladové karty cenu nad ceníkovou (pole
@@ -587,7 +760,7 @@ Textový řádek je jen text na dokladu:
   kontrolního hlášení, OSS ani zaúčtování nevstupuje,
 - nevydává nic ze skladu a neprodává majetek,
 - prázdný textový řádek se při uložení zahodí,
-- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku.
+- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku; koncept pouze s textovými řádky uložit lze.
 
 Kopie dokladu i dobropis textový řádek převezmou na stejné místo. U kopie s posunem
 měsíce se posune i měsíc v jeho textu. Jak se textový řádek přenáší do exportů,
@@ -618,6 +791,36 @@ službu a každý řádek sedne na svůj účet. Nenavázané řádky zůstávaj
 dlouhodobým majetkem navíc dostane klasifikaci DPH **1m/2m**, prodej dlouhodobého majetku se
 podle § 76 odst. 4 ZDPH nezapočítává do koeficientu. Ruční volba klasifikace má přednost.
 
+#### Zaúčtování už při zadání faktury
+
+V podvojném účetnictví vidí účetní pod šipkou na konci řádku vedle účtu položky ještě dvě pole.
+Řádek tak nese celou dvojici účtů, kterou vytvoří zaúčtování:
+
+- **Předkontace** vybere předkontaci řádku. Doplní výnosový účet položky (strana Dal) a pohledávku
+  (strana MD), pokud je řádek ještě nemá. Vyplněný účet má vždy přednost.
+- **Účet MD (pohledávka)** je protiúčet řádku. Prázdné pole použije pohledávku z předkontace
+  dokladu (obvykle 311). Zadat lze 311 nebo její analytiku, protože úhrada vydané faktury v bance,
+  pokladně i zápočtem odúčtovává pohledávku 311. Všechny řádky dokladu musí mít stejný protiúčet.
+
+Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
+[Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.
+
+Pod položkami je box **Náhled zápisu**. Ukazuje účty MD a Dal s částkami přesně tak, jak se
+doklad zaúčtuje, včetně DPH a pohledávky, a přepočítá se chvíli po každé změně dokladu. Náhled
+počítá server stejným výpočtem jako tlačítko **Zaúčtovat**, doklad přitom neuloží. Chybu, kvůli
+které by se doklad neuložil nebo nezaúčtoval (zamčené období, podané DPH, neplatný účet), ukáže
+rovnou v boxu. Náhled je jen u druhů dokladu, které se účtují do deníku (faktura, dobropis, daňový
+doklad k platbě, penále), a jen pro účetní.
+
+Protiúčet z řádku nelze použít u vyúčtování zálohy, daňového dokladu k platbě a penále: tyto
+doklady účtují pohledávku podle vlastní předkontace a zaúčtování to ohlásí chybou.
+
+**Členění DPH položky** zvolíte pod šipkou na konci řádku, kde je i účet položky. Výchozí
+**Automaticky podle sazby** kód odvodí ze sazby, jednotky a odběratele. Zvolený kód se při dalším
+uložení zachová, dokud nezměníte sazbu, jednotku, kartu majetku, odběratele, přenesenou daňovou
+povinnost nebo datum plnění. Po takové změně se kód odvodí znovu. V podaném období DPH je změna
+členění změnou položky a platí pro ni stejný zámek jako pro změnu částky.
+
 Pokud se kartu uzavřít nepodaří (zavřené účetní období, nebo u dlouhodobého majetku rok, který
 nemá potvrzený ani přerušený daňový odpis), **faktura se přesto vystaví a zaúčtuje** a systém
 hned po vystavení upozorní, která karta zůstala v užívání a proč (např. „rok 2025 nemá
@@ -647,8 +850,9 @@ Obsahuje-li text položky období (například `období 28. 9. 2026 – 28. 9. 2
 
 U vystavené a zaúčtované faktury se období nastaví v jejím **detailu**: stejný odkaz **Časové
 rozlišení** nad položkami otevře pole **Od** a **Do** u všech řádků a tlačítko **Uložit časové
-rozlišení** je uloží. Zápis faktury v deníku se tím nemění. Fakturu z uzavřeného účetního
-období takto upravit nelze.
+rozlišení** je uloží. Zápis faktury v deníku se tím nemění. Fakturu z uzavřeného, revidovaného či
+schváleného účetního období takto upravit nelze. Během uzávěrky jde období změnit jen do
+zaúčtování kroku **Časové rozlišení**; potom aplikace změnu odmítne, dokud krok nevrátíte.
 
 Období se přenáší ze zálohové faktury na vyúčtovací fakturu. Přes API se nastaví poli
 `accrual_from` a `accrual_to` u položky, u vystavené faktury endpointem
@@ -795,9 +999,18 @@ aplikaci označíte akcí **Označit jako vyplaceno**.
 
 ### 15.9.5 Tlačítka
 
-Editor má dole jedno tlačítko: **Vytvořit** u nové faktury, **Uložit** u úpravy konceptu.
-Faktura se uloží jako koncept, zůstane neviditelná pro klienta. Další akce najdete v **detailu
-faktury**:
+Editor má dole tlačítko **Vytvořit** u nové faktury, **Uložit** u úpravy konceptu.
+Faktura se uloží jako koncept, zůstane neviditelná pro klienta.
+
+Je-li na instalaci zapnutá volba `accounting.save_and_post` v `cfg.php` (proměnná prostředí
+`MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`, ve výchozím stavu je vypnutá), vidí v podvojném účetnictví uživatel
+s právem zaúčtovat vedle něj i **Uložit a zaúčtovat**. Bez volby tlačítko v editoru není a doklad zaúčtujete
+z jeho detailu. Náhled zápisu pod položkami a pole Předkontace a Protiúčet na řádku vidí každý uživatel s právem zaúčtovat. Tlačítko uloží
+doklad stejně jako Uložit, koncept rovnou vystaví (stejně jako **Vystavit** v detailu) a zaúčtuje
+ho podle náhledu zápisu. Když zaúčtování selže, doklad zůstane uložený a aplikace ukáže důvod.
+Tlačítko je jen u druhů dokladu, které se účtují do deníku, a u konceptu jen s právem vystavit.
+
+Další akce najdete v **detailu faktury**:
 
 <!-- cols: 30 70 -->
 | Tlačítko (detail) | Funkce |
@@ -827,19 +1040,54 @@ V editoru klikněte na ikonu **Přidat výkaz práce** v řádku položky. Zobra
 Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna položka `1 ks × celková
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
+Výkaz může používat **šablonu účtování výkazů** s paušálem a pásmy hodin. Šablony
+spravujete na stránce `Prodej → Šablony výkazů`: bez skladu ji otevřete z **Ceníku**, se zapnutým
+skladem je přímo v menu **Prodej**. Zobrazení
+vyžaduje právo **Ceník** ke čtení; úprava a archivace vyžadují právo zápisu. Po výběru šablony se
+v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
+`RRRR-MM`. Tlačítkem **Připravit přenos** zařadíte účtovací položky k uložení;
+po akci se zobrazí **Připraveno k uložení**, počet čekajících položek a jejich náhled
+u položek faktury. Samotný přenos se provede až po uložení faktury. Při nahrazení
+starší souhrnné položky ji vyberte v nabídce, jinak
+by se mohla částka účtovat dvakrát. Propojené položky mají stabilní vazbu na výkaz a
+na PDF odkazují na jeho podrobný rozpis. Při ukládání nepřeneseného nebo změněného
+účtování se aplikace zeptá, zda chcete pokračovat bez aktualizace položek faktury.
+Pokud už jste přenos připravili tlačítkem, další potvrzení se nezobrazuje. Nesoulad
+výkazu a položek blokuje vystavení faktury; nejprve zkontrolujte výkaz a přeneste jej znovu.
+Bez šablony zadejte sazbu pro každý řádek výkazu zvlášť.
+
+Jednotlivý výkaz si uchovává vlastní kopii šablony. Změna firemní šablony tedy nemění
+již uložený výkaz. Paušál se účtuje i při nulovém počtu hodin, nevyčerpané hodiny se
+nepřevádějí do dalšího období a limit hodin platí samostatně pro každý výkaz/fakturu.
+Popis položky může obsahovat `{nazev}` (název výkazu), `{zakazka}`, `{obdobi}`, `{limit}`,
+`{od}`, `{do}` a `{hodiny}`.
+
+Kopie faktury i hromadné vystavení převezmou cenové ujednání výkazu bez odpracovaného času
+a období účtování posunou o tolik měsíců, o kolik se posunulo DUZP kopie. Účtování za
+předchozí měsíc tak zůstane za předchozí měsíc.
+
+Pokud uložené ujednání nejde vyhodnotit (například měna ujednání neodpovídá faktuře nebo
+hodiny přesahují zahrnutý limit a chybí neomezené pásmo), detail faktury zobrazí varování
+s důvodem a PDF vynechá cenovou rekapitulaci. Fakturu nelze vystavit ani odeslat ke schválení,
+dokud výkaz neopravíte a rekapitulaci znovu nepřenesete.
+
+Volby zobrazení výkazu určují také, zda zákazník v PDF, e-mailu ke schválení a na veřejném
+odkazu uvidí hodiny, sazby a částky. Úprava šablony nebo její archivace neovlivní již
+uložené výkazy; archivace zároveň zruší její předvolbu na zakázkách.
+
 Čas lze zadat také přímo do množství fakturační položky s hodinovou jednotkou (`h`, `hod`,
 `hod.`). Například `0:01` při sazbě 1 000 Kč/h znamená 16,67 Kč. Sazba `333,33333 Kč/h` při
 60 hodinách dává 20 000 Kč. Stejný způsob zadávání podporují přijaté faktury a šablony
 pravidelné fakturace.
 
-Šestimístnou sazbu lze zadat u ručních hodinových položek a ve výkazu práce. Položky navázané
-na ceník používají cenu z ceníku na dvě desetinná místa.
+Cenu za jednotku lze u každé položky zadat až na šest desetinných míst, ve výkazu práce
+také sazbu. Ceník i skladová karta vedou ceny také na šest desetinných míst a do řádku
+předvyplní cenu se všemi místy, která má. Cena v haléřích se všude ukazuje na dvě místa.
 
 Uložené desetinné hodiny se při otevření ani uložení bez změny času nepřevádějí na celé
 minuty. Například `0,33 h` zůstává `0,33 h`, nikoli 20 minut. Desetinné zadání, které
 neodpovídá celým minutám, zachovává původní přesnost: dvě desetinná místa ve výkazu a tři u
-množství fakturační položky. Pro přesné minutové účtování použijte zápis `H:MM`. Skladové
-řádky zachovávají běžné množství a cenu na dvě desetinná místa.
+množství fakturační položky. Pro přesné minutové účtování použijte zápis `H:MM`.
 
 **Druhá strana PDF** má formát:
 
@@ -856,6 +1104,32 @@ množství fakturační položky. Pro přesné minutové účtování použijte 
 | Celkem k úhradě: 18 750 Kč                       |
 +--------------------------------------------------+
 ```
+
+**Zobrazení výkazu práce.** Ve výkazu v editoru faktury i v samostatném okně
+**Výkaz** najdete volbu **Zobrazení výkazu práce**. Standardně přebírá nastavení firmy.
+Po vypnutí **Použít výchozí nastavení firmy** nastavíte výjimku jen pro tuto fakturu:
+
+- **Kompaktní řádky výkazu** zmenší písmo a odsazení tabulky stejně jako kompaktní položky faktury.
+- Sloupce **Datum**, **Hodiny**, **Hodinová sazba** a **Částka** můžete zapínat samostatně.
+  Popis činnosti zůstává vždy viditelný. Datum se tiskne jen tehdy, když je alespoň u jedné práce vyplněné.
+- Vypnutí **Částky** skryje také peněžní součet práce; vypnutí **Hodin** skryje součet času.
+  Pro výkaz pouze s popisem, datem a časem vypněte sazbu a částku.
+
+Nastavení platí pro zobrazení práce v detailu faktury, přílohu faktury v PDF, samostatný schvalovací výkaz,
+veřejný sledovací náhled i schvalovací stránku a rekapitulaci práce ve schvalovacím e-mailu.
+Pokud některý otevřený výkaz skrývá hodiny nebo částku, veřejný náhled nezobrazuje
+odpovídající společný součet napříč výkazy. Výkaz materiálu si ponechává vlastní tabulku.
+Editor nadále ukazuje uložené údaje; skrytí výstupních sloupců nemění sazby, cenu práce
+ani částku faktury a nenahrazuje oprávnění k finančním datům.
+
+Pokud skrytí částky schová součet ve schvalovacím e-mailu, řádek materiálu v něm zůstává;
+u výkazu jen s materiálem zůstává i součet k vyúčtování. Schvalovací stránka ukáže částku
+u jednotlivých řádků práce jen u výkazu, u kterého je podoba změněná proti standardní.
+
+Výchozí podobu nastavuje správce v **Firma → Nastavení** u voleb vzhledu PDF.
+Změna výchozího nastavení se projeví u konceptů faktur bez vlastní výjimky. Výkazy už
+vystavených faktur si ponechají dosavadní podobu i po přegenerování PDF; chcete-li ji
+změnit, nastavte výjimku přímo ve výkazu. Zaškrtnutí dědění ve výkazu jeho výjimku zruší.
 
 **Smazání výkazu.** V editoru klikněte na ikonu odpojit (řetěz). Položka faktury zůstane, ale
 ztratí detailní rozpis.
@@ -952,15 +1226,16 @@ Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady záloh
 - **Daňový doklad k přijaté platbě** (typ „Daňový doklad k platbě“, viz
   [§ 14.11.1](14_Faktury.md#14111-sloupce-seznamu)) se zaúčtuje **jen za DPH** (MD 324 / D 343),
   bez fiktivní pohledávky 311 a bez duplicitního výnosu 6xx (ten patří až finální faktuře).
-- **Vyúčtovací (finální) faktura** navázaná na proformu (viz [§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-danovy-doklad))
+- **Vyúčtovací (finální) faktura** navázaná na proformu (viz [§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-konecnou-fakturu-zaloha-bez-ddkp))
   při zaúčtování automaticky doplní **zúčtovací řádek zálohy** (MD 324 / D 311) ve výši
   skutečně **přijaté** zálohy, ne nominální částky proformy, takže i částečně zaplacená nebo
   jinak vyrovnaná proforma se zúčtuje správně.
 
-- **Zálohu s daňovým dokladem k platbě čerpanou postupně víc fakturami** (viz
-  [§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)) zúčtuje každá faktura
-  jen ve výši základu, který odečetla. Součet odpočtů všech faktur nesmí přesáhnout daňový
-  doklad k platbě a úhrada zálohy musí být zaúčtovaná.
+- **Zálohu s daňovým dokladem k platbě čerpanou postupně víc fakturami** a **víc záloh čerpaných
+  jednou fakturou** (viz [§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich))
+  zúčtuje faktura z každé zálohy jen ve výši základu, který z ní odečetla. Součet odpočtů všech
+  faktur jedné zálohy nesmí přesáhnout její daňový doklad k platbě a úhrada zálohy musí být
+  zaúčtovaná.
 
 > [!WARNING]
 > Mimo automatiku zůstává proforma **bez** daňového dokladu k platbě navázaná na **víc než
@@ -968,6 +1243,37 @@ Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady záloh
 > nebo odečítá víc, než daňové doklady přiznaly, a postupné čerpání, ke kterému chybí
 > zaúčtovaná úhrada zálohy. Částka zúčtování zálohy by nebyla jednoznačná, systém takový
 > doklad automaticky nezaúčtuje a je potřeba dořešit ho ručním zápisem.
+
+#### Záloha přijatá před otevřením knih
+
+Při přechodu z jiného systému v průběhu roku mohou existovat zálohy, které odběratel zaplatil
+a ke kterým jste vystavili daňový doklad k přijaté platbě ještě v předchozím systému. Daň
+z nich je přiznaná a otevírací zápis nese na účtu 324 zbytek zálohy po dani. Bankovní pohyb
+v MyÚčtu nemají a mít nemají. Taková záloha se eviduje jako **převzatá z počátečních stavů**:
+
+1. Zálohovou fakturu založte s datem před otevřením knih a evidujte její úhradu (ruční úhrada
+   s datem přijetí platby, také před otevřením knih).
+2. Daňový doklad k platbě založte s jeho vlastním číslem a datem přijetí úplaty a vystavte ho.
+   **Nezaúčtovávejte ho**, jeho daň už nese otevírací zápis.
+3. Zálohovou fakturu i daňový doklad označte jako převzaté z počátečních stavů: v detailu
+   dokladu **Další akce → Pokročilé → Převzato z počátečních stavů** a potvrďte. Doklad se tím
+   naváže na nejbližší zaúčtovaný otevírací zápis po svém datu a v hlavičce dostane štítek
+   **Převzato z počátečních stavů**. Akci vidí uživatel s právem zaúčtovat doklady ve firmě
+   s podvojným účetnictvím. Zrušit ji jde na stejném místě (**Zrušit převzetí z počátečních
+   stavů**). Integrace mohou použít REST API (`PUT /api/v1/invoices/{id}/opening-balance`,
+   zrušení `DELETE`), přijaté doklady stejně (`/api/v1/purchase-invoices/{id}/opening-balance`).
+4. Konečnou fakturu vystavte a zálohu na ní odečtěte jako obvykle (**Odečíst zálohu**).
+
+Konečná faktura pak převzatý daňový doklad bere jako uplatněný a při zaúčtování doplní
+MD 324 / D 311 do výše převzaté zálohy po dani daňového dokladu. V [Saldokontu](60_Saldokonto.md)
+na účtu 324 je převzatá záloha otevřenou položkou proti počátečnímu stavu, dokud ji konečná
+faktura nevyčerpá.
+
+Za převzatou zálohu se počítá jen úhrada s datem před otevíracím zápisem, která neprošla bankou
+ani pokladnou. Pozdější úhrady musí zaúčtovat banka nebo pokladna. Označit jde jen vystavený doklad
+bez vlastního zápisu v deníku, datovaný před otevíracím zápisem, v otevřeném účetním období.
+Převzatý daňový doklad zaúčtovat nejde. Označení nejde zrušit, když zálohu už čerpá konečná
+faktura nebo je proti dokladu zaúčtovaná úhrada.
 
 ### 15.9.9 Storno vs. dobropis
 
@@ -980,6 +1286,11 @@ Pokud zjistíte, že vystavená faktura je špatně:
   klientovi pošlete jako oficiální opravu. Účetně správné, ale vyžaduje, abyste s klientem
   komunikovali o tom, co a proč. Dobropis vztahující se k jiné faktuře vystavte přes **Storno /
   dobropis** v detailu té faktury, ne ručně.
+- **Zjednodušený opravný daňový doklad** (§ 45 odst. 2 ZDPH) - dobropis k zjednodušenému
+  dokladu odběratele, který vám není dostatečně znám (drobný zákazník bez adresy, viz
+  [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)). Nemusí nést označení a DIČ
+  odběratele ani rozdíl základu a daně; číslo původního dokladu, důvod opravy, rozdíl celkové
+  částky a den doručení nese vždy.
 
 > [!TIP]
 > **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](52_Ucetni_denik.md) zaúčtuje
@@ -1038,11 +1349,12 @@ materiálu**.
 | Popis | Co bylo dodáno (např. „Kabel UTP cat6“) |
 | Množství | Desetinné číslo (počet kusů, metrů, kg, ...) |
 | MJ | Měrná jednotka z číselníku (výchozí „ks“) |
-| Cena/MJ | Jednotková cena - **bez DPH, nebo s DPH podle režimu faktury** (viz níže) |
+| Cena/MJ | Jednotková cena až na šest desetinných míst - **bez DPH, nebo s DPH podle režimu faktury** (viz níže). PDF ukazuje víc než dvě místa jen u ceny, která je skutečně má |
 | Celkem | Automaticky: množství × cena/MJ |
 
-**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky
-faktury). U výkazu práce je volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
+**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH**. U účtování podle šablony
+účtování výkazů ji přebírají všechny položky paušálu a pásem; bez šablony se přenese
+jedna souhrnná položka. U výkazu práce je sazba volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
 výchozí **12 %**. Sazbu vyberete v záhlaví příslušné sekce. Materiál a práce tak mohou mít
 **různou sazbu DPH** na jednom dokladu, DPH se na faktuře rekapituluje správně po sazbách.
 

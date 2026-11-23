@@ -8,6 +8,7 @@ import {
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
   payrollEmploymentOptionsFromContext,
+  payrollEmploymentPeriodFit,
   payrollImportFingerprint,
   payrollImportIssues,
   payrollMinorToInput,
@@ -84,7 +85,24 @@ describe('payrollComponentsUi', () => {
       code: 'SYN-HPP',
       relation_type: 'employment',
       status: 'active',
+      start_date: null,
+      end_date: null,
     }])
+  })
+
+  // Případ z podpory: květnový vstup na dubnovou skončenou dohodu se ve výběru
+  // nedal rozlišit od nové dohody a náhled hlásil „lze bezpečně zpracovat".
+  it('pozná vztah, který v měsíci vstupu neplatí', () => {
+    const old = { start_date: '2026-04-01', end_date: '2026-04-30' }
+    expect(payrollEmploymentPeriodFit(old, '2026-05')).toBe('ended')
+    expect(payrollEmploymentPeriodFit(old, '2026-04')).toBe('ok')
+    expect(payrollEmploymentPeriodFit({ start_date: '2026-06-15', end_date: null }, '2026-05')).toBe('not_started')
+    expect(payrollEmploymentPeriodFit({ start_date: '2026-05-31', end_date: null }, '2026-05')).toBe('ok')
+    expect(payrollEmploymentPeriodFit({ start_date: null, end_date: null }, '2026-05')).toBe('ok')
+    const [option] = payrollEmploymentOptionsFromContext([
+      { id: 5, employee_id: 1, code: 'B021', relation_type: 'dpp', status: 'ended', full_name: 'Syntetický Brigádník', start_date: '2026-04-01', end_date: '2026-04-30' },
+    ] as PayrollAbsenceEmployment[])
+    expect(option).toMatchObject({ start_date: '2026-04-01', end_date: '2026-04-30' })
   })
 
   it('never offers an archived or never-started relation for a payroll input', () => {

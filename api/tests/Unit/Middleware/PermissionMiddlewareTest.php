@@ -82,6 +82,7 @@ final class PermissionMiddlewareTest extends TestCase
             ['POST', '/api/bank-statements/7/send-unmatched'],
             ['GET', '/api/bank-statements/export-unmatched'],
             ['POST', '/api/bank-transactions/7/match-document'],
+            ['POST', '/api/bank-transactions/match-document-batch'],
             ['GET', '/api/bank-transactions/payment-candidates'],
             ['POST', '/api/bank-transactions/7/create-purchase-invoice'],
             ['POST', '/api/bank-transactions/7/document-request'],
@@ -236,6 +237,30 @@ final class PermissionMiddlewareTest extends TestCase
             ->process($this->request('POST', '/api/admin/bank-rule-templates'), $this->handler())->getStatusCode());
         self::assertSame(204, $this->middleware($writer, $access)
             ->process($this->request('POST', '/api/admin/bank-rule-templates'), $this->handler())->getStatusCode());
+    }
+
+    public function testWorkReportTemplatesUsePriceListPermissions(): void
+    {
+        foreach (['staff', 'client'] as $type) {
+            foreach ([0, 1, 2] as $level) {
+                $role = new EffectiveRole(8, 'Synthetic billing role', $type, true, ['price_list' => $level]);
+                $middleware = $this->middleware($role, new SupplierAccess(1, false, null));
+                self::assertSame($level > 0 ? 204 : 403, $middleware->process($this->request('GET', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
+                self::assertSame($level > 0 ? 204 : 403, $middleware->process($this->request('HEAD', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
+                foreach ([['POST', '/api/work-report-billing-templates'], ['PUT', '/api/work-report-billing-templates/7'], ['DELETE', '/api/work-report-billing-templates/7']] as [$method, $path]) {
+                    self::assertSame($level === 2 ? 204 : 403, $middleware->process($this->request($method, $path), $this->handler())->getStatusCode());
+                }
+                self::assertSame(403, $this->middleware($role, new SupplierAccess(0, true, null))->process($this->request('GET', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
+            }
+            foreach (['invoices', 'projects'] as $pickerPermission) {
+                $role = new EffectiveRole(9, 'Synthetic billing picker', $type, true, [$pickerPermission => 1]);
+                $middleware = $this->middleware($role, new SupplierAccess(1, false, null));
+                self::assertSame(204, $middleware->process($this->request('GET', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
+                self::assertSame(403, $middleware->process($this->request('POST', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
+            }
+        }
+        $settingsOnly = new EffectiveRole(10, 'Synthetic settings writer', 'staff', true, ['settings.company.write' => 2]);
+        self::assertSame(403, $this->middleware($settingsOnly, new SupplierAccess(1, false, null))->process($this->request('POST', '/api/work-report-billing-templates'), $this->handler())->getStatusCode());
     }
 
     public function testPriceListMatrixSeparatesPickerManagementAndSupplierAccess(): void

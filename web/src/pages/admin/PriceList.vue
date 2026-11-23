@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -9,6 +9,7 @@ import { codebooksApi, type Currency } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { unitPriceText } from '@/utils/unitPrice'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -23,6 +24,9 @@ const query = ref('')
 const currency = ref('')
 const status = ref<'active' | 'archived' | 'all'>('active')
 const currencies = ref<Currency[]>([])
+// Telefon: měna a stav za tlačítkem „Filtry" (vzor CashRegister), hledání zůstává vidět.
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => (currency.value ? 1 : 0) + (status.value !== 'active' ? 1 : 0))
 
 async function load() {
   loading.value = true
@@ -80,10 +84,15 @@ onMounted(async () => {
         <h1 class="text-2xl font-semibold">{{ t('price_list.title') }}</h1>
         <p class="mt-1 text-sm text-neutral-500">{{ t('price_list.subtitle') }}</p>
       </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <RouterLink v-if="auth.canRead('price_list')" :to="{ name: 'admin-work-report-billing-templates' }" :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('work_report_billing.templates') }}
+        </RouterLink>
       <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="createItem">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('price_list.new') }}
       </button>
+      </div>
     </header>
 
     <div v-if="error" class="mb-4 rounded-md border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">
@@ -97,11 +106,24 @@ onMounted(async () => {
           <button type="button" :class="btnOutline('neutral')" @click="load"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('common.search') }}</button>
         </div>
         <div class="flex flex-wrap gap-2">
-          <select v-model="currency" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" @change="load">
+          <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="price-list-filters-toggle"
+            class="hidden max-md:inline-flex cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+            :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+            </svg>
+            {{ t('common.filters') }}
+            <span v-if="activeFilterCount"
+              class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs font-medium tabular-nums">{{ activeFilterCount }}</span>
+            <svg class="w-3.5 h-3.5 transition-transform" :class="filtersOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <select v-model="currency" data-test="price-list-currency" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" :class="filtersOpen ? '' : 'max-md:hidden'" @change="load">
             <option value="">{{ t('price_list.all_currencies') }}</option>
             <option v-for="row in currencies" :key="row.code" :value="row.code">{{ row.code }}</option>
           </select>
-          <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" @change="load">
+          <select v-model="status" data-test="price-list-status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" :class="filtersOpen ? '' : 'max-md:hidden'" @change="load">
             <option value="active">{{ t('price_list.active') }}</option>
             <option value="archived">{{ t('price_list.inactive') }}</option>
             <option value="all">{{ t('price_list.all_statuses') }}</option>
@@ -140,7 +162,7 @@ onMounted(async () => {
               <td class="px-4 py-3">
                 <div class="flex flex-wrap gap-1">
                   <span v-for="price in item.prices.filter(row => !row.archived)" :key="price.currency_code" class="status-badge bg-neutral-100 text-neutral-700 font-mono">
-                    {{ price.currency_code }} {{ Number(price.unit_price).toFixed(2) }}
+                    {{ price.currency_code }} {{ unitPriceText(Number(price.unit_price)) }}
                   </span>
                   <span v-if="item.allow_exchange_rate_conversion" class="status-badge bg-primary-50 text-primary-700">{{ t('price_list.conversion_badge') }}</span>
                 </div>
@@ -178,7 +200,7 @@ onMounted(async () => {
           </div>
           <div class="flex flex-wrap gap-1">
             <span v-for="price in item.prices.filter(row => !row.archived)" :key="price.currency_code" class="status-badge bg-neutral-100 text-neutral-700 font-mono">
-              {{ price.currency_code }} {{ Number(price.unit_price).toFixed(2) }}
+              {{ price.currency_code }} {{ unitPriceText(Number(price.unit_price)) }}
             </span>
             <span v-if="item.allow_exchange_rate_conversion" class="status-badge bg-primary-50 text-primary-700">{{ t('price_list.conversion_badge') }}</span>
           </div>

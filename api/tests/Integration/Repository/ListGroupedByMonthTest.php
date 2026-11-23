@@ -479,6 +479,82 @@ final class ListGroupedByMonthTest extends TestCase
         );
     }
 
+    /**
+     * #392: hlavička měsíce (počet, obrat, predikce) musí ukazovat CELÝ měsíc i tehdy,
+     * když stránka načetla jen část jeho řádků. Dřív se sčítaly jen řádky stránky.
+     */
+    public function testInvoiceMonthHeaderCoversWholeMonthAcrossPages(): void
+    {
+        $client = $this->client('Header Klient', true, false);
+        $this->invoice($client, '2004-06-05', '2004-06-05', 100.0, 21.0, 121.0, 'issued');
+        $this->invoice($client, '2004-06-10', '2004-06-10', 300.0, 63.0, 363.0, 'paid');
+        $this->invoice($client, '2004-06-15', '2004-06-15', 1000.0, 210.0, 1210.0, 'sent');
+        $this->invoice($client, '2004-06-20', '2004-06-20', 500.0, 105.0, 605.0, 'draft');
+        $proforma = $this->invoice($client, '2004-06-22', '2004-06-22', 800.0, 168.0, 968.0, 'issued');
+        // Dobropis zadaný s kladným součtem obrat přesto snižuje (§ 4a ZDPH).
+        $creditNote = $this->invoice($client, '2004-06-25', '2004-06-25', 50.0, 10.5, 60.5, 'issued');
+        $this->pdo->prepare('UPDATE invoices SET invoice_type = ? WHERE id = ?')->execute(['proforma', $proforma]);
+        $this->pdo->prepare('UPDATE invoices SET invoice_type = ? WHERE id = ?')->execute(['credit_note', $creditNote]);
+        $this->invoice($client, '2004-05-10', '2004-05-10', 200.0, 42.0, 242.0, 'issued');
+
+        $base = ['supplier_id' => $this->supplierId, 'client_id' => $client];
+        $first = $this->invoices->listGroupedByMonth($base, 1, 2);
+        self::assertSame(['2004-06'], array_column($first['data'], 'month'));
+        self::assertCount(2, $first['data'][0]['invoices'], 'Stránka nese jen 2 řádky.');
+        self::assertSame(6, $first['data'][0]['count'], 'Počet za celý červen, ne za stránku.');
+        $june = $this->currencyTotals($first['data'][0], 'CZK');
+        self::assertEqualsWithDelta(1633.5, $june['with_vat'], 0.001, 'Obrat června = 121 + 363 + 1210 − 60,5.');
+        self::assertEqualsWithDelta(1350.0, $june['without_vat'], 0.001);
+        self::assertEqualsWithDelta(283.5, $june['vat'], 0.001);
+        self::assertEqualsWithDelta(605.0, $june['draft_with_vat'], 0.001, 'Predikce = koncept celého měsíce.');
+
+        $second = $this->invoices->listGroupedByMonth($base, 2, 2);
+        self::assertSame(6, $second['data'][0]['count']);
+        self::assertSame($june, $this->currencyTotals($second['data'][0], 'CZK'), 'Každá stránka nese stejný souhrn měsíce.');
+
+        $last = $this->invoices->listGroupedByMonth($base, 4, 2);
+        self::assertSame(['2004-05'], array_column($last['data'], 'month'));
+        self::assertSame(1, $last['data'][0]['count']);
+        self::assertEqualsWithDelta(242.0, $this->currencyTotals($last['data'][0], 'CZK')['with_vat'], 0.001);
+
+        // Souhrn respektuje filtry seznamu (sdílený WHERE).
+        $paidOnly = $this->invoices->listGroupedByMonth($base + ['status' => 'paid'], 1, 1);
+        self::assertSame(1, $paidOnly['data'][0]['count']);
+        self::assertEqualsWithDelta(363.0, $this->currencyTotals($paidOnly['data'][0], 'CZK')['with_vat'], 0.001);
+
+        // Souvislý seznam (bez měsíců) dál sčítá jen řádky stránky.
+        $continuous = $this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 1, 2);
+        self::assertSame(2, $continuous['data'][0]['count']);
+    }
+
+    /** #392: totéž pro přijaté faktury včetně vyřazení zaplacené zálohy z nákladu. */
+    public function testPurchaseMonthHeaderCoversWholeMonthAcrossPages(): void
+    {
+        $vendor = $this->client('Header Dodavatel', false, true);
+        $this->purchase($vendor, '2004-06-05', '2004-06-05', 100.0, 21.0, 121.0, 'received');
+        $this->purchase($vendor, '2004-06-10', '2004-06-10', 300.0, 63.0, 363.0, 'received');
+        $this->purchase($vendor, '2004-06-15', '2004-06-15', 1000.0, 210.0, 1210.0, 'paid');
+        $this->purchase($vendor, '2004-06-20', '2004-06-20', 500.0, 105.0, 605.0, 'draft');
+        $advance = $this->purchase($vendor, '2004-06-25', '2004-06-25', 800.0, 168.0, 968.0, 'paid');
+        $this->pdo->prepare("UPDATE purchase_invoices SET document_kind = 'advance' WHERE id = ?")->execute([$advance]);
+        $this->purchase($vendor, '2004-05-10', '2004-05-10', 200.0, 42.0, 242.0, 'received');
+
+        $base = ['supplier_id' => $this->supplierId, 'vendor_id' => $vendor];
+        $first = $this->purchases->listGroupedByMonth($base, 1, 2);
+        self::assertSame(['2004-06'], array_column($first['data'], 'month'));
+        self::assertCount(2, $first['data'][0]['invoices']);
+        self::assertSame(5, $first['data'][0]['count'], 'Počet za celý červen, ne za stránku.');
+        $june = $this->currencyTotals($first['data'][0], 'CZK');
+        self::assertEqualsWithDelta(1694.0, $june['with_vat'], 0.001, 'Náklad června bez konceptu a zaplacené zálohy.');
+        self::assertEqualsWithDelta(1400.0, $june['without_vat'], 0.001);
+
+        $last = $this->purchases->listGroupedByMonth($base, 3, 2);
+        self::assertSame(['2004-06', '2004-05'], array_column($last['data'], 'month'));
+        self::assertSame(5, $last['data'][0]['count']);
+        self::assertSame(1, $last['data'][1]['count']);
+        self::assertEqualsWithDelta(242.0, $this->currencyTotals($last['data'][1], 'CZK')['with_vat'], 0.001);
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /**

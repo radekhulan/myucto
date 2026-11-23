@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\AverageEarningBatchService;
 use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
@@ -32,7 +31,7 @@ final class AverageEarningTakeoverSuggestionTest extends TestCase
     protected function setUp(): void
     {
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->derivation = $container->get(AverageEarningDerivationService::class);
             $this->batch = $container->get(AverageEarningBatchService::class);

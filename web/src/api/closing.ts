@@ -235,6 +235,14 @@ export interface ClosingStepPayload {
   taken_over_entry_ids?: number[]
   taken_over_accounts?: number
   replace_reason?: string
+  // Krok close_books: zmražení kategorie ÚJ a přílohy k závěrce (selhání knihy nezastaví,
+  // ale blokuje schválení, dokud se zmražení nepodaří).
+  category_frozen?: boolean
+  warning?: string
+  warning_detail?: string
+  notes_frozen?: boolean
+  notes_warning?: string
+  notes_warning_detail?: string
 }
 
 export interface ClosingStep {
@@ -250,6 +258,8 @@ export interface ClosingStep {
 /** GET /periods/{id}/closing — období + kroky + odvozené flagy (§3.4). */
 export interface ClosingState {
   accounting_framework?: 'cz_504'
+  /** Pořadí kroků průvodce ze serveru (u 504 jde krok Zásoby před daň). */
+  step_order?: ClosingStepKey[]
   period: ClosingPeriod
   steps: ClosingStep[]
   can_start?: boolean
@@ -268,6 +278,17 @@ export interface ClosingState {
   depreciation_step_required?: boolean
   /** Počáteční stavy dalšího roku pro krok open_next; null = krok je hotový. */
   opening_takeover?: OpeningTakeover | null
+  /** Daň z příjmů je potřeba přepočítat: po jejím zaúčtování nebo potvrzení se vrátil
+   *  krok, který mění výsledek hospodaření. Do přepočtu nejde uzavřít knihy. */
+  income_tax_stale?: { caused_by: ClosingStepKey[]; at: string | null } | null
+  /** Rok uzavřel už původní systém (převedené uzávěrkové zápisy bez source_id). Průvodce nic
+   *  znovu neúčtuje a dimenze roku jsou kvůli převzaté uzávěrce zmrazené. */
+  closing_taken_over?: boolean
+  /** Chybějící posouzení a stavy, se kterými server uzavření knih odmítne (pak can_close = false).
+   *  closing_taken_over_residual = po převzaté uzávěrce zůstal na účtech zůstatek. */
+  close_blockers?: ('deferred_tax_assessment' | 'nonprofit_tax_assessment' | 'closing_taken_over_residual')[]
+  /** Účty se zůstatkem po převzaté uzávěrce (blocker closing_taken_over_residual). */
+  taken_over_residual_accounts?: string[]
 }
 
 export type OpeningTakeoverStatus = 'to_create' | 'match' | 'mismatch' | 'unavailable'
@@ -291,6 +312,9 @@ export interface OpeningTakeover {
   accounts: number
   /** Porovnání před uzavřením knih počítá ze zůstatků, ne ze zaúčtovaného uzávěrkového zápisu. */
   preliminary: boolean
+  /** Po uzávěrce převzaté z původního systému nebo u převzaté rozvahy bez dimenzí se porovnává jen po účtech. */
+  compare_level?: 'account'
+  compare_reason?: 'taken_over_closing' | 'opening_without_dimensions'
   message?: string
 }
 
@@ -405,8 +429,12 @@ export interface RunStepPayload {
   /** D9 provisions — účetní-potvrzený seznam OP per pohledávka. */
   items?: ProvisionInput[]
   partial?: boolean
-  /** D11 income_tax — částka splatné daně (591/341). */
+  /** D11 income_tax: částka splatné daně (591/341); deferred_tax 500: odložená daň (záporná = pohledávka). */
   amount?: number
+  /** Důvod odchylky ruční částky od návrhu (daň z příjmů, odložená daň). */
+  reason?: string
+  /** Odložená daňová pohledávka (500): potvrzené posouzení podle § 59 odst. 4 vyhlášky. */
+  prudence_confirmed?: boolean
   /** §DM / Task 11 — časové rozlišení drobného majetku (deferrals): režim + volitelné %. */
   small_asset_accrual?: { mode: SmallAssetAccrualMode; pct?: number | null }
   /** §DČR / Task 12 — časové rozlišení nákladů příštích období (deferrals): trigger, částky z faktur. */
@@ -446,12 +474,20 @@ export interface SmallAssetAccrualPreview {
   breakdown_501_small_asset: number
   cards_vs_501_diff: number
   existing: { entry_id: number; mode: string | null; pct: number | null; amount: number | null } | null
+  /** Odklad zaúčtovaný v roce jinými zápisy než krokem (ruční interní doklad, převod). */
+  booked_outside?: { amount: number; entries: { entry_id: number; document_no: string | null; entry_date: string; amount: number }[] } | null
+  closing_taken_over?: boolean
+  /** Proč krok nový odklad nezaúčtuje (server zaúčtování odmítne). */
+  post_blocked?: 'closing_taken_over' | 'booked_outside' | null
 }
 
-// ── §DČR / Task 12: časové rozlišení nákladů příštích období (381 z označených faktur) ──
+// ── §DČR / Task 12: časové rozlišení nákladů příštích období (381 z faktur a ostatních závazků) ──
+/** Časové rozlišení nákladů příštích období (381) z řádků přijatých faktur a ostatních závazků. */
 export interface PrepaidExpenseAccrualItem {
+  source: 'purchase_invoice' | 'other_item'
   item_id: number
-  purchase_invoice_id: number
+  purchase_invoice_id: number | null
+  other_item_id: number | null
   vendor_invoice_number: string
   description: string
   currency_code: string
@@ -473,18 +509,19 @@ export interface PrepaidExpenseAccrualPreview {
   period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
   next_period_start: string
   items: PrepaidExpenseAccrualItem[]
-  documents: { purchase_invoice_id: number; vendor_invoice_number: string; deferred_amount: number }[]
+  documents: { source: 'purchase_invoice' | 'other_item'; purchase_invoice_id: number | null; other_item_id: number | null; vendor_invoice_number: string; deferred_amount: number }[]
   by_account: Record<string, number>
   total: number
   existing: { entry_id: number; amount: number | null } | null
 }
 
-/** Časové rozlišení výnosů příštích období (384) z řádků vydaných faktur a členských předpisů NNO. */
+/** Časové rozlišení výnosů příštích období (384) z řádků vydaných faktur, členských předpisů NNO a ostatních pohledávek. */
 export interface DeferredRevenueAccrualItem {
-  source: 'invoice' | 'nonprofit_membership'
+  source: 'invoice' | 'nonprofit_membership' | 'other_item'
   item_id: number
   invoice_id: number | null
   membership_case_id: number | null
+  other_item_id: number | null
   invoice_number: string
   description: string
   currency_code: string
@@ -505,7 +542,7 @@ export interface DeferredRevenueAccrualPreview {
   period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
   next_period_start: string
   items: DeferredRevenueAccrualItem[]
-  documents: { source: 'invoice' | 'nonprofit_membership'; invoice_id: number | null; membership_case_id: number | null; invoice_number: string; deferred_amount: number }[]
+  documents: { source: 'invoice' | 'nonprofit_membership' | 'other_item'; invoice_id: number | null; membership_case_id: number | null; other_item_id: number | null; invoice_number: string; deferred_amount: number }[]
   by_account: Record<string, number>
   total: number
   existing: { entry_id: number; amount: number | null } | null
@@ -584,25 +621,69 @@ export interface ProvisionInput {
 }
 
 // ── D11: splatná daň z příjmů ──────────────────────────────────────────────
+/** Náhled odložené daně u ostatních firem (vyhláška 500, ČÚS 003). */
+export interface DeferredTaxPreview {
+  as_of: string
+  period: { id: number; fiscal_year: number }
+  taxpayer_type: string | null
+  applicable: boolean
+  computation: {
+    rate: number
+    rate_year: number
+    rate_is_fallback: boolean
+    titles: { key: string; label: string; difference: number; kind: string }[]
+    net_difference: number
+    deferred_tax: number
+    kind: string
+    requires_prudence_check: boolean
+    warnings: string[]
+  } | null
+  balance_481: number
+  balance_592: number
+  /** Kladný = dozúčtovat závazek, záporný = snížit ho nebo zaúčtovat pohledávku. */
+  movement: number
+  existing_entry_id: number | null
+  existing_amount: number | null
+}
+
 export interface IncomeTaxPreview {
   as_of: string
   period: { id: number; fiscal_year: number }
   suggested_amount: number | null
-  suggested_source: 'finalized_return' | 'computed_from_ledger' | null
+  suggested_source: 'finalized_return' | 'computed_from_ledger' | 'computed_from_assessment' | null
+  /** Proč návrh chybí (u 504 např. chybějící nebo zastaralé daňové posouzení). */
+  suggested_unavailable?: { code: string; message: string } | null
   has_finalized_return: boolean
+  /** Posouzení finalizovaného DPPO, ze kterého je návrh, proti účetnictví (vh_differs_tax_same
+   *  = drobný rozdíl VH bez dopadu na daň, jen informace). */
+  return_books?: { current: boolean | null; reason: string; vh_difference?: number } | null
   taxpayer_type: string | null
   applicable: boolean
   rate_hint: number
+  /** Zůstatky před uzávěrkou roku (bez zápisů uzavření knih, i převzatých). */
   balance_341: number
   balance_591: number
+  /** Daň zaúčtovaná v roce na 591 (bez uzavření knih) a z toho mimo zápis průvodce. */
+  booked_amount?: number | null
+  booked_outside_wizard?: number | null
+  /** Rok uzavřel už původní systém: daň se jen potvrdí, znovu se neúčtuje. */
+  closing_taken_over?: boolean
+  /** Krok potvrzený bez nového zápisu (daň v deníku mimo průvodce). */
+  existing_booked_outside?: 'taken_over' | 'other_entries' | null
   existing_entry_id: number | null
+  /** U 504 se daň zařazuje do hlavní nebo hospodářské činnosti. */
+  activity_required?: boolean
+  existing_activity?: 'main' | 'economic' | null
   existing_amount: number | null
 }
 
 // ── D10: rozdělení výsledku hospodaření ────────────────────────────────────
 export interface ProfitDistribution500Preview {
   accounting_framework?: 'cz_500'
-  approved_period: { id: number; fiscal_year: number; status: string }
+  /** null, když se rozděluje výsledek z počátečních stavů prvního roku v MyÚčtu (source = opening). */
+  approved_period: { id: number; fiscal_year: number; status: string } | null
+  source?: 'approved_period' | 'opening'
+  source_fiscal_year?: number
   target_period: { id: number; fiscal_year: number; row_version: number; starts_on: string; ends_on: string }
   balance_431: number
   available_profit: number
@@ -679,6 +760,7 @@ export type SeriesCode =
   | 'cash_in' | 'cash_out'
   | 'stock_in' | 'stock_out' | 'stock_transfer'
   | 'offset' | 'purchase_order'
+  | 'other_receivable' | 'other_payable'
 
 /**
  * Výchozí prefixy řad = zrcadlo DocumentSeriesService::DEFAULT_PREFIXES. Řádek řady
@@ -698,6 +780,8 @@ export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
   stock_transfer: 'PRE',
   offset: 'ZAP',
   purchase_order: 'OBJ',
+  other_receivable: 'OP',
+  other_payable: 'OZ',
 }
 
 /**
@@ -710,10 +794,14 @@ export const SERIES_DOUBLE_ENTRY_ONLY: SeriesCode[] = ['closing', 'opening', 'fx
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
-  /** L-3: 0 = společná řada firmy, >0 = vlastní řada té pokladny. */
+  /** 0 = společná řada firmy, >0 = vlastní řada pokladny (cash_*) nebo druhu ostatní položky (other_*). */
   register_id?: number
   /** Název pokladny u vlastní řady — jen pro zobrazení (BE dopočítává). */
   register_name?: string | null
+  /** Název vlastního druhu ostatní položky u jeho vlastní řady (other_receivable / other_payable). */
+  kind_name?: string | null
+  /** Kód vestavěného druhu ostatní položky u jeho vlastní řady (název je v překladech). */
+  kind_builtin_code?: string | null
   fiscal_year: number
   prefix: string
   /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */
@@ -769,6 +857,8 @@ export interface DepreciationBookResult {
   total_accounting: number
   total_tax: number
   errors: { asset_id: number; code: string }[]
+  /** Rok uzavřel původní program (převzatá uzávěrka): účetní odpisy se neúčtovaly. */
+  accounting_skipped?: 'closing_taken_over'
 }
 
 export interface TaxBaseAdjustments {
@@ -868,6 +958,8 @@ export const closingApi = {
   estimatesSuggest: (periodId: number) =>
     api.get<EstimatesSuggest>(`/accounting/periods/${periodId}/closing/estimates-suggest`).then(r => r.data),
   // D11 — náhled podkladu splatné daně (DPPO + zůstatky 341/591).
+  deferredTaxPreview: (periodId: number) =>
+    api.get<DeferredTaxPreview>(`/accounting/periods/${periodId}/closing/deferred-tax-preview`).then(r => r.data),
   incomeTaxPreview: (periodId: number) =>
     api.get<IncomeTaxPreview>(`/accounting/periods/${periodId}/closing/income-tax-preview`).then(r => r.data),
   // §DM / Task 11 — náhled časového rozlišení drobného majetku (381/501) dle režimu.

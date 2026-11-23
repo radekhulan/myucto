@@ -78,8 +78,11 @@ final class CreateSupplierInitializationTest extends TestCase
         $pdo = $this->db->pdo();
         try {
             foreach ($this->created as $id) {
+                $row = $this->supplierRow($id);
                 $response = $this->settings->deleteSupplierById(
-                    $this->request('DELETE', '/api/suppliers/' . $id),
+                    $this->request('DELETE', '/api/suppliers/' . $id)->withParsedBody([
+                        'confirm' => trim((string) ($row['ic'] ?? '')) !== '' ? trim((string) $row['ic']) : trim((string) ($row['company_name'] ?? '')),
+                    ]),
                     new Psr7Response(),
                     ['id' => (string) $id],
                 );

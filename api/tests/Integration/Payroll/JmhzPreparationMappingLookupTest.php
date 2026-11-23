@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use PHPUnit\Framework\Attributes\Group;
@@ -15,7 +14,7 @@ final class JmhzPreparationMappingLookupTest extends TestCase
 {
     public function testRepeatedInputsResolveEachIncludedComponentOncePerPreparation(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $pdo = $container->get(Connection::class)->pdo();
         $service = $container->get(JmhzPreparationSnapshotService::class);
         $method = new \ReflectionMethod($service, 'supplements');

@@ -547,7 +547,7 @@ final class PayrollJmhzTransportAction
     ): ?Response {
         // Odeslání úředního podání jménem firmy se nikdy nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

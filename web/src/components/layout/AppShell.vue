@@ -16,7 +16,7 @@ const { t } = useI18n()
                tenhle nadpis je značka, ne titulek stránky, a musí sedět s logem
                v topbaru aplikace. -->
           <h1 class="font-sans text-lg font-semibold leading-tight">
-            My<span class="text-primary-600">Účto</span><span class="text-neutral-500 font-normal">.cz</span>
+            My<span class="text-primary-600">Účto</span><span class="brand-tld">.cz</span>
           </h1>
           <p class="text-xs text-neutral-500 leading-tight">{{ title ?? t('app.subtitle') }}</p>
         </div>

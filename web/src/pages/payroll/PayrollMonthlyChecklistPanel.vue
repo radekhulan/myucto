@@ -2,10 +2,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
-import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
+import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION, PAYROLL_JMHZ_REGISTRATION_SETTLING } from '@/api/payrollTransportCodes'
 import {
   PAYROLL_QUEUE_BATCH_SIZE,
   payrollApi,
+  type PayrollJmhzDeferralContext,
+  type PayrollJmhzFreezeBlocker,
   type PayrollMonthlyChecklistItem,
   type PayrollMonthlyChecklistResponse,
   type PayrollRegzelEnvironment,
@@ -32,6 +34,9 @@ import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm
 import { useReceiptFollowUp } from '@/composables/useReceiptFollowUp'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import JmhzFreezeBlockerList from './JmhzFreezeBlockerList.vue'
+import JmhzRegistrationSettlingConfirm from './JmhzRegistrationSettlingConfirm.vue'
+import { deferralContextFromError, freezeBlockersFromError } from './jmhzFreezeBlockers'
 
 /*
  * Měsíční přehled říká, CO se za měsíc podává, a umí to rovnou připravit
@@ -103,11 +108,26 @@ const preparing = ref('')
 const prepareError = ref<Record<string, string>>({})
 /** Varování kontroly 290 čekající na potvrzení, klíčované položkou. */
 const lateDiscount = ref<Record<string, string>>({})
+const settling = ref<Record<string, string>>({})
+const prepareDeferral = ref<Record<string, PayrollJmhzDeferralContext | null>>({})
+const prepareWarnings = ref<string[]>([])
 /** Proklik k chybě přípravy (měsíc podaný předchozím programem → přehled převzatých podání). */
 const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubmissionTarget>>>({})
 
+/**
+ * Nálezy blokace přípravy hlášení se jmény a odkazy na opravu (z odpovědi
+ * 409). Hláška bez nich účetní řekla, co chybí, ale ne kde to opravit ani
+ * že údaj čtený ze schváleného běhu potřebuje opravnou revizi.
+ */
+const prepareBlockers = ref<Record<string, PayrollJmhzFreezeBlocker[]>>({})
+
 /** Běží příprava nebo odeslání (řádek i „vše") — jedna operace naráz. */
 const flowBusy = ref(false)
+/**
+ * Co právě běží. „Jen připravit" nesmí přepsat tlačítka odeslání na
+ * „Připravuji a odesílám…": nic se neodesílá a vypadalo to, že ano.
+ */
+const flowKind = ref<'prepare' | 'send' | null>(null)
 /** Chyba odeslání u konkrétního řádku (klíčováno klíčem položky). */
 const sendError = ref<Record<string, string>>({})
 /** Shrnutí posledního odeslání pod hlavičkou. */
@@ -149,6 +169,10 @@ function matchesAgenda(code: string | null): boolean {
 
 const items = computed(() => (response.value?.items ?? []).filter(item => matchesAgenda(item.agenda_code)))
 
+const unpreparedOverdueCount = computed(() => items.value
+  .filter(item => !item.done && item.is_overdue && item.submission_id === null)
+  .length)
+
 /**
  * Odeslané zprávy datové schránky a kolik z nich má doložené doručení.
  * Bez doručenky přehled pojišťovně nedoběhne do „splněno" — účetní to musí
@@ -170,12 +194,46 @@ function isPreparable(item: PayrollMonthlyChecklistItem): boolean {
   return !item.done && item.action.prepare !== null && item.action.prepare !== undefined
 }
 
+/**
+ * Příprava teď spustit nejde a účetní to vlastními údaji nezmění: období
+ * ještě neskončilo, nebo ročník hlášení aplikace neumí sestavit. Tlačítka
+ * zůstanou vidět, ale neaktivní, a u řádku stojí věta proč a od kdy.
+ */
+function prepareBlocked(item: PayrollMonthlyChecklistItem): boolean {
+  return (item.action.prepare_blocked ?? null) !== null
+}
+
+/**
+ * Klíč hlášky o přípravě. Řádek po neúspěšné přípravě může změnit klíč
+ * (povinnost se zapíše do evidence), ale je to pořád táž povinnost: chyba
+ * se váže na agendu, období a pojišťovnu, ne na klíč řádku, jinak by po
+ * načtení přehledu zmizela dřív, než ji kdo přečte.
+ */
+function prepareKey(item: PayrollMonthlyChecklistItem): string {
+  const request = item.action.prepare
+  return request
+    ? `prepare:${request.agenda_code}:${request.period}:${request.insurer_code ?? ''}`
+    : item.key
+}
+
 function isDispatchable(item: PayrollMonthlyChecklistItem): boolean {
   return !item.done && item.dispatchable === true && item.submission_id !== null
 }
 
 /** Řádky, které „Připravit a odeslat vše" pokryje. */
-const bulkItems = computed(() => items.value.filter(item => isPreparable(item) || isDispatchable(item)))
+const bulkItems = computed(() => items.value.filter(item =>
+  (isPreparable(item) && !prepareBlocked(item)) || isDispatchable(item)))
+const bulkNeedsPreparation = computed(() => bulkItems.value.some(isPreparable))
+
+function actionPath(item: PayrollMonthlyChecklistItem): string {
+  const path = item.action.path ?? ''
+  if (item.submission_id === null || item.submission_id === undefined) return path
+  const target = new URL(path, window.location.origin)
+  target.searchParams.set('submission', String(item.submission_id))
+  target.searchParams.set('period', item.period ?? period.value)
+  target.searchParams.set('environment', props.environment)
+  return `${target.pathname}${target.search}${target.hash}`
+}
 
 /** Nepřipravené podání případu dávky; připraví se stejně jako v Nemocenských případech. */
 function isSicknessPreparable(item: PayrollMonthlyChecklistItem): boolean {
@@ -183,7 +241,8 @@ function isSicknessPreparable(item: PayrollMonthlyChecklistItem): boolean {
 }
 
 /** Řádky, které „Jen připravit vše" pokryje: nic se neodesílá. */
-const prepareAllItems = computed(() => items.value.filter(item => isPreparable(item) || isSicknessPreparable(item)))
+const prepareAllItems = computed(() => items.value.filter(item =>
+  (isPreparable(item) && !prepareBlocked(item)) || isSicknessPreparable(item)))
 const prepareAllSummary = ref('')
 
 function phaseClass(phase: string): string {
@@ -254,7 +313,8 @@ const CUSTOM_STATUS_KEYS: Record<string, string> = {
 }
 
 function statusLabel(item: PayrollMonthlyChecklistItem): string {
-  if (item.source === 'submission') return submissionStatusLabel(item.status)
+  // Povinnost v evidenci bez podání je „Nepřipraveno", ne stav podání.
+  if (item.source === 'submission' && item.status !== 'not_prepared') return submissionStatusLabel(item.status)
   return t(CUSTOM_STATUS_KEYS[item.status] ?? 'payroll.submissions.monthly_checklist.status.unknown')
 }
 
@@ -312,18 +372,28 @@ function channelLabel(item: PayrollMonthlyChecklistItem): string {
 async function prepareOne(
   item: PayrollMonthlyChecklistItem,
   confirmLateDiscount = false,
+  confirmSettling = false,
 ): Promise<number[] | null> {
   const request = item.action.prepare
-  if (!request) return null
+  if (!request || prepareBlocked(item)) return null
+  const errorKey = prepareKey(item)
   preparing.value = item.key
-  prepareError.value = { ...prepareError.value, [item.key]: '' }
-  lateDiscount.value = { ...lateDiscount.value, [item.key]: '' }
-  prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: null }
+  prepareError.value = { ...prepareError.value, [errorKey]: '' }
+  prepareBlockers.value = { ...prepareBlockers.value, [errorKey]: [] }
+  lateDiscount.value = { ...lateDiscount.value, [errorKey]: '' }
+  settling.value = { ...settling.value, [errorKey]: '' }
+  prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: null }
+  prepareErrorTarget.value = { ...prepareErrorTarget.value, [errorKey]: null }
   try {
     const result = await payrollApi.prepareMonthlyChecklistItem(
       props.environment,
-      confirmLateDiscount ? { ...request, confirm_late_discount: true } : request,
+      {
+        ...request,
+        ...(confirmLateDiscount ? { confirm_late_discount: true } : {}),
+        ...(confirmSettling ? { confirm_registration_settling: true } : {}),
+      },
     )
+    if (result.warning) prepareWarnings.value = [...prepareWarnings.value, result.warning]
     return result.submission_ids ?? []
   } catch (exception) {
     // Kontrola 290: hlášení po splatnosti se slevou. Nezakazuje, ale chce
@@ -331,14 +401,24 @@ async function prepareOne(
     if (apiErrorCode(exception) === PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION) {
       lateDiscount.value = {
         ...lateDiscount.value,
-        [item.key]: apiErrorMessage(exception, t('payroll.transport_delivery.late_discount_title')),
+        [errorKey]: apiErrorMessage(exception, t('payroll.transport_delivery.late_discount_title')),
       }
       return null
     }
-    prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: externalJmhzSubmissionTarget(exception) }
+    if (apiErrorCode(exception) === PAYROLL_JMHZ_REGISTRATION_SETTLING) {
+      settling.value = {
+        ...settling.value,
+        [errorKey]: apiErrorMessage(exception, t('payroll.jmhz_gate.settling.title')),
+      }
+      prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: deferralContextFromError(exception) }
+      return null
+    }
+    prepareErrorTarget.value = { ...prepareErrorTarget.value, [errorKey]: externalJmhzSubmissionTarget(exception) }
+    prepareBlockers.value = { ...prepareBlockers.value, [errorKey]: freezeBlockersFromError(exception) }
+    prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: deferralContextFromError(exception) }
     prepareError.value = {
       ...prepareError.value,
-      [item.key]: apiErrorMessage(
+      [errorKey]: apiErrorMessage(
         exception,
         t('payroll.submissions.monthly_checklist.prepare_failed'),
       ),
@@ -357,7 +437,9 @@ async function prepareOne(
 async function prepareAll() {
   if (flowBusy.value) return
   flowBusy.value = true
+  flowKind.value = 'prepare'
   prepareAllSummary.value = ''
+  prepareWarnings.value = []
   let prepared = 0
   let failed = 0
   try {
@@ -369,7 +451,7 @@ async function prepareAll() {
         continue
       }
       preparing.value = item.key
-      prepareError.value = { ...prepareError.value, [item.key]: '' }
+      prepareError.value = { ...prepareError.value, [prepareKey(item)]: '' }
       try {
         await payrollSicknessCasesApi.prepare(props.environment, sickness.case_id, sickness.document)
         prepared++
@@ -377,7 +459,7 @@ async function prepareAll() {
         failed++
         prepareError.value = {
           ...prepareError.value,
-          [item.key]: apiErrorMessage(exception, t('payroll.submissions.monthly_checklist.prepare_failed')),
+          [prepareKey(item)]: apiErrorMessage(exception, t('payroll.submissions.monthly_checklist.prepare_failed')),
         }
       } finally {
         preparing.value = ''
@@ -387,18 +469,27 @@ async function prepareAll() {
     await load(true)
   } finally {
     flowBusy.value = false
+    flowKind.value = null
   }
 }
 
 /** „Jen připravit" a potvrzení kontroly 290: připraví a zůstane na místě. */
-async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false) {
+async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false, confirmSettling = false) {
   if (flowBusy.value) return
   flowBusy.value = true
+  flowKind.value = 'prepare'
+  prepareAllSummary.value = ''
+  prepareWarnings.value = []
   try {
-    await prepareOne(item, confirmLateDiscount)
+    const ids = await prepareOne(item, confirmLateDiscount, confirmSettling)
+    // Příprava podání už zmrazí: ať je vidět, že vzniklo a že nic neodešlo.
+    if (ids !== null) {
+      prepareAllSummary.value = t('payroll.submissions.monthly_checklist.send.prepared_one')
+    }
     await load(true)
   } finally {
     flowBusy.value = false
+    flowKind.value = null
   }
 }
 
@@ -410,7 +501,9 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
 async function prepareAndSend(targets: PayrollMonthlyChecklistItem[]) {
   if (flowBusy.value || targets.length === 0) return
   flowBusy.value = true
+  flowKind.value = 'send'
   sendSummary.value = ''
+  prepareAllSummary.value = ''
   try {
     const submissionIds = new Set<number>()
     for (const item of targets) {
@@ -429,6 +522,7 @@ async function prepareAndSend(targets: PayrollMonthlyChecklistItem[]) {
     if (sendable.length > 0) await sendItems(sendable)
   } finally {
     flowBusy.value = false
+    flowKind.value = null
   }
 }
 
@@ -584,7 +678,7 @@ watch([environmentModel, period], () => { void load() })
 onMounted(() => { void load() })
 // Podání odeslané nebo doručenka stažená v jiném okně mění stav položek měsíce.
 useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && preparing.value === '' && receiptsBusy.value === ''
-  && databoxOutboxIds.value.length === 0)
+  && databoxOutboxIds.value.length === 0, { partial: true })
 </script>
 
 <template>
@@ -657,13 +751,31 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
       </button>
     </div>
 
+    <!--
+      Příprava hlášení je jeden synchronní požadavek, u větší firmy na desítky
+      sekund. Změna popisku na tlačítku v řádku se snadno přehlédne.
+    -->
+    <p
+      v-if="preparing !== ''"
+      class="flex items-start gap-3 rounded-xl border border-payroll-200 bg-payroll-50 p-4 text-sm text-payroll-800"
+      role="status"
+      aria-live="polite"
+      data-test="monthly-checklist-preparing-progress"
+    >
+      <svg class="mt-0.5 h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+        <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+      </svg>
+      <span>{{ t('payroll.submissions.monthly_checklist.preparing_progress') }}</span>
+    </p>
+
     <div v-if="loading" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <div v-for="index in 5" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
     <template v-else-if="response">
       <div
-        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || databoxOutboxIds.length || sendSummary || followUpActive || receiptStats.pending"
+        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || prepareWarnings.length || databoxOutboxIds.length || sendSummary || followUpActive || receiptStats.pending"
         class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm shadow-sm"
         data-test="monthly-checklist-send-bar"
       >
@@ -684,9 +796,11 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.send" />
             </svg>
-            {{ flowBusy
+            {{ flowKind === 'send'
               ? t('payroll.submissions.monthly_checklist.send.working')
-              : t('payroll.submissions.monthly_checklist.send.all', { count: bulkItems.length }) }}
+              : t(bulkNeedsPreparation
+                ? 'payroll.submissions.monthly_checklist.send.all'
+                : 'payroll.submissions.monthly_checklist.send.send_all', { count: bulkItems.length }) }}
           </button>
           <button
             v-if="prepareAllItems.length"
@@ -699,11 +813,34 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.doc" />
             </svg>
-            {{ t('payroll.submissions.monthly_checklist.send.prepare_all', { count: prepareAllItems.length }) }}
+            {{ flowKind === 'prepare' && preparing !== ''
+              ? t('payroll.submissions.monthly_checklist.preparing')
+              : t('payroll.submissions.monthly_checklist.send.prepare_all', { count: prepareAllItems.length }) }}
           </button>
         </div>
+        <!--
+          Co který krok udělá a co je nevratné. „Jen připravit" podání už
+          zmrazí; bez téhle věty to obrazovka neříkala a „připravit" znělo
+          jako nezávazný náhled.
+        -->
+        <p
+          v-if="bulkItems.length || prepareAllItems.length"
+          class="mt-2 max-w-3xl text-xs text-neutral-600"
+          data-test="monthly-checklist-steps-hint"
+        >
+          {{ t('payroll.submissions.monthly_checklist.send.steps_hint') }}
+        </p>
         <p v-if="prepareAllSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-prepare-all-summary">
           {{ prepareAllSummary }}
+        </p>
+        <p
+          v-for="(warning, index) in prepareWarnings"
+          :key="index"
+          class="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-2 text-warning-900"
+          role="alert"
+          data-test="monthly-checklist-prepare-warning"
+        >
+          {{ warning }}
         </p>
         <p v-if="sendSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-send-summary">
           {{ sendSummary }}
@@ -762,6 +899,17 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
           </dd>
         </div>
       </dl>
+
+      <p
+        v-if="!compact && unpreparedOverdueCount > 1"
+        class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
+        data-test="monthly-checklist-bulk-external-hint"
+      >
+        <span>{{ t('payroll.submissions.overview.bulk_external_hint', { count: unpreparedOverdueCount }) }}</span>
+        <RouterLink :to="{ name: 'payroll-dashboard', hash: '#payroll-deadlines' }" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="monthly-checklist-bulk-external-link">
+          {{ t('payroll.submissions.overview.bulk_external_action') }}
+        </RouterLink>
+      </p>
 
       <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
         <div v-if="items.length === 0" class="p-6 text-sm text-neutral-500" data-test="monthly-checklist-empty">
@@ -856,29 +1004,33 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                         v-if="isPreparable(item)"
                         type="button"
                         :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
-                        :disabled="flowBusy"
+                        :disabled="flowBusy || prepareBlocked(item)"
+                        :title="t('payroll.submissions.monthly_checklist.send.prepare_and_send_hint')"
                         data-test="monthly-checklist-prepare-send"
                         @click="prepareAndSend([item])"
                       >
                         <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                           <path :d="ICONS.send" />
                         </svg>
-                        {{ preparing === item.key
-                          ? t('payroll.submissions.monthly_checklist.preparing')
+                        {{ preparing === item.key && flowKind === 'send'
+                          ? t('payroll.submissions.monthly_checklist.send.working')
                           : t('payroll.submissions.monthly_checklist.send.prepare_and_send') }}
                       </button>
                       <button
                         v-if="isPreparable(item)"
                         type="button"
                         :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
-                        :disabled="flowBusy"
+                        :disabled="flowBusy || prepareBlocked(item)"
+                        :title="t('payroll.submissions.monthly_checklist.send.prepare_only_hint')"
                         data-test="monthly-checklist-prepare"
                         @click="prepare(item)"
                       >
                         <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                           <path :d="ICONS.doc" />
                         </svg>
-                        {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
+                        {{ preparing === item.key && flowKind === 'prepare'
+                          ? t('payroll.submissions.monthly_checklist.preparing')
+                          : t('payroll.submissions.monthly_checklist.send.prepare_only') }}
                       </button>
                       <PayrollDispatchModeSelect
                         v-if="!isPreparable(item) && isDispatchable(item)"
@@ -903,7 +1055,7 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                       </button>
                       <RouterLink
                         v-if="!isPreparable(item) && item.action.path"
-                        :to="item.action.path"
+                        :to="actionPath(item)"
                         :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
                         data-test="monthly-checklist-action"
                       >
@@ -938,8 +1090,11 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                     </div>
                     <p
                       v-if="item.action.reason"
-                      class="mt-1 max-w-xs text-xs text-neutral-500"
-                      data-test="monthly-checklist-reason"
+                      class="mt-1 text-xs"
+                      :class="prepareBlocked(item)
+                        ? 'ml-auto max-w-md rounded-lg border border-warning-500/30 bg-warning-50 p-2 text-left text-warning-800'
+                        : 'max-w-xs text-neutral-500'"
+                      :data-test="prepareBlocked(item) ? 'monthly-checklist-prepare-blocked' : 'monthly-checklist-reason'"
                     >
                       {{ item.action.reason }}
                     </p>
@@ -952,29 +1107,48 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                       {{ sendError[item.key] }}
                     </p>
                     <p
-                      v-if="prepareError[item.key]"
-                      class="mt-1 max-w-xs text-xs text-danger-600"
+                      v-if="prepareError[prepareKey(item)]"
+                      class="ml-auto mt-1 max-w-md text-left text-xs text-danger-600"
                       role="alert"
                       data-test="monthly-checklist-prepare-error"
                     >
-                      {{ prepareError[item.key] }}
+                      {{ prepareError[prepareKey(item)] }}
                       <RouterLink
-                        v-if="prepareErrorTarget[item.key]"
-                        :to="prepareErrorTarget[item.key]!"
+                        v-if="prepareErrorTarget[prepareKey(item)]"
+                        :to="prepareErrorTarget[prepareKey(item)]!"
                         class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
                         data-test="monthly-checklist-external-link"
                       >
                         {{ t('payroll.external_jmhz.open_history') }}
                       </RouterLink>
                     </p>
+                    <JmhzFreezeBlockerList
+                      v-if="prepareBlockers[prepareKey(item)]?.length"
+                      class="ml-auto max-w-md text-left"
+                      :blockers="prepareBlockers[prepareKey(item)]!"
+                      :period="item.period"
+                      :deferral="prepareDeferral[prepareKey(item)]"
+                      :can-write="true"
+                    />
+                    <JmhzRegistrationSettlingConfirm
+                      v-if="settling[prepareKey(item)]"
+                      class="ml-auto mt-2 max-w-md text-left"
+                      :message="settling[prepareKey(item)]!"
+                      :busy="preparing === item.key"
+                      :deferral="prepareDeferral[prepareKey(item)]"
+                      :can-write="true"
+                      test-id="monthly-checklist-settling"
+                      @confirm="prepare(item, false, true)"
+                      @cancel="settling = { ...settling, [prepareKey(item)]: '' }"
+                    />
                     <PayrollLateDiscountConfirm
-                      v-if="lateDiscount[item.key]"
+                      v-if="lateDiscount[prepareKey(item)]"
                       class="mt-2 max-w-md text-left"
-                      :message="lateDiscount[item.key]!"
+                      :message="lateDiscount[prepareKey(item)]!"
                       :busy="preparing === item.key"
                       test-id="monthly-checklist-late-discount"
                       @confirm="prepare(item, true)"
-                      @cancel="lateDiscount = { ...lateDiscount, [item.key]: '' }"
+                      @cancel="lateDiscount = { ...lateDiscount, [prepareKey(item)]: '' }"
                     />
                   </template>
                 </td>
@@ -1026,21 +1200,23 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                     v-if="isPreparable(item)"
                     type="button"
                     :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
-                    :disabled="flowBusy"
+                    :disabled="flowBusy || prepareBlocked(item)"
                     @click="prepareAndSend([item])"
                   >
-                    {{ preparing === item.key
-                      ? t('payroll.submissions.monthly_checklist.preparing')
+                    {{ preparing === item.key && flowKind === 'send'
+                      ? t('payroll.submissions.monthly_checklist.send.working')
                       : t('payroll.submissions.monthly_checklist.send.prepare_and_send') }}
                   </button>
                   <button
                     v-if="isPreparable(item)"
                     type="button"
                     :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
-                    :disabled="flowBusy"
+                    :disabled="flowBusy || prepareBlocked(item)"
                     @click="prepare(item)"
                   >
-                    {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
+                    {{ preparing === item.key && flowKind === 'prepare'
+                      ? t('payroll.submissions.monthly_checklist.preparing')
+                      : t('payroll.submissions.monthly_checklist.send.prepare_only') }}
                   </button>
                   <PayrollDispatchModeSelect
                     v-if="!isPreparable(item) && isDispatchable(item)"
@@ -1061,7 +1237,7 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                   </button>
                   <RouterLink
                     v-if="!isPreparable(item) && item.action.path"
-                    :to="item.action.path"
+                    :to="actionPath(item)"
                     :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
                   >
                     {{ isDispatchable(item) ? t('payroll.submissions.monthly_checklist.send.open') : item.action.label }}
@@ -1083,30 +1259,56 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                     {{ t('payroll.submissions.monthly_checklist.send.awaiting_receipt') }}
                   </span>
                 </div>
-                <p v-if="item.action.reason" class="mt-1 text-xs text-neutral-500">{{ item.action.reason }}</p>
+                <p
+                  v-if="item.action.reason"
+                  class="mt-1 text-xs"
+                  :class="prepareBlocked(item)
+                    ? 'rounded-lg border border-warning-500/30 bg-warning-50 p-2 text-warning-800'
+                    : 'text-neutral-500'"
+                >
+                  {{ item.action.reason }}
+                </p>
                 <p v-if="sendError[item.key]" class="mt-1 text-xs text-danger-600" role="alert">{{ sendError[item.key] }}</p>
                 <p
-                  v-if="prepareError[item.key]"
+                  v-if="prepareError[prepareKey(item)]"
                   class="mt-1 text-xs text-danger-600"
                   role="alert"
                 >
-                  {{ prepareError[item.key] }}
+                  {{ prepareError[prepareKey(item)] }}
                   <RouterLink
-                    v-if="prepareErrorTarget[item.key]"
-                    :to="prepareErrorTarget[item.key]!"
+                    v-if="prepareErrorTarget[prepareKey(item)]"
+                    :to="prepareErrorTarget[prepareKey(item)]!"
                     class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
                   >
                     {{ t('payroll.external_jmhz.open_history') }}
                   </RouterLink>
                 </p>
-                <PayrollLateDiscountConfirm
-                  v-if="lateDiscount[item.key]"
+                <JmhzFreezeBlockerList
+                  v-if="prepareBlockers[prepareKey(item)]?.length"
+                  :blockers="prepareBlockers[prepareKey(item)]!"
+                  :period="item.period"
+                  :deferral="prepareDeferral[prepareKey(item)]"
+                  :can-write="true"
+                />
+                <JmhzRegistrationSettlingConfirm
+                  v-if="settling[prepareKey(item)]"
                   class="mt-2"
-                  :message="lateDiscount[item.key]!"
+                  :message="settling[prepareKey(item)]!"
+                  :busy="preparing === item.key"
+                  :deferral="prepareDeferral[prepareKey(item)]"
+                  :can-write="true"
+                  test-id="monthly-checklist-settling-mobile"
+                  @confirm="prepare(item, false, true)"
+                  @cancel="settling = { ...settling, [prepareKey(item)]: '' }"
+                />
+                <PayrollLateDiscountConfirm
+                  v-if="lateDiscount[prepareKey(item)]"
+                  class="mt-2"
+                  :message="lateDiscount[prepareKey(item)]!"
                   :busy="preparing === item.key"
                   test-id="monthly-checklist-late-discount-mobile"
                   @confirm="prepare(item, true)"
-                  @cancel="lateDiscount = { ...lateDiscount, [item.key]: '' }"
+                  @cancel="lateDiscount = { ...lateDiscount, [prepareKey(item)]: '' }"
                 />
               </template>
             </div>

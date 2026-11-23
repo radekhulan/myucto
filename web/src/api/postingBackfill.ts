@@ -14,6 +14,10 @@ export interface PostingBackfillPending {
   bank_transactions: number
   settlements: number
   total: number
+  /** Faktury, které zpracuje úloha Doúčtování. */
+  backfill_total?: number
+  /** Banka, pokladna a zápočty čekající na ruční zaúčtování. */
+  manual_total?: number
 }
 
 export interface PostingBackfillJob {
@@ -35,6 +39,7 @@ export interface PostingBackfillJob {
 export interface PostingBackfillStatus {
   pending: PostingBackfillPending
   jobs: PostingBackfillJob[]
+  state?: 'backfill' | 'manual_only' | 'all_posted'
 }
 
 export interface PostingBackfillStartParams {

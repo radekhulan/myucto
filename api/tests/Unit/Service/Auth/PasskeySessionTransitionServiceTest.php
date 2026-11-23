@@ -274,6 +274,7 @@ final class PasskeySessionTransitionServiceTest extends TestCase
             $sessions ?? $this->createMock(SessionManager::class),
             $this->createMock(MfaStepUpService::class),
             $this->createMock(MfaStepUpProofStore::class),
+            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
         );
     }
 }

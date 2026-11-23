@@ -11,6 +11,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\OpenItemsService;
 use MyInvoice\Service\Accounting\Vat\VatClearingService;
 use MyInvoice\Service\Accounting\Vat\VatClearingTrigger;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
@@ -46,6 +47,7 @@ final class VatClearingTriggerTest extends TestCase
     private PostingService $posting;
     private AccountingPeriodRepository $periods;
     private AccountingSupplierSettingsRepository $settings;
+    private OpenItemsService $openItems;
 
     private int $supplierId = 0;
     private bool $inTx = false;
@@ -65,6 +67,7 @@ final class VatClearingTriggerTest extends TestCase
             $this->posting  = $container->get(PostingService::class);
             $this->periods  = $container->get(AccountingPeriodRepository::class);
             $this->settings = $container->get(AccountingSupplierSettingsRepository::class);
+            $this->openItems = $container->get(OpenItemsService::class);
             $seeder         = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -449,6 +452,48 @@ final class VatClearingTriggerTest extends TestCase
             $this->clearing->status($this->supplierId, self::YEAR, 11)['run'],
             'Se smazaným dokladem zmizel i záznam běhu.',
         );
+    }
+
+    /**
+     * Nulové období mazalo zúčtovací doklad i s okruhem párování, ve kterém byl jeho řádek
+     * 343 spárovaný s platbou daně. Okruh doklad drží stejně jako mazání v deníku.
+     */
+    public function testZeroedPeriodWithPairedClearingIsNotDeleted(): void
+    {
+        $this->bookOutputVat(600.00, self::YEAR . '-10-10', 910131);
+        $posted = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 10);
+        $entryId = (int) $posted['entry_id'];
+        $pdo = $this->db->pdo();
+        $line = $pdo->prepare(
+            "SELECT l.id, l.account_id, ca.account_code FROM journal_entry_lines l
+               JOIN chart_of_accounts ca ON ca.id = l.account_id AND ca.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND l.side = 'credit' ORDER BY l.line_no LIMIT 1"
+        );
+        $line->execute([$this->supplierId, $entryId]);
+        $settlement = $line->fetch(\PDO::FETCH_ASSOC);
+        $paymentId = $this->posting->postDocument($this->supplierId, 'manual', 910133, [
+            ['account_code' => $settlement['account_code'], 'side' => 'debit', 'amount' => 600.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 600.00],
+        ], ['entry_date' => self::YEAR . '-11-25', 'description' => 'Platba DPH']);
+        $paymentLine = $pdo->prepare('SELECT id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? AND account_id = ?');
+        $paymentLine->execute([$this->supplierId, $paymentId, $settlement['account_id']]);
+        $pairing = $this->openItems->create($this->supplierId, (int) $settlement['account_id'],
+            [(int) $settlement['id'], (int) $paymentLine->fetchColumn()], null, ['user_id' => null, 'ip' => null, 'user_agent' => null]);
+        $this->posting->postDocument($this->supplierId, 'manual', 910132, [
+            ['account_code' => '343.200', 'side' => 'debit', 'amount' => 600.00],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 600.00],
+        ], ['entry_date' => self::YEAR . '-10-20', 'description' => 'Dobropis']);
+
+        try {
+            $this->clearing->postForPeriod($this->supplierId, self::YEAR, 10);
+            self::fail('Spárovaný zúčtovací doklad se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+        }
+        self::assertSame(1, $this->clearingEntryCount(), 'Doklad zůstal i s okruhem.');
+        $items = $pdo->prepare('SELECT COUNT(*) FROM journal_line_pairing_items WHERE supplier_id = ? AND pairing_id = ?');
+        $items->execute([$this->supplierId, (int) $pairing['id']]);
+        self::assertSame(2, (int) $items->fetchColumn());
     }
 
     /** Do zamčeného data se ani nemaže. */

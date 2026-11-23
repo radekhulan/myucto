@@ -15,6 +15,9 @@ export interface MyuctoImportReport {
   outside_scope: Record<string, number>
   files: number
   reconciliation: Record<string, number>
+  dropped?: Record<string, number>
+  missing_files?: Record<string, number>
+  numbering_check?: string[]
 }
 export interface MyuctoImportResult {
   token: string

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
@@ -37,7 +36,7 @@ final class PayrollAwaitingRunDutyServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -81,6 +80,24 @@ final class PayrollAwaitingRunDutyServiceTest extends TestCase
         self::assertSame(1, $missing[0]['employment_count']);
         self::assertSame('2026-10-20', $missing[0]['due_on']);
         self::assertSame([], $this->service->missing($this->supplierId, '2026-08'), 'Převzatý měsíc hlídá jiná služba.');
+    }
+
+    /**
+     * Výslovně zvolený měsíc, který teprve nastane: přehled podání před
+     * založením běhu říká, že z jeho schválení vznikne hlášení a do kdy.
+     * Dřív byl u budoucího měsíce prázdný. Souhrn bez zvoleného měsíce
+     * budoucí měsíce dál nehlídá.
+     */
+    public function testExplicitlyChosenFutureMonthIsReportedToo(): void
+    {
+        $this->seedEmployment('2026-01-01');
+
+        $future = $this->service->missing($this->supplierId, '2026-12');
+
+        self::assertSame(['2026-12'], array_column($future, 'period'));
+        self::assertSame('2027-01-20', $future[0]['due_on']);
+        self::assertSame('not_open', $future[0]['phase']);
+        self::assertNotContains('2026-12', array_column($this->service->missing($this->supplierId), 'period'));
     }
 
     public function testCoveredOrEmptyMonthIsNotReported(): void

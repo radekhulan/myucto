@@ -19,7 +19,7 @@ final class MyuctoExportReaderTest extends TestCase
         foreach (['', 'synthetic-export-password'] as $password) {
             $path = $this->archive([], [], $password);
             $result = (new MyuctoExportReader())->read($path, $password);
-            self::assertSame('Syntetická firma', $result['tables']['supplier'][71]['company_name']);
+            self::assertSame('Syntetická firma', $result['tables']->get('supplier', 71)['company_name']);
             self::assertSame(['runtime_jobs' => 1], $result['skipped']);
         }
     }
@@ -90,8 +90,80 @@ final class MyuctoExportReaderTest extends TestCase
         $manifest['restore']['documents'] = [['entry' => 'doklady/original.pdf', 'storage_path' => 'purchase-invoices/sup-71/original.pdf']];
         $zip->addFromString('manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR)); $zip->close();
         $result = (new MyuctoExportReader())->read($path);
-        self::assertSame($bytes, $result['assets'][0]['content']);
+        self::assertSame($bytes, file_get_contents($result['assets'][0]['file']));
+        self::assertSame(hash('sha256', $bytes), $result['assets'][0]['sha256']);
         self::assertSame('purchase_invoices', $result['assets'][0]['table']);
+    }
+
+    public function testHighlyCompressedEntryIsRejectedBeforeExtraction(): void
+    {
+        $path = $this->archive(); $zip = new ZipArchive(); $zip->open($path);
+        $zip->addFromString('data/bomb.jsonl', str_repeat("\n", 8 * 1024 * 1024)); $zip->close();
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('kompresní poměr');
+        (new MyuctoExportReader())->read($path);
+    }
+
+    public function testOversizedLineIsRejected(): void
+    {
+        $path = $this->archive([], [], '', ['supplier' => [['id' => 71, 'company_name' => str_repeat('x', 200)]]]);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Řádek exportu překračuje limit');
+        (new MyuctoExportReader(maxLineBytes: 128))->read($path);
+    }
+
+    public function testRowAndDataLimitsAreEnforcedPerExport(): void
+    {
+        $path = $this->archive([], [], '', ['clients' => [['id' => 1, 'supplier_id' => 71], ['id' => 2, 'supplier_id' => 71]]]);
+        try {
+            (new MyuctoExportReader(maxTableRows: 1))->read($path);
+            self::fail('Limit řádků tabulky se nevynutil.');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('clients překračuje limit 1 řádků', $e->getMessage());
+        }
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Data pro převod překračují limit');
+        (new MyuctoExportReader(maxDataBytes: 64))->read($path);
+    }
+
+    public function testMoreRowsThanDeclaredAreRejected(): void
+    {
+        $path = $this->archive([], ['clients' => ['rows' => 1, 'entry' => 'data/clients.jsonl']], '',
+            ['clients' => [['id' => 1, 'supplier_id' => 71], ['id' => 2, 'supplier_id' => 71]]]);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Počet řádků exportu nesedí: clients');
+        (new MyuctoExportReader())->read($path);
+    }
+
+    /** Manifest firmy s tisíci příloh má megabajty kontrolních součtů (dřív limit 2 MiB). */
+    public function testLargeManifestIsAccepted(): void
+    {
+        $path = $this->archive(['notes' => bin2hex(random_bytes(1_500_000))]);
+        $result = (new MyuctoExportReader())->read($path);
+        self::assertSame(1, $result['tables']->count('supplier'));
+    }
+
+    /**
+     * Tabulka nad dřívějším limitem 100 000 řádků se přečte proudem: v paměti zůstane
+     * jen index, ne řádky.
+     */
+    public function testTableAboveFormerRowLimitIsStreamedWithoutHoldingRows(): void
+    {
+        $clients = [];
+        for ($i = 1; $i <= 120_000; $i++) {
+            $clients[] = ['id' => $i, 'supplier_id' => 71, 'company_name' => 'Syntetický odběratel ' . $i, 'city' => 'Test'];
+        }
+        $path = $this->archive([], [], '', ['clients' => $clients]);
+        unset($clients);
+        gc_collect_cycles();
+        $base = memory_get_usage();
+        memory_reset_peak_usage();
+        $result = (new MyuctoExportReader())->read($path);
+        $peak = memory_get_peak_usage() - $base;
+        self::assertSame(120_000, $result['tables']->count('clients'));
+        self::assertSame('Syntetický odběratel 120000', $result['tables']->get('clients', 120_000)['company_name']);
+        // 120 000 řádků v polích zabere přes 60 MiB, index jen jednotky MiB.
+        self::assertLessThan(24 * 1024 * 1024, $peak, 'Čtečka drží řádky v paměti: ' . round($peak / 1048576) . ' MiB.');
     }
 
     private function archive(array $overrides = [], array $tableOverrides = [], string $password = '', array $rows = []): string

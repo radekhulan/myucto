@@ -40,15 +40,15 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  * 2027 ČSSZ nevydala). Lhůty JMHZ sada nese: § 7 odst. 1 z. č. 323/2025 Sb.
  * je trvalé pravidlo zákona.
  *
- * Uvnitř daně z příjmů jsou jako ruční posouzení vedené dvě hodnoty, které se
- * pro rok 2027 doložit nedají:
+ * Uvnitř daně z příjmů čeká na vyhlášení jediná hodnota:
  *
  *  • `benefit_exemption.meal.per_shift` — limit stravenkového paušálu je 70 %
- *    horní hranice stravného, a ta pro rok 2027 vyhlášená není,
- *  • `benefit_exemption.non_cash_leisure.yearly` — zák. č. 180/2026 Sb. zrušil
- *    od 1. 1. 2027 společný limit poloviny průměrné mzdy a rozdělil koš
- *    (rekreace 20 000 Kč, zbytek bez limitu). Nové koše zavádí samostatná
- *    změna; do té doby se starý koš nesmí počítat ani starým, ani novým číslem.
+ *    horní hranice stravného, a ta pro rok 2027 vyhlášená není.
+ *
+ * `benefit_exemption.non_cash_leisure.yearly` nese od 1. 1. 2027 hodnotu
+ * `unlimited`: zák. č. 180/2026 Sb. zrušil u § 6 odst. 9 písm. d) bodu 2 ZDP
+ * společný limit poloviny průměrné mzdy, rekreace a zájezd mají vlastní koš
+ * 20 000 Kč podle bodu 3.
  *
  * ── Co zůstává podle roku 2026 a mění se samostatně ─────────────────────────
  * Zrušení srážkové daně podle § 6 odst. 4 ZDP (zák. č. 360/2025 Sb.) je změna
@@ -133,12 +133,14 @@ final class CzechPayrollRulesets2027
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'benefit_exemption.meal.minimum_work_minutes' => PayrollRuleValue::integer(180),
-                // 70 % horní hranice stravného 5 až 12 hodin; vyhláška o stravném
-                // pro rok 2027 k datu stažení nevyšla. Hodnota roku 2026 by tu
-                // byla tichý odhad.
+                // 70 % horní hranice stravného 5 až 12 hodin; vyhláška MPSV podle
+                // § 189 zákoníku práce pro rok 2027 k datu stažení nevyšla. Hodnota
+                // roku 2026 by tu byla tichý odhad. V administraci se parametr
+                // ukazuje jako „čeká na vyhlášení" (PayrollRuleParameterCatalog).
                 'benefit_exemption.meal.per_shift' => PayrollRuleValue::manualReview(
-                    'K OVĚŘENÍ: horní hranice stravného pro rok 2027 není vyhlášená, takže '
-                    . 'osvobozený příspěvek na stravování za směnu nelze odvodit.',
+                    'ČEKÁ NA VYHLÁŠENÍ: horní hranici stravného pro rok 2027 stanoví vyhláška MPSV '
+                    . 'podle § 189 zákoníku práce, obvykle v prosinci. Do té doby nelze odvodit '
+                    . 'osvobozený příspěvek na stravování za směnu.',
                 ),
                 'benefit_exemption.meal.second_contribution_day_minutes' =>
                     PayrollRuleValue::integer(660),
@@ -147,11 +149,13 @@ final class CzechPayrollRulesets2027
                 'benefit_exemption.meal.shift_rate' => PayrollRuleValue::rate('0.70'),
                 // § 6 odst. 9 písm. d) bod 1 ZDP: průměrná mzda 51 663 Kč.
                 'benefit_exemption.non_cash_health.yearly' => PayrollRuleValue::moneyMinor(5_166_300),
-                'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::manualReview(
-                    'K OVĚŘENÍ: od 1. 1. 2027 má § 6 odst. 9 písm. d) bod 2 ZDP plnění bez číselného '
-                    . 'limitu a rekreace samostatný limit 20 000 Kč (bod 3). Společný limit poloviny '
-                    . 'průměrné mzdy už neplatí.',
-                ),
+                // § 6 odst. 9 písm. d) bod 2 ZDP ve znění zák. č. 180/2026 Sb.: věta
+                // „v úhrnu do výše poloviny průměrné mzdy" vypadla, plnění jsou
+                // osvobozena bez číselného limitu. Rekreace a zájezd mají vlastní
+                // koš podle bodu 3 (benefit_exemption.recreation.yearly). Hodnota
+                // musí souhlasit s PayrollBenefitExemptionBasket::isUnlimited(),
+                // hlídá to CzechPayrollRulesets2027Test.
+                'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::text('unlimited'),
                 'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
                 // § 6 odst. 9 písm. d) bod 3 ZDP ve znění zák. č. 180/2026 Sb.:
                 // rekreace a zájezd samostatně nejvýš 20 000 Kč za zdaňovací období.

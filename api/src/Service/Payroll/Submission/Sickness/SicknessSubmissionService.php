@@ -453,22 +453,16 @@ final readonly class SicknessSubmissionService
              * prvním (pravděpodobný příjem), po doplnění na dalším (číslo
              * rozhodnutí) a účetní opravovala a zkoušela náhled pořád dokola.
              */
-            $missing = [];
-            try {
-                $payload = $this->nempriPayload(
-                    $supplierId,
-                    $environment,
-                    $caseId,
-                    $row,
-                    $kind,
-                    $context,
-                    $identity,
-                    $document,
-                );
-            } catch (SicknessException $exception) {
-                $missing[] = $exception;
-                $payload = null;
-            }
+            [$payload, $missing] = $this->nempriPayload(
+                $supplierId,
+                $environment,
+                $caseId,
+                $row,
+                $kind,
+                $context,
+                $identity,
+                $document,
+            );
             // Číslo rozhodnutí podle druhu dávky (povinnost, zákaz i tvar) se
             // ohlídá hned, stejným pravidlem jako ve validátoru věty, a hlásí
             // se spolu s ostatními chybami případu; validátor ho jinak vidí
@@ -495,12 +489,18 @@ final readonly class SicknessSubmissionService
                 );
             }
             if ($missing !== [] || $payload === null) {
+                // `problems` nese každou chybu zvlášť s jejím upřesněním, aby
+                // obrazovka nabídla proklik ke každé, ne jen k první.
                 throw new SicknessException(
                     $missing[0]->validationCode,
                     implode("\n", array_map(
                         static fn (SicknessException $exception): string => $exception->getMessage(),
                         $missing,
                     )),
+                    ['problems' => array_map(
+                        static fn (SicknessException $exception): array => $exception->problem(),
+                        $missing,
+                    )],
                 );
             }
             $xml = $this->nempriSerializer->serialize($payload);
@@ -566,9 +566,15 @@ final readonly class SicknessSubmissionService
      * ošetřovanou osobu, rozhodné období z převzatých mezd a způsob výplaty
      * mzdy.
      *
+     * Rozhodné období, způsob výplaty a údaje vztahu a osoby jsou na sobě
+     * nezávislé a opravují se na různých místech (mzdový běh, karta osoby,
+     * podmínky vztahu). Chyba jednoho proto nezakryje ostatní: vrací se
+     * všechny najednou a věta jen tehdy, když žádná není.
+     *
      * @param array<string,mixed> $row
      * @param array<string,mixed> $context
      * @param array<string,mixed> $identity
+     * @return array{0:?NempriXmlPayload,1:list<SicknessException>}
      */
     private function nempriPayload(
         int $supplierId,
@@ -579,7 +585,7 @@ final readonly class SicknessSubmissionService
         array $context,
         array $identity,
         SicknessDocumentKind $document = SicknessDocumentKind::Nempri,
-    ): NempriXmlPayload {
+    ): array {
         $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::NEMPRI25);
         $employeeId = (int) $row['employee_id'];
         $eventOn = (string) $row['incapacity_from'];
@@ -610,7 +616,26 @@ final readonly class SicknessSubmissionService
             );
         }
 
-        return $this->payloads->nempri(
+        $problems = [];
+        $attempt = static function (callable $part) use (&$problems): mixed {
+            try {
+                return $part();
+            } catch (SicknessException $exception) {
+                $problems[] = $exception;
+
+                return null;
+            }
+        };
+        $caredPerson = $kind->hasApplication()
+            ? $attempt(fn (): ?NempriPerson => $this->caredPerson($supplierId, $employeeId, $row))
+            : null;
+        $decisivePeriod = $startsClaim
+            ? $attempt(fn (): NempriDecisivePeriod => $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context, $transferredOn))
+            : null;
+        $paymentConnection = $startsClaim
+            ? $attempt(fn (): ?NempriPaymentConnection => $this->paymentConnection($supplierId, $employeeId, $eventOn))
+            : null;
+        $payload = $attempt(fn (): NempriXmlPayload => $this->payloads->nempri(
             $row,
             $kind,
             $context,
@@ -618,17 +643,13 @@ final readonly class SicknessSubmissionService
             $manifest['payload_version'],
             $this->software->productName,
             $this->software->productVersion,
-            $kind->hasApplication()
-                ? $this->caredPerson($supplierId, $employeeId, $row)
-                : null,
-            $startsClaim
-                ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context, $transferredOn)
-                : null,
-            $startsClaim
-                ? $this->paymentConnection($supplierId, $employeeId, $eventOn)
-                : null,
+            $caredPerson,
+            $decisivePeriod,
+            $paymentConnection,
             $this->insuredContacts->forEmployee($supplierId, $employeeId),
-        );
+        ));
+
+        return [$problems === [] ? $payload : null, $problems];
     }
 
     /**

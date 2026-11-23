@@ -88,7 +88,7 @@ final class TaxAction
             'year'            => $year,
             // Profil nese rodná čísla jen maskovaná; API token a MCP z rodiny dostanou
             // jen to, z čeho se počítá sleva a zvýhodnění (H28).
-            'profile'         => RequestAuthorization::isSessionAuth($request)
+            'profile'         => RequestAuthorization::actsAsSession($request)
                 ? $publicProfile
                 : TaxFamilyIdentifierService::bearerProfile($publicProfile),
             'is_vat_payer'    => $isVat,
@@ -192,11 +192,11 @@ final class TaxAction
      */
     public function revealFamily(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         if (!RequestAuthorization::allows($request, TaxFamilyIdentifierService::PERMISSION, AccessLevel::WRITE)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         if ($sid <= 0) {
@@ -226,7 +226,7 @@ final class TaxAction
                 $request->getHeaderLine('User-Agent'),
             );
         } catch (PermissionDenied) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\DomainException $e) {

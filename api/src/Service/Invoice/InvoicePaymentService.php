@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
@@ -114,7 +115,7 @@ final class InvoicePaymentService
     public function listFor(int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT p.*,
+            'SELECT p.*, (' . TakenOverPayment::isTaxDeclaredByOriginSql('p') . ') AS tax_declared_by_origin,
                     td.varsymbol AS tax_document_varsymbol, td.status AS tax_document_status,
                     bt.statement_id AS bank_statement_id, bt.counterparty_name AS bank_counterparty_name
                FROM invoice_payments p
@@ -165,7 +166,8 @@ final class InvoicePaymentService
     /** @return array<string,mixed>|null */
     public function findPayment(int $paymentId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM invoice_payments WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT p.*, (' . TakenOverPayment::isTaxDeclaredByOriginSql('p') . ') AS tax_declared_by_origin
+              FROM invoice_payments p WHERE p.id = ?');
         $stmt->execute([$paymentId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : self::castPayment($row);
@@ -297,7 +299,14 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
-            $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
+            $locked = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? FOR UPDATE');
+            $locked->execute([$invoiceId]);
+            // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246); faktura
+            // ji jen zrcadlí ({@see InvoiceOtherItemPayments}). Jiná platba by ji přeplatila.
+            $otherItemId = $locked->fetchColumn();
+            if ($otherItemId !== null && $otherItemId !== false) {
+                throw new \RuntimeException('Faktura je navázaná na ostatní pohledávku. Úhradu spárujte s pohledávkou, faktura ji převezme.');
+            }
             if (($opts['source'] ?? '') === 'bank') {
                 $amount = $this->settleableBankAmount($pdo, $invoiceId, $amount);
             }
@@ -437,7 +446,9 @@ final class InvoicePaymentService
      * nenavázanou platbu, kterou lze navázat ({@see bankReconcilableSql()}: zápočet ani
      * pokladna bankou podruhé neodúčtují 311); 0 = faktura už je spárovaná
      * s jinou transakcí, >1 = nejednoznačné (rekonciliaci proveď ručně). Tím je
-     * zaručeno, že nikdy neporušíme UNIQUE(bank_transaction_id, invoice_id).
+     * zaručeno, že nikdy neporušíme UNIQUE(bank_transaction_id, invoice_id). Doklad převzatý
+     * z Money S3, jehož úhradu nese jen výplň bez dokladu úhrady, dostane bankovní platbu
+     * místo výplně ({@see replaceMoneyS3Filler()}).
      *
      * Musí běžet uvnitř transakce volajícího (faktura by měla být zamčená FOR UPDATE).
      *
@@ -454,6 +465,9 @@ final class InvoicePaymentService
         );
         $sel->execute([$invoiceId]);
         $rows = $sel->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($rows) === 0 && ($replaced = $this->replaceMoneyS3Filler($pdo, $invoiceId, $txId, $opts)) !== null) {
+            return $replaced;
+        }
         if (count($rows) === 0) {
             throw new \RuntimeException(
                 'Faktura nemá nenavázanou platbu k rekonciliaci (je už spárovaná s jinou transakcí, nebo uhrazená zápočtem či pokladnou).'
@@ -483,6 +497,61 @@ final class InvoicePaymentService
     }
 
     /**
+     * Bankovní pohyb za úhradu, kterou převod z Money S3 nesl jen výplní bez dokladu úhrady
+     * ({@see TakenOverPayment::isMoneyS3Filler()}): pohyb se zaeviduje jako bankovní platba
+     * převzatá z Money (poznámka převodu s odkazem na výplň, vazba výplně na DDKP) a výplň se
+     * o její částku zmenší (nebo zruší). Uhrazená částka i stav dokladu se nemění.
+     * Částka je menší z výplně a pohybu (pohyb v jiné měně než doklad se bere celou výplní).
+     *
+     * @param array{variable_symbol?: ?string, bank_reference?: ?string} $opts
+     * @return array{payment_id: int, amount: float}|null null = doklad výplň nemá
+     */
+    private function replaceMoneyS3Filler(PDO $pdo, int $invoiceId, int $txId, array $opts): ?array
+    {
+        $filler = $pdo->prepare('SELECT p.id, p.supplier_id, p.amount, p.currency, p.note, p.tax_document_invoice_id FROM invoice_payments p
+              WHERE p.invoice_id = ? AND ' . TakenOverPayment::moneyS3FillerSql('p') . ' ORDER BY p.id LIMIT 1 FOR UPDATE');
+        $filler->execute([$invoiceId]);
+        $f = $filler->fetch(PDO::FETCH_ASSOC);
+        if ($f === false) {
+            return null;
+        }
+        $tx = $pdo->prepare('SELECT t.amount, t.currency, t.bank_ref, DATE(t.posted_at) AS posted_on FROM bank_transactions t WHERE t.id = ?');
+        $tx->execute([$txId]);
+        $t = $tx->fetch(PDO::FETCH_ASSOC);
+        if ($t === false) {
+            return null;
+        }
+        $fillerAmount = round((float) $f['amount'], 2);
+        $amount = strtoupper((string) ($t['currency'] ?? '')) === strtoupper((string) $f['currency'])
+            ? round(min($fillerAmount, abs((float) $t['amount'])), 2)
+            : $fillerAmount;
+        $whole = $fillerAmount - $amount < 0.01;
+        // Platba nese touž úhradu z Money jako výplň: poznámku převodu (zůstává převzatou
+        // platbou Money, predikát zdanění ji pozná) s odkazem na nahrazenou výplň a u celé
+        // náhrady i vazbu výplně na DDKP. Bez toho by k úplatě zdaněné DDKP z Money šel
+        // vystavit druhý DDKP.
+        $paymentNo = trim((string) ($t['bank_ref'] ?? '')) !== '' ? trim((string) $t['bank_ref']) : '#' . $txId;
+        $note = mb_substr(IssuedPaymentRecorder::note('bank', $paymentNo) . ' – nahrazuje: ' . (string) $f['note'], 0, 255);
+        if ($whole && $f['tax_document_invoice_id'] !== null) {
+            // Vazba na DDKP je jedinečná: výplň ji uvolní dřív, než ji převezme platba.
+            $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = NULL WHERE id = ?')->execute([(int) $f['id']]);
+        }
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, variable_symbol, bank_reference, note, source, bank_transaction_id, tax_document_invoice_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, "bank", ?, ?)')
+            ->execute([(int) $f['supplier_id'], $invoiceId, (string) $t['posted_on'], number_format($amount, 2, '.', ''), (string) $f['currency'],
+                self::trimOrNull($opts['variable_symbol'] ?? null, 20), self::trimOrNull($opts['bank_reference'] ?? null, 120), $note, $txId,
+                $whole ? $f['tax_document_invoice_id'] : null]);
+        $paymentId = (int) $pdo->lastInsertId();
+        if ($whole) {
+            $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([(int) $f['id']]);
+        } else {
+            $pdo->prepare('UPDATE invoice_payments SET amount = ? WHERE id = ?')->execute([number_format($fillerAmount - $amount, 2, '.', ''), (int) $f['id']]);
+        }
+        $this->clientBankAccounts->captureForInvoiceTransaction($invoiceId, $txId);
+        return ['payment_id' => $paymentId, 'amount' => $amount];
+    }
+
+    /**
      * Smaže platbu a přepočítá paid_total + status (může revertovat 'paid').
      *
      * Guardy (vynechatelné přes $skipBankGuard pro bank-unmatch flow, který maže
@@ -494,7 +563,7 @@ final class InvoicePaymentService
      *
      * @return array{became_unpaid: bool, remaining: float}
      */
-    public function deletePayment(int $paymentId, bool $skipBankGuard = false): array
+    public function deletePayment(int $paymentId, bool $skipBankGuard = false, bool $allowMoneyS3Filler = false): array
     {
         $payment = $this->findPayment($paymentId);
         if ($payment === null) {
@@ -504,6 +573,14 @@ final class InvoicePaymentService
             throw new \RuntimeException(
                 'Platba je navázaná na bankovní transakci. Zruš spárování v detailu výpisu.'
             );
+        }
+        if ($payment['source'] === InvoiceOtherItemPayments::SOURCE) {
+            throw new \RuntimeException(
+                'Platba je úhradou navázané ostatní pohledávky. Odpojte úhradu v detailu pohledávky, nebo fakturu od pohledávky odpojte.'
+            );
+        }
+        if (TakenOverPayment::isProtected($payment) && !($allowMoneyS3Filler && TakenOverPayment::isMoneyS3Filler($payment))) {
+            throw new TakenOverPaymentException(TakenOverPayment::protectedMessage($payment));
         }
         if ($payment['tax_document_invoice_id'] !== null) {
             $pdo = $this->db->pdo();
@@ -553,8 +630,11 @@ final class InvoicePaymentService
     /**
      * Smaže VŠECHNY platby faktury (unmark-paid flow). Guardy (bankovní vazby,
      * daňové doklady) ověřuje volající. Vrací počet smazaných plateb.
+     *
+     * Zůstává zrcadlo úhrad ostatní pohledávky (peníze patří pohledávce, ne faktuře)
+     * a platba převzatá bez protějšku v MyÚčtu ({@see TakenOverPayment::isProtected()}).
      */
-    public function deleteAllForInvoice(int $invoiceId): int
+    public function deleteAllForInvoice(int $invoiceId, bool $allowMoneyS3Filler = false): int
     {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -565,14 +645,15 @@ final class InvoicePaymentService
             $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
             $this->assertNoEetRecord('a.invoice_payment_id IN (SELECT p.id FROM invoice_payments p WHERE p.invoice_id = ?)', [$invoiceId]);
             $this->goPayPending->releaseForInvoice($invoiceId);
-            $payments = $pdo->prepare('SELECT id, supplier_id FROM invoice_payments WHERE invoice_id = ?');
-            $payments->execute([$invoiceId]);
+            $deletable = 'p.source <> ? AND NOT ' . TakenOverPayment::isProtectedSql('p', $allowMoneyS3Filler);
+            $payments = $pdo->prepare("SELECT p.id, p.supplier_id FROM invoice_payments p WHERE p.invoice_id = ? AND {$deletable}");
+            $payments->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             foreach ($payments->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
                 $this->eetReconciliation->releaseInvoicePayment((int) $p['supplier_id'], (int) $p['id']);
             }
             self::releaseCreditNotes($pdo, 'p.invoice_id = ?', [$invoiceId]);
-            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ?');
-            $del->execute([$invoiceId]);
+            $del = $pdo->prepare("DELETE p FROM invoice_payments p WHERE p.invoice_id = ? AND {$deletable}");
+            $del->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             $count = $del->rowCount();
             $transition = $this->recomputeLocked($pdo, $invoiceId);
             if ($ownsTransaction) {
@@ -708,7 +789,7 @@ final class InvoicePaymentService
      *
      * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
      */
-    private function recomputeLocked(PDO $pdo, int $invoiceId): array
+    public static function recomputeLocked(PDO $pdo, int $invoiceId): array
     {
         $pdo->prepare(
             'UPDATE invoices i
@@ -867,6 +948,12 @@ final class InvoicePaymentService
         if (array_key_exists('bank_statement_id', $row)) {
             $row['bank_statement_id'] = $row['bank_statement_id'] !== null ? (int) $row['bank_statement_id'] : null;
         }
+        $row['taken_over'] = TakenOverPayment::isTakenOver($row);
+        $row['taken_over_locked'] = TakenOverPayment::isProtected($row);
+        $row['prior_year'] = TakenOverPayment::isPriorYear($row);
+        // Doložení zdanění potřebuje data (DDKP, podané období): počítá ho SQL výběru platby.
+        $row['tax_declared_by_origin'] = (bool) ($row['tax_declared_by_origin'] ?? false);
+        $row['money_s3_filler'] = TakenOverPayment::isMoneyS3Filler($row);
         return $row;
     }
 

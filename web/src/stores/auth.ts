@@ -11,8 +11,11 @@ import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
 import { getWindowSupplierScope } from '@/workspace/supplierContext'
 import { clearVatReportPeriodSession } from '@/utils/vatReportPeriodSession'
+import { clearPayrollPeriodSession } from '@/utils/payrollPeriodSession'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
+import { ssoEnforcementPolicy } from '@/security/oidc'
+import { forgetSsoSession, rememberSsoSession, setSsoRenewalPolicy } from '@/security/ssoRenewal'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -30,6 +33,8 @@ export const useAuthStore = defineStore('auth', () => {
   const submissionTestEnvironmentAllowed = ref(false)
   // Web faktura je výchozí funkce; skrývá se jen na výslovné false ze serveru.
   const invoicePublicLinksEnabled = ref(true)
+  const saveAndPostEnabled = ref(false)
+  const scheduledPohodaExportEnabled = ref(false)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
   const domainContext = ref<DomainContext | null>(null)
@@ -55,12 +60,15 @@ export const useAuthStore = defineStore('auth', () => {
   // se fail-closed tvářilo jako spravované, self-hosted instalace by přišla
   // o tlačítko Aktualizovat vždycky, když setup-status ještě nedorazil.
   const isManagedInstallation = computed(() => setupStatus.value?.managed === true)
-  const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
-  const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
+  // Vynucený silný poskytovatel řídí druhý faktor sám: místní MFA se pak
+  // nezřizuje, ani povinně, ani nabídkou.
+  const localMfaApplies = computed(() => !ssoEnforcementPolicy(setupStatus.value).strong)
+  const mustSetupTotp = computed(() => localMfaApplies.value && user.value?.must_setup_totp === true)
+  const mustSetupMfa = computed(() => localMfaApplies.value && user.value?.must_setup_mfa === true)
   // Dobrovolná nabídka MFA. Na rozdíl od `mustSetupMfa` NIC neblokuje — router
   // podle ní jen otevře /setup-mfa tomu, kdo tam přijde po přihlášení. Fail-closed
   // na `false`: dokud server nabídku nepotvrdí, nikoho nikam neposíláme.
-  const shouldOfferMfa = computed(() => user.value?.should_offer_mfa === true)
+  const shouldOfferMfa = computed(() => localMfaApplies.value && user.value?.should_offer_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
   const hasPayrollFeatures = computed(() => license.value?.payroll_features === true)
   // ⚠️ Odemyká placené moduly TARIF? Bez toho obrazovka nerozliší „licence
@@ -101,19 +109,29 @@ export const useAuthStore = defineStore('auth', () => {
     permissionCatalogVersion.value = ''
   }
 
-  async function fetchSetupStatus() {
+  async function loadSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
     setOverdueIncludesToday(setupStatus.value.overdue_includes_today === true)
+    setSsoRenewalPolicy(setupStatus.value)
+    return setupStatus.value
+  }
+
+  async function fetchSetupStatus() {
+    const status = await loadSetupStatus()
     // Na úplně čerstvé instalaci ještě nemusí existovat tabulka domén a setup
     // záměr schválně povoluje přístup i z LAN hostname odlišného od app.url.
     // Tenant kontext proto načítáme až po dokončení prvotního setupu.
-    if (!setupStatus.value.needs_setup) {
+    if (!status.needs_setup) {
       await fetchDomainContext()
     } else {
       domainContext.value = null
       setDomainSupplierLock(null)
     }
-    return setupStatus.value
+    return status
+  }
+
+  async function bootstrapWorkspace() {
+    await Promise.allSettled([loadSetupStatus(), refresh()])
   }
 
   async function fetchDomainContext() {
@@ -154,8 +172,11 @@ export const useAuthStore = defineStore('auth', () => {
       permissions.value = data.permissions || {}
       permissionCatalogVersion.value = data.permission_catalog_version || ''
       license.value = data.license || null
+      rememberSsoSession(data.sso_session, data.server_time)
       submissionTestEnvironmentAllowed.value = data.submission_test_environment_allowed === true
       invoicePublicLinksEnabled.value = data.invoice_public_links_enabled !== false
+      saveAndPostEnabled.value = data.save_and_post_enabled === true
+      scheduledPohodaExportEnabled.value = data.scheduled_pohoda_export_enabled === true
       lockedSession.value = null
       profileHydrated.value = true
       domainContext.value = data.domain_context && domainContext.value
@@ -208,22 +229,24 @@ export const useAuthStore = defineStore('auth', () => {
     password: string,
     captchaToken?: string,
     totp?: string,
-    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string },
+    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string; ssoTicket?: string },
   ) {
     ++refreshGeneration
     permissionsLoading.value = false
     rememberTotpEnrollment(null)
     loading.value = true
     try {
+      // Lístek od poskytovatele nahrazuje e-mail, heslo i captchu.
+      const credentials = opts?.ssoTicket
+        ? { sso_ticket: opts.ssoTicket }
+        : { email, password, cf_turnstile_response: captchaToken }
       const data = await authApi.login({
-        email,
-        password,
+        ...credentials,
         totp: totp || undefined,
         recovery_code: opts?.recoveryCode || undefined,
         email_otp: opts?.emailOtp || undefined,
         remember_device: opts?.rememberDevice || undefined,
         resend_otp: opts?.resendOtp || undefined,
-        cf_turnstile_response: captchaToken,
       })
       recordCanonicalDomainLoginSession(data.csrf_token)
       user.value = data.user
@@ -243,6 +266,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function clearPrivateState() {
     clearVatReportPeriodSession()
+    clearPayrollPeriodSession()
     ++refreshGeneration
     permissionsLoading.value = false
     rememberTotpEnrollment(null)
@@ -261,6 +285,7 @@ export const useAuthStore = defineStore('auth', () => {
     const requestCsrfToken = logoutRetryCsrfToken || csrfToken.value
     if (requestCsrfToken) setCsrfToken(requestCsrfToken)
 
+    forgetSsoSession()
     try {
       await authApi.logout()
       logoutRetryCsrfToken = ''
@@ -313,6 +338,8 @@ export const useAuthStore = defineStore('auth', () => {
     license,
     submissionTestEnvironmentAllowed,
     invoicePublicLinksEnabled,
+    saveAndPostEnabled,
+    scheduledPohodaExportEnabled,
     lockedSession,
     profileHydrated,
     domainContext,
@@ -343,6 +370,7 @@ export const useAuthStore = defineStore('auth', () => {
     clearPermissions,
     prepareDomainLogin,
     fetchSetupStatus,
+    bootstrapWorkspace,
     fetchDomainContext,
     setSessionCsrfToken,
     setMfaPolicy,

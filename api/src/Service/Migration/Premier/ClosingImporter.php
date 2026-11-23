@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\Closing\ClosingSteps;
 
 /**
  * Uzávěrka převedeného roku, který je v PREMIER uzavřený.
@@ -130,13 +131,17 @@ final class ClosingImporter
         if (abs((float) $depreciation['total_accounting']) >= 0.005 || $depreciation['errors'] !== []) {
             throw new PremierException('depreciation_needed', 'hromadné účtování odpisů by zaúčtovalo odpisy, které v deníku PREMIER nejsou');
         }
-        foreach (['depreciation', 'estimates', 'deferrals', 'provisions', 'income_tax'] as $step) {
-            $this->closing->confirmStep($ctx->supplierId, $periodId, $step, 'done', self::NOTE, $version(), $meta);
-        }
+        // Kroky v pořadí průvodce: u neziskové organizace jdou Zásoby před daní.
         $state = $this->closing->state($ctx->supplierId, $periodId);
-        foreach ($state['steps'] as $s) {
-            if ($s['step_key'] === 'stock' && $s['status'] === 'pending') {
-                $this->closing->runStockValuation($ctx->supplierId, $periodId, $version(), $meta);
+        foreach (ClosingSteps::order($state['accounting_framework'] ?? null) as $step) {
+            if (in_array($step, ['depreciation', 'estimates', 'deferrals', 'provisions', 'income_tax'], true)) {
+                $this->closing->confirmStep($ctx->supplierId, $periodId, $step, 'done', self::NOTE, $version(), $meta);
+            } elseif ($step === 'stock') {
+                foreach ($this->closing->state($ctx->supplierId, $periodId)['steps'] as $s) {
+                    if ($s['step_key'] === 'stock' && $s['status'] === 'pending') {
+                        $this->closing->runStockValuation($ctx->supplierId, $periodId, $version(), $meta);
+                    }
+                }
             }
         }
         if (!$this->closing->state($ctx->supplierId, $periodId)['can_close']) {

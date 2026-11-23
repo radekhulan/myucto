@@ -157,7 +157,8 @@ final class EquityChangesStatementService
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = :supplier_id AND e.posted_at IS NOT NULL
-                AND e.reversed_by IS NULL
+                -- Stornovaný zápis i jeho storno se počítají oba jako v hlavní knize
+                -- (vyruší se); filtr jen na nestornované by nechal storno bez originálu.
                 AND e.entry_date <= :as_of
                 -- Zápis datovaný přesně na PRVNÍ den období se nesmí započítat
                 -- zároveň do počátečního stavu i mezi pohyby. Do počátečního stavu
@@ -205,7 +206,6 @@ final class EquityChangesStatementService
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                AND e.reversed_by IS NULL
                 AND e.entry_date BETWEEN ? AND ?
                 AND e.source_type NOT IN ('opening', 'closing')
                 AND a.account_type = 'equity'

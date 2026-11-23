@@ -179,6 +179,40 @@ final class CashRegisterServiceTest extends TestCase
         self::assertEqualsWithDelta(0.0, (float) $detail['balance_foreign'], 0.001);
     }
 
+    public function testForeignOpeningBalanceEntersForeignBalance(): void
+    {
+        // Peníze v pokladně před prvním dokladem v MyÚčtu: počáteční stav ve valutě k datu.
+        $id = $this->service->create($this->supplierId, ['name' => 'EUR pokladna', 'account_code' => '211500', 'currency_code' => 'EUR']);
+        $this->service->update($this->supplierId, $id, ['opening_foreign_amount' => '2858,02', 'opening_foreign_date' => '2019-01-01']);
+        $detail = $this->service->get($this->supplierId, $id);
+        self::assertSame(2858.02, $detail['opening_foreign_amount']);
+        self::assertSame('2019-01-01', $detail['opening_foreign_date']);
+        self::assertEqualsWithDelta(2858.02, (float) $detail['balance_foreign'], 0.001);
+        self::assertEqualsWithDelta(0.0, $this->service->documentsSignedForeignTotal($this->supplierId, $id, '2018-12-31'), 0.001,
+            'Před dnem počátečního stavu se nezapočítá.');
+
+        try {
+            $this->service->update($this->supplierId, $id, ['opening_foreign_amount' => 10, 'opening_foreign_date' => '']);
+            self::fail('Počáteční stav bez data musí selhat.');
+        } catch (CashException $e) {
+            self::assertSame('validation', $e->errorCode);
+        }
+
+        $this->service->update($this->supplierId, $id, ['opening_foreign_amount' => '', 'opening_foreign_date' => '']);
+        $cleared = $this->service->get($this->supplierId, $id);
+        self::assertNull($cleared['opening_foreign_amount']);
+        self::assertEqualsWithDelta(0.0, (float) $cleared['balance_foreign'], 0.001);
+
+        $this->seedAnalytic('211100');
+        $czk = $this->service->create($this->supplierId, ['name' => 'Kč', 'account_code' => '211100']);
+        try {
+            $this->service->update($this->supplierId, $czk, ['opening_foreign_amount' => 5, 'opening_foreign_date' => '2026-01-01']);
+            self::fail('Korunová pokladna valutový počáteční stav nemá.');
+        } catch (CashException $e) {
+            self::assertSame('validation', $e->errorCode);
+        }
+    }
+
     public function testForeignCurrencyRegisterAutoAnalytic(): void
     {
         // Bez zadané analytiky se přidělí první volná 211.xxx automaticky (tečkovaný tvar).

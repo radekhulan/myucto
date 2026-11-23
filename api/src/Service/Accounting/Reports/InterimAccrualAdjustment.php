@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\Assets\AssetException;
+use MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard;
+use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
+use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\PostingException;
@@ -23,19 +27,29 @@ use MyInvoice\Service\Accounting\PostingException;
  * na 381/384 je (odklad uzávěrky, rozpuštění v dalším roce, doklad rozúčtovaný rovnou na
  * 381/384), se znovu neupravuje.
  *
+ * Stejná volba přidává průběžné účetní odpisy: odpis roku, který zaúčtuje až krok
+ * uzávěrky, se k rozvahovému dni ukáže za uplynulé celé měsíce jako MD 551 / D oprávky
+ * ({@see DepreciationPostingService::interimAccounting()}).
+ *
  * Výsledkem jsou rozdíly zůstatků (MD − D) po účtech. Výkazy je přičtou k zůstatkům
  * deníku, takže rozvaha bilancuje: o co klesne náklad, o to vzroste 381 a výsledek
- * běžného období; o co klesne výnos, o to vzroste 384 a klesne výsledek.
+ * běžného období; o co klesne výnos, o to vzroste 384 a klesne výsledek; o co vzroste
+ * odpis, o to vzrostou oprávky a klesne výsledek.
  */
 final class InterimAccrualAdjustment
 {
     public function __construct(
         private readonly AccrualDeferralService $accruals,
+        private readonly DepreciationPostingService $depreciation,
+        private readonly AccrualAgendaGuard $agenda,
     ) {}
 
     /**
-     * @return array{deltas: array<string,float>, prepaid_expense: float, deferred_revenue: float, documents: int}
-     *   deltas = účet => změna zůstatku MD − D; prepaid_expense = přírůstek 381; deferred_revenue = přírůstek 384
+     * @return array{deltas: array<string,float>, prepaid_expense: float, deferred_revenue: float, documents: int,
+     *   depreciation: float, depreciation_assets: int, accrual_agenda: float, accrual_agenda_items: int}
+     *   deltas = účet => změna zůstatku MD − D; prepaid_expense = přírůstek 381; deferred_revenue = přírůstek 384;
+     *   depreciation = průběžný účetní odpis karet, jejichž odpis roku deník ještě nenese;
+     *   accrual_agenda = nezaúčtované rozpuštění položek agendy Časové rozlišení (v normálním znaménku)
      */
     public function compute(int $supplierId, string $periodStartsOn, string $asOf): array
     {
@@ -50,9 +64,9 @@ final class InterimAccrualAdjustment
         try {
             $accountsByInvoice = [];
             $costsByInvoice = [];
-            foreach ($this->accruals->prepaidExpenseRows($supplierId, $asOf, $periodStartsOn, $asOf, $asOf) as $row) {
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->prepaidExpenseRows($supplierId, $asOf, $periodStartsOn, $asOf, $asOf)) as $row) {
                 $netCzk = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costsByInvoice);
-                $deferred = AccrualDeferralService::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
+                $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0) {
                     continue;
                 }
@@ -61,13 +75,13 @@ final class InterimAccrualAdjustment
                     $add($deltas, (string) $account, -$part);
                 }
                 $prepaid = round($prepaid + $deferred, 2);
-                $documents['purchase_invoice:' . (int) $row['purchase_invoice_id']] = true;
+                $documents[AccrualDeferralService::prepaidExpenseDocumentKey($row)] = true;
             }
 
             $contexts = [];
-            foreach ($this->accruals->deferredRevenueRows($supplierId, $asOf, $periodStartsOn, $asOf, null, false, $asOf) as $row) {
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->deferredRevenueRows($supplierId, $asOf, $periodStartsOn, $asOf, null, false, $asOf)) as $row) {
                 [$netCzk, $accounts] = $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
-                $deferred = AccrualDeferralService::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
+                $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0 || $accounts === []) {
                     continue;
                 }
@@ -75,9 +89,7 @@ final class InterimAccrualAdjustment
                     $add($deltas, (string) $account, $part);
                 }
                 $revenue = round($revenue + $deferred, 2);
-                $documents[$row['membership_case_id'] === null
-                    ? 'invoice:' . (int) $row['invoice_id']
-                    : 'membership:' . (int) $row['membership_case_id']] = true;
+                $documents[AccrualDeferralService::deferredRevenueDocumentKey($row)] = true;
             }
 
             if ((int) round($prepaid * 100) !== 0) {
@@ -86,10 +98,25 @@ final class InterimAccrualAdjustment
             if ((int) round($revenue * 100) !== 0) {
                 $add($deltas, $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE), -$revenue);
             }
+
+            // Položky agendy Časové rozlišení: jen nezaúčtované rozpuštění podle plánu
+            // ({@see AccrualAgendaGuard::interimDeltas()}), zaúčtované už je v deníku.
+            $agenda = $this->agenda->interimDeltas($supplierId, $periodStartsOn, $asOf);
+            foreach ($agenda['deltas'] as $account => $amount) {
+                $add($deltas, (string) $account, $amount);
+            }
+
+            $depreciation = $this->depreciation->interimAccounting($supplierId, $periodStartsOn, $asOf);
+            foreach ($depreciation['lines'] as $line) {
+                $add($deltas, $line['expense'], $line['amount']);
+                $add($deltas, $line['accumulated'], -$line['amount']);
+            }
         } catch (ClosingException $e) {
             throw new ReportException($e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (PostingException $e) {
             throw new ReportException($e->errorCode, $e->getMessage());
+        } catch (AssetException $e) {
+            throw new ReportException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
         return [
@@ -97,6 +124,10 @@ final class InterimAccrualAdjustment
             'prepaid_expense' => $prepaid,
             'deferred_revenue' => $revenue,
             'documents' => count($documents),
+            'depreciation' => $depreciation['total'],
+            'accrual_agenda' => $agenda['total'],
+            'accrual_agenda_items' => $agenda['items'],
+            'depreciation_assets' => $depreciation['assets'],
         ];
     }
 }

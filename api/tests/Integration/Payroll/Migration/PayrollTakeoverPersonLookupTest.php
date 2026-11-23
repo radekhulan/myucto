@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Migration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonLookup;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
@@ -29,7 +28,7 @@ final class PayrollTakeoverPersonLookupTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->lookup = $container->get(PayrollTakeoverPersonLookup::class);
         $this->people = $container->get(PayrollPersonCreateService::class);

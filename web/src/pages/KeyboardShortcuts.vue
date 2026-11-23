@@ -23,6 +23,16 @@ const draft = reactive<Record<string, string>>({})
 const saving = reactive({ value: false })
 
 const groupOrder: ShortcutGroup[] = ['general', 'menu', 'create']
+
+/** Kombinace s myší a ovládání lišty záložek; pevné, v nastavení jen pro přehled. */
+const fixedShortcuts = computed(() => [
+  { keys: [t('keyboard_shortcuts.fixed_shift_click')], label: t('keyboard_shortcuts.fixed_shift_click_label') },
+  { keys: [t('keyboard_shortcuts.fixed_ctrl_click')], label: t('keyboard_shortcuts.fixed_ctrl_click_label') },
+  { keys: [t('keyboard_shortcuts.fixed_ctrl_shift_click'), t('keyboard_shortcuts.fixed_middle_click')], label: t('keyboard_shortcuts.fixed_browser_tab_label') },
+  { keys: [t('keyboard_shortcuts.fixed_tab_middle_click')], label: t('keyboard_shortcuts.fixed_tab_middle_click_label') },
+  { keys: [t('keyboard_shortcuts.fixed_tab_right_click')], label: t('keyboard_shortcuts.fixed_tab_right_click_label') },
+  { keys: ['← →', 'Delete'], label: t('keyboard_shortcuts.fixed_tab_keys_label') },
+])
 const groupedActions = computed(() => groupOrder.map(group => ({
   group,
   actions: shortcuts.actions.value.filter(action => action.group === group),
@@ -125,7 +135,8 @@ async function reset(): Promise<void> {
     </div>
 
     <div class="space-y-6">
-      <section v-for="section in groupedActions" :key="section.group">
+      <template v-for="section in groupedActions" :key="section.group">
+      <section>
         <h2 class="mb-2 text-xs font-bold uppercase tracking-wider text-neutral-500">
           {{ t(`keyboard_shortcuts.group_${section.group}`) }}
         </h2>
@@ -162,6 +173,29 @@ async function reset(): Promise<void> {
           </div>
         </div>
       </section>
+
+      <!-- Pevné kombinace s myší patří k oknům a záložkám, proto hned pod Obecné. -->
+      <section v-if="section.group === 'general'" data-fixed-shortcuts>
+        <h2 class="mb-1 text-xs font-bold uppercase tracking-wider text-neutral-500">{{ t('keyboard_shortcuts.group_fixed') }}</h2>
+        <p class="mb-2 text-xs text-neutral-500">{{ t('keyboard_shortcuts.group_fixed_hint') }}</p>
+        <div class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
+          <div
+            v-for="(item, index) in fixedShortcuts"
+            :key="item.label"
+            class="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+            :class="{ 'border-t border-neutral-100': index > 0 }"
+          >
+            <div class="text-neutral-800">{{ item.label }}</div>
+            <div class="flex flex-wrap items-center gap-1.5 sm:justify-end">
+              <template v-for="(combo, comboIndex) in item.keys" :key="combo">
+                <span v-if="comboIndex > 0" class="text-xs text-neutral-400">{{ t('keyboard_shortcuts.or') }}</span>
+                <kbd class="rounded-md border border-neutral-300 bg-neutral-50 px-2 py-1 font-mono text-xs text-neutral-700">{{ combo }}</kbd>
+              </template>
+            </div>
+          </div>
+        </div>
+      </section>
+      </template>
     </div>
 
     <div class="mt-6 flex flex-wrap justify-end gap-3">

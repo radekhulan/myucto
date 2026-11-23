@@ -28,7 +28,11 @@ const props = withDefaults(defineProps<{
   /** Bez rámečku a nadpisu (vložení do existující karty). */
   bare?: boolean
   prefill?: DimensionPrefillParams | null
-}>(), { readonly: false, bare: false, prefill: null })
+  /** Sbalitelná karta jako Zaúčtování; výchozí stav sbalený. */
+  collapsible?: boolean
+  /** Sbalitelnou kartu otevřít hned (např. chybí povinná dimenze). */
+  initiallyOpen?: boolean
+}>(), { readonly: false, bare: false, prefill: null, collapsible: false, initiallyOpen: false })
 
 const emit = defineEmits<{ saved: [header: DimensionMap] }>()
 
@@ -70,6 +74,15 @@ const dirty = computed(() => JSON.stringify(compactDimensions(header.value)) !==
 const editable = computed(() => !props.readonly && dims.canEdit.value)
 const hasAutoFilled = computed(() =>
   Object.entries(autoFilled.value).some(([typeId, valueId]) => header.value[Number(typeId)] === valueId))
+
+/*
+ * Sbalitelná karta je výchozím stavem zavřená. Neuložený návrh (předvyplnění)
+ * ani výzva k přeúčtování se ale schovat nesmí, proto ji otevřou.
+ */
+const open = ref(!props.collapsible || props.initiallyOpen)
+watch([dirty, needsRepost], ([isDirty, repost]) => {
+  if (isDirty || repost) open.value = true
+})
 
 async function load() {
   if (!dims.enabled.value || props.docId <= 0) return
@@ -136,7 +149,49 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
 </script>
 
 <template>
-  <section v-if="dims.enabled.value && dims.documentTypes.value.length > 0"
+  <section v-if="dims.enabled.value && dims.documentTypes.value.length > 0 && collapsible"
+           class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden"
+           data-test="document-dimensions">
+    <div class="flex items-center justify-between gap-2" :class="[open ? 'border-b border-neutral-200' : '', editable && dirty ? 'pr-5' : '']">
+      <button type="button" class="flex-1 min-w-0 px-5 py-3 flex items-center justify-between gap-2 text-left hover:bg-neutral-50 cursor-pointer"
+        :aria-expanded="open" data-test="document-dimensions-toggle" @click="open = !open">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('dimensions.panel_title') }}</h3>
+        <svg class="w-4 h-4 text-neutral-400 transition-transform shrink-0" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      <button v-if="editable && dirty" type="button" :disabled="saving" :class="btnFilled('primary')" class="whitespace-nowrap" @click="save">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+        {{ saving ? t('common.saving') : t('dimensions.save') }}
+      </button>
+    </div>
+    <div v-show="open" class="px-5 py-4">
+      <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+      <template v-else>
+        <DimensionFields v-model="header" :types="singleTypes" :disabled="!editable" />
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <DimensionChips :dimensions="{}" :splits="headerSplits" class="flex" data-test="document-splits" />
+          <button v-if="editable" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="document-split" @click="splitOpen = true">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+            {{ t('dimensions.split.open') }}
+          </button>
+        </div>
+      </template>
+      <p v-if="!loading && hasAutoFilled" class="mt-2 text-xs text-neutral-500" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
+      <p v-if="needsRepost" class="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800">
+        {{ t(needsRepostAccount ? 'dimensions.needs_repost_account' : 'dimensions.needs_repost') }}
+      </p>
+    </div>
+    <DimensionSplitEditor
+      v-if="splitOpen"
+      :types="dims.documentTypes.value"
+      :current="headerSplits"
+      :title="t('dimensions.split.title_document')"
+      @close="splitOpen = false"
+      @save="applySplit"
+    />
+  </section>
+  <section v-else-if="dims.enabled.value && dims.documentTypes.value.length > 0"
            :class="bare ? '' : 'bg-surface border border-neutral-200 rounded-lg shadow-sm p-4'"
            data-test="document-dimensions">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">

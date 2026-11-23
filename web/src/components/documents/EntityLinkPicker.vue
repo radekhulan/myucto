@@ -76,7 +76,11 @@ function onKeydown(e: KeyboardEvent) {
     if (activeIndex.value >= 0 && results.value[activeIndex.value]) {
       e.preventDefault(); choose(results.value[activeIndex.value])
     }
-  } else if (e.key === 'Escape') { open.value = false }
+  } else if (e.key === 'Escape' && open.value) {
+    // Escape zavře jen seznam výsledků, ne okno nebo drawer kolem (modalStack).
+    e.preventDefault()
+    open.value = false
+  }
 }
 
 function onBlur() {

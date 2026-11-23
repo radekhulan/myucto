@@ -13,6 +13,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import {
   postingBackfillApi,
   type PostingBackfillJob,
@@ -22,6 +23,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BankBulkPanel from '@/components/accounting/BankBulkPanel.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -38,6 +40,9 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 const canPost = computed(() => auth.canWrite('accounting.journal.post'))
 const pending = computed(() => state.value?.pending ?? null)
+/** Pohyby mimo faktury (banka, pokladna, zápočty) tato úloha neúčtuje, čekají na ruční účtování ve svých agendách. */
+const pendingManual = computed(() =>
+  (pending.value?.bank_transactions ?? 0) + (pending.value?.cash_documents ?? 0) + (pending.value?.settlements ?? 0))
 const pendingDocuments = computed(() =>
   (pending.value?.invoices ?? 0) + (pending.value?.purchase_invoices ?? 0))
 const percent = computed(() => {
@@ -160,6 +165,19 @@ const actions = computed<ActionItem[]>(() => [
   },
 ])
 
+/** Počty čekajících dokladů po hromadné akci s bankovními pohyby, bez překreslení stránky. */
+async function refreshPending() {
+  try {
+    state.value = await postingBackfillApi.status()
+  } catch {
+    // počty se obnoví při dalším načtení stránky
+  }
+}
+
+function scrollToBankBulk() {
+  document.getElementById('bank-bulk')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function fmtDateTime(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -222,12 +240,35 @@ onUnmounted(stopPolling)
             <div class="text-neutral-500">{{ t('accounting.posting_backfill.pending_settlements') }}</div>
           </div>
         </div>
-        <p v-if="pendingDocuments === 0" class="mt-3 text-sm text-success-600">
+        <p v-if="pendingDocuments === 0 && pendingManual === 0" class="mt-3 text-sm text-success-600" data-test="backfill-nothing">
           {{ t('accounting.posting_backfill.nothing_pending') }}
         </p>
-        <p v-else class="mt-3 text-xs text-neutral-500">
-          {{ t('accounting.posting_backfill.scope_hint') }}
-        </p>
+        <template v-else>
+          <p v-if="pendingDocuments === 0" class="mt-3 text-sm text-success-600" data-test="backfill-invoices-done">
+            {{ t('accounting.posting_backfill.invoices_done') }}
+          </p>
+          <p v-else class="mt-3 text-xs text-neutral-500">
+            {{ t('accounting.posting_backfill.scope_hint') }}
+          </p>
+          <div v-if="pendingManual > 0" class="mt-3 text-sm text-neutral-700" data-test="backfill-manual">
+            <p>{{ t('accounting.posting_backfill.manual_hint') }}</p>
+            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              <RouterLink v-if="pending && pending.bank_transactions > 0" to="/bank?tab=posting" class="text-primary-600 hover:underline whitespace-nowrap" data-test="backfill-link-bank">
+                {{ t('accounting.posting_backfill.manual_bank', { count: pending.bank_transactions }) }}
+              </RouterLink>
+              <a v-if="pending && pending.bank_transactions > 0" href="#bank-bulk" class="text-primary-600 hover:underline whitespace-nowrap" data-test="backfill-link-bank-bulk"
+                @click.prevent="scrollToBankBulk">
+                {{ t('accounting.posting_backfill.manual_bank_bulk') }}
+              </a>
+              <RouterLink v-if="pending && pending.cash_documents > 0" to="/accounting/cash" class="text-primary-600 hover:underline whitespace-nowrap">
+                {{ t('accounting.posting_backfill.manual_cash', { count: pending.cash_documents }) }}
+              </RouterLink>
+              <RouterLink v-if="pending && pending.settlements > 0" to="/accounting/offsets" class="text-primary-600 hover:underline whitespace-nowrap">
+                {{ t('accounting.posting_backfill.manual_settlements', { count: pending.settlements }) }}
+              </RouterLink>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- Průběh -->
@@ -301,5 +342,7 @@ onUnmounted(stopPolling)
         </div>
       </div>
     </template>
+
+    <BankBulkPanel class="mt-4 block" @changed="refreshPending" />
   </div>
 </template>

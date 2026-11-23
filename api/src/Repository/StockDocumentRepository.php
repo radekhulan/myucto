@@ -62,7 +62,7 @@ final class StockDocumentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT l.id, l.document_id, l.supplier_id, l.stock_item_id, l.doc_date, l.qty,
                     l.unit_cost, l.value_total, l.extra_cost, l.invoice_item_id,
-                    l.purchase_invoice_item_id, l.purchase_order_line_id,
+                    l.purchase_invoice_item_id, l.purchase_order_line_id, l.remember_seller_code, l.fill_intrastat,
                     l.source_description, l.source_qty,
                     l.line_no, l.note, l.tracking_input_json,
                     si.sku, si.name, si.unit, si.tracking_mode
@@ -219,9 +219,9 @@ final class StockDocumentRepository
         $pdo->prepare(
             'INSERT INTO stock_document_lines
                 (document_id, supplier_id, stock_item_id, doc_date, qty, unit_cost, value_total,
-                 extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id,
+                 extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id, remember_seller_code, fill_intrastat,
                  source_description, source_qty, line_no, note, tracking_input_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             (int) $data['document_id'],
             $supplierId,
@@ -234,6 +234,8 @@ final class StockDocumentRepository
             isset($data['invoice_item_id']) && (int) $data['invoice_item_id'] > 0 ? (int) $data['invoice_item_id'] : null,
             isset($data['purchase_invoice_item_id']) && (int) $data['purchase_invoice_item_id'] > 0 ? (int) $data['purchase_invoice_item_id'] : null,
             isset($data['purchase_order_line_id']) && (int) $data['purchase_order_line_id'] > 0 ? (int) $data['purchase_order_line_id'] : null,
+            (int) (($data['remember_seller_code'] ?? false) === true),
+            (int) (($data['fill_intrastat'] ?? false) === true),
             $data['source_description'] ?? null,
             $data['source_qty'] ?? null,
             (int) ($data['line_no'] ?? 0),
@@ -386,6 +388,100 @@ final class StockDocumentRepository
         return array_map([self::class, 'cast'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Vydané faktury vzniklé z řádků příjemky (migrace 2274), novější první. Storno faktury
+     * tu zůstává: je to historie dokladu, rozhoduje až kontrola dvojího vytvoření.
+     *
+     * Skladník bez práva na faktury dostane jen čísla řádků nestornovaných faktur: stačí na
+     * upozornění, že faktura existuje. Číslo ani odběratele z dokladu, který nesmí číst, ne.
+     *
+     * @return list<array{line_nos:list<int>, invoice_id?:int, varsymbol?:?string, status?:string, client_name?:?string}>
+     */
+    public function salesInvoicesOfReceipt(int $supplierId, int $documentId, bool $canReadInvoices): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.id AS invoice_id, i.varsymbol, i.status, c.company_name AS client_name,
+                    GROUP_CONCAT(l.line_no ORDER BY l.line_no) AS line_nos
+               FROM stock_receipt_invoice_links l
+               JOIN invoices i ON i.id = l.invoice_id
+               JOIN clients c ON c.id = i.client_id
+              WHERE l.supplier_id = ? AND l.document_id = ?
+              GROUP BY i.id, i.varsymbol, i.status, c.company_name
+              ORDER BY i.id DESC'
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $lineNos = array_map('intval', explode(',', (string) $r['line_nos']));
+            if ($canReadInvoices) {
+                $out[] = [
+                    'invoice_id' => (int) $r['invoice_id'],
+                    'varsymbol' => $r['varsymbol'],
+                    'status' => (string) $r['status'],
+                    'client_name' => $r['client_name'],
+                    'line_nos' => $lineNos,
+                ];
+            } elseif ($r['status'] !== 'cancelled') {
+                $out[] = ['line_nos' => $lineNos];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Výběr kusů na řádcích konceptů, které z příjemky vznikly.
+     *
+     * @return list<array{stock_item_id:int, tracking_json:string}>
+     */
+    public function trackingOfDraftInvoicesFromReceipt(int $supplierId, int $documentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT ii.stock_item_id, ii.tracking_json
+               FROM invoice_items ii
+               JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ? AND i.status = 'draft'
+              WHERE ii.tracking_json IS NOT NULL AND ii.stock_item_id IS NOT NULL
+                AND ii.invoice_id IN (SELECT invoice_id FROM stock_receipt_invoice_links WHERE supplier_id = ? AND document_id = ?)"
+        );
+        $stmt->execute([$supplierId, $supplierId, $documentId]);
+        return array_map(static fn (array $row): array => [
+            'stock_item_id' => (int) $row['stock_item_id'],
+            'tracking_json' => (string) $row['tracking_json'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Příjemky, z jejichž řádků faktura vznikla (migrace 2274).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function receiptsOfSalesInvoice(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM stock_documents
+              WHERE supplier_id = ? AND id IN (
+                    SELECT document_id FROM stock_receipt_invoice_links WHERE supplier_id = ? AND invoice_id = ?
+              )
+              ORDER BY doc_date DESC, id DESC'
+        );
+        $stmt->execute([$supplierId, $supplierId, $invoiceId]);
+        return array_map([self::class, 'cast'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Zapíše vazbu vybraných řádků příjemky na fakturu.
+     *
+     * @param list<int> $lineNos
+     */
+    public function linkSalesInvoice(int $supplierId, int $documentId, array $lineNos, int $invoiceId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO stock_receipt_invoice_links (supplier_id, document_id, line_no, invoice_id) VALUES (?, ?, ?, ?)'
+        );
+        foreach ($lineNos as $lineNo) {
+            $stmt->execute([$supplierId, $documentId, $lineNo, $invoiceId]);
+        }
+    }
+
     /** @return list<array<string,mixed>> */
     public function listByPurchaseInvoice(int $supplierId, int $purchaseInvoiceId): array
     {
@@ -495,6 +591,29 @@ final class StockDocumentRepository
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
             $out[(int) $r['purchase_invoice_item_id']] = (string) $r['received'];
+        }
+        return $out;
+    }
+
+    /**
+     * Karty, na které se řádky přijaté faktury přijímají v konceptech i zaúčtovaných příjemkách.
+     *
+     * @return array<int,list<int>> klíč = purchase_invoice_item_id
+     */
+    public function receiptCardsByPurchaseInvoiceItem(int $supplierId, int $purchaseInvoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT l.purchase_invoice_item_id, l.stock_item_id
+               FROM stock_document_lines l
+               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND d.purchase_invoice_id = ?
+                AND d.doc_type = 'receipt' AND d.status IN ('draft', 'posted')
+                AND l.purchase_invoice_item_id IS NOT NULL"
+        );
+        $stmt->execute([$supplierId, $purchaseInvoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['purchase_invoice_item_id']][] = (int) $r['stock_item_id'];
         }
         return $out;
     }
@@ -628,7 +747,9 @@ final class StockDocumentRepository
         $r['stock_item_id'] = (int) $r['stock_item_id'];
         $r['invoice_item_id'] = $r['invoice_item_id'] !== null ? (int) $r['invoice_item_id'] : null;
         $r['purchase_invoice_item_id'] = $r['purchase_invoice_item_id'] !== null ? (int) $r['purchase_invoice_item_id'] : null;
+        $r['remember_seller_code'] = (bool) ($r['remember_seller_code'] ?? false);
         $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
+        $r['fill_intrastat'] = (bool) ($r['fill_intrastat'] ?? false);
         $r['line_no'] = (int) $r['line_no'];
         $r['tracking_allocations'] = $r['tracking_input_json'] === null
             ? []

@@ -287,6 +287,8 @@ export interface AiIssuedExtractResult {
   usage?: { input_tokens?: number; output_tokens?: number }
   ai_data?: Record<string, unknown>
   error?: string
+  // Upozornění k založenému konceptu (odpočet zálohy, nesedící součet, OSS) — texty serveru.
+  warnings?: string[]
 }
 
 export const integrationsApi = {
@@ -343,12 +345,13 @@ export const integrationsApi = {
   // POST kvůli CSRF ochraně — server se podle adresy připojuje ven.
   listOllamaModels: (baseUrl: string) =>
     api.post<{ models: OllamaModel[] }>('/admin/imports/ai/ollama/models', { base_url: baseUrl }).then(r => r.data),
-  extractPdfAi: (file: File, model?: string, importBatchId?: string) => {
+  extractPdfAi: (file: File, model?: string, importBatchId?: string, withoutItems = false) => {
     const fd = new FormData()
     fd.append('pdf', file, file.name)
     const qs = new URLSearchParams()
     if (model) qs.set('model', model)
     if (importBatchId) qs.set('import_batch_id', importBatchId)
+    if (withoutItems) qs.set('without_items', '1')
     const url = qs.toString() ? `/admin/imports/ai-extract-pdf?${qs.toString()}` : '/admin/imports/ai-extract-pdf'
     return api.post<AiExtractResult>(url, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },

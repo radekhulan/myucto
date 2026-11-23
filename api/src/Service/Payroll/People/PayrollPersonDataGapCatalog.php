@@ -311,6 +311,75 @@ final class PayrollPersonDataGapCatalog
     }
 
     /**
+     * Tytéž výrazy hodnocené k MZDOVÉMU OBDOBÍ, ne k dnešku.
+     *
+     * Kontrola před během se ptá, jestli projde konkrétní měsíc. Dohoda, která
+     * skončila v únoru a má daňovou rezidenci zapsanou jen na únor, je k dnešku
+     * „bez rezidence", za únor ale v pořádku. Záznam proto stačí platný
+     * kdykoli v období (překryv intervalů): každá podmínka `od <= dnes` se
+     * mění na `od <= konec období` a `do >= dnes` na `do >= začátek období`.
+     * Seznam osob zůstává u {@see self::expressions()}.
+     *
+     * @return array<string,string>
+     */
+    public static function expressionsForPeriod(
+        string $periodStart,
+        string $periodEnd,
+        string $employee = 'employee',
+        string $profile = 'profile',
+    ): array {
+        [$start, $end] = self::periodBounds($periodStart, $periodEnd);
+        $expressions = [];
+        foreach (self::expressionsAtToday($employee, $profile) as $key => $expression) {
+            $expressions[$key] = strtr($expression, [
+                '<= CURRENT_DATE' => "<= '{$end}'",
+                '>= CURRENT_DATE' => ">= '{$start}'",
+            ]);
+        }
+
+        return $expressions;
+    }
+
+    /**
+     * Osoba má v období pracovní vztah, za který se měsíc počítá.
+     *
+     * Skončený vztah se počítá, pokud do období zasáhl — právě za něj se
+     * podává poslední hlášení. Archivovaný a nenastoupený ne.
+     */
+    public static function employedInPeriodExpression(
+        string $periodStart,
+        string $periodEnd,
+        string $employee = 'employee',
+    ): string {
+        [$start, $end] = self::periodBounds($periodStart, $periodEnd);
+
+        return sprintf(
+            "EXISTS (
+                SELECT 1 FROM payroll_employments period_relation
+                 WHERE period_relation.supplier_id = %1\$s.supplier_id
+                   AND period_relation.employee_id = %1\$s.id
+                   AND period_relation.status NOT IN ('archived', 'no_show')
+                   AND (period_relation.start_date IS NULL OR period_relation.start_date <= '%3\$s')
+                   AND (period_relation.end_date IS NULL OR period_relation.end_date >= '%2\$s'))",
+            $employee,
+            $start,
+            $end,
+        );
+    }
+
+    /** @return array{0:string,1:string} */
+    private static function periodBounds(string $periodStart, string $periodEnd): array
+    {
+        foreach ([$periodStart, $periodEnd] as $date) {
+            if (\DateTimeImmutable::createFromFormat('!Y-m-d', $date)?->format('Y-m-d') !== $date) {
+                throw new \InvalidArgumentException("Neplatné datum období: {$date}.");
+            }
+        }
+
+        return [$periodStart, $periodEnd];
+    }
+
+    /**
      * Mezery osoby, které se vážou na platnost záznamu v čase — ty se
      * hodnotí k rozhodnému dni {@see self::referenceDateExpression()}.
      * Údaje na vztahu (`jmhz_*`) se dál hlásí jen za BĚŽÍCÍ vztah.

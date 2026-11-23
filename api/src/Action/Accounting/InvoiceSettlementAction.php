@@ -138,7 +138,7 @@ final class InvoiceSettlementAction
         if ($e instanceof SettlementException) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
-        return $this->mapError($response, $e);
+        return $this->mapPostingError($response, $e);
     }
 
     /** @param array<string,mixed> $payload */

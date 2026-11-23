@@ -31,7 +31,7 @@ final class PohodaReconciler
 {
     public const STEP = 'reconciliation';
 
-    private const LABELS = ['purchase_invoices' => 'Přijaté faktury × 321', 'issued_invoices' => 'Vydané faktury × 311'];
+    private const LABELS = ['purchase_invoices' => 'Přijaté faktury × 321', 'issued_invoices' => 'Vydané faktury × 311', 'bank' => 'Banka × 221'];
 
     /**
      * Doklady POHODY, ze kterých vznikly doklady kontroly: agenda exportu, element dokladu,
@@ -55,6 +55,7 @@ final class PohodaReconciler
         private readonly TrialBalanceService $trialBalance,
         private readonly FinancialStatementService $statements,
         private readonly SaldoService $saldo,
+        private readonly PohodaSaldoPairing $pairing,
     ) {}
 
     public function run(PohodaContext $ctx): void
@@ -70,7 +71,7 @@ final class PohodaReconciler
         $pohoda = PohodaJournal::trialBalance($ctx->export, $ctx->skipsDate(...));
         // Úhrady, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY, v deníku POHODY
         // nejsou - předvaha MyÚčta je proti ní má navíc a kontrola je přičítá k POHODĚ.
-        $derived = $this->derivedTurnover($ctx->supplierId);
+        $derived = $this->derivedTurnover($ctx->supplierId, $periodIds);
         foreach ($derived['accounts'] as $syn => $net) {
             $pohoda[$syn] ??= [0.0, 0.0, 0.0];
             $pohoda[$syn][1] = round($pohoda[$syn][1] + $net, 2);
@@ -173,6 +174,7 @@ final class PohodaReconciler
                         'open_items_total' => round((float) $block['open_items_total'], 2),
                         'difference' => round((float) $block['difference'], 2),
                     ];
+                    $difference['by_symbol'] = $this->pairing->breakdown($ctx->supplierId, $difference['account'], $asOf);
                     $row['status'] = 'differences';
                     $row['differences'][] = $difference;
                     $ctx->protocol->warn(self::STEP, 'saldo_difference', self::saldoDifferenceText($row['year'], $asOf, $difference), ['year' => $row['year'], 'as_of' => $asOf] + $difference);
@@ -210,8 +212,9 @@ final class PohodaReconciler
     {
         $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
         return sprintf(
-            'Rok %d, saldokonto k %s, účet %s %s: zůstatek hlavní knihy %s Kč, součet položek %s Kč, rozdíl %s Kč. Může být oprávněný (například přeplatek bez dokladu), zkontrolujte ho.',
+            'Rok %d, saldokonto k %s, účet %s %s: zůstatek hlavní knihy %s Kč, součet položek %s Kč, rozdíl %s Kč. Může být oprávněný (například přeplatek bez dokladu), zkontrolujte ho.%s',
             $year, self::saldoDay($asOf), $d['account'], $d['name'], $money($d['gl_balance']), $money($d['open_items_total']), $money($d['difference']),
+            PohodaSaldoPairing::describe($d['by_symbol'] ?? null),
         );
     }
 
@@ -233,24 +236,28 @@ final class PohodaReconciler
      *
      * @return array{entries:int,accounts:array<string,float>}
      */
-    private function derivedTurnover(int $supplierId): array
+    private function derivedTurnover(int $supplierId, array $periodIds): array
     {
+        $periodFilter = implode(',', array_fill(0, count($periodIds), '?'));
+        $scope = "FROM pohoda_import_map m
+                    JOIN journal_entries e ON e.supplier_id = m.supplier_id AND e.id = m.target_id
+                   WHERE m.supplier_id = ? AND m.kind = ? AND e.period_id IN ({$periodFilter})";
+        $params = [$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY, ...$periodIds];
         $stmt = $this->db->pdo()->prepare(
-            "SELECT LEFT(a.account_code, 3) AS syn, COUNT(DISTINCT l.entry_id) AS entries,
+            "SELECT LEFT(a.account_code, 3) AS syn,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
-               FROM pohoda_import_map m
-               JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id AND l.entry_id = m.target_id
+               FROM (SELECT DISTINCT e.id, e.supplier_id {$scope}) e
+               JOIN journal_entry_lines l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE m.supplier_id = ? AND m.kind = ?
               GROUP BY LEFT(a.account_code, 3)"
         );
-        $stmt->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        $stmt->execute($params);
         $accounts = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             $accounts[(string) $r['syn']] = round((float) $r['net'], 2);
         }
-        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM pohoda_import_map WHERE supplier_id = ? AND kind = ?');
-        $count->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        $count = $this->db->pdo()->prepare("SELECT COUNT(DISTINCT e.id) {$scope}");
+        $count->execute($params);
         return ['entries' => (int) $count->fetchColumn(), 'accounts' => $accounts];
     }
 
@@ -305,9 +312,10 @@ final class PohodaReconciler
             $journal = $scalar($ledger($kind, $docType, $prefix, $sign), [$supplierId]);
             $out[] = TrialBalanceReconciliation::documentRow($key, $documents, $journal, (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId]));
         }
+        // Jen korunové výpisy: pohyby účtu v cizí měně jsou v té měně, deník v Kč (stejně jako Money S3).
         $bankDocs = $scalar(
             "SELECT COALESCE(SUM(t.amount), 0) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
-              WHERE s.supplier_id = ?
+              WHERE s.supplier_id = ? AND COALESCE(s.currency, 'CZK') = 'CZK'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
                              WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id AND e.period_id IN ({$in}))
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = s.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)",
@@ -321,7 +329,9 @@ final class PohodaReconciler
               WHERE l.supplier_id = ? AND e.period_id IN ({$in}) AND a.account_code LIKE '221%'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
-                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')",
+                             JOIN bank_transactions kt ON kt.id = k.doc_id
+                             JOIN bank_statements ks ON ks.id = kt.statement_id AND ks.supplier_id = k.supplier_id
+                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ks.currency, 'CZK') = 'CZK')",
             [$supplierId]
         );
         $out[] = TrialBalanceReconciliation::documentRow('bank', $bankDocs, $bankJournal, 0);
@@ -343,6 +353,9 @@ final class PohodaReconciler
      */
     private function explainBySource(PohodaContext $ctx, array $periodIds, array $row): array
     {
+        if ($row['key'] === 'bank') {
+            return $this->explainBank($ctx, $periodIds, $row);
+        }
         $spec = self::SOURCES[$row['key']] ?? null;
         if ($spec === null) {
             return $row;
@@ -371,9 +384,148 @@ final class PohodaReconciler
         return $row;
     }
 
+    /**
+     * Rozdíl banky proti deníku, který je už v POHODĚ: řádky pohybu v deníku POHODY dají na
+     * účet 221 jinou částku, než zní pohyb. Typicky výdaj zaúčtovaný předkontací pro příjem
+     * (MD 221 / D 335): účet 221 se v deníku pohne opačně a rozdíl je dvojnásobek pohybu.
+     * Po číslech dokladu se porovná rozdíl v MyÚčtu (navázané pohyby − jejich zápis na 221)
+     * s rozdílem v POHODĚ (pohyby s řádky − jejich řádky na 221, {@see PohodaBankJournal});
+     * vysvětlené jsou jen tehdy, když jsou na haléř stejné a dají celý rozdíl kontroly.
+     *
+     * @param list<int> $periodIds
+     * @param array{key:string,documents:float,journal:float,ok:bool,other_accounts:int} $row
+     * @return array<string,mixed>
+     */
+    private function explainBank(PohodaContext $ctx, array $periodIds, array $row): array
+    {
+        $mine = $this->bankEntryDifferences($ctx->supplierId, $periodIds);
+        if ($mine === []) {
+            return $row;
+        }
+        $pohoda = self::pohodaBankDifferences($ctx, array_map('strval', array_keys($mine)));
+        $entries = [];
+        foreach ($mine as $docNo => $difference) {
+            $entries[] = ['document_no' => (string) $docNo, 'difference' => $difference];
+        }
+        if (!TrialBalanceReconciliation::explainedBySource($entries, array_map(static fn (array $s): float => $s['difference'], $pohoda), $row['documents'], $row['journal'])) {
+            return $row;
+        }
+        $explained = [];
+        foreach ($entries as $e) {
+            foreach ($pohoda[$e['document_no']]['movements'] as $m) {
+                $explained[] = ['document_no' => $e['document_no']] + $m;
+            }
+        }
+        $row['ok'] = true;
+        $row['source_differences'] = $explained;
+        return $row;
+    }
+
+    /**
+     * Rozdíl navázaných pohybů proti účtu 221 jejich zápisu po číslech dokladu (zápisy, které
+     * kontrola banky porovnává: navázané na převedený pohyb).
+     *
+     * @param list<int> $periodIds
+     * @return array<string,float>
+     */
+    private function bankEntryDifferences(int $supplierId, array $periodIds): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.document_no,
+                    (SELECT COALESCE(SUM(t.amount), 0)
+                       FROM journal_entry_document_links k JOIN bank_transactions t ON t.id = k.doc_id
+                       JOIN bank_statements ts ON ts.id = t.statement_id AND ts.supplier_id = k.supplier_id
+                      WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ts.currency, 'CZK') = 'CZK'
+                        AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = k.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)) AS docs,
+                    (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+                       FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+                      WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '221%') AS journal
+               FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.period_id IN (" . (implode(',', array_map('intval', $periodIds)) ?: '0') . ")
+                AND EXISTS (SELECT 1 FROM journal_entry_document_links k
+                             JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
+                             JOIN bank_transactions kt ON kt.id = k.doc_id
+                             JOIN bank_statements ks ON ks.id = kt.statement_id AND ks.supplier_id = k.supplier_id
+                            WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ks.currency, 'CZK') = 'CZK')"
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $docNo = trim((string) $r['document_no']);
+            $out[$docNo] = round(($out[$docNo] ?? 0.0) + (float) $r['docs'] - (float) $r['journal'], 2);
+        }
+        return array_filter($out, static fn (float $d): bool => !ReconciliationTolerance::isZeroCent($d));
+    }
+
+    /**
+     * Týž rozdíl v POHODĚ po číslech dokladu: částka pohybu − účinek jeho řádků deníku na 221,
+     * jen u pohybů, které v deníku POHODY řádky mají. Číslo, jehož řádky nejde rozdělit mezi
+     * jeho pohyby ({@see PohodaBankJournal::byMovement()}), se nevysvětluje.
+     *
+     * @param list<string> $docNos
+     * @return array<string,array{difference:float,movements:list<array{date:string,amount:float,difference:float,reason:string}>}>
+     */
+    private static function pohodaBankDifferences(PohodaContext $ctx, array $docNos): array
+    {
+        $rows = PohodaBankJournal::byMovement($ctx);
+        $out = [];
+        foreach ($docNos as $docNo) {
+            $assigned = 0;
+            $total = 0.0;
+            $movements = [];
+            foreach ($ctx->bankTransactions[$docNo] ?? [] as $tx) {
+                $own = $rows[(int) $tx['id']] ?? [];
+                if ($own === []) {
+                    continue;
+                }
+                $assigned += count($own);
+                $amount = (float) $tx['amount'];
+                $net = round(array_sum(array_column($own, 'net')), 2);
+                $difference = round($amount - $net, 2);
+                if (ReconciliationTolerance::isZeroCent($difference)) {
+                    continue;
+                }
+                $total += $difference;
+                $opposite = !ReconciliationTolerance::isZeroCent($amount) && ReconciliationTolerance::sameCent($net, -$amount);
+                $movements[] = ['date' => (string) $tx['date'], 'amount' => $amount, 'difference' => $difference, 'reason' => $opposite ? 'opposite_direction' : 'amount'];
+            }
+            if ($assigned === 0 || $assigned !== count($ctx->bankJournalRows[$docNo] ?? [])) {
+                continue;
+            }
+            $out[$docNo] = ['difference' => round($total, 2), 'movements' => $movements];
+        }
+        return $out;
+    }
+
+    /** @param array{key:string,documents:float,journal:float,source_differences:list<array<string,mixed>>} $row */
+    private static function bankSourceDifferenceText(array $row): string
+    {
+        $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
+        $list = static function (array $rows) use ($money): string {
+            $shown = array_map(static fn (array $s): string => sprintf('%s ze dne %s, pohyb %s Kč (rozdíl %s)',
+                $s['document_no'], self::saldoDay($s['date']), $money($s['amount']), $money($s['difference'])), array_slice($rows, 0, 30));
+            return implode(', ', $shown) . (count($rows) > 30 ? ' a další' : '');
+        };
+        $opposite = array_values(array_filter($row['source_differences'], static fn (array $s): bool => $s['reason'] === 'opposite_direction'));
+        $amount = array_values(array_filter($row['source_differences'], static fn (array $s): bool => $s['reason'] !== 'opposite_direction'));
+        $text = sprintf('%s: rozdíl pohybů proti deníku %s Kč je už v deníku POHODY, převod ho převzal beze změny.',
+            self::LABELS['bank'], $money(round($row['documents'] - $row['journal'], 2)));
+        if ($opposite !== []) {
+            $text .= sprintf(' U %d pohybů je v deníku POHODY předkontace pro opačný směr pohybu (výdaj zaúčtovaný jako příjem nebo naopak), účet 221 se tak pohnul opačně než peníze: %s.',
+                count($opposite), $list($opposite));
+        }
+        if ($amount !== []) {
+            $text .= sprintf(' U %d pohybů se částka pohybu liší od jeho zápisu na účtu 221: %s.', count($amount), $list($amount));
+        }
+        return $text . ' Zaúčtování těchto pohybů zkontrolujte a případně opravte interním dokladem.';
+    }
+
     /** @param array{key:string,documents:float,journal:float,source_differences:list<array{document_no:string,difference:float,reason:string}>} $row */
     private static function sourceDifferenceText(array $row): string
     {
+        if ($row['key'] === 'bank') {
+            return self::bankSourceDifferenceText($row);
+        }
         $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
         $list = static function (array $rows) use ($money): string {
             $shown = array_map(static fn (array $s): string => $s['document_no'] . ' (' . $money($s['difference']) . ')', array_slice($rows, 0, 30));

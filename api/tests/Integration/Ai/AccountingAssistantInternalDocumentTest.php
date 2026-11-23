@@ -21,7 +21,11 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Ai\AccountingAssistantService;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Ai\Assistant\AssistantDataTools;
+use MyInvoice\Service\Ai\Assistant\ManualSearchService;
 use MyInvoice\Service\Ai\AiAssistantHistoryService;
 use MyInvoice\Service\Ai\AiInternalDocumentValidator;
 use MyInvoice\Service\Document\DocumentStorage;
@@ -236,7 +240,8 @@ final class AccountingAssistantInternalDocumentTest extends TestCase
         self::assertTrue(RequestAuthorization::canCreateInternalDocument($this->request($write)));
 
         foreach ([[$read, 0], [$write, 1]] as [$permissions, $expected]) {
-            $action = new AiAssistantAction($this->service([self::aiResponse([self::proposal()])]), new AiAssistantHistoryService($this->db));
+            $action = new AiAssistantAction($this->service([self::aiResponse([self::proposal()])]), new AiAssistantHistoryService($this->db),
+                $this->container->get(AssistantDataTools::class), $this->container->get(ActivityLogger::class));
             $response = $action->ask($this->request($permissions)->withParsedBody(['question' => 'Přeúčtuj 5 000 z 518 na 501.']), new Response());
             self::assertSame(200, $response->getStatusCode());
             $response->getBody()->rewind();
@@ -329,6 +334,8 @@ final class AccountingAssistantInternalDocumentTest extends TestCase
             $c->get(ChartOfAccountsRepository::class),
             $c->get(VatStatusService::class),
             $c->get(AiInternalDocumentValidator::class),
+            $c->get(OtherItemKindService::class),
+            new ManualSearchService(),
         );
     }
 

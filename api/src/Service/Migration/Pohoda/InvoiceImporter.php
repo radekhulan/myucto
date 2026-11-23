@@ -7,9 +7,11 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigratedClientCountry;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -18,7 +20,9 @@ use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Repository\Section74bCorrectionRepository;
+use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Support\PohodaPaymentType;
 use MyInvoice\Support\Sql\PayablePredicate;
 
 /**
@@ -74,6 +78,8 @@ final class InvoiceImporter
     /** Limit KH pro jednotlivý doklad (A.4/B.2), vč. DPH. */
     private const KH_LIMIT = 10000.0;
 
+    private const UNPAID = ['paid' => 0.0, 'settled' => false, 'paid_at' => null];
+
     /**
      * Ostatní pohledávka či závazek POHODY v přiznání DPH vstupuje do evidence DPH a KH jen
      * jako faktura; agenda Ostatní pohledávky a závazky řádky DPH nevede. Poznámka dokladu
@@ -94,7 +100,7 @@ final class InvoiceImporter
         'receivable' => 'invoice',
     ];
 
-    private const PURCHASE_AGENDAS = [
+    public const PURCHASE_AGENDAS = [
         'received' => 'invoice',
         'received_debit' => 'invoice',
         'received_credit' => 'credit_note',
@@ -102,17 +108,6 @@ final class InvoiceImporter
         'received_advance' => 'advance',
         'received_proforma' => 'advance',
         'commitment' => 'invoice',
-    ];
-
-    /** `typ:paymentType` Pohody → způsob úhrady MyÚčta. */
-    private const PAYMENT_TYPES = [
-        '' => 'bank_transfer',
-        'draft' => 'bank_transfer',
-        'cash' => 'cash',
-        'creditcard' => 'card',
-        'delivery' => 'cash_on_delivery',
-        'encashment' => 'direct_debit',
-        'compensation' => 'offset',
     ];
 
     /** Přihrádky rekapitulace a jejich výchozí sazba, když export `@rate` nenese. */
@@ -125,6 +120,8 @@ final class InvoiceImporter
     private readonly MigrationVatRateLookup $rates;
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
+
+    private readonly MigratedClientCountry $clientCountry;
 
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
@@ -141,6 +138,7 @@ final class InvoiceImporter
     ) {
         $this->rates = new MigrationVatRateLookup($db);
         $this->foreignCurrency = new ForeignCurrencyTakeover($db, createMissingCurrency: true);
+        $this->clientCountry = new MigratedClientCountry($db);
     }
 
     public function importIssued(PohodaContext $ctx): void
@@ -246,7 +244,8 @@ final class InvoiceImporter
         $summary = PohodaXml::get($r, 'intDocSummary/homeCurrency');
         $vat = round(PohodaXml::num($summary, 'priceHighVAT') + PohodaXml::num($summary, 'priceLowVAT') + PohodaXml::num($summary, 'price3VAT'), 2);
         $text = PohodaXml::text($h, 'text');
-        $target = preg_match('/dokladu\s+([^\s,]+)/u', $text, $m) === 1 ? $m[1] : '';
+        $target = self::debtorCorrectionTarget($text, static fn (string $number): bool =>
+            isset($ctx->purchaseInvoices[$number]) || isset($ctx->commitments[$number]));
         $invoiceId = $ctx->purchaseInvoices[$target] ?? $ctx->commitments[$target] ?? null;
         if ($invoiceId === null || abs($vat) < 0.005) {
             $p->count(self::STEP_INTERNAL, 's74b_review');
@@ -272,6 +271,28 @@ final class InvoiceImporter
     }
 
     /**
+     * Číslo opravovaného dokladu z textu opravy § 74b („…dokladu 252 1086, datum splatnosti…").
+     * Číslo dokladu POHODY smí obsahovat mezery, proto vyhrává nejdelší úsek do čárky, který
+     * je mezi převedenými doklady; jinak první slovo (pro hlášení v protokolu).
+     *
+     * @param callable(string):bool $known
+     */
+    public static function debtorCorrectionTarget(string $text, callable $known): string
+    {
+        if (preg_match('/dokladu\s+([^,;]+)/u', $text, $m) !== 1) {
+            return '';
+        }
+        $words = array_slice(preg_split('/\s+/u', trim($m[1])) ?: [], 0, 4);
+        for ($n = count($words); $n > 0; $n--) {
+            $candidate = implode(' ', array_slice($words, 0, $n));
+            if ($known($candidate)) {
+                return $candidate;
+            }
+        }
+        return $words[0] ?? '';
+    }
+
+    /**
      * Seznam klientů čte cache statistik - převedené faktury by v něm bez přepočtu chyběly.
      * Běží mimo transakci kroku, zkouška nanečisto ho vynechá.
      */
@@ -293,15 +314,23 @@ final class InvoiceImporter
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
         }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
+            return;
+        }
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'invoice', $existing[$key], $doc);
+            self::rememberSplits($ctx, 'invoice', $existing[$key], $r, $prefix);
             $this->captureLiquidations($ctx, 'invoice', $existing[$key], $doc['number'], $r);
             // Vazby na deník se při opakovaném běhu hodnotí znovu: doklad minulého období
             // zápis v deníku roku nemá a nesmí se napodruhé hlásit jako nezaúčtovaný.
             if ($this->isPreviousPeriod($ctx, $doc)) {
                 $ctx->previousPeriod['invoice|' . $existing[$key]] = true;
+                if ($kind === 'proforma' && $doc['without_accounting']) {
+                    $ctx->previousPeriodUnbooked['invoice|' . $existing[$key]] = true;
+                }
             }
             $p->count($step, 'existing');
             $this->reportChanged($ctx, $step, 'invoices', $existing[$key], $doc['number'], $r, $prefix);
@@ -311,12 +340,11 @@ final class InvoiceImporter
         if ($ctx->skipsNew($step)) {
             return;
         }
-        if ($ctx->skipsDate($doc['accounting'])) {
-            $p->count($step, 'later_year_skipped');
-            return;
-        }
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
         $class = $this->classifyIssued($ctx, $kind, $doc['vat_class'], $amounts);
+        if (OtherItemImporter::outsideReturnWithoutVatClass($agenda, $doc['vat_class'], $amounts['vat'])) {
+            $class['in_return'] = false;
+        }
         if (($agenda === 'receivable' || $agenda === 'internal') && !$class['in_return']) {
             // Pohledávka mimo přiznání (odvod, půjčka…) zůstává jen v deníku.
             $p->count($step, 'journal_only');
@@ -331,6 +359,13 @@ final class InvoiceImporter
         }
         $snapshot = PartnerImporter::snapshot(PohodaXml::get($doc['h'], 'partnerIdentity'));
         $clientId = $this->partners->resolvePartner($ctx, $snapshot);
+        // Ř. 26 u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+        $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
+        foreach ($amounts['items'] as $i => $item) {
+            if (isset($item['code'])) {
+                $amounts['items'][$i]['code'] = $this->clientCountry->saleCode($item['code'], $ctx->supplierId, $clientId);
+            }
+        }
         if (!$this->rateIssuedItems($ctx, $step, $doc, $amounts, $class, $clientId, $snapshot)) {
             return;
         }
@@ -344,11 +379,14 @@ final class InvoiceImporter
             $p->info($step, 'kh_a5_forced', "Doklad {$doc['number']} ({$snapshot['name']}, DIČ {$snapshot['dic']}) má v Pohodě členění {$doc['vat_class']}, které ho podle číselníku členění DPH řadí do oddílu A.5 kontrolního hlášení, přestože je nad 10 000 Kč a odběratel má DIČ. Ověřte, že odběratel není plátce DPH.", ['document_no' => $doc['number']]);
             $snapshot['dic'] = '';
         }
-        $pay = $type === 'tax_document'
-            ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
-            : self::payment($doc, $amounts);
+        $pay = match (true) {
+            $type === 'tax_document' => ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']],
+            // Daňová evidence: zaplaceno až podle navázaných úhrad ({@see PohodaTaxEvidenceImporter::payments()}).
+            $ctx->taxEvidence => self::UNPAID,
+            default => self::payment($doc, $amounts, $type === 'proforma'),
+        };
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
-        $booked = !$review && $type !== 'proforma';
+        $booked = !$ctx->taxEvidence && !$review && $type !== 'proforma' && !self::postedLater($doc);
         if ($doc['foreign'] !== '') {
             $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
         }
@@ -375,7 +413,7 @@ final class InvoiceImporter
                 // Tuzemské přenesení daňové povinnosti (ř. 25) nese kód zařazení i příznak hlavičky.
                 reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code'], ...array_column($amounts['items'], 'code')]),
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx, $notes),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $notes),
                 clientSnapshot: PartnerImporter::snapshotJson($snapshot),
                 totalWithoutVat: $amounts['base'],
                 totalVat: $amounts['vat'],
@@ -416,9 +454,13 @@ final class InvoiceImporter
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'invoice', $id, $doc);
+        self::rememberSplits($ctx, 'invoice', $id, $r, $prefix);
         $this->captureLiquidations($ctx, 'invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['invoice|' . $id] = true;
+            if ($type === 'proforma' && $doc['without_accounting']) {
+                $ctx->previousPeriodUnbooked['invoice|' . $id] = true;
+            }
             $p->count($step, 'previous_period');
         }
         $ctx->statsClients[] = $clientId;
@@ -444,10 +486,15 @@ final class InvoiceImporter
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
         }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
+            return;
+        }
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'purchase_invoice', $existing[$key], $doc);
+            self::rememberSplits($ctx, 'purchase_invoice', $existing[$key], $r, $prefix);
             $this->captureLiquidations($ctx, 'purchase_invoice', $existing[$key], $doc['number'], $r);
             if ($this->isPreviousPeriod($ctx, $doc)) {
                 $ctx->previousPeriod['purchase_invoice|' . $existing[$key]] = true;
@@ -465,12 +512,16 @@ final class InvoiceImporter
         if ($ctx->skipsNew($step)) {
             return;
         }
-        if ($ctx->skipsDate($doc['accounting'])) {
-            $p->count($step, 'later_year_skipped');
-            return;
-        }
+        // DUZP z dokladu dodavatele a datum odpočtu ({@see PohodaPurchaseVatDates}); `tax`
+        // dál nese DUZP, u zahraničního přenesení ho upraví až země dodavatele níž.
+        $deduction = $doc['tax'];
+        $doc['tax'] = $doc['kh'] ?? $doc['tax'];
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
         $class = $this->classifyPurchase($ctx, $kind, $doc['vat_class'], $amounts);
+        if (OtherItemImporter::outsideReturnWithoutVatClass($agenda, $doc['vat_class'], $amounts['vat'])) {
+            // Ostatní závazek bez členění s nulovou daní (mzdy v MDB exportu) není přijatá faktura.
+            $class['in_return'] = false;
+        }
         if (($agenda === 'commitment' || $agenda === 'internal') && !$class['in_return']) {
             $p->count($step, 'journal_only');
             return;
@@ -486,16 +537,14 @@ final class InvoiceImporter
                 $class['reasons'][] = 'samovyměření z interního dokladu ' . $sa['doc'] . ': ' . $sa['error'];
             } else {
                 $used[$doc['number']] = true;
+                // Data samovyměření nese interní doklad s vyměřením daně, se stejným
+                // významem jako u faktury: dateKHDPH = DUZP, dateTax = přiznání a odpočet.
+                // Interní doklad bez data KH DPH přebírá DUZP z faktury.
+                $deduction = $sa['date'] ?? $deduction;
+                $doc['tax'] = $sa['kh'] ?? $doc['kh'] ?? $sa['date'] ?? $doc['tax'];
                 $amounts = $this->applySelfAssessment($sa, $amounts, $doc['tax'] ?? $doc['issue']);
-                $doc['tax'] = $sa['date'] ?? $doc['tax'];
                 $p->count($step, 'self_assessed');
             }
-        }
-        // Přijatá strana OSS nezná (režim je pro plnění, která poskytujeme), takže se sazba
-        // páruje tuzemsky - jen až tady, protože `amounts()` ji kvůli vydané větvi nechává
-        // nenapárovanou. Nenalezená sazba je pořád tvrdá chyba celého běhu jako dřív.
-        foreach ($amounts['items'] as $i => $item) {
-            $amounts['items'][$i]['rate_id'] ??= $this->rateId((float) $item['rate'], $doc['tax'] ?? $doc['issue']);
         }
         $type = $kind === 'invoice' && $amounts['gross_total'] < 0 ? 'credit_note' : $kind;
         $review = $class['reasons'] !== [];
@@ -507,20 +556,43 @@ final class InvoiceImporter
         }
         $snapshot = PartnerImporter::snapshot(PohodaXml::get($doc['h'], 'partnerIdentity'));
         $vendorId = $this->partners->resolvePartner($ctx, $snapshot);
+        $foreignReverse = VatLedgerService::purchaseClaimFollowsTaxDate(
+            $class['reverse'], null, array_column($amounts['items'], 'code'), $this->clientCountry->iso2($ctx->supplierId, $vendorId),
+        );
+        $dates = PohodaPurchaseVatDates::fromPohoda($doc['tax'], $deduction, $foreignReverse);
+        if ($dates['kept_deduction']) {
+            $p->count($step, 'foreign_reverse_dppd_kept');
+            $p->info($step, 'foreign_reverse_dppd_kept', sprintf(
+                'Doklad %s: zahraniční plnění v přenesení daňové povinnosti má DUZP %s (datum KH DPH) v jiném měsíci než datum, '
+                    . 'ke kterému POHODA daň přiznala (%s). Evidence DPH řadí samovyměření podle DUZP, proto převod jako DUZP '
+                    . 'ponechal %s - přiznání sedí na podané z POHODY, kontrolní hlášení ponese toto datum místo %s.',
+                $doc['number'], $doc['tax'], $deduction, $deduction, $doc['tax'],
+            ), ['document_no' => $doc['number']]);
+        }
+        $doc['tax'] = $dates['tax'];
+        // Přijatá strana OSS nezná (režim je pro plnění, která poskytujeme), takže se sazba
+        // páruje tuzemsky - jen až tady, protože `amounts()` ji kvůli vydané větvi nechává
+        // nenapárovanou. Sazba platí ke dni plnění (DUZP). Nenalezená sazba je pořád tvrdá
+        // chyba celého běhu jako dřív.
+        foreach ($amounts['items'] as $i => $item) {
+            $amounts['items'][$i]['rate_id'] ??= $this->rateId((float) $item['rate'], $doc['tax'] ?? $doc['issue']);
+        }
         $vendorNumber = mb_substr(self::vendorDocumentNumber($doc), 0, 50);
         $duplicate = $this->stmt('purchase_duplicate', 'SELECT 1 FROM purchase_invoices WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1');
         $duplicate->execute([$ctx->supplierId, $vendorId, $vendorNumber, $doc['issue']]);
         if ($duplicate->fetchColumn() !== false) {
             $vendorNumber = mb_substr($vendorNumber . ' (' . $doc['number'] . ')', 0, 50);
         }
-        $pay = $type === 'tax_document'
-            ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
-            : self::payment($doc, $amounts);
-        $unbooked = $review || $type === 'advance';
+        // Daňová evidence: zaplaceno až podle navázaných úhrad ({@see PohodaTaxEvidenceImporter::payments()}).
+        // Přijatý doklad zaplacený bez vazby na pohyb by peněžní deník započetl jako virtuální
+        // výdaj vedle skutečného pohybu; u daňového dokladu k záloze by byl výdajem podruhé.
+        $pay = match (true) {
+            $ctx->taxEvidence => self::UNPAID,
+            $type === 'tax_document' => ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']],
+            default => self::payment($doc, $amounts),
+        };
+        $unbooked = $ctx->taxEvidence || $review || $type === 'advance' || self::postedLater($doc);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
-        // Datum pro KH je v Pohodě den, ke kterému účetní odpočet uplatnila - MyÚčto
-        // ho respektuje jen jako ručně zadané datum přijetí (§ 73).
-        $claim = $doc['claim'];
         $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
             ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
         if ($doc['foreign'] !== '') {
@@ -543,8 +615,9 @@ final class InvoiceImporter
                 issueDate: $doc['issue'],
                 taxDate: $doc['tax'] ?? $doc['issue'],
                 dueDate: $doc['due'],
-                receivedAt: $claim ?? ($doc['tax'] ?? $doc['issue']),
-                receivedAtSource: $claim !== null ? 'manual' : 'import',
+                // Odpočet uplatněný v POHODĚ po DUZP je ručně zadané datum přijetí (§ 73).
+                receivedAt: $dates['received'] ?? ($doc['tax'] ?? $doc['issue']),
+                receivedAtSource: $dates['received'] !== null ? 'manual' : 'import',
                 currencyId: $fx->currencyId ?? $this->homeCurrency->id($ctx->supplierId),
                 exchangeRate: $fx->rate,
                 // Položky i rekapitulace Pohody jsou bez DPH.
@@ -559,7 +632,7 @@ final class InvoiceImporter
                 status: $status,
                 vatDeduction: $class['deduction'],
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx, $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : []),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : []),
                 createdBy: $ctx->userId,
                 advancePaidAmount: $amounts['advance'],
                 paymentVariableSymbol: preg_match('/^\d{1,10}$/', $doc['symvar']) === 1 ? $doc['symvar'] : null,
@@ -590,11 +663,12 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
-        $this->claimPeriod($ctx, $step, $doc, $type);
+        $this->claimPeriod($ctx, $step, $doc, $type, $deduction, $foreignReverse);
         ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'purchase_invoice', $id, $doc);
+        self::rememberSplits($ctx, 'purchase_invoice', $id, $r, $prefix);
         $this->captureLiquidations($ctx, 'purchase_invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['purchase_invoice|' . $id] = true;
@@ -608,6 +682,17 @@ final class InvoiceImporter
         $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons']);
     }
 
+    /**
+     * Předkontace „Nevím" (zaúčtuje se později): POHODA doklad do deníku nezapsala, takže
+     * převzatý doklad zaúčtovaný není a dostupné musí zůstat jeho zaúčtování. Jiné doklady
+     * bez zápisu se stejným číslem (předkontace „Bez", mzdové závazky, nulové doklady,
+     * zápis pod jiným číslem) se tím nemění, příznak zaúčtování u nich zůstává.
+     */
+    private static function postedLater(array $doc): bool
+    {
+        return mb_strtolower(trim(PohodaXml::text($doc['h'], 'accounting/ids'))) === 'nevím';
+    }
+
     /** @return array<string,mixed> */
     private function header(array $r, string $prefix): array
     {
@@ -619,8 +704,13 @@ final class InvoiceImporter
             'issue' => $issue,
             'tax' => PohodaXml::date($h, 'dateTax'),
             'accounting' => PohodaXml::date($h, 'dateAccounting') ?? $issue,
+            // Doklad bez zaúčtování (předkontace „Bez“): v deníku ani v počátečních stavech není.
+            'without_accounting' => PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting',
             'due' => PohodaXml::date($h, 'dateDue') ?? $issue,
-            'claim' => PohodaXml::date($h, 'dateKHDPH'),
+            // „Datum KH DPH": u přijatého dokladu DUZP z dokladu dodavatele (DPPD v KH),
+            // `dateTax` je tam datum odpočtu ({@see PohodaPurchaseVatDates}). Vydaný doklad ho
+            // nevede nebo je shodné s DUZP, převod ho u něj nepoužívá.
+            'kh' => PohodaXml::date($h, 'dateKHDPH'),
             'vat_class' => PohodaXml::text($h, 'classificationVAT/ids'),
             'text' => PohodaXml::text($h, 'text'),
             'symvar' => PohodaXml::text($h, 'symVar'),
@@ -632,7 +722,7 @@ final class InvoiceImporter
             'kh_number' => PohodaXml::text($h, 'numberKHDPH'),
             'account_no' => PohodaXml::text($h, 'paymentAccount/accountNo'),
             'bank_code' => PohodaXml::text($h, 'paymentAccount/bankCode'),
-            'payment' => self::PAYMENT_TYPES[PohodaXml::text($h, 'paymentType/paymentType')] ?? 'other',
+            'payment' => PohodaPaymentType::fromPohoda(PohodaXml::text($h, 'paymentType/paymentType')),
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
@@ -805,6 +895,10 @@ final class InvoiceImporter
      */
     private function refreshSettlement(PohodaContext $ctx, string $step, string $table, int $id, array $doc): void
     {
+        // Daňová evidence vede úhradu jen z navázaných pohybů ({@see PohodaTaxEvidenceImporter::payments()}).
+        if ($ctx->taxEvidence || ($doc['payment_outside_selection'] ?? false)) {
+            return;
+        }
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
         $settled = abs($remaining) < 0.005;
         if ($table === 'purchase_invoices') {
@@ -839,17 +933,26 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $doc
      * @param array{total:float,advance:float} $amounts
+     * @param bool $proforma zálohový list: nedoplatek do {@see InvoicePaymentService::TOLERANCE} je uhrazeno
+     *                       stejně jako u platby zadané v MyÚčtu. POHODA ho nechává otevřený, když klient
+     *                       zaplatí kulatou částku proformy s haléři; účetní doklad to není, v deníku nic nezbývá.
+     *                       Faktury zůstávají přesně: jejich nedoplatek je i v hlavní knize 311.
      * @return array{paid:float,settled:bool,paid_at:?string}
      */
-    private static function payment(array $doc, array $amounts): array
+    private static function payment(array $doc, array $amounts, bool $proforma = false): array
     {
         $toPay = round($amounts['total'] - $amounts['advance'], 2);
+        if ($doc['payment_outside_selection'] ?? false) {
+            return ['paid' => 0.0, 'settled' => false, 'paid_at' => null];
+        }
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
-        $settled = abs($remaining) < 0.005;
+        $paid = round($toPay - $remaining, 2);
+        $settled = abs($remaining) < 0.005
+            || ($proforma && $remaining > 0 && $paid > 0 && $remaining <= InvoicePaymentService::TOLERANCE + 0.0001);
         return [
-            'paid' => round($toPay - $remaining, 2),
+            'paid' => $paid,
             'settled' => $settled,
-            'paid_at' => $doc['paid_date'] ?? ($settled && abs($toPay) < 0.005 ? $doc['issue'] : null),
+            'paid_at' => $doc['paid_date'] ?? ($settled && (abs($toPay) < 0.005 || abs($remaining) >= 0.005) ? $doc['issue'] : null),
         ];
     }
 
@@ -1048,7 +1151,7 @@ final class InvoiceImporter
      * (`PD…` - ř. 43, 44). Rozhoduje jen u faktury, která sama členění samovyměření nemá
      * ({@see selfAssessedByInternalDocuments()}).
      *
-     * @return array<string,array{doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string,deducted:bool}>
+     * @return array<string,array{doc:string,date:?string,kh:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string,deducted:bool}>
      */
     private function selfAssessments(PohodaContext $ctx): array
     {
@@ -1071,7 +1174,7 @@ final class InvoiceImporter
                 continue;
             }
             $docNo = PohodaXml::text($h, 'number/numberRequested');
-            $entry = ['doc' => $docNo, 'date' => PohodaXml::date($h, 'dateTax'), 'lines' => [], 'error' => null];
+            $entry = ['doc' => $docNo, 'date' => PohodaXml::date($h, 'dateTax'), 'kh' => PohodaXml::date($h, 'dateKHDPH'), 'lines' => [], 'error' => null];
             foreach (PohodaXml::all($r, 'intDocDetail/intDocItem') as $it) {
                 $code = $ctx->vat->selfAssessmentCode(PohodaXml::text($it, 'classificationVAT/ids')) ?? $headerCode;
                 $rate = PohodaXml::attr($it, 'rateVAT', 'value');
@@ -1219,12 +1322,19 @@ final class InvoiceImporter
      */
     private static function withoutSkippedPayments(PohodaContext $ctx, array $doc, array $r): array
     {
-        if ($ctx->skippedYears === []) {
+        if ($ctx->skippedYears === [] && $ctx->selectedYears === null && $ctx->ownJournalFrom === null) {
             return $doc;
         }
         $skipped = 0.0;
         $last = null;
-        foreach (PohodaXml::all($r, 'liquidations/liquidation') as $l) {
+        $liquidations = PohodaXml::all($r, 'liquidations/liquidation');
+        if ($liquidations === [] && $ctx->skipsDate($doc['paid_date'])) {
+            $doc['remaining'] = '';
+            $doc['paid_date'] = null;
+            $doc['payment_outside_selection'] = true;
+            return $doc;
+        }
+        foreach ($liquidations as $l) {
             $date = PohodaXml::date($l, 'date');
             if ($ctx->skipsDate($date)) {
                 $skipped += PohodaXml::num($l, 'amount');
@@ -1239,6 +1349,26 @@ final class InvoiceImporter
         $doc['remaining'] = number_format($remaining + $skipped, 2, '.', '');
         $doc['paid_date'] = $last;
         return $doc;
+    }
+
+    /**
+     * Zakázka a činnost dokladu z exportu (`typ:contract`, `typ:activity` hlavičky a položek)
+     * pro {@see PohodaSplitDimension}. Zapisuje se i u dokladu z dřívějšího převodu, ať je
+     * opakovaný převod doplní.
+     *
+     * @param array<string,mixed> $r
+     */
+    private static function rememberSplits(PohodaContext $ctx, string $docType, int $id, array $r, string $prefix): void
+    {
+        $headerNode = PohodaXml::get($r, $prefix . 'Header');
+        $itemNodes = PohodaXml::all($r, $prefix . 'Detail/' . $prefix . 'Item');
+        foreach (PohodaSplitDimension::SPLITS as $split) {
+            $header = PohodaSplitDimension::code($headerNode, $split);
+            $items = array_map(static fn (mixed $item): string => PohodaSplitDimension::code($item, $split), $itemNodes);
+            if ($header !== '' || array_filter($items, static fn (string $code): bool => $code !== '') !== []) {
+                $ctx->splitDocuments[$split][$docType][$id] = ['header' => $header, 'items' => $items];
+            }
+        }
     }
 
     /**
@@ -1267,30 +1397,31 @@ final class InvoiceImporter
     }
 
     /**
-     * Odpočet, který Pohoda uplatnila (datum pro KH) dřív, než ho MyÚčto připustí - před
-     * datem plnění nebo vystavení (§ 73). Evidence DPH ho zařadí až do období plnění,
-     * protokol na posun upozorní stejně jako převod z PREMIER.
+     * Odpočet, který POHODA uplatnila (datum odp./doruč.) dřív, než ho MyÚčto připustí -
+     * před DUZP z dokladu dodavatele nebo před datem vystavení (§ 73). Evidence DPH ho
+     * zařadí až do období DUZP, protokol na posun upozorní stejně jako převod z PREMIER.
+     * Odpočet po DUZP je běžný stav (doklad došel později) a varování nedostane.
      *
-     * Doklad minulého období s datem pro KH v minulém roce zařadí Pohoda do prvního
-     * období agendy - tam ho porovnává i tato kontrola. DPH takového dokladu převod
-     * nevyřazuje: odvody DPH v Pohodě ukazují, že ho přiznání převáděného roku obsahuje.
+     * Doklad minulého období s odpočtem v minulém roce zařadí POHODA do prvního období
+     * agendy - tam ho porovnává i tato kontrola. DPH takového dokladu převod nevyřazuje:
+     * odvody DPH v POHODĚ ukazují, že ho přiznání převáděného roku obsahuje. Zahraniční
+     * přenesení se řadí podle DUZP, období drží {@see PohodaPurchaseVatDates}.
      *
-     * @param array<string,mixed> $doc
+     * @param array<string,mixed> $doc `tax` = DUZP, jak se zapsalo do `tax_date`
      */
-    private function claimPeriod(PohodaContext $ctx, string $step, array $doc, string $type): void
+    private function claimPeriod(PohodaContext $ctx, string $step, array $doc, string $type, ?string $deduction, bool $foreignReverse): void
     {
-        $claim = $doc['claim'];
-        if ($claim === null || $type === 'advance') {
+        if ($deduction === null || $type === 'advance' || $foreignReverse) {
             return;
         }
         $earliest = max((string) ($doc['tax'] ?? $doc['issue']), (string) $doc['issue']);
-        $claim = max($claim, $ctx->periodStart());
-        if ($claim >= $earliest || substr($claim, 0, 7) === substr($earliest, 0, 7)) {
+        $deduction = max($deduction, $ctx->periodStart());
+        if ($deduction >= $earliest || PohodaPurchaseVatDates::sameMonth($deduction, $earliest)) {
             return;
         }
         $ctx->protocol->warn($step, 'claim_before_document', sprintf(
-            'Doklad %s: Pohoda uplatnila odpočet k %s, dřív než je datum plnění nebo vystavení (%s). MyÚčto odpočet před držením dokladu nepřipustí - doklad je v DPH v období %s.',
-            $doc['number'], $claim, $earliest, substr($earliest, 0, 7)
+            'Doklad %s: POHODA uplatnila odpočet k %s (datum odp./doruč.), dřív než je DUZP z dokladu dodavatele (datum KH DPH) nebo datum vystavení (%s). MyÚčto odpočet před DUZP nepřipustí - doklad je v DPH v období %s.',
+            $doc['number'], $deduction, $earliest, substr($earliest, 0, 7)
         ), ['document_no' => $doc['number']]);
         $ctx->protocol->count($step, 'claim_moved');
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\BulkDryRun;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
@@ -127,6 +128,13 @@ final class DeletePurchaseInvoiceAction
                 'ip'         => $ip,
                 'user_agent' => $request->getHeaderLine('User-Agent'),
             ]);
+            // Hromadné akce nanečisto: všechny kontroly i storno prošly, soubory se nevracejí.
+            if (BulkDryRun::requested($request)) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::ok($response, ['ok' => true, 'dry_run' => true]);
+            }
             $reopenedSubmissionIds = $this->submissions->reopenForDeletedInvoice($supplierId, $id);
             // Podání je zpátky ve frontě — jeho originál patří z archivu zpět mezi čekající.
             $this->filer->restore($supplierId, $reopenedSubmissionIds);

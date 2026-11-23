@@ -8,6 +8,7 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\TaxEvidence\AnnualClosingService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,6 +46,10 @@ final class AnnualClosingAction
 
     public function reopen(Request $request, Response $response, array $args): Response
     {
+        if (!RequestAuthorization::mayOverridePeriodProtection($request)) {
+            return Json::error($response, 'period_closed',
+                'Uzavřený rok daňové evidence lze znovu otevřít jen v aplikaci, přes API token ne.', 409);
+        }
         $body = (array) ($request->getParsedBody() ?? []);
         return $this->run($request, $response, $args, fn (int $sid, int $year) => $this->service->reopen(
             $sid, $year, (int) ($body['row_version'] ?? 0)

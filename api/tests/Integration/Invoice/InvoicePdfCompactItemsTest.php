@@ -85,7 +85,7 @@ final class InvoicePdfCompactItemsTest extends TestCase
         self::assertStringContainsString('<th style="width:30%">Popis</th>', $html);
         self::assertStringNotContainsString('items-compact', $html);
         self::assertStringContainsString('<br><span style="font-size:85%;color:#666666">Výr. č.: SN0001</span>', $html);
-        self::assertStringContainsString('<br><span style="font-size:85%;color:#666666;white-space:nowrap">(celkem 20&nbsp;ks)</span>', $html);
+        self::assertStringContainsString('<br><span style="font-size:85%;color:#666666;white-space:nowrap">(celkem 20&nbsp;kus)</span>', $html);
         self::assertStringNotContainsString('> · ', $html);
         // Vypnutá volba = stejný výstup, jako když ji firma vůbec nemá (dnešní stav).
         self::assertSame($html, $this->renderer->renderHtml($this->invoice(['invoice_pdf_compact_items' => 0]), includeCss: false));
@@ -100,7 +100,7 @@ final class InvoicePdfCompactItemsTest extends TestCase
         // Popis dostane šířku, kterou číselné sloupce v menším písmu nepotřebují.
         self::assertStringContainsString('<th style="width:42%">Popis</th>', $html);
         self::assertEqualsWithDelta(100.0, self::headerWidthSum($html), 0.001);
-        self::assertMatchesRegularExpression('~Brzdové destičky\s*<span style="font-size:85%;color:#666666;white-space:nowrap"> · celkem&nbsp;20&nbsp;ks</span>~u', $html);
+        self::assertMatchesRegularExpression('~Brzdové destičky\s*<span style="font-size:85%;color:#666666;white-space:nowrap"> · celkem&nbsp;20&nbsp;kus</span>~u', $html);
         self::assertStringContainsString('<td>bal</td>', $html);
     }
 

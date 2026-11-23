@@ -789,6 +789,9 @@ final class PayrollRegistrationA1MasterDataWriter
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
+                // Zapisují se jen údaje z registrace; nezměněná uložená pole
+                // jejich zápis číselníkovou kontrolou neblokují.
+                $current,
             ),
             $employmentVersion,
             $userId,

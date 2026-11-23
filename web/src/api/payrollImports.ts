@@ -1,6 +1,8 @@
 import { api } from './client'
 import { downloadApiFile } from '@/utils/downloadFile'
-import type { PayrollAgreementAnnualHours } from './payroll'
+import type { PayrollAgreementAnnualHours, PayrollOpenAgreement } from './payroll'
+
+export type { PayrollOpenAgreement }
 
 /** Soubor přenášený v JSON těle; obsah je base64 bez prefixu `data:`. */
 export interface ImportFilePayload {
@@ -386,7 +388,12 @@ export type AttendanceMeaning =
   | 'ignore' | 'person_name' | 'personal_number' | 'birth_number' | 'birth_date' | 'health_insurer_code'
   | 'relation_label'
   | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'start_date' | 'monthly_wage'
-  | 'hourly_rate' | 'end_date' | 'bank_account'
+  | 'hourly_rate' | 'end_date' | 'bank_account' | 'worked_days'
+  | 'address_street' | 'address_house_number' | 'address_city' | 'address_postal_code' | 'address_country'
+  | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
+  | 'tax_declaration_from' | 'education_code' | 'employment_status_code'
+  | 'birth_surname' | 'birth_place' | 'birth_country' | 'work_mode_code' | 'continuous_operation'
+  | 'workplace_city' | 'position_name' | 'leadership'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
@@ -470,7 +477,7 @@ export interface AttendanceEmploymentOption {
   relation_type?: string
 }
 
-export type AttendanceMatchStatus = 'linked' | 'matched' | 'ambiguous' | 'not_found'
+export type AttendanceMatchStatus = 'linked' | 'matched' | 'ambiguous' | 'conflict' | 'not_found'
 
 export interface AttendanceConflict {
   hours?: string | null
@@ -490,6 +497,8 @@ export interface AttendanceComponentValue {
   component_code: string
   amount: string
   amount_minor: number
+  /** Původní částka s haléři, když ji import zaokrouhlil nahoru na celé koruny. */
+  rounded_from_minor?: number
   source: string
   conflicts: AttendanceConflict[]
 }
@@ -507,6 +516,8 @@ export interface AttendancePerson {
   key: string
   display_name: string
   personal_number: string | null
+  /** Osobní číslo má ve firmě nebo v podkladech víc osob: k párování se nepoužilo a nepřevezme se. */
+  number_ambiguous?: boolean
   birth_number_masked: string | null
   relation_label: string | null
   department: string | null
@@ -533,15 +544,71 @@ export interface AttendancePerson {
     employee_id: number | null
     employee_name: string | null
     employment_code: string | null
+    /** Rozpor rodného a osobního čísla (stav `conflict`), řádek se nepároval. */
+    conflict?: string | null
     candidates: { employment_id: number; employee_id: number; label: string }[]
   }
+  /** Odpracované dny v měsíci ze sloupce podkladů; zapíšou se do souhrnu pracovního měsíce. */
+  worked_days?: number | null
   metrics: AttendanceMetric[]
   components: AttendanceComponentValue[]
   deductions?: AttendanceDeductionValue[]
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
+  /** Chyby řádku, kvůli kterým import osobu nezaloží (neplatné rodné číslo); ke vztahu v evidenci ji přiřadit jde. */
+  errors?: string[]
   /** Roční hodiny na DPP po započtení importované docházky; jen u osob přiřazených na DPP. */
   dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
+  /** Údaje pro registraci ČSSZ, které se zapíšou (nové osobě všechny, existující jen chybějící). */
+  registration?: AttendanceRegistrationItem[]
+  /** Návrh pravděpodobného výdělku ze sazby nebo z odměny za odpracované hodiny. */
+  probable_earning?: AttendanceProbableEarning | null
+  /** Osoba je v evidenci (vazba, rodné nebo osobní číslo), jen nemá vztah v období: založí se jí nový vztah. */
+  existing_person?: AttendanceExistingPerson | null
+  /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
+  open_agreement?: PayrollOpenAgreement | null
+  /**
+   * Mzda ze sazby a hodin (podklady bez částky): `computed` = dopočtená
+   * (sazba × hodiny), `amount_in_source` = podklady nesou částku, `no_hours` =
+   * chybí hodiny, `hourly_terms` = vztah má hodinové odměňování na kartě.
+   */
+  rate_wage?: AttendanceRateWage | null
   warnings: string[]
+}
+
+export type AttendanceRateWage =
+  | { status: 'computed'; component_code: string; hours: string; hourly_rate_minor: number; amount_minor: number }
+  | { status: 'amount_in_source' | 'no_hours' | 'hourly_terms' }
+
+export interface AttendanceExistingPerson {
+  employee_id: number
+  employee_name: string
+  matched_by: 'link' | 'birth_number' | 'employment_code' | 'name_birth_date'
+  /** Druh posledního vztahu osoby, výchozí druh nové dohody. */
+  relation_type: RegistrationRelationType
+  /** Shoda jen podle jména a data narození: založení vyžaduje potvrzení uživatele. */
+  requires_confirmation?: boolean
+}
+
+/** Pravděpodobný výdělek z podkladů, viz AttendanceImportService::probableEarnings(). */
+export interface AttendanceProbableEarning {
+  source: 'rate' | 'amount'
+  hourly_minor: number
+  amount_minor: number | null
+  hours: string | null
+}
+
+export interface AttendanceProbableEarningChange extends AttendanceProbableEarning {
+  key: string
+  display_name: string
+  employment_id: number
+}
+
+/** Údaj pro registraci ČSSZ v náhledu, viz AttendanceRegistrationData::display() na serveru. */
+export interface AttendanceRegistrationItem {
+  key: 'address' | 'citizenship' | 'birth' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
+    | 'work_mode_code' | 'position_name' | 'workplace_city' | 'continuous_operation' | 'leadership' | 'house_number'
+    | 'employment_status_code' | 'education_code'
+  value: string
 }
 
 export interface AttendanceComponentCheck {
@@ -637,17 +704,33 @@ export interface AttendancePreview {
   persons: AttendancePerson[]
   component_checks: AttendanceComponentCheck[]
   wage_changes: AttendanceWageChange[]
+  /** Pravděpodobné výdělky k potvrzení u vztahů, které žádný nemají. */
+  probable_earning_changes?: AttendanceProbableEarningChange[]
   upgrade_available: AttendanceSampleUpgrade | null
+  /** Náhled i použití zaokrouhlují složky vykazované v JMHZ nahoru na celé koruny. Starší server klíč nemá. */
+  round_whole_crowns?: boolean
+  /** Výchozí stav volby: zapnuto za měsíce vykazované přes JMHZ. */
+  whole_crowns_default?: boolean
   summary: {
     persons: number
     matched: number
     ambiguous: number
     not_found: number
+    /** Z `not_found`: rozpor rodného a osobního čísla. Starší server klíč nemá. */
+    conflicts?: number
+    /** Osoby s odpracovanými dny v podkladech. */
+    worked_days?: number
     metrics: number
     components: number
     amount_minor_total: number
     deductions?: number
     deduction_minor_total?: number
+    /** Přiřazené osoby, kterým v evidenci chybí údaje pro registraci z podkladů. */
+    registration_gaps?: number
+    /** Složky vykazované v JMHZ, jejichž částka má haléře. */
+    halere_components?: number
+    /** Mzda ze sazby a hodin: komu vznikne (a kolik celkem) a komu ne. */
+    rate_wages?: { computed: number; amount_minor: number; no_hours: number; hourly_terms: number }
   }
 }
 
@@ -657,6 +740,8 @@ export interface AttendancePreviewPayload {
   rules: AttendanceRule[] | null
   profile_id: number | null
   components?: AttendanceProfileComponent[] | null
+  /** Bez klíče rozhodne server podle období (JMHZ = zapnuto). */
+  round_whole_crowns?: boolean
 }
 
 export interface AttendanceLink {
@@ -680,6 +765,12 @@ export interface AttendanceApplyPayload {
   profile_id?: number | null
   /** Účetní potvrdila nález kontrol období a dvojích vstupů (`source_checks`). */
   confirm_source_checks?: boolean
+  /** Doplnit přiřazeným osobám chybějící údaje pro registraci ČSSZ z podkladů. */
+  fill_registration_data?: boolean
+  /** Zapsat navržené pravděpodobné výdělky vztahům, které žádný nemají. */
+  adopt_probable_earnings?: boolean
+  /** Zaokrouhlit složky vykazované v JMHZ nahoru na celé koruny; bez klíče rozhodne server podle období. */
+  round_whole_crowns?: boolean
 }
 
 /** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */
@@ -725,6 +816,10 @@ export interface AttendanceApplyResult {
   wage_conflicts: { key: string; display_name: string; reason: string }[]
   runs_needing_refresh: AttendanceRunNeedingRefresh[]
   deductions?: AttendanceDeductionReport | null
+  /** Doplnění údajů pro registraci ČSSZ; null = volba vypnutá. */
+  registration?: { filled: number; notes: { key: string; display_name: string; reason: string }[] } | null
+  /** Zápis pravděpodobných výdělků; null = volba vypnutá. */
+  probable_earnings?: { adopted: number; conflicts: { key: string; display_name: string; reason: string }[] } | null
 }
 
 /** Hrubá a čistá mzda z mzdového exportu v dávce proti výpočtu mzdového běhu období. */
@@ -766,12 +861,20 @@ export interface AttendancePersonCreate {
   fixed_term_end_on?: string | null
   personal_number: string | null
   activate: boolean
+  /** Otevřená DPP osoby, která se použije místo nové dohody. */
+  use_open_agreement?: number | null
+  /** Výslovně nová DPP vedle otevřené dohody. */
+  create_new_agreement?: boolean
+  /** Potvrzení, že osoba z podkladů je osoba z evidence se shodným jménem a datem narození (její id). */
+  confirm_existing_person?: number
+  /** Výslovně nová karta osoby i přes shodu jména a data narození. */
+  create_new_person?: boolean
 }
 
 export interface AttendancePersonsResult {
   results: {
     person_key: string
-    status: 'created' | 'failed'
+    status: 'created' | 'employment_created' | 'reused' | 'failed'
     employee_id: number | null
     employment_id: number | null
     message: string | null
@@ -789,7 +892,7 @@ export interface AttendanceBatchRow {
 }
 
 /** Vestavěné vzory profilu: docházkový systém GIRITON a obecná šablona MyÚčto. */
-export type AttendanceSampleKey = 'giriton' | 'myucto'
+export type AttendanceSampleKey = 'giriton' | 'myucto' | 'pamica'
 
 export interface AttendanceProfile {
   id: number
@@ -905,7 +1008,89 @@ export interface PohodaOicApplyResult {
   summary: { applied: number; failed: number; skipped: number }
 }
 
+// ─── Dohody (jen smlouvy, bez docházky) ───────────────────────────────────────
+
+export type AgreementImportStatus = 'create' | 'exists' | 'duplicate' | 'error'
+export type AgreementImportOutcome = 'created' | 'existing' | 'skipped' | 'failed'
+export type AgreementRelationType = 'dpp' | 'dpc' | 'employment' | 'small_scale_employment'
+
+export interface AgreementImportAgreement {
+  key: string
+  sheet: string
+  row: number
+  relation_type: AgreementRelationType | null
+  relation_label: string | null
+  start_on: string | null
+  end_on: string | null
+  status: AgreementImportStatus
+  note: string | null
+  errors: string[]
+  warnings: string[]
+  registration: AttendanceRegistrationItem[]
+}
+
+export interface AgreementImportPerson {
+  key: string
+  display_name: string
+  personal_number: string | null
+  birth_number_masked: string | null
+  birth_date: string | null
+  existing_person: {
+    employee_id: number
+    employee_name: string
+    matched_by: string
+    requires_confirmation: boolean
+  } | null
+  warnings: string[]
+  errors: string[]
+  agreements: AgreementImportAgreement[]
+}
+
+export interface AgreementImportPreview {
+  persons: AgreementImportPerson[]
+  files: { name: string; rows: number; error: string | null }[]
+  summary: {
+    persons: number
+    new_persons: number
+    existing_persons: number
+    confirm: number
+    create: number
+    exists: number
+    errors: number
+  }
+}
+
+export interface AgreementImportResult {
+  results: {
+    person_key: string
+    row_key: string
+    display_name: string
+    relation_type: AgreementRelationType | null
+    start_on: string | null
+    outcome: AgreementImportOutcome
+    employee_id: number | null
+    employment_id: number | null
+    message: string | null
+  }[]
+  counts: Record<AgreementImportOutcome, number>
+}
+
+export const AGREEMENT_TEMPLATE_FILENAME = 'dohody-myucto.xlsx'
+
 export const payrollImportsApi = {
+  previewAgreements: (files: ImportFilePayload[]) =>
+    api.post<AgreementImportPreview>('/payroll/imports/agreements/preview', { files })
+      .then(response => response.data),
+  applyAgreements: (payload: {
+    files: ImportFilePayload[]
+    confirmations: Record<string, number | 'new'>
+    person_keys: string[]
+  }) =>
+    api.post<AgreementImportResult>('/payroll/imports/agreements/apply', payload)
+      .then(response => response.data),
+  downloadAgreementTemplate: () =>
+    downloadApiFile('/payroll/imports/agreements/template', AGREEMENT_TEMPLATE_FILENAME),
+
   previewRegistrations: (payload: RegistrationPreviewPayload) =>
     api.post<RegistrationPreview>('/payroll/imports/registrations/preview', payload)
       .then(response => response.data),
@@ -951,9 +1136,17 @@ export const payrollImportsApi = {
     api.post<{ profile: AttendanceProfile; restored: boolean }>('/payroll/imports/attendance/profiles/sample', {
       sample_key: sampleKey,
     }).then(response => response.data),
-  /** Šablona XLSX pro Vzor MyÚčto (ukázkové řádky a list Návod). */
-  downloadAttendanceTemplate: (fallbackFilename: string) =>
-    downloadApiFile('/payroll/imports/attendance/template', fallbackFilename),
+  /**
+   * Šablona ke vzoru: XLSX pro Vzor MyÚčto (ukázkové řádky a list Návod),
+   * u Vzoru PAMICA ukázkový XML export se smyšlenými osobami za zvolený měsíc.
+   */
+  downloadAttendanceTemplate: (fallbackFilename: string, sampleKey: AttendanceSampleKey = 'myucto', period?: string) => {
+    const query = new URLSearchParams()
+    if (sampleKey !== 'myucto') query.set('sample', sampleKey)
+    if (period) query.set('period', period)
+    const qs = query.toString()
+    return downloadApiFile(`/payroll/imports/attendance/template${qs ? `?${qs}` : ''}`, fallbackFilename)
+  },
   copyAttendanceProfile: (id: number, targetSupplierId: number) =>
     api.post<{ profile: AttendanceProfile }>(`/payroll/imports/attendance/profiles/${id}/copy`, {
       target_supplier_id: targetSupplierId,

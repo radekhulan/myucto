@@ -49,6 +49,8 @@ final class CashRulePresets
     {
         $out = [];
         foreach ($this->rules->effectiveMap($supplierId) as $key => $rule) {
+            // Číselný klíč převzaté předkontace (513000) je v poli int.
+            $key = (string) $key;
             if (in_array($key, self::HANDLED_BY_PURPOSE, true)) {
                 continue;
             }

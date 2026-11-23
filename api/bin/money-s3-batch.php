@@ -20,6 +20,8 @@ declare(strict_types=1);
  * Volby:
  *   --from-year=auto|RRRR|all  první převáděný rok; auto (výchozí) = první rok, od kterého
  *                              v Money navazují počáteční a konečné stavy
+ *   --to-year=auto|RRRR        poslední převáděný rok; auto (výchozí) = u každé firmy poslední
+ *                              rok, který v MyÚčtu nemá vlastní zápisy
  *   --dry-run                  zkouška nanečisto: nic nezůstane, ani založené firmy
  *   --existing=skip|update|relink  firma už v MyÚčtu je: přeskočit (výchozí), převést znovu
  *                              (převod doplní jen to, co chybí), nebo opravný převod vazeb
@@ -70,7 +72,7 @@ Použití:
 
 TXT;
 
-$opts = getopt('', ['dir:', 'ico:', 'all', 'list', 'from-year:', 'dry-run', 'existing:', 'dppo-dir:', 'group:', 'group-id:',
+$opts = getopt('', ['dir:', 'ico:', 'all', 'list', 'from-year:', 'to-year:', 'dry-run', 'existing:', 'dppo-dir:', 'group:', 'group-id:',
     'related-parties', 'no-close', 'disposal-year-tax:', 'no-registry', 'user-id:', 'report:']);
 
 function ms3bFail(string $message, int $code = 2): never
@@ -145,8 +147,12 @@ if ($selected === []) {
 }
 
 $fromYearOpt = (string) ($opts['from-year'] ?? 'auto');
+$toYearOpt = (string) ($opts['to-year'] ?? 'auto');
 if ($fromYearOpt !== 'auto' && $fromYearOpt !== 'all' && preg_match('/^\d{4}$/', $fromYearOpt) !== 1) {
     ms3bFail('--from-year čeká auto, rok (RRRR) nebo all.');
+}
+if ($toYearOpt !== 'auto' && preg_match('/^\d{4}$/', $toYearOpt) !== 1) {
+    ms3bFail('--to-year čeká auto nebo rok (RRRR).');
 }
 
 $filings = [];
@@ -183,6 +189,7 @@ try {
         [],
         !array_key_exists('no-registry', $opts),
         $filings !== [],
+        $toYearOpt === 'auto' ? MoneyS3BatchOptions::TO_YEAR_AUTO : (int) $toYearOpt,
     );
 } catch (MoneyS3Exception $e) {
     ms3bFail($e->getMessage());

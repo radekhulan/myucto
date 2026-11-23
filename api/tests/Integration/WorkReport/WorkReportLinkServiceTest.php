@@ -140,7 +140,7 @@ final class WorkReportLinkServiceTest extends TestCase
         )->execute([$this->supplierId, $clientId, $projectId, '2026-06-01', '2026-06-15', $this->currencyId, $this->userId, $status, 'invoice']);
         $invId = (int) $pdo->lastInsertId();
         $this->invoiceIds[] = $invId;
-        $this->workReports->save($invId, $projectId, $title, $items);
+        $this->workReports->save($invId, $this->supplierId, $projectId, $title, $items);
         return $invId;
     }
 
@@ -150,6 +150,33 @@ final class WorkReportLinkServiceTest extends TestCase
             $this->linkIds[] = (int) $link['id'];
         }
         return $link;
+    }
+
+    public function testPreviewRedactsHiddenColumnsAndSuppressesIncompleteGrandTotals(): void
+    {
+        $client = $this->client();
+        $invoice = $this->draftInvoiceWithReport($client, null, 'Pouze čas', [
+            ['description' => 'Analýza', 'work_date' => '2096-06-01', 'hours' => 2, 'rate' => 1234],
+        ]);
+        $this->workReports->saveDisplayOptions($invoice, ['rate' => false, 'amount' => false, 'date' => false], $this->supplierId);
+        $this->draftInvoiceWithReport($client, null, 'S cenou', [['description' => 'Konzultace', 'hours' => 1, 'rate' => 500]]);
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $client, null, $this->userId));
+        $preview = $this->service->buildPreview($link);
+        self::assertCount(2, $preview['reports']);
+        self::assertSame([], $preview['totals_by_currency']);
+        self::assertSame(3.0, $preview['total_hours']);
+        $report = array_values(array_filter($preview['reports'], static fn (array $row): bool => $row['invoice_id'] === $invoice))[0];
+        self::assertNull($report['items'][0]['work_date']);
+        self::assertNull($report['items'][0]['rate']);
+        self::assertNull($report['items'][0]['total_amount']);
+        self::assertNull($report['total_amount']);
+        self::assertSame(2.0, $report['items'][0]['hours']);
+        self::assertSame(2468.0, $this->workReports->findByInvoice($invoice, $this->supplierId)['total_amount']);
+
+        $this->workReports->saveDisplayOptions($invoice, ['hours' => false], $this->supplierId);
+        $preview = $this->service->buildPreview($link);
+        self::assertNull($preview['total_hours']);
+        self::assertSame(2968.0, $preview['totals_by_currency'][0]['total_amount']);
     }
 
     // ── link lifecycle ───────────────────────────────────────────────────

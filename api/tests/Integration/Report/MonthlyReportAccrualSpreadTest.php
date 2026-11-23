@@ -137,11 +137,11 @@ final class MonthlyReportAccrualSpreadTest extends TestCase
         $twig = (new \ReflectionMethod(MonthlyReportPdfRenderer::class, 'twig'))->invoke($this->pdf);
 
         $withOption = $twig->render('monthly-report.twig', $this->service->build($this->supplierId, self::YEAR, 10, null, true));
-        self::assertStringContainsString('Průběžné časové rozlišení mimo deník', $withOption);
+        self::assertStringContainsString('Průběžné časové rozlišení a odpisy mimo deník', $withOption);
         self::assertStringContainsString('6 100,00', $withOption);
 
         $without = $twig->render('monthly-report.twig', $this->service->build($this->supplierId, self::YEAR, 10));
-        self::assertStringNotContainsString('Průběžné časové rozlišení mimo deník', $without);
+        self::assertStringNotContainsString('Průběžné časové rozlišení a odpisy mimo deník', $without);
     }
 
     /**

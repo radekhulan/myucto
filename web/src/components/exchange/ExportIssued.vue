@@ -4,8 +4,11 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { useAuthStore } from '@/stores/auth'
+import PohodaSchedulePanel from './PohodaSchedulePanel.vue'
 
 const { t, tm, rt } = useI18n()
+const auth = useAuthStore()
 
 type Format = 'pdf-zip' | 'isdoc' | 'pohoda' | 'stereo' | 'money_s3' | 'csv'
 type PeriodType = 'monthly' | 'quarterly'
@@ -261,5 +264,7 @@ const monthLabel = (m: string): string => {
         </button>
       </div>
     </div>
+
+    <PohodaSchedulePanel v-if="auth.scheduledPohodaExportEnabled" />
   </div>
 </template>

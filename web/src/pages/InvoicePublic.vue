@@ -6,7 +6,7 @@ import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { ensureLocaleLoaded } from '@/i18n'
 import { publicInvoiceApi, type PublicInvoiceData, type PublicInvoiceItem, type PublicInvoiceParty } from '@/api/publicInvoice'
 import { appIsoDate } from '@/utils/date'
-import { formatDuration, isPreciseTimeItem, isTimeItem, itemQuantity } from '@/utils/timeBilling'
+import { formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -90,7 +90,7 @@ function fmtDate(d: string | null): string {
 
 /** V režimu „ceny s DPH" nese unit_price_without_vat brutto — netto dopočítáme z řádkového základu (vzor PDF šablony). */
 function unitPrice(it: PublicInvoiceItem): number {
-  if (inv.value?.prices_include_vat && isPreciseTimeItem(it) && itemQuantity(it) !== 0) {
+  if (inv.value?.prices_include_vat && isPreciseUnitPrice(it) && itemQuantity(it) !== 0) {
     return Math.round(it.total_without_vat / itemQuantity(it) * 1e6) / 1e6
   }
   return inv.value?.prices_include_vat && it.quantity !== 0
@@ -100,7 +100,7 @@ function unitPrice(it: PublicInvoiceItem): number {
 
 function fmtUnitPrice(it: PublicInvoiceItem): string {
   const price = unitPrice(it)
-  const precision = isPreciseTimeItem(it)
+  const precision = isPreciseUnitPrice(it)
     ? Math.max(2, (price.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length)
     : 2
   return fmtMoney(price, precision)
@@ -175,7 +175,7 @@ onMounted(async () => {
       <div class="max-w-3xl mx-auto flex items-center gap-3">
         <div class="w-8 h-8 bg-primary-600 rounded-md flex items-center justify-center text-white font-bold">M</div>
         <div class="text-sm">
-          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="brand-tld">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ tt('Online náhled faktury', 'Online invoice view') }}</div>
         </div>
       </div>

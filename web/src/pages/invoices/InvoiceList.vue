@@ -8,8 +8,13 @@ import { useExpandableItems } from '@/composables/useExpandableItems'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
-import { formatMoney, formatMoneyWhole, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
+import { bulkIssueConfirmMessage } from '@/pages/invoices/invoiceBulkIssue'
+import BulkDimensionsModal from '@/components/dimensions/BulkDimensionsModal.vue'
+import { bulkDimensionsSummary } from '@/components/dimensions/bulkDimensions'
+import type { BulkDocumentDimensionsResult } from '@/api/dimensions'
+import { mergeMonthGroups } from '@/utils/monthGroups'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useToast } from '@/composables/useToast'
@@ -26,9 +31,15 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import MultiSelectFilter, { type MultiSelectOption } from '@/components/ui/MultiSelectFilter.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { invoiceListFilterParams } from '@/api/listQueries'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
+import OriginalPdfBulkUploadModal from '@/components/invoices/OriginalPdfBulkUploadModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import TableColorsMenu from '@/components/ui/TableColorsMenu.vue'
@@ -39,6 +50,8 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -52,6 +65,8 @@ import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/er
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -93,6 +108,7 @@ const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const dateFrom = ref<string>('')
 const dateTo = ref<string>('')
+const cashflowDraftUnscheduled = ref(false)
 const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
 // Neuhrazené K DATU X (task #4) — historický protějšek unpaidOnly (dnešní status).
@@ -129,6 +145,9 @@ const REVENUE_CATEGORY_NONE = 'none'
 const revenueCategoryMode = ref<'include' | 'exclude'>('include')
 const revenueCategoryIds = ref<string[]>([])
 const revenueCategories = ref<RevenueCategory[]>([])
+// Hodnoty dimenzí (stejný výběr jako v účetním deníku); jen u firmy se zapnutými dimenzemi.
+const dimensionValueIds = ref<number[]>([])
+const dimensionDescendants = ref(true)
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
 
@@ -157,12 +176,14 @@ const activeFilterCount = computed(() => {
   if (currencyFilter.value) n++
   if (monthFilter.value !== '') n++
   if (dateFrom.value || dateTo.value) n++
+  if (cashflowDraftUnscheduled.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   if (unpaidAsOf.value) n++
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
   if (revenueCategoryIds.value.length) n++
+  if (dimensionValueIds.value.length) n++
   return n
 })
 
@@ -191,6 +212,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (dateFrom.value || dateTo.value) {
     chips.push({ key: 'dates', value: `${dateFrom.value ? formatDate(dateFrom.value) : '…'} – ${dateTo.value ? formatDate(dateTo.value) : '…'}` })
   }
+  if (cashflowDraftUnscheduled.value) chips.push({ key: 'cashflow_draft_unscheduled', value: t('crm.cash_flow.unscheduled_drafts_filter') })
   if (overdueOnly.value) chips.push({ key: 'overdue', value: t('invoice.overdue_only') })
   if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('invoice.unpaid_only') })
   if (unpaidAsOf.value) {
@@ -219,6 +241,9 @@ const filterChips = computed<FilterChip[]>(() => {
         : shown,
     })
   }
+  if (dimensionValueIds.value.length) {
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dimensions, dimensionValueIds.value, dimensionDescendants.value, t) })
+  }
   return chips
 })
 
@@ -230,12 +255,14 @@ function clearFilter(key: string) {
     case 'currency': currencyFilter.value = ''; break
     case 'month': monthFilter.value = ''; break
     case 'dates': dateFrom.value = ''; dateTo.value = ''; break
+    case 'cashflow_draft_unscheduled': cashflowDraftUnscheduled.value = false; break
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
     case 'unpaid_as_of': unpaidAsOf.value = ''; break
     case 'booked': bookedFilter.value = ''; break
     case 'oss_review': ossReviewFilter.value = ''; break
     case 'revenue_category': revenueCategoryIds.value = []; break
+    case 'dimension': dimensionValueIds.value = []; dimensionDescendants.value = true; break
   }
 }
 
@@ -575,16 +602,17 @@ async function applyBulkOss() {
 }
 
 // Hromadné odeslání klientům — pouze faktury se status issued/sent/reminded/paid + ne cancellation
+function canSendRow(inv: InvoiceListItem): boolean {
+  return ['issued', 'sent', 'reminded', 'paid'].includes(inv.status)
+    && inv.invoice_type !== 'cancellation'
+    && !inv.calendar_id
+}
+
 const sendableSelected = computed(() => {
   const ids = new Set(selectedIds.value)
   return groups.value
     .flatMap(g => g.invoices)
-    .filter(inv =>
-      ids.has(inv.id)
-      && ['issued', 'sent', 'reminded', 'paid'].includes(inv.status)
-      && inv.invoice_type !== 'cancellation'
-      && !inv.calendar_id
-    )
+    .filter(inv => ids.has(inv.id) && canSendRow(inv))
 })
 
 // Hromadné vystavení — jen drafty. Řadíme podle issue_date asc, pak id asc, aby varsymboly šly sekvenčně.
@@ -597,19 +625,73 @@ const issuableSelected = computed(() => {
 })
 
 // Hromadné označení za zaplacené — jen issued/sent/reminded (ne paid, ne cancelled, ne draft, ne cancellation)
+function canMarkPaidRow(inv: InvoiceListItem): boolean {
+  return ['issued', 'sent', 'reminded'].includes(inv.status)
+    && inv.invoice_type !== 'cancellation'
+    && !isCalendarType(inv.invoice_type)
+    && hasPositiveAmountToPay(inv)
+    && !rowLockedForMe(inv)
+}
+
 const markPayableSelected = computed(() => {
   const ids = new Set(selectedIds.value)
   return groups.value
     .flatMap(g => g.invoices)
-    .filter(inv =>
-      ids.has(inv.id)
-      && ['issued', 'sent', 'reminded'].includes(inv.status)
-      && inv.invoice_type !== 'cancellation'
-      && !isCalendarType(inv.invoice_type)
-      && hasPositiveAmountToPay(inv)
-      && !rowLockedForMe(inv)
-    )
+    .filter(inv => ids.has(inv.id) && canMarkPaidRow(inv))
 })
+
+// Telefon: „…" na kartě dokladu se stejnými akcemi, jaké seznam umí hromadně
+// (PDF, odeslat, označit zaplaceno), jen pro jeden doklad a bez zaškrtávání.
+const isPhone = useIsPhone()
+const rowBusyId = ref<number | null>(null)
+
+function rowNumber(inv: InvoiceListItem): string {
+  return inv.varsymbol || t('invoice.draft_id_short', { id: inv.id })
+}
+
+function rowMenuActions(inv: InvoiceListItem): RowAction[] {
+  const busy = rowBusyId.value !== null || bulkBusy.value
+  const hasPdf = inv.status !== 'draft'
+  return [
+    { key: 'view-pdf', label: t('invoice.view_pdf'), icon: 'eye', show: hasPdf, href: invoicesApi.pdfUrl(inv.id, false) },
+    { key: 'download-pdf', label: t('invoice.download_pdf'), icon: 'download', show: hasPdf, href: invoicesApi.pdfUrl(inv.id, true), download: true },
+    { key: 'send', label: t('invoice.phone.send'), icon: 'send', variant: 'primary', disabled: busy,
+      show: auth.canWrite('invoices.send') && canSendRow(inv), run: () => void rowSend(inv) },
+    { key: 'mark-paid', label: t('invoice.mark_paid'), icon: 'checkCircle', variant: 'success', disabled: busy,
+      show: auth.canWrite('invoices.mark_paid') && canMarkPaidRow(inv), run: () => void rowMarkPaid(inv) },
+  ]
+}
+
+async function rowSend(inv: InvoiceListItem) {
+  if (!confirm(t('invoice.phone.send_confirm', { number: rowNumber(inv) }))) return
+  rowBusyId.value = inv.id
+  try {
+    await invoicesApi.send(inv.id)
+    markRowsTouched('invoice', [inv.id])
+    toast.success(t('invoice.phone.send_done', { number: rowNumber(inv) }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.phone.send_failed'))
+  } finally {
+    rowBusyId.value = null
+  }
+}
+
+async function rowMarkPaid(inv: InvoiceListItem) {
+  if (!confirm(t('invoice.phone.mark_paid_confirm', { number: rowNumber(inv) }))) return
+  const sendThanks = thanksEnabled.value && confirm(t('invoice.phone.thanks_confirm'))
+  rowBusyId.value = inv.id
+  try {
+    await invoicesApi.markPaid(inv.id, appIsoDate(), sendThanks ? { sendThanks: true, thanksTrigger: 'manual' } : undefined)
+    markRowsTouched('invoice', [inv.id])
+    toast.success(t('invoice.phone.mark_paid_done', { number: rowNumber(inv) }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.phone.mark_paid_failed'))
+  } finally {
+    rowBusyId.value = null
+  }
+}
 
 // Hromadná upomínka — jen běžné faktury (ne proforma/dobropis/storno) ve stavu issued/sent/reminded,
 // po splatnosti a placené bankovním převodem (kartové/hotovostní úhrady se neupomínají).
@@ -707,7 +789,7 @@ async function bulkIssue() {
     toast.warning(t('invoice.bulk_issue_no_eligible'))
     return
   }
-  if (!confirm(t('invoice.bulk_issue_confirm', { n: list.length }))) return
+  if (!confirm(bulkIssueConfirmMessage(list, t))) return
   bulkBusy.value = true
   let okCount = 0
   const errors: string[] = []
@@ -731,6 +813,25 @@ async function bulkIssue() {
   } finally {
     bulkBusy.value = false
   }
+}
+
+// Hromadné dimenze — koncepty i vystavené a zaúčtované doklady, stejné právo jako panel
+// Dimenze na detailu (účetnictví, zápis). Co server odmítne, vrátí v souhrnu s důvodem.
+const bulkDimsOpen = ref(false)
+
+async function onBulkDimensionsDone(r: BulkDocumentDimensionsResult) {
+  bulkDimsOpen.value = false
+  markRowsTouched('invoice', r.updated)
+  const msg = bulkDimensionsSummary(r, t)
+  if (r.skipped.length || r.needs_repost.length) toast.warning(msg)
+  else toast.success(msg)
+  if (r.skipped.length === 0) selectedIds.value = []
+  else selectedIds.value = r.skipped.map(s => s.id)
+  await load()
+}
+
+function onBulkDimensionsFailed(e: any) {
+  toast.error(e?.response?.data?.error?.message || t('dimensions.bulk_failed'))
 }
 
 // Hromadné zaúčtování (A2) — jen podvojné účetnictví, jen nezaúčtované (booked_at NULL)
@@ -820,34 +921,7 @@ async function bulkSend() {
   }
 }
 
-function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup[] {
-  const byMonth = new Map<string, MonthGroup>()
-  for (const g of existing) byMonth.set(g.month, g)
-  for (const g of incoming) {
-    const cur = byMonth.get(g.month)
-    if (!cur) {
-      byMonth.set(g.month, g)
-      continue
-    }
-    cur.invoices.push(...g.invoices)
-    cur.count += g.count
-    // Merge totals_per_currency
-    for (const t of g.totals_per_currency) {
-      const found = cur.totals_per_currency.find(x => x.currency === t.currency)
-      if (found) {
-        found.without_vat = Math.round((found.without_vat + t.without_vat) * 100) / 100
-        found.vat         = Math.round((found.vat         + t.vat)         * 100) / 100
-        found.with_vat    = Math.round((found.with_vat    + t.with_vat)    * 100) / 100
-        found.draft_without_vat = Math.round((found.draft_without_vat + t.draft_without_vat) * 100) / 100
-        found.draft_vat         = Math.round((found.draft_vat         + t.draft_vat)         * 100) / 100
-        found.draft_with_vat    = Math.round((found.draft_with_vat    + t.draft_with_vat)    * 100) / 100
-      } else {
-        cur.totals_per_currency.push({ ...t })
-      }
-    }
-  }
-  return Array.from(byMonth.values())
-}
+const mergeGroups = (existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup[] => mergeMonthGroups(existing, incoming)
 
 let loadSeq = 0
 async function load(reset = true) {
@@ -926,6 +1000,7 @@ function listParams(): InvoiceListParams {
     date_from: dateFrom.value || undefined,
     date_to:   dateTo.value || undefined,
     currency:  currencyFilter.value || undefined,
+    cashflow_draft_unscheduled: cashflowDraftUnscheduled.value || undefined,
     overdue: overdueOnly.value || undefined,
     unpaid_only: unpaidOnly.value || undefined,
     unpaid_as_of: unpaidAsOf.value || undefined,
@@ -935,6 +1010,8 @@ function listParams(): InvoiceListParams {
       ? revenueCategoryIds.value : undefined,
     revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
       ? revenueCategoryIds.value : undefined,
+    dimension_value_id: dimensionValueIdsParam(dimensionValueIds.value),
+    dimension_descendants: dimensionValueIds.value.length ? dimensionDescendants.value : undefined,
     per_page: 50,
     sort_key: tbl.sort.value?.key,
     sort_dir: tbl.sort.value?.dir,
@@ -948,6 +1025,28 @@ function listParams(): InvoiceListParams {
     include_dimensions: tbl.isVisible('dimensions'),
   }
 }
+const invoiceBookUrl = (format: 'pdf' | 'xlsx') => invoicesApi.bookUrl(listParams(), format)
+const bulk = useListBulkActions({
+  target: 'invoice',
+  selectedIds,
+  listQuery: () => invoiceListFilterParams(listParams()),
+  total,
+})
+// Hromadné nahrání originálů PDF (párování podle čísla dokladu v názvu souboru).
+const originalPdfBulkOpen = ref(false)
+const canUploadOriginals = computed(() => auth.canWrite('invoices'))
+const headerActions = computed<ActionItem[]>(() => [
+  {
+    key: 'upload-originals',
+    label: t('invoice.original_pdf_bulk.action'),
+    icon: 'upload',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: canUploadOriginals.value,
+    run: () => { originalPdfBulkOpen.value = true },
+  },
+  bulk.menuItem.value,
+])
 const listNav = useListNavigationSource('invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -962,6 +1061,8 @@ const DEFAULT_YEAR: number | '' = ''
 const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'invoice.varsymbol_label', required: true },
   { key: 'client', labelKey: 'invoice.client_project' },
+  { key: 'client_ic', labelKey: 'common.ic', defaultHidden: true },
+  { key: 'client_dic', labelKey: 'common.dic', defaultHidden: true },
   { key: 'type', labelKey: 'invoice.type' },
   { key: 'issued', labelKey: 'invoice.tax_date' },
   { key: 'due', labelKey: 'invoice.due_date' },
@@ -1025,6 +1126,8 @@ function extraFieldValue(inv: InvoiceListItem, key: string): string {
 }
 function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    client_ic: inv.client_ic || '—',
+    client_dic: inv.client_dic || '—',
     country: inv.country || '—',
     vat_classification: inv.vat_classification_codes?.join(', ') || '—',
     vat_return_lines: inv.vat_return_lines?.join(', ') || '—',
@@ -1113,6 +1216,8 @@ onMounted(async () => {
   }).catch(() => {})
   // Včetně archivovaných — visí na starých fakturách (viz revenueCategoryOptions).
   revenueCategoriesApi.list(true).then(r => { revenueCategories.value = r }).catch(() => {})
+  // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
+  dimensions.load().catch(() => { /* chip ukáže #id */ })
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   await hydrateFilters(route.query)
 })
@@ -1121,6 +1226,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   statusFilter.value = typeof q.status === 'string' ? q.status : ''
   typeFilter.value   = typeof q.type === 'string' ? q.type : ''
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
+  cashflowDraftUnscheduled.value = q.cashflow_draft_unscheduled === '1' || q.cashflow_draft_unscheduled === 'true'
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
   unpaidAsOf.value   = typeof q.unpaid_as_of === 'string' ? q.unpaid_as_of : ''
@@ -1135,7 +1241,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // jako u „nezaúčtováno".
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
+    : ((cashflowDraftUnscheduled.value || overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -1149,6 +1255,8 @@ function loadFiltersFromQuery(q: typeof route.query) {
   revenueCategoryMode.value = rcExclude !== '' ? 'exclude' : 'include'
   const rcRaw = rcExclude !== '' ? rcExclude : rcInclude
   revenueCategoryIds.value = rcRaw ? rcRaw.split(',').map(v => v.trim()).filter(v => v !== '') : []
+  dimensionValueIds.value = parseDimensionValueIds(q.dimension_value_id)
+  dimensionDescendants.value = q.dimension_descendants !== '0'
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
@@ -1162,6 +1270,7 @@ function buildQuery(): Record<string, string> {
   if (dateFrom.value) q.from = dateFrom.value
   if (dateTo.value) q.to = dateTo.value
   if (currencyFilter.value) q.currency = currencyFilter.value
+  if (cashflowDraftUnscheduled.value) q.cashflow_draft_unscheduled = '1'
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
   if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
@@ -1170,6 +1279,10 @@ function buildQuery(): Record<string, string> {
   if (revenueCategoryIds.value.length) {
     const key = revenueCategoryMode.value === 'exclude' ? 'revenue_category_exclude' : 'revenue_category'
     q[key] = revenueCategoryIds.value.join(',')
+  }
+  if (dimensionValueIds.value.length) {
+    q.dimension_value_id = dimensionValueIdsParam(dimensionValueIds.value) as string
+    if (!dimensionDescendants.value) q.dimension_descendants = '0'
   }
   if (search.value) q.q = search.value
   return q
@@ -1201,8 +1314,8 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
-       revenueCategoryIds, revenueCategoryMode], () => {
+       cashflowDraftUnscheduled, overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
+       revenueCategoryIds, revenueCategoryMode, dimensionValueIds, dimensionDescendants], () => {
   if (suppressUrlSync) return
   syncFiltersToUrl()
   load(true)
@@ -1246,7 +1359,7 @@ const yearOptions = useYearOptions('invoices', yearFilter)
 // `rt()` zformátuje jednotlivé položky pole (pro případnou interpolaci).
 const monthOptions = computed(() => (tm('common.months_short') as unknown as string[]).map(m => rt(m)))
 useWindowRefresh(refreshLoadedPages,
-  () => !loading.value && !loadingMore.value && !bulkBusy.value && !bulkPdfOpen.value && !ossBulkOpen.value && !wrModalOpen.value && selectedIds.value.length === 0)
+  () => !loading.value && !loadingMore.value && !bulkBusy.value && !bulkPdfOpen.value && !ossBulkOpen.value && !wrModalOpen.value && !originalPdfBulkOpen.value && selectedIds.value.length === 0)
 </script>
 
 <template>
@@ -1255,14 +1368,14 @@ useWindowRefresh(refreshLoadedPages,
       <div>
         <h1 class="text-2xl font-semibold">{{ t('invoice.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">
-          {{ t('invoice.subtitle_grouping') }}
+          <span class="max-md:hidden">{{ t('invoice.subtitle_grouping') }}</span>
           <template v-if="!loading && total > 0">
-            <span class="ml-2 whitespace-nowrap">· {{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
+            <span class="md:ml-2 whitespace-nowrap"><span class="max-md:hidden">· </span>{{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
             <span v-if="total > loadedCount" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
           </template>
         </p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap justify-end">
+      <div class="flex items-center gap-2 flex-wrap justify-end max-md:w-full">
         <template v-if="clientFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
           <RouterLink :to="{ name: 'client-detail', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-detail">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
@@ -1273,10 +1386,18 @@ useWindowRefresh(refreshLoadedPages,
             {{ t('invoice.client_edit') }}
           </RouterLink>
         </template>
+        <InvoiceBookMenu
+          v-if="auth.canRead('invoices')"
+          :label="t('invoice.book_issued')"
+          :url-for="invoiceBookUrl"
+          fallback-filename="kniha-vystavenych-faktur"
+          class="max-md:-order-1"
+        />
+        <ActionBar v-if="bulk.canUse.value || canUploadOriginals" :actions="headerActions" data-test="invoice-more-actions" />
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
-          :class="btnFilled('primary')"
+          :class="[btnFilled('primary'), 'max-md:order-first max-md:flex-1 max-md:justify-center max-md:h-10']"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('invoice.new') }}
@@ -1325,26 +1446,12 @@ useWindowRefresh(refreshLoadedPages,
          řádky dole v tabulce, kdežto v hlavičce byly akce mimo zorné pole a
          navíc při každém výběru odsouvaly tlačítko „Nová faktura". -->
     <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
-        <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
-          @click="openBulkPdfExport"
-          :disabled="bulkBusy"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
-          {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
-        </button>
         <button v-if="(issuableSelected.length > 0) && auth.canWrite('invoices.issue')"
           @click="bulkIssue"
           :disabled="bulkBusy"
           :class="btnFilled('success')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_issue', { n: issuableSelected.length }) }}
-        </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.issue') && !auth.isClientRole"
-          @click="bulkReissue"
-          :disabled="bulkBusy"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
         </button>
         <button v-if="(markPayableSelected.length > 0) && auth.canWrite('invoices.mark_paid')"
           @click="bulkMarkPaid"
@@ -1367,13 +1474,6 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_reminder', { n: reminderSelected.length }) }}
         </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.create') && !auth.isClientRole"
-          @click="openBulkOss"
-          :disabled="bulkBusy"
-          :class="btnOutline('warning')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
-        </button>
         <button v-if="(postableSelected.length > 0) && auth.canWrite('accounting.journal.post') && !auth.isClientRole"
           @click="bulkPost"
           :disabled="bulkBusy"
@@ -1381,6 +1481,43 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_post', { n: postableSelected.length }) }}
         </button>
+        <button v-if="bulk.canUse.value" type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
+          data-test="invoice-bulk-open" @click="bulk.open">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+          {{ t('bulk_actions.menu') }}
+        </button>
+        <template #more>
+          <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
+            @click="openBulkPdfExport"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
+            {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.issue') && !auth.isClientRole"
+            @click="bulkReissue"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
+            {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.create') && !auth.isClientRole"
+            @click="openBulkOss"
+            :disabled="bulkBusy"
+            :class="btnOutline('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && dimensions.canEdit.value && !auth.isClientRole"
+            @click="bulkDimsOpen = true"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')"
+            class="whitespace-nowrap"
+            data-test="invoice-bulk-dimensions">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
+            {{ t('dimensions.bulk_button', { n: selectedIds.length }) }}
+          </button>
+        </template>
     </BulkActionBar>
 
     <!-- Filtry -->
@@ -1394,7 +1531,7 @@ useWindowRefresh(refreshLoadedPages,
       <template #primary>
         <!-- Hledání je nejpoužívanější prvek lišty, takže dostává nejvíc místa
              a ikonu lupy uvnitř — dřív bylo nejmenší z deseti ovládacích prvků. -->
-        <div class="relative flex-1 min-w-56">
+        <div class="relative flex-1 min-w-56 max-md:min-w-0 max-md:basis-full">
           <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
@@ -1403,7 +1540,7 @@ useWindowRefresh(refreshLoadedPages,
             v-model="search"
             type="search"
             :placeholder="t('invoice.search_placeholder')"
-            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
           />
         </div>
       </template>
@@ -1506,11 +1643,17 @@ useWindowRefresh(refreshLoadedPages,
           <option value="oss">{{ t('invoice.oss_review_scope.oss') }}</option>
           <option value="domestic">{{ t('invoice.oss_review_scope.domestic') }}</option>
         </select>
+        <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
+        <div v-if="dimensions.enabled.value" class="basis-full flex flex-col gap-1" data-test="invoice-dimension-filter">
+          <DimensionReportFilters :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+            @update:value-ids="dimensionValueIds = $event" @update:descendants="dimensionDescendants = $event" />
+          <p class="text-xs text-neutral-500">{{ t('dimensions.document_filter_hint') }}</p>
+        </div>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
-        <button type="button" :class="btnOutline('neutral')" @click="toggleGrouping">
+        <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-          {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
+          <span class="max-md:hidden">{{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}</span><span class="hidden max-md:inline">{{ groupByMonth ? t('invoice.view_continuous_short') : t('invoice.view_monthly') }}</span>
         </button>
         <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
         <TableColorsMenu :ctrl="tbl" :colors="colors" />
@@ -1633,6 +1776,8 @@ useWindowRefresh(refreshLoadedPages,
                   <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.client_company_name">{{ inv.client_company_name }}</div>
                   <div v-if="inv.project_name" class="text-xs text-neutral-500 truncate max-w-md">{{ inv.project_name }}</div>
                 </td>
+                <td v-else-if="c.key === 'client_ic'" :data-custom-color="!!colors.color('client_ic')" :style="colors.cellStyle('client_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.client_ic || '—' }}</td>
+                <td v-else-if="c.key === 'client_dic'" :data-custom-color="!!colors.color('client_dic')" :style="colors.cellStyle('client_dic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.client_dic || '—' }}</td>
                 <td v-else-if="c.key === 'type'" :data-custom-color="!!colors.color('type')" :style="colors.cellStyle('type')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
                 <td v-else-if="c.key === 'issued'" :data-custom-color="!!colors.color('issued')" :style="colors.cellStyle('issued')" class="px-3 py-2.5 text-center text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
@@ -1771,7 +1916,7 @@ useWindowRefresh(refreshLoadedPages,
                         <template v-else>
                         <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </template>
                       </tr>
@@ -1798,14 +1943,16 @@ useWindowRefresh(refreshLoadedPages,
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <WorkspaceDragHandle />
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(inv.id)"
-                @change="toggleSelected(inv.id)"
-                @click.stop
-                class="mt-0.5 w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-              />
+              <!-- Telefon: dotyková plocha 44 px kolem zaškrtávátka (vizuálně beze změny). -->
+              <label class="flex shrink-0 max-md:-m-3 max-md:p-3 max-md:cursor-pointer" data-test="invoice-card-select" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(inv.id)"
+                  @change="toggleSelected(inv.id)"
+                  @click.stop
+                  class="mt-0.5 w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                />
+              </label>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
                   <div class="font-medium text-neutral-900 truncate" :data-custom-color="!!colors.color('client')" :style="colors.cellStyle('client')">{{ inv.client_company_name }}</div>
@@ -1854,7 +2001,7 @@ useWindowRefresh(refreshLoadedPages,
                     <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — stejně jako v desktop tabulce. -->
                     <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite('invoices')"
                       @click="openWorkReport(inv.id)"
-                      class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
+                      class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1 max-md:min-h-9 max-md:px-3"
                       :title="t('invoice.wr_btn')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6m3 6v-4m3 4v-2"/></svg>
                       {{ t('invoice.wr_btn') }}
@@ -1862,6 +2009,10 @@ useWindowRefresh(refreshLoadedPages,
                     <span v-else class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ statusLabel(inv.status) }}
                     </span>
+                    <div v-if="isPhone && rowMenuActions(inv).some(a => a.show)" data-test="invoice-card-menu"
+                      class="[&_[aria-haspopup=menu]]:w-10 [&_[aria-haspopup=menu]]:h-10">
+                      <RowActionsMenu :inline-count="0" :actions="rowMenuActions(inv)" />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1916,6 +2067,13 @@ useWindowRefresh(refreshLoadedPages,
         </div>
       </div>
     </div>
+
+    <BulkActionsDialog v-if="bulk.dialog.value" target="invoice"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="load()" />
+    <BulkDimensionsModal v-if="bulkDimsOpen" :ids="selectedIds"
+      @close="bulkDimsOpen = false" @done="onBulkDimensionsDone" @failed="onBulkDimensionsFailed" />
 
     <!-- Hromadné nastavení OSS — dvoufázové: náhled, teprve pak provedení (OSS-7) -->
     <div v-if="ossBulkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
@@ -2101,5 +2259,6 @@ useWindowRefresh(refreshLoadedPages,
       v-model="wrModalOpen"
       :invoice-id="wrModalInvoiceId"
       @saved="load(true)" />
+    <OriginalPdfBulkUploadModal v-if="originalPdfBulkOpen" @close="originalPdfBulkOpen = false" />
   </div>
 </template>

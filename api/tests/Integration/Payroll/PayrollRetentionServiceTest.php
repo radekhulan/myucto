@@ -496,6 +496,32 @@ final class PayrollRetentionServiceTest extends TestCase
         );
     }
 
+    public function testManualWorkSummaryHasTheSameRetentionAsAttendance(): void
+    {
+        $this->ageEmployee($this->employeeId, 2025);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source)
+             VALUES (?, ?, ?, ?)'
+        )->execute([$this->supplierId, $this->employmentId, '2025-01-01', 'manual_summary']);
+        $monthId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_time_month_manual_summaries
+                (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start,
+                 content_sha256, reason, created_by)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId, $monthId, $this->employmentId, '2025-01-01',
+            str_repeat('a', 64), 'Syntetický doložený souhrn', $this->userId,
+        ]);
+
+        $assessment = $this->assessmentFor($this->employeeId);
+        $working = $this->categoryOf($assessment, PayrollRetentionCatalog::WORKING_TIME);
+        self::assertSame(10, $working['years']);
+        self::assertSame('2035-12-31', $working['retained_until']);
+        self::assertFalse($assessment->isProposable());
+    }
+
     /**
      * Neurčená kategorie pořád existuje — spis k exekučním srážkám. Zákon pro něj
      * lhůtu nemá (ověřeno negativně v OSŘ i v exekučním řádu), takže osobu drží,

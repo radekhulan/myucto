@@ -235,6 +235,31 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Daňový doklad k platbě DPP25005 sdílí číslice s licencí FP25005 a je v záloze dřív.
+     * Samovyměření „RCH k FP25005" si nesmí vzít podle číslic: doklad by ztratil vlastní
+     * odpočet 210 Kč a stal se přenesenou povinností s datem a základem cizí faktury.
+     */
+    public function testSelfAssessmentNamingAnotherDocumentIsNotTakenByDigits(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/dpp.lz', SyntheticAgenda::filesWithTaxDocumentSharingSelfAssessmentDigits());
+        $backup = Ms3Backup::extract($this->tmp . '/dpp.lz', $this->tmp . '/dpp');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT p.varsymbol, p.reverse_charge, p.tax_date, p.total_vat, p.status
+               FROM purchase_invoices p WHERE p.supplier_id = ? AND p.varsymbol IN ('DPP25005', 'FP25005') ORDER BY p.varsymbol"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame([['DPP25005', 0, '2025-07-12', '210.00', false], ['FP25005', 1, '2025-07-10', '0.00', false]],
+            array_map(static fn (array $r): array => [$r[0], (int) $r[1], (string) $r[2], (string) $r[3], $r[4] === 'draft'], $stmt->fetchAll(PDO::FETCH_NUM)),
+            $this->explain($protocol));
+        $july = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 7, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(210.0, (float) ($july['5']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
+    /**
      * Faktura s příznakem přenesené povinnosti bez interního dokladu se samovyměřením
      * nesmí projít jako plnění bez daně (ř. 40 s nulovou daní) — jde do konceptu.
      */
@@ -291,6 +316,27 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         self::assertSame(0, $this->rowCount('invoices', $supplierId, "varsymbol <> 'FV25002' AND reverse_charge = 1"));
         $august = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 8, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(1000.0, (float) ($august['25']['base'] ?? 0), 0.005, json_encode($august, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
+    /** `19Ř26`: tuzemský odběratel = § 71i, zahraniční = služba s místem plnění mimo tuzemsko. */
+    public function testLine26SplitsByCustomerCountry(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/r26.lz', SyntheticAgenda::filesWithOtherSupplyLine26());
+        $backup = Ms3Backup::extract($this->tmp . '/r26.lz', $this->tmp . '/r26');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        foreach (['FV25026' => '71i', 'FV25027' => '26s'] as $number => $code) {
+            self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = '{$number}' AND vat_classification_code = '{$code}' AND status <> 'draft'"), $number . ' ' . $this->explain($protocol));
+            $items = $this->db->pdo()->prepare(
+                'SELECT DISTINCT ii.vat_classification_code FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                  WHERE i.supplier_id = ? AND i.varsymbol = ?');
+            $items->execute([$supplierId, $number]);
+            self::assertSame([$code], $items->fetchAll(PDO::FETCH_COLUMN), $number);
+        }
+        $august = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 8, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(2000.0, (float) ($august['26']['base'] ?? 0), 0.005, 'Obě faktury na ř. 26.');
     }
 
     /**

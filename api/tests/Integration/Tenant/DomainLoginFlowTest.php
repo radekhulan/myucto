@@ -237,9 +237,11 @@ final class DomainLoginFlowTest extends TestCase
     {
         $context = new SessionAuthContext('passkey', 'strong', new \DateTimeImmutable(), $this->credentialId);
         $independent = $this->sessions->create($this->userId, '192.0.2.15', 'Independent canonical login', $context);
-        $temporary = $this->sessions->create($this->userId, '192.0.2.15', 'Temporary portal verification', $context);
         $verifier = self::opaqueToken();
         $flow = $this->start($verifier);
+        // Dočasné přihlášení vzniká až během toku. Založené před ním by bylo starší relací,
+        // která potřebuje potvrzení, a test by padal, kdykoli mezi kroky přeskočí sekunda.
+        $temporary = $this->sessions->create($this->userId, '192.0.2.15', 'Temporary portal verification', $context);
         $authorized = $this->login->authorize(
             $this->verifiedRequest($flow),
             $flow['request_token'],

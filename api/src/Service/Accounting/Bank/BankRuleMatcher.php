@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Bank;
 
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
 /**
  * Pure match logika pravidel účtování (§3.5, §4.1). Bez DB — jednotkově
  * testovatelné. Kritéria = AND přes VYPLNĚNÁ pole pravidla:
+ *   - bank_account_id — vlastní bankovní účet výpisu (id ze supplier_bank_accounts),
  *   - counterparty_account (+ counterparty_bank, je-li) — normalizované číslo účtu,
  *   - variable_symbol — číslice (VariableSymbolNormalizer::digits),
  *   - message_contains — substring v normalizované zprávě nebo jméně protistrany (BankMessageNormalizer),
+ *   - card_payment — 1 jen platba kartou, 0 jen pohyb bez karty ({@see isCardPayment()}),
  *   - amount_min/max — ABS(amount) v uzavřeném intervalu (porovnání v haléřích).
  *
  * Prázdná pole se ignorují; pravidlo bez jediného kritéria vynucuje CHECK/DB
@@ -23,6 +26,9 @@ final class BankRuleMatcher
     /** Pravidlo s prioritou pod touto hranicí má přednost před detektory (vlastní převod, odvody, karta). */
     public const DETECTOR_OVERRIDE_PRIORITY = 50;
 
+    /** Klíč pohybu s id vlastního bankovního účtu výpisu ({@see StatementOwnAccount::idFor()}). */
+    public const OWN_ACCOUNT = 'own_bank_account_id';
+
     /** @param array<string,mixed> $rule řádek bank_posting_rules */
     public static function overridesDetectors(array $rule): bool
     {
@@ -30,13 +36,34 @@ final class BankRuleMatcher
     }
 
     /**
+     * Pořadí pravidel při souběhu: nižší priorita, pak pravidlo omezené na vlastní účet
+     * před obecným. Pravidla se stejným pořadím jsou v souběhu, mezi nimi rozhoduje
+     * počet použití ({@see \MyInvoice\Repository\BankPostingRuleRepository::findActive()}).
+     *
+     * @param array<string,mixed> $rule
+     * @return array{int,int}
+     */
+    public static function rank(array $rule): array
+    {
+        return [(int) ($rule['priority'] ?? 100), (int) ($rule['bank_account_id'] ?? 0) > 0 ? 0 : 1];
+    }
+
+    /**
      * @param array<string,mixed> $rule řádek bank_posting_rules
      * @param array{amount:float|int|string, variable_symbol?:?string,
      *              counterparty_account?:?string, counterparty_bank?:?string,
-     *              description?:?string, counterparty_name?:?string} $tx
+     *              description?:?string, counterparty_name?:?string, card_last4?:?string,
+     *              own_bank_account_id?:?int} $tx
      */
     public function matching(array $rule, array $tx): bool
     {
+        // Vlastní bankovní účet výpisu ({@see StatementOwnAccount}). Volající, který účet
+        // výpisu nezná, klíč nepředá a pravidlo omezené na účet se nepoužije.
+        $ruleOwnAccount = (int) ($rule['bank_account_id'] ?? 0);
+        if ($ruleOwnAccount > 0 && (int) ($tx[self::OWN_ACCOUNT] ?? 0) !== $ruleOwnAccount) {
+            return false;
+        }
+
         // counterparty_account
         $ruleAccount = self::str($rule['counterparty_account'] ?? null);
         if ($ruleAccount !== null) {
@@ -88,6 +115,12 @@ final class BankRuleMatcher
             }
         }
 
+        // card_payment: 1 = jen platba kartou, 0 = jen pohyb bez karty, NULL = cokoli.
+        $ruleCard = $rule['card_payment'] ?? null;
+        if ($ruleCard !== null && $ruleCard !== '' && (int) $ruleCard !== (self::isCardPayment($tx) ? 1 : 0)) {
+            return false;
+        }
+
         // amount_min/max (ABS, haléře)
         $absCents = (int) round(abs((float) $tx['amount']) * 100.0);
         if ($rule['amount_min'] !== null && $absCents < (int) round((float) $rule['amount_min'] * 100.0)) {
@@ -98,6 +131,40 @@ final class BankRuleMatcher
         }
 
         return true;
+    }
+
+    /**
+     * Pole pohybu, která pravidlo porovnává, z řádku `bank_transactions`. Vlastní účet
+     * výpisu doplní {@see StatementOwnAccount::withOwnAccount()}.
+     *
+     * @param array<string,mixed> $tx
+     * @return array{amount:float, variable_symbol:?string, counterparty_account:?string,
+     *   counterparty_bank:?string, description:?string, counterparty_name:?string, card_last4:?string}
+     */
+    public static function txFields(array $tx): array
+    {
+        $text = static fn (string $key): ?string => ($tx[$key] ?? null) !== null ? (string) $tx[$key] : null;
+        return [
+            'amount'               => (float) $tx['amount'],
+            'variable_symbol'      => $text('variable_symbol'),
+            'counterparty_account' => $text('counterparty_account'),
+            'counterparty_bank'    => $text('counterparty_bank'),
+            'description'          => $text('description'),
+            'counterparty_name'    => $text('counterparty_name'),
+            'card_last4'           => $text('card_last4'),
+        ];
+    }
+
+    /**
+     * Platba kartou = pohyb s platnou koncovkou karty, stejně jako u párování karetních
+     * dokladů ({@see \MyInvoice\Service\Bank\StatementMatcher}). Pohyb bez klíče
+     * `card_last4` se bere jako pohyb bez karty.
+     *
+     * @param array<string,mixed> $tx
+     */
+    public static function isCardPayment(array $tx): bool
+    {
+        return CardNumberMask::isValidLast4(self::str($tx['card_last4'] ?? null));
     }
 
     private static function str(mixed $v): ?string

@@ -194,7 +194,10 @@ final class IdokladBankTransactionImporter
                 statement_date = GREATEST(statement_date, VALUES(statement_date))"
         )->execute([
             $ref, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
-            self::text($account['bank_code'] ?? null, 4), (string) $account['currency'], $date,
+            // Výpis nese jen český kód banky; zahraniční (sort code) by se oříznutím zkomolil.
+            \MyInvoice\Service\Bank\AccountNumberNormalizer::canonicalBankCode((string) ($account['bank_code'] ?? '')) === null
+                ? null : self::text($account['bank_code'] ?? null, 4),
+            (string) $account['currency'], $date,
         ]);
         $s = $pdo->prepare('SELECT id FROM bank_statements WHERE supplier_id = ? AND file_hash = ?');
         $s->execute([$supplierId, $hash]);

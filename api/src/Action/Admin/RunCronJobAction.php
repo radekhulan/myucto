@@ -88,6 +88,10 @@ final class RunCronJobAction
 
         $spawned = $this->spawnBackground($phpBin, $scriptPath, $logPath, $rootDir, $diag);
 
+        // ⚠️ Do auditu ani do odpovědi nepatří absolutní cesty (PHP, log, kořen
+        // webu): audit čte každý admin a ve spravovaném provozu jde o rozložení
+        // serveru provozovatele. Úplné cesty zůstávají jen v logu instalace výše.
+        $diag = self::withoutPaths((string) $diag);
         $this->logger->log(
             'admin.cron.run_now',
             (int) ($user['id'] ?? 0),
@@ -95,9 +99,8 @@ final class RunCronJobAction
             null,
             [
                 'script'   => $script,
-                'php_bin'  => $phpBin,
                 'spawned'  => $spawned,
-                'log_file' => $logPath,
+                'log_file' => basename($logPath),
                 'diag'     => $diag,
             ]
         );
@@ -109,9 +112,18 @@ final class RunCronJobAction
         return Json::ok($response, [
             'script'   => $script,
             'started'  => true,
-            'php_bin'  => $phpBin,
-            'log_file' => $logPath,
+            'log_file' => basename($logPath),
         ], 202);
+    }
+
+    /** Nahradí absolutní cesty (Windows i Unix) v diagnostickém textu jejich názvem souboru. */
+    public static function withoutPaths(string $text): string
+    {
+        return (string) preg_replace_callback(
+            '~(?:[A-Za-z]:[\\\\/]|/)[^\s()=,;"\']*~',
+            static fn (array $m): string => basename(str_replace('\\', '/', $m[0])),
+            $text,
+        );
     }
 
     /**

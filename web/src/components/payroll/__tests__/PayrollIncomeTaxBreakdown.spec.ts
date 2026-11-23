@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { PayrollRunResultPerson } from '@/api/payroll'
 
-vi.mock('vue-i18n', () => ({
+// Sdílené formátování (`useFormat`) táhne @/i18n se skutečným `createI18n`,
+// proto továrna původní modul rozprostírá a přepisuje jen `useI18n`.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     locale: ref('cs-CZ'),
     t: (key: string, params?: Record<string, unknown>) =>
@@ -175,6 +178,15 @@ describe('PayrollIncomeTaxBreakdown', () => {
     expect(bonus.text()).toContain('payroll.runs.tax.bonus_eligibility.eligible')
     expect(bonus.text()).toContain('11 200')
     expect(bonus.text()).toContain('50')
+  })
+
+  it('datum výpočtu daně píše česky, ne ve tvaru ISO', () => {
+    const wrapper = mount(PayrollIncomeTaxBreakdown, {
+      props: { people: fixture(), personNames: { 31: 'Syntetická osoba' } },
+    })
+
+    expect(wrapper.text()).toContain('31. 08. 2026')
+    expect(wrapper.text()).not.toContain('2026-08-31')
   })
 
   it('vysvětlí nulový měsíční bonus příjmem pod hranicí', () => {

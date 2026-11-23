@@ -96,10 +96,10 @@ final class MoneyS3BatchImporter
             if ($ico === '') {
                 throw new MoneyS3Exception('agenda_ico_missing', 'Záloha nenese IČO firmy, dávka ji k firmě nepřiřadí. Převeďte ji průvodcem jedné firmy.');
             }
-            if ($agenda->taxRecordsOnly()) {
-                // Agenda vede v Money jen daňovou evidenci → převod nemá co převést, skončit chybou
-                // ještě před založením firmy.
-                throw new MoneyS3Exception('tax_records_not_supported', AgendaInfo::TEXT_TAX_RECORDS_NOT_SUPPORTED);
+            $conflict = $agenda->taxRecordsAfterDoubleEntry();
+            if ($conflict !== null) {
+                // Převod by firmu přepnul do podvojného účetnictví i pro roky daňové evidence.
+                throw new MoneyS3Exception('tax_records_after_double_entry', AgendaInfo::textTaxRecordsAfterDoubleEntry($conflict));
             }
 
             $existing = $this->companies->findExisting($ico, $actor->allowedSupplierIds);
@@ -124,7 +124,7 @@ final class MoneyS3BatchImporter
             }
 
             $perYear = FiledDppoFiling::latestPerYear($filings, $ico, static fn (array $e): string => (string) ($e['file'] ?? ''));
-            $fromYear = $this->fromYear($backup, $options, $targetId);
+            $fromYear = $this->fromYear($backup, $options, $targetId, $relink);
             $summary['from_year_auto'] = $options->fromYear === MoneyS3BatchOptions::FROM_YEAR_AUTO;
             $summary['filings_available'] = array_keys($perYear);
 
@@ -161,6 +161,7 @@ final class MoneyS3BatchImporter
                     $options->disposalYearTax,
                     false,
                     $relink,
+                    is_int($options->toYear) ? $options->toYear : null,
                 );
                 [$protocol, $runId] = $this->runImport($targetId, $actor->userId, $backup, $lzPath, $agenda, $importOptions, $jobId, $progress, $cancel);
                 $result = $protocol->toArray();
@@ -247,11 +248,15 @@ final class MoneyS3BatchImporter
     }
 
     /** Rok = label účetního období firmy; nově zakládaná firma vede kalendářní rok. */
-    private function fromYear(Ms3Backup $backup, MoneyS3BatchOptions $options, ?int $targetId): ?int
+    private function fromYear(Ms3Backup $backup, MoneyS3BatchOptions $options, ?int $targetId, bool $relink): ?int
     {
         if ($options->fromYear === MoneyS3BatchOptions::FROM_YEAR_AUTO) {
             $calendar = $targetId !== null ? $this->journal->companyCalendar($targetId) : null;
-            return JournalImporter::suggestedFromYear($this->journal->chainBreaks($backup, new ImportOptions(), $calendar));
+            // Navazování se posuzuje jen v převáděných letech: rok za horní hranicí (rok, který
+            // firma už účtuje v MyÚčtu) volbu „od roku" neposune.
+            $toYear = is_int($options->toYear) ? $options->toYear
+                : ($targetId !== null ? $this->importer->effectiveToYear($targetId, $backup, new ImportOptions(relinkOnly: $relink)) : null);
+            return JournalImporter::suggestedFromYear($this->journal->chainBreaks($backup, new ImportOptions(toYear: $toYear), $calendar));
         }
         return is_int($options->fromYear) ? $options->fromYear : null;
     }

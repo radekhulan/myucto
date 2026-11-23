@@ -398,12 +398,23 @@ final class DeferredTax504Test extends TestCase
         $fx = $closing->fxPreview($this->supplier, $this->period);
         $closing->runFxRevaluation($this->supplier, $this->period, [], $this->version(), [], ['snapshot_hash' => $fx['snapshot_hash']]);
         $count = $this->journalCount();
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertFalse($state['can_close'], 'Průvodce nesmí nabízet uzavření, které server odmítne.');
+        self::assertContains('deferred_tax_assessment', $state['close_blockers']);
         try { $closing->closeBooks($this->supplier, $this->period, $this->version()); self::fail('Prior-year assessment allowed closing next books.'); }
         catch (ClosingException $e) { self::assertSame('deferred_tax_assessment_required', $e->errorCode); }
         self::assertSame($count, $this->journalCount());
         $deferred->run($this->supplier, $this->period, $this->body(), $this->version());
         $deferred->run($this->supplier, $this->period, $this->body(), $this->version());
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertNotContains('deferred_tax_assessment', $state['close_blockers']);
+        self::assertSame(['nonprofit_tax_assessment'], $state['close_blockers']);
+        self::assertFalse($state['can_close']);
         \MyInvoice\Tests\Support\NonprofitTaxAssessmentFixture::confirm($container, $this->supplier, $this->period, (int) $this->db->pdo()->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn());
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertSame([], $state['close_blockers']);
+        self::assertTrue($state['can_close']);
+        self::assertFalse($state['precheck_stale'], 'Posouzení potvrzená po předběžných kontrolách snímek nezastarají.');
         self::assertSame(0.0, $closing->closeBooks($this->supplier, $this->period, $this->version())['profit']);
     }
 
@@ -519,6 +530,59 @@ final class DeferredTax504Test extends TestCase
         return \MyInvoice\Service\Accounting\Closing\DeferredTax504Proof::forPending($this->db, $container->get(\MyInvoice\Repository\JournalEntryRepository::class), $this->supplier, $this->period, $this->version());
     }
 
+    /**
+     * Nové spuštění kroku Zásoby přepíše skladový slot (nové řádky deníku, nová id). Otisk
+     * podkladů odložené daně se počítá z obsahu, takže potvrzené rozhodnutí při stejných
+     * částkách platí dál; změna částky ho zneplatní.
+     */
+    public function testStockRerunWithSameAmountsKeepsDeferredDecisionCurrent(): void
+    {
+        $service = Bootstrap::buildContainer()->get(DeferredTax504Service::class);
+        $this->postIncome('100.00');
+        $this->postStock('40.00');
+        $service->run($this->supplier, $this->period, $this->body(), $this->version());
+        self::assertTrue($service->closingCheck($this->supplier, $this->period)['complete']);
+        $lines = $this->stockLineIds();
+        $this->postStock('40.00');
+        self::assertNotSame($lines, $this->stockLineIds(), 'Přepis slotu musí vytvořit nové řádky deníku.');
+        self::assertTrue($service->closingCheck($this->supplier, $this->period)['complete']);
+        $this->postStock('41.00');
+        self::assertFalse($service->closingCheck($this->supplier, $this->period)['complete']);
+    }
+
+    /** Rozhodnutí potvrzené s původním otiskem nad id řádků zůstane platné, dokud se podklady nezmění. */
+    public function testLegacyIdBasedSourceHashStaysValid(): void
+    {
+        $service = Bootstrap::buildContainer()->get(DeferredTax504Service::class);
+        $this->postIncome('100.00');
+        $body = $this->body();
+        $body['source_hash'] = \MyInvoice\Service\Accounting\Closing\DeferredTax504Repository::legacySourceHash($this->db, $this->supplier, $this->period);
+        self::assertNotSame($this->body()['source_hash'], $body['source_hash']);
+        $service->run($this->supplier, $this->period, $body, $this->version());
+        self::assertTrue($service->closingCheck($this->supplier, $this->period)['complete']);
+        $this->postIncome('10.00');
+        self::assertFalse($service->closingCheck($this->supplier, $this->period)['complete']);
+    }
+
+    private function postStock(string $amount): void
+    {
+        $origins = array_map(static fn (): array => ['origin' => 'explicit', 'ref' => 'synthetic-test'], $this->dimensions);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'closing',
+            \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->period),
+            [['account_code' => '112', 'side' => 'debit', 'amount' => $amount],
+             ['account_code' => '501', 'side' => 'credit', 'amount' => $amount, 'dimensions' => $this->dimensions, 'dimension_origins' => $origins]],
+            ['entry_date' => '2097-06-30', 'posted' => true, 'allow_closing_period' => true]);
+    }
+
+    /** @return list<int> */
+    private function stockLineIds(): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT l.id FROM journal_entry_lines l JOIN journal_entries e ON e.id = l.entry_id
+            WHERE e.supplier_id = ? AND e.source_type = 'closing' AND e.source_id = ? ORDER BY l.id");
+        $stmt->execute([$this->supplier, \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->period)]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
     private function postIncome(string $amount): void
     {
         Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'manual', null,
@@ -628,7 +692,10 @@ final class DeferredTax504Test extends TestCase
         $after = $deferred->preview($this->supplier, $this->period)['source_hash'];
         self::assertNotSame($before, $after);
         $j6 = $container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentService::class)->read($this->supplier, $this->period)['snapshot'];
-        self::assertSame($j6['input_hash'], $after);
+        $content = new \MyInvoice\Service\Accounting\Closing\DeferredTax504SourceContent();
+        $content->add($j6['sources'], $j6['findings']);
+        self::assertSame($content->finish(\MyInvoice\Service\Accounting\Closing\DeferredTax504SourceContent::snapshotHeader($j6)), $after);
+        self::assertSame($j6['input_hash'], \MyInvoice\Service\Accounting\Closing\DeferredTax504Repository::legacySourceHash($this->db, $this->supplier, $this->period));
         self::assertSame(-10001, $j6['accounting_result_cents']);
         self::assertSame([], $j6['findings']);
         self::assertSame([], $deferred->run($this->supplier, $this->period, $this->body(), $this->version())['entry_ids']);

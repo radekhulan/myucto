@@ -28,6 +28,9 @@ require __DIR__ . '/../vendor/autoload.php';
 // naopak nevadí. Regenerace: průnik `createMock|createStub|createPartialMock|
 // createConfiguredMock|getMockBuilder` v `tests/` s `final class` v `src/`.
 \DG\BypassFinals::allowPaths([
+    '*/api/src/Infrastructure/Database/ReadOnlySnapshot.php',
+    '*/api/src/Service/ActivityLogHashChain.php',
+    '*/api/src/Service/Nonprofit/Membership/MembershipContactErasure.php',
     '*/api/src/Repository/BankEmailNoticeRepository.php',
     '*/api/src/Service/Bank/EmailNotice/Parser/BankEmailNoticeParserRepository.php',
     '*/api/src/Service/Migration/Myucto/MyuctoExportReader.php',
@@ -72,6 +75,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Security/CrossSupplierAuthorization.php',
     '*/api/src/Service/Bank/Connector/CsasApiClient.php',
     '*/api/src/Service/Bank/Connector/CsasCredentialVault.php',
+    '*/api/src/Service/Bank/Connector/CsasSiblingAccountLinker.php',
     '*/api/src/Service/Bank/Connector/KbPlusApiClient.php',
     '*/api/src/Service/Bank/Connector/KbPlusCredentialVault.php',
     '*/api/src/Service/Bank/Connector/KbPlusRegistrationClient.php',
@@ -79,6 +83,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/BankPaymentOrderSubmissionRepository.php',
     '*/api/src/Repository/PaymentOrderRepository.php',
     '*/api/src/Repository/AccountingModeRepository.php',
+    '*/api/src/Service/Accounting/EntryForm/EntryFormService.php',
     '*/api/src/Repository/ClosingRepository.php',
     '*/api/src/Repository/EmailProfileRepository.php',
     '*/api/src/Repository/EmailTemplateRepository.php',
@@ -254,6 +259,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/AccountingPeriodRepository.php',
     '*/api/src/Service/Accounting/Card/CardClearingRegime.php',
     '*/api/src/Service/Accounting/Vat/VatClearingService.php',
+    '*/api/src/Service/Report/VatCrossCheckService.php',
     '*/api/src/Repository/TaxSubmissionRepository.php',
     '*/api/src/Repository/AccountingSupplierSettingsRepository.php',
     '*/api/src/Service/Validation/XmlSchemaValidator.php',

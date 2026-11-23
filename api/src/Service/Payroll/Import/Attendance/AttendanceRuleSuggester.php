@@ -50,9 +50,21 @@ final class AttendanceRuleSuggester
         ['/prescas/', 'overtime_hours', null],
         ['/sluzebni cest|pracovni cest/', 'business_trip_hours', null],
         ['/home ?office|prace z domova/', 'home_office_hours', null],
+        ['/odpracovan\w* dn|dny odprac|pocet dnu|^dny$|^odpracovane dny$/', 'worked_days', null],
         ['/prace celkem|odprac|^prace$/', 'worked_hours', null],
         ['/^hodiny$|^hodin$|pocet hodin|hodiny celkem/', 'reference_hours', null],
     ];
+
+    /**
+     * Údaje osoby, které vlastní sešit firmy pojmenuje stejně jako šablona
+     * Vzoru MyÚčto (sazba, konec dohody, účet a údaje pro registraci ČSSZ).
+     * Hlavičky se berou ze seznamu sloupců šablony, aby návrh a šablona
+     * zůstaly jedním zdrojem ({@see AttendanceMyUctoSampleProfile::columns()}).
+     */
+    private const TEMPLATE_MEANINGS = ['hourly_rate', 'end_date', 'bank_account', ...AttendanceMeaning::REGISTRATION];
+
+    /** @var list<array{0:string,1:string}>|null vzor hlavičky, význam */
+    private static ?array $templatePatterns = null;
 
     /** @return array{meaning:string,component_code:?string} */
     public function suggest(string $header): array
@@ -61,6 +73,11 @@ final class AttendanceRuleSuggester
         if ($normalized === '') {
             return ['meaning' => AttendanceMeaning::IGNORE, 'component_code' => null];
         }
+        foreach (self::templatePatterns() as [$pattern, $meaning]) {
+            if (AttendanceRules::like($pattern, $normalized)) {
+                return ['meaning' => $meaning, 'component_code' => null];
+            }
+        }
         foreach (self::PATTERNS as [$pattern, $meaning, $component]) {
             if (preg_match($pattern . 'u', $normalized) === 1) {
                 return ['meaning' => $meaning, 'component_code' => $component];
@@ -68,6 +85,24 @@ final class AttendanceRuleSuggester
         }
 
         return ['meaning' => AttendanceMeaning::IGNORE, 'component_code' => null];
+    }
+
+    /** @return list<array{0:string,1:string}> */
+    private static function templatePatterns(): array
+    {
+        if (self::$templatePatterns === null) {
+            self::$templatePatterns = [];
+            foreach (AttendanceMyUctoSampleProfile::columns() as $column) {
+                if (!in_array($column['meaning'], self::TEMPLATE_MEANINGS, true)) {
+                    continue;
+                }
+                foreach ($column['patterns'] as $pattern) {
+                    self::$templatePatterns[] = [$pattern, $column['meaning']];
+                }
+            }
+        }
+
+        return self::$templatePatterns;
     }
 
     public function isPersonHeader(string $header): bool

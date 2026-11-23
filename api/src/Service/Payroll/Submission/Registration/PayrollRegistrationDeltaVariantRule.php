@@ -47,10 +47,13 @@ final class PayrollRegistrationDeltaVariantRule
     /**
      * Cesty v deltě, které varianta nesmí nést.
      *
+     * Datum skončení `employment.end_on` (10224) smí nést i A4-10 a A4-SPEC
+     * ({@see PayrollRegistrationRegisteredEnd::allowsEndOn()}).
+     *
      * @param array<string,mixed> $delta
      * @return list<string>
      */
-    public static function forbiddenPaths(string $variant, array $delta): array
+    public static function forbiddenPaths(string $variant, array $delta, int $actionCode): array
     {
         $result = [];
         foreach (self::FORBIDDEN_KEYS[$variant] ?? [] as $key) {
@@ -67,6 +70,9 @@ final class PayrollRegistrationDeltaVariantRule
             $result[] = 'facts.highest_education_code';
         }
         $allowed = self::EMPLOYMENT_ALLOWED[$variant] ?? null;
+        if ($allowed !== null && PayrollRegistrationRegisteredEnd::allowsEndOn($actionCode, $variant)) {
+            $allowed[] = 'end_on';
+        }
         if ($allowed !== null && is_array($delta['employment'] ?? null)) {
             foreach (array_keys($delta['employment']) as $field) {
                 if (!in_array($field, $allowed, true)) {

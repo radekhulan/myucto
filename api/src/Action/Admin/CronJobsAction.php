@@ -244,7 +244,9 @@ final class CronJobsAction
             // režimu plánování: ty nejsou neaktivní, jen se plánují jinak.
             'inactive'    => $inactive,
             'server_time' => date('c'),
-            'install'     => $this->installContext(),
+            // Návod k naplánování úloh nese cesty serveru. Ve spravovaném provozu
+            // úlohy plánuje provozovatel a jeho rozložení serveru nájemníkovi nepatří.
+            'install'     => $gate->isManagedInstallation() ? null : $this->installContext(),
             'schedule'    => $this->scheduleContext($pdo) + [
                 // Stejné pravidlo jako kontrola prostředí: stojí-li plánovač,
                 // je to jeden problém, ne seznam zaseklých úloh.

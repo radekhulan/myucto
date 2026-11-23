@@ -25,14 +25,20 @@ vi.mock('@/stores/auth', () => ({
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
-vi.mock('vue-i18n', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) =>
-      params ? `${key}:${JSON.stringify(params)}` : key,
-    locale: ref('cs-CZ'),
-  }),
-}))
+vi.mock('vue-i18n', async (importOriginal) => {
+  const original = await importOriginal<typeof import('vue-i18n')>()
+  const { default: cs } = await import('@/i18n/cs.json')
+  const { te } = original.createI18n({ legacy: false, locale: 'cs', messages: { cs } }).global
+  return {
+    ...original,
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, unknown>) =>
+        params ? `${key}:${JSON.stringify(params)}` : key,
+      te,
+      locale: ref('cs-CZ'),
+    }),
+  }
+})
 
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 
@@ -172,6 +178,22 @@ function mountCards(period = '2026-08') {
 }
 
 describe('PayrollEmployeeCards', () => {
+  it('přeloží hodinové blokace a neznámou blokaci popíše neutrálně', async () => {
+    m.employeeCards.mockResolvedValue(cardMonth([row({ blockers: [
+      'base_conflict', 'hourly_time_missing', 'hourly_minimum_time_missing', 'unknown_blocker',
+    ] })]))
+    const wrapper = mountCards()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.base_conflict')
+    expect(wrapper.text()).toContain('payroll.hourly_preview.blockers.hourly_time_missing')
+    expect(wrapper.text()).toContain('payroll.hourly_preview.blockers.hourly_minimum_time_missing')
+    expect(wrapper.text()).toContain('payroll.quick_inputs.blocker_unknown')
+    expect(wrapper.text()).not.toContain('payroll.quick_inputs.blockers.hourly_')
+    expect(wrapper.text()).not.toContain('unknown_blocker')
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(false)

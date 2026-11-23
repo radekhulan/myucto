@@ -80,7 +80,7 @@ final class PayrollOvertimeLimitService
         }
         $limits = $this->averagingLimits($supplierId, $this->rules->forDate($periodStart), $periodStart);
         $from = self::historyStart($periodStart, $periodEnd, $limits);
-        $segments = $this->repository->segmentsForMany(
+        $evidence = $this->repository->segmentsAndManualMonthsForMany(
             $supplierId,
             $employmentIds,
             $from,
@@ -102,7 +102,7 @@ final class PayrollOvertimeLimitService
                 $employmentId,
                 $periodStart,
                 $periodEnd,
-                $segments[$employmentId] ?? [],
+                $evidence['segments'][$employmentId] ?? [],
                 $consents[$employmentId] ?? [],
                 $limits,
                 $employmentStarts[$employmentId] ?? null,
@@ -110,6 +110,11 @@ final class PayrollOvertimeLimitService
                 $protections[$employmentId] ?? [],
                 $profiles[$employmentId] ?? null,
             );
+            if (($evidence['manual_months'][$employmentId] ?? []) !== []) {
+                $result[$employmentId] = $result[$employmentId]->withManualSummaryPeriods(
+                    $evidence['manual_months'][$employmentId], $from, $periodEnd,
+                );
+            }
         }
 
         return $result;

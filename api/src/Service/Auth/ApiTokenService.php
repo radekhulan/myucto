@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Cache\RedisFactory;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
 use PDO;
 
 /**
@@ -24,6 +26,12 @@ use PDO;
  */
 final class ApiTokenService
 {
+    /**
+     * Výchozí životnost tokenu, když volající expiraci neuvede (token z webu
+     * i výměna hesla za token, PasswordTokenAction).
+     */
+    public const DEFAULT_EXPIRY_DAYS = 90;
+
     private const PLAINTEXT_PREFIX = 'mi_pat_';
     private const RANDOM_BYTES = 32;
     private const TOUCH_INTERVAL_SEC = 300;
@@ -31,6 +39,16 @@ final class ApiTokenService
     public function __construct(
         private readonly Connection $db,
         private readonly RedisFactory $redis,
+        /**
+         * Licenční brána pro tokeny se zápisem. Kontejner ji dosazuje vždy
+         * (Bootstrap); `null` mají jen přímo sestavené testy.
+         */
+        private readonly ?LicenseCapacityGate $capacity = null,
+        /**
+         * Strop platnosti tokenů vydaných ze sezení přes Entra ID
+         * (`auth.oidc.session_lifetime_hours`). Bez konfigurace platí výchozí strop.
+         */
+        private readonly ?Config $config = null,
     ) {}
 
     /**
@@ -45,6 +63,8 @@ final class ApiTokenService
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
+        bool $allowIssuedInvoiceEdit = false,
+        bool $allowSystemWrite = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -57,6 +77,8 @@ final class ApiTokenService
                 $scope,
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
+                allowIssuedInvoiceEdit: $allowIssuedInvoiceEdit,
+                allowSystemWrite: $allowSystemWrite,
             );
             $pdo->commit();
             return $token;
@@ -79,6 +101,9 @@ final class ApiTokenService
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
+        bool $seatGate = true,
+        bool $allowIssuedInvoiceEdit = false,
+        bool $allowSystemWrite = false,
     ): array {
         if (!$pdo->inTransaction() || $userId < 1) {
             throw new \LogicException('Vytvoření API tokenu vyžaduje aktivní transakci a uživatele.');
@@ -90,6 +115,12 @@ final class ApiTokenService
         if ($name === '' || mb_strlen($name) > 100) {
             throw new \InvalidArgumentException('Token name must be 1–100 chars');
         }
+        if ($allowIssuedInvoiceEdit && ($supplierId === null || $scope !== 'read_write')) {
+            throw new \InvalidArgumentException('Issued invoice edit requires a supplier-bound read_write token');
+        }
+        if ($allowSystemWrite && $scope !== 'read_write') {
+            throw new \InvalidArgumentException('System write requires a read_write token');
+        }
 
         $raw       = random_bytes(self::RANDOM_BYTES);
         $body      = rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
@@ -100,8 +131,8 @@ final class ApiTokenService
         $expiresSql = $expiresAt !== null ? 'FROM_UNIXTIME(?)' : 'NULL';
         $stmt = $pdo->prepare(
             'INSERT INTO api_tokens (user_id, supplier_id, name, token_hash, prefix, scope,
-                                     allow_payroll_submission_docs, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
+                                     allow_payroll_submission_docs, allow_issued_invoice_edit, allow_system_write, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
         );
         $params = [
             $userId,
@@ -111,11 +142,20 @@ final class ApiTokenService
             $prefix,
             $scope,
             $allowPayrollSubmissionDocs ? 1 : 0,
+            $allowIssuedInvoiceEdit ? 1 : 0,
+            $allowSystemWrite ? 1 : 0,
         ];
         if ($expiresAt !== null) {
             $params[] = $expiresAt->getTimestamp();
         }
-        $stmt->execute($params);
+        // ⚠️ Token se zápisem může podle parametru licence zabírat místo.
+        // `$seatGate = false` smí předat jen cesta, která počet přístupů
+        // nemění (obnova MCP oprávnění vytváří token jen dočasně).
+        if ($seatGate && $scope === 'read_write' && $this->capacity !== null) {
+            $this->capacity->mutateWriteTokens(static fn () => $stmt->execute($params));
+        } else {
+            $stmt->execute($params);
+        }
 
         return [
             'plaintext' => $plaintext,
@@ -142,8 +182,8 @@ final class ApiTokenService
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
-                    t.allow_payroll_submission_docs, t.eet_external_by_default,
-                    t.expires_at, t.revoked_at,
+                    t.allow_payroll_submission_docs, t.allow_issued_invoice_edit, t.allow_system_write, t.eet_external_by_default,
+                    t.expires_at, t.revoked_at, t.issued_auth_method,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
                     r.is_active AS user_role_active, r.system_key AS user_role_system_key,
@@ -165,6 +205,9 @@ final class ApiTokenService
         if ((int) $row['user_is_active'] !== 1 || (int) $row['user_role_active'] !== 1) {
             return null;
         }
+        if (!$this->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null)) {
+            return null;
+        }
 
         $row['id']                = (int) $row['id'];
         $row['user_id']           = (int) $row['user_id'];
@@ -174,7 +217,42 @@ final class ApiTokenService
         $row['user_is_active']    = true;
         $row['user_totp_enabled'] = (int) ($row['user_totp_enabled'] ?? 0) === 1;
         $row['eet_external_by_default'] = (int) ($row['eet_external_by_default'] ?? 0) === 1;
+        $row['allow_issued_invoice_edit'] = (int) ($row['allow_issued_invoice_edit'] ?? 0) === 1;
+        $row['allow_system_write'] = (int) ($row['allow_system_write'] ?? 0) === 1;
         return $row;
+    }
+
+    /**
+     * Token vydaný ze sezení přes Entra ID (`issued_auth_method = oidc:entra`,
+     * PAT i MCP připojení) platí, jen dokud se uživatel přes Entra ID úspěšně
+     * ověřil v posledních `auth.oidc.session_lifetime_hours`. Uživatele
+     * zablokovaného v Entra ID tak token přežije nejvýš o stejný strop jako
+     * sezení. Po dalším přihlášení přes Entra ID token zase funguje, dokud
+     * neskončí jeho vlastní platnost. Tokeny vydané jinak se nemění.
+     *
+     * Platí jen se zapnutým `auth.oidc.tokens_follow_identity`; bez něj
+     * token platí do své vlastní expirace.
+     */
+    public function issuingIdentityFresh(int $userId, ?string $issuedAuthMethod, ?PDO $pdo = null): bool
+    {
+        if (!(bool) $this->config?->get('auth.oidc.tokens_follow_identity', false)) {
+            return true;
+        }
+        if (!SessionAuthContext::isOrganizationIdentityMethod($issuedAuthMethod)) {
+            return true;
+        }
+        $stmt = ($pdo ?? $this->db->pdo())->prepare(
+            'SELECT 1 FROM user_external_identities
+              WHERE user_id = ? AND provider = ?
+                AND last_used_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND
+              LIMIT 1'
+        );
+        $stmt->execute([
+            $userId,
+            SessionAuthContext::ORGANIZATION_PROVIDER,
+            SessionManager::externalLifetimeSeconds($this->config),
+        ]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /**
@@ -207,8 +285,8 @@ final class ApiTokenService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.supplier_id, s.display_name AS supplier_name, s.company_name AS supplier_company,
-                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs, t.eet_external_by_default,
-                    t.last_used_at, t.last_used_ip,
+                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs, t.allow_issued_invoice_edit,
+                    t.allow_system_write, t.eet_external_by_default, t.last_used_at, t.last_used_ip,
                     t.expires_at, t.revoked_at, t.created_at,
                     (SELECT COUNT(*) FROM api_token_ips ip WHERE ip.token_id = t.id) AS ip_rule_count
              FROM api_tokens t
@@ -226,6 +304,8 @@ final class ApiTokenService
             // přetypování by štítek schopnosti svítil i u tokenů, které ji nemají.
             $r['allow_payroll_submission_docs'] = (int) $r['allow_payroll_submission_docs'] === 1;
             $r['eet_external_by_default'] = (int) $r['eet_external_by_default'] === 1;
+            $r['allow_issued_invoice_edit'] = (int) $r['allow_issued_invoice_edit'] === 1;
+            $r['allow_system_write'] = (int) $r['allow_system_write'] === 1;
             if ($r['last_used_ip'] !== null) {
                 $r['last_used_ip'] = @inet_ntop($r['last_used_ip']) ?: null;
             }

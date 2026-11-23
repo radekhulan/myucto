@@ -369,7 +369,9 @@ je potřeba načíst aktuální kartu a znovu zkontrolovat náhled.
 Kartu lze **smazat** nejen ve stavu Koncept, ale také po chybném zařazení do užívání. U karty v užívání se spolu s kartou atomicky
 smaže i účetní zápis zařazení, takže ji lze založit znovu se správným datem. Smazání je možné jen bez potvrzených nebo zaúčtovaných
 odpisů a bez technických zhodnocení. Případné odpisy je potřeba nejdřív odstranit odzadu a přerušení zrušit. Zápis zařazení musí
-být v otevřeném období a mimo uzamčenou část účetnictví. Vyřazenou kartu je nutné nejdřív vrátit z vyřazení.
+být v otevřeném období a mimo uzamčenou část účetnictví a jeho řádky nesmí být spárované s jiným zápisem v okruhu otevřených
+položek ani rozepsané na doklady v saldokontu (okruh nejdřív zrušte v opisu účtu na záložce **Otevřené položky - párování**).
+Vyřazenou kartu je nutné nejdřív vrátit z vyřazení.
 
 ### 28.12.6 Technické zhodnocení (§ 33)
 

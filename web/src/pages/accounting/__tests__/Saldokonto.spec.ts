@@ -156,6 +156,24 @@ describe('Saldokonto.vue', () => {
     ])
   })
 
+  it('ukáže vedle čísla dokladu druhé číslo přijaté faktury, jen když ho položka má', async () => {
+    const report = makeReport()
+    report.accounts[0].partners[0].items[0] = {
+      ...report.accounts[0].partners[0].items[0],
+      doc_type: 'purchase_invoice',
+      doc_no: 'PF2605001',
+      other_doc_no: 'FA-2026-001',
+    }
+    serveSaldo(report)
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const hints = wrapper.findAll('[data-testid="saldo-other-doc-no"]')
+    expect(hints).toHaveLength(1)
+    expect(hints[0].text()).toContain('FA-2026-001')
+    expect(wrapper.text()).toContain('PF2605001')
+  })
+
   it('(a) výchozí pohled je plochý seznam, seřazený dle splatnosti vzestupně napříč partnery', async () => {
     serveSaldo(makeReport())
     const wrapper = mount(Saldokonto)

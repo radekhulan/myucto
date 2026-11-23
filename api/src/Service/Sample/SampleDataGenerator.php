@@ -26,6 +26,7 @@ use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
+use MyInvoice\Service\PurchaseInvoice\PurchaseNumberingDate;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Eshop\CategoryTreeService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
@@ -516,6 +517,7 @@ final class SampleDataGenerator
         $purchaseInvoices = [];
         $stockReceiptCandidates = [];
         $smallAssetPurchaseIds = [];
+        $numberingBasis = PurchaseNumberingDate::stored($this->db, $supplierId);
         for ($i = 0; $i < self::PURCHASE_COUNT; $i++) {
             $issueDate = $i < 2
                 ? $today->modify('-1 year')->modify($i === 0 ? '-3 months' : '-1 month')->format('Y-m-d')
@@ -568,7 +570,9 @@ final class SampleDataGenerator
             }
             $receivedAt = min($receivedAt, $today->format('Y-m-d'));
             $period = $issueDt->format('Ym');
-            $vs = $this->nextPurchaseVarsymbol($pdo, $supplierId, $period);
+            $vs = $this->nextPurchaseVarsymbol($pdo, $supplierId, PurchaseNumberingDate::period(
+                ['issue_date' => $issueDate, 'received_at' => $receivedAt, 'tax_date' => $taxDate], $numberingBasis,
+            ));
             $vendorInvoiceNumber = sprintf('DOD-%s-%04d', substr($period, 2), $i + 100);
             $stmt = $pdo->prepare(
                 'INSERT INTO purchase_invoices

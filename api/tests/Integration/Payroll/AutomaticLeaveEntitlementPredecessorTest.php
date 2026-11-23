@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -29,7 +28,7 @@ final class AutomaticLeaveEntitlementPredecessorTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         foreach (['payroll_absences', 'payroll_leave_ledger', 'payroll_module_state', 'payroll_time_months'] as $table) {
             if (!$this->db->hasTable($table)) {
@@ -77,6 +76,20 @@ final class AutomaticLeaveEntitlementPredecessorTest extends TestCase
         self::assertNotContains('absence_legal_assessment_required', $item['blockers'], 'Absenci před MyÚčtem posoudil předchozí program.');
         self::assertSame(1, $item['predecessor_absences']);
         self::assertSame([], $item['assessment_absences']);
+    }
+
+    public function testManualSourceBlocksLeaveCalculationAndDoesNotClaimZero(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source, status, approved_at) VALUES (?, ?, '2026-09-01', 'manual_summary', 'approved', NOW())")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $item = $this->item();
+        self::assertFalse($item['ready']);
+        self::assertContains('manual_work_source_requires_review', $item['blockers']);
+        self::assertNull($item['worked_equivalent_minutes']);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->calculateBatch($this->supplierId, 2026, '2026-09-26', [
+            ['employment_id' => $this->employmentId, 'input_version' => $item['input_version']],
+        ], null);
     }
 
     public function testAbsenceAfterStartNamesWhatToAssessAndDecisionClearsTheBlocker(): void

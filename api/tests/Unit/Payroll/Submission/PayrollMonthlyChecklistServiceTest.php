@@ -389,6 +389,35 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertSame('Vyřídí se v kartě zaměstnance.', $item['channel']['note']);
     }
 
+    public function testEldpChecklistOpensStatementForThePersonEmploymentAndEndYear(): void
+    {
+        $deadline = $this->checklistItem('eldp_submission');
+        $deadline['employment_end_date'] = '2025-12-31';
+        $service = $this->service(deadlineItems: [$deadline]);
+
+        $item = $this->onlyItem($service, 'checklist');
+
+        self::assertSame(
+            '/payroll/submissions/eldp?person=3&employment=4&year=2025',
+            $item['action']['path'],
+        );
+        self::assertSame('Otevřít evidenční listy', $item['action']['label']);
+        self::assertStringNotContainsString('kartě zaměstnance', $item['document']['note']);
+        self::assertStringNotContainsString('kartě zaměstnance', $item['channel']['note']);
+    }
+
+    public function testTerminationChecklistOpensExitDocumentsForTheCorrectEmployment(): void
+    {
+        $service = $this->service(deadlineItems: [$this->checklistItem('termination_document')]);
+
+        $item = $this->onlyItem($service, 'checklist');
+
+        self::assertSame(
+            '/payroll/people?person=3&employment=4&panel=exit_documents',
+            $item['action']['path'],
+        );
+    }
+
     /**
      * REGZEC nemá žádnou odesílací cestu (appka umí jen náhled) — kanál je
      * proto „netýká se", ne „neznámo". Důvod zůstává v `action.reason`.
@@ -467,6 +496,48 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertSame('2026-08-20', $item['due_on']);
         self::assertSame(self::PERIOD, $item['period']);
         self::assertFalse($item['done']);
+    }
+
+    /**
+     * Sloupec „Jakou cestou" říká u nepřipravené povinnosti totéž, co pak
+     * odeslání opravdu udělá: se zvoleným podpisovým certifikátem VREP, bez
+     * něj datová schránka. Dřív řádek tvrdil datovou schránku, dokud se podání
+     * nepřipravilo, a potom VREP.
+     */
+    public function testUnpreparedJmhzDutyNamesTheSameChannelAsThePreparedSubmission(): void
+    {
+        $withCertificate = $this->onlyItem($this->service(
+            agendaDuties: [$this->agendaDuty(JmhzSubmissionBridgeService::AGENDA_CODE)],
+            signingProfile: true,
+        ), 'agenda_duty');
+        self::assertSame('VREP ČSSZ (podpisový certifikát)', $withCertificate['channel']['label']);
+
+        $withoutCertificate = $this->onlyItem($this->service(
+            agendaDuties: [$this->agendaDuty(JmhzSubmissionBridgeService::AGENDA_CODE)],
+        ), 'agenda_duty');
+        self::assertSame('datová schránka', $withoutCertificate['channel']['label']);
+    }
+
+    /**
+     * Povinnost v evidenci, ke které nevzniklo podání (příprava se zastavila
+     * až na katalogu kontrol): řádek je „Nepřipraveno" a nabízí přípravu.
+     * Dřív „Otevřeno" s odkazem na záložku JMHZ, která vedla zpět do přehledu.
+     */
+    public function testJmhzObligationWithoutSubmissionIsNotPreparedAndPreparable(): void
+    {
+        $item = $this->onlyItem($this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+                latestSubmissionStatus: null,
+            )],
+        ), 'submission');
+
+        self::assertSame('not_prepared', $item['status']);
+        self::assertSame(
+            ['agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE, 'period' => self::PERIOD, 'insurer_code' => null],
+            $item['action']['prepare'],
+        );
+        self::assertNull($item['action']['prepare_blocked']);
     }
 
     /**
@@ -549,6 +620,22 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         self::assertTrue($this->onlyItem($service, 'submission')['done']);
+    }
+
+    /** JMHZ podané přes VREP nemá odchozí zprávu; sloupec nesmí tvrdit datovou schránku. */
+    public function testFiledJmhzShowsTheChannelItActuallyWentThrough(): void
+    {
+        $row = $this->submissionRow(
+            agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+            latestSubmissionStatus: 'accepted',
+            obligationStatus: 'fulfilled',
+        );
+        $row['latest_submission']['channel'] = 'vrep_apep';
+
+        $item = $this->onlyItem($this->service(submissionRows: [$row]), 'submission');
+
+        self::assertStringContainsString('VREP', (string) $item['channel']['label']);
+        self::assertStringNotContainsString('datová schránka', (string) $item['channel']['label']);
     }
 
     /**

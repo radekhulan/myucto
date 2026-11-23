@@ -24,7 +24,7 @@ final class TechnicalSupplierAccessAction
 
     public function get(Request $request, Response $response, array $args): Response
     {
-        if (!$this->allowed($request)) return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+        if (!$this->allowed($request)) return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
         $id = (int) ($args['id'] ?? 0);
         if (!$this->isTechnicalUser($id)) return Json::error($response, 'not_found', 'Správce instance nenalezen.', 404);
         return Json::ok($response, $this->scopeResponse($id));
@@ -32,7 +32,7 @@ final class TechnicalSupplierAccessAction
 
     public function put(Request $request, Response $response, array $args): Response
     {
-        if (!$this->allowed($request)) return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+        if (!$this->allowed($request)) return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
         if (array_diff(array_keys($body), ['all_suppliers', 'supplier_ids']) !== []

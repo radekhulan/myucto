@@ -28,10 +28,16 @@ final class SyntheticPohodaExport
         . 'xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd" xmlns:bnk="http://www.stormware.cz/schema/version_2/bank.xsd" '
         . 'xmlns:vat="http://www.stormware.cz/schema/version_2/classificationVAT.xsd" xmlns:bka="http://www.stormware.cz/schema/version_2/bankAccount.xsd" '
         . 'xmlns:adb="http://www.stormware.cz/schema/version_2/addressbook.xsd" xmlns:lAdb="http://www.stormware.cz/schema/version_2/list_addBook.xsd" '
-        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:vch="http://www.stormware.cz/schema/version_2/voucher.xsd"';
+        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:vch="http://www.stormware.cz/schema/version_2/voucher.xsd" '
+        . 'xmlns:lCon="http://www.stormware.cz/schema/version_2/list_contract.xsd" xmlns:con="http://www.stormware.cz/schema/version_2/contract.xsd" '
+        . 'xmlns:lAcv="http://www.stormware.cz/schema/version_2/list_activity.xsd" xmlns:acv="http://www.stormware.cz/schema/version_2/activity.xsd"';
 
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
+
+    /** Karty s pohyby majetku (`$withAssetMovements`): s technickým zhodnocením a s pohybem neznámého druhu. */
+    public const IMPROVED_ASSET = '23IM0002';
+    public const UNKNOWN_MOVEMENT_ASSET = '24IM0003';
 
     /** Doklad v režimu OSS (`$withOss`): 1 000 Kč + SK 23 %, odběratel bez DIČ na Slovensku. */
     public const OSS_DOCUMENT = '26FV0002';
@@ -109,9 +115,18 @@ final class SyntheticPohodaExport
      * (předkontace „Nevím"), v deníku tedy chybí. `settled` = účetní platbu mezitím zaúčtovala
      * jako úhradu faktury: faktura zlikvidovaná tímto pohybem, v deníku 321/221. Minulá
      * faktura 25FV0099 je v tomtéž exportu doplacená bez pohybu v bance.
+     *
+     * `$withAssetMovements`: k majetku z `$withAssets` navíc dvě karty s pohyby (`IMpohyb`)
+     * na společném účtu 022002/082002 (počáteční stav je součet karet):
+     * - {@see self::IMPROVED_ASSET}: linka zařazená 10. 1. 2023 za 180 000 Kč, technické
+     *   zhodnocení 84 000 Kč 15. 6. 2024 (`IM.Kc` 264 000), skupina 2 rovnoměrně
+     *   (2023 11 %, od 2024 sazba pro zvýšenou cenu 20 %), samostatný účetní plán 3 000 Kč
+     *   měsíčně do června 2024 a pak 5 000 Kč do prosince 2027, odpisy leden až březen 2026 v deníku;
+     * - {@see self::UNKNOWN_MOVEMENT_ASSET}: vozík za 50 000 Kč s pohybem druhu 16, který převod nezná.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null, bool $withAssetMovements = false): string
     {
+        $withAssets = $withAssets || $withAssetMovements;
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
@@ -119,7 +134,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm, $oss) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm, $oss, $withAssetMovements) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -130,11 +145,12 @@ final class SyntheticPohodaExport
             file_put_contents($dir . '/90_majetek.xml', '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
                 . '<mdbExport version="1" ico="' . self::ICO . '" year="' . self::YEAR . '" source="POHODA" state="ok">'
                 . '<IM><ID>1</ID><Cislo>' . self::ASSET_NUMBER . '</Cislo><SText>Testovací stroj</SText><RelTpIM>1</RelTpIM><RelSkOdp>1</RelSkOdp><RelTpOdp>1</RelTpOdp>'
-                . '<Datum>2025-01-15</Datum><DatZar>2025-01-15</DatZar><Kc>120000</Kc><KcDanova>120000</KcDanova></IM>'
+                . '<Datum>2025-01-15</Datum><DatZar>2025-01-15</DatZar><Kc>120000</Kc><KcDanova>120000</KcDanova><KcOdeps>48000</KcOdeps><KcZust>48000</KcZust><KcZustUcetni>120000</KcZustUcetni></IM>'
                 . '<IModpis><ID>1</ID><RefAg>1</RefAg><Rok>2025</Rok><RelUzavreno>1</RelUzavreno><KcOdpis>24000</KcOdpis></IModpis>'
                 . '<IModpis><ID>2</ID><RefAg>1</RefAg><Rok>2026</Rok><KcOdpis>48000</KcOdpis></IModpis>'
                 . '<IModpis><ID>3</ID><RefAg>1</RefAg><Rok>2027</Rok><KcOdpis>48000</KcOdpis></IModpis>'
                 . $months
+                . ($withAssetMovements ? self::assetMovementCards() : '')
                 // Drobný majetek: vrtačka z přijaté faktury (zdroj dohledaný nástrojem) a vyřazené židle bez dokladu.
                 . '<IMmist><ID>1</ID><SText>Dílna</SText></IMmist>'
                 . '<DM><ID>1</ID><Cislo>DM0001</Cislo><SText>Vrtačka</SText><RelTpDM>1</RelTpDM><RelAgID>2</RelAgID><RefPol>77</RefPol><Datum>2026-01-12</Datum>'
@@ -147,6 +163,24 @@ final class SyntheticPohodaExport
                 . '<DM><ID>4</ID><Cislo>DM0004</Cislo><SText>Monitor</SText><Datum>2026-02-05</Datum><Pocet>1</Pocet><Kc>600</Kc><KcJedn>600</KcJedn></DM>'
                 . '</mdbExport>');
         }
+        return $dir;
+    }
+
+    /**
+     * Agenda vedená v POHODĚ jako daňová evidence: přehled jednotek s typem `singleEntry`,
+     * účetní deník, osnova a předkontace jsou prázdné odpovědi se stavem `ok` (tak na jejich
+     * export odpoví agenda bez podvojného účetnictví). Doklady a banka jsou z {@see write()}:
+     * vydaná faktura 26FV0001 a přijatá 26PF0001 uhrazené bankou, neuhrazená faktura minulého
+     * roku 25FV0099, poplatek BAN0010003 bez dokladu a počáteční stav účtu 100 000 Kč.
+     */
+    public static function writeTaxEvidence(string $root): string
+    {
+        $dir = self::write($root);
+        $units = rtrim($root, '/\\') . '/00_ucetni_jednotky.xml';
+        file_put_contents($units, str_replace('<acu:unitType>doubleEntry</acu:unitType>', '<acu:unitType>singleEntry</acu:unitType>', (string) file_get_contents($units)));
+        self::file($dir . '/01_ucetni_denik.xml', '<lst:listAccountancy version="2.0" dateTimeStamp="2026-02-01T10:00:00" state="ok"></lst:listAccountancy>');
+        self::file($dir . '/02_uctova_osnova.xml', '<lst:listAccount version="1.1" state="ok"></lst:listAccount>');
+        self::file($dir . '/03_predkontace_pu.xml', '<lst:listAccounting version="1.1" state="ok"></lst:listAccounting>');
         return $dir;
     }
 
@@ -281,6 +315,57 @@ final class SyntheticPohodaExport
                 . self::bank('BAN0010022', 'expense', '2026-02-20', 400, '', 'Pronajímatel Test s.r.o.')
                 . self::bank('BAN0010023', 'expense', '2026-03-10', 1000, '', 'Finanční úřad'));
         }
+    }
+
+    /** Mzda zaměstnance bez vlastního zápisu, předpis nese interní doklad mezd ({@see withPayrollItems()}). */
+    public const PAYROLL_WAGE = '26MZ0001';
+    /** Pojistné bez členění DPH (MDB export) s vlastním zápisem 524/336 ({@see withPayrollItems()}). */
+    public const PAYROLL_INSURANCE = '26OM0001';
+    /** Daň ze mzdy za prosinec minulého roku, předpis je v počátečním stavu ({@see withPayrollItems()}). */
+    public const PAYROLL_OPENING_TAX = '25MZ0012';
+
+    /**
+     * Doplní agendu z {@see withOtherItems()} (`$settled = true`) o mzdové závazky, které
+     * firma v MyÚčtu nepočítá:
+     *   - mzda zaměstnance na 331 (předkontace „bez"), předpis je interní doklad mezd 521/331,
+     *   - pojistné bez členění DPH s vlastním zápisem 524/336, uhrazené bankou,
+     *   - daň ze mzdy na 342 z minulého roku bez zápisu v roce agendy (počáteční stav).
+     */
+    public static function withPayrollItems(string $dir): void
+    {
+        $item = static fn (string $number, string $date, string $text, float $amount, string $rule, string $vat, string $liquidations = ''): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting><inv:dateDue>2026-02-20</inv:dateDue>'
+            . '<inv:text>' . $text . '</inv:text>' . ($rule !== '' ? '<inv:accounting><typ:ids>' . $rule . '</typ:ids></inv:accounting>' : '')
+            . ($vat !== '' ? '<inv:classificationVAT><typ:ids>' . $vat . '</typ:ids></inv:classificationVAT>' : '')
+            . '<inv:partnerIdentity><typ:address><typ:company>Zaměstnanci Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>' . ($liquidations === '' ? $amount : 0) . '</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>' . $liquidations . '</lst:invoice>';
+        self::append($dir . '/02_uctova_osnova.xml', '</lst:listAccount>',
+            '<lst:itemAccount id="331000" code="331000" name="Zaměstnanci"/>'
+            . '<lst:itemAccount id="342000" code="342000" name="Ostatní přímé daně"/>'
+            . '<lst:itemAccount id="521000" code="521000" name="Mzdové náklady"/>');
+        self::append($dir . '/03_predkontace_pu.xml', '</lst:listAccounting>',
+            '<lst:itemAccounting id="4" code="BEZ331000" accounting="Mzdy" debit="331000" agenda="commitment"/>'
+            . '<lst:itemAccounting id="5" code="BEZ342000" accounting="Daň ze mzdy" debit="342000" agenda="commitment"/>');
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            $item(self::PAYROLL_WAGE, '2026-02-08', 'Mzda zaměstnance 1/2026', 20000, 'BEZ331000', 'PN')
+            . $item(self::PAYROLL_INSURANCE, '2026-02-08', 'Sociální pojištění 1/2026', 6000, '', '',
+                '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('BAN0010030liq')) . '</typ:id><typ:date>2026-02-18</typ:date>'
+                . '<typ:sourceAgenda>bank</typ:sourceAgenda><typ:sourceDocument><typ:id>' . abs(crc32('BAN0010030')) . '</typ:id>'
+                . '<typ:number>BAN0010030</typ:number></typ:sourceDocument><typ:amount>6000</typ:amount></typ:liquidation></inv:liquidations>')
+            . $item(self::PAYROLL_OPENING_TAX, '2025-12-31', 'Daň ze mzdy 12/2025', 1500, 'BEZ342000', 'PN'));
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Interní doklady', '26IN0010', 'Mzdy 1/2026', 20000, '521000', '331000', '2026-01-31')
+            . self::entry('Interní doklady', '26IN0011', 'Záloha daně ze mzdy 1/2026', 3000, '331000', '342000', '2026-01-31')
+            . self::entry('Ostatní závazky', self::PAYROLL_INSURANCE, 'Sociální pojištění 1/2026', 6000, '524000', '336000', '2026-02-08')
+            . self::entry('Banka', 'BAN0010030', 'Úhrada pojistného', 6000, '336000', '221001', '2026-02-18'));
+        self::append($dir . '/29_banka.xml', '</lst:listBank>',
+            self::bank('BAN0010030', 'expense', '2026-02-18', 6000, '', 'Správa sociálního zabezpečení Test'));
     }
 
     /** Ostatní závazek uhrazený v minulém roce ({@see withOtherItemSettlements()}). */
@@ -460,6 +545,125 @@ final class SyntheticPohodaExport
             . '<typ:sourceDocument><typ:number>BAN9990001</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
+    /** Vydaná faktura minulého roku uhrazená zčásti v minulém roce ({@see withIssuedPaidEarlier()}). */
+    public const ISSUED_PAID_EARLIER = '25FV0098';
+
+    /**
+     * Vydaná faktura 25FV0098 na 1 000 Kč mimo DPH z listopadu minulého roku, kterou POHODA
+     * přenesla do agendy: 600 Kč uhrazeno 10. 12. minulého roku bankou minulé agendy, zbývá
+     * 400 Kč. Počáteční stav 311 nese její zbytek 400 a neuhrazenou 25FV0099 (500).
+     */
+    public static function withIssuedPaidEarlier(string $dir): void
+    {
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::ISSUED_PAID_EARLIER . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>250098</inv:symVar><inv:date>2025-11-10</inv:date><inv:dateTax>2025-11-10</inv:dateTax>'
+            . '<inv:dateAccounting>2025-11-10</inv:dateAccounting><inv:dateDue>2025-11-24</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Služby z minulého roku</inv:text>'
+            . self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO)
+            . '<inv:liquidation><typ:amountHome>400</typ:amountHome><typ:date>2025-12-10</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>1000</typ:priceNone><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('25FV0098liq')) . '</typ:id><typ:date>2025-12-10</typ:date><typ:sourceAgenda>bank</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>BAN9990002</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 900, '311001', '701000', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 900, '701000', '411000', '2026-01-01'));
+    }
+
+    /** Přijatá faktura vyrovnaná zápočtem bez pohybu peněz ({@see withPurchaseSettledByOffset()}). */
+    public const PURCHASE_SETTLED_BY_OFFSET = '26PF0050';
+
+    /**
+     * Přijatá faktura 300 Kč mimo DPH, kterou POHODA vede jako uhrazenou interním dokladem
+     * zápočtu (`internalDocuments`), tedy bez bankovního i pokladního dokladu.
+     */
+    public static function withPurchaseSettledByOffset(string $dir): void
+    {
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_SETTLED_BY_OFFSET . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026050</inv:symVar><inv:originalDocument>RE-2026-50</inv:originalDocument><inv:date>2026-02-01</inv:date><inv:dateTax>2026-02-01</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-01</inv:dateAccounting><inv:dateDue>2026-02-15</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Nájem</inv:text>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-10</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>300</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('26PF0050liq')) . '</typ:id><typ:date>2026-02-10</typ:date><typ:sourceAgenda>internalDocuments</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>ZAP0001</typ:number></typ:sourceDocument><typ:amount>300</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+    }
+
+    /** Přijatá faktura uhrazená pokladnou ({@see withPurchasePaidByCash()}). */
+    public const PURCHASE_PAID_BY_CASH = '26PF0060';
+    public const CASH_PAYMENT = '26VP0060';
+    public const CASH_RECEIPT = '26PP0061';
+
+    /**
+     * Přijatá faktura 400 Kč mimo DPH uhrazená výdajovým pokladním dokladem 26VP0060
+     * a samostatný pokladní příjem 26PP0061 za 300 Kč bez faktury. Pokladna `HP` není
+     * v číselníku a v deníku agendy nemá žádný zápis.
+     */
+    public static function withPurchasePaidByCash(string $dir): void
+    {
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_PAID_BY_CASH . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026060</inv:symVar><inv:originalDocument>RE-2026-60</inv:originalDocument><inv:date>2026-02-12</inv:date><inv:dateTax>2026-02-12</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-12</inv:dateAccounting><inv:dateDue>2026-02-26</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Kancelářské potřeby</inv:text>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-15</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>400</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('26PF0060liq')) . '</typ:id><typ:date>2026-02-15</typ:date><typ:sourceAgenda>voucher</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>' . self::CASH_PAYMENT . '</typ:number></typ:sourceDocument><typ:amount>400</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+        $voucher = static fn (string $type, string $number, string $date, float $amount, string $text): string =>
+            '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>' . $type . '</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . $number . '</typ:numberRequested></vch:number>'
+            . '<vch:date>' . $date . '</vch:date><vch:datePayment>' . $date . '</vch:datePayment><vch:text>' . $text . '</vch:text>'
+            . '<vch:classificationVAT><typ:ids>PN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $vouchers = $voucher('expense', self::CASH_PAYMENT, '2026-02-15', 400, 'Úhrada kancelářských potřeb')
+            . $voucher('receipt', self::CASH_RECEIPT, '2026-02-20', 300, 'Tržba v hotovosti');
+        $file = $dir . '/28_pokladna.xml';
+        if (is_file($file)) {
+            self::append($file, '</lst:listVoucher>', $vouchers);
+        } else {
+            self::file($file, '<lst:listVoucher version="2.0" state="ok">' . $vouchers . '</lst:listVoucher>');
+        }
+    }
+
+    /** Doklady, jejichž skupinu párovacího symbolu má POHODA vyrovnanou ({@see withClosedPairingGroups()}). */
+    public const PAIRED_ISSUED = '26FV0090';
+    public const PAIRED_PURCHASE = '26PF0090';
+
+    /**
+     * Vydaná a přijatá faktura z 1 210 Kč, které POHODA vede jako neuhrazené, ale v deníku je
+     * vyrovnává interní doklad se stejným párovacím symbolem.
+     */
+    public static function withClosedPairingGroups(string $dir): void
+    {
+        $paired = static fn (string $symbol, string $entry): string => str_replace(
+            '</act:accountingItem>',
+            '<act:pairing><act:symbol>' . $symbol . '</act:symbol></act:pairing></act:accountingItem>',
+            $entry,
+        );
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('issuedInvoice', self::PAIRED_ISSUED, '260090', '2026-04-01', 1000, 210));
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('receivedInvoice', self::PAIRED_PURCHASE, '260091', '2026-04-01', 1000, 210));
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            $paired('260090', self::entry('Vydané faktury', self::PAIRED_ISSUED, 'Služby', 1210, '311001', '602000', '2026-04-01'))
+            . $paired('260090', self::entry('Interní doklady', '26IN0090', 'Vyrovnání faktury', 1210, '518000', '311001', '2026-04-20'))
+            . $paired('260091', self::entry('Přijaté faktury', self::PAIRED_PURCHASE, 'Materiál', 1210, '518000', '321001', '2026-04-01'))
+            . $paired('260091', self::entry('Interní doklady', '26IN0091', 'Vyrovnání faktury', 1210, '321001', '602000', '2026-04-21')));
+    }
+
     /** Zápis deníku se střediskem VYUKA, 500 Kč na 518000 / 321001. */
     public const CENTRE_DOCUMENT = '26IN0099';
 
@@ -475,6 +679,118 @@ final class SyntheticPohodaExport
             '</act:accountingItem>',
             '<act:centre><typ:ids>' . $centre . '</typ:ids><typ:name>' . $centreName . '</typ:name></act:centre></act:accountingItem>',
             self::entry('Interní doklady', $number, $text, $amount, $debit, $credit, '2026-03-05'),
+        ));
+    }
+
+    /** Zakázka s vlastním partnerem (odběratel, adresář č. 1) na vydané faktuře 26FV0001. */
+    public const CONTRACT_PARTNER = 'Z-PARTNER';
+    /** Zakázka bez partnera na přijaté faktuře 26PF0001 a na poplatku banky BAN0010003. */
+    public const CONTRACT_OWN = 'Z-NAKUP';
+    /** Zakázka, kterou žádný doklad nepoužívá. */
+    public const CONTRACT_UNUSED = 'Z-VOLNA';
+
+    /**
+     * Agenda Zakázky (`35_zakazky.xml`) a zakázka na dokladech a v deníku (`typ:contract`):
+     * {@see CONTRACT_PARTNER} na hlavičce vydané faktury a jejích řádcích deníku (její jediná
+     * položka nese {@see CONTRACT_OWN}),
+     * {@see CONTRACT_OWN} na jediné položce přijaté faktury (export ji jinak vede jen
+     * rekapitulací), jejích řádcích deníku a na řádku poplatku
+     * banky, {@see CONTRACT_UNUSED} jen v číselníku.
+     */
+    public static function withContracts(string $dir): void
+    {
+        $contract = static fn (int $id, string $number, string $text, string $partner): string =>
+            '<lCon:contract version="2.0"><con:contractDesc><con:id>' . $id . '</con:id><con:number><typ:numberRequested>' . $number . '</typ:numberRequested></con:number>'
+            . '<con:text>' . $text . '</con:text>'
+            . ($partner !== '' ? '<con:partnerIdentity><typ:id>' . $partner . '</typ:id><typ:address><typ:company>Odběratel Test s.r.o.</typ:company></typ:address></con:partnerIdentity>' : '')
+            . '</con:contractDesc></lCon:contract>';
+        self::file($dir . '/35_zakazky.xml', '<lCon:listContract version="2.0" state="ok">'
+            . $contract(1, self::CONTRACT_PARTNER, 'Stavba haly', '1')
+            . $contract(2, self::CONTRACT_OWN, 'Vlastní vývoj', '')
+            . $contract(3, self::CONTRACT_UNUSED, 'Nevyužitá zakázka', '')
+            . '</lCon:listContract>');
+        $tag = static fn (string $code): string => '<typ:ids>' . $code . '</typ:ids>';
+        $journal = (string) file_get_contents($dir . '/01_ucetni_denik.xml');
+        foreach (['26FV0001' => self::CONTRACT_PARTNER, '26PF0001' => self::CONTRACT_OWN, 'BAN0010003' => self::CONTRACT_OWN] as $number => $code) {
+            $journal = str_replace(
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number>',
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number><act:contract>' . $tag($code) . '</act:contract>',
+                $journal,
+            );
+        }
+        file_put_contents($dir . '/01_ucetni_denik.xml', $journal);
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:contract>' . $tag(self::CONTRACT_PARTNER) . '</inv:contract></inv:invoiceHeader>',
+            $issued, 1,
+        ));
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceItem>~s',
+            '$1<inv:contract>' . $tag(self::CONTRACT_OWN) . '</inv:contract></inv:invoiceItem>',
+            $issued, 1,
+        ));
+        $received = (string) file_get_contents($dir . '/20_faktury_receivedInvoice.xml');
+        file_put_contents($dir . '/20_faktury_receivedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26PF0001</typ:numberRequested>.*?</inv:invoiceHeader>)~s',
+            '$1<inv:invoiceDetail><inv:invoiceItem><inv:text>Materiál</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>500</typ:unitPrice><typ:price>500</typ:price><typ:priceVAT>105</typ:priceVAT><typ:priceSum>605</typ:priceSum></inv:homeCurrency>'
+            . '<inv:contract>' . $tag(self::CONTRACT_OWN) . '</inv:contract></inv:invoiceItem></inv:invoiceDetail>',
+            $received, 1,
+        ));
+    }
+
+    /** Činnost hlavičky vydané faktury 26FV0001 a jejích řádků deníku. */
+    public const ACTIVITY_SALES = 'PRODEJ';
+    /** Činnost položky vydané faktury, hlavičky přijaté faktury 26PF0001, jejích řádků a poplatku banky BAN0010003. */
+    public const ACTIVITY_SERVICE = 'SERVIS';
+    /** Činnost, kterou žádný doklad nepoužívá. */
+    public const ACTIVITY_UNUSED = 'REZIE';
+
+    /**
+     * Agenda Činnosti (`34_cinnosti.xml`) a činnost na dokladech a v deníku (`typ:activity`):
+     * {@see ACTIVITY_SALES} na hlavičce vydané faktury a jejích řádcích deníku (její jediná
+     * položka nese {@see ACTIVITY_SERVICE}), {@see ACTIVITY_SERVICE} na hlavičce přijaté faktury,
+     * jejích řádcích deníku a na řádku poplatku banky, {@see ACTIVITY_UNUSED} jen v číselníku.
+     * Jde kombinovat se zakázkami ({@see withContracts()}).
+     */
+    public static function withActivities(string $dir): void
+    {
+        $activity = static fn (int $id, string $code, string $name): string =>
+            '<lAcv:activity version="2.0"><acv:activityHeader><acv:id>' . $id . '</acv:id><acv:code>' . $code . '</acv:code>'
+            . '<acv:name>' . $name . '</acv:name></acv:activityHeader></lAcv:activity>';
+        self::file($dir . '/34_cinnosti.xml', '<lAcv:listActivity version="2.0" state="ok">'
+            . $activity(1, self::ACTIVITY_SALES, 'Prodej služeb')
+            . $activity(2, self::ACTIVITY_SERVICE, 'Servis a údržba')
+            . $activity(3, self::ACTIVITY_UNUSED, 'Správní režie')
+            . '</lAcv:listActivity>');
+        $tag = static fn (string $code): string => '<typ:ids>' . $code . '</typ:ids>';
+        $journal = (string) file_get_contents($dir . '/01_ucetni_denik.xml');
+        foreach (['26FV0001' => self::ACTIVITY_SALES, '26PF0001' => self::ACTIVITY_SERVICE, 'BAN0010003' => self::ACTIVITY_SERVICE] as $number => $code) {
+            $journal = str_replace(
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number>',
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number><act:activity>' . $tag($code) . '</act:activity>',
+                $journal,
+            );
+        }
+        file_put_contents($dir . '/01_ucetni_denik.xml', $journal);
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        $issued = (string) preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SALES) . '</inv:activity></inv:invoiceHeader>',
+            $issued, 1,
+        );
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceItem>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SERVICE) . '</inv:activity></inv:invoiceItem>',
+            $issued, 1,
+        ));
+        $received = (string) file_get_contents($dir . '/20_faktury_receivedInvoice.xml');
+        file_put_contents($dir . '/20_faktury_receivedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26PF0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SERVICE) . '</inv:activity></inv:invoiceHeader>',
+            $received, 1,
         ));
     }
 
@@ -559,6 +875,76 @@ final class SyntheticPohodaExport
             . $doc(self::S74B_REDUCTION, '2026-05-14', 1.0, 'Vrácení uplatněného odpočtu DPH u neuhrazeného závazku do 6 měsíců od splatnosti, ev. č. původně vystaveného dokladu')
             . $doc(self::S74B_RESTORATION, '2026-06-20', -1.0, 'Uplatnění odpočtu DPH z úhrady závazku po 6 měsících od splatnosti, ev. č. původního vystaveného dokladu')
             . '</lst:listIntDoc>');
+    }
+
+    /** Číslo pokladního dokladu bez roku v řadě - POHODA ho čísluje znovu v každé agendě. */
+    public const CASH_REPEATED_NUMBER = 'PP0001';
+
+    /**
+     * Pokladní příjem v hotovosti (pokladna `HP`, účet 211000) se zápisem v deníku agendy.
+     * Opakovaným voláním nad agendami různých let vznikne doklad se stejným číslem v obou.
+     */
+    public static function withCashReceipt(string $agendaDir, string $number, string $date, float $amount): void
+    {
+        $chart = $agendaDir . '/02_uctova_osnova.xml';
+        if (!str_contains((string) file_get_contents($chart), 'code="211000"')) {
+            self::append($chart, '</lst:listAccount>', '<lst:itemAccount id="211000" code="211000" name="Pokladna"/>');
+        }
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Pokladna', $number, 'Tržba v hotovosti', $amount, '211000', '602000', $date));
+        $voucher = '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>receipt</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . $number . '</typ:numberRequested></vch:number>'
+            . '<vch:date>' . $date . '</vch:date><vch:datePayment>' . $date . '</vch:datePayment><vch:text>Tržba v hotovosti</vch:text>'
+            . '<vch:classificationVAT><typ:ids>UN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $vouchers = $agendaDir . '/28_pokladna.xml';
+        if (is_file($vouchers)) {
+            self::append($vouchers, '</lst:listVoucher>', $voucher);
+        } else {
+            self::file($vouchers, '<lst:listVoucher version="2.0" state="ok">' . $voucher . '</lst:listVoucher>');
+        }
+    }
+
+    /** Číslo vydané faktury bez roku v řadě ({@see withIssuedInvoice()}). */
+    public const ISSUED_REPEATED_NUMBER = 'FV0001';
+
+    /** Vydaná faktura se základní sazbou DPH a jejím předpisem v deníku agendy. */
+    public static function withIssuedInvoice(string $agendaDir, string $number, string $vs, string $date, float $base): void
+    {
+        $vat = round($base * 0.21, 2);
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', self::invoice('issuedInvoice', $number, $vs, $date, $base, $vat));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', $number, 'Služby', $base, '311001', '602000', $date)
+            . self::entry('Vydané faktury', $number, 'DPH', $vat, '311001', '343021', $date));
+    }
+
+    /** Číslo ostatního závazku bez roku v řadě ({@see withOtherCommitment()}). */
+    public const OTHER_ITEM_REPEATED_NUMBER = 'OZ0007';
+
+    /** Neuhrazený ostatní závazek (pojistné, 518000/325000) se zápisem v deníku agendy. */
+    public static function withOtherCommitment(string $agendaDir, string $number, string $date, float $amount): void
+    {
+        $item = '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting><inv:dateDue>' . $date . '</inv:dateDue>'
+            . '<inv:text>Pojistné</inv:text><inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Pojišťovna Test a.s.</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>' . $amount . '</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        $items = $agendaDir . '/26_faktury_commitment.xml';
+        if (is_file($items)) {
+            self::append($items, '</lst:listInvoice>', $item);
+        } else {
+            self::file($items, '<lst:listInvoice version="2.0" state="ok">' . $item . '</lst:listInvoice>');
+        }
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Ostatní závazky', $number, 'Pojistné', $amount, '518000', '325000', $date));
     }
 
     /**
@@ -649,6 +1035,35 @@ final class SyntheticPohodaExport
             self::entry('Vydané faktury', self::REVERSE_SALE, 'Stavební práce', 1000, '311001', '602000', '2026-01-18'));
     }
 
+    /** Vydané faktury v členění na ř. 26 ({@see withOtherSupplyLine26()}). */
+    public const LINE26_DOMESTIC = '26FV0011';
+    public const LINE26_FOREIGN = '26FV0012';
+
+    /**
+     * Agenda z {@see write()} s členěním `UDnulova` (ř. 26) a dvěma vydanými fakturami na 1 000 Kč
+     * bez daně: 26FV0011 tuzemskému odběrateli (dodání knih § 71i) a 26FV0012 odběrateli z USA
+     * (služba s místem plnění mimo tuzemsko).
+     */
+    public static function withOtherSupplyLine26(string $agendaDir): void
+    {
+        $append = static function (string $file, string $closing, string $xml): void {
+            $content = (string) file_get_contents($file);
+            file_put_contents($file, str_replace($closing, (string) iconv('UTF-8', 'Windows-1250', $xml) . $closing, $content));
+        };
+        $append($agendaDir . '/06_cleneni_dph.xml', '</lst:listClassificationVAT>',
+            '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>UDnulova</vat:code><vat:name>Plnění s nárokem na odpočet ř. 26</vat:name>'
+            . '<vat:lineInVATReturn>26</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>Nezahrnovat</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>');
+        $foreignPartner = '<inv:partnerIdentity><typ:address><typ:company>Overseas Test Inc.</typ:company><typ:city>Boston</typ:city><typ:street>Test Street 1</typ:street>'
+            . '<typ:zip>02101</typ:zip><typ:country><typ:ids>US</typ:ids></typ:country></typ:address></inv:partnerIdentity>';
+        $domestic = str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDnulova</typ:ids>', self::invoice('issuedInvoice', self::LINE26_DOMESTIC, '260011', '2026-01-19', 1000, 0));
+        $foreign = (string) preg_replace('~<inv:partnerIdentity>.*?</inv:partnerIdentity>~s', $foreignPartner,
+            str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDnulova</typ:ids>', self::invoice('issuedInvoice', self::LINE26_FOREIGN, '260012', '2026-01-20', 1000, 0)));
+        $append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $domestic . $foreign);
+        $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::LINE26_DOMESTIC, 'Knihy', 1000, '311001', '602000', '2026-01-19')
+            . self::entry('Vydané faktury', self::LINE26_FOREIGN, 'Služby', 1000, '311001', '602000', '2026-01-20'));
+    }
+
     /** Přijatá faktura za službu z EU se samovyměřením ({@see withSelfAssessedForeignPurchase()}). */
     public const SELF_ASSESSED_PURCHASE = '26PF0010';
     public const SELF_ASSESSMENT_DOCUMENT = '26DD0001';
@@ -688,6 +1103,26 @@ final class SyntheticPohodaExport
         $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
             self::entry('Přijaté faktury', self::SELF_ASSESSED_PURCHASE, 'Licence software', 2530, '518000', '321001', '2026-02-15')
             . self::entry('Interní doklady', self::SELF_ASSESSMENT_DOCUMENT, 'DPH samovyměření', 525, '343011', '343021', '2026-02-15'));
+    }
+
+    /** Záznam adresáře zahraničního dodavatele bez DIČ a státu ({@see withForeignVendorWithoutVatIdInAddressbook()}). */
+    public const FOREIGN_ADDRESSBOOK_ID = '9001';
+
+    /**
+     * {@see withSelfAssessedForeignPurchase()}, ale dodavatel je v adresáři POHODY bez DIČ
+     * a bez státu a faktura na něj odkazuje (`typ:id`). DIČ nese jen doklad, stát ani on.
+     */
+    public static function withForeignVendorWithoutVatIdInAddressbook(string $agendaDir): void
+    {
+        self::withSelfAssessedForeignPurchase($agendaDir);
+        $invoices = $agendaDir . '/20_faktury_receivedInvoice.xml';
+        $content = (string) file_get_contents($invoices);
+        $content = str_replace('<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company>',
+            '<inv:partnerIdentity><typ:id>' . self::FOREIGN_ADDRESSBOOK_ID . '</typ:id><typ:address><typ:company>Lieferant Test GmbH</typ:company>', $content);
+        file_put_contents($invoices, str_replace('<typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic>', '<typ:dic>DE999999999</typ:dic>', $content));
+        self::append($agendaDir . '/30_adresar.xml', '</lAdb:listAddressBook>',
+            '<lAdb:addressbook version="2.0"><adb:addressbookHeader><adb:id>' . self::FOREIGN_ADDRESSBOOK_ID . '</adb:id><adb:identity><typ:address>'
+            . '<typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city></typ:address></adb:identity></adb:addressbookHeader></lAdb:addressbook>');
     }
 
     /** Faktury se samovyměřením jen na interních dokladech ({@see withSelfAssessmentByInternalDocuments()}). */
@@ -833,22 +1268,112 @@ final class SyntheticPohodaExport
     public const EARLY_CLAIM_CURRENT = '26PF0050';
 
     /**
-     * Přijaté faktury, u kterých POHODA uplatnila odpočet (datum pro KH) dřív než k datu
-     * plnění, obě 1 000 + 210 Kč:
-     *  - 25PF0900: doklad minulého období (vystaven a uplatněn 10. 12. 2025, plnění
-     *    1. 1. 2026), DPH je podané v přiznání agendy 2025;
-     *  - 26PF0050: vystaven a uplatněn 20. 1. 2026, plnění až 1. 3. 2026.
+     * Přijaté faktury 1 000 + 210 Kč, u kterých se v POHODĚ liší datum odpočtu („Datum
+     * odp./doruč.", `dateTax`) od DUZP z dokladu dodavatele („Datum KH DPH", `dateKHDPH`):
+     *  - 25PF0900: doklad minulého období, vystaven 10. 12. 2025 s DUZP 10. 12. 2025,
+     *    odpočet uplatněn až 1. 1. 2026 - za období odpočtu je v přiznání agendy;
+     *  - 26PF0050: vystaven 20. 1. 2026 a odpočet uplatněn 20. 1. 2026, DUZP až 1. 3. 2026.
+     *    Odpočet před DUZP MyÚčto nepřipustí.
      */
     public static function withEarlyClaims(string $agendaDir): void
     {
-        $early = static fn (string $number, string $date, string $supply): string =>
-            str_replace('<inv:dateTax>' . $date . '</inv:dateTax>', '<inv:dateTax>' . $supply . '</inv:dateTax>',
-                self::invoice('receivedInvoice', $number, substr($number, -4), $date, 1000, 210));
         self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
-            $early(self::EARLY_CLAIM_PREVIOUS, '2025-12-10', '2026-01-01') . $early(self::EARLY_CLAIM_CURRENT, '2026-01-20', '2026-03-01'));
+            self::receivedWithDates(self::EARLY_CLAIM_PREVIOUS, '2025-12-10', '2026-01-01', '2025-12-10', 1000, 210)
+            . self::receivedWithDates(self::EARLY_CLAIM_CURRENT, '2026-01-20', '2026-01-20', '2026-03-01', 1000, 210));
         self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
             self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'Služby', 1000, '518000', '321001', '2026-01-20')
             . self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'DPH', 210, '343011', '321001', '2026-01-20'));
+    }
+
+    /** Doklady s různým DUZP a datem odpočtu ({@see withSplitVatDates()}). */
+    public const SPLIT_DOMESTIC = '26PF0061';
+    public const SPLIT_FOREIGN_SAME_MONTH = '26PF0062';
+    public const SPLIT_FOREIGN_OTHER_MONTH = '26PF0063';
+    public const SPLIT_JANUARY = '26PF0064';
+
+    /**
+     * Přijaté faktury, u kterých POHODA vede DUZP z dokladu dodavatele (`dateKHDPH`) před
+     * datem odpočtu (`dateTax`):
+     *  - 26PF0061: tuzemská faktura 10 000 + 2 100 Kč (KH B.2), DUZP 27. 2. 2026, odpočet
+     *    1. 3. 2026 - odpočet v březnu, v KH DPPD 27. 2.;
+     *  - 26PF0062: služba z EU 2 500 Kč se samovyměřením (interní doklad 26DD0062 bez data
+     *    KH DPH, DUZP nese jen faktura), DUZP 5. 3., přiznáno 20. 3. 2026 - stejný měsíc;
+     *  - 26PF0063: služba z EU 2 000 Kč se samovyměřením (26DD0063), DUZP 26. 2., přiznáno
+     *    2. 3. 2026 - samovyměření je v POHODĚ v březnu;
+     *  - 26PF0064: tuzemská faktura 1 000 + 210 Kč, DUZP 12. 1., odpočet 15. 1. 2026.
+     */
+    public static function withSplitVatDates(string $agendaDir): void
+    {
+        $foreign = static function (string $number, string $deduction, string $duzp, float $base): string {
+            $none = '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $base . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+                . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
+                . '<typ:priceHighSum>0</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary>';
+            $xml = str_replace(
+                [self::summary('inv', $base, 0), '<typ:ids>PD</typ:ids>'],
+                [$none, '<typ:ids>PDslRegEU</typ:ids>'],
+                self::receivedWithDates($number, $deduction, $deduction, $duzp, $base, 0),
+            );
+            return (string) preg_replace('~<inv:partnerIdentity>.*?</inv:partnerIdentity>~s',
+                '<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city><typ:street>Teststraße 1</typ:street>'
+                . '<typ:zip>10115</typ:zip><typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic></typ:address></inv:partnerIdentity>', $xml);
+        };
+        $selfAssessment = static fn (string $number, string $invoice, string $deduction, ?string $duzp, float $base): string =>
+            '<lst:intDoc version="2.0"><int:intDocHeader><int:number><typ:numberRequested>' . $number . '</typ:numberRequested></int:number>'
+            . '<int:date>' . $deduction . '</int:date><int:dateTax>' . $deduction . '</int:dateTax><int:dateAccounting>' . $deduction . '</int:dateAccounting>'
+            . ($duzp !== null ? '<int:dateKHDPH>' . $duzp . '</int:dateKHDPH>' : '')
+            . '<int:classificationVAT><typ:ids>DDslRegEU</typ:ids></int:classificationVAT><int:text>Vyměření DPH k ' . $invoice . '</int:text></int:intDocHeader>'
+            . '<int:intDocDetail><int:intDocItem><int:text>Služba z EU</int:text><int:rateVAT value="21">high</int:rateVAT>'
+            . '<int:homeCurrency><typ:price>' . $base . '</typ:price><typ:priceVAT>' . round($base * 0.21, 2) . '</typ:priceVAT></int:homeCurrency></int:intDocItem></int:intDocDetail>'
+            . '<int:linkedDocuments><typ:link><typ:sourceAgenda>receivedInvoice</typ:sourceAgenda><typ:sourceDocument><typ:number>' . $invoice . '</typ:number></typ:sourceDocument></typ:link></int:linkedDocuments>'
+            . '</lst:intDoc>';
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            self::receivedWithDates(self::SPLIT_DOMESTIC, '2026-03-01', '2026-03-01', '2026-02-27', 10000, 2100)
+            . $foreign(self::SPLIT_FOREIGN_SAME_MONTH, '2026-03-20', '2026-03-05', 2500)
+            . $foreign(self::SPLIT_FOREIGN_OTHER_MONTH, '2026-03-02', '2026-02-26', 2000)
+            . self::receivedWithDates(self::SPLIT_JANUARY, '2026-01-15', '2026-01-15', '2026-01-12', 1000, 210));
+        $internal = $agendaDir . '/27_interni_doklady.xml';
+        $documents = $selfAssessment('26DD0062', self::SPLIT_FOREIGN_SAME_MONTH, '2026-03-20', null, 2500)
+            . $selfAssessment('26DD0063', self::SPLIT_FOREIGN_OTHER_MONTH, '2026-03-02', '2026-02-26', 2000);
+        is_file($internal)
+            ? self::append($internal, '</lst:listIntDoc>', $documents)
+            : self::file($internal, '<lst:listIntDoc version="2.0" state="ok">' . $documents . '</lst:listIntDoc>');
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Přijaté faktury', self::SPLIT_DOMESTIC, 'Služby', 10000, '518000', '321001', '2026-03-01')
+            . self::entry('Přijaté faktury', self::SPLIT_DOMESTIC, 'DPH', 2100, '343011', '321001', '2026-03-01')
+            . self::entry('Přijaté faktury', self::SPLIT_FOREIGN_SAME_MONTH, 'Služba z EU', 2500, '518000', '321001', '2026-03-20')
+            . self::entry('Interní doklady', '26DD0062', 'DPH samovyměření', 525, '343011', '343021', '2026-03-20')
+            . self::entry('Přijaté faktury', self::SPLIT_FOREIGN_OTHER_MONTH, 'Služba z EU', 2000, '518000', '321001', '2026-03-02')
+            . self::entry('Interní doklady', '26DD0063', 'DPH samovyměření', 420, '343011', '343021', '2026-03-02')
+            . self::entry('Přijaté faktury', self::SPLIT_JANUARY, 'Služby', 1000, '518000', '321001', '2026-01-15')
+            . self::entry('Přijaté faktury', self::SPLIT_JANUARY, 'DPH', 210, '343011', '321001', '2026-01-15'));
+    }
+
+    /** Přijatá faktura od tuzemského dodavatele s datem vystavení, datem odpočtu (`dateTax`) a DUZP (`dateKHDPH`). */
+    private static function receivedWithDates(string $number, string $date, string $deduction, string $duzp, float $base, float $vat): string
+    {
+        return str_replace(
+            ['<inv:dateTax>' . $date . '</inv:dateTax>', '<inv:dateKHDPH>' . $date . '</inv:dateKHDPH>'],
+            ['<inv:dateTax>' . $deduction . '</inv:dateTax>', '<inv:dateKHDPH>' . $duzp . '</inv:dateKHDPH>'],
+            self::invoice('receivedInvoice', $number, substr($number, -4), $date, $base, $vat),
+        );
+    }
+
+    /** Doklady s předkontací „Nevím" ({@see withNotYetPosted()}). */
+    public const NOT_POSTED_PURCHASE = '26PF0090';
+    public const NOT_POSTED_ISSUED = '26FV0090';
+
+    /**
+     * Přijatá faktura 26PF0090 a vydaná 26FV0090 s předkontací „Nevím" (zaúčtuje se později):
+     * v deníku POHODY zápis nemají, převod je proto nesmí označit jako zaúčtované.
+     */
+    public static function withNotYetPosted(string $agendaDir): void
+    {
+        $later = static fn (string $xml): string => str_replace('<inv:text>Služby</inv:text>',
+            '<inv:text>Služby</inv:text><inv:accounting><typ:ids>Nevím</typ:ids></inv:accounting>', $xml);
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            $later(self::invoice('receivedInvoice', self::NOT_POSTED_PURCHASE, '2026090', '2026-02-15', 1000, 210)));
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            $later(self::invoice('issuedInvoice', self::NOT_POSTED_ISSUED, '2026091', '2026-02-16', 1000, 210)));
     }
 
     /** Úhrada přes platební bránu ({@see withPaymentGateway()}). */
@@ -875,6 +1400,118 @@ final class SyntheticPohodaExport
             . self::entry('Vydané faktury', self::GATEWAY_INVOICE, 'DPH', 210, '311001', '343021', '2026-03-01')
             . self::entry('Banka', self::GATEWAY_BANK, 'Poplatek brány', 20, '568000', '221001', '2026-03-05')
             . self::entry('Banka', self::GATEWAY_BANK, 'Úhrada ' . self::GATEWAY_INVOICE, 1210, '221001', '311001', '2026-03-05'));
+    }
+
+    /** Výpis pod jedním číslem dokladu ({@see withSharedBankNumber()}). */
+    public const SHARED_BANK = 'BAN0010050';
+    public const SHARED_BANK_UNBOOKED = -150.0;
+
+    /**
+     * Výpis, který POHODA vede pod jediným číslem dokladu: tři pohyby BAN0010050 téhož dne.
+     * Příjem 500 Kč (221/261) a poplatek 20 Kč (568/221) mají řádek v deníku, výdaj 150 Kč
+     * má předkontaci „Nevím" a řádek nemá.
+     */
+    public static function withSharedBankNumber(string $agendaDir): void
+    {
+        $doc = static fn (string $id, string $type, float $amount): string =>
+            str_replace('<bnk:id>' . abs(crc32(self::SHARED_BANK)) . '</bnk:id>', '<bnk:id>' . abs(crc32($id)) . '</bnk:id>',
+                self::bank(self::SHARED_BANK, $type, '2026-04-10', $amount, '', 'Banka Test'));
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="261000" code="261000" name="Peníze na cestě"/>');
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('SB-IN', 'receipt', 500) . $doc('SB-FEE', 'expense', 20) . $doc('SB-OPEN', 'expense', abs(self::SHARED_BANK_UNBOOKED)));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::SHARED_BANK, 'Převod z jiného účtu', 500, '221001', '261000', '2026-04-10')
+            . self::entry('Banka', self::SHARED_BANK, 'Poplatek', 20, '568000', '221001', '2026-04-10'));
+    }
+
+    /** Účet v EUR ({@see withEurBankAccount()}): zkratka v POHODĚ, číslo (modulo 11), analytika. */
+    public const EUR_ACCOUNT = 'BANE';
+    public const EUR_ACCOUNT_NUMBER = '2605000002';
+    public const EUR_ANALYTIC = '221002';
+    /** Korunová faktura uhrazená z účtu v EUR: 10 000 + 2 100 Kč = 500 EUR kurzem 24,20. */
+    public const EUR_INVOICE = '26FV0009';
+    public const EUR_INVOICE_VS = '2026009';
+    public const EUR_RECEIPT = 'BANE0001';
+    public const EUR_FEE = 'BANE0002';
+    public const EUR_FX_DIFFERENCE = 'BANE0003';
+
+    /**
+     * Bankovní účet v EUR tak, jak ho vede POHODA: číselník účtů měnu nenese (XML), každý
+     * doklad účtu nese částku v měně (`bnk:foreignCurrency`) i v Kč. Počáteční stav
+     * 1 000 EUR kurzem 24,245 (24 245 Kč, otevírací zápis 221002), úhrada faktury
+     * {@see EUR_INVOICE} 500 EUR kurzem 24,20 (12 100 Kč), poplatek 2 EUR kurzem 24,25
+     * (48,50 Kč) a uzávěrka kurzových rozdílů 150 Kč bez částky v měně (221002/663000).
+     * Stav účtu na konci je 1 498 EUR.
+     */
+    public static function withEurBankAccount(string $agendaDir): void
+    {
+        $doc = static fn (string $number, string $type, string $date, float $home, float $foreign, float $rate, string $statement, string $text, string $vs = '', bool $opening = false): string =>
+            '<lst:bank version="2.0"><bnk:bankHeader>' . ($opening ? '' : '<bnk:id>' . abs(crc32($number)) . '</bnk:id>')
+            . '<bnk:bankType>' . $type . '</bnk:bankType><bnk:account><typ:ids>' . self::EUR_ACCOUNT . '</typ:ids></bnk:account>'
+            . ($opening ? '' : '<bnk:number>' . $number . '</bnk:number><bnk:statementNumber><bnk:statementNumber>' . $statement . '</bnk:statementNumber></bnk:statementNumber>')
+            . '<bnk:symVar>' . $vs . '</bnk:symVar><bnk:dateStatement>' . $date . '</bnk:dateStatement><bnk:datePayment>' . $date . '</bnk:datePayment>'
+            . ($opening ? '<bnk:accounting><typ:ids>Bez</typ:ids><typ:accountingType>withoutAccounting</typ:accountingType></bnk:accounting>' : '')
+            . '<bnk:text>' . $text . '</bnk:text><bnk:partnerIdentity><typ:address><typ:company>Odběratel Test s.r.o.</typ:company></typ:address></bnk:partnerIdentity></bnk:bankHeader>'
+            . '<bnk:bankSummary><bnk:homeCurrency><typ:priceNone>' . $home . '</typ:priceNone><typ:priceLowSum>0</typ:priceLowSum><typ:priceHighSum>0</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></bnk:homeCurrency>'
+            . '<bnk:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>' . $rate . '</typ:rate><typ:amount>1</typ:amount>'
+            . '<typ:priceSum>' . $foreign . '</typ:priceSum></bnk:foreignCurrency></bnk:bankSummary></lst:bank>';
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>',
+            '<lst:itemAccount id="' . self::EUR_ANALYTIC . '" code="' . self::EUR_ANALYTIC . '" name="Bankovní účet EUR"/>'
+            . '<lst:itemAccount id="663000" code="663000" name="Kurzové zisky"/>');
+        self::append($agendaDir . '/31_bankovni_ucty.xml', '</lst:listBankAccount>',
+            '<lst:bankAccount version="2.0"><bka:bankAccountHeader><bka:ids>' . self::EUR_ACCOUNT . '</bka:ids>'
+            . '<bka:numberAccount>' . self::EUR_ACCOUNT_NUMBER . '</bka:numberAccount><bka:codeBank>' . self::BANK_CODE . '</bka:codeBank><bka:nameBank>Testovací banka</bka:nameBank>'
+            . '<bka:analyticAccount><typ:ids>' . self::EUR_ANALYTIC . '</typ:ids></bka:analyticAccount></bka:bankAccountHeader></lst:bankAccount>');
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('issuedInvoice', self::EUR_INVOICE, self::EUR_INVOICE_VS, '2026-02-01', 10000, 2100, '', self::EUR_RECEIPT));
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('', 'receipt', '2026-01-01', 24245, 1000, 24.245, '', 'Počáteční stav bankovního účtu ' . self::EUR_ACCOUNT, '', true)
+            . $doc(self::EUR_RECEIPT, 'receipt', '2026-02-10', 12100, 500, 24.20, '001', 'Úhrada ' . self::EUR_INVOICE, self::EUR_INVOICE_VS)
+            . $doc(self::EUR_FEE, 'expense', '2026-02-27', 48.50, 2, 24.25, '001', 'Poplatek')
+            . $doc(self::EUR_FX_DIFFERENCE, 'receipt', '2026-03-31', 150, 0, 24.515, '002', 'Uzávěrka kurzových rozdílů - kurzový zisk'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 24245, self::EUR_ANALYTIC, '701000', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 24245, '701000', '411000', '2026-01-01')
+            . self::entry('Vydané faktury', self::EUR_INVOICE, 'Služby', 10000, '311001', '602000', '2026-02-01')
+            . self::entry('Vydané faktury', self::EUR_INVOICE, 'DPH', 2100, '311001', '343021', '2026-02-01')
+            . self::entry('Banka', self::EUR_RECEIPT, 'Úhrada ' . self::EUR_INVOICE, 12100, self::EUR_ANALYTIC, '311001', '2026-02-10')
+            . self::entry('Banka', self::EUR_FEE, 'Poplatek', 48.50, '568000', self::EUR_ANALYTIC, '2026-02-27')
+            . self::entry('Banka', self::EUR_FX_DIFFERENCE, 'Kurzový zisk', 150, self::EUR_ANALYTIC, '663000', '2026-03-31'));
+    }
+
+    /** Číslo bankovního dokladu použité znovu o rok později ({@see withBankNumberNextYear()}). */
+    public const NEXT_YEAR_BANK = 'BAN0010070';
+
+    /**
+     * Číselná řada banky se v POHODĚ každý rok začíná znovu: příjem 400 Kč z března má
+     * v deníku řádek, výdaj 250 Kč se stejným číslem o rok později (agenda vede i doklady
+     * po konci roku) má předkontaci „Nevím" a řádek nemá.
+     */
+    public static function withBankNumberNextYear(string $agendaDir): void
+    {
+        $doc = static fn (string $id, string $type, string $date, float $amount): string =>
+            str_replace('<bnk:id>' . abs(crc32(self::NEXT_YEAR_BANK)) . '</bnk:id>', '<bnk:id>' . abs(crc32($id)) . '</bnk:id>',
+                self::bank(self::NEXT_YEAR_BANK, $type, $date, $amount, '', 'Banka Test'));
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('NY-OLD', 'receipt', '2026-03-03', 400) . $doc('NY-NEW', 'expense', self::NEXT_YEAR . '-03-02', 250));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::NEXT_YEAR_BANK, 'Příjem', 400, '221001', '602000', '2026-03-03'));
+    }
+
+    /** Výdaj zaúčtovaný předkontací pro příjem ({@see withOppositeDirectionPayment()}). */
+    public const OPPOSITE_BANK = 'BAN0010060';
+
+    /**
+     * Výdaj 300 Kč, který účetní v POHODĚ zaúčtovala předkontací pro příjem: MD 221 / D 335.
+     * Účet 221 se v deníku pohne opačně než peníze, banka proti deníku nesedí o 600 Kč.
+     */
+    public static function withOppositeDirectionPayment(string $agendaDir): void
+    {
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="335000" code="335000" name="Pohledávky za zaměstnanci"/>');
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>', self::bank(self::OPPOSITE_BANK, 'expense', '2026-04-20', 300, '', 'Zaměstnanec Test'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::OPPOSITE_BANK, 'Záloha na cestovné', 300, '221001', '335000', '2026-04-20'));
     }
 
     /** Totéž bez částek v cizí měně - doklady, jak by je převod převzal v Kč. */
@@ -918,7 +1555,7 @@ final class SyntheticPohodaExport
      *    odpočtu jedinou zálohu 26ZP0001 (vazba na dokladu), 26PF0102 dvě zálohy 26ZP0002
      *    a 26ZP0003, záloha 26ZP0004 se čerpá postupně fakturami 26PF0103 a 26PF0104 (400 + 400);
      *  - DDKP (interní doklady v členění PD): 26ZD0001 s vazbou na 26ZP0001, 26ZD0002 jen
-     *    s textem „…zálohové faktuře č. 26ZP0002" (stejný partner i částka jako záloha),
+     *    s textem „…(zálohová faktura č. 26ZP0002)" (stejný partner i částka jako záloha),
      *    26ZD0003 s textem o 26ZP0003, ale jinou částkou;
      *  - záloha 26ZP0005 (1 000, Vratka Test, doklad dodavatele = VS 2026105) zaplacená na 314
      *    a příchozí platba 300 s jejím VS zaúčtovaná na 314 bez vazby (vrácení zálohy);
@@ -1019,7 +1656,7 @@ final class SyntheticPohodaExport
             . '</lst:intDoc>';
         $internal = $agendaDir . '/27_interni_doklady.xml';
         $taxDocuments = $taxDocument(self::TAX_DOCUMENT_LINKED, 'Daňový doklad k přijaté platbě', self::LINK_ADVANCE)
-            . $taxDocument(self::TAX_DOCUMENT_BY_TEXT, 'Daňový doklad k uhrazené zálohové faktuře č. ' . self::LINK_ADVANCE_FALLBACK, '')
+            . $taxDocument(self::TAX_DOCUMENT_BY_TEXT, 'Daňový doklad k přijaté platbě (zálohová faktura č. ' . self::LINK_ADVANCE_FALLBACK . ')', '')
             . $taxDocument(self::TAX_DOCUMENT_WRONG_AMOUNT, 'Daňový doklad k uhrazené zálohové faktuře č. ' . self::LINK_ADVANCE_PAIRED, '');
         is_file($internal)
             ? self::append($internal, '</lst:listIntDoc>', $taxDocuments)
@@ -1107,6 +1744,60 @@ final class SyntheticPohodaExport
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', $opening314, '701000', '411000', '2026-01-01'));
     }
 
+    /** Vydané zálohové listy z {@see withIssuedProformas()}. */
+    public const PROFORMA_PREVIOUS = '125ZL0001';
+    public const PROFORMA_DRAWN_UNPAID = '126ZL0001';
+    public const PROFORMA_FINAL = '26FV0201';
+    public const PROFORMA_HALER = '126ZL0002';
+    public const PROFORMA_UNDERPAID = '126ZL0003';
+
+    /**
+     * Vydané zálohové listy bez zaúčtování (předkontace „Bez“), jak je POHODA přenáší:
+     *  - 125ZL0001 (1 210, z minulého roku, neuhrazený): v počátečních stavech 311 není;
+     *  - 126ZL0001 (605, neuhrazený), který konečná faktura 26FV0201 (500 + 105 DPH) odečetla
+     *    položkou odpočtu ještě před platbou: zápis 324/311 nechá na 324 debet 605;
+     *  - 126ZL0002 (1 000,01) zaplacený kulatou částkou, v POHODĚ nedoplatek 0,01;
+     *  - 126ZL0003 (1 000,10) zaplacený 1 000, nedoplatek 0,10 je nad tolerancí.
+     */
+    public static function withIssuedProformas(string $agendaDir): void
+    {
+        $customer = self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO);
+        $proforma = static fn (string $number, string $date, float $amount, ?float $remaining = null): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedProformaInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>' . preg_replace('/\D/', '', $number) . '</inv:symVar><inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting>'
+            . '<inv:dateDue>' . date('Y-m-d', (int) strtotime($date . ' +14 days')) . '</inv:dateDue>'
+            . '<inv:accounting><typ:ids>Bez</typ:ids><typ:accountingType>withoutAccounting</typ:accountingType></inv:accounting>'
+            . '<inv:text>Záloha ' . $number . '</inv:text>' . $customer
+            . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>'
+            . '<inv:liquidation><typ:amountHome>' . ($remaining ?? $amount) . '</typ:amountHome>'
+            . ($remaining !== null ? '<typ:date>' . date('Y-m-d', (int) strtotime($date . ' +3 days')) . '</typ:date>' : '') . '</inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+            . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT><typ:priceHighSum>0</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        self::file($agendaDir . '/16_faktury_issuedProformaInvoice.xml', '<lst:listInvoice version="2.0" state="ok">'
+            . $proforma(self::PROFORMA_PREVIOUS, '2025-11-10', 1210)
+            . $proforma(self::PROFORMA_DRAWN_UNPAID, '2026-02-01', 605)
+            . $proforma(self::PROFORMA_HALER, '2026-03-02', 1000.01, 0.01)
+            . $proforma(self::PROFORMA_UNDERPAID, '2026-03-02', 1000.10, 0.10)
+            . '</lst:listInvoice>');
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="324000" code="324000" name="Přijaté zálohy"/>');
+        $final = '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::PROFORMA_FINAL . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>260201</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>UD</typ:ids></inv:classificationVAT><inv:text>Vyúčtování</inv:text>' . $customer
+            . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType><inv:liquidation><typ:amountHome>0</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Služby</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>500</typ:unitPrice><typ:price>500</typ:price><typ:priceVAT>105</typ:priceVAT><typ:priceSum>605</typ:priceSum></inv:homeCurrency></inv:invoiceItem>'
+            . '<inv:invoiceAdvancePaymentItem><inv:text>Odpočet zálohy</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="0">none</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>-605</typ:unitPrice><typ:price>-605</typ:price><typ:priceVAT>0</typ:priceVAT><typ:priceSum>-605</typ:priceSum></inv:homeCurrency>'
+            . '<inv:sourceDocument><typ:number>' . self::PROFORMA_DRAWN_UNPAID . '</typ:number></inv:sourceDocument></inv:invoiceAdvancePaymentItem></inv:invoiceDetail>'
+            . self::summary('inv', 500, 105) . '</lst:invoice>';
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $final);
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::PROFORMA_FINAL, 'Služby', 500, '311001', '602000', '2026-02-10')
+            . self::entry('Vydané faktury', self::PROFORMA_FINAL, 'DPH', 105, '311001', '343021', '2026-02-10')
+            . self::entry('Vydané faktury', self::PROFORMA_FINAL, 'Vyúčtování přijaté zálohy', 605, '324000', '311001', '2026-02-10'));
+    }
+
     /** Pohyby bez zápisu v deníku z {@see withBookedBankHistory()}, které návrh dostanou nebo nedostanou. */
     public const PROPOSAL_BY_ACCOUNT = 'BAN0020001';
     public const PROPOSAL_BY_NAME = 'BAN0020002';
@@ -1175,8 +1866,34 @@ final class SyntheticPohodaExport
         $zip->close();
     }
 
+    /** Tabulky `90_majetek.xml` pro karty `$withAssetMovements` ({@see write()}). */
+    private static function assetMovementCards(): string
+    {
+        $xml = '<IM><ID>2</ID><Cislo>' . self::IMPROVED_ASSET . '</Cislo><SText>Testovací linka</SText><RelTpIM>1</RelTpIM><RelSkOdp>2</RelSkOdp><RelTpOdp>1</RelTpOdp>'
+            . '<Datum>2023-01-05</Datum><DatZar>2023-01-10</DatZar><Kc>264000</Kc><KcDanova>264000</KcDanova><KcOdeps>52800</KcOdeps><KcZust>85800</KcZust><KcZustUcetni>60000</KcZustUcetni></IM>'
+            . '<IM><ID>3</ID><Cislo>' . self::UNKNOWN_MOVEMENT_ASSET . '</Cislo><SText>Testovací vozík</SText><RelTpIM>1</RelTpIM><RelSkOdp>1</RelSkOdp><RelTpOdp>1</RelTpOdp>'
+            . '<Datum>2024-02-01</Datum><DatZar>2024-02-01</DatZar><Kc>50000</Kc><KcDanova>50000</KcDanova><KcOdeps>20000</KcOdeps><KcZust>0</KcZust><KcZustUcetni>50000</KcZustUcetni></IM>';
+        $id = 200;
+        foreach ([[2, 2023, 19800, 1], [2, 2024, 52800, 1], [2, 2025, 52800, 1], [2, 2026, 52800, 0], [2, 2027, 52800, 0], [2, 2028, 33000, 0],
+            [3, 2024, 10000, 1], [3, 2025, 20000, 1], [3, 2026, 20000, 0]] as [$card, $year, $amount, $closed]) {
+            $xml .= sprintf('<IModpis><ID>%d</ID><RefAg>%d</RefAg><Rok>%d</Rok><RelUzavreno>%d</RelUzavreno><KcOdpis>%d</KcOdpis></IModpis>', ++$id, $card, $year, $closed, $amount);
+        }
+        // Samostatný účetní plán linky: od zařazení 3 000 Kč, po zhodnocení zbývající cena do konce plánu.
+        for ($i = 0; $i < 60; $i++) {
+            $xml .= sprintf('<IMuodpis><ID>%d</ID><RefAg>2</RefAg><Mesic>%04d-%02d-01</Mesic><KcOdpis>%d</KcOdpis></IMuodpis>', 300 + $i, 2023 + intdiv($i, 12), $i % 12 + 1, $i < 18 ? 3000 : 5000);
+        }
+        for ($i = 0; $i < 25; $i++) {
+            $xml .= sprintf('<IModpisM><ID>%d</ID><RefAg>3</RefAg><Mesic>%04d-%02d-01</Mesic><KcOdpis>2000</KcOdpis></IModpisM>', 400 + $i, 2024 + intdiv($i + 1, 12), ($i + 1) % 12 + 1);
+        }
+        foreach ([[2, 1, '2023-01-05', 180000, ''], [2, 2, '2023-01-10', 180000, ''], [2, 3, '2024-06-15', 84000, 'Přístavba linky'], [2, 7, '2025-12-31', 52800, ''],
+            [2, 8, '2025-12-31', 60000, ''], [3, 2, '2024-02-01', 50000, ''], [3, 16, '2025-05-01', 5000, '']] as [$card, $kind, $date, $amount, $note]) {
+            $xml .= sprintf('<IMpohyb><ID>%d</ID><RefAg>%d</RefAg><RelTpPoh>%d</RelTpPoh><Datum>%s</Datum><Kc>%d</Kc>%s</IMpohyb>', ++$id, $card, $kind, $date, $amount, $note === '' ? '' : '<Pozn>' . $note . '</Pozn>');
+        }
+        return $xml;
+    }
+
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null, bool $withAssetMovements = false): array
     {
         $oss ??= new OssVariant();
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
@@ -1197,6 +1914,15 @@ final class SyntheticPohodaExport
             }
             $journal .= self::entry('Přijaté faktury', '26PF0002', 'Nářadí', 1200, '518000', '321001', '2026-02-05')
                 . self::entry('Přijaté faktury', '26PF0002', 'DPH', 252, '343011', '321001', '2026-02-05');
+        }
+        if ($withAssetMovements) {
+            // Linka 264 000 + vozík 50 000 na jednom účtu, oprávky ke konci 2025 144 000 + 46 000.
+            $journal .= self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 314000, '022002', '701000', '2026-01-01')
+                . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 190000, '701000', '082002', '2026-01-01')
+                . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 124000, '701000', '411000', '2026-01-01');
+            foreach (['2026-01-31', '2026-02-28', '2026-03-31'] as $date) {
+                $journal .= self::entry('Dlouhodobý majetek', self::IMPROVED_ASSET, 'Odpis - Testovací linka', 5000, '551000', '082002', $date);
+            }
         }
         if ($withOss) {
             $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
@@ -1238,6 +1964,11 @@ final class SyntheticPohodaExport
         }
         if ($withAssets) {
             foreach (['022001' => 'Stroje', '042000' => 'Pořízení majetku', '082001' => 'Oprávky ke strojům', '551000' => 'Odpisy'] as $code => $name) {
+                $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
+            }
+        }
+        if ($withAssetMovements) {
+            foreach (['022002' => 'Výrobní linky', '082002' => 'Oprávky k výrobním linkám'] as $code => $name) {
                 $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
             }
         }

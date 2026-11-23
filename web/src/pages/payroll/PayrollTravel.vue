@@ -506,6 +506,10 @@ async function materialize(trip: TravelTrip) {
     }
     if (result.posting?.status === 'skipped') {
       toast.warning(t('payroll_travel.settlement.posting_skipped', { reason: result.posting.reason ?? '' }))
+    } else if (result.posting?.status === 'error') {
+      toast.error(t('payroll_travel.settlement.posting_failed', {
+        message: result.posting.message ?? result.posting.reason ?? '',
+      }))
     }
     await load()
   } catch (error: unknown) {

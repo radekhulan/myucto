@@ -140,7 +140,8 @@ final class MembershipJ6SourceFactsTest extends TestCase
 
         $source = (string) file_get_contents((new \ReflectionClass(MembershipJ6SourceFacts::class))->getFileName());
         self::assertStringContainsString('MembershipChargeRepository::claimRecord($claimRecord)', $source);
-        self::assertStringContainsString('MembershipRepository::revisionRecord($revisionRecord)', $source);
+        // Pečeť výmazu a kotvu v J6 dokládá chováním MembershipErasureTest (testJ6RejectsSealedRowWhoseContentDiffersFromItsAnchoredSeal,
+        // testSealsAreAnchoredInTheAuditChain).
     }
 
     private function member(): array

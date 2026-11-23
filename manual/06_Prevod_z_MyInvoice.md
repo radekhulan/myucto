@@ -232,7 +232,7 @@ výpisu a jeho spárování.
 | `PŘEVOD ZASTAVEN: cíl ... nemá kam uložit tato data zdroje` | Preflight zjistil, že by se ztratila data (nekompatibilní nebo neaktuální cílová instalace) | Aktualizujte MyÚčto a spusťte převod znovu. Vědomé pokračování se ztrátou: `--allow-missing`. Podrobnosti v [§ 6.9.3](#693-preflight-zastavil-prevod) |
 | `Integrity constraint violation: 1062 Duplicate entry` | Převod byl spuštěn s `--no-truncate` nad čerstvou databází, číselníky už jsou naplněné | Vytvořte cílovou databázi znovu prázdnou a převod zopakujte bez tohoto přepínače |
 | `Access denied for user 'myucto'@'172.18.0.4' (using password: YES)` při převodu mezi dvěma Docker stacky | Hostname `db` se přeložil na databázi druhého stacku | V `cfg.docker.php` uveďte jméno kontejneru, viz [§ 6.9.5](#695-kolize-dns-aliasu-db-mezi-dvema-compose-stacky) |
-| Úprava `cfg.docker.php` se neprojevila | Produkční image drží zkompilovaný config v paměti, `restart` ho nenačte | Spusťte `docker compose up -d --force-recreate app` |
+| Úprava konfigurace Dockeru se neprojevila | Existující kontejner má původní prostředí nebo připojený soubor | Ověřte skutečnou konfiguraci a použijte `docker compose up -d --force-recreate app` se správným compose souborem |
 | Nikdo se po převodu nepřihlásí | Jiný `app.pepper` nebo `app.secret_encryption_key` než ve zdroji | Nastavte hodnoty shodné se zdrojem, viz [§ 6.2](#62-nez-zacnete) |
 | Import nebo některá migrace skončila chybou | Převod se nepovedl celý | Nepokračujte v cílové databázi. Zapište si chybový výstup, vytvořte cíl znovu prázdný a celý postup zopakujte. Zdroj MyInvoice zůstává nedotčený |
 | Návratový kód jiný než `0` | Viz tabulka | Viz [§ 6.9.7](#697-navratove-kody) |
@@ -338,17 +338,22 @@ které je napříč Dockerem jedinečné:
 
 Totéž platí pro zdroj v migračním URL: `mysql://root:tajne@myinvoice-db-1:3306/myinvoice`.
 
-### 6.9.6 Po změně `cfg.docker.php` nestačí `restart`
+### 6.9.6 Načtení změněné konfigurace Dockeru
 
-Produkční image má z výkonových důvodů `opcache.validate_timestamps=0`, takže
-PHP nekontroluje časová razítka souborů a drží zkompilovanou verzi configu
-v paměti. `docker compose restart app` proces PHP-FPM uvnitř kontejneru
-zachová, takže aplikace dál běží nad **starým** `cfg.php` a úprava se zdánlivě
-neprojeví. Kontejner je potřeba vytvořit znovu:
+`docker compose restart app` restartuje i procesy PHP v kontejneru.
+**Nezmění však prostředí a definici připojených souborů existujícího
+kontejneru.** Po změně `.env`, compose konfigurace nebo při nahrazení
+konfiguračního souboru připojeného bind mountem vytvořte kontejner znovu:
+
+U instalace z GHCR použijte `-f docker-compose.production.yml`; příklad
+níže předpokládá výchozí `docker-compose.yml`:
 
 ```powershell
 docker compose up -d --force-recreate app
 ```
+
+Před dalším pokusem o přihlášení ověřte zejména databázové připojení
+a shodu původních klíčů `app.pepper` a `app.secret_encryption_key`.
 
 ### 6.9.7 Návratové kódy
 

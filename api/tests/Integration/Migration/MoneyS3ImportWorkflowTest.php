@@ -40,6 +40,8 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
     /**
      * Faktura převedená dřív jako neuhrazená a spárovaná s úhradou až v dalším běhu
      * (novější záloha) musí dostat i stav „uhrazeno" — samotný záznam párování nestačí.
+     * Rok 2024 první převod uzavřel: řádný opakovaný převod v něm nové párování nezakládá,
+     * doplní ho jen opravný převod vazeb.
      */
     public function testLaterRunMarksInvoicePaidWhenItsPaymentIsLinked(): void
     {
@@ -54,7 +56,12 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         $pdo->prepare('DELETE FROM payment_matches WHERE purchase_invoice_id = ? AND supplier_id = ?')->execute([$invoiceId, $supplierId]);
         $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'payment' AND money_key = 'p|2024|FP24001'")->execute([$supplierId]);
 
-        $protocol = $this->import($supplierId);
+        $regular = $this->import($supplierId);
+        self::assertFalse($regular->hasErrors(), $this->explain($regular));
+        self::assertSame(0, $this->rowCount('payment_matches', $supplierId, "purchase_invoice_id = {$invoiceId}"), 'Uzavřený rok řádný převod nepáruje.');
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(),
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_HALF, false, true));
 
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rowCount('payment_matches', $supplierId, "purchase_invoice_id = {$invoiceId}"));
@@ -62,8 +69,8 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
     }
 
     /**
-     * Opakovaný převod novější zálohy existující doklad nepřepisuje (může být už
-     * zaúčtovaný nebo upravený v MyÚčtu), ale změnu v Money musí ohlásit.
+     * Opakovaný převod novější zálohy existující doklad, který uživatel v MyÚčtu upravil,
+     * nepřepisuje, ale změnu v Money musí ohlásit.
      */
     public function testChangeInMoneyAfterImportIsReportedNotOverwritten(): void
     {
@@ -71,6 +78,9 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         $this->import($supplierId);
         $this->db->pdo()->prepare("UPDATE purchase_invoices SET total_with_vat = 6000 WHERE supplier_id = ? AND vendor_invoice_number = 'DF-2025-003'")
             ->execute([$supplierId]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::patch(SyntheticAgenda::files(), 'ROK.002/PFaktury.DAT',
+            static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25001' && (int) $r['FlagDel'] === 0
+                ? ['Zaklad_2' => 5100.0, 'DPH_2' => 1071.0, 'CelkemSDPH' => 6171.0] + $r : $r));
 
         $protocol = $this->import($supplierId);
 
@@ -79,7 +89,7 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         $messages = $steps['purchase_invoices']['messages'];
         $changed = array_values(array_filter($messages, static fn (array $m): bool => $m['code'] === 'changed_in_money'));
         self::assertCount(1, $changed, $this->explain($protocol));
-        self::assertSame('FP25001', $changed[0]['context']['document_no']);
+        self::assertSame(['FP25001 (2025)'], $changed[0]['context']['documents']);
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-003' AND total_with_vat = 6000"));
     }
 
@@ -335,7 +345,8 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
             [['account_id' => $expense, 'side' => 'debit', 'amount' => '10.00'], ['account_id' => $liability, 'side' => 'credit', 'amount' => '10.00']],
         );
 
-        $protocol = $this->import($supplierId);
+        // Rok 2025 výslovně vybraný k převodu: deník Money se do rozjetého roku nepřimíchá.
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2025));
 
         self::assertTrue($protocol->failed());
         self::assertContains('journal_not_empty', array_column($protocol->get('preflight'), 'code'));
@@ -366,7 +377,7 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         );
         $pdo->prepare('DELETE FROM invoice_payments WHERE supplier_id = ?')->execute([$supplierId]);
 
-        $regular = $this->import($supplierId);
+        $regular = $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2025));
         self::assertTrue($regular->failed());
         self::assertContains('journal_not_empty', array_column($regular->get('preflight'), 'code'));
         self::assertSame(0, $this->rowCount('invoice_payments', $supplierId));

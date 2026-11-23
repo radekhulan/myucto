@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 final class UnitCreditSetoffTest extends TestCase
 {
     use ChargeIssuanceFixture,PaymentCorrectionFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     private Connection $db;private array $f;
     protected function setUp():void{$this->db=Bootstrap::buildContainer()->get(Connection::class);$this->db->pdo()->beginTransaction();$this->f=$this->issuanceFixture($this->db);}
     protected function tearDown():void{if($this->db->pdo()->inTransaction())$this->db->pdo()->rollBack();}
@@ -47,5 +48,20 @@ final class UnitCreditSetoffTest extends TestCase
         $f=$this->f;$base=$this->settledPaymentFixture('1','0');$this->correctionPayments()->reverse($f['supplier'],$base['operation']['id'],2,'2026-02-02','Synthetic undo','undo',$f['actor']);
         $this->paymentFixtureContainer()->get(\MyInvoice\Repository\Property\Charges\Issuance\IssuanceRepository::class)->reverse($f['supplier'],$base['charge']['id'],['row_version'=>2,'accounting_date'=>'2026-02-02','effective_at'=>'2026-02-02T10:00:00+01:00','reason'=>'Synthetic withdrawal','evidence_ref'=>'Synthetic decision','idempotency_key'=>'charge-undo'],$f['actor']);
         $all=(new DebtRepository($this->db))->allCurrent($f['supplier']);self::assertCount(1,$all);self::assertFalse($all[0]['active']);self::assertSame($base['debt']['snapshot'],$all[0]['snapshot']);
+    }
+
+    /** Jednoduchá forma: zápočet kreditu, oprava úlevou i storna plateb a zápočtu jsou po dvojicích a důkazy je přijmou. */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testReservedCreditCannotBeSpentTwiceAndExactReversalRestoresBothSidesInSingleEntryForm():void
+    {
+        $this->testReservedCreditCannotBeSpentTwiceAndExactReversalRestoresBothSides();
+        $this->assertSupplierJournalPaired($this->db->pdo(),$this->f['supplier']);
+    }
+    /** Jednoduchá forma: storno úhrady i storno předpisu zrcadlí dvojice originálu. */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testReversedUnpaidRegisteredDebtRemainsReadableWithoutBlockingOtherInventoryInSingleEntryForm():void
+    {
+        $this->testReversedUnpaidRegisteredDebtRemainsReadableWithoutBlockingOtherInventory();
+        $this->assertSupplierJournalPaired($this->db->pdo(),$this->f['supplier']);
     }
 }

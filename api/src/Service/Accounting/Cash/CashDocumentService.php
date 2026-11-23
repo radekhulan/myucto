@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Cash;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesAllocator;
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\CashDocumentRepository;
@@ -14,6 +18,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\FxSettlementPosting;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\PurchasePayableAccount;
 use MyInvoice\Service\Invoice\InvoiceMath;
@@ -21,6 +26,7 @@ use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Eet\EetCashDocumentRecorder;
@@ -82,6 +88,8 @@ final class CashDocumentService
         private readonly \MyInvoice\Service\Accounting\AdvanceSettlementSync $advanceSettlement,
         private readonly \MyInvoice\Service\PurchaseInvoice\PurchasePaidStatusRestore $paidStatusRestore,
         private readonly EetCashDocumentRecorder $eet,
+        private readonly NumberSeriesSelection $numberSeriesSelection,
+        private readonly NumberSeriesAllocator $numberSeries,
     ) {}
 
     /**
@@ -118,6 +126,11 @@ final class CashDocumentService
         try {
             $docId = $this->documents->insert($supplierId, $doc, $userId);
             $this->documents->replaceVatLines($docId, $doc['vat_mode'] === 'vat' ? $doc['vat_lines'] : []);
+            // Řada z číselníku: volba z hlavičky, jinak výchozí řada uživatele pro pokladnu.
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply(
+                'cash_documents', $supplierId, $docId, $data,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']), (int) $doc['register_id'], $userId, isNew: true,
+            ));
 
             if ($post) {
                 $result = $this->doPost($supplierId, $docId, $userId, self::eetDeviceId($data));
@@ -176,6 +189,16 @@ final class CashDocumentService
         try {
             $this->documents->updateHeader($supplierId, $id, $doc);
             $this->documents->replaceVatLines($id, $doc['vat_mode'] === 'vat' ? $doc['vat_lines'] : []);
+            // Řada patří druhu a pokladně: po změně směru nebo pokladny se volba bez nové
+            // volby vrací na výchozí řadu.
+            if (!array_key_exists('number_series_id', $data)
+                && ((int) $doc['register_id'] !== (int) $existing['register_id'] || $doc['doc_type'] !== $existing['doc_type'])) {
+                $data['number_series_id'] = null;
+            }
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply(
+                'cash_documents', $supplierId, $id, $data,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']), (int) $doc['register_id'],
+            ));
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -296,10 +319,12 @@ final class CashDocumentService
             if ($doc === null) {
                 throw new CashException('validation', 'Pokladní doklad nenalezen.', 404);
             }
-            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId,
-                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
-            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId,
-                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
+            $docEntryIds = array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)]));
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, $docEntryIds);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, $docEntryIds);
+            // Stejně jako mazání v deníku: okruh párování a rozpad saldokonta by smazání odneslo kaskádou.
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, $docEntryIds);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, $docEntryIds);
             $this->assertTaxDateUnlocked($supplierId, (string) ($doc['tax_date'] ?? $doc['issue_date']));
             $this->assertNoFollowUpDocuments($supplierId, $doc);
             $eetConflict = (new EetHistoryGuard($this->db))->cashDocumentConflict($supplierId, $id);
@@ -444,6 +469,22 @@ final class CashDocumentService
         $entry = (new \MyInvoice\Repository\JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db)))->insertPropertyClearing($intent, $number);
         $this->documents->markPosted($supplier, $id, $number, $entry);
         return ['id' => $id, 'journal_entry_id' => $entry, 'doc_number' => $number];
+    }
+
+    /**
+     * Chyba číselníku řad (neplatná nebo ukončená řada) je validační chyba pokladny.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private static function seriesGuard(callable $fn): mixed
+    {
+        try {
+            return $fn();
+        } catch (NumberSeriesException $e) {
+            throw new CashException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
     }
 
     /** @param ?int $eetDeviceId zařízení EET, když pokladna žádné namapované nemá */
@@ -717,7 +758,7 @@ final class CashDocumentService
         if ($kind === 'invoice') {
             $stmt = $pdo->prepare(
                 "SELECT i.id, i.varsymbol AS number, i.issue_date, i.amount_to_pay, i.paid_total,
-                        i.invoice_type, cur.code AS currency, c.company_name AS partner_name,
+                        i.invoice_type, i.exchange_rate, cur.code AS currency, c.company_name AS partner_name,
                         c.ic AS partner_ic, c.dic AS partner_dic
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
@@ -731,8 +772,11 @@ final class CashDocumentService
                     -- finálního dokladu / DDKP. Platební kalendář platebním cílem není
                     -- (zrcadlo CashSettlementService::NON_SETTLEABLE_INVOICE_TYPES).
                     AND i.invoice_type NOT IN ('payment_calendar','rent_calendar','advance_calendar')
-                    AND cur.code = 'CZK'
+                    -- Cizoměnová faktura se z korunové pokladny hradí korunami s kurzovým
+                    -- rozdílem (foreignInvoiceSettlement); zálohová ne.
+                    AND (cur.code = 'CZK' OR (i.invoice_type <> 'proforma' AND i.exchange_rate > 0))
                     AND (i.amount_to_pay - i.paid_total) > 0.005
+                    AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                     AND (i.varsymbol LIKE ? OR c.company_name LIKE ?)
                   ORDER BY i.issue_date DESC, i.id DESC
                   LIMIT " . $limit
@@ -757,7 +801,7 @@ final class CashDocumentService
                     // Úhrada proformy spustí vystavení finální faktury / DDKP — UI to musí
                     // uživateli ukázat dřív, než doklad založí (M-3).
                     'is_proforma'   => (string) $r['invoice_type'] === 'proforma',
-                ];
+                ] + self::foreignSettlementHint((string) $r['currency'], (float) ($r['exchange_rate'] ?? 0), round($total - $paid, 2));
             }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         }
 
@@ -769,12 +813,18 @@ final class CashDocumentService
             // dřív tu byla vlastní kopie bez zápočtů, takže zčásti započtenou fakturu
             // našeptávač nabízel k úhradě celou.
             $remainingSql = PurchaseSettledExpr::remaining('pi');
+            // Cizoměnový doklad: vratka jen v korunách (validatePurchaseRefund), úhrada
+            // korunami jen celé neuhrazené faktury nebo účtenky (foreignPurchaseSettlement).
+            $currencyFilter = $refundable
+                ? "AND cur.code = 'CZK'"
+                : "AND (cur.code = 'CZK' OR (pi.document_kind IN ('invoice','receipt') AND pi.exchange_rate > 0
+                        AND ({$remainingSql}) > pi.amount_to_pay - 0.005))";
             $settlementFilter = $refundable
                 ? "AND ({$remainingSql}) < pi.amount_to_pay - 0.005"
                 : "AND ({$remainingSql}) > 0.005";
             $stmt = $pdo->prepare(
                 "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.issue_date, pi.total_with_vat,
-                        ({$remainingSql}) AS remaining,
+                        ({$remainingSql}) AS remaining, pi.exchange_rate,
                         pi.document_kind, cur.code AS currency, c.company_name AS partner_name,
                         c.ic AS partner_ic, c.dic AS partner_dic
                    FROM purchase_invoices pi
@@ -789,7 +839,7 @@ final class CashDocumentService
                   WHERE pi.supplier_id = ?
                     AND pi.status IN ('received','booked','paid')
                     AND pi.document_kind <> 'tax_document'
-                    AND cur.code = 'CZK'
+                    " . $currencyFilter . "
                     " . $settlementFilter . "
                     AND (pi.vendor_invoice_number LIKE ? OR pi.varsymbol LIKE ? OR c.company_name LIKE ?)
                   ORDER BY pi.issue_date DESC, pi.id DESC
@@ -814,11 +864,32 @@ final class CashDocumentService
                     'currency_code' => (string) $r['currency'],
                     'issued_on'     => (string) $r['issue_date'],
                     'document_kind' => (string) $r['document_kind'],
-                ];
+                ] + self::foreignSettlementHint((string) $r['currency'], (float) ($r['exchange_rate'] ?? 0), $remaining);
             }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         }
 
         throw new CashException('validation', 'Neplatný typ dokladu (invoice|purchase_invoice).');
+    }
+
+    /**
+     * Údaje pro korunovou úhradu cizoměnového dokladu v našeptávači: kurz dokladu,
+     * zbytek v korunách podle něj (výchozí částka pokladního dokladu) a kurzová
+     * tolerance, ve které koruny uhradí celý zbytek ({@see FxPaymentSettlement}).
+     * U korunového dokladu nic.
+     *
+     * @return array<string,float>
+     */
+    private static function foreignSettlementHint(string $currency, float $rate, float $remaining): array
+    {
+        if (strtoupper($currency) === FxPaymentSettlement::LOCAL_CURRENCY || $rate <= 0.0) {
+            return [];
+        }
+        $expected = FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
+        return [
+            'exchange_rate' => $rate,
+            'remaining_czk' => $expected,
+            'czk_tolerance' => round(FxPaymentSettlement::matchTolerance($expected), 2),
+        ];
     }
 
     // ── post (v transakci volajícího) ──────────────────────────────────────────
@@ -854,9 +925,29 @@ final class CashDocumentService
 
         $register = $this->requireActiveRegister($supplierId, (int) $doc['register_id']);
         $doc['vat_lines'] = $this->documents->vatLinesFor($id);
-        $this->validateDoc($supplierId, $doc, $doc['vat_lines'], $register);
+        // Korunová úhrada cizoměnového dokladu: částka v měně dokladu se určuje tady, pod
+        // zámkem dokladu a ze zbytku k datu zaúčtování, a uloží se s dokladem. Zápis,
+        // úhrada faktury i pozdější doúčtování se pak řídí touž hodnotou.
+        $doc['settled_document_amount'] = $this->validateDoc($supplierId, $doc, $doc['vat_lines'], $register);
 
         $docNumber = $doc['doc_number'];
+        // Nová řada z číselníku (volba na dokladu, výchozí řada pokladny nebo druhu). Víc řad
+        // jedné pokladny sdílí její pokladní knihu i zůstatek, liší se jen číslem dokladu.
+        $native = $docNumber === null
+            ? self::seriesGuard(fn () => $this->numberSeries->nativeFor(
+                $supplierId,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']),
+                $doc['number_series_id'] ?? null,
+                new \DateTimeImmutable((string) $doc['issue_date']),
+                (int) $doc['register_id'],
+            ))
+            : null;
+        if ($native !== null) {
+            $docNumber = $this->numberSeries->allocate(
+                $supplierId, $native, new \DateTimeImmutable((string) $doc['issue_date']), 'PF',
+                (int) substr((string) $doc['issue_date'], 0, 4),
+            );
+        }
         if ($docNumber === null) {
             $seriesCode = $doc['doc_type'] === 'in' ? 'cash_in' : 'cash_out';
             $fiscalYear = (int) substr((string) $doc['issue_date'], 0, 4);
@@ -874,6 +965,12 @@ final class CashDocumentService
             }
             $docNumber = $this->series->next($supplierId, $seriesCode, $fiscalYear, $seriesScope);
         }
+        $usedSeries = $native !== null ? (int) $native['id'] : null;
+        if (($doc['number_series_id'] ?? null) !== $usedSeries && $doc['doc_number'] === null) {
+            $this->db->pdo()->prepare('UPDATE cash_documents SET number_series_id = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([$usedSeries, $id, $supplierId]);
+        }
+        $this->documents->setSettledDocumentAmount($supplierId, $id, $doc['settled_document_amount']);
 
         // Daňová evidence (DE §6, R6): posted doklad BEZ journalu a BEZ posting enginu /
         // kontroly účetního období (v DE období neexistují; zámek je booked_at, R14).
@@ -1058,9 +1155,11 @@ final class CashDocumentService
                 (string) $doc['issue_date'],
             );
         } elseif ($doc['purpose'] === 'invoice_payment' && $doc['invoice_id'] !== null) {
+            // Platba faktury se eviduje v měně faktury: u korunové úhrady cizoměnové
+            // faktury je to uhrazená částka v její měně, ne přijaté koruny.
             $res = $this->invoicePayments->recordPayment(
                 (int) $doc['invoice_id'],
-                (float) $doc['total_amount'],
+                (float) ($doc['settled_document_amount'] ?? $doc['total_amount']),
                 (string) $doc['issue_date'],
                 ['source' => 'cash', 'note' => $docNumber, 'created_by' => $userId],
             );
@@ -1281,6 +1380,12 @@ final class CashDocumentService
                 $this->line($cashAccount, 'credit', $total),
             ];
         }
+        if (($doc['settled_document_amount'] ?? null) !== null && $doc['invoice_id'] !== null) {
+            return $this->buildForeignSettlement(
+                $supplierId, $doc, $cashAccount, $total, 'invoice', (int) $doc['invoice_id'],
+                $this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311'),
+            );
+        }
         if ($doc['invoice_id'] !== null && $this->invoiceType($supplierId, (int) $doc['invoice_id']) === 'proforma') {
             return [
                 $this->line($cashAccount, 'debit', $total),
@@ -1339,6 +1444,11 @@ final class CashDocumentService
         if ($doc['purchase_invoice_id'] !== null) {
             $payable = (new PurchasePayableAccount($this->db))->forPayment($supplierId, (int) $doc['purchase_invoice_id'], $payable);
         }
+        if (!$refund && ($doc['settled_document_amount'] ?? null) !== null && $doc['purchase_invoice_id'] !== null) {
+            return $this->buildForeignSettlement(
+                $supplierId, $doc, $cashAccount, $total, 'purchase_invoice', (int) $doc['purchase_invoice_id'], $payable,
+            );
+        }
         return $refund
             ? [
                 $this->line($cashAccount, 'debit', $total),
@@ -1379,6 +1489,71 @@ final class CashDocumentService
         return $kind === 'tax_document' && $row['parent_purchase_invoice_id'] === null
             ? 'tax_document_standalone'
             : $kind;
+    }
+
+    /**
+     * Korunová úhrada cizoměnové faktury nebo účtenky z korunové pokladny. Zrcadlo
+     * bankovní korunové úhrady (`BankPostingService::buildIncomingCzkFx()` u vydané,
+     * `buildOutgoingCzkCardFx()` u přijaté): saldokonto (311 / závazek dokladu) se
+     * odúčtuje uhrazenou částkou v měně dokladu kurzem předpisu, pokladna skutečně
+     * přijatými nebo vydanými korunami a rozdíl je realizovaný kurzový zisk 663 nebo
+     * ztráta 563. Předpis, jeho saldokontní účet, kurz i řádek kurzového rozdílu dává
+     * sdílený {@see FxSettlementPosting}, stejně jako bance.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function buildForeignSettlement(
+        int $supplierId,
+        array $doc,
+        string $cashAccount,
+        float $total,
+        string $docType,
+        int $docId,
+        string $saldoAccount,
+    ): array {
+        $fx = $this->fxSettlement();
+        $table = $docType === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT d.exchange_rate, cur.code AS currency
+               FROM {$table} d JOIN currencies cur ON cur.id = d.currency_id
+              WHERE d.id = ? AND d.supplier_id = ?"
+        );
+        $stmt->execute([$docId, $supplierId]);
+        $header = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($header === false || strtoupper((string) $header['currency']) === FxPaymentSettlement::LOCAL_CURRENCY) {
+            throw new CashException('validation', 'Cizoměnovou úhradu lze zaúčtovat jen k dokladu v cizí měně.');
+        }
+        $label = $docType === 'invoice' ? 'Vydaná faktura #' : 'Přijatá faktura #';
+        $saldo = $fx->predpisSaldo(
+            $supplierId,
+            $fx->predpis($supplierId, $docType, $docId, false, $label . $docId . ' nemá zaúčtovaný předpis.'),
+            $saldoAccount,
+        );
+        $rate = $fx->predpisFxRate($supplierId, $saldo, $header);
+        $foreign = round((float) $doc['settled_document_amount'], 2);
+        $saldoLine = FxSettlementPosting::withFxTrace(
+            $this->line($saldo['code'], $docType === 'invoice' ? 'credit' : 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+            strtoupper((string) $header['currency']),
+            $rate,
+            $foreign,
+        );
+        $lines = $docType === 'invoice'
+            ? [$this->line($cashAccount, 'debit', $total), $saldoLine]
+            : [$saldoLine, $this->line($cashAccount, 'credit', $total)];
+        $fx->appendFxDifference($lines, $supplierId, (string) $doc['issue_date'], 0.0, $docType === 'invoice');
+
+        return $lines;
+    }
+
+    private ?FxSettlementPosting $fxSettlement = null;
+
+    private function fxSettlement(): FxSettlementPosting
+    {
+        return $this->fxSettlement ??= new FxSettlementPosting(
+            $this->db,
+            $this->rules,
+            new \MyInvoice\Repository\JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db)),
+        );
     }
 
     /**
@@ -1456,9 +1631,12 @@ final class CashDocumentService
      * @param array<string,mixed> $doc
      * @param list<array<string,mixed>> $vatLines
      * @param array<string,mixed> $register
+     * @return ?float uhrazená částka v měně dokladu u korunové úhrady cizoměnové faktury,
+     *                jinak null (úhrada ve shodné měně, ostatní účely)
      */
-    private function validateDoc(int $supplierId, array $doc, array $vatLines, array $register): void
+    private function validateDoc(int $supplierId, array $doc, array $vatLines, array $register): ?float
     {
+        $settledDocumentAmount = null;
         $purpose = (string) $doc['purpose'];
         $docType = (string) $doc['doc_type'];
         $vatMode = (string) $doc['vat_mode'];
@@ -1511,7 +1689,7 @@ final class CashDocumentService
             if ($docType === 'out') {
                 $this->validateInvoiceRefund($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
             } else {
-                $this->validateInvoicePayment($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
+                $settledDocumentAmount = $this->validateInvoicePayment($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
             }
         } elseif ($purpose === 'purchase_payment') {
             if ($doc['purchase_invoice_id'] === null || $doc['invoice_id'] !== null) {
@@ -1520,7 +1698,7 @@ final class CashDocumentService
             if ($doc['doc_type'] === 'in') {
                 $this->validatePurchaseRefund($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
             } else {
-                $this->validatePurchasePayment($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
+                $settledDocumentAmount = $this->validatePurchasePayment($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
             }
         } else {
             if ($doc['invoice_id'] !== null || $doc['purchase_invoice_id'] !== null) {
@@ -1560,9 +1738,12 @@ final class CashDocumentService
                 throw new CashException('counter_account_invalid', 'Nákladový účet musí být aktivní účet třídy 5 v osnově firmy.');
             }
         }
+
+        return $settledDocumentAmount;
     }
 
-    private function validateInvoicePayment(int $supplierId, int $invoiceId, float $amount): void
+    /** @return ?float uhrazená částka v měně faktury u korunové úhrady cizoměnové faktury, jinak null */
+    private function validateInvoicePayment(int $supplierId, int $invoiceId, float $amount): ?float
     {
         // FOR UPDATE (M-5): bez zámku hlavičky vidí dvě souběžné hotovostní úhrady téže
         // faktury tentýž `remaining` a obě projdou → faktura se přeplatí. Zamyká se
@@ -1571,7 +1752,7 @@ final class CashDocumentService
         // (create/post), zámek se drží do jejího konce.
         $this->lockRow('invoices', $invoiceId, $supplierId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, cur.code AS currency
+            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, i.other_item_id, i.exchange_rate, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?'
         );
@@ -1580,23 +1761,79 @@ final class CashDocumentService
         if ($inv === false) {
             throw new CashException('invoice_not_found', 'Vydaná faktura nenalezena.', 404);
         }
+        // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246).
+        if ($inv['other_item_id'] !== null) {
+            throw new CashException('invoice_covered_by_other_item',
+                'Faktura je navázaná na ostatní pohledávku. Pokladní doklad přiřaďte pohledávce, faktura úhradu převezme.', 409);
+        }
         // Proforma (zálohová) se hotově hradit SMÍ (B5 — inkaso zálohy 211/324); jen
         // draft/cancelled zůstávají zakázané.
         if (in_array((string) $inv['status'], ['draft', 'cancelled'], true)) {
             throw new CashException('invoice_invalid_status', 'Fakturu v tomto stavu nelze hradit hotově.');
         }
-        // B6 (FX úhrady 563/663) řeší VĚDOMĚ jen banku: pokladní doklad je CZK-only už z
-        // konstrukce (normalize() fixuje currency_code='CZK'/fx_rate=1.0 a cash_documents
-        // nemá sloupec pro cizoměnovou částku), takže kurzový přepočet úhrady zde nelze
-        // vyjádřit. Cizoměnová hotovostní úhrada by vyžadovala rozšíření schématu (foreign
-        // amount + měna) i UI — mimo scope B6.
-        if ((string) $inv['currency'] !== 'CZK') {
-            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
-        }
         $remaining = self::cents($inv['amount_to_pay']) - self::cents($inv['paid_total']);
+        if ((string) $inv['currency'] !== FxPaymentSettlement::LOCAL_CURRENCY) {
+            return $this->foreignInvoiceSettlement($inv, $amount, $remaining);
+        }
         if (self::cents($amount) > $remaining) {
             throw new CashException('amount_exceeds_remaining', 'Částka převyšuje zbývající úhradu faktury.');
         }
+        return null;
+    }
+
+    /**
+     * Korunová úhrada cizoměnové VYDANÉ faktury z korunové pokladny — stejná pravidla
+     * jako bankovní korunová platba ({@see FxPaymentSettlement}). Koruny v kurzové
+     * toleranci vůči zbytku (kurz dokladu) uhradí celý zbytek, rozdíl je kurzový. Menší
+     * částka je částečná úhrada přepočtená kurzem dokladu, jako u banky
+     * ({@see FxPaymentSettlement::amountInInvoiceCurrency()}).
+     *
+     * Zálohová faktura (proforma) se korunami z pokladny hradit nesmí: inkaso zálohy
+     * jde na 324 bez předpisu, takže kurz úhrady není proti čemu vyrovnat. Banka ji
+     * odmítá stejně (`BankPostingService::buildIncomingCzkFx()`).
+     *
+     * @param array<string,mixed> $inv
+     */
+    private function foreignInvoiceSettlement(array $inv, float $amount, int $remainingCents): float
+    {
+        if ((string) $inv['invoice_type'] === 'proforma') {
+            throw new CashException(
+                'foreign_currency_proforma',
+                'Cizoměnovou zálohovou fakturu z pokladny uhradit nelze — inkaso zálohy v cizí měně zaúčtujte v bance.',
+            );
+        }
+        $currency = strtoupper((string) $inv['currency']);
+        $rate = (float) ($inv['exchange_rate'] ?? 0);
+        if ($rate <= 0.0) {
+            throw new CashException('fx_rate_unavailable', 'Faktura nemá kurz pro přepočet korunové úhrady.');
+        }
+        if ($remainingCents <= 0) {
+            throw new CashException('amount_exceeds_remaining', 'Faktura je už uhrazená, není co hradit.');
+        }
+        $remaining = $remainingCents / 100;
+        $full = FxPaymentSettlement::isFullCzkSettlement($amount, $remaining, $currency, $rate, FxPaymentSettlement::LOCAL_CURRENCY);
+        $settled = FxPaymentSettlement::amountInInvoiceCurrency($amount, $currency, $rate, FxPaymentSettlement::LOCAL_CURRENCY, $remaining, $full);
+        if (self::cents($settled) <= 0) {
+            throw new CashException('validation', 'Částka úhrady je po přepočtu do měny faktury nulová.');
+        }
+        if (self::cents($settled) > $remainingCents) {
+            $expected = FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
+            throw new CashException(
+                'fx_amount_out_of_tolerance',
+                sprintf(
+                    'Korunová částka převyšuje zbytek faktury %.2f %s (podle kurzu dokladu %.2f Kč) i s kurzovou tolerancí.',
+                    $remaining, $currency, $expected,
+                ),
+                422,
+                [
+                    'remaining' => round($remaining, 2),
+                    'currency_code' => $currency,
+                    'expected_czk' => $expected,
+                    'tolerance_czk' => round(FxPaymentSettlement::matchTolerance($expected), 2),
+                ],
+            );
+        }
+        return $settled;
     }
 
     /**
@@ -1629,8 +1866,12 @@ final class CashDocumentService
         if (!RefundDocument::isOpenRefund($inv)) {
             throw new CashException('invoice_invalid_status', 'Doklad v tomto stavu nelze vyplatit v hotovosti.');
         }
+        // Výplata cizoměnového dokladu k vyplacení zůstává jen v korunách: banka cizoměnovou
+        // vratku dobropisu automaticky neúčtuje (`fx_not_supported`) a pokladna nesmí umět
+        // víc než banka. Korunová úhrada cizoměnové faktury ({@see foreignInvoiceSettlement()})
+        // se týká jen příjmu, kde předpis na 311 vyrovnává kladná pohledávka.
         if ((string) $inv['currency'] !== 'CZK') {
-            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
+            throw new CashException('foreign_currency_invoice', 'Výplatu cizoměnového dokladu k vyplacení z pokladny nelze zaúčtovat.');
         }
         $refund = self::cents(RefundDocument::refundAmount($inv));
         if (self::cents($amount) !== $refund) {
@@ -1668,7 +1909,8 @@ final class CashDocumentService
         }
     }
 
-    private function validatePurchasePayment(int $supplierId, int $purchaseInvoiceId, float $amount): void
+    /** @return ?float uhrazená částka v měně dokladu u korunové úhrady cizoměnového dokladu, jinak null */
+    private function validatePurchasePayment(int $supplierId, int $purchaseInvoiceId, float $amount): ?float
     {
         // FOR UPDATE (M-5) — viz komentář ve validateInvoicePayment().
         $this->lockRow('purchase_invoices', $purchaseInvoiceId, $supplierId);
@@ -1676,11 +1918,11 @@ final class CashDocumentService
         if ($pf === null) {
             throw new CashException('invoice_not_found', 'Přijatá faktura nenalezena.', 404);
         }
-        if ((string) $pf['currency'] !== 'CZK') {
-            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
-        }
         if (!in_array((string) $pf['status'], ['received', 'booked'], true)) {
             throw new CashException('invoice_invalid_status', 'Přijatou fakturu v tomto stavu nelze hradit hotově.');
+        }
+        if ((string) $pf['currency'] !== FxPaymentSettlement::LOCAL_CURRENCY) {
+            return $this->foreignPurchaseSettlement($supplierId, $purchaseInvoiceId, $pf, $amount);
         }
         // H-1: platebním cílem je ZBYTEK (`amount_to_pay` = brutto − uhrazená záloha,
         // generovaný sloupec migrace 0026, mínus už zaúčtované úhrady), ne brutto. Proti
@@ -1703,6 +1945,70 @@ final class CashDocumentService
                 ['remaining' => round($remaining / 100, 2)],
             );
         }
+        return null;
+    }
+
+    /**
+     * Korunová úhrada cizoměnové PŘIJATÉ faktury nebo účtenky z korunové pokladny.
+     * Pravidla jsou táž jako u bankovní korunové platby (párování v
+     * `BankStatementAction`, zaúčtování `BankPostingService::buildOutgoingCzkCardFx()`):
+     *
+     *   - jen v plné výši zbytku: koruny se musí vejít do kurzové tolerance vůči zbytku
+     *     přepočtenému kurzem dokladu ({@see FxPaymentSettlement::isFullCzkSettlement()}),
+     *   - jen na dosud neuhrazený doklad: měnu a kurz předchozí částečné úhrady nejde
+     *     bezpečně doložit (`cross_currency_partial_unsupported` jako v bance),
+     *   - jen faktura a účtenka: zálohová faktura (314) a daňový doklad k platbě nemají
+     *     předpis na závazku, proti kterému by šel kurzový rozdíl vyrovnat.
+     *
+     * Vrací uhrazenou částku v měně dokladu (celý zbytek).
+     *
+     * @param array<string,mixed> $pf
+     */
+    private function foreignPurchaseSettlement(int $supplierId, int $purchaseInvoiceId, array $pf, float $amount): float
+    {
+        if (!in_array((string) ($pf['document_kind'] ?? ''), ['invoice', 'receipt'], true)) {
+            throw new CashException(
+                'foreign_currency_invoice',
+                'Z korunové pokladny lze uhradit jen cizoměnovou fakturu nebo účtenku — zálohu nebo daňový doklad k platbě v cizí měně zaúčtujte v bance.',
+            );
+        }
+        $currency = strtoupper((string) $pf['currency']);
+        $rate = (float) ($pf['exchange_rate'] ?? 0);
+        if ($rate <= 0.0) {
+            throw new CashException('fx_rate_unavailable', 'Doklad nemá kurz pro přepočet korunové úhrady.');
+        }
+        $remainingCents = self::cents($this->purchaseRemaining($supplierId, $purchaseInvoiceId));
+        if ($remainingCents <= 0) {
+            throw new CashException(
+                'nothing_to_settle',
+                'Přijatá faktura už je vypořádaná (zálohou nebo jinou úhradou) — není co hradit.',
+            );
+        }
+        if ($remainingCents !== self::cents((float) $pf['amount_to_pay'])) {
+            throw new CashException(
+                'cross_currency_partial_unsupported',
+                'Částečně uhrazený cizoměnový doklad nelze doplatit korunami z pokladny — měnu a kurz předchozí úhrady nelze bezpečně doložit.',
+            );
+        }
+        $remaining = $remainingCents / 100;
+        if (!FxPaymentSettlement::isFullCzkSettlement($amount, $remaining, $currency, $rate, FxPaymentSettlement::LOCAL_CURRENCY)) {
+            $expected = FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
+            throw new CashException(
+                'fx_amount_out_of_tolerance',
+                sprintf(
+                    'Cizoměnový doklad lze z pokladny uhradit jen celý: %.2f %s je podle kurzu dokladu %.2f Kč, korunová částka se smí lišit nejvýš o kurzovou toleranci.',
+                    $remaining, $currency, $expected,
+                ),
+                422,
+                [
+                    'remaining' => round($remaining, 2),
+                    'currency_code' => $currency,
+                    'expected_czk' => $expected,
+                    'tolerance_czk' => round(FxPaymentSettlement::matchTolerance($expected), 2),
+                ],
+            );
+        }
+        return round($remaining, 2);
     }
 
     /**
@@ -1731,11 +2037,15 @@ final class CashDocumentService
         if ($pf === null) {
             throw new CashException('invoice_not_found', 'Přijatá faktura nenalezena.', 404);
         }
+        // Vratka k cizoměnovému dokladu zůstává jen v korunách: vrácená částka v měně
+        // dokladu ani kurz, kterým se má závazek obnovit, nejsou z korunové vratky
+        // jednoznačné (korunová úhrada se mohla zaúčtovat jiným kurzem) a banka cizoměnovou
+        // vratku také automaticky neúčtuje (`fx_not_supported`).
         if ((string) $pf['currency'] !== 'CZK') {
-            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
+            throw new CashException('foreign_currency_invoice', 'Vratku k cizoměnovému dokladu z pokladny nelze zaúčtovat.');
         }
 
-        $paid = self::cents((float) $pf['amount_to_pay'])
+        $paid =self::cents((float) $pf['amount_to_pay'])
             - self::cents($this->purchaseRemaining($supplierId, $purchaseInvoiceId, $excludeCashDocumentId));
         if ($paid <= 0) {
             throw new CashException(
@@ -2339,15 +2649,12 @@ final class CashDocumentService
             return;
         }
 
-        // Finální faktura z proformy — vazba parent_invoice_id (FinalFromProformaCreator).
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT varsymbol FROM invoices
-              WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'invoice'
-                AND status <> 'cancelled'
-              ORDER BY id LIMIT 1"
+        // Finální faktura z proformy: vazba parent_invoice_id (FinalFromProformaCreator), nebo
+        // faktura čerpající proformu odpočtovým řádkem spolu s dalšími zálohami.
+        $finalRow = \MyInvoice\Service\Invoice\AdvanceDrawLinks::firstFinalOf(
+            $this->db->pdo(), $supplierId, $invoiceId, ['draft', 'issued', 'sent', 'reminded', 'paid'],
         );
-        $stmt->execute([$supplierId, $invoiceId]);
-        $final = $stmt->fetchColumn();
+        $final = $finalRow === null ? false : (string) ($finalRow['varsymbol'] ?? '');
         if ($final !== false) {
             throw new CashException(
                 'followup_document_exists',
