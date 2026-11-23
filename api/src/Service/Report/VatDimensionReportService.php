@@ -198,7 +198,7 @@ final class VatDimensionReportService
         }
         $ok = $lineDifferences === [] && array_filter($difference, static fn (float $d): bool => abs($d) >= 0.005) === [];
 
-        [$return, $returnError] = $this->returnBridge($supplierId, $year, $month, $period, $total);
+        [$return, $returnError] = $this->returnBridge($supplierId, $year, $month, $scope, $total);
         [$account343, $account343Error] = $this->account343($supplierId, $typeId, $start, $end, $out, $total);
 
         $missingRates = array_values($missingByDoc);
@@ -326,13 +326,14 @@ final class VatDimensionReportService
      * Most sestava → přiznání: ř. 62/63/64 tak, jak je skládá {@see DphPriznaniBuilder}, a rozdíl
      * proti součtu sestavy (úpravy § 79, § 76, § 78 a zaokrouhlení na celé Kč).
      *
+     * @param array<string,mixed> $scope období a režim sestavy ({@see DphPriznaniBuilder::returnScope()})
      * @param array<string,float> $evidence
      * @return array{0: array<string,mixed>|null, 1: string|null}
      */
-    private function returnBridge(int $supplierId, int $year, int $month, string $period, array $evidence): array
+    private function returnBridge(int $supplierId, int $year, int $month, array $scope, array $evidence): array
     {
         try {
-            $summary = $this->vatReturn->build($supplierId, $year, $month, $period)['summary'];
+            $summary = $this->vatReturn->build($supplierId, $year, $month, $scope['period'], scope: $scope)['summary'];
         } catch (\Throwable $e) {
             return [null, 'Přiznání za období nejde sestavit: ' . $e->getMessage()];
         }

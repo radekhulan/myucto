@@ -16,13 +16,14 @@ use MyInvoice\Service\Tax\TaxOfficeBankAccounts;
  *   • úhrada vlastní daně finančnímu úřadu a vratka nadměrného odpočtu. Řádek 343 je
  *     vypořádáním, když platí aspoň jedno:
  *       1. zápis je z bankovního pohybu, jehož protiúčet je u ČNB (kód banky 0710, účty
- *          finančních úřadů {@see TaxOfficeBankAccounts}) — doložená vazba, poplatek
+ *          finančních úřadů {@see TaxOfficeBankAccounts}) — doložená úhrada, poplatek
  *          nebo penále na jiném účtu ve stejném zápisu na tom nic nemění,
- *       2. řádek je v jednoduchém zápisu ve dvojici s peněžním účtem (211, 221, 261),
- *       3. zápis (z banky, pokladny i ruční) má jen účty 343 a peněžní účty a žádnou
- *          jinou protistranu.
- *     DPH z bankovního poplatku (568/343/221 bez protiúčtu u ČNB) nebo pokladní doklad
- *     s DPH (211/5xx/343) protistranu nákladu či výnosu mají, a v obratu proto zůstávají.
+ *       2. zápis z banky nebo pokladny má jen účty 343 a peněžní účty (211, 221, 261)
+ *          a žádnou jinou protistranu.
+ *     Dvojice peněžní účet / 343 sama úhradou NENÍ: v jednoduchém zápisu se tak rozpadá
+ *     i hotovostní prodej (211/602 a 211/343 za DPH). Ruční zápis 343/221 se také
+ *     nevylučuje. DPH z bankovního poplatku (568/343/221 bez protiúčtu u ČNB) nebo
+ *     pokladní doklad s DPH (211/5xx/343) protistranu nákladu či výnosu mají a zůstávají.
  */
 final class Vat343Turnover
 {
@@ -50,13 +51,8 @@ final class Vat343Turnover
                                WHERE v343_bt.id = {$entryAlias}.source_id
                                  AND (TRIM(LEADING '0' FROM v343_bt.counterparty_bank) = '{$bank}'
                                       OR REPLACE(v343_bt.counterparty_account, ' ', '') LIKE 'CZ__" . TaxOfficeBankAccounts::BANK_CODE . "%')))
-              OR ({$lineAlias}.pair_no IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM journal_entry_lines v343_pl
-                                JOIN chart_of_accounts v343_pa ON v343_pa.id = v343_pl.account_id
-                               WHERE v343_pl.supplier_id = {$lineAlias}.supplier_id AND v343_pl.entry_id = {$lineAlias}.entry_id
-                                 AND v343_pl.pair_no = {$lineAlias}.pair_no AND v343_pl.id <> {$lineAlias}.id
-                                 AND " . self::moneySql('v343_pa') . "))
-              OR (EXISTS (SELECT 1 FROM journal_entry_lines v343_ml
+              OR ({$entryAlias}.source_type IN ('bank', 'cash')
+                  AND EXISTS (SELECT 1 FROM journal_entry_lines v343_ml
                             JOIN chart_of_accounts v343_mca ON v343_mca.id = v343_ml.account_id
                            WHERE v343_ml.supplier_id = {$entryAlias}.supplier_id AND v343_ml.entry_id = {$entryAlias}.id
                              AND " . self::moneySql('v343_mca') . ")

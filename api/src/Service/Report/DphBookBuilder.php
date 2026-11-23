@@ -136,26 +136,34 @@ final class DphBookBuilder
             // Secondary (ř.43/44 mirror odpočet u RC / dovozu služby). U plnění bez nároku
             // na odpočet ('none', § 72/4) se mirror POTLAČÍ — konzistentně s DPHDP3
             // (VatClassificationMapper) a KH: výstupní samovyměření zůstává, odpočet ne.
-            // Částky zrcadlového řádku i ř. 47 počítá TÝŽ pravidlo jako přiznání
-            // ({@see DphLineProjection::secondaryAmounts()}): poměrný nárok § 75 u samovyměření
-            // krátí odpočet, doplňující ř. 51 daň nenese.
+            // Zrcadlový odpočet ze samovyměření (ř. 43/44) počítá TÝŽ pravidlo jako přiznání
+            // ({@see DphLineProjection::secondaryAmounts()}): poměrný nárok § 75 ho krátí.
+            // Ostatní secondary řádky (ř. 51 u prodeje majetku) i ř. 47 Kniha ukazuje
+            // s částkami primárního řádku jako dosud.
             $secondary = $cls['dphdp3_line_secondary'];
             if (!empty($secondary) && empty($g['vat_deduction_none'])) {
-                [$secondaryBase, $secondaryVat] = DphLineProjection::secondaryAmounts($g, $secondary);
+                $secondaryRow = $row;
+                if (DphLineProjection::isSelfAssessmentMirror($secondary)) {
+                    [$secondaryBase, $secondaryVat] = DphLineProjection::secondaryAmounts($g, $secondary);
+                    $secondaryRow = $this->toBookRow(['base_czk' => $secondaryBase, 'vat_czk' => $secondaryVat] + $g);
+                }
                 $this->addToSection($sections, $scope, array_merge($cls, [
                     'dphdp3_line'           => $secondary,
                     'dphdp3_line_secondary' => null,
                     'is_secondary'          => true,
-                ]), $this->toBookRow(['base_czk' => $secondaryBase, 'vat_czk' => $secondaryVat] + $g));
+                ]), $secondaryRow);
             }
             // ř.47 — hodnota pořízeného majetku (primary nebo secondary v 40-45).
-            $asset = DphLineProjection::fixedAssetAmounts($g, (string) $line, $secondary);
-            if ($asset !== null) {
-                $this->addToSection($sections, $scope, array_merge($cls, [
-                    'dphdp3_line'           => '47',
-                    'dphdp3_line_secondary' => null,
-                    'is_secondary'          => true,
-                ]), $this->toBookRow(['base_czk' => $asset[0], 'vat_czk' => $asset[1]] + $g));
+            if ($g['is_fixed_asset']) {
+                $p = (int) ($cls['dphdp3_line'] ?? 0);
+                $s = (int) ($cls['dphdp3_line_secondary'] ?? 0);
+                if (($p >= 40 && $p <= 45) || ($s >= 40 && $s <= 45)) {
+                    $this->addToSection($sections, $scope, array_merge($cls, [
+                        'dphdp3_line'           => '47',
+                        'dphdp3_line_secondary' => null,
+                        'is_secondary'          => true,
+                    ]), $row);
+                }
             }
         }
 

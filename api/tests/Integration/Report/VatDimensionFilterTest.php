@@ -86,6 +86,7 @@ final class VatDimensionFilterTest extends TestCase
 
     protected function tearDown(): void
     {
+        \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared();
         if (isset($this->db) && $this->inTx) {
             $pdo = $this->db->pdo();
             if ($pdo->inTransaction()) {
@@ -435,8 +436,8 @@ final class VatDimensionFilterTest extends TestCase
 
     /**
      * Nález 8: úhrada daně finančnímu úřadu z banky s poplatkem ve stejném zápisu (protiúčet
-     * u ČNB) i ruční zápis 343/221 do obratu 343 nepatří; DPH z poplatku bez vazby na FÚ ano.
-     * Stejné pravidlo čte kontrola obratu 343 proti přiznání.
+     * u ČNB) do obratu 343 nepatří; ruční zápis 343/221 bez doložené úhrady a DPH z poplatku
+     * bez vazby na FÚ ano (jako dosud). Stejné pravidlo čte kontrola obratu 343 proti přiznání.
      */
     public function testAccount343SettlementWithFeeAndManualPaymentAreExcluded(): void
     {
@@ -461,9 +462,9 @@ final class VatDimensionFilterTest extends TestCase
 
         $report = $this->container->get(VatDimensionReportService::class)->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', $this->typeId);
         $x = self::byCode($report['account343']['rows'])['VDF-X'];
-        self::assertSame(2.1, $x['debit'], 'V obratu zůstane jen DPH z poplatku.');
-        self::assertSame(2, $report['account343']['excluded']['payments']['count']);
-        self::assertSame(-5700.0, $report['account343']['excluded']['payments']['net']);
+        self::assertSame(702.1, $x['debit'], 'Ruční zápis 343/221 bez doložené úhrady a DPH z poplatku v obratu zůstanou (jako dosud).');
+        self::assertSame(1, $report['account343']['excluded']['payments']['count'], 'Vyloučená je jen doložená úhrada s protiúčtem u ČNB.');
+        self::assertSame(-5000.0, $report['account343']['excluded']['payments']['net']);
     }
 
     /** Drobný nález: vyloučená úhrada s řádkem 343 rozděleným mezi dvě hodnoty je jeden zápis. */
@@ -471,7 +472,7 @@ final class VatDimensionFilterTest extends TestCase
     {
         $this->container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
         $this->container->get(AccountingPeriodRepository::class)->create($this->supplierId, self::YEAR, sprintf('%04d-01-01', self::YEAR), sprintf('%04d-12-31', self::YEAR));
-        $this->container->get(PostingService::class)->postDocument($this->supplierId, 'manual', null, [
+        $this->container->get(PostingService::class)->postDocument($this->supplierId, 'bank', null, [
             ['account_code' => '343', 'side' => 'debit', 'amount' => 1000.0,
                 'dimension_splits' => [$this->typeId => [$this->v['x'] => 0.5, $this->v['child'] => 0.5]]],
             ['account_code' => '221', 'side' => 'credit', 'amount' => 1000.0],
@@ -480,6 +481,85 @@ final class VatDimensionFilterTest extends TestCase
         $report = $this->container->get(VatDimensionReportService::class)->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', $this->typeId);
         self::assertSame(1, $report['account343']['excluded']['payments']['count']);
         self::assertSame(-1000.0, $report['account343']['excluded']['payments']['net']);
+    }
+
+    /** Regrese review 2: Kniha DPH ukazuje ř. 51 (prodej majetku) i ř. 47 (krácený nárok) jako dosud. */
+    public function testBookKeepsLine51AndLine47AmountsOfPrimaryRow(): void
+    {
+        $cust = $this->client('Odběratel VDF', 'CZ11111118', customer: true);
+        $vend = $this->client('Dodavatel VDF', 'CZ22222220', vendor: true);
+        $this->sale('VDF-1M', $cust, $this->date(16), [[10000, 2100, 'code' => '1m']], null, '1m');
+        $this->purchase('VDF-40K', $vend, $this->date(17), [[10000, 2100]], ['asset' => true, 'deduction' => 'reduced']);
+
+        $book = $this->container->get(DphBookBuilder::class)->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $byLine = [];
+        foreach ($book['sections'] as $section) {
+            $byLine[$section['dphdp3_line']] = ($byLine[$section['dphdp3_line']] ?? 0.0) + $section['subtotal_vat'];
+        }
+        self::assertSame(2100.0, round($byLine['51'] ?? 0.0, 2), 'Ř. 51 Knihy nese daň primárního řádku.');
+        self::assertSame(2100.0, round($byLine['47'] ?? 0.0, 2), 'Ř. 47 Knihy nese daň i u kráceného nároku.');
+    }
+
+    /**
+     * Regrese review 2: v jednoduchém zápisu se hotovostní prodej rozpadne na 211/602 a 211/343.
+     * Dvojice peněžní účet / 343 úhradou finančnímu úřadu není, DPH zůstane v obratu 343.
+     */
+    public function testAccount343KeepsCashSaleVatInSimpleEntryForm(): void
+    {
+        $this->container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $this->container->get(AccountingPeriodRepository::class)->create($this->supplierId, self::YEAR, sprintf('%04d-01-01', self::YEAR), sprintf('%04d-12-31', self::YEAR));
+        $this->container->get(\MyInvoice\Service\Accounting\EntryForm\EntryFormService::class)
+            ->schedule($this->supplierId, sprintf('%04d-01-01', self::YEAR), \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single, $this->userId);
+        $this->container->get(PostingService::class)->postDocument($this->supplierId, 'cash', null, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.0, 'pair_no' => 1],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 100.0, 'pair_no' => 1],
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 21.0, 'pair_no' => 2],
+            ['account_code' => '343', 'side' => 'credit', 'amount' => 21.0, 'pair_no' => 2, 'dimensions' => [$this->typeId => $this->v['x']]],
+        ], ['entry_date' => $this->date(18), 'posted_by' => $this->userId]);
+
+        $report = $this->container->get(VatDimensionReportService::class)->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', $this->typeId);
+        self::assertSame(21.0, self::byCode($report['account343']['rows'])['VDF-X']['credit']);
+        self::assertSame(0, $report['account343']['excluded']['payments']['count']);
+    }
+
+    /** Review 2, bod 4: vyřazený doklad KH se ve výpisu za hodnotu ukáže jen dílem hodnoty. */
+    public function testExcludedKhDocumentShowsOnlyTheDimensionShare(): void
+    {
+        $cust = $this->client('Odběratel bez DIČ', null, customer: true);
+        $doc = $this->sale('VDF-A1', $cust, $this->date(19), [[7000, 0, 'code' => '25s'], [3000, 0, 'code' => '25s']], null, '25s', true);
+        $this->dimensions->saveDocument($this->supplierId, 'invoice', $doc, [$this->typeId => $this->v['child']], [2 => [$this->typeId => $this->v['x']]]);
+
+        $kh = $this->container->get(KhEvidenceService::class);
+        $x = $kh->current($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'all', $this->dimensions->filter($this->supplierId, $this->v['x']));
+        $excluded = array_column($x['excluded'], null, 'doc_number');
+        self::assertArrayHasKey('VDF-A1', $excluded);
+        self::assertSame(3000.0, (float) $excluded['VDF-A1']['base_total'], 'Vyřazený doklad jen dílem hodnoty.');
+        $other = $this->value('VDF-JINA');
+        $none = $kh->current($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'all', $this->dimensions->filter($this->supplierId, $other));
+        self::assertNotContains('VDF-A1', array_column($none['excluded'], 'doc_number'), 'Hodnota bez dílu doklad nevypíše.');
+    }
+
+    /**
+     * Review 2, bod 5: firma je v dubnu plátce a ke konci čtvrtletí identifikovaná osoba.
+     * Sestava i srovnávací přiznání počítají ve stejném režimu, most proto nevykáže rozdíl.
+     */
+    public function testReturnBridgeUsesTheSameScopeWhenStatusChangesInQuarter(): void
+    {
+        $pdo = $this->db->pdo();
+        $history = $pdo->prepare(
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified) VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer), is_identified = VALUES(is_identified)'
+        );
+        $history->execute([$this->supplierId, self::YEAR . '-01-01', 1, 0]);
+        $history->execute([$this->supplierId, self::YEAR . '-06-01', 0, 1]);
+        $cust = $this->client('Odběratel VDF', 'CZ11111118', customer: true);
+        $doc = $this->sale('VDF-PI', $cust, sprintf('%04d-04-10', self::YEAR), [[10000, 2100]]);
+        $this->dimensions->saveDocument($this->supplierId, 'invoice', $doc, [$this->typeId => $this->v['x']], null);
+
+        $report = $this->container->get(VatDimensionReportService::class)->build($this->supplierId, self::YEAR, 4, 'quarterly', $this->typeId);
+        self::assertTrue($report['period']['forced_monthly']);
+        self::assertSame(0.0, $report['total']['vat_output'], 'Identifikovaná osoba tuzemské plnění nevykazuje.');
+        self::assertSame(0.0, $report['control']['return']['bridge']['vat_output'], 'Přiznání ve stejném režimu jako sestava.');
     }
 
     private function allocation(int $purchaseId, float $base, float $vat): void
@@ -566,7 +646,7 @@ final class VatDimensionFilterTest extends TestCase
     }
 
     /** @param list<array{0:float|int,1:float|int}> $items */
-    private function sale(string $varsymbol, int $clientId, string $date, array $items, ?int $currencyId = null): int
+    private function sale(string $varsymbol, int $clientId, string $date, array $items, ?int $currencyId = null, string $code = '1', bool $rc = false): int
     {
         [$base, $vat] = $this->sum($items);
         $this->db->pdo()->prepare(
@@ -574,8 +654,8 @@ final class VatDimensionFilterTest extends TestCase
                 (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                  currency_id, exchange_rate, reverse_charge, total_without_vat, total_vat, total_with_vat,
                  status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, "issued", "1", ?)'
-        )->execute([$this->supplierId, $varsymbol, $clientId, $date, $date, $date, $currencyId ?? $this->currencyId, $base, $vat, $base + $vat, $this->userId]);
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, "issued", ?, ?)'
+        )->execute([$this->supplierId, $varsymbol, $clientId, $date, $date, $date, $currencyId ?? $this->currencyId, $rc ? 1 : 0, $base, $vat, $base + $vat, $code, $this->userId]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->items('invoice_items', 'invoice_id', $id, $items);
         return $id;
@@ -592,9 +672,9 @@ final class VatDimensionFilterTest extends TestCase
                  due_date, received_at, currency_id, exchange_rate, reverse_charge, vendor_snapshot,
                  total_without_vat, total_vat, total_with_vat, status, vat_classification_code,
                  is_fixed_asset, vat_deduction, vat_deduction_percent, created_by)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, NULL, ?, "{}", ?, ?, ?, "received", ?, 0, ?, ?, ?)'
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, NULL, ?, "{}", ?, ?, ?, "received", ?, ?, ?, ?, ?)'
         )->execute([$this->supplierId, $vendorId, $number, $date, $date, $date, $date, $this->currencyId, !empty($opt['rc']) ? 1 : 0,
-            $base, $vat, $base + $vat, $opt['code'] ?? '40', $opt['deduction'] ?? 'full', $opt['percent'] ?? 100, $this->userId]);
+            $base, $vat, $base + $vat, $opt['code'] ?? '40', !empty($opt['asset']) ? 1 : 0, $opt['deduction'] ?? 'full', $opt['percent'] ?? 100, $this->userId]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->items('purchase_invoice_items', 'purchase_invoice_id', $id, $items);
         return $id;

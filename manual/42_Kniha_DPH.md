@@ -399,11 +399,12 @@ a úhrady nebo vratky daně. Řádek 343 je úhradou nebo vratkou, když:
 - zápis je z bankovního pohybu s protiúčtem u ČNB (kód banky 0710, účty
   finančních úřadů); poplatek nebo penále ve stejném zápisu na tom nic
   nemění,
-- v jednoduchém zápisu je ve dvojici s peněžním účtem (211, 221, 261),
-- zápis (z banky, pokladny i ruční) má jen účet 343 a peněžní účty.
+- zápis z banky nebo pokladny má jen účet 343 a peněžní účty (211, 221, 261).
 
-DPH z bankovního poplatku bez protiúčtu u ČNB nebo pokladní doklad s DPH
-protistranu nákladu či výnosu mají, a v obratu proto zůstávají. Stejné
+Samotná dvojice peněžní účet a 343 úhradou není: v jednoduchém zápisu se tak
+rozpadá i hotovostní prodej (211/602 a 211/343). Ruční zápis 343/221 se také
+nevylučuje. DPH z bankovního poplatku bez protiúčtu u ČNB nebo pokladní doklad
+s DPH protistranu nákladu či výnosu mají, a v obratu proto zůstávají. Stejné
 pravidlo používá kontrola obratu 343 proti přiznání. Počet vyloučených
 úhrad je počet zápisů.
 

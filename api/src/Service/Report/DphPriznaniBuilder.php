@@ -100,6 +100,9 @@ final class DphPriznaniBuilder
      * @param ?string $dZjist datum zjištění důvodů pro dodatečné (Y-m-d) — povinné pro D/E.
      * @param ?string $reason důvody pro podání dodatečného přiznání (§ 141 odst. 5 DŘ) —
      *        jdou do textové přílohy VetaR (kod_sekce='D'); prázdné = doplní se obecný text.
+     * @param array<string,mixed>|null $scope období a režim z {@see returnScope()}; sestava DPH
+     *        podle dimenze předá svůj, aby srovnávací přiznání počítalo ve stejném režimu
+     *        (změna plátce na identifikovanou osobu uvnitř čtvrtletí).
      * @return array{xml: string, summary: array<string, mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
      */
     public function build(
@@ -110,6 +113,7 @@ final class DphPriznaniBuilder
         string $variant = 'radne',
         ?string $dZjist = null,
         ?string $reason = null,
+        ?array $scope = null,
     ): array {
         $forma = self::VARIANT_FORMA[$variant] ?? null;
         if ($forma === null) {
@@ -131,7 +135,7 @@ final class DphPriznaniBuilder
         }
         // Období, stav plátcovství k jeho konci a typ P/I určuje returnScope() (sdílí ho
         // sestava DPH podle dimenze, aby počítala za totéž období jako přiznání).
-        $scope = $this->returnScope($supplierId, $year, $month, $period);
+        $scope ??= $this->returnScope($supplierId, $year, $month, $period);
         $rangeStart = $scope['range_start'];
         $statusDate = $scope['status_date'];
         // §141 DŘ: důvody pro dodatečné přiznání nelze zjistit dřív, než období skončilo,

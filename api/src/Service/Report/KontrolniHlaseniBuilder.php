@@ -1028,6 +1028,14 @@ final class KontrolniHlaseniBuilder
                 }
             }
             unset($summary);
+            // Vyřazené doklady (chybějící DIČ u přenesení, rozdílný režim) se vyřazují podle
+            // celého dokladu, ale vypisují jen dílem hodnoty, stejně jako oddíly.
+            $kinds = ['A.1' => 'a1', 'B.1' => 'b1', 'A.4' => 'a4', 'B.2' => 'b2'];
+            $weightedExcluded = [];
+            foreach ($excluded as $row) {
+                array_push($weightedExcluded, ...self::weightedRows([$row], $kinds[(string) ($row['excluded_section'] ?? '')] ?? 'a4'));
+            }
+            $excluded = $weightedExcluded;
             foreach ($r['dimension_unassigned'] as $u) {
                 $warnings[] = sprintf(
                     'Doklad %s: rozpis DPH nejde přiřadit k položkám s různými dimenzemi, základ %s Kč a DPH %s Kč '

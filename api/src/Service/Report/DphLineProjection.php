@@ -110,11 +110,18 @@ final class DphLineProjection
      */
     private const SELF_ASSESSMENT_MIRROR_LINES = ['43' => true, '44' => true, '43k' => true, '44k' => true];
 
+    /** Zrcadlový odpočet ze samovyměření (ř. 43/44 v plné i krácené výši)? */
+    public static function isSelfAssessmentMirror(string $line): bool
+    {
+        return isset(self::SELF_ASSESSMENT_MIRROR_LINES[$line]);
+    }
+
     /**
      * Základ a daň zrcadlového (secondary) řádku řádku evidence: odpočtová varianta
      * (`deduction_*`, u samovyměření s poměrným nárokem § 75 krácená), u doplňujícího
-     * ř. 51/51b jen základ — daň zůstává výhradně na primárním ř. 1/2. Sdílí přiznání
-     * i Kniha DPH ({@see DphBookBuilder}), aby zrcadlový odpočet ukazovaly stejně.
+     * ř. 51/51b jen základ — daň zůstává výhradně na primárním ř. 1/2. Kniha DPH
+     * ({@see DphBookBuilder}) ho používá pro zrcadlový ř. 43/44, aby odpočet ukazovala
+     * stejně jako přiznání.
      *
      * @param array<string,mixed> $r
      * @return array{0: float, 1: float}
