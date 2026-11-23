@@ -21,6 +21,8 @@ export interface AccrualScheduleRow {
   to_on: string | null
   days: number | null
   amount_planned: number
+  /** Část řádku za uzavřené období (sloučené starší řádky), účtovaná do běžného období. */
+  closed_period_amount?: number
   status: AccrualScheduleStatus
   journal_entry_id: number | null
   entry_date: string | null
@@ -391,7 +393,18 @@ export interface AccrualTakeoverPreview {
   opening: Array<{ account_code: string; entry_id: number | null; opening_balance: number; allocated: number; items: number; remainder: number }>
   terminations: AccrualTakeoverTermination[]
   unmatched_terminations: AccrualTakeoverTermination[]
-  summary: { items: number; new: number; terminated: number; unpaired_sources: number; opening_remainder: number }
+  warnings?: AccrualTakeoverWarning[]
+  summary: { items: number; new: number; terminated: number; unpaired_sources: number; opening_remainder: number; without_origin?: number }
+}
+
+export interface AccrualTakeoverWarning {
+  code: string
+  item_no?: string
+  account_code?: string
+  source_document_no?: string | null
+  opening_balance?: number
+  reconstructed?: number
+  message?: string
 }
 
 export interface AccrualActivity {
@@ -458,7 +471,7 @@ export const accrualsApi = {
     api.post<{ posted: number; total: number }>(`/accounting/accruals/closing/${periodId}/post`, { row_version: rowVersion }).then(r => r.data),
   takeoverPreview: () => api.get<AccrualTakeoverPreview>('/accounting/accruals/takeover/pohoda').then(r => r.data),
   takeoverApply: () =>
-    api.post<AccrualTakeoverPreview & { created: number; updated: number }>('/accounting/accruals/takeover/pohoda').then(r => r.data),
+    api.post<AccrualTakeoverPreview & { created: number; updated: number; drafted?: Array<{ item_no: string; code: string; message: string }> }>('/accounting/accruals/takeover/pohoda').then(r => r.data),
 }
 
 /** Kód chyby agendy bez prefixu `accruals.error.` (nebo prázdný řetězec). */

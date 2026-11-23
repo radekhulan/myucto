@@ -439,6 +439,9 @@ onMounted(load)
                   <td class="whitespace-nowrap px-3 py-2 text-xs text-neutral-600">
                     <template v-if="row.from_on && row.to_on">{{ formatDate(row.from_on) }} – {{ formatDate(row.to_on) }}</template>
                     <span v-if="row.days" class="ml-1 text-neutral-400">({{ t('accruals.detail.days', row.days) }})</span>
+                    <p v-if="row.closed_period_amount" class="mt-1 max-w-xs whitespace-normal text-warning-700" data-test="row-closed-part">
+                      {{ t('accruals.detail.closed_period_part', { amount: formatMoney(row.closed_period_amount) }) }}
+                    </p>
                   </td>
                   <td class="whitespace-nowrap px-3 py-2 text-xs">{{ t(`accruals.row_kind.${row.kind}`) }}</td>
                   <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.amount_planned) }}</td>
@@ -549,6 +552,9 @@ onMounted(load)
               </tr>
             </tbody>
           </table>
+          <p v-if="rowPreview.row.closed_period_amount" role="status" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-warning-700" data-test="row-preview-closed-part">
+            {{ t('accruals.detail.closed_period_part', { amount: formatMoney(rowPreview.row.closed_period_amount) }) }}
+          </p>
           <p v-if="!rowPreview.lock.postable" role="alert" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-warning-700" data-test="row-lock">{{ t('accruals.detail.locked') }}</p>
         </template>
       </div>

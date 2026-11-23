@@ -1005,6 +1005,7 @@
       "post_row": "Zaúčtovat",
       "post_title": "Zaúčtovat rozpuštění",
       "post_intro": "Zápis ke dni {date} na částku {amount}:",
+      "closed_period_part": "Obsahuje rozpuštění za uzavřené období ({amount}), účtuje se do běžného období; u významné částky zvažte opravu minulého období (426/428).",
       "posted": "Rozpuštění je zaúčtované.",
       "unpost_row": "Stornovat",
       "confirm_unpost": "Stornovat rozpuštění ke dni {date}? Vznikne protizápis ke dni původního zápisu.",
@@ -1120,7 +1121,12 @@
       "allocated": "Rozepsáno do položek",
       "remainder": "Nerozepsaný zůstatek",
       "terminations": "Ukončení z interních dokladů",
-      "unmatched": "nespárováno s položkou"
+      "unmatched": "nespárováno s položkou",
+      "warnings_title": "Upozornění k převzetí",
+      "warning": {
+        "item_without_origin": "{item_no}: zdrojový doklad nemá v deníku zápis na účtu položky ani podíl na počátečním stavu. Položka se převezme jako koncept, přiřaďte jí zápis vzniku v odsouhlasení a aktivujte ji.",
+        "reconstruction_exceeds_opening": "Účet {account}: rekonstrukce počátečního stavu ({reconstructed}) překročila počáteční stav účtu ({opening}). Položky nesou jen část rozpuštěnou po převzetí, zbytek zůstane nerozepsaný."
+      }
     },
     "warning": {
       "internal_document_unlinked": "Interní doklad není vazbou „Souvisí“ spojený se zdrojovým dokladem. Má-li zdrojová faktura období od–do, uzávěrka ji odloží znovu.",

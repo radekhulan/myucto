@@ -138,6 +138,23 @@ describe('AccrualDetail', () => {
     expect(action(wrapper, 'edit').show).toBe(false)
   })
 
+  it('řádek se sloučeným rozpuštěním za uzavřené období upozorní v plánu i v náhledu zaúčtování', async () => {
+    const merged = row(11, '2099-06-01', 'planned', { from_on: '2098-07-01', to_on: '2099-06-01', amount_planned: 700, closed_period_amount: 600 })
+    m.get.mockResolvedValue(detail({ next_release: merged, schedule: [merged, row(12, '2099-07-01', 'planned', { closed_period_amount: 0 })] }))
+    m.rowPreview.mockResolvedValue({ row: merged, entry_date: '2099-06-01',
+      lines: [{ account_code: '548', side: 'debit', amount: 700 }, { account_code: '381', side: 'credit', amount: 700 }],
+      lock: { postable: true, closed: false, closing: false, date_locked: false, period_status: 'open' } })
+    const wrapper = mountDetail()
+    await flushPromises()
+    const notes = wrapper.findAll('[data-test="row-closed-part"]')
+    expect(notes).toHaveLength(1)
+    expect(notes[0].text()).toContain('accruals.detail.closed_period_part')
+    expect(notes[0].text()).toContain('600 Kč')
+    action(wrapper, 'post_release').run!()
+    await flushPromises()
+    expect(wrapper.get('[data-test="row-preview-closed-part"]').text()).toContain('600 Kč')
+  })
+
   it('zaúčtování ukáže náhled zápisu a v zamčeném období ho nedovolí', async () => {
     m.rowPreview.mockResolvedValue({ row: row(11, '2099-06-01'), entry_date: '2099-06-01',
       lines: [{ account_code: '548', side: 'debit', amount: 100 }, { account_code: '381', side: 'credit', amount: 100 }],

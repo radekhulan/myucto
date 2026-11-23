@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accrualsApi, type AccrualTakeoverPreview } from '@/api/accruals'
+import { accrualsApi, type AccrualTakeoverPreview, type AccrualTakeoverWarning } from '@/api/accruals'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
@@ -21,6 +21,18 @@ const failed = ref(false)
 const applying = ref(false)
 const result = ref<{ created: number; updated: number } | null>(null)
 const canWrite = computed(() => auth.canWrite('accounting.accruals.write'))
+const warnings = computed<AccrualTakeoverWarning[]>(() => preview.value?.warnings ?? [])
+
+function warningText(w: AccrualTakeoverWarning): string {
+  const key = `accruals.takeover.warning.${w.code}`
+  const text = t(key, {
+    item_no: w.item_no ?? '',
+    account: w.account_code ?? '',
+    opening: formatMoney(w.opening_balance ?? 0),
+    reconstructed: formatMoney(w.reconstructed ?? 0),
+  })
+  return text === key ? (w.message ?? w.code) : text
+}
 
 function errorText(error: any): string {
   return error?.response?.data?.error?.message || t('common.error')
@@ -45,7 +57,10 @@ async function apply() {
   try {
     const applied = await accrualsApi.takeoverApply()
     result.value = { created: applied.created, updated: applied.updated }
-    preview.value = applied
+    // Koncept vzniklý až při převzetí (zápis vzniku navázaný na jinou položku) náhled neznal.
+    const known = new Set((applied.warnings ?? []).filter(w => w.code === 'item_without_origin').map(w => w.item_no))
+    const drafted = (applied.drafted ?? []).filter(d => !known.has(d.item_no))
+    preview.value = { ...applied, warnings: [...(applied.warnings ?? []), ...drafted] }
     toast.success(t('accruals.takeover.done', { created: applied.created, updated: applied.updated }))
   } catch (error: any) {
     toast.error(errorText(error))
@@ -114,6 +129,13 @@ onMounted(load)
           <div class="text-xs text-neutral-500">{{ t('accruals.takeover.summary_opening_remainder') }}</div>
           <div class="text-lg font-semibold tabular-nums">{{ formatMoney(preview.summary.opening_remainder) }}</div>
         </div>
+      </section>
+
+      <section v-if="warnings.length" class="rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-800" role="status" data-test="takeover-warnings">
+        <h2 class="mb-1 font-semibold">{{ t('accruals.takeover.warnings_title') }}</h2>
+        <ul class="list-disc space-y-1 pl-5">
+          <li v-for="(w, index) in warnings" :key="`${w.code}-${w.item_no ?? w.account_code ?? index}`" data-test="takeover-warning">{{ warningText(w) }}</li>
+        </ul>
       </section>
 
       <section class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">

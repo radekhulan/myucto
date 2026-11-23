@@ -56,7 +56,9 @@ se položce sám nepřiřadí, ani když je na dokladu jediný.
 
 Řádek, který už uzávěrka odložila, převezmete do agendy z panelu **Časové rozlišení** v detailu dokladu
 akcí **Převzít do agendy**. Položka dostane zůstatek k datu, od kterého ho rozpouští (den po posledním
-rozpuštění v otevření roku), naváže se na zápis odkladu a plán začne tímto dnem.
+rozpuštění v otevření roku), naváže se na zápis odkladu a plán začne tímto dnem. Řádek dokladu převezme
+ze záznamu kroku uzávěrky, takže otevření roku tranši znovu nerozpustí, ani když se mezitím změnilo období
+řádku. Odložila-li uzávěrka víc řádků dokladu, vyberte, který položka převezme.
 
 Položka založená z interního dokladu, který není vazbou **Souvisí** spojený se zdrojovou fakturou, ukáže
 upozornění: uzávěrka by fakturu s obdobím od–do odložila znovu.
@@ -170,6 +172,9 @@ rozlišení v deníku jako ruční zápisy s čísly typu `24CR0001`.
 3. Potvrďte převzetí. Položky se založí, převzaté zápisy se navážou a plán za nimi dopočte agenda.
    **Nic se neúčtuje.**
 4. Zkontrolujte položku **Nerozepsaný zůstatek PS** (pokud vznikla) a odsouhlasení s hlavní knihou.
+5. Projděte **upozornění k převzetí**. Položka, jejíž zdrojový doklad nemá v deníku zápis na účtu položky
+   ani podíl na počátečním stavu, se převezme jako **koncept** bez plánu. Přiřaďte jí zápis vzniku
+   v odsouhlasení a aktivujte ji.
 
 Převzetí lze spustit opakovaně, například po dalším převodu deníku. Existující položky se nepřepíšou,
 doplní se jen nové zápisy a přepočte nerozepsaný zůstatek. Pravidla párování popisuje
@@ -250,7 +255,9 @@ Pokračuje-li plán za zaúčtovanými nebo převzatými řádky, začíná dnem
 zůstatek. Rozdíl mezi zbývajícím zůstatkem a součtem plánu vyrovná poslední řádek. Nezaúčtované řádky
 s datem v uzavřeném období (například v uzavřeném minulém roce) se při přepočtu přičtou k prvnímu řádku
 v otevřeném období, takže neblokují položku ani uzavření dalšího roku. Řádky v uzavíraném období zůstávají,
-zaúčtuje je krok uzávěrky.
+zaúčtuje je krok uzávěrky. Řádek, který nese rozpuštění za uzavřené období, detail položky i náhled
+zaúčtování označí upozorněním s jeho částkou: účtuje se do běžného období a u významné částky zvažte opravu
+minulého období (426/428).
 
 ### 125.10.4 Zápisy agendy
 
@@ -354,6 +361,10 @@ Odklad dokladu, který převzala agenda, projekce nehlásí jako nezaúčtované
   zrušili, převzetí nezmění. Převzatý zápis se nenaváže na úsek, který už rozpustila agenda (náhled ho ukáže
   jako konflikt), ani na zápis vzniku navázaný na jinou položku. Klesne-li nerozepsaný zůstatek PS na nulu,
   položka zbytku se zruší.
+- **Položka bez zápisu vzniku.** Smlouva, jejíž zdrojový doklad nemá v deníku zápis na účtu položky ani
+  podíl na počátečním stavu, se převezme jako koncept bez plánu a náhled ji uvede v upozorněních. Do
+  odsouhlasení se počítá s převzatými zápisy, ale nic nehlásí k zaúčtování a neblokuje uzavření roku.
+  Opakované převzetí ji doplní o nové zápisy a aktivuje, jakmile zápis vzniku najde.
 
 ### 125.10.10 Oprávnění
 

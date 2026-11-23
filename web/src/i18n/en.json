@@ -1005,6 +1005,7 @@
       "post_row": "Post",
       "post_title": "Post release",
       "post_intro": "Entry dated {date} for {amount}:",
+      "closed_period_part": "Includes the release for a closed period ({amount}), posted to the current period; for a material amount consider a prior-period correction (426/428).",
       "posted": "The release is posted.",
       "unpost_row": "Reverse",
       "confirm_unpost": "Reverse the release dated {date}? A reversing entry is created on the date of the original entry.",
@@ -1120,7 +1121,12 @@
       "allocated": "Allocated to items",
       "remainder": "Unallocated balance",
       "terminations": "Terminations from internal documents",
-      "unmatched": "not paired with an item"
+      "unmatched": "not paired with an item",
+      "warnings_title": "Takeover warnings",
+      "warning": {
+        "item_without_origin": "{item_no}: the source document has no journal entry on the item account and no share of the opening balance. The item is taken over as a draft; assign its origin entry in the reconciliation and activate it.",
+        "reconstruction_exceeds_opening": "Account {account}: the reconstructed opening balance ({reconstructed}) exceeds the account opening balance ({opening}). Items carry only the part released after the takeover, the rest stays unallocated."
+      }
     },
     "warning": {
       "internal_document_unlinked": "The internal document is not linked (Related) to the source document. If the source invoice has a period, closing will defer it again.",
