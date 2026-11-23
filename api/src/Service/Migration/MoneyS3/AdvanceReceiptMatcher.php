@@ -175,7 +175,7 @@ final class AdvanceReceiptMatcher
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT t.id, DATE(t.posted_at) AS posted_on, t.amount, t.currency, COALESCE(t.variable_symbol, '') AS symbol,
-                    COALESCE(t.counterparty_name, '') AS name, SUM(l.amount) AS czk
+                    COALESCE(t.counterparty_name, '') AS name, SUM(l.signed_amount) AS czk
                FROM bank_transactions t
                JOIN bank_statements s ON s.id = t.statement_id
                JOIN journal_entries e ON e.supplier_id = s.supplier_id AND e.source_type = 'bank' AND e.source_id = t.id AND e.reversed_by IS NULL

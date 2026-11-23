@@ -149,7 +149,7 @@ final class OpeningDocuments
     private static function openingBalance(PDO $pdo, int $supplierId, int $periodId, string $account, int $sign): ?float
     {
         $stmt = $pdo->prepare(
-            "SELECT COUNT(DISTINCT e.id), COALESCE(SUM(CASE WHEN a.account_code LIKE ? THEN IF(l.side = 'debit', l.amount, -l.amount) ELSE 0 END), 0)
+            "SELECT COUNT(DISTINCT e.id), COALESCE(SUM(CASE WHEN a.account_code LIKE ? THEN IF(l.side = 'debit', l.signed_amount, -l.signed_amount) ELSE 0 END), 0)
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id
