@@ -15749,7 +15749,9 @@ paths:
       description: |
         Interní pomůcka; řádky obsahují document_kind pro rozlišení faktury a pokladního dokladu. NENÍ EPO podání.
         S filtrem `dimension_value_id` kniha obsahuje jen díl dokladů připadající na hodnotu dimenze
-        a odpověď nese použitý filtr v `dimension` (jinak `null`).
+        a odpověď nese použitý filtr v `dimension` (jinak `null`). `dimension_unassigned` vypíše přijaté
+        doklady s hodnotou filtru, jejichž rozpis DPH nejde přiřadit k položkám v různých dimenzích
+        (v knize hodnoty nejsou).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer } }
@@ -15760,7 +15762,8 @@ paths:
       responses:
         '200': { description: 'Summary řádků žurnálu (`period`, `supplier`, `dimension`, `sections`, `totals`)' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Hodnota dimenze ve filtru nenalezena (`not_found`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný filtr dimenze (`dimension_value_invalid`) nebo hodnoty víc typů dimenze (`dimension_filter_single_type`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/dph-book:
     get:
@@ -15780,21 +15783,25 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Hodnota dimenze ve filtru nenalezena (`not_found`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný filtr dimenze (`dimension_value_invalid`) nebo hodnoty víc typů dimenze (`dimension_filter_single_type`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/vat-by-dimension/preview:
     get:
       tags: [Reports]
       summary: DPH podle dimenze (evidence DPH za období po hodnotách typu dimenze)
       description: |
-        Evidence DPH za období (stejná data jako přiznání, bez konceptů) rozdělená po hodnotách jednoho typu
-        dimenze a řádku „bez dimenze" (`value_id` null). Řádek evidence (položka dokladu) patří hodnotě
-        položky, jinak hodnotě hlavičky dokladu; u rozpadu podílem po haléřích. Výsledek = DPH na výstupu
+        Evidence DPH za období (stejná data a období jako přiznání, bez konceptů) rozdělená po hodnotách
+        jednoho typu dimenze. Řádek evidence (položka dokladu) patří hodnotě položky, jinak hodnotě hlavičky
+        dokladu; u rozpadu podílem po haléřích. Rozpis DPH přijatého dokladu patří dimenzi dokladu, mají-li ji
+        všechny položky stejnou, jinak je v řádku `kind = vat_allocation`. Opravy § 43, § 46 a § 74b jsou
+        v řádku `kind = corrections`, takže součet řádků je úplná evidence. Výsledek = DPH na výstupu
         (ř. 1–13) − nárok na odpočet (ř. 40–45, krácený sloupec v plné výši).
 
         `control.difference` = součet řádků − evidence za období, musí být nula (`control.ok`).
-        `control.return` jsou ř. 62, 63 a 64 přiznání a `bridge` jejich rozdíl proti evidenci (opravy § 43,
-        § 46, § 74b, § 79, krácení § 76, úprava § 78 a zaokrouhlení na celé Kč). `account343` porovnává
+        `control.return` jsou ř. 62, 63 a 64 přiznání a `bridge` jejich rozdíl proti součtu (korekce § 79,
+        krácení § 76, úprava § 78 a zaokrouhlení na celé Kč). Chybí-li u dokladu v cizí měně kurz, je sestava
+        předběžná (`preliminary`, `missing_rates`). `account343` porovnává
         obraty účtu 343 po hodnotách dimenze řádků deníku za období (bez úhrad daně finančnímu úřadu,
         vratek odpočtu, počátečních stavů a uzávěrky); u firmy bez účtu 343 je `null` a důvod
         v `account343_unavailable`.
@@ -15858,7 +15865,8 @@ paths:
         '200': { description: Soupis dokladů, content: { application/json: { schema: { $ref: '#/components/schemas/KhEvidenceReport' } } } }
         '400': { description: Neplatné období nebo oddíl }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Hodnota dimenze ve filtru nenalezena (`not_found`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný filtr dimenze (`dimension_value_invalid`) nebo hodnoty víc typů dimenze (`dimension_filter_single_type`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/kh-evidence:
     get:
@@ -15883,6 +15891,8 @@ paths:
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Hodnota dimenze ve filtru nenalezena (`not_found`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný filtr dimenze (`dimension_value_invalid`) nebo hodnoty víc typů dimenze (`dimension_filter_single_type`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/oss/preview:
     get:
@@ -64071,6 +64081,7 @@ components:
             start: { type: string, format: date }
             end: { type: string, format: date }
             label: { type: string }
+            forced_monthly: { type: boolean, description: 'Identifikovaná osoba: zvolené čtvrtletí přepnuto na měsíc `month` jako v přiznání.' }
         supplier:
           type: object
           properties:
@@ -64091,6 +64102,10 @@ components:
               - { $ref: '#/components/schemas/VatDimensionAmounts' }
               - type: object
                 properties:
+                  kind:
+                    type: string
+                    enum: [value, none, vat_allocation, corrections]
+                    description: 'value = hodnota typu, none = bez dimenze, vat_allocation = rozpis DPH přijatého dokladu s položkami v různých dimenzích, corrections = opravy § 43, § 46, § 74b'
                   value_id: { type: [integer, 'null'] }
                   code: { type: [string, 'null'] }
                   name: { type: string }
@@ -64173,6 +64188,11 @@ components:
                   is_total: { type: boolean }
             note: { type: string }
         account343_unavailable: { type: [string, 'null'] }
+        preliminary: { type: boolean, description: 'Některý doklad v cizí měně nemá kurz (přepočten náhradním kurzem 1,0), částky jsou předběžné.' }
+        missing_rates:
+          type: array
+          description: Doklady v cizí měně bez kurzu (stejný tvar jako `missing_rates` náhledu přiznání).
+          items: { type: object, additionalProperties: true }
         generated_at: { type: string }
         warnings: { type: array, items: { type: string } }
     ReportDimensionFilter:

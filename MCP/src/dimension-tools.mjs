@@ -160,8 +160,10 @@ export const DIMENSION_TOOLS = [
       + 'a řádek „bez dimenze": DPH na výstupu, nárok na odpočet, výsledek a základy podle sazeb. DPH dokladu patří '
       + 'dimenzi položky, jinak hlavičky, u rozpadu podílem. control.ok/difference ověřuje, že součet sedí na evidenci '
       + 'za období; control.return jsou ř. 62–64 přiznání a bridge opravy a zaokrouhlení. account343 porovná obraty '
-      + 'účtu 343 po dimenzích (bez úhrad finančnímu úřadu a počátečních stavů). Doklady hodnoty vypíše vat_ledger '
-      + 's dimension_value_id. Nemění data.',
+      + 'účtu 343 po dimenzích (bez úhrad finančnímu úřadu a počátečních stavů). Řádek kind=corrections nese opravy '
+      + '§ 43/46/74b, kind=vat_allocation rozpis DPH bez vazby na položky. preliminary=true znamená, že u dokladu '
+      + 'v cizí měně chybí kurz (missing_rates) a částky jsou jen předběžné — uveď to vždy u odpovědi. '
+      + 'Doklady hodnoty vypíše vat_ledger s dimension_value_id. Nemění data.',
     { year: { type: 'integer', minimum: 2020, maximum: 2050, description: 'Rok.' },
       month: { type: 'integer', minimum: 1, maximum: 12, description: 'Měsíc 1–12; u čtvrtletí libovolný měsíc čtvrtletí.' },
       period: str('Zdaňovací období.', { enum: ['monthly', 'quarterly'] }),

@@ -152,6 +152,7 @@ test('DPH podle dimenze je čtecí sestava za období a typ dimenze', async () =
   assert.throws(() => validateToolArguments(tool, { year: 2026, month: 10 }));
   assert.throws(() => validateToolArguments(tool, { year: 2026, month: 13, type_id: 11 }));
   assert.throws(() => validateToolArguments(tool, { year: 2026, month: 10, type_id: 11, period: 'yearly' }));
+  assert.match(tool.description, /preliminary/, 'Popis vede asistenta k upozornění na předběžné částky.');
 });
 
 test('záznamní evidence DPH předá filtr dimenze knize DPH i soupisu KH', async () => {
