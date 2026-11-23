@@ -315,7 +315,57 @@ final class AdvanceSettlementEvidenceReader
      */
     public function advanceReceived(int $supplierId, int $proformaId): float
     {
-        return round($this->postedAdvanceReceived($supplierId, $proformaId) + $this->openingAdvanceReceived($supplierId, $proformaId), 2);
+        return round($this->postedAdvanceReceived($supplierId, $proformaId) + $this->openingAdvanceReceived($supplierId, $proformaId)
+            + $this->takenOverSettlementReceived($supplierId, $proformaId), 2);
+    }
+
+    /**
+     * Přijatá záloha zápočtem převzatým z jiného programu: evidovaná platba zálohy `settlement`
+     * se zápočtem (`invoice_settlements`) navázaným na převzatý zápis, který zálohu přijal na
+     * straně Dal zálohového účtu (Money S3 vede úhradu zálohy interním dokladem, např.
+     * MD 325 / D 324). Zálohu na 324 nese převzatý deník stejně jako bankovní zápis, konečná
+     * faktura ji proto smí zúčtovat. V měně proformy.
+     */
+    public function takenOverSettlementReceived(int $supplierId, int $proformaId): float
+    {
+        return round($this->scalarFloat(
+            "SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
+               JOIN invoices p ON p.id = ip.invoice_id AND p.supplier_id = ip.supplier_id AND p.invoice_type = 'proforma'
+              WHERE ip.supplier_id = ? AND ip.invoice_id = ? AND " . self::takenOverSettlementReceiptSql('ip'),
+            [$supplierId, $proformaId],
+        ), 2);
+    }
+
+    /**
+     * SQL podmínka „platba `$payment` (alias `invoice_payments`) je zápočet převzatý z jiného
+     * programu, jehož převzatý zápis přijal zálohu" ({@see takenOverSettlementReceived()}).
+     * Účet zálohy: `$accountId` (SQL výraz, saldokonto) nebo syntetický účet 324; `$asOf` =
+     * SQL výraz rozvahového dne, zápis po něm (nebo stornovaný k němu) se nepočítá.
+     */
+    public static function takenOverSettlementReceiptSql(string $payment, ?string $accountId = null, ?string $asOf = null): string
+    {
+        if (preg_match('/^[a-z_][a-z0-9_]*$/', $payment) !== 1 || ($accountId !== null && preg_match('/^[a-z_][a-z0-9_.]*$/', $accountId) !== 1)
+            || ($asOf !== null && preg_match('/^[a-z_][a-z0-9_.]*$/', $asOf) !== 1)) {
+            throw new \InvalidArgumentException('Neplatný alias.');
+        }
+        $account = $accountId !== null
+            ? "(tsa.id = {$accountId} OR tsa.parent_id = {$accountId})"
+            : "COALESCE(tsp.account_code, tsa.account_code) LIKE '324%'";
+        $live = $asOf !== null
+            ? "tse.entry_date <= {$asOf} AND (tse.reversed_by IS NULL OR tsrev.entry_date > {$asOf})"
+            : 'tse.reversed_by IS NULL';
+        return "{$payment}.source = 'settlement' AND EXISTS (
+                    SELECT 1 FROM invoice_settlements tsr
+                      JOIN journal_entries tse ON tse.id = tsr.journal_entry_id AND tse.supplier_id = tsr.supplier_id
+                      JOIN journal_entry_lines tsl ON tsl.entry_id = tse.id AND tsl.supplier_id = tse.supplier_id
+                      JOIN chart_of_accounts tsa ON tsa.id = tsl.account_id
+                      LEFT JOIN chart_of_accounts tsp ON tsp.id = tsa.parent_id
+                      LEFT JOIN journal_entries tsrev ON tsrev.id = tse.reversed_by
+                     WHERE tsr.supplier_id = {$payment}.supplier_id AND tsr.doc_type = 'invoice' AND tsr.doc_id = {$payment}.invoice_id
+                       AND tsr.invoice_payment_id = {$payment}.id AND tsr.status = 'confirmed'
+                       AND tse.posted_at IS NOT NULL AND {$live}
+                       AND tsl.side = 'credit' AND {$account}
+                       AND " . TakenOverRecord::journalEntrySql('tse') . ')';
     }
 
     /**

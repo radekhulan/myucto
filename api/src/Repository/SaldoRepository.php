@@ -1368,7 +1368,8 @@ final class SaldoRepository
                               AND (e.reversed_by IS NULL OR rev.entry_date > x.as_of)
                               AND l.side = 'credit'
                               AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
-                       ){$openingCollected}
+                       )
+                       OR (" . AdvanceSettlementEvidenceReader::takenOverSettlementReceiptSql('ip', 'x.account_id', 'x.as_of') . "){$openingCollected}
                    )
                  GROUP BY ip.invoice_id
             ), settled AS (
