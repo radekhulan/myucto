@@ -213,6 +213,33 @@ final class JournalEntryRefresh
     }
 
     /**
+     * Doklady zápisů (zdroj zápisu i vazba zápisu na vydaný či přijatý doklad), jedním
+     * dotazem na dávku: zápis => list „druh|id".
+     *
+     * @param list<int> $entryIds
+     * @return array<int,list<string>>
+     */
+    public function entryDocuments(int $supplierId, array $entryIds): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique($entryIds)), 1000) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT e.id, e.source_type, e.source_id FROM journal_entries e
+                  WHERE e.supplier_id = ? AND e.id IN ({$in}) AND e.source_type IN ('invoice', 'purchase_invoice') AND e.source_id IS NOT NULL
+                 UNION
+                 SELECT k.entry_id, k.doc_type, k.doc_id FROM journal_entry_document_links k
+                  WHERE k.supplier_id = ? AND k.entry_id IN ({$in}) AND k.doc_type IN ('invoice', 'purchase_invoice')"
+            );
+            $stmt->execute([$supplierId, ...$chunk, $supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$entryId, $type, $docId]) {
+                $out[(int) $entryId][] = $type . '|' . $docId;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Doklad, ke kterému zápis patří (zdroj zápisu), leží v období s podaným přiznáním DPH,
      * kontrolním nebo OSS hlášením: zápis se nepřepisuje, stejně jako doklad
      * ({@see DocumentRefresh::filedPeriod()}), aby se doklad a deník nerozešly.

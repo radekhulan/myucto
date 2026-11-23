@@ -65,7 +65,7 @@ final class InvoiceImporter
 
     private readonly DocumentRefresh $documentRefresh;
 
-    /** @var \WeakMap<ImportContext,array<int,array<string,mixed>>>|null doklady Money pro krok deníku ({@see moneyDocuments()}) */
+    /** @var \WeakMap<ImportContext,array<string,mixed>>|null doklady Money pro krok deníku ({@see moneyDocuments()}) */
     private ?\WeakMap $moneyDocuments = null;
 
     public function __construct(
@@ -1229,8 +1229,8 @@ final class InvoiceImporter
     {
         $issued = $docType === 'invoice';
         $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
-        $source = $this->moneyDocuments($ctx, $issued);
-        $key = $source['keys'][$docId] ?? null;
+        $key = $this->moneyDocumentKeys($ctx, $issued)[$docId] ?? null;
+        $source = $key !== null ? $this->moneyDocuments($ctx, $issued, (int) explode('|', $key, 2)[0]) : ['rows' => [], 'codes' => []];
         $r = $key !== null ? ($source['rows'][$key] ?? null) : null;
         $current = $this->documentRefresh->states($ctx->supplierId, $issued, [$docId])[$docId] ?? null;
         if ($key === null || $current === null) {
@@ -1254,39 +1254,61 @@ final class InvoiceImporter
     }
 
     /**
-     * Doklady Money zapisovaných let s klíčem mapy převodu (jednou za běh):
-     * `keys` id dokladu => klíč, `rows` klíč => řádek Money, `codes` členění řádků vydaných dokladů.
+     * Klíč mapy převodu podle id dokladu (jednou za běh).
      *
-     * @return array{keys:array<int,string>,rows:array<string,array<string,mixed>>,codes:array<string,list<array<string,mixed>>>}
+     * @return array<int,string>
      */
-    private function moneyDocuments(ImportContext $ctx, bool $issued): array
+    private function moneyDocumentKeys(ImportContext $ctx, bool $issued): array
     {
         $this->moneyDocuments ??= new \WeakMap();
         $cached = $this->moneyDocuments[$ctx] ?? [];
-        if (isset($cached[(int) $issued])) {
-            return $cached[(int) $issued];
+        if (!isset($cached['keys'][(int) $issued])) {
+            $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
+            $cached['keys'][(int) $issued] = array_map('strval', array_flip($this->map->all($ctx->supplierId, $kind)));
+            $this->moneyDocuments[$ctx] = $cached;
         }
-        $kind = $issued ? MoneyS3ImportRepository::KIND_INVOICE : MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
-        $keys = array_flip($this->map->all($ctx->supplierId, $kind));
+        return $cached['keys'][(int) $issued];
+    }
+
+    /**
+     * Doklady Money jednoho roku (adresáře roku podle rozvrhu) pro krok deníku, po letech
+     * - krok deníku zná rozvrh jen do roku, který právě převádí: `rows` klíč => řádek Money,
+     * `codes` členění řádků vydaných dokladů. Zapisovatelnost roku posoudí až
+     * {@see prepareUpdate()}.
+     *
+     * @return array{rows:array<string,array<string,mixed>>,codes:array<string,list<array<string,mixed>>>}
+     */
+    private function moneyDocuments(ImportContext $ctx, bool $issued, int $year): array
+    {
+        $this->moneyDocuments ??= new \WeakMap();
+        $cached = $this->moneyDocuments[$ctx] ?? [];
+        if (isset($cached['years'][(int) $issued][$year])) {
+            return $cached['years'][(int) $issued][$year];
+        }
         $rows = [];
         $codes = [];
-        foreach ($ctx->backup->rowsAcrossYears($issued ? 'VFaktury' : 'PFaktury') as $r) {
-            $year = $ctx->yearOf($r);
-            $docNo = trim((string) ($r['Doklad'] ?? ''));
-            if ($year !== null && $docNo !== '' && $ctx->yearWritable($year) && (int) ($r['FlagDel'] ?? 0) === 0) {
-                $rows[$year . '|' . $docNo] = $r;
+        foreach ($ctx->dirYears as $dir => $dirYear) {
+            if ($dirYear !== $year) {
+                continue;
             }
-        }
-        if ($issued && $rows !== []) {
-            foreach ($ctx->backup->rowsAcrossYears('VFaktPol', ['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) as $item) {
-                if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
-                    $codes[$item['__dir'] . '|' . (int) ($item['Cislo'] ?? 0)][] = $item;
+            $path = $ctx->backup->dir() . DIRECTORY_SEPARATOR . $dir;
+            foreach ($ctx->backup->table($issued ? 'VFaktury' : 'PFaktury', $path)?->rows() ?? [] as $r) {
+                $docNo = trim((string) ($r['Doklad'] ?? ''));
+                if ($docNo !== '') {
+                    $rows[$year . '|' . $docNo] = ['__dir' => (string) $dir] + $r;
+                }
+            }
+            if ($issued) {
+                foreach ($ctx->backup->table('VFaktPol', $path)?->rows(['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) ?? [] as $item) {
+                    if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
+                        $codes[$dir . '|' . (int) ($item['Cislo'] ?? 0)][] = $item;
+                    }
                 }
             }
         }
-        $cached[(int) $issued] = ['keys' => $keys, 'rows' => $rows, 'codes' => $codes];
+        $cached['years'][(int) $issued][$year] = ['rows' => $rows, 'codes' => $codes];
         $this->moneyDocuments[$ctx] = $cached;
-        return $cached[(int) $issued];
+        return $cached['years'][(int) $issued][$year];
     }
 
     /**

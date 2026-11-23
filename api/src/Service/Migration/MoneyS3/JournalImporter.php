@@ -245,6 +245,13 @@ final class JournalImporter
                 $staleByDocument[$parts[1] . '|' . $parts[2]][$key] = $entryId;
             }
         }
+        // Forma zápisu firmy. Výchozí jednoduchou formu instalace zapsal převod před prvním
+        // zápisem deníku; deník Money pak jde po dvojicích přímo ze zdroje.
+        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
+        // Rozhodnutí o změněných a smazaných zápisech roku dřív, než se cokoli přepíše:
+        // ponechá-li se kterýkoli zápis dokladu, ponechají se všechny jeho zápisy (doklad
+        // se pak nemění a nesmí se rozejít s žádným ze svých zápisů).
+        $decisions = $refresh ? $this->decide($ctx, $year, $groups, $existing, $current, $stored, $keeps, $fxAccounts, $period, $forms, $singleDir) : [];
         $fingerprints = [];
         $seen = [];
         $refreshed = ['replaced' => [], 'deleted' => [], 'kept' => [], 'differs' => []];
@@ -252,9 +259,6 @@ final class JournalImporter
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
             'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
         ];
-        // Forma zápisu firmy. Výchozí jednoduchou formu instalace zapsal převod před prvním
-        // zápisem deníku; deník Money pak jde po dvojicích přímo ze zdroje.
-        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
         $sameAccountRows = 0;
         $now = date('Y-m-d H:i:s');
         $done = 0;
@@ -272,28 +276,29 @@ final class JournalImporter
                 $seen[$key] = true;
                 $docLabel = $isOpening ? "počáteční stavy {$year}" : (trim((string) ($first['Doklad'] ?? '')) ?: $groupKey);
                 $entryId = $existing[$key];
-                $source = JournalEntryRefresh::fingerprint(JournalEntryRefresh::net(
-                    $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on'])[0]
-                ));
-                $entryState = $current[$entryId] ?? null;
-                if ($entryState !== null && ($stored[$key] ?? null) !== $source && $entryState !== $source) {
+                $decision = $decisions[$key] ?? null;
+                if ($decision !== null) {
                     // Money zápis změnilo (nebo se zápis převedený před zavedením otisků od
-                    // Money liší). Přepíše se, jen když ho v MyÚčtu nikdo neupravil: zápis
-                    // odpovídá otisku z převodu, nebo jeho řádky od převodu nikdo nezměnil,
-                    // a nemá zásah uživatele.
-                    if ($keeps($key, $entryId, $entryState) || !$this->replaceEntry($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms)) {
+                    // Money liší). Přepíše se podle rozhodnutí roku ({@see decide()}).
+                    if ($decision['action'] !== 'replace' || !$this->executeReplace($ctx, $entryId, $decision['plan'])) {
                         $refreshed[($stored[$key] ?? null) === null ? 'differs' : 'kept'][] = $docLabel;
                         $ctx->keptEntries[] = $entryId;
                         $p->count(self::STEP, 'changed_kept');
                     } else {
                         $refreshed['replaced'][] = $docLabel;
-                        $fingerprints[$key] = [$entryId, $source];
+                        $fingerprints[$key] = [$entryId, $decision['source']];
                         $p->count(self::STEP, 'replaced');
                         $stats['existing']++;
                         continue;
                     }
-                } elseif ($entryState !== null && ($stored[$key] ?? null) !== $source) {
-                    $fingerprints[$key] = [$entryId, $source];
+                } elseif (isset($current[$entryId])) {
+                    // Zápis shodný s Money: otisk se doplní (zápis převedený před otisky) či obnoví.
+                    $source = JournalEntryRefresh::fingerprint(JournalEntryRefresh::net(
+                        $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on'])[0]
+                    ));
+                    if (($stored[$key] ?? null) !== $source && $current[$entryId] === $source) {
+                        $fingerprints[$key] = [$entryId, $source];
+                    }
                 }
             }
             if (isset($existing[$key])) {
@@ -321,7 +326,7 @@ final class JournalImporter
             $keyParts = explode('|', $key);
             $staleKept = [];
             foreach ($staleByDocument[($keyParts[1] ?? '') . '|' . ($keyParts[2] ?? '')] ?? [] as $staleKey => $staleId) {
-                if (isset($current[$staleId]) && $keeps($staleKey, $staleId, $current[$staleId])) {
+                if (($decisions[$staleKey]['action'] ?? null) === 'keep') {
                     $staleKept[$staleKey] = $staleId;
                 }
             }
@@ -415,7 +420,7 @@ final class JournalImporter
                     continue;
                 }
                 $label = explode('|', $key)[2] ?? $key;
-                if (!$keeps($key, $entryId, $current[$entryId]) && $this->refresh->delete($ctx->supplierId, $entryId)) {
+                if (($decisions[$key]['action'] ?? null) === 'delete' && $this->refresh->delete($ctx->supplierId, $entryId)) {
                     $this->map->forget($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $key);
                     $refreshed['deleted'][] = $label;
                     $p->count(self::STEP, 'deleted_in_money');
@@ -459,48 +464,142 @@ final class JournalImporter
     }
 
     /**
-     * Přepíše řádky převzatého zápisu podle skupiny deníku Money; hlavička zápisu (zdroj,
-     * vazba na doklad, datum, popis) zůstává, dimenze přiřazené v MyÚčtu se přenesou na
-     * řádky se stejným pořadím, účtem a stranou. False = přepis odmítla pojistka deníku
-     * (zápis je součástí jiné evidence), doklad zápisu leží v podaném období DPH nebo ho
-     * převod nezmění, nebo dimenzi z MyÚčta nemá kam přenést; zápis zůstává, jak byl.
+     * Rozhodnutí o zápisech roku, které Money od převodu změnilo (`replace` s plánem, nebo
+     * `keep`) nebo smazalo (`delete`, nebo `keep`). Zápis se zásahem uživatele, s úpravou
+     * v MyÚčtu, převedený před otisky nebo se zápisem, který přepsat nejde, se ponechá.
+     * Ponechá-li se kterýkoli zápis dokladu (i z dřívějšího roku, {@see ImportContext::$keptEntries}),
+     * ponechají se všechny zápisy toho dokladu v roce: krok dokladů pak doklad nezmění
+     * a deník s ním zůstane v souladu.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     * @param array<string,int> $existing
+     * @param array<int,string> $current
+     * @param array<string,?string> $stored
+     * @param callable(string,int,?string):bool $keeps
+     * @param array<int,array<string,mixed>> $fxAccounts
+     * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
+     * @return array<string,array{entry:int,action:string,plan?:array<string,mixed>,source?:string}>
+     */
+    private function decide(ImportContext $ctx, int $year, array $groups, array $existing, array $current, array $stored, callable $keeps,
+        array $fxAccounts, array $period, SourceJournalPairs $forms, bool $singleDir): array
+    {
+        $decisions = [];
+        foreach ($groups as $groupKey => $groupRows) {
+            $key = $year . '|' . $groupKey;
+            $entryId = $existing[$key] ?? null;
+            if ($entryId === null || !isset($current[$entryId])) {
+                continue;
+            }
+            $isOpening = $groupKey === Ms3Journal::OPENING_SOURCE;
+            $source = JournalEntryRefresh::fingerprint(JournalEntryRefresh::net(
+                $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on'])[0]
+            ));
+            if (($stored[$key] ?? null) === $source || $current[$entryId] === $source) {
+                continue;
+            }
+            $plan = $keeps($key, $entryId, $current[$entryId]) ? null
+                : $this->planReplace($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms);
+            $decisions[$key] = $plan === null
+                ? ['entry' => $entryId, 'action' => 'keep']
+                : ['entry' => $entryId, 'action' => 'replace', 'plan' => $plan, 'source' => $source];
+        }
+        $groupKeys = array_fill_keys(array_map(static fn (string $g): string => $year . '|' . $g, array_keys($groups)), true);
+        foreach ($existing as $key => $entryId) {
+            if (isset($groupKeys[$key]) || !isset($current[$entryId])) {
+                continue;
+            }
+            $decisions[$key] = ['entry' => $entryId, 'action' => $singleDir && !$keeps($key, $entryId, $current[$entryId]) ? 'delete' : 'keep'];
+        }
+        if ($decisions === []) {
+            return [];
+        }
+        // Doklady rozhodovaných zápisů a doklady s ponechaným zápisem.
+        $documents = $this->refresh->entryDocuments($ctx->supplierId, [...array_column($decisions, 'entry'), ...$ctx->keptEntries]);
+        $keptDocuments = [];
+        foreach ([...array_column(array_filter($decisions, static fn (array $d): bool => $d['action'] === 'keep'), 'entry'), ...$ctx->keptEntries] as $entryId) {
+            foreach ($documents[$entryId] ?? [] as $document) {
+                $keptDocuments[$document] = true;
+            }
+        }
+        foreach ($decisions as $key => $d) {
+            if ($d['action'] === 'keep') {
+                continue;
+            }
+            foreach ($documents[$d['entry']] ?? [] as $document) {
+                if (isset($keptDocuments[$document])) {
+                    $decisions[$key] = ['entry' => $d['entry'], 'action' => 'keep'];
+                    break;
+                }
+            }
+        }
+        return $decisions;
+    }
+
+    /**
+     * Plán přepisu převzatého zápisu podle skupiny deníku Money: hlavička zápisu (zdroj,
+     * vazba na doklad, datum, popis) zůstává, mění se řádky; dimenze přiřazené v MyÚčtu se
+     * přenesou na řádek se stejným pořadím, účtem a stranou. Null = zápis se nepřepíše:
+     * jeho doklad leží v podaném období DPH nebo ho převod nezmění (doklad a deník by se
+     * rozešly), nebo dimenzi z MyÚčta nemá nový zápis kam přenést.
      *
      * @param list<array<string,mixed>> $groupRows
      * @param array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> $fxAccounts
      * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
+     * @return array{header:array<string,mixed>,lines:list<array<string,mixed>>,dimensions:list<array<string,mixed>>}|null
      */
-    private function replaceEntry(ImportContext $ctx, int $entryId, array $groupRows, string $groupKey, array $fxAccounts, bool $isOpening, array $period, SourceJournalPairs $forms): bool
+    private function planReplace(ImportContext $ctx, int $entryId, array $groupRows, string $groupKey, array $fxAccounts, bool $isOpening, array $period, SourceJournalPairs $forms): ?array
     {
         [$lines, , , $texts] = $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on']);
         $header = $this->refresh->header($ctx->supplierId, $entryId);
         if ($lines === [] || $header === null || $this->refresh->documentInFiledPeriod($ctx->supplierId, $header, $this->documents)) {
-            return false;
+            return null;
         }
         // Zápis dokladu se přepíše, jen když doklad Money buď nezměnilo, nebo ho krok dokladů
         // aktualizuje - jinak by se doklad a deník rozešly.
         if (in_array($header['source_type'], ['invoice', 'purchase_invoice'], true) && $header['source_id'] !== null
             && !$this->invoices->documentFollowsEntry($ctx, (string) $header['source_type'], (int) $header['source_id'])) {
-            return false;
+            return null;
         }
-        $dimensions = $this->refresh->userDimensions($ctx->supplierId, $entryId);
         PostingService::assertBalanced($lines);
         if ($forms->singleAt((string) $header['entry_date'])) {
             $lines = SourceJournalPairs::pair($lines, $texts)['lines'];
             if ($lines === []) {
-                return false;
+                return null;
             }
         }
+        $dimensions = $this->refresh->userDimensions($ctx->supplierId, $entryId);
+        foreach ($dimensions as $d) {
+            $fits = false;
+            foreach ($lines as $i => $l) {
+                if ((int) ($l['line_no'] ?? $i + 1) === $d['line_no'] && (int) $l['account_id'] === $d['account_id'] && $l['side'] === $d['side']) {
+                    $fits = true;
+                    break;
+                }
+            }
+            if (!$fits) {
+                return null;
+            }
+        }
+        return ['header' => $header, 'lines' => $lines, 'dimensions' => $dimensions];
+    }
+
+    /**
+     * Přepíše zápis podle plánu ({@see planReplace()}). False = přepis odmítla pojistka
+     * deníku (zápis je součástí jiné evidence) nebo se dimenze nepřenesla; zápis zůstává.
+     *
+     * @param array{header:array<string,mixed>,lines:list<array<string,mixed>>,dimensions:list<array<string,mixed>>} $plan
+     */
+    private function executeReplace(ImportContext $ctx, int $entryId, array $plan): bool
+    {
         $pdo = $this->db->pdo();
         $pdo->exec('SAVEPOINT money_s3_entry_replace');
         try {
-            $this->journal->replace($entryId, $header, $lines);
+            $this->journal->replace($entryId, $plan['header'], $plan['lines']);
         } catch (PostingException) {
             $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_entry_replace');
             return false;
         }
-        // Dimenze přiřazená v MyÚčtu patří řádku s týmž pořadím, účtem i stranou. Když ho
-        // nový zápis nemá (Money řádky přeskládalo nebo přeúčtovalo), zápis zůstane, jak byl.
-        if (!$this->refresh->restoreUserDimensions($ctx->supplierId, $entryId, $dimensions)) {
+        if (!$this->refresh->restoreUserDimensions($ctx->supplierId, $entryId, $plan['dimensions'])) {
             $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_entry_replace');
             return false;
         }
