@@ -1203,10 +1203,13 @@ final class PohodaImportTest extends TestCase
 
     /**
      * Služba z EU se samovyměřením v cizí měně: POHODA vyměří daň ze základu 2 500 Kč (kurz ke
-     * dni plnění), faktura zní na 2 530 Kč (kurz faktury). Rozdíl 30 Kč je položka dokladu, ale
+     * dni plnění), faktura zní na 100 EUR = 2 530 Kč (kurz faktury 25,30). Rozdíl 30 Kč
      * předmětem daně není - v přiznání ani v KH A.2 nesmí být. Dřív ho evidence DPH kvůli
      * příznaku samovyměření na hlavičce zařadila jako službu z EU (24e) a dopočítala z něj
      * daň 6,30 Kč na ř. 5 i ř. 43 a do KH A.2.
+     *
+     * Doklad se převezme v EUR (dřív v Kč s důvodem „samovyměření DPH"): jedna položka 100 EUR
+     * se základem samovyměření 2 500 Kč ze zdroje, přiznání i KH zůstávají stejné.
      */
     public function testSelfAssessedForeignPurchaseDoesNotTaxTheRateDifference(): void
     {
@@ -1216,8 +1219,20 @@ final class PohodaImportTest extends TestCase
 
         $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
         self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['self_assessed'] ?? 0, $this->explain($protocol));
-        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf(
-            "varsymbol = '%s' AND reverse_charge = 1 AND total_with_vat = 2530.00 AND status <> 'draft'", SyntheticPohodaExport::SELF_ASSESSED_PURCHASE)), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['foreign_currency'] ?? 0, $this->explain($protocol));
+        $doc = $this->db->pdo()->query(sprintf(
+            "SELECT c.code, pi.exchange_rate, pi.total_without_vat, pi.total_vat, pi.total_with_vat, pi.reverse_charge, pi.status, pi.note_below_items
+               FROM purchase_invoices pi JOIN currencies c ON c.id = pi.currency_id WHERE pi.supplier_id = %d AND pi.varsymbol = '%s'",
+            $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE))->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['EUR', '25.300000', '100.00', '0.00', '100.00', 1], [$doc['code'], $doc['exchange_rate'], $doc['total_without_vat'],
+            $doc['total_vat'], $doc['total_with_vat'], (int) $doc['reverse_charge']], $this->explain($protocol));
+        self::assertNotSame('draft', $doc['status']);
+        self::assertStringContainsString('doklad v EUR, převzat v měně dokladu kurzem 25,3 Kč', (string) $doc['note_below_items']);
+        self::assertStringContainsString('samovyměření DPH ze základu 2 500,00 Kč', (string) $doc['note_below_items']);
+        $items = $this->db->pdo()->query(sprintf(
+            "SELECT i.total_without_vat, i.total_vat, i.import_tax_base_czk FROM purchase_invoice_items i JOIN purchase_invoices pi ON pi.id = i.purchase_invoice_id
+              WHERE pi.supplier_id = %d AND pi.varsymbol = '%s'", $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE))->fetchAll(\PDO::FETCH_NUM);
+        self::assertSame([['100.00', '0.00', '2500.00']], $items);
 
         $container = Bootstrap::buildContainer();
         $lines = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];

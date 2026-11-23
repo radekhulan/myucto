@@ -490,7 +490,7 @@ final class InvoiceImporter
             $p->count($step, 'later_year_skipped');
             return;
         }
-        $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
+        $key = self::mapKey($agenda, $doc['number'], $doc['issue']);
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'purchase_invoice', $existing[$key], $doc);
@@ -529,6 +529,7 @@ final class InvoiceImporter
         if (!$class['reverse'] && $kind !== 'advance' && $class['reasons'] === [] && isset($selfAssessed[$doc['number']])) {
             $class = self::selfAssessedByInternalDocuments($class, $selfAssessed[$doc['number']], $amounts);
         }
+        $assessedHere = false;
         if ($class['reverse']) {
             $sa = $selfAssessed[$doc['number']] ?? null;
             if ($sa === null) {
@@ -543,6 +544,7 @@ final class InvoiceImporter
                 $deduction = $sa['date'] ?? $deduction;
                 $doc['tax'] = $sa['kh'] ?? $doc['kh'] ?? $sa['date'] ?? $doc['tax'];
                 $amounts = $this->applySelfAssessment($sa, $amounts, $doc['tax'] ?? $doc['issue']);
+                $assessedHere = true;
                 $p->count($step, 'self_assessed');
             }
         }
@@ -595,13 +597,34 @@ final class InvoiceImporter
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
         $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
             ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
-        if ($doc['foreign'] !== '') {
-            $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
+        // Samovyměření z interního dokladu jde v měně dokladu jednou položkou se základem
+        // v Kč ze zdroje ({@see PohodaSelfAssessedCurrency}); bez něj zůstává v Kč.
+        $candidate = $amounts['items'];
+        $block = ForeignCurrencyTakeover::purchaseBlock($class['reverse'], $class['deduction']);
+        if ($doc['foreign'] !== '' && $assessedHere) {
+            $merged = PohodaSelfAssessedCurrency::merge($amounts['items'], $doc['foreign_total']);
+            if (is_string($merged)) {
+                $block = $merged;
+            } else {
+                $candidate = $merged;
+                $block = ForeignCurrencyTakeover::purchaseBlock(false, $class['deduction']);
+            }
+        } elseif ($doc['foreign'] !== '') {
+            $candidate = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
         }
         // Přijatý doklad úhradu v částce nevede (jen stav), částečná úhrada ho proto neblokuje.
-        $fx = $this->foreignCurrency->decide($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $amounts['items'], $amounts['total'],
-            ForeignCurrencyTakeover::purchaseBlock($class['reverse'], $class['deduction']) ?? ForeignCurrencyTakeover::paymentBlock($amounts['advance'], 0.0, 0.0));
+        $fx = $this->foreignCurrency->decide($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $candidate, $amounts['total'],
+            $block ?? ForeignCurrencyTakeover::paymentBlock($amounts['advance'], 0.0, 0.0));
+        $notes = $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : [];
         if ($fx->inForeignCurrency()) {
+            if (count($candidate) !== count($amounts['items'])) {
+                $assets = [$assets[0]];
+                $taxBaseNote = PohodaSelfAssessedCurrency::note($candidate[0]['tax_base_czk'], $fx->currency);
+                if ($taxBaseNote !== null) {
+                    $notes[] = $taxBaseNote;
+                }
+            }
+            $amounts['items'] = $candidate;
             $amounts = self::inForeignCurrency($amounts);
         }
         try {
@@ -632,7 +655,7 @@ final class InvoiceImporter
                 status: $status,
                 vatDeduction: $class['deduction'],
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : []),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $notes),
                 createdBy: $ctx->userId,
                 advancePaidAmount: $amounts['advance'],
                 paymentVariableSymbol: preg_match('/^\d{1,10}$/', $doc['symvar']) === 1 ? $doc['symvar'] : null,
@@ -660,6 +683,7 @@ final class InvoiceImporter
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['code'] ?? null,
                 $assets[$i],
+                importTaxBaseCzk: $item['tax_base_czk'] ?? null,
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
@@ -725,13 +749,39 @@ final class InvoiceImporter
             'payment' => PohodaPaymentType::fromPohoda(PohodaXml::text($h, 'paymentType/paymentType')),
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
+            // Stát spotřeby dokladu v režimu OSS; POHODA element vynechává, není-li doklad v OSS.
+            'moss' => strtoupper(PohodaXml::text($h, 'MOSS/ids')),
+        ] + self::foreignCurrency($r, $prefix);
+    }
+
+    /**
+     * Klíč dokladu v mapě převodu (`pohoda_import_map`) a měna dokladu ze souhrnu - sdílí
+     * převod a oprava dokladů převzatých v Kč ({@see PohodaForeignPurchaseRepair}).
+     *
+     * @return array{key:string,number:string,foreign:string,foreign_rate:float,foreign_units:float,foreign_total:float}
+     */
+    public static function purchaseSource(array $r, string $agenda): array
+    {
+        $h = PohodaXml::get($r, 'invoiceHeader') ?? [];
+        $number = PohodaXml::text($h, 'number/numberRequested');
+        $issue = PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'dateAccounting');
+        return ['key' => self::mapKey($agenda, $number, $issue), 'number' => $number] + self::foreignCurrency($r, 'invoice');
+    }
+
+    private static function mapKey(string $agenda, string $number, ?string $issue): string
+    {
+        return $agenda . '|' . $number . '|' . $issue;
+    }
+
+    /** @return array{foreign:string,foreign_rate:float,foreign_units:float,foreign_total:float} */
+    private static function foreignCurrency(array $r, string $prefix): array
+    {
+        return [
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
             // Kurz dokladu za `amount` jednotek měny (MDB: `CmKurs` za `CmMnoz`).
             'foreign_rate' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/rate'),
             'foreign_units' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/amount') ?: 1.0,
             'foreign_total' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/priceSum'),
-            // Stát spotřeby dokladu v režimu OSS; POHODA element vynechává, není-li doklad v OSS.
-            'moss' => strtoupper(PohodaXml::text($h, 'MOSS/ids')),
         ];
     }
 

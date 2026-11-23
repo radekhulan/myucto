@@ -35,6 +35,7 @@ final class MigratedDocumentItem
         public readonly ?string $expenseKind,
         public readonly ?string $expenseAccountCode = null,
         public readonly ?string $revenueAccountCode = null,
+        public readonly ?float $importTaxBaseCzk = null,
     ) {}
 
     /**
@@ -116,6 +117,7 @@ final class MigratedDocumentItem
         bool $isFixedAsset = false,
         ?string $expenseKind = null,
         ?string $expenseAccountCode = null,
+        ?float $importTaxBaseCzk = null,
     ): self {
         return new self(
             $description, $quantity, $unit, $unitPrice, $vatRateId, $vatRateSnapshot,
@@ -127,6 +129,10 @@ final class MigratedDocumentItem
             // zdrojem (PREMIER podle účtu položky) má přednost.
             $expenseKind ?? ($isFixedAsset ? 'fixed_asset' : null),
             $expenseAccountCode,
+            null,
+            // Základ DPH v Kč ze zdroje u položky v cizí měně, která ho kurzem dokladu nedá
+            // (samovyměření kurzem ke dni plnění); evidence DPH ho bere místo přepočtu.
+            $importTaxBaseCzk,
         );
     }
 }

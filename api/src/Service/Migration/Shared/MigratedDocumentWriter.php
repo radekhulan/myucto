@@ -170,12 +170,12 @@ final class MigratedDocumentWriter
         $this->stmt('purchase_item', 'INSERT INTO purchase_invoice_items
                 (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code, is_fixed_asset, expense_kind,
-                 expense_account_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                 expense_account_code, import_tax_base_czk)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
             $purchaseInvoiceId, $item->description, $item->quantity, $item->unit, $item->unitPrice,
             $item->vatRateId, $item->vatRateSnapshot, $item->totalWithoutVat, $item->totalVat, $item->totalWithVat,
             $orderIndex, $item->vatClassificationCode, $item->isFixedAsset ? 1 : 0, $item->expenseKind,
-            $item->expenseAccountCode,
+            $item->expenseAccountCode, $item->importTaxBaseCzk,
         ]);
     }
 
