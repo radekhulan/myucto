@@ -21,7 +21,7 @@ use PHPUnit\Framework\TestCase;
  *   2. tři druhy klíčů z mapy MUSÍ zůstat zakázané:
  *      - '34' — jeho `base` slot nese DAŇ (plní ho interní injekce § 74b);
  *        uživatelem nastavená '34' by tam poslala základ → tiše chybná hodnota v XML,
- *      - '33' — totéž na věřitelské straně (§ 46, injekce applySection46Corrections),
+ *      - '33' — totéž na věřitelské straně (§ 46, injekce DphPriznaniBuilder::correctionEntries),
  *      - '40k'/'41k'/'42k' — krácený odpočet § 76, klíče si tvoří VatLedgerService sám.
  */
 final class DphLineWhitelistGuardTest extends TestCase

@@ -32,6 +32,7 @@
     <tr><td class="meta-label">Období:</td><td>{{ period.label }} ({{ period.start|cz_date }} - {{ period.end|cz_date }})</td></tr>
     <tr><td class="meta-label">Typ dimenze:</td><td>{{ dimension_type.name }}</td></tr>
     <tr><td class="meta-label">Sestaveno:</td><td>{{ generated_at|cz_datetime }}</td></tr>
+    {% if preliminary %}<tr><td class="meta-label">Stav:</td><td class="bad"><strong>PŘEDBĚŽNÉ</strong> - u dokladů v cizí měně chybí kurz (viz upozornění)</td></tr>{% endif %}
 </table>
 
 <table class="list">
@@ -45,7 +46,7 @@
     <tbody>
         {% for row in rows %}
         <tr>
-            <td style="padding-left: {{ 1.2 + row.depth * 3 }}mm;">{{ row.label }}{% if not row.is_active %} (neaktivní){% endif %}</td>
+            <td style="padding-left: {{ 1.2 + row.depth * 3 }}mm;{% if row.kind != 'value' %} font-style: italic;{% endif %}">{{ row.label }}{% if not row.is_active %} (neaktivní){% endif %}</td>
             <td class="num">{{ row.documents }}</td>
             {% for key, label in columns %}<td class="num">{{ attribute(row, key)|cz_money }}</td>{% endfor %}
         </tr>
@@ -71,7 +72,7 @@
             <td colspan="6"></td>
         </tr>
         <tr class="control">
-            <td>Opravy a zaokrouhlení přiznání (přiznání − evidence)</td><td></td>
+            <td>Úpravy přiznání (§ 79, § 76, § 78) a zaokrouhlení (přiznání − celkem)</td><td></td>
             <td class="num">{{ control.return.bridge.vat_output|cz_money }}</td>
             <td class="num">{{ control.return.bridge.vat_input|cz_money }}</td>
             <td class="num">{{ control.return.bridge.vat_result|cz_money }}</td>
@@ -84,7 +85,7 @@
     <div class="note bad">Rozdíl na ř. {{ d.line }}: základ {{ d.base|cz_money }}, DPH {{ d.vat|cz_money }}</div>
 {% endfor %}
 {% if control.return_error %}<div class="note">{{ control.return_error }}</div>{% endif %}
-<div class="note">DPH dokladu se dělí podle dimenze položky, jinak hlavičky, u rozpadu podle podílů (po haléřích). Opravy § 43, § 46, § 74b, § 79, krácení odpočtu (§ 76) a úprava odpočtu (§ 78) nemají vazbu na položky dokladu, jsou v řádku „Opravy a zaokrouhlení přiznání“ spolu se zaokrouhlením řádků přiznání na celé Kč.</div>
+<div class="note">DPH dokladu se dělí podle dimenze položky, jinak hlavičky, u rozpadu podle podílů (po haléřích). Rozpis DPH přijatého dokladu patří dimenzi dokladu, mají-li ji všechny položky stejnou, jinak je v řádku „Rozpis DPH bez vazby na položky“. Opravy § 43, § 46 a § 74b vazbu na položky nemají a jsou v řádku oprav. Korekce § 79, krácení odpočtu (§ 76) a úprava odpočtu (§ 78) jsou v řádku úprav přiznání spolu se zaokrouhlením řádků přiznání na celé Kč.</div>
 
 {% if account343 %}
 <div class="section-title">Kontrola obratů účtu 343</div>

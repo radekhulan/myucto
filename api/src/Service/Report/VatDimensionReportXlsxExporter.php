@@ -49,7 +49,7 @@ final class VatDimensionReportXlsxExporter
             'Období' => $period['label'] . ' (' . self::czDate($period['start']) . ' - ' . self::czDate($period['end']) . ')',
             'Typ dimenze' => (string) $report['dimension_type']['name'],
             'Sestaveno' => self::czDateTime((string) $report['generated_at']),
-        ];
+        ] + (!empty($report['preliminary']) ? ['Stav' => 'PŘEDBĚŽNÉ - u dokladů v cizí měně chybí kurz (viz upozornění)'] : []);
         $r = 2;
         foreach ($meta as $label => $value) {
             $sheet->setCellValueExplicit([1, $r], $label . ':', DataType::TYPE_STRING);
@@ -94,7 +94,7 @@ final class VatDimensionReportXlsxExporter
             $sheet->setCellValueExplicit([1, $r], 'Přiznání k DPH (ř. 62, 63, 64)', DataType::TYPE_STRING);
             $this->money($sheet, $r, $return);
             $r++;
-            $sheet->setCellValueExplicit([1, $r], 'Opravy a zaokrouhlení přiznání (přiznání − evidence)', DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([1, $r], 'Úpravy přiznání (§ 79, § 76, § 78) a zaokrouhlení (přiznání − celkem)', DataType::TYPE_STRING);
             $this->money($sheet, $r, $return['bridge']);
             $r++;
         } elseif ($report['control']['return_error'] !== null) {

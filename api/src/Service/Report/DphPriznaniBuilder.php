@@ -71,11 +71,11 @@ final class DphPriznaniBuilder
      *
      * ZÁMĚRNĚ VYNECHÁNO, ačkoli v $lineMap jsou:
      *   - '34' (opr_dluz, § 74b) — slot `base` u něj nese DAŇ, ne základ; plní ho interní
-     *     injekce applySection74bCorrections(). Uživatelem nastavená '34' by tam poslala
+     *     injekce correctionEntries() (§ 74b). Uživatelem nastavená '34' by tam poslala
      *     ZÁKLAD a daň zahodila → tiše CHYBNÁ hodnota v podaném XML, což je horší než
      *     chybějící řádek.
      *   - '33' (opr_verit, § 46) — stejná past jako '34', jen na věřitelské straně: slot
-     *     `base` nese DAŇ a plní ho interní injekce applySection46Corrections(). Oprava
+     *     `base` nese DAŇ a plní ho interní injekce correctionEntries() (§ 46). Oprava
      *     u nedobytné pohledávky se zadává přes {@see Section46Service}, ne klasifikací.
      *   - '40k'/'41k'/'42k' — krácený odpočet § 76; klíče si tvoří VatLedgerService sám
      *     podle vat_deduction='reduced', nenastavují se ručně.
@@ -129,19 +129,11 @@ final class DphPriznaniBuilder
         } else {
             $dZjist = null;
         }
-        $supplier = $this->loadSupplier($supplierId);
-        // Default period z supplier.vat_period, fallback 'monthly'
-        if ($period === null) {
-            $period = (string) ($supplier['vat_period'] ?? 'monthly');
-        }
-        if (!in_array($period, ['monthly', 'quarterly'], true)) {
-            $period = 'monthly';
-        }
-        // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04).
-        // První load výše slouží jen pro default periodicity; typ P/I, warning neplátce
-        // i gates korekcí §74b/§46/§43 níže se řídí supplierem se stavem k období
-        // (oba flagy z historie — migrace 1181 historizuje i identifikovanou osobu).
-        [$rangeStart, $statusDate] = $this->periodRange($year, $month, $period);
+        // Období, stav plátcovství k jeho konci a typ P/I určuje returnScope() (sdílí ho
+        // sestava DPH podle dimenze, aby počítala za totéž období jako přiznání).
+        $scope = $this->returnScope($supplierId, $year, $month, $period);
+        $rangeStart = $scope['range_start'];
+        $statusDate = $scope['status_date'];
         // §141 DŘ: důvody pro dodatečné přiznání nelze zjistit dřív, než období skončilo,
         // ani v budoucnu. Dřív se sem propsalo cokoli, co spolkl DateTimeImmutable —
         // a přitom právě tímhle datem běží lhůta pro podání.
@@ -170,14 +162,8 @@ final class DphPriznaniBuilder
                 );
             }
         }
-        $supplier = $this->loadSupplier($supplierId, $statusDate);
-        // Identifikovaná osoba (§ 6g–6l ZDPH, issue #94): přiznání typu 'I' —
-        // vyplňuje JEN samovyměření z přeshraničních přijatých plnění (ř. 3-6
-        // pořízení zboží / služby z EU, ř. 12-13 služby ze 3. zemí), vždy měsíčně,
-        // a jen za měsíce, kdy povinnost vznikla. BEZ nároku na odpočet (žádná
-        // Veta4 vč. zrcadlového ř. 43), bez tuzemských výstupů (ř. 1/2) i oddílu C
-        // (ř. 20-26 — služby do EU vykazuje jen v souhrnném hlášení).
-        $isIdentified = !$supplier['is_vat_payer'] && !empty($supplier['is_identified']);
+        $supplier = $scope['supplier'];
+        $isIdentified = $scope['identified'];
 
         $warnings = [];
         if ($isIdentified) {
@@ -200,14 +186,11 @@ final class DphPriznaniBuilder
             $warnings[] = 'Chybí DIČ tenanta.';
         }
 
-        if ($isIdentified && $period !== 'monthly') {
-            // IO má zdaňovací období VŽDY kalendářní měsíc (§ 99 se na ni nevztahuje,
-            // povinnost vzniká per měsíc dle § 101 odst. 5).
-            $period = 'monthly';
+        if ($scope['forced_monthly']) {
             $warnings[] = 'Identifikovaná osoba podává vždy za kalendářní měsíc — kvartální volba ignorována.';
         }
-
-        [$vatStart, $vatEnd] = $this->periodRange($year, $month, $period);
+        $period = $scope['period'];
+        [$vatStart, $vatEnd] = [$scope['start'], $scope['end']];
         // returnRows = kanonické řádky + plnění v režimu OSS na ř. 24 (§ 110b odst. 2).
         // #238: doklady v cizí měně bez kurzu — NEházíme chybu, vrátíme je v
         // `missing_rates` a akce je při stažení doplní z ČNB (náhled jen varuje).
@@ -230,7 +213,7 @@ final class DphPriznaniBuilder
         }
         $this->appendSalesDataWarnings($supplierId, $year, $month, $period, $warnings);
         if ($isIdentified) {
-            $lines = $this->filterLinesForIdentified($lines, $warnings);
+            $lines = self::filterLinesForIdentified($lines, $warnings);
         }
         $quarter = $period === 'quarterly' ? (int) ceil($month / 3) : null;
 
@@ -254,45 +237,20 @@ final class DphPriznaniBuilder
             );
         }
 
-        // § 74b ZDPH — evidované korekce odpočtu dlužníka za období (audit §2.5). Snížení
-        // (odst. 1/3): ř. 40/41 základ i daň ZÁPORNĚ + ř. 34 opr_dluz KLADNĚ; obnova
-        // (odst. 2/4): opačně. Řádek 34 je informativní (vat=null → mimo rekapitulaci ř.62/63),
-        // skutečný daňový efekt nese ř. 40/41 (vstupuje do ř. 46/63). Jen skuteční plátci —
-        // identifikovaná osoba odpočet nemá. Korekce se vždy míří do sloupce „V plné výši".
-        if (!$isIdentified && !empty($supplier['is_vat_payer'])) {
-            $this->applySection74bCorrections($lines, $supplierId, $year, $month, $period);
+        // Evidované opravy § 74b, § 46 a § 43 do řádků přiznání ({@see correctionEntries()}).
+        $corrections = $this->correctionEntries($supplierId, $year, $month, $period, $isIdentified, !empty($supplier['is_vat_payer']));
+        foreach ($corrections['entries'] as $entry) {
+            $this->addToLine($lines, $entry['line'], $entry['base'], $entry['vat'], $entry['label']);
         }
+        array_push($warnings, ...$corrections['warnings']);
 
-        // § 46 ZDPH — evidované věřitelské opravy u nedobytné pohledávky. Zrcadlo § 74b
-        // s prohozenými stranami: oprava snižuje daň na VÝSTUPU, tedy ř. 1/2 základ i daň
-        // ZÁPORNĚ + informativní ř. 33 opr_verit KLADNĚ; obnova po úhradě (§ 46e) opačně.
-        // Identifikovaná osoba tuzemská zdanitelná plnění neuskutečňuje, takže se jí netýká.
-        if (!$isIdentified && !empty($supplier['is_vat_payer'])) {
-            $this->applySection46Corrections($lines, $supplierId, $year, $month, $period);
-
-            // § 43 ZDPH — oprava VÝŠE daně (chybná sazba, špatný výpočet). Na rozdíl od
-            // § 42 patří ZPĚTNĚ do období PŮVODNÍHO plnění, proto se načítá podle období,
-            // které se právě staví, a ne podle data opravného dokladu.
-            // Řádek určuje Section43Service: vydaný doklad ř. 1/2, přijatý doklad odpočet
-            // ř. 40/41 (krácený 40k/41k) — stejný zdroj čte Kniha DPH i KH.
-            $s43 = $this->section43->periodCorrectionLines($supplierId, $year, $month, $period);
-            $s43HasVat = false;
-            foreach ($s43['lines'] as $s43Line => $s43Sum) {
-                $this->addToLine($lines, (string) $s43Line, $s43Sum['base'], $s43Sum['vat'], 'Oprava výše daně §43 (ř. ' . $s43Line . ')');
-                $s43HasVat = $s43HasVat || $s43Sum['vat'] != 0.0;
-            }
-            foreach ($s43['warnings'] as $s43Warning) {
-                $warnings[] = $s43Warning;
-            }
-
-            // § 43 odst. 1 opravu výslovně směruje do DODATEČNÉHO přiznání. Když se za
-            // totéž období staví řádné, oprava sice sedí věcně, ale podá se špatným
-            // typem podání — a to je vada, kterou by jinak nikdo nezachytil.
-            if (!$isAmendment && $s43HasVat) {
-                $warnings[] = 'Za toto období jsou evidované opravy výše daně podle § 43 ZDPH. '
-                    . 'Ty se podávají v DODATEČNÉM daňovém přiznání za období původního plnění '
-                    . '(§ 43 odst. 1) — zkontroluj typ podání.';
-            }
+        // § 43 odst. 1 opravu výslovně směruje do DODATEČNÉHO přiznání. Když se za
+        // totéž období staví řádné, oprava sice sedí věcně, ale podá se špatným
+        // typem podání — a to je vada, kterou by jinak nikdo nezachytil.
+        if (!$isAmendment && $corrections['s43_has_vat']) {
+            $warnings[] = 'Za toto období jsou evidované opravy výše daně podle § 43 ZDPH. '
+                . 'Ty se podávají v DODATEČNÉM daňovém přiznání za období původního plnění '
+                . '(§ 43 odst. 1) — zkontroluj typ podání.';
         }
 
         // <Pisemnost nazevSW verzeSW> > <DPHDP3 verzePis="03.01">
@@ -415,7 +373,7 @@ final class DphPriznaniBuilder
             // ř.33 opr_verit (§46, věřitel) — INFORMATIVNÍ oprava výše daně u nedobytné
             // pohledávky: oprava KLADNĚ, obnova po úhradě (§46e) ZÁPORNĚ (anotace XSD).
             // Nese jen DPH (base slot), vat=null → mimo rekapitulaci ř.62/63; skutečný
-            // daňový efekt je na ř.1/2, kam ho míří applySection46Corrections().
+            // daňový efekt je na ř.1/2, kam ho míří correctionEntries().
             '33' => ['veta' => 3, 'base' => 'opr_verit',  'vat' => null],
             // ř.34 opr_dluz (§74b, dlužník) — INFORMATIVNÍ oprava odpočtu daně: snížení
             // (odst. 1/3) KLADNĚ, obnova (odst. 2/4) ZÁPORNĚ. Nese jen DPH (base slot),
@@ -1030,6 +988,89 @@ final class DphPriznaniBuilder
     }
 
     /**
+     * Období a režim přiznání: výchozí periodicita firmy, stav plátcovství k POSLEDNÍMU dni
+     * období (EPIC VH-04, oba příznaky z historie — migrace 1181 historizuje i identifikovanou
+     * osobu) a identifikovaná osoba (§ 6g–6l ZDPH, issue #94): přiznání typu 'I' vyplňuje
+     * JEN samovyměření z přeshraničních přijatých plnění (ř. 3–6, 12–13), BEZ nároku na
+     * odpočet, a vždy za kalendářní měsíc (§ 99 se na ni nevztahuje, povinnost vzniká per
+     * měsíc dle § 101 odst. 5) — kvartální volba se přepne na měsíc `$month`.
+     *
+     * Sdílí ho build() i sestava DPH podle dimenze, aby počítaly za totéž období a režim.
+     * `range_start`/`status_date` jsou hranice ZVOLENÉHO období (před přepnutím na měsíc).
+     *
+     * @return array{period:string, start:string, end:string, quarter:?int, range_start:string, status_date:string,
+     *               supplier:array<string,mixed>, identified:bool, payer:bool, forced_monthly:bool}
+     */
+    public function returnScope(int $supplierId, int $year, int $month, ?string $period = null): array
+    {
+        if ($period === null) {
+            $period = (string) ($this->loadSupplier($supplierId)['vat_period'] ?? 'monthly');
+        }
+        if (!in_array($period, ['monthly', 'quarterly'], true)) {
+            $period = 'monthly';
+        }
+        [$rangeStart, $statusDate] = $this->periodRange($year, $month, $period);
+        $supplier = $this->loadSupplier($supplierId, $statusDate);
+        $identified = !$supplier['is_vat_payer'] && !empty($supplier['is_identified']);
+        $forced = $identified && $period !== 'monthly';
+        if ($forced) {
+            $period = 'monthly';
+        }
+        [$start, $end] = $this->periodRange($year, $month, $period);
+        return [
+            'period' => $period, 'start' => $start, 'end' => $end,
+            'quarter' => $period === 'quarterly' ? (int) ceil($month / 3) : null,
+            'range_start' => $rangeStart, 'status_date' => $statusDate,
+            'supplier' => $supplier, 'identified' => $identified, 'payer' => (bool) $supplier['is_vat_payer'],
+            'forced_monthly' => $forced,
+        ];
+    }
+
+    /**
+     * Evidované opravy, které přiznání přičítá k řádkům DPHDP3, v pořadí, v jakém je
+     * build() přičítá ({@see addToLine()}: nulová oprava řádek nezaloží):
+     *
+     *   • § 74b ZDPH (dlužník) — snížení (odst. 1/3): ř. 40/41 základ i daň ZÁPORNĚ + ř. 34
+     *     opr_dluz KLADNĚ, obnova (odst. 2/4) opačně. Ř. 34 je informativní, efekt nese
+     *     ř. 40/41. Korekce míří do sloupce „V plné výši".
+     *   • § 46 ZDPH (věřitel, nedobytná pohledávka) — zrcadlo § 74b na výstupu: ř. 1/2
+     *     ZÁPORNĚ + informativní ř. 33 opr_verit KLADNĚ, obnova po úhradě (§ 46e) opačně.
+     *   • § 43 ZDPH — oprava VÝŠE daně do období PŮVODNÍHO plnění (načítá se podle období,
+     *     které se staví), řádek určuje Section43Service (vydaný ř. 1/2, přijatý ř. 40/41,
+     *     krácený 40k/41k) — stejný zdroj čte Kniha DPH i KH.
+     *
+     * Jen skuteční plátci; identifikovaná osoba odpočet ani tuzemská plnění nemá. Sdílí ho
+     * sestava DPH podle dimenze (řádek oprav bez vazby na položky dokladu).
+     *
+     * @return array{entries: list<array{line:string, base:float, vat:float, label:string, kind:string}>,
+     *               warnings: list<string>, s43_has_vat: bool}
+     */
+    public function correctionEntries(int $supplierId, int $year, int $month, string $period, bool $identified, bool $payer): array
+    {
+        $out = ['entries' => [], 'warnings' => [], 's43_has_vat' => false];
+        if ($identified || !$payer) {
+            return $out;
+        }
+        $entry = static fn (string $line, float $base, float $vat, string $label, string $kind): array
+            => ['line' => $line, 'base' => $base, 'vat' => $vat, 'label' => $label, 'kind' => $kind];
+        $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
+        $out['entries'][] = $entry('40', (float) $s74b['basic']['base'], (float) $s74b['basic']['vat'], 'Oprava odpočtu §74b (21 %)', 's74b');
+        $out['entries'][] = $entry('41', (float) $s74b['reduced']['base'], (float) $s74b['reduced']['vat'], 'Oprava odpočtu §74b (12 %)', 's74b');
+        $out['entries'][] = $entry('34', (float) $s74b['opr_dluz'], 0.0, 'Oprava odpočtu dlužníka §74b (ř. 34)', 's74b');
+        $s46 = $this->section46->periodCorrectionLines($supplierId, $year, $month, $period);
+        $out['entries'][] = $entry('1', (float) $s46['basic']['base'], (float) $s46['basic']['vat'], 'Oprava §46 nedobytná pohledávka (21 %)', 's46');
+        $out['entries'][] = $entry('2', (float) $s46['reduced']['base'], (float) $s46['reduced']['vat'], 'Oprava §46 nedobytná pohledávka (12 %)', 's46');
+        $out['entries'][] = $entry('33', (float) $s46['opr_verit'], 0.0, 'Oprava věřitele §46 (ř. 33)', 's46');
+        $s43 = $this->section43->periodCorrectionLines($supplierId, $year, $month, $period);
+        foreach ($s43['lines'] as $s43Line => $s43Sum) {
+            $out['entries'][] = $entry((string) $s43Line, (float) $s43Sum['base'], (float) $s43Sum['vat'], 'Oprava výše daně §43 (ř. ' . $s43Line . ')', 's43');
+            $out['s43_has_vat'] = $out['s43_has_vat'] || $s43Sum['vat'] != 0.0;
+        }
+        $out['warnings'] = array_values($s43['warnings']);
+        return $out;
+    }
+
+    /**
      * Řádky povolené identifikované osobě (§ 6g–6l, issue #94): jen samovyměření
      * z přeshraničních přijatých plnění. Cokoli jiného (tuzemské výstupy ř. 1/2,
      * oddíl C ř. 20-31, odpočty ř. 40+ vč. zrcadlového ř. 43 z RC mirroru) IO
@@ -1043,7 +1084,7 @@ final class DphPriznaniBuilder
      * @param list<string> $warnings by-ref
      * @return array<string, array{base:float, vat:float, count:int, label:string}>
      */
-    private function filterLinesForIdentified(array $lines, array &$warnings): array
+    public static function filterLinesForIdentified(array $lines, array &$warnings): array
     {
         $allowed = ['3', '4', '5', '6', '12', '13'];
         // Zrcadlový odpočet ř. 43 (dphdp3_line_secondary klasifikací 23/24/25)
@@ -1277,57 +1318,11 @@ final class DphPriznaniBuilder
     }
 
     /**
-     * Přimíchá EVIDOVANÉ korekce §74b (dlužník) do projekce řádků DPHDP3 — ř. 40/41 (základ
-     * i daň) a informativní ř. 34 opr_dluz. Merge do TÉHOŽ agregátu jako běžný odpočet, aby
-     * sdílené sčítání i rekapitulace (round per řádek → ř. 46 = Σ ř. 40-45) zůstaly konzistentní.
-     * Znaménka určuje {@see Section74bService::periodCorrectionLines()} (snížení záporně na
-     * ř. 40/41 a kladně na ř. 34; obnova opačně). Přičítáme jen nenulové příspěvky.
-     *
-     * @param array<string, array{base:float, vat:float, count:int, label:string}> $lines by-ref
-     */
-    private function applySection74bCorrections(array &$lines, int $supplierId, int $year, int $month, string $period): void
-    {
-        $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
-        $add = static function (array &$lines, string $line, float $base, float $vat, string $label): void {
-            if (round($base, 2) == 0.0 && round($vat, 2) == 0.0) {
-                return;
-            }
-            if (!isset($lines[$line])) {
-                $lines[$line] = ['base' => 0.0, 'vat' => 0.0, 'count' => 0, 'label' => $label];
-            }
-            $lines[$line]['base'] += $base;
-            $lines[$line]['vat']  += $vat;
-        };
-        $add($lines, '40', $s74b['basic']['base'],   $s74b['basic']['vat'],   'Oprava odpočtu §74b (21 %)');
-        $add($lines, '41', $s74b['reduced']['base'], $s74b['reduced']['vat'], 'Oprava odpočtu §74b (12 %)');
-        // ř. 34 opr_dluz — informativní DPH (base slot, vat=0 → mimo rekapitulaci ř. 62/63).
-        $add($lines, '34', $s74b['opr_dluz'], 0.0, 'Oprava odpočtu dlužníka §74b (ř. 34)');
-    }
-
-    /**
-     * Přimíchá EVIDOVANÉ opravy § 46 (věřitel, nedobytná pohledávka) do projekce řádků —
-     * ř. 1/2 (základ i daň) a informativní ř. 33 opr_verit. Merge do TÉHOŽ agregátu jako
-     * běžná uskutečněná plnění, aby sdílené sčítání i rekapitulace zůstaly konzistentní.
-     * Znaménka určuje {@see Section46Service::periodCorrectionLines()}: oprava snižuje
-     * ř. 1/2 a zvyšuje ř. 33, obnova po úhradě (§ 46e) opačně.
-     *
-     * @param array<string, array{base:float, vat:float, count:int, label:string}> $lines by-ref
-     */
-    private function applySection46Corrections(array &$lines, int $supplierId, int $year, int $month, string $period): void
-    {
-        $s46 = $this->section46->periodCorrectionLines($supplierId, $year, $month, $period);
-        $this->addToLine($lines, '1', $s46['basic']['base'],   $s46['basic']['vat'],   'Oprava §46 nedobytná pohledávka (21 %)');
-        $this->addToLine($lines, '2', $s46['reduced']['base'], $s46['reduced']['vat'], 'Oprava §46 nedobytná pohledávka (12 %)');
-        // ř. 33 opr_verit — informativní DPH (base slot, vat=0 → mimo rekapitulaci ř. 62/63).
-        $this->addToLine($lines, '33', $s46['opr_verit'], 0.0, 'Oprava věřitele §46 (ř. 33)');
-    }
-
-    /**
      * Přičte evidovanou opravu k řádku přiznání. Nulová oprava řádek NEZALOŽÍ — prázdný
      * řádek by ve výkazu budil dojem, že se něco opravovalo.
      *
-     * Sdílí ho § 46 i § 43; obojí míří do týchž řádků 1/2 a musí se tam sčítat, ne
-     * přepisovat (za jedno období můžou nastat obě opravy najednou).
+     * Sdílí ho § 74b, § 46 i § 43 ({@see correctionEntries()}); míří do týchž řádků a musí
+     * se tam sčítat, ne přepisovat (za jedno období můžou nastat víc oprav najednou).
      *
      * @param array<string, array{base:float, vat:float, count:int, label:string}> $lines by-ref
      */

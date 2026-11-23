@@ -15,26 +15,47 @@ use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
  * Sestava „DPH podle dimenze": evidence DPH za zdaňovací období rozdělená po hodnotách
  * jednoho typu dimenze (Středisko, Projekt …) včetně řádku „bez dimenze".
  *
- * Data jsou TÁTÁ jako přiznání: kanonické řádky {@see VatLedgerService::iterateReturnRows()}
- * bez konceptů, rozdělené pravidlem {@see VatLedgerDimensionAllocation} (položka > hlavička,
- * rozpad po haléřích). Každá hodnota má vlastní projekci na řádky DPHDP3
- * ({@see DphLineProjection}) a z ní DPH na výstupu (ř. 1–13), nárok na odpočet
- * (ř. 40–45 včetně kráceného sloupce v plné výši) a základy po sazbách.
+ * Data jsou TÁTÁ jako přiznání: období a režim z {@see DphPriznaniBuilder::returnScope()}
+ * (identifikovaná osoba vždy za měsíc a jen s řádky samovyměření), kanonické řádky
+ * {@see VatLedgerService::iterateReturnRowsByDimension()} bez konceptů rozdělené pravidlem
+ * {@see VatLedgerDimensionAllocation} (položka > hlavička, rozpad po haléřích) a opravy
+ * § 74b, § 46 a § 43 z {@see DphPriznaniBuilder::correctionEntries()}. Každý řádek sestavy
+ * má vlastní projekci na řádky DPHDP3 ({@see DphLineProjection}) a z ní DPH na výstupu
+ * (ř. 1–13), nárok na odpočet (ř. 40–45 včetně kráceného sloupce v plné výši) a základy.
+ *
+ * Řádky: hodnoty typu, „Bez dimenze", „Rozpis DPH bez vazby na položky" (rozpis DPH
+ * přijatého dokladu s položkami v různých dimenzích) a „Opravy přiznání bez vazby na
+ * položky". Součet všech je úplná evidence za období.
  *
  * Kontroly:
- *   1. Součet hodnot a „bez dimenze" proti evidenci za období promítnuté STEJNOU projekcí
- *      z nerozdělených řádků téhož průchodu. Rozdíl musí být nula na haléř a po řádcích
- *      přiznání; nenulový rozdíl znamená, že rozdělení řádek ztratilo nebo zdvojilo.
- *      Zrcadlový odpočet ř. 43/44 je v obou haléřový (přiznání ho skládá po celých Kč).
- *   2. Most k přiznání (ř. 62, 63, 64 z {@see DphPriznaniBuilder}): rozdíl evidence proti
- *      přiznání tvoří jen opravy a úpravy bez vazby na doklad (§ 43, § 46, § 74b, § 76,
- *      § 78, § 79) a zaokrouhlení řádků přiznání na celé Kč.
+ *   1. Součet řádků proti evidenci za období promítnuté STEJNOU projekcí z nerozdělených
+ *      řádků téhož průchodu a opravám. Rozdíl musí být nula na haléř a po řádcích přiznání;
+ *      nenulový rozdíl znamená, že rozdělení řádek ztratilo nebo zdvojilo. Zrcadlový
+ *      odpočet ř. 43/44 je v obou haléřový (přiznání ho skládá po celých Kč).
+ *   2. Most k přiznání (ř. 62, 63, 64 z {@see DphPriznaniBuilder}): rozdíl tvoří jen úpravy
+ *      bez řádků dokladů (§ 79 na ř. 45, krácení § 76 na ř. 52/53, § 78 na ř. 60)
+ *      a zaokrouhlení řádků přiznání na celé Kč.
  *   3. Obraty účtu 343 po hodnotách dimenze řádků deníku za období (datum účetního
  *      případu), bez úhrad daně finančnímu úřadu a bez počátečních stavů a uzávěrky
  *      ({@see Vat343Turnover}). Rozdíl proti sestavě se vysvětluje, nekontroluje.
+ *
+ * Chybí-li u dokladu v cizí měně kurz, evidence ho přepočte náhradním kurzem 1,0; sestava
+ * je pak předběžná (`preliminary`, `missing_rates`, varování), stejně jako náhled přiznání.
  */
 final class VatDimensionReportService
 {
+    /** Klíče zvláštních řádků (hodnoty mají klíč id). */
+    private const ROW_NONE = 'none';
+    private const ROW_VAT_ALLOCATION = 'vat_allocation';
+    private const ROW_CORRECTIONS = 'corrections';
+
+    /** Popisky zvláštních řádků sestavy (`kind`). */
+    public const ROW_LABELS = [
+        'none' => 'Bez dimenze',
+        'vat_allocation' => 'Rozpis DPH bez vazby na položky',
+        'corrections' => 'Opravy přiznání bez vazby na položky (§ 43, § 46, § 74b)',
+    ];
+
     public const AMOUNT_KEYS = [
         'vat_output', 'vat_input', 'vat_result',
         'base_output_standard', 'base_output_reduced', 'base_output_other',
@@ -73,57 +94,102 @@ final class VatDimensionReportService
             throw new DimensionException('dimensions_disabled', 'Dimenze nejsou u firmy zapnuté (Nastavení firmy).', 409);
         }
         $type = $this->dimensions->requireType($supplierId, $typeId);
-        [$start, $end, $quarter] = self::periodRange($year, $month, $period);
+        // Období a režim přesně jako přiznání: identifikovaná osoba vždy za měsíc a jen
+        // s řádky samovyměření ({@see DphPriznaniBuilder::returnScope()}).
+        $scope = $this->vatReturn->returnScope($supplierId, $year, $month, $period);
+        [$start, $end, $period] = [$scope['start'], $scope['end'], $scope['period']];
+        $quarter = $scope['quarter'];
 
-        // Jeden průchod evidencí: nerozdělený řádek jde do kontrolní projekce, jeho díly
-        // do projekcí hodnot. Evidence se tak čte jednou a v paměti nikdy neleží celá.
+        // Jeden průchod evidencí: nerozdělený řádek jde do kontrolní projekce (a sběru
+        // chybějících kurzů), jeho díly do projekcí hodnot. Evidence se tak čte jednou
+        // a v paměti nikdy neleží celá.
         $evidence = new DphLineProjection();
-        $rows = (function () use ($supplierId, $start, $end, $evidence): \Generator {
-            foreach ($this->ledger->iterateReturnRows($supplierId, $start, $end, false) as $r) {
-                $evidence->add($r);
-                yield $r;
-            }
-        })();
+        $missingByDoc = [];
+        $onRow = static function (array $r) use ($evidence, &$missingByDoc): void {
+            $evidence->add($r);
+            VatLedgerService::collectMissingExchangeRate($missingByDoc, $r);
+        };
         /** @var array<string, DphLineProjection> $buckets */
         $buckets = [];
         $documents = [];
-        foreach ($this->ledger->allocateByDimension($supplierId, $typeId, $rows) as $part) {
-            $key = $part['dimension_value_id'] === null ? '' : (string) $part['dimension_value_id'];
+        foreach ($this->ledger->iterateReturnRowsByDimension($supplierId, $start, $end, $typeId, false, $onRow) as $part) {
+            $key = isset($part['dimension_unassigned'])
+                ? self::ROW_VAT_ALLOCATION
+                : ($part['dimension_value_id'] === null ? self::ROW_NONE : (string) $part['dimension_value_id']);
             ($buckets[$key] ??= new DphLineProjection())->add($part);
             if ($part['code'] !== null && $part['dphdp3_line'] !== null) {
                 $documents[$key][VatLedgerService::documentIdentity($part)] = true;
             }
         }
+        $filter = static function (array $lines) use ($scope): array {
+            if (!$scope['identified']) {
+                return $lines;
+            }
+            $ignored = [];
+            return DphPriznaniBuilder::filterLinesForIdentified($lines, $ignored);
+        };
 
-        $values = $this->values($supplierId, $typeId, array_filter(array_keys($buckets), static fn (string $k): bool => $k !== ''));
+        // Opravy, které přiznání přičítá k řádkům (§ 74b, § 46, § 43): podíl na položkách
+        // dokladu nemají, sestava je vykazuje samostatným řádkem v úplném součtu.
+        $corrections = $this->vatReturn->correctionEntries($supplierId, $year, $month, $period, $scope['identified'], $scope['payer']);
+        $correctionLines = [];
+        foreach ($corrections['entries'] as $entry) {
+            if (round($entry['base'], 2) == 0.0 && round($entry['vat'], 2) == 0.0) {
+                continue;
+            }
+            $correctionLines[$entry['line']]['base'] = ($correctionLines[$entry['line']]['base'] ?? 0.0) + $entry['base'];
+            $correctionLines[$entry['line']]['vat'] = ($correctionLines[$entry['line']]['vat'] ?? 0.0) + $entry['vat'];
+        }
+
+        $valueKeys = array_values(array_filter(array_keys($buckets), static fn (string|int $k): bool => ctype_digit((string) $k)));
+        $values = $this->values($supplierId, $typeId, array_map('strval', $valueKeys));
+        $rowsSpec = array_map(static fn (array $v): array => ['kind' => 'value', 'key' => (string) $v['id'], 'value' => $v], $values);
+        $rowsSpec[] = ['kind' => 'none', 'key' => self::ROW_NONE, 'value' => null];
+        if (isset($buckets[self::ROW_VAT_ALLOCATION])) {
+            $rowsSpec[] = ['kind' => 'vat_allocation', 'key' => self::ROW_VAT_ALLOCATION, 'value' => null];
+        }
+        if ($correctionLines !== []) {
+            $rowsSpec[] = ['kind' => 'corrections', 'key' => self::ROW_CORRECTIONS, 'value' => null];
+        }
+
         $out = [];
         $sumLines = [];
-        foreach ([...$values, null] as $value) {
-            $key = $value === null ? '' : (string) $value['id'];
-            $lines = isset($buckets[$key]) ? $buckets[$key]->lines(false) : [];
+        foreach ($rowsSpec as $spec) {
+            $lines = $spec['kind'] === 'corrections'
+                ? $correctionLines
+                : $filter(isset($buckets[$spec['key']]) ? $buckets[$spec['key']]->lines(false) : []);
             foreach ($lines as $line => $d) {
                 $sumLines[$line]['base'] = ($sumLines[$line]['base'] ?? 0.0) + (float) $d['base'];
                 $sumLines[$line]['vat'] = ($sumLines[$line]['vat'] ?? 0.0) + (float) $d['vat'];
             }
+            $value = $spec['value'];
             $out[] = [
+                'kind'      => $spec['kind'],
                 'value_id'  => $value === null ? null : (int) $value['id'],
                 'code'      => $value === null ? null : (string) $value['code'],
-                'name'      => $value === null ? 'Bez dimenze' : (string) $value['name'],
-                'label'     => $value === null ? 'Bez dimenze' : self::label($value),
+                'name'      => $value === null ? self::ROW_LABELS[$spec['kind']] : (string) $value['name'],
+                'label'     => $value === null ? self::ROW_LABELS[$spec['kind']] : self::label($value),
                 'depth'     => $value === null ? 0 : (int) $value['depth'],
                 'is_active' => $value === null ? true : (bool) $value['is_active'],
-                'documents' => count($documents[$key] ?? []),
+                'documents' => count($documents[$spec['key']] ?? []),
             ] + self::amounts($lines) + ['lines' => self::roundLines($lines)];
         }
         $total = self::sumAmounts($out);
-        $evidenceLines = $evidence->lines(false);
+
+        // Kontrola: evidence za období promítnutá z NEROZDĚLENÝCH řádků téhož průchodu
+        // a opravy přiznání, tedy řádky přiznání před zaokrouhlením na celé Kč.
+        $evidenceLines = $filter($evidence->lines(false));
+        foreach ($correctionLines as $line => $d) {
+            $evidenceLines[$line]['base'] = (float) ($evidenceLines[$line]['base'] ?? 0.0) + $d['base'];
+            $evidenceLines[$line]['vat'] = (float) ($evidenceLines[$line]['vat'] ?? 0.0) + $d['vat'];
+        }
         $evidenceAmounts = self::amounts($evidenceLines);
         $difference = [];
         foreach (self::AMOUNT_KEYS as $k) {
             $difference[$k] = round($total[$k] - $evidenceAmounts[$k], 2);
         }
         $lineDifferences = [];
-        foreach (array_unique([...array_keys($sumLines), ...array_keys($evidenceLines)]) as $line) {
+        foreach (array_unique([...array_map('strval', array_keys($sumLines)), ...array_map('strval', array_keys($evidenceLines))]) as $line) {
             $db = round(($sumLines[$line]['base'] ?? 0.0) - (float) ($evidenceLines[$line]['base'] ?? 0.0), 2);
             $dv = round(($sumLines[$line]['vat'] ?? 0.0) - (float) ($evidenceLines[$line]['vat'] ?? 0.0), 2);
             if (abs($db) >= 0.005 || abs($dv) >= 0.005) {
@@ -132,10 +198,25 @@ final class VatDimensionReportService
         }
         $ok = $lineDifferences === [] && array_filter($difference, static fn (float $d): bool => abs($d) >= 0.005) === [];
 
-        [$return, $returnError] = $this->returnBridge($supplierId, $year, $month, $period, $evidenceAmounts);
+        [$return, $returnError] = $this->returnBridge($supplierId, $year, $month, $period, $total);
         [$account343, $account343Error] = $this->account343($supplierId, $typeId, $start, $end, $out, $total);
 
+        $missingRates = array_values($missingByDoc);
         $warnings = [];
+        if ($missingRates !== []) {
+            $warnings[] = 'Chybí kurz u dokladů v cizí měně: '
+                . implode(', ', VatLedgerService::missingExchangeRateLabels($missingRates))
+                . '. Částky těchto dokladů jsou přepočtené náhradním kurzem 1,0 a sestava je jen předběžná; '
+                . 'kurz doplňte na dokladech (přiznání ho při stažení doplní z ČNB).';
+        }
+        if ($scope['forced_monthly']) {
+            $warnings[] = 'Identifikovaná osoba podává vždy za kalendářní měsíc — sestava je za zvolený měsíc, ne za čtvrtletí.';
+        }
+        if (isset($buckets[self::ROW_VAT_ALLOCATION])) {
+            $warnings[] = 'Některé přijaté doklady mají rozpis DPH a položky s různými dimenzemi: rozpis nejde přiřadit '
+                . 'k položkám, jeho DPH je v řádku „' . self::ROW_LABELS['vat_allocation'] . '".';
+        }
+        array_push($warnings, ...$corrections['warnings']);
         if (!$ok) {
             $warnings[] = 'Součet sestavy nesedí na evidenci DPH za období. Rozdíl po řádcích přiznání je v kontrolním řádku.';
         }
@@ -145,6 +226,7 @@ final class VatDimensionReportService
                 'year' => $year, 'month' => $month, 'period_type' => $period, 'quarter' => $quarter,
                 'start' => $start, 'end' => $end,
                 'label' => $quarter !== null ? sprintf('%d. čtvrtletí %04d', $quarter, $year) : sprintf('%02d/%04d', $month, $year),
+                'forced_monthly' => $scope['forced_monthly'],
             ],
             'supplier' => $this->supplier($supplierId),
             'dimension_type' => ['id' => (int) $type['id'], 'name' => (string) $type['name']],
@@ -159,6 +241,8 @@ final class VatDimensionReportService
                 'return' => $return,
                 'return_error' => $returnError,
             ],
+            'preliminary' => $missingRates !== [],
+            'missing_rates' => $missingRates,
             'account343' => $account343,
             'account343_unavailable' => $account343Error,
             'generated_at' => date('Y-m-d H:i:s'),
@@ -239,8 +323,8 @@ final class VatDimensionReportService
     }
 
     /**
-     * Most evidence → přiznání: ř. 62/63/64 tak, jak je skládá {@see DphPriznaniBuilder}, a rozdíl
-     * proti evidenci (opravy a úpravy bez dokladu, zaokrouhlení na celé Kč).
+     * Most sestava → přiznání: ř. 62/63/64 tak, jak je skládá {@see DphPriznaniBuilder}, a rozdíl
+     * proti součtu sestavy (úpravy § 79, § 76, § 78 a zaokrouhlení na celé Kč).
      *
      * @param array<string,float> $evidence
      * @return array{0: array<string,mixed>|null, 1: string|null}
@@ -315,7 +399,27 @@ final class VatDimensionReportService
         }
         $marks = implode(',', array_fill(0, count($accountIds), '?'));
         $excluded = 'CASE WHEN ' . Vat343Turnover::bookTransferSql('e') . " THEN 'opening'
-                          WHEN " . Vat343Turnover::settlementPaymentSql('e') . " THEN 'payment' ELSE '' END";
+                          WHEN " . Vat343Turnover::settlementLineSql('l', 'e') . " THEN 'payment' ELSE '' END";
+
+        // Vyloučené zápisy (úhrady a vratky daně, počáteční stavy a uzávěrka) celé, bez
+        // rozpadu po dimenzích: počet je počet zápisů, ne řádků či dílů.
+        $excludedStmt = $this->db->pdo()->prepare(
+            "SELECT x.excluded, COUNT(DISTINCT x.entry_id) AS entries, SUM(x.net) AS net
+               FROM (SELECT e.id AS entry_id, {$excluded} AS excluded,
+                            CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END AS net
+                       FROM journal_entries e
+                       JOIN journal_entry_lines l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id
+                      WHERE e.supplier_id = ? AND e.posted_at IS NOT NULL
+                        AND e.entry_date >= ? AND e.entry_date <= ?
+                        AND l.account_id IN ({$marks})) x
+              WHERE x.excluded <> ''
+           GROUP BY x.excluded"
+        );
+        $excludedStmt->execute([$supplierId, $start, $end, ...$accountIds]);
+        $excludedSums = ['payment' => ['count' => 0, 'net' => 0], 'opening' => ['count' => 0, 'net' => 0]];
+        foreach ($excludedStmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $excludedSums[$r['excluded']] = ['count' => (int) $r['entries'], 'net' => (int) round(((float) $r['net']) * 100)];
+        }
 
         $single = $this->db->pdo()->prepare(
             "SELECT COALESCE(jd.dimension_value_id, ccv.id) AS value_id, {$excluded} AS excluded,
@@ -354,13 +458,10 @@ final class VatDimensionReportService
         array_push($sums, ...$split->fetchAll(\PDO::FETCH_ASSOC));
 
         $byValue = [];
-        $excludedSums = ['payment' => ['count' => 0, 'net' => 0], 'opening' => ['count' => 0, 'net' => 0]];
         foreach ($sums as $r) {
             $debit = (int) round(((float) $r['debit']) * 100);
             $credit = (int) round(((float) $r['credit']) * 100);
             if ($r['excluded'] !== '') {
-                $excludedSums[$r['excluded']]['count'] += (int) $r['entries'];
-                $excludedSums[$r['excluded']]['net'] += $credit - $debit;
                 continue;
             }
             $key = $r['value_id'] === null ? '' : (string) (int) $r['value_id'];
@@ -371,7 +472,9 @@ final class VatDimensionReportService
         // Řádky v pořadí sestavy; hodnota, která je jen na 343 (mimo strom sestavy), se přidá.
         $labels = [];
         foreach ($reportRows as $row) {
-            $labels[$row['value_id'] === null ? '' : (string) $row['value_id']] = $row;
+            if ($row['kind'] === 'value' || $row['kind'] === 'none') {
+                $labels[$row['value_id'] === null ? '' : (string) $row['value_id']] = $row;
+            }
         }
         $extra = array_diff(array_keys($byValue), array_keys($labels));
         if ($extra !== []) {
