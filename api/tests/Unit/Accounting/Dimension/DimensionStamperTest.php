@@ -150,7 +150,7 @@ final class DimensionStamperTest extends TestCase
         self::assertStringContainsString('fd.dimension_value_id IN (?,?)', $sql);
         self::assertStringContainsString('fl.cost_center IN (?)', $sql);
         self::assertStringContainsString('journal_entry_line_dimension_splits dim_cs', $sql, 'Řádek s rozpadem téhož typu nerozhoduje textem.');
-        self::assertStringContainsString('ROUND(sl.amount * s.share', $sql, 'Řádek s rozpadem jen svým dílem.');
+        self::assertStringContainsString('ROUND(s.amount * s.weight', $sql, 'Řádek s rozpadem jen svým dílem.');
         self::assertSame(2, substr_count($sql, 'fe.entry_date >= ? AND fe.entry_date <= ?'), 'Jediná hodnota i středisko jdou po datu zápisu.');
         self::assertStringContainsString('se.entry_date >= ? AND se.entry_date <= ?', $sql, 'Rozpad jde po datu zápisu.');
         self::assertStringEndsWith(') l', $sql);
