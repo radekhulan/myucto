@@ -187,7 +187,10 @@ Převod přenáší doklady s čísly z Money S3, ale počítadlo nové řady ne
 1. V průvodci otevřete záložku **Dávka více firem** a vyberte zálohy `.lz`
    všech firem najednou.
 2. Zkontrolujte u každé firmy IČO, název, roky, doporučený rok „od" a cílovou
-   firmu. Zvolte **Firma už v MyÚčtu je** (převést, nebo přeskočit).
+   firmu. Zvolte **Firma už v MyÚčtu je** (převést, nebo přeskočit), případně
+   **Převést do roku** (platí pro všechny firmy dávky, výchozí **Automaticky**
+   podle vlastních zápisů každé firmy) a **Z dalšího roku jen počáteční stavy**
+   (viz [§ 106.10.6](#106106-uzaverka-historickych-let)).
 3. Volitelně přiložte EPO XML podaných přiznání k DPPO, zvolte skupinu firem
    a **Firmy dávky jsou spřízněné osoby** (jen pro skupinu, ne pro nezávislé
    klienty).
@@ -278,6 +281,8 @@ firmy nemění, viz [§ 106.10.10](#1061010-danova-evidence).
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpis na účet a rok se zdrojem „import", bankovní pohyby |
 | úhrady faktur | spárování faktury s bankovním pohybem nebo pokladním dokladem |
+| faktury z let před „Převést od roku" otevřené k začátku prvního převáděného roku | doklady počátečního stavu navázané na otevírací zápis, viz níže |
+| mzdové závazky otevřené ke konci posledního převáděného roku | ostatní závazky, viz níže |
 | karty dlouhodobého majetku a jejich pohyby | karty majetku s počátečními stavy, technickými zhodnoceními a odpisy převedených let, viz níže |
 | karty drobného majetku | evidence drobného majetku včetně vyřazených karet |
 
@@ -415,6 +420,39 @@ převezme bez nároku na odpočet.
 v dalším roce je běžné. Stejně se rozliší doklady se stejným číslem na dvou
 bankovních účtech nebo ve dvou pokladnách.
 
+**Doklady z let před „Převést od roku".** Převádíte-li od pozdějšího roku, než
+kterým záloha začíná, převod z dřívějších let převezme jen faktury, které byly
+k začátku prvního převáděného roku otevřené: vydané i přijaté faktury (ne
+zálohové listy, daňové doklady k platbě ani dobropisy), které Money uhradilo
+v prvním převáděném roce nebo později. Vzniknou jako doklady počátečního stavu:
+bez vlastního zápisu, navázané na otevírací zápis prvního období. Saldokonto je
+ukáže proti počátečnímu stavu 311 a 321 a jejich pozdější úhrady z převedené
+banky převod spáruje, i v uzavřeném roce (deník se tím nemění).
+
+- Faktura, u které Money nevede datum úhrady, ale vede zbytek k úhradě, se
+  nezakládá. Protokol ji vypíše k ověření: Money staré roky často
+  neaktualizovalo a počáteční stav ji nemusí nést. Potřebujete-li ji v MyÚčtu,
+  založte ji ze zůstatku v saldokontu.
+- Převyšuje-li součet otevřených faktur strany počáteční stav účtu 311 (vydané)
+  nebo 321 (přijaté), nezaloží se žádný doklad té strany a protokol to ohlásí.
+  Money pak vede úhrady starých faktur jinak než deník (částečné úhrady,
+  zápočty); ověřte je v Money.
+
+**Mzdové závazky na konci roku.** Mzdy, pojistné a daň ze mzdy vede mzdový modul
+Money jako závazky. Závazek na účtu 331, 336 nebo 342, který byl ke konci
+posledního převáděného roku otevřený (zaplacený až v dalším roce, nebo
+neuhrazený), převod založí jako ostatní závazek. Lednovou výplatu, pojistné
+a daň za prosinec pak spárujete s úhradou v Bance.
+
+- Závazek s vlastním zápisem v deníku (pojistné, daň) převezme zápis bez nového
+  zaúčtování.
+- Čistou mzdu vede Money na témže účtu na obou stranách, předpis nese interní
+  doklad mezd. Vznikne jako potvrzená položka bez zápisu; saldokonto 331 ji
+  neukáže a kontrolní sestava (viz [§ 106.10.5](#106105-rekonciliace-a-protokol))
+  ji vypíše jako rozdíl.
+- Závazky jiných účtů (exekuce, insolvence na 379) převod jen vyjmenuje.
+- Část uhrazená do konce roku se vede jako uhrazená mimo banku a pokladnu.
+
 ### 106.10.3 Co převod nepřenese
 
 - **Přílohy a elektronický archiv.** Money je drží v šifrovaných souborech,
@@ -423,7 +461,8 @@ bankovních účtech nebo ve dvou pokladnách.
   deníku; zaměstnance převezmete z podání JMHZ (viz [§ 106.10.2.2](#1061022-mzdy)), zásoby se zakládají
   v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
-  zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká. U daňové
+  zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká. Výjimkou
+  jsou mzdové závazky otevřené ke konci roku, viz [§ 106.10.2](#106102-co-prevod-prenese). U daňové
   evidence vzniknou ostatní závazky a pohledávky jen z neuhrazených, viz
   [§ 106.10.10](#1061010-danova-evidence).
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za
@@ -517,6 +556,12 @@ s počty, upozornění a chyby a pro každý rok rekonciliaci:
 - doklady proti deníku: přijaté faktury proti 321, vydané proti 311, pokladna
   proti 211 a banka proti 221.
 
+**Kontrola saldokonta.** Na konci protokolu je kontrolní sestava saldokonta ke
+konci posledního převáděného roku (tedy k 1. 1. dalšího roku) proti zůstatkům
+účtů 311, 321, 314, 324, 331, 336 a 342. Počítá ji stejná sestava jako
+Účetnictví → Saldokonto. Rozdíl znamená zůstatek bez dokladu nebo položky, který
+v dalším roce nepůjde spárovat s úhradou; založte k němu položku ze zůstatku.
+
 Doklad, ke kterému v deníku Money není zápis se stejným číslem, protokol vypíše
 jako doklad bez zápisu. Takový doklad není zaúčtovaný. Zaúčtujte ho ručně nebo
 hromadně v Účetnictví → Doúčtovat doklady. Koncepty k ruční kontrole se mezi
@@ -594,8 +639,28 @@ uzavřete ho ručně v Uzávěrce (kapitola [Uzávěrka](72_Uzaverka.md)).
 
 Otevření dalšího roku převzaté počáteční stavy z Money ponechá a nic nového
 nezaúčtuje, takže se počáteční stavy nezdvojí. Poslední převedený rok zůstává
-otevřený. Rok, jehož knihy se uzavřely, ale další rok se otevřít nepodařilo,
-opakovaný převod dotáhne.
+otevřený, pokud nezvolíte otevření dalšího roku z počátečních stavů Money (níže).
+Rok, jehož knihy se uzavřely, ale další rok se otevřít nepodařilo, opakovaný
+převod dotáhne.
+
+**Otevření dalšího roku z počátečních stavů Money.** Při finálním převodu (třeba
+roku 2026, když rok 2027 už běží v MyÚčtu a Money ho má založený s počátečními
+stavy) zaškrtněte **Z dalšího roku jen počáteční stavy** (dávka: stejná volba,
+příkazová řádka `--opening-only-next`). Ve výchozím stavu je volba vypnutá.
+
+1. Z adresáře roku po posledním převáděném roce (volba **Převést do roku**,
+   bez ní předposlední rok zálohy) převod převezme jen počáteční stavy jako
+   otevírací zápis. Doklady, banka ani deník toho roku z Money nepřijdou.
+2. Do roku s vlastními zápisy z MyÚčta smí, jen když v něm ještě není otevírací
+   zápis. Otevírací zápis zadaný v MyÚčtu převod nezmění a počáteční stavy
+   Money s ním jen porovná. Rok musí být otevřený a mimo zámek k datu.
+3. Poslední převáděný rok se proti počátečním stavům ověří a uzavře stejně jako
+   historické roky, přeskočené kroky dostanou poznámku a průvodce uzávěrkou je
+   znovu nenabídne. Nesedí-li konečné stavy na počáteční stavy z Money, protokol
+   vypíše rozdíly po účtech a rok zůstane otevřený.
+4. Má-li rok co přeceňovat kurzem nebo vyžaduje-li krok Zásoby, uzávěrka zůstane
+   rozpracovaná: kroky z Money jsou přeskočené a zbytek dokončíte v Uzávěrce.
+   Opakovaný převod uzavřený rok jen přeskočí.
 
 ### 106.10.7 Režim účetnictví a automatika
 
@@ -646,6 +711,12 @@ MyÚčta se převádí znovu, průběžně i po uzávěrce v Money:
 3. Vlastní zápisy, doklady a období roku 2027 převod nemění; popisy přepisuje
    jen u zápisů, které v daném běhu navázal na převzaté doklady.
 
+**Zálohy uhrazené z devizového účtu.** Vede-li Money úhradu zálohové faktury
+dokladem, který na převedený pohyb nevede (interní doklad, jiné číslo pohybu
+devizového účtu), převod ji spáruje s bankovním příjmem na 324 ze dne úhrady se
+symbolem zálohy nebo jménem odběratele, i když částka kvůli kurzu přesně nesedí
+(tolerance 1,5 %). Konečná faktura pak přijatou zálohu najde.
+
 **Úhrady po konci převáděných let.** Datum úhrady z Money (`Uhrazeno`) převod
 převezme jen do konce posledního převáděného roku. Faktura 2026 zaplacená
 v lednu 2027, kterou Money už zná, přijde jako neuhrazená a lednovou platbu
@@ -695,8 +766,8 @@ roku) porovná s pohyby Money podle data, částky a variabilního symbolu:
 - pohyb bez protějšku v Money nechá a vyjmenuje k ověření, zda v Money nechybí,
 - pohyb s protějškem, který je v MyÚčtu spárovaný, zaúčtovaný, ignorovaný nebo
   jinak navázaný (zařazení v peněžním deníku, záloha na daň, tankování), nesmaže
-  a převod se zastaví s jeho výpisem: zrušte u něj párování a zaúčtování (nebo
-  ho smažte) a převod spusťte znovu.
+  a převod se nespustí: kontrola před převodem ho vypíše. Zrušte u něj párování
+  a zaúčtování (nebo ho smažte) a převod spusťte znovu.
 
 Pohyby po posledním pohybu v Money zůstanou. Nemá-li účet v Money kód banky ani
 IBAN a v MyÚčtu jsou výpisy stejného čísla účtu u více bank, převod se zastaví;
