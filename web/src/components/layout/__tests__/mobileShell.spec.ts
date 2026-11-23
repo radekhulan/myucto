@@ -55,9 +55,11 @@ describe('mobilní rám aplikace', () => {
     expect(drawerRow).toMatch(/<ThemeToggle[^>]*\/>\s*<FullscreenToggle\s*\/>/)
   })
 
-  it('zásuvka i nabídky nechávají hlavičku a spodní lištu volné', () => {
+  it('nabídky nechávají hlavičku volnou, zásuvka má celou výšku nad spodní lištou', () => {
     expect(appLayout).toContain("const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }")
-    expect(appLayout).toContain(':style="phoneNavigation ? phoneOverlayStyle : undefined"')
+    expect(appLayout).toContain("const phoneDrawerStyle = { top: 'var(--instance-alert-h, 0px)', bottom: 'var(--app-footer-height)'")
+    expect(appLayout).toContain(':style="phoneNavigation ? phoneDrawerStyle : undefined"')
+    expect(appLayout).toContain(':style="phoneOverlayStyle"')
   })
 
   it('Peníze nesou i Dokumenty: odkazy, zápis jízdy a zvýraznění záložky', () => {

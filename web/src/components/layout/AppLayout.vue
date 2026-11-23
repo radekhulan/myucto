@@ -1649,6 +1649,8 @@ const MOBILE_ICONS = {
 const phoneNavigation = computed(() => !isDesktop.value && !tabletNavigationRail.value)
 /** Zásuvka a nabídky na telefonu leží mezi hlavičkou a spodní lištou, obě zůstávají vidět. */
 const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }
+// Menu na telefonu zakryje i hlavičku s výběrem firmy, aby měl seznam celou výšku.
+const phoneDrawerStyle = { top: 'var(--instance-alert-h, 0px)', bottom: 'var(--app-footer-height)', height: 'auto', zIndex: 40, paddingTop: 'env(safe-area-inset-top, 0px)' }
 const openDrawerSections = ref<Set<string>>(new Set())
 
 function drawerSectionOpen(key: string): boolean {
@@ -2122,7 +2124,7 @@ onBeforeUnmount(() => {
       <div
         v-if="mobileOpen" @click="mobileOpen = false"
         class="lg:hidden fixed inset-0 bg-black/50 z-20"
-        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        :style="phoneNavigation ? { ...phoneDrawerStyle, zIndex: 39, paddingTop: undefined } : undefined"
         aria-hidden="true"
       ></div>
 
@@ -2144,7 +2146,7 @@ onBeforeUnmount(() => {
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
           mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0',
         ]"
-        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        :style="phoneNavigation ? phoneDrawerStyle : undefined"
         data-testid="app-drawer"
       >
         <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-slim px-2.5 py-3">
