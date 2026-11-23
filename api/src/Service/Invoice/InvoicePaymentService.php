@@ -445,7 +445,9 @@ final class InvoicePaymentService
      * nenavázanou platbu, kterou lze navázat ({@see bankReconcilableSql()}: zápočet ani
      * pokladna bankou podruhé neodúčtují 311); 0 = faktura už je spárovaná
      * s jinou transakcí, >1 = nejednoznačné (rekonciliaci proveď ručně). Tím je
-     * zaručeno, že nikdy neporušíme UNIQUE(bank_transaction_id, invoice_id).
+     * zaručeno, že nikdy neporušíme UNIQUE(bank_transaction_id, invoice_id). Doklad převzatý
+     * z Money S3, jehož úhradu nese jen výplň bez dokladu úhrady, dostane bankovní platbu
+     * místo výplně ({@see replaceMoneyS3Filler()}).
      *
      * Musí běžet uvnitř transakce volajícího (faktura by měla být zamčená FOR UPDATE).
      *
@@ -462,6 +464,9 @@ final class InvoicePaymentService
         );
         $sel->execute([$invoiceId]);
         $rows = $sel->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($rows) === 0 && ($replaced = $this->replaceMoneyS3Filler($pdo, $invoiceId, $txId, $opts)) !== null) {
+            return $replaced;
+        }
         if (count($rows) === 0) {
             throw new \RuntimeException(
                 'Faktura nemá nenavázanou platbu k rekonciliaci (je už spárovaná s jinou transakcí, nebo uhrazená zápočtem či pokladnou).'
@@ -488,6 +493,48 @@ final class InvoicePaymentService
         $this->clientBankAccounts->captureForInvoiceTransaction($invoiceId, $txId);
 
         return ['payment_id' => $paymentId, 'amount' => round((float) $rows[0]['amount'], 2)];
+    }
+
+    /**
+     * Bankovní pohyb za úhradu, kterou převod z Money S3 nesl jen výplní bez dokladu úhrady
+     * ({@see TakenOverPayment::isMoneyS3Filler()}): pohyb se zaeviduje jako bankovní platba
+     * a výplň se o její částku zmenší (nebo zruší). Uhrazená částka i stav dokladu se nemění.
+     * Částka je menší z výplně a pohybu (pohyb v jiné měně než doklad se bere celou výplní).
+     *
+     * @param array{variable_symbol?: ?string, bank_reference?: ?string} $opts
+     * @return array{payment_id: int, amount: float}|null null = doklad výplň nemá
+     */
+    private function replaceMoneyS3Filler(PDO $pdo, int $invoiceId, int $txId, array $opts): ?array
+    {
+        $filler = $pdo->prepare('SELECT p.id, p.supplier_id, p.amount, p.currency FROM invoice_payments p
+              WHERE p.invoice_id = ? AND ' . TakenOverPayment::moneyS3FillerSql('p') . ' ORDER BY p.id LIMIT 1 FOR UPDATE');
+        $filler->execute([$invoiceId]);
+        $f = $filler->fetch(PDO::FETCH_ASSOC);
+        if ($f === false) {
+            return null;
+        }
+        $tx = $pdo->prepare('SELECT t.amount, t.currency, DATE(t.posted_at) AS posted_on FROM bank_transactions t WHERE t.id = ?');
+        $tx->execute([$txId]);
+        $t = $tx->fetch(PDO::FETCH_ASSOC);
+        if ($t === false) {
+            return null;
+        }
+        $fillerAmount = round((float) $f['amount'], 2);
+        $amount = strtoupper((string) ($t['currency'] ?? '')) === strtoupper((string) $f['currency'])
+            ? round(min($fillerAmount, abs((float) $t['amount'])), 2)
+            : $fillerAmount;
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, variable_symbol, bank_reference, source, bank_transaction_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, "bank", ?)')
+            ->execute([(int) $f['supplier_id'], $invoiceId, (string) $t['posted_on'], number_format($amount, 2, '.', ''), (string) $f['currency'],
+                self::trimOrNull($opts['variable_symbol'] ?? null, 20), self::trimOrNull($opts['bank_reference'] ?? null, 120), $txId]);
+        $paymentId = (int) $pdo->lastInsertId();
+        if ($fillerAmount - $amount < 0.01) {
+            $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([(int) $f['id']]);
+        } else {
+            $pdo->prepare('UPDATE invoice_payments SET amount = ? WHERE id = ?')->execute([number_format($fillerAmount - $amount, 2, '.', ''), (int) $f['id']]);
+        }
+        $this->clientBankAccounts->captureForInvoiceTransaction($invoiceId, $txId);
+        return ['payment_id' => $paymentId, 'amount' => $amount];
     }
 
     /**

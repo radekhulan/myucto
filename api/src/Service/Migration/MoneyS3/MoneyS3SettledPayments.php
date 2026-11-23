@@ -151,21 +151,23 @@ final class MoneyS3SettledPayments
      * Zapíše úhrady vydaných dokladů bez dokladu úhrady (viz třída). Volat UVNITŘ transakce
      * volajícího.
      *
+     * Výplň (platba bez dokladu úhrady) nevznikne u dokladu, jehož úhrada je v převedené bance
+     * či pokladně ({@see pendingBankMatches()}, `$leftForMatching`): patří párování, které ji
+     * zaeviduje jako bankovní či pokladní platbu; dřívější výplň se u něj zruší. Takové doklady
+     * vrací `left_for_matching` k ohlášení.
+     *
      * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`) do poznámky
-     * @param list<int>|null $only jen tyto doklady (oprava vybraných)
-     * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>}
+     * @param array<int,true> $leftForMatching doklady, jejichž úhrada má kandidáty v převedené bance či pokladně
+     * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>,left_for_matching:list<array<string,mixed>>}
      */
-    public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], ?array $only = null): array
+    public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], array $leftForMatching = []): array
     {
-        $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => []];
+        $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => [], 'left_for_matching' => []];
         $candidates = $this->issuedCandidates($supplierId, $lastEnd, true);
-        if ($only !== null) {
-            $keep = array_flip($only);
-            $candidates = array_values(array_filter($candidates, static fn (array $c): bool => isset($keep[$c['id']])));
-        }
         if ($candidates === []) {
             return $out;
         }
+        $leftForMatching += $this->pendingBankMatches($supplierId, array_column($candidates, 'id'));
         $pdo = $this->db->pdo();
         $named = [];
         foreach ($candidates as $c) {
@@ -188,13 +190,19 @@ final class MoneyS3SettledPayments
                     if ($amount < 0.01 || $entry['account_id'] === null) {
                         continue;
                     }
-                    $this->recordSettlement($supplierId, $userId, 'invoice', $c, $entry, $amount);
+                    if (!$this->recordSettlement($supplierId, $userId, 'invoice', $c, $entry, $amount)) {
+                        continue;
+                    }
                     $settled += $amount;
                     $out['settlements']++;
                     $out['settlement_amount'] += $amount;
                 }
             }
             $target = $c['in_range'] ? round($room - $settled, 2) : 0.0;
+            if ($target >= 0.01 && isset($leftForMatching[$c['id']])) {
+                $out['left_for_matching'][] = $c + ['amount' => $target];
+                $target = 0.0;
+            }
             $note = self::note($paymentNos[$c['id']] ?? null);
             $action = null;
             if ($c['own_id'] !== null) {
@@ -226,6 +234,38 @@ final class MoneyS3SettledPayments
         }
         $out['settlement_amount'] = round($out['settlement_amount'], 2);
         return $out;
+    }
+
+    /**
+     * Vydané doklady se spárovaným pohybem banky, ke kterému chybí evidovaná platba (dřívější
+     * běh převodu párování zapsal a platbu ne): úhrada je v převedené bance a doplní ji
+     * párování (opakovaný převod), ne výplň.
+     *
+     * @param list<int> $invoiceIds
+     * @return array<int,true>
+     */
+    public function pendingBankMatches(int $supplierId, array $invoiceIds): array
+    {
+        $out = [];
+        foreach (array_chunk($invoiceIds, 500) as $chunk) {
+            $in = implode(',', array_map('intval', $chunk));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT DISTINCT pm.invoice_id FROM payment_matches pm
+                  WHERE pm.supplier_id = ? AND pm.invoice_id IN ({$in})
+                    AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = pm.invoice_id AND ip.bank_transaction_id = pm.bank_transaction_id)"
+            );
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                $out[(int) $id] = true;
+            }
+        }
+        return $out;
+    }
+
+    /** SQL podmínka „platba `$alias` je výplň bez dokladu úhrady" (alias `invoice_payments`). */
+    public static function fillerSql(string $alias): string
+    {
+        return TakenOverPayment::moneyS3FillerSql($alias);
     }
 
     /**
@@ -301,7 +341,9 @@ final class MoneyS3SettledPayments
                 if ($amount < 0.01 || $entry['account_id'] === null) {
                     continue;
                 }
-                $this->recordSettlement($supplierId, $userId, 'purchase_invoice', $r, $entry, $amount);
+                if (!$this->recordSettlement($supplierId, $userId, 'purchase_invoice', $r, $entry, $amount)) {
+                    continue;
+                }
                 $settled += $amount;
                 $out['settlements']++;
                 $out['settlement_amount'] += $amount;
@@ -556,9 +598,14 @@ final class MoneyS3SettledPayments
      * @param array<string,mixed> $doc
      * @param array<string,mixed> $entry
      */
-    private function recordSettlement(int $supplierId, ?int $userId, string $docType, array $doc, array $entry, float $amount): void
+    private function recordSettlement(int $supplierId, ?int $userId, string $docType, array $doc, array $entry, float $amount): bool
     {
         $pdo = $this->db->pdo();
+        $exists = $pdo->prepare('SELECT 1 FROM invoice_settlements WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? AND journal_entry_id = ?');
+        $exists->execute([$supplierId, $docType, $doc['id'], $entry['entry_id']]);
+        if ($exists->fetchColumn() !== false) {
+            return false;
+        }
         $docNo = $entry['document_no'] !== '' ? $entry['document_no'] : '#' . $entry['entry_id'];
         $paymentId = null;
         if ($docType === 'invoice') {
@@ -573,6 +620,7 @@ final class MoneyS3SettledPayments
              VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)"
         )->execute([$supplierId, $docType, $doc['id'], $entry['date'], number_format($amount, 2, '.', ''), $entry['account_id'],
             'Převzato z Money S3, interní doklad ' . $docNo, $entry['entry_id'], $paymentId, $userId]);
+        return true;
     }
 
     private function currentNote(int $paymentId): string

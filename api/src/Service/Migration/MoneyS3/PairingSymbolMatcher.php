@@ -1529,7 +1529,8 @@ final class PairingSymbolMatcher
             }
         }
 
-        // Zápočty (převzaté i zadané v MyÚčtu) a ruční platby vydaných faktur.
+        // Zápočty (převzaté i zadané v MyÚčtu) a ruční platby vydaných faktur. Výplň bez
+        // dokladu úhrady ({@see MoneyS3SettledPayments}) úhradu nezabírá: párování ji nahradí.
         $settlements = $pdo->prepare("SELECT doc_type, doc_id, amount, journal_entry_id FROM invoice_settlements WHERE supplier_id = ? AND status = 'confirmed'");
         $settlements->execute([$sid]);
         while ($r = $settlements->fetch(PDO::FETCH_ASSOC)) {
@@ -1569,6 +1570,7 @@ final class PairingSymbolMatcher
              UNION ALL
              SELECT 'invoice', ip.invoice_id, ip.amount FROM invoice_payments ip
               WHERE ip.supplier_id = ? AND ip.source IN ('credit_note', 'settlement')
+                AND NOT " . MoneyS3SettledPayments::fillerSql('ip') . "
                 AND NOT EXISTS (SELECT 1 FROM credit_note_offsets o WHERE o.invoice_payment_id = ip.id)
                 AND NOT EXISTS (SELECT 1 FROM invoice_settlements s WHERE s.invoice_payment_id = ip.id)"
         );

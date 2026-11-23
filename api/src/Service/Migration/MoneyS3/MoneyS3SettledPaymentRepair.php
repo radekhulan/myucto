@@ -21,7 +21,8 @@ use PDO;
  *  - vydaný doklad z mapy převodu (faktura, zálohová faktura) uhrazený do konce
  *    posledního převedeného období dostane na rozdíl `paid_total` proti evidovaným platbám
  *    zápočet interním dokladem navázaným na doklad, zbytek platbu bez dokladu úhrady k datu
- *    úhrady,
+ *    úhrady. Doklad se spárovaným pohybem banky bez evidované platby výplň nedostane a jen
+ *    se ohlásí: platbu doplní opakovaný převod ({@see MoneyS3SettledPayments::pendingBankMatches()}),
  *  - přijatý doklad uhrazený podle Money dostane zápočet interním dokladem navázaným na
  *    doklad a zbytek nekrytý evidovanými úhradami do `settled_outside_amount`,
  *  - jediná platba zálohy z Money se naváže na jediný DDKP z Money se stejnou částkou.
@@ -77,7 +78,7 @@ final class MoneyS3SettledPaymentRepair
             'status' => 'nothing', 'reason' => null,
             'issued_count' => 0, 'issued_amount_czk' => 0.0, 'settlements' => 0, 'settlement_amount_czk' => 0.0, 'without_document_amount_czk' => 0.0,
             'purchase_count' => 0, 'purchase_amount_czk' => 0.0, 'purchase_settlements' => 0, 'purchase_settlement_amount_czk' => 0.0, 'tax_document_links' => 0,
-            'invoices' => [], 'purchases' => [],
+            'invoices' => [], 'purchases' => [], 'left_for_matching' => [],
         ];
         $lastEnd = $this->payments->lastTransferredPeriodEnd($supplierId);
         if ($lastEnd === null) {
@@ -107,6 +108,7 @@ final class MoneyS3SettledPaymentRepair
                 $row['invoices'][] = $i;
             }
             $row['settlements'] = $issued['settlements'];
+            $row['left_for_matching'] = $issued['left_for_matching'];
 
             $purchases = $this->payments->restorePurchaseSettlements($supplierId, $userId, $lastEnd);
             foreach ($purchases['documents'] as $d) {

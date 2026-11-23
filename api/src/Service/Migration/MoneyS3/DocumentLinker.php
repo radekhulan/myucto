@@ -354,20 +354,58 @@ final class DocumentLinker
         if ($lastEnd === null) {
             return;
         }
+        // Úhrada dokladem banky či pokladny: v převedených datech ji má párování (i nejednoznačnou,
+        // ohlášenou k ručnímu spárování), výplň by ji zakryla. Doklad úhrady mimo převedená data
+        // (pozdější rok) do poznámky výplně nepatří - „bez dokladu úhrady" by nebyla pravda.
+        $transferred = [];
+        foreach ([$ctx->bankTransactions, $ctx->cashDocuments] as $docs) {
+            foreach (array_keys($docs) as $key) {
+                $transferred[explode('|', (string) $key, 3)[1] ?? ''] = true;
+            }
+        }
+        $movementNos = [];
+        foreach (['BankKnih', 'PoklKnih'] as $table) {
+            foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
+                $movementNos[trim((string) ($r['Doklad'] ?? ''))] = true;
+            }
+        }
+        // Úhrada, kterou párování už zaevidovalo (platba s číslem úhrady v poznámce), výplň
+        // nebrání: zbytek uhrazené částky nese jiný (interní) doklad.
+        $recorded = [];
+        $stmt = $this->db->pdo()->prepare("SELECT invoice_id, note FROM invoice_payments WHERE supplier_id = ? AND source IN ('bank', 'cash') AND note LIKE ?");
+        $stmt->execute([$ctx->supplierId, IssuedPaymentRecorder::NOTE_PREFIX . '%']);
+        while ($p = $stmt->fetch(PDO::FETCH_NUM)) {
+            $recorded[(int) $p[0]][(string) $p[1]] = true;
+        }
         $paymentNos = [];
+        $left = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
             $docId = $ctx->issuedInvoices[$ctx->yearOf($r) . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
             $settledBy = trim((string) ($r['UDoklad'] ?? ''));
-            if ($docId !== null && $settledBy !== '') {
+            if ($docId === null || $settledBy === '') {
+                continue;
+            }
+            if (isset($transferred[$settledBy])) {
+                if (!isset($recorded[$docId][IssuedPaymentRecorder::note('bank', $settledBy)])) {
+                    $left[$docId] = true;
+                }
+            } elseif (!isset($movementNos[$settledBy])) {
                 $paymentNos[$docId] = $settledBy;
             }
         }
-        $out = $payments->recordIssued($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd, $paymentNos);
+        $out = $payments->recordIssued($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd, $paymentNos, $left);
         foreach (['settlements' => 'settled_internal_document', 'inserted' => 'settled_without_document', 'updated' => 'settled_without_document_updated',
             'deleted' => 'settled_without_document_removed'] as $key => $counter) {
             if ($out[$key] > 0) {
                 $ctx->protocol->count(self::STEP_PAYMENTS, $counter, $out[$key]);
             }
+        }
+        if ($out['left_for_matching'] !== []) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'settled_left_for_matching', count($out['left_for_matching']));
+            $ctx->protocol->warn(self::STEP_PAYMENTS, 'settled_left_for_matching', count($out['left_for_matching'])
+                . ' uhrazených dokladů má úhradu v převedené bance či pokladně, ale evidovanou platbu nedostaly (nejednoznačná úhrada). '
+                . 'Spárujte ji ručně, jinak přepočet plateb doklad vrátí mezi neuhrazené.',
+                ['documents' => array_slice(array_column($out['left_for_matching'], 'document_no'), 0, 50)]);
         }
     }
 

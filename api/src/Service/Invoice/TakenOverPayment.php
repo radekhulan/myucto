@@ -161,6 +161,26 @@ final class TakenOverPayment
                  )))";
     }
 
+    /**
+     * Výplň Money S3: platba `settlement` bez dokladu úhrady, kterou převod doplňuje uhrazenou
+     * částku podle Money ({@see MONEY_S3_WITHOUT_DOCUMENT_NOTE}). Bankovní platba za touž
+     * úhradu ji nahrazuje ({@see InvoicePaymentService::reconcileToBankTransaction()}).
+     *
+     * @param array{source?:mixed,note?:mixed} $payment
+     */
+    public static function isMoneyS3Filler(array $payment): bool
+    {
+        return ($payment['source'] ?? null) === PohodaPriorYearPayments::SOURCE
+            && str_starts_with((string) ($payment['note'] ?? ''), self::MONEY_S3_WITHOUT_DOCUMENT_NOTE);
+    }
+
+    /** SQL podoba {@see isMoneyS3Filler()} nad aliasem `invoice_payments`. */
+    public static function moneyS3FillerSql(string $alias): string
+    {
+        self::assertAlias($alias);
+        return "({$alias}.source = '" . PohodaPriorYearPayments::SOURCE . "' AND COALESCE({$alias}.note, '') LIKE '" . self::MONEY_S3_WITHOUT_DOCUMENT_NOTE . "%')";
+    }
+
     /** SQL podoba {@see isMoneyS3Payment()} s dokladem z mapy převodu Money S3. */
     public static function moneyS3PaymentSql(string $alias): string
     {

@@ -179,15 +179,17 @@ final class IssuedPaymentRecorder
     /**
      * Uhrazená částka a stav faktury po změně plateb, stejně jako po zaevidované platbě
      * v MyÚčtu ({@see InvoicePaymentService::recordPayment()}): uhrazená částka je součet
-     * plateb, faktura, kterou platby pokryjí, je uhrazená ke dni poslední platby. Uhrazenou
-     * částku a stav, které převod převzal z Money, nesnižuje.
+     * plateb bez výplně ({@see MoneyS3SettledPayments}, tu po párování zmenší), faktura,
+     * kterou platby pokryjí, je uhrazená ke dni poslední platby. Uhrazenou částku a stav,
+     * které převod převzal z Money, nesnižuje.
      */
     private function sync(int $supplierId, int $invoiceId): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'UPDATE invoices i
-                SET i.paid_total = GREATEST(i.paid_total, (SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p WHERE p.invoice_id = i.id))
+                SET i.paid_total = GREATEST(i.paid_total, (SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p
+                                                            WHERE p.invoice_id = i.id AND NOT ' . MoneyS3SettledPayments::fillerSql('p') . '))
               WHERE i.id = ? AND i.supplier_id = ?'
         )->execute([$invoiceId, $supplierId]);
         $pdo->prepare(
@@ -211,7 +213,7 @@ final class IssuedPaymentRecorder
         if (!array_key_exists($invoiceId, $this->invoices)) {
             $stmt = $this->db->pdo()->prepare(
                 "SELECT i.status, i.invoice_type, i.paid_total, i.amount_to_pay, i.exchange_rate, cur.code AS currency,
-                        (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = i.id) AS recorded
+                        (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = i.id AND NOT " . MoneyS3SettledPayments::fillerSql('ip') . ") AS recorded
                    FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.id = ? AND i.supplier_id = ?"
             );

@@ -67,6 +67,11 @@ foreach ($rows as $r) {
         $r['settlements'], $fmt($r['settlement_amount_czk']), $fmt($r['without_document_amount_czk']),
         $r['purchase_count'], $fmt($r['purchase_amount_czk']), $r['purchase_settlements'], $fmt($r['purchase_settlement_amount_czk']), $r['tax_document_links'],
         $r['status'] === 'repaired' ? ', doplněno' : ($r['status'] === 'would_repair' ? ', k doplnění' : ''));
+    if ($r['left_for_matching'] !== []) {
+        printf("  %d dokladů má úhradu v převedené bance bez evidované platby (výplň nevzniká, doplní ji opakovaný převod): %s Kč\n",
+            count($r['left_for_matching']), $fmt(array_sum(array_map(static fn (array $i): float => $i['amount'] * ($i['currency'] === 'CZK' ? 1.0 : ($i['rate'] ?? 1.0)), $r['left_for_matching']))));
+    }
+    $totals['left'] = ($totals['left'] ?? 0) + count($r['left_for_matching']);
     $totals['issued'] += $r['issued_count'];
     $totals['issued_czk'] += $r['issued_amount_czk'];
     $totals['purchase'] += $r['purchase_count'];
@@ -85,8 +90,8 @@ foreach ($rows as $r) {
         }
     }
 }
-printf("Celkem vydané %d dokladů, %s Kč; přijaté %d dokladů, %s Kč; vazby na DDKP %d.\n",
-    $totals['issued'], $fmt($totals['issued_czk']), $totals['purchase'], $fmt($totals['purchase_czk']), $totals['links']);
+printf("Celkem vydané %d dokladů, %s Kč; přijaté %d dokladů, %s Kč; vazby na DDKP %d; ponecháno párování %d.\n",
+    $totals['issued'], $fmt($totals['issued_czk']), $totals['purchase'], $fmt($totals['purchase_czk']), $totals['links'], $totals['left'] ?? 0);
 if (!$commit && ($totals['issued'] + $totals['purchase'] + $totals['links']) > 0) {
     echo PHP_EOL . 'Nic nezměněno. Zápis provede spuštění s --commit.' . PHP_EOL;
 }
