@@ -223,9 +223,19 @@ final class PohodaAccrualTakeoverService
         $groups = $this->crGroups($supplierId);
         $openingEntries = $this->openingEntries($supplierId);
         $openingDate = $openingEntries['date'];
+        $known = $this->existingItems($supplierId);
         $items = [];
         foreach ($groups as $docNo => $g) {
             $items[$docNo] = $this->buildItem($supplierId, $docNo, $g, $openingDate);
+            // Už převzatá položka drží svůj rozpad (i po úpravě účetní nebo stornu zápisu),
+            // opakované převzetí ho nepočítá znovu.
+            $prev = $known[$items[$docNo]['import_key']] ?? null;
+            if ($prev !== null) {
+                foreach (['basis_amount', 'period_from', 'period_to', 'method'] as $k) {
+                    $items[$docNo][$k] = $prev[$k];
+                }
+                $items[$docNo]['known_opening'] = $prev['opening_balance'];
+            }
         }
         $terminations = $this->terminations($supplierId, $items);
         foreach ($terminations['matched'] as $t) {
@@ -240,6 +250,14 @@ final class PohodaAccrualTakeoverService
         // Rozpad počátečního stavu: ukončené přesně, běžící rekonstrukcí.
         $opening = [];
         foreach ($items as $docNo => &$p) {
+            if (array_key_exists('known_opening', $p)) {
+                $p['opening_share'] = $p['known_opening'] === null ? null : (float) $p['known_opening'];
+                if ($p['opening_share'] !== null) {
+                    $opening[$p['account_code']]['allocated'] = round(($opening[$p['account_code']]['allocated'] ?? 0.0) + $p['opening_share'], 2);
+                    $opening[$p['account_code']]['items'] = ($opening[$p['account_code']]['items'] ?? 0) + 1;
+                }
+                continue;
+            }
             $releasedSince = $openingDate !== null && $p['releases'] !== [] && $p['releases'][0]['date'] >= $openingDate;
             $unpaired = $p['period_from'] === null && $p['origin'] === null && $releasedSince;
             if (!$unpaired && ($p['period_from'] === null || $openingDate === null || $p['period_from'] >= $openingDate || $p['origin'] !== null)) {
@@ -265,6 +283,16 @@ final class PohodaAccrualTakeoverService
             $opening[$p['account_code']]['items'] = ($opening[$p['account_code']]['items'] ?? 0) + 1;
         }
         unset($p);
+        // Převzatá položka, jejíž zápisy mezitím zmizely z výběru (storno při ukončení v agendě),
+        // dál nese svůj díl počátečního stavu.
+        $present = array_flip(array_column($items, 'import_key'));
+        foreach ($known as $key => $prev) {
+            if (!isset($present[$key]) && !str_starts_with($key, self::IMPORT_PREFIX . 'ps:') && $prev['opening_balance'] !== null) {
+                $code = (string) $prev['accrual_account_code'];
+                $opening[$code]['allocated'] = round(($opening[$code]['allocated'] ?? 0.0) + (float) $prev['opening_balance'], 2);
+                $opening[$code]['items'] = ($opening[$code]['items'] ?? 0) + 1;
+            }
+        }
         // Rekonstrukce z faktury a rytmu dává smysl jen tehdy, když zhruba sedí na počáteční
         // stav. Překročí-li ho o víc než 1 % (smlouvy rozpouštěné pevnou částkou, ne podle
         // dnů), nesou rekonstruované položky jen to, co po převzetí rozpustily, a zbytek
@@ -327,6 +355,18 @@ final class PohodaAccrualTakeoverService
                 'opening_remainder' => round(array_sum(array_column($openingRows, 'remainder')), 2),
             ],
         ];
+    }
+
+    /** @return array<string, array<string,mixed>> import_key => položka */
+    private function existingItems(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM accrual_items WHERE supplier_id = ? AND import_key LIKE ?');
+        $stmt->execute([$supplierId, self::IMPORT_PREFIX . '%']);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(string) $r['import_key']] = AccrualItemRepository::castItem($r);
+        }
+        return $out;
     }
 
     /** @return array<string,int> import_key => id */

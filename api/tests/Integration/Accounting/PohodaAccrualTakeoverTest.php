@@ -160,6 +160,10 @@ final class PohodaAccrualTakeoverTest extends TestCase
         self::assertSame(0, $again['created'], 'Opakované převzetí nezakládá nové položky.');
         self::assertSame($entriesBefore, $this->entryCount());
         self::assertSame(0.0, $this->reconciliation->reconcile($this->supplierId, '2092-12-31')['totals']['difference']);
+        // Storno převzatého zápisu (např. při ukončení v agendě) nemění rozpad počátečního stavu.
+        $crEntry = (int) $this->db->pdo()->query("SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND document_no = '90CR0001'")->fetchColumn();
+        $this->posting->reverse($this->supplierId, $crEntry, ['entry_date' => '2092-12-31', 'user_id' => $this->userId]);
+        self::assertSame(1_234.56, $this->takeover->preview($this->supplierId)['summary']['opening_remainder']);
         $links = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM accrual_entry_links WHERE supplier_id = ' . $this->supplierId)->fetchColumn();
         $this->takeover->apply($this->supplierId, $this->userId);
         self::assertSame($links, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM accrual_entry_links WHERE supplier_id = ' . $this->supplierId)->fetchColumn());
