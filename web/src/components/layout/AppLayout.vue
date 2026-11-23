@@ -881,9 +881,9 @@ const navSections = computed<NavSection[]>(() => {
       { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
       { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
       ...(dimensionsEnabled ? [{ to: '/company/dimensions', label: t('nav.dimensions'), icon: ICONS.codebooks, permission: 'accounting' as PermissionKey }] : []),
-      { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
+      { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens, dividerBefore: true },
       { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
-      { to: '/eet/records',                label: t('eet.records.nav'),     icon: ICONS.cash, permission: 'eet' as PermissionKey },
+      { to: '/eet/records',                label: t('eet.records.nav'),     icon: ICONS.cash, permission: 'eet' as PermissionKey, dividerBefore: true },
       { to: '/eet/settings',               label: t('eet.nav'),             icon: ICONS.cash, permission: 'eet.settings' as PermissionKey },
     ],
   })
