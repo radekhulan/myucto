@@ -36847,6 +36847,8 @@
       "journal_only": "journal only",
       "commitments": "other liabilities in the VAT return",
       "receivables": "other receivables in the VAT return",
+      "payroll": "of which payroll liabilities (accounts 331, 336, 342)",
+      "payroll_or_tax": "tax assessments kept in the journal only (accounts 341, 343)",
       "kh_a5_forced": "documents in control statement section A.5",
       "claim_moved": "documents deducted before the tax point, moved to the tax point period",
       "foreign_reverse_dppd_kept": "foreign reverse charge documents keeping the POHODA return date instead of the tax point",

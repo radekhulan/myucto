@@ -729,6 +729,17 @@ kontrole. Interní doklady mimo přiznání k DPH mají zápis v deníku a zázn
 Interní doklady. Zápis takového dokladu nejde smazat v deníku, opravuje se stornem
 v detailu dokladu.
 
+Mzdové závazky na účtech 331, 336 a 342 (mzdy zaměstnanců, pojistné, daň ze mzdy)
+se převedou do `Účetnictví → Ostatní pohledávky a závazky` stejně jako ostatní
+závazky, aby se daly párovat s úhradami. Závazek s vlastním zápisem v deníku ho
+převezme bez nového zaúčtování. Mzda zaměstnance, jejíž předpis nese interní doklad
+mezd, a závazek z počátečního stavu se uloží jako potvrzené bez vlastního zápisu.
+Ostatní závazek bez členění DPH a s nulovou daní (u mzdových dokladů ho tak vede
+export z MDB) je doklad mimo přiznání, ne přijatá faktura. Protokol převodu uvádí
+počet mzdových závazků v kroku ostatních pohledávek a závazků. Předpisy DPH (343)
+a doplatky daně z příjmů (341) zůstávají jen v deníku, zálohy na daň z příjmů
+převod převezme jako předpisy záloh.
+
 **Samovyměření jen na interních dokladech.** Někdy účetní vede přijatou fakturu
 v členění mimo přiznání (například `PN`) a výstup i odpočet zachytí až dvojicí
 interních dokladů navázaných na fakturu (vyměření `DD…`, odpočet `PD…`). Převod

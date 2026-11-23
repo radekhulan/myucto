@@ -36847,6 +36847,8 @@
       "journal_only": "jen v deníku",
       "commitments": "ostatních závazků v přiznání DPH",
       "receivables": "ostatních pohledávek v přiznání DPH",
+      "payroll": "z toho mzdových závazků (účty 331, 336, 342)",
+      "payroll_or_tax": "předpisů daní jen v deníku (účty 341, 343)",
       "kh_a5_forced": "dokladů v KH oddílu A.5",
       "claim_moved": "dokladů s odpočtem před DUZP, přesunutých do období DUZP",
       "foreign_reverse_dppd_kept": "zahraničních přenesení s datem přiznání z POHODY místo DUZP",

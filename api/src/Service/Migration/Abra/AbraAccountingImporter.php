@@ -31,6 +31,7 @@ use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
+use MyInvoice\Service\Migration\Shared\MigratedOtherItemPolicy;
 use MyInvoice\Service\Migration\Shared\MigratedPaymentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use PDO;
@@ -1011,6 +1012,9 @@ final class AbraAccountingImporter
             $documentTargets[$target] = ['type' => 'other_item', 'id' => $id];
             $this->otherItemSourcePaid[$id] = (float) $plan['paid_total'];
             $this->created($report, $posting['status'] === 'posted' ? 'other_items' : 'other_items_unposted');
+            if (MigratedOtherItemPolicy::payroll($posting['account'])) {
+                $report['counts']['other_items_payroll_created'] = ($report['counts']['other_items_payroll_created'] ?? 0) + 1;
+            }
         }
         $this->pendingOtherItems = [];
     }

@@ -300,7 +300,7 @@ final class PohodaImportTest extends TestCase
         self::assertSame(2, $this->rows('pohoda_import_map', $supplierId, "kind = 'other_item'"));
     }
 
-    public function testSettledOtherItemKeepsBankPaymentsAndPayrollLiabilityStaysInModule(): void
+    public function testSettledOtherItemKeepsBankPaymentsAndPayrollLiabilityBecomesOtherItem(): void
     {
         $supplierId = $this->supplier();
         $dir = SyntheticPohodaExport::write($this->tmp);
@@ -309,11 +309,13 @@ final class PohodaImportTest extends TestCase
 
         $first = $this->importer->run($supplierId, $this->userId, $export, false);
         self::assertFalse($first->hasErrors(), $this->explain($first));
-        self::assertSame(4, $this->rows('other_items', $supplierId));
-        self::assertSame(0, $this->rows('other_items', $supplierId, "document_no IN ('26OZM0001', '26OZD0001', '26OZD0002')"));
+        self::assertSame(5, $this->rows('other_items', $supplierId));
+        self::assertSame(0, $this->rows('other_items', $supplierId, "document_no IN ('26OZD0001', '26OZD0002')"));
         $counts = self::stepCounts($first, 'other_items');
-        // Odvod na 336 a doplatek daně na 341 vlastní mzdový a daňový modul.
-        self::assertSame(2, $counts['payroll_or_tax'] ?? 0);
+        // Doplatek daně na 341 vlastní daňový modul. Odvod na 336 je ostatní závazek
+        // a převezme svůj zápis, firma mzdy v MyÚčtu nepočítá.
+        self::assertSame(1, $counts['payroll_or_tax'] ?? 0);
+        self::assertSame(1, $counts['payroll'] ?? 0);
         self::assertSame(1, $counts['created_unposted'] ?? 0);
         self::assertSame(1, $counts['tax_advances'] ?? 0);
 
@@ -344,9 +346,68 @@ final class PohodaImportTest extends TestCase
 
         $again = $this->importer->run($supplierId, $this->userId, $export, false);
         self::assertFalse($again->hasErrors(), $this->explain($again));
-        self::assertSame(4, $this->rows('other_items', $supplierId));
+        self::assertSame(5, $this->rows('other_items', $supplierId));
         self::assertSame(3, $this->rows('other_item_allocations', $supplierId));
         self::assertSame(1, $this->rows('tax_advance_schedules', $supplierId));
+    }
+
+    /**
+     * Mzdové závazky (331, 336, 342) firmy, která mzdy v MyÚčtu nepočítá, jsou v agendě
+     * Ostatní pohledávky a závazky: pojistné s vlastním zápisem ho převezme bez nového
+     * účtování a páruje úhradu z banky, mzda zaměstnance (předpis nese interní doklad mezd)
+     * a daň ze mzdy z počátečního stavu jsou potvrzené bez zápisu. Pojistné bez členění DPH
+     * (MDB export) není přijatá faktura. Opakovaný převod nic nezdvojí.
+     */
+    public function testPayrollLiabilitiesBecomeOtherItemsWithoutNewPosting(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withOtherItems($dir, true);
+        SyntheticPohodaExport::withPayrollItems($dir);
+        $export = PohodaExport::open($dir);
+        $pdo = $this->db->pdo();
+        $item = static fn (string $number): array|false => $pdo->query(
+            "SELECT id, status, account_code, amount, journal_entry_id FROM other_items
+              WHERE supplier_id = {$supplierId} AND document_no = '{$number}'")->fetch(\PDO::FETCH_ASSOC);
+
+        $first = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $journal = $this->rows('journal_entries', $supplierId);
+        $counts = self::stepCounts($first, 'other_items');
+        self::assertSame(4, $counts['payroll'] ?? 0, 'Odvod 26OZM0001 a tři mzdové závazky.');
+
+        $insurance = $item(SyntheticPohodaExport::PAYROLL_INSURANCE);
+        self::assertNotFalse($insurance);
+        self::assertSame(['posted', '336.000', '6000.00'], [$insurance['status'], $insurance['account_code'], (string) $insurance['amount']]);
+        self::assertNotNull($insurance['journal_entry_id']);
+        self::assertSame(1, $this->rows('journal_entries', $supplierId,
+            "id = {$insurance['journal_entry_id']} AND source_type = 'other_item' AND source_id = {$insurance['id']}"));
+        self::assertSame(0, $this->rows('pohoda_import_map', $supplierId,
+            "kind = 'purchase_invoice' AND pohoda_key LIKE 'commitment|" . SyntheticPohodaExport::PAYROLL_INSURANCE . "|%'"));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId), 'Jen přijatá faktura základního exportu.');
+        self::assertSame('6000.00', (string) $pdo->query("SELECT SUM(amount) FROM other_item_allocations
+            WHERE other_item_id = {$insurance['id']} AND reversed_on IS NULL")->fetchColumn());
+
+        foreach ([[SyntheticPohodaExport::PAYROLL_WAGE, '331.000', '20000.00'], [SyntheticPohodaExport::PAYROLL_OPENING_TAX, '342.000', '1500.00']] as [$number, $account, $amount]) {
+            $row = $item($number);
+            self::assertNotFalse($row, $number);
+            self::assertSame(['confirmed', $account, $amount, null], [$row['status'], $row['account_code'], (string) $row['amount'], $row['journal_entry_id']], $number);
+            self::assertSame(0, $this->rows('journal_entries', $supplierId, "source_type = 'other_item' AND source_id = {$row['id']}"), $number);
+        }
+        // Klíč mapy převodu sdílí jednorázové doplnění mzdových závazků u převedených firem.
+        self::assertSame(1, $this->rows('pohoda_import_map', $supplierId,
+            "kind = 'other_item' AND pohoda_key = 'commitment|" . SyntheticPohodaExport::PAYROLL_WAGE . "|2026-02-08'"));
+        self::assertSame(1, $this->rows('pohoda_import_map', $supplierId,
+            "kind = 'other_item' AND pohoda_key = 'commitment|" . SyntheticPohodaExport::PAYROLL_OPENING_TAX . "|2025-12-31'"));
+
+        $items = $this->rows('other_items', $supplierId);
+        $allocations = $this->rows('other_item_allocations', $supplierId);
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame($items, $this->rows('other_items', $supplierId));
+        self::assertSame($allocations, $this->rows('other_item_allocations', $supplierId));
+        self::assertSame($journal, $this->rows('journal_entries', $supplierId));
+        self::assertSame(0, self::stepCounts($again, 'other_items')['payroll'] ?? 0);
     }
 
     /**

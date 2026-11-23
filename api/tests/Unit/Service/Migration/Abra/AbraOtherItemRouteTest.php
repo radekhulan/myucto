@@ -33,14 +33,19 @@ final class AbraOtherItemRouteTest extends TestCase
         self::assertSame(AbraOtherItemWriter::ROUTE_DOCUMENT, AbraOtherItemWriter::route(self::plan('faktura-prijata')));
     }
 
-    public function testPayrollAndTaxAccountsStayInJournal(): void
+    public function testTaxAccountsStayInJournalAndPayrollBecomesOtherItems(): void
     {
-        foreach (['331000', '336100', '341000', '342000', '343900'] as $account) {
+        foreach (['341000', '343900'] as $account) {
             self::assertSame(AbraOtherItemWriter::ROUTE_MODULE,
+                AbraOtherItemWriter::route(self::plan('zavazek', ['primUcet' => 'code:' . $account])), $account);
+        }
+        foreach (['331000', '336100', '342000'] as $account) {
+            self::assertSame(AbraOtherItemWriter::ROUTE_OTHER_ITEM,
                 AbraOtherItemWriter::route(self::plan('zavazek', ['primUcet' => 'code:' . $account])), $account);
         }
         self::assertTrue(MigratedOtherItemPolicy::moduleOwned('343.100'));
         self::assertFalse(MigratedOtherItemPolicy::moduleOwned('333001'));
+        self::assertFalse(MigratedOtherItemPolicy::moduleOwned('336.100'));
     }
 
     public function testVatForeignCurrencyAndCancellationAreNotOtherItems(): void

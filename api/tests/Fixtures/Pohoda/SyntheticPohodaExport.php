@@ -317,6 +317,57 @@ final class SyntheticPohodaExport
         }
     }
 
+    /** Mzda zaměstnance bez vlastního zápisu, předpis nese interní doklad mezd ({@see withPayrollItems()}). */
+    public const PAYROLL_WAGE = '26MZ0001';
+    /** Pojistné bez členění DPH (MDB export) s vlastním zápisem 524/336 ({@see withPayrollItems()}). */
+    public const PAYROLL_INSURANCE = '26OM0001';
+    /** Daň ze mzdy za prosinec minulého roku, předpis je v počátečním stavu ({@see withPayrollItems()}). */
+    public const PAYROLL_OPENING_TAX = '25MZ0012';
+
+    /**
+     * Doplní agendu z {@see withOtherItems()} (`$settled = true`) o mzdové závazky, které
+     * firma v MyÚčtu nepočítá:
+     *   - mzda zaměstnance na 331 (předkontace „bez"), předpis je interní doklad mezd 521/331,
+     *   - pojistné bez členění DPH s vlastním zápisem 524/336, uhrazené bankou,
+     *   - daň ze mzdy na 342 z minulého roku bez zápisu v roce agendy (počáteční stav).
+     */
+    public static function withPayrollItems(string $dir): void
+    {
+        $item = static fn (string $number, string $date, string $text, float $amount, string $rule, string $vat, string $liquidations = ''): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting><inv:dateDue>2026-02-20</inv:dateDue>'
+            . '<inv:text>' . $text . '</inv:text>' . ($rule !== '' ? '<inv:accounting><typ:ids>' . $rule . '</typ:ids></inv:accounting>' : '')
+            . ($vat !== '' ? '<inv:classificationVAT><typ:ids>' . $vat . '</typ:ids></inv:classificationVAT>' : '')
+            . '<inv:partnerIdentity><typ:address><typ:company>Zaměstnanci Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>' . ($liquidations === '' ? $amount : 0) . '</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>' . $liquidations . '</lst:invoice>';
+        self::append($dir . '/02_uctova_osnova.xml', '</lst:listAccount>',
+            '<lst:itemAccount id="331000" code="331000" name="Zaměstnanci"/>'
+            . '<lst:itemAccount id="342000" code="342000" name="Ostatní přímé daně"/>'
+            . '<lst:itemAccount id="521000" code="521000" name="Mzdové náklady"/>');
+        self::append($dir . '/03_predkontace_pu.xml', '</lst:listAccounting>',
+            '<lst:itemAccounting id="4" code="BEZ331000" accounting="Mzdy" debit="331000" agenda="commitment"/>'
+            . '<lst:itemAccounting id="5" code="BEZ342000" accounting="Daň ze mzdy" debit="342000" agenda="commitment"/>');
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            $item(self::PAYROLL_WAGE, '2026-02-08', 'Mzda zaměstnance 1/2026', 20000, 'BEZ331000', 'PN')
+            . $item(self::PAYROLL_INSURANCE, '2026-02-08', 'Sociální pojištění 1/2026', 6000, '', '',
+                '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('BAN0010030liq')) . '</typ:id><typ:date>2026-02-18</typ:date>'
+                . '<typ:sourceAgenda>bank</typ:sourceAgenda><typ:sourceDocument><typ:id>' . abs(crc32('BAN0010030')) . '</typ:id>'
+                . '<typ:number>BAN0010030</typ:number></typ:sourceDocument><typ:amount>6000</typ:amount></typ:liquidation></inv:liquidations>')
+            . $item(self::PAYROLL_OPENING_TAX, '2025-12-31', 'Daň ze mzdy 12/2025', 1500, 'BEZ342000', 'PN'));
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Interní doklady', '26IN0010', 'Mzdy 1/2026', 20000, '521000', '331000', '2026-01-31')
+            . self::entry('Interní doklady', '26IN0011', 'Záloha daně ze mzdy 1/2026', 3000, '331000', '342000', '2026-01-31')
+            . self::entry('Ostatní závazky', self::PAYROLL_INSURANCE, 'Sociální pojištění 1/2026', 6000, '524000', '336000', '2026-02-08')
+            . self::entry('Banka', 'BAN0010030', 'Úhrada pojistného', 6000, '336000', '221001', '2026-02-18'));
+        self::append($dir . '/29_banka.xml', '</lst:listBank>',
+            self::bank('BAN0010030', 'expense', '2026-02-18', 6000, '', 'Správa sociálního zabezpečení Test'));
+    }
+
     /** Ostatní závazek uhrazený v minulém roce ({@see withOtherItemSettlements()}). */
     public const OTHER_ITEM_PAID_EARLIER = '26OZP0001';
     /** Ostatní závazek uhrazený pokladnou ({@see withOtherItemSettlements()}). */

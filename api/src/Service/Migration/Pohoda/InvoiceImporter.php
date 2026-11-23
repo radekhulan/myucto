@@ -342,6 +342,9 @@ final class InvoiceImporter
         }
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
         $class = $this->classifyIssued($ctx, $kind, $doc['vat_class'], $amounts);
+        if (OtherItemImporter::outsideReturnWithoutVatClass($agenda, $doc['vat_class'], $amounts['vat'])) {
+            $class['in_return'] = false;
+        }
         if (($agenda === 'receivable' || $agenda === 'internal') && !$class['in_return']) {
             // Pohledávka mimo přiznání (odvod, půjčka…) zůstává jen v deníku.
             $p->count($step, 'journal_only');
@@ -515,6 +518,10 @@ final class InvoiceImporter
         $doc['tax'] = $doc['kh'] ?? $doc['tax'];
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
         $class = $this->classifyPurchase($ctx, $kind, $doc['vat_class'], $amounts);
+        if (OtherItemImporter::outsideReturnWithoutVatClass($agenda, $doc['vat_class'], $amounts['vat'])) {
+            // Ostatní závazek bez členění s nulovou daní (mzdy v MDB exportu) není přijatá faktura.
+            $class['in_return'] = false;
+        }
         if (($agenda === 'commitment' || $agenda === 'internal') && !$class['in_return']) {
             $p->count($step, 'journal_only');
             return;

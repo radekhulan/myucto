@@ -20,9 +20,15 @@ use PDO;
  * banky a pokladny {@see DocumentLinker::matchPayments()}. Převádí se i uhrazené doklady,
  * aby agenda nesla celou historii roku.
  *
- * Předpisy mezd, odvodů a DPH (účty 331, 336, 342, 343) vlastní mzdový a daňový modul
- * a nepřevádějí se. Zálohy na daň z příjmů (341) bez zaúčtování převezme daňový modul jako
- * předpisy záloh ({@see self::taxAdvances()}).
+ * Mzdové závazky (331, 336, 342, {@see MigratedOtherItemPolicy}) se převádějí stejně:
+ * předpis s vlastním zápisem (pojistné) ho převezme, mzda zaměstnance (předpis nese interní
+ * doklad mezd) a závazek z počátečního stavu se založí bez zápisu. Protokol je počítá
+ * zvlášť (`payroll`). Předpisy DPH (343) vlastní daňový modul a nepřevádějí se. Zálohy na
+ * daň z příjmů (341) bez zaúčtování převezme daňový modul jako předpisy záloh
+ * ({@see self::taxAdvances()}).
+ *
+ * Doklad bez členění DPH s nulovou daní (MDB export členění u mzdových dokladů nevyplňuje)
+ * je mimo přiznání ({@see self::outsideReturnWithoutVatClass()}).
  */
 final class OtherItemImporter
 {
@@ -126,6 +132,7 @@ final class OtherItemImporter
                         self::rememberSourcePaid($ctx, $id, $candidate, $record);
                         $p->count(self::STEP, 'created_unposted');
                         $p->count(self::STEP, $candidate['remaining'] >= 0.005 ? 'open' : 'settled');
+                        self::countPayroll($ctx, $account);
                     }
                     continue;
                 }
@@ -167,6 +174,7 @@ final class OtherItemImporter
                 self::rememberSourcePaid($ctx, $id, $candidate, $record);
                 $p->count(self::STEP, 'created');
                 $p->count(self::STEP, $candidate['remaining'] >= 0.005 ? 'open' : 'settled');
+                self::countPayroll($ctx, $posting['account']);
             }
         }
         $this->taxAdvances($ctx, $advances);
@@ -323,8 +331,13 @@ final class OtherItemImporter
         $header = PohodaXml::get($record, 'invoiceHeader');
         $summary = PohodaXml::get($record, 'invoiceSummary/homeCurrency');
         $code = PohodaXml::text($header, 'classificationVAT/ids');
-        $class = $agenda === 'receivable' ? $vat->sale($code, 0.0) : $vat->purchase($code);
-        if ($code === '' || $class === null || $class['in_return'] || PohodaXml::text($header, 'MOSS/ids') !== '') return null;
+        if (PohodaXml::text($header, 'MOSS/ids') !== '') return null;
+        if ($code !== '') {
+            $class = $agenda === 'receivable' ? $vat->sale($code, 0.0) : $vat->purchase($code);
+            if ($class === null || $class['in_return']) return null;
+        }
+        // Bez členění rozhoduje nulová daň, kterou níž hlídají částky souhrnu i položek
+        // ({@see self::outsideReturnWithoutVatClass()}).
         if (PohodaXml::text($record, 'invoiceSummary/foreignCurrency/currency/ids') !== '') return null;
         if (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') !== []) return null;
         foreach (['priceLow', 'priceLowVAT', 'priceHigh', 'priceHighVAT', 'price3', 'price3VAT', 'round/priceRound'] as $field) {
@@ -410,6 +423,24 @@ final class OtherItemImporter
     public static function moduleOwned(string $account): bool
     {
         return MigratedOtherItemPolicy::moduleOwned($account);
+    }
+
+    /**
+     * Ostatní pohledávka nebo závazek bez členění DPH a s nulovou daní je doklad mimo
+     * přiznání, ne faktura. MDB export (účetnictví bez XML datového balíku) členění
+     * u dokladů mimo DPH, typicky mezd a odvodů, nevyplňuje. Přijaté a vydané faktury
+     * (jiné agendy) bez členění zůstávají v přiznání ({@see InvoiceImporter}).
+     */
+    public static function outsideReturnWithoutVatClass(string $agenda, string $code, float $vat): bool
+    {
+        return in_array($agenda, ['receivable', 'commitment'], true) && $code === '' && abs($vat) < 0.005;
+    }
+
+    private static function countPayroll(PohodaContext $ctx, ?string $account): void
+    {
+        if ($account !== null && MigratedOtherItemPolicy::payroll($account)) {
+            $ctx->protocol->count(self::STEP, 'payroll');
+        }
     }
 
     /**
