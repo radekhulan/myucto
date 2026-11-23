@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Migration;
 
+use MyInvoice\Service\Crm\CrmAggregationService;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentNotApplicableException;
+use MyInvoice\Service\Invoice\ProformaVatRates;
 use MyInvoice\Service\Invoice\ProformaWithoutVatRatesException;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
@@ -69,22 +71,38 @@ final class MoneyS3ProformaWithoutRatesTest extends MoneyS3ImportTestCase
         self::assertSame(0.0, (float) $this->scalar('SELECT total_vat FROM invoices WHERE id = ?', [$finalId]));
     }
 
-    /** Nová platba zálohy bez sazeb v MyÚčtu nedostane DDKP na 0 %: vystaví ho uživatel se sazbou. */
-    public function testTaxDocumentForNewPaymentOfMoneyProformaWithoutRatesIsRefused(): void
+    /**
+     * Nová platba zálohy bez sazeb, ke které DDKP z Money sazbu neurčuje (žádný není):
+     * DDKP na 0 % nevznikne. Server si vyžádá sazbu plnění a se zvolenou sazbou ho vystaví.
+     * V automatickém režimu je odmítnutí vidět jako úkol CRM.
+     */
+    public function testTaxDocumentForNewPaymentOfMoneyProformaWithoutRatesNeedsChosenRate(): void
     {
         $proforma = $this->invoice('ZV25050');
         $pdo = $this->db->pdo();
-        $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source) VALUES (?, ?, '2026-01-10', 100.00, 'CZK', 'manual')")
+        $pdo->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$this->invoice('DD25050')]);
+        $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = NULL WHERE invoice_id = ?')->execute([$proforma]);
+        $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source) VALUES (?, ?, '2026-01-10', 121.00, 'CZK', 'manual')")
             ->execute([$this->supplierId, $proforma]);
         $payment = (int) $pdo->lastInsertId();
 
+        $creator = $this->container(PaymentTaxDocumentCreator::class);
         try {
-            $this->container(PaymentTaxDocumentCreator::class)->createForPayment($payment);
+            $creator->createForPayment($payment);
             self::fail('DDKP k záloze bez sazeb by vyšel bez daně.');
         } catch (PaymentTaxDocumentNotApplicableException $e) {
+            self::assertSame(ProformaVatRates::RATE_REQUIRED, $e->getCode());
             self::assertStringContainsString('bez sazeb DPH', $e->getMessage());
         }
-        self::assertSame(1, $this->rowCount('invoices', $this->supplierId, "invoice_type = 'tax_document' AND parent_invoice_id = {$proforma}"));
+
+        $crm = $this->container(CrmAggregationService::class)->actionItems($this->supplierId, $this->userId);
+        self::assertContains('proforma_awaiting_document', array_column((array) ($crm['items'] ?? $crm), 'type'),
+            'Odmítnutý DDKP v automatickém režimu musí být vidět v úkolech.');
+
+        $rate21 = (int) $pdo->query("SELECT id FROM vat_rates WHERE rate_percent = 21 AND is_reverse_charge = 0 AND valid_from <= '2026-01-10'
+                                       AND (valid_to IS NULL OR valid_to >= '2026-01-10') ORDER BY valid_from DESC LIMIT 1")->fetchColumn();
+        $taxDocId = $creator->createForPayment($payment, $this->userId, $rate21);
+        self::assertSame(21.0, (float) $this->scalar('SELECT total_vat FROM invoices WHERE id = ?', [$taxDocId]));
     }
 
     private function invoice(string $no): int

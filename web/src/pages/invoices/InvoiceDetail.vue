@@ -69,6 +69,7 @@ import { useIsPhone } from '@/composables/useIsPhone'
 import { useListNavigation } from '@/composables/useListNavigation'
 import { useOpeningBalanceDocument } from '@/composables/useOpeningBalanceDocument'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import PaymentTaxRateDialog from '@/components/invoices/PaymentTaxRateDialog.vue'
 
 const PaymentMethodModal = defineAsyncComponent(() => import('@/components/invoices/PaymentMethodModal.vue'))
 const RefundPaymentDialog = defineAsyncComponent(() => import('@/components/invoices/RefundPaymentDialog.vue'))
@@ -589,17 +590,26 @@ async function submitPartialPayment() {
   }
 }
 
-async function createTaxDocForPayment(paymentId: number) {
+// Záloha převzatá bez sazeb DPH: server si vyžádá sazbu plnění (`proforma_without_vat_rates`).
+const taxRateDialog = ref<{ paymentId: number; paidOn: string; message: string } | null>(null)
+
+async function createTaxDocForPayment(paymentId: number, vatRateId?: number) {
   if (!invoice.value) return
   busy.value = 'payment-tax-doc'
   try {
-    const r = await invoicesApi.createPaymentTaxDocument(invoice.value.id, paymentId)
+    const r = await invoicesApi.createPaymentTaxDocument(invoice.value.id, paymentId, vatRateId)
     payments.value = r.payments
+    taxRateDialog.value = null
     toast.success(t('invoice.payments.tax_doc_created'))
     // Rovnou do detailu konceptu — uživatel ho zkontroluje a vystaví jedním klikem.
     router.push(`/invoices/${r.tax_document_id}`)
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
+    const err = e?.response?.data?.error
+    if (err?.code === 'proforma_without_vat_rates' && !vatRateId) {
+      taxRateDialog.value = { paymentId, paidOn: String(err.paid_on ?? ''), message: String(err.message ?? '') }
+    } else {
+      toast.error(err?.message || t('invoice.operation_failed'))
+    }
   } finally {
     busy.value = null
   }
@@ -4237,6 +4247,8 @@ useWindowRefresh(async () => {
     </WorkspaceTeleport>
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
     <InsufficientStockDialog v-if="insufficientStock" :items="insufficientStock" @close="insufficientStock = null" />
+    <PaymentTaxRateDialog v-if="taxRateDialog" :paid-on="taxRateDialog.paidOn" :message="taxRateDialog.message" :busy="busy !== null"
+      @pick="id => taxRateDialog && createTaxDocForPayment(taxRateDialog.paymentId, id)" @close="taxRateDialog = null" />
     <ConfirmDialog v-if="invoice && openingBalance.confirming.value"
       :title="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_title') : t('accounting.opening_balance_document.unmark_title')"
       :message="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_confirm') : t('accounting.opening_balance_document.unmark_confirm')"

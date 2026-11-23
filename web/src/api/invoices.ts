@@ -1076,9 +1076,10 @@ export const invoicesApi = {
       `/invoices/${id}/payments/${paymentId}`,
     ).then(r => r.data),
   // Daňový doklad k přijaté platbě (DUZP = datum platby) — DRAFT, idempotentní
-  createPaymentTaxDocument: (id: number, paymentId: number) =>
+  createPaymentTaxDocument: (id: number, paymentId: number, vatRateId?: number) =>
     api.post<{ tax_document_id: number; payments: InvoicePayment[] }>(
       `/invoices/${id}/payments/${paymentId}/tax-document`,
+      vatRateId ? { vat_rate_id: vatRateId } : undefined,
     ).then(r => r.data),
   // Koncept vyúčtovací faktury k záloze → daňový doklad k přijaté platbě (koncept se odstraní)
   convertToTaxDocument: (id: number) =>

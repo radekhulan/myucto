@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\ProformaVatRates;
 use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
@@ -1438,14 +1439,24 @@ final class CrmAggregationService
         // nevyřízené platby, ne podle počtu: jedna zapomenutá dva týdny je horší než
         // pět včerejších. Platba, ze které daň přiznal původní program (úhrada minulého roku z POHODY, platby
         // převzaté z Money S3), doklad nečeká ({@see TakenOverPayment::isTaxDeclaredByOrigin()}).
-        if (ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL) {
+        //
+        // V automatických režimech doklad vzniká sám, kromě zálohy převzaté bez sazeb DPH,
+        // jejíž DDKP sazbu plnění neurčují ({@see ProformaVatRates}): automatika ji odmítne
+        // a úkol je jediné místo, kde je to vidět.
+        $manualMode = ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL;
+        $moneyConverted = static function () use ($pdo, $supplierId): bool {
+            $stmt = $pdo->prepare("SELECT 1 FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'invoice' LIMIT 1");
+            $stmt->execute([$supplierId]);
+            return $stmt->fetchColumn() !== false;
+        };
+        if ($manualMode || $moneyConverted()) {
             $stmt = $pdo->prepare(
                 "SELECT i.id, MIN(p.paid_on) AS oldest_payment
                    FROM invoices i
                    JOIN invoice_payments p ON p.invoice_id = i.id AND NOT " . TakenOverPayment::isTaxDeclaredByOriginSql('p') . "
                   WHERE i.supplier_id = ?
                     AND i.invoice_type = 'proforma'
-                    AND i.status <> 'cancelled'
+                    AND i.status <> 'cancelled'" . ($manualMode ? '' : ' AND ' . ProformaVatRates::withoutRatesSql('i')) . "
                     AND NOT EXISTS (SELECT 1 FROM invoices ch
                                      WHERE ch.parent_invoice_id = i.id
                                        AND ch.invoice_type IN ('invoice', 'tax_document')

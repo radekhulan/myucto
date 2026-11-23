@@ -11,5 +11,5 @@ namespace MyInvoice\Service\Invoice;
  */
 final class ProformaWithoutVatRatesException extends \DomainException
 {
-    public const ERROR_CODE = 'proforma_without_vat_rates';
+    public const ERROR_CODE = ProformaVatRates::ERROR_CODE;
 }

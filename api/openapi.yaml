@@ -6167,7 +6167,17 @@ paths:
         platby, DPH shora koeficientem (§ 37), částka rozdělená mezi sazby DPH
         proformy poměrně. Řádek přebírá klasifikaci DPH z proformy; nulová sazba jen
         ve zvláštním režimu (`26c`). Jen plátce DPH a ne-reverse-charge plnění. Idempotentní —
-        existující nestornovaný doklad k platbě vrátí beze změny.
+        existující nestornovaný doklad k platbě vrátí beze změny. Záloha převzatá z Money S3
+        bez sazeb DPH dostane jedinou sazbu svých daňových dokladů z Money; když ji neurčují,
+        vyžaduje `vat_rate_id` (jinak 409 `proforma_without_vat_rates` s `paid_on`).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vat_rate_id: { type: [integer, "null"], format: int64, description: "Sazba plnění pro zálohu převzatou bez sazeb DPH (kladná, platná k datu platby)" }
       responses:
         '200':
           description: OK
@@ -6180,8 +6190,10 @@ paths:
                   payments:
                     type: array
                     items: { $ref: '#/components/schemas/InvoicePayment' }
+        '400':
+          description: Neplatná sazba DPH (`invalid_vat_rate`)
         '409':
-          description: Podmínky nesplněny (neplátce DPH, reverse charge, není proforma)
+          description: Podmínky nesplněny (neplátce DPH, reverse charge, není proforma, platba už zdaněná; `tax_document_failed`), nebo záloha převzatá bez sazeb DPH vyžaduje sazbu plnění (`proforma_without_vat_rates`)
 
   /api/v1/invoices/{id}/convert-to-tax-document:
     parameters:
