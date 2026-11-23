@@ -1420,6 +1420,13 @@ sériová čísla nebo šarže, množství, cena za jednotku a celkem bez DPH.
   Stornovaná výdejka se neukáže, v řádku jsou jen kusy, které opravdu odešly.
 - **Sklad:** řádek faktury bez vybraného skladu patří k výchozímu skladu firmy,
   ze kterého ho vydala automatická výdejka.
+- **Včetně převzatých faktur** přidá do sestavy položky, u kterých se kód řádku
+  shoduje s kódem skladové karty. Jedná se o párování pro sestavu podle kódu,
+  bez skladového pohybu. Řádky bez známého skladu se zobrazí při výběru všech
+  skladů. Převzatý dobropis odečte množství ze svého řádku. Pokud se kód
+  karty uvolnil změnou kódu nebo smazáním karty,
+  sestava ho už znovu nepoužije. U starších změn se vychází z dochovaných
+  záznamů v žurnálu aktivit.
 - **Souhrn** nad tabulkou platí pro celý filtr, ne jen pro zobrazenou stránku: počet
   řádků, prodané množství (když mají všechny řádky stejnou jednotku) a tržbu bez DPH
   po měnách. Částky se nepřepočítávají kurzem, každá měna má svůj součet.

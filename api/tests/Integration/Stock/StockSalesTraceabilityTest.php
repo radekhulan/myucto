@@ -524,6 +524,49 @@ final class StockSalesTraceabilityTest extends StockTestCase
         self::assertSame(0, $report['totals']['lines']);
     }
 
+    public function testImportedLinesWithoutWarehouseAreVisibleOnlyAcrossAllWarehouses(): void
+    {
+        $supplierId = $this->createSupplier();
+        $main = $this->warehouse($supplierId, 'HLAVNI', true);
+        $branch = $this->warehouse($supplierId, 'POBOCKA', false);
+        $this->item($supplierId, 'IMP-WH');
+        $client = $this->client($supplierId);
+        $unknown = $this->importedInvoice($supplierId, $client, [['IMP-WH', '2.000', 300.0]], date: '2099-05-03');
+        $known = $this->importedInvoice($supplierId, $client, [['IMP-WH', '1.000', 100.0]], date: '2099-05-04');
+        $this->db->pdo()->prepare('UPDATE invoice_items SET warehouse_id = ? WHERE invoice_id = ?')->execute([$branch, $known]);
+
+        $params = ['date_from' => '2099-05-01', 'date_to' => '2099-05-31', 'include_imported' => '1'];
+        self::assertSame([$known, $unknown], array_column($this->sales($supplierId, $params)['items'], 'invoice_id'));
+        self::assertSame([], $this->sales($supplierId, $params + ['warehouse_id' => (string) $main])['items']);
+        self::assertSame([$known], array_column($this->sales($supplierId, $params + ['warehouse_id' => (string) $branch])['items'], 'invoice_id'));
+    }
+
+    public function testReusedCodeDoesNotAssignImportedHistoryToAnotherItem(): void
+    {
+        $supplierId = $this->createSupplier();
+        $other = $this->createSupplier();
+        $old = $this->item($supplierId, 'IMPORTED-OLD');
+        $deleted = $this->item($supplierId, 'IMPORTED-DELETE');
+        $client = $this->client($supplierId);
+        $items = [['IMPORTED-OLD', '2.000', 300.0], ['IMPORTED-DELETE', '1.000', 100.0]];
+        $this->importedInvoice($supplierId, $client, $items, date: '2099-05-03');
+
+        $params = ['date_from' => '2099-05-01', 'date_to' => '2099-05-31', 'include_imported' => '1'];
+        self::assertSame([$old, $deleted], array_column($this->sales($supplierId, $params)['items'], 'stock_item_id'));
+
+        $this->db->pdo()->prepare("UPDATE stock_items SET sku = 'NEW-CODE' WHERE id = ?")->execute([$old]);
+        $this->db->pdo()->prepare('DELETE FROM stock_items WHERE id = ?')->execute([$deleted]);
+        $this->item($supplierId, 'IMPORTED-OLD');
+        $this->item($supplierId, 'IMPORTED-DELETE');
+        $unrelated = $this->item($other, 'IMPORTED-OLD');
+        $this->importedInvoice($other, $this->client($other), [$items[0]], date: '2099-05-03');
+        $result = $this->sales($supplierId, $params + ['group_by' => 'item']);
+
+        self::assertSame([], $result['items']);
+        self::assertSame([], $result['groups']);
+        self::assertSame([$unrelated], array_column($this->sales($other, $params)['items'], 'stock_item_id'));
+    }
+
     public function testImportedLinesFollowItemFilter(): void
     {
         $supplierId = $this->createSupplier();

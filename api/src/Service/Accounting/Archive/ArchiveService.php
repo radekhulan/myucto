@@ -109,6 +109,7 @@ final class ArchiveService
         'warehouses'                  => 'id',
         'warehouse_locations'         => 'id',
         'stock_items'                 => 'id',
+        'stock_sales_retired_skus'    => 'id',
         'stock_item_units'            => 'id',
         'stock_packaging_units'       => 'id',
         'stock_tracking_units'        => 'id',

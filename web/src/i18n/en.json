@@ -17126,7 +17126,7 @@
         "group_client": "By customer",
         "group_item": "By item",
         "include_imported": "Include imported invoices",
-        "include_imported_hint": "Adds lines of imported invoices and their credit notes that have no stock item but whose item code matches a stock item code. Stock is not affected. If you later change the item code, old lines will no longer match it.",
+        "include_imported_hint": "Adds lines of imported invoices and their credit notes that have no stock item but whose item code matches a stock item code. Stock is not affected. Previously released item codes are excluded from matching. Lines without a warehouse appear when all warehouses are selected.",
         "matched_by_code": "imported, by code",
         "item_filter": "Item {sku}",
         "summary_lines": "Document lines",

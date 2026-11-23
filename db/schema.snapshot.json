@@ -1230,7 +1230,8 @@
         "2324_sales_quotes.sql",
         "2325_sales_quote_orders.sql",
         "2326_sales_quote_order_line_origins.sql",
-        "2327_sales_quote_permissions.sql"
+        "2327_sales_quote_permissions.sql",
+        "2328_stock_sales_retired_skus.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26944,6 +26945,24 @@
             },
             "checks": []
         },
+        "stock_sales_retired_skus": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "sku": "varchar(50) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_ssrs_supplier_sku": "UNIQUE BTREE (supplier_id, sku)"
+            },
+            "foreign_keys": {
+                "fk_ssrs_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "stock_tags": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -31408,6 +31427,8 @@
         "trg_property_party_member_no_delete": "BEFORE DELETE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_property_party_member_no_update": "BEFORE UPDATE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_standby_floor_proof_no_update": "BEFORE UPDATE ON payroll_standby_floor_proofs #72ff01a143309e460f66ddea9916227310cfe59c",
+        "trg_stock_sales_register_deleted_sku": "AFTER DELETE ON stock_items #9b4ab07b39259f18fba970be7a5310052f4c391d",
+        "trg_stock_sales_register_previous_sku": "AFTER UPDATE ON stock_items #9f3b0562a2b2cce2cd1abe991d60cdea9a5a2ca5",
         "trg_submission_defect_notice_guard": "BEFORE INSERT ON submission_defect_notices #a86513c4dc1c74e0b4cbe8de9a1bc593f16b17d9",
         "trg_submission_defect_notice_inbox_privacy": "BEFORE INSERT ON submission_defect_notices #8311952e7004cc589badcad747c0804d1de7b8c9",
         "trg_submission_defect_notice_update_guard": "BEFORE UPDATE ON submission_defect_notices #8caf5532dcdb8848b0a4c802df86cd71590a88f0",

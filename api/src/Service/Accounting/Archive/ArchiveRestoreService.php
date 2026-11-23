@@ -104,6 +104,7 @@ final class ArchiveRestoreService
         'warehouses',
         'warehouse_locations',
         'stock_items',
+        'stock_sales_retired_skus',
         'stock_item_units',
         'stock_packaging_units',
         'stock_tracking_units',

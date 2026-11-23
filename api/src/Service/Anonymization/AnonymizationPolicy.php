@@ -806,6 +806,7 @@ final class AnonymizationPolicy
         'stock_item_vendors' => ['currency_code' => 'keep', 'note' => 'text', 'vendor_sku' => 'keep'],
         'stock_items' => ['default_sale_unit' => 'keep', 'ean' => 'keep', 'expense_account_code' => 'keep', 'intrastat_cn8_code' => 'keep', 'intrastat_country_of_origin' => 'keep', 'intrastat_supplementary_unit' => 'keep', 'name' => 'keep', 'note' => 'text', 'revenue_account_code' => 'keep', 'sku' => 'keep', 'unit' => 'keep'],
         'stock_landed_costs' => ['description' => 'text'],
+        'stock_sales_retired_skus' => ['sku' => 'keep'],
         'stock_locales' => ['code' => 'keep', 'name' => 'keep'],
         'stock_media' => ['alt_text' => 'keep', 'mime_type' => 'keep', 'original_name' => 'file_name', 'storage_key' => 'keep', 'title' => 'keep'],
         'stock_packaging_units' => ['code' => 'keep', 'name' => 'keep'],

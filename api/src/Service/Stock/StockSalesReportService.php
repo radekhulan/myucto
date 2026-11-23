@@ -31,7 +31,7 @@ use PDO;
  * historie faktur z předchozího systému: zboží odešlo tam, výdejka v MyÚčtu nevznikla
  * a vznikat nesmí, proto se karta do řádku neukládá a páruje se až tady. Takový řádek
  * má `matched_by_code`, dobropis odečítá množství z řádku. Když se kód karty později
- * změní, staré řádky s ní spárovat nejde.
+ * uvolní přejmenováním nebo smazáním karty, už se pro párování nepoužije.
  */
 final class StockSalesReportService
 {
@@ -51,6 +51,8 @@ final class StockSalesReportService
         LEFT JOIN stock_items sic ON ii.stock_item_id IS NULL
              AND (i.import_batch_id IS NOT NULL OR ip.import_batch_id IS NOT NULL)
              AND sic.supplier_id = i.supplier_id AND sic.sku = ii.seller_item_code
+             AND NOT EXISTS (SELECT 1 FROM stock_sales_retired_skus retired
+                              WHERE retired.supplier_id = sic.supplier_id AND retired.sku = sic.sku)
         JOIN stock_items si ON si.id = COALESCE(ii.stock_item_id, sic.id) AND si.supplier_id = i.supplier_id
         LEFT JOIN currencies cur ON cur.id = i.currency_id';
 
@@ -200,7 +202,7 @@ final class StockSalesReportService
         }
         if (!empty($filters['warehouse_id'])) {
             // Řádek bez skladu vydává automatická výdejka z výchozího skladu firmy.
-            $where[] = '(ii.warehouse_id = ? OR (ii.warehouse_id IS NULL AND EXISTS (
+            $where[] = '(ii.warehouse_id = ? OR (ii.warehouse_id IS NULL AND ii.stock_item_id IS NOT NULL AND EXISTS (
                 SELECT 1 FROM warehouses dw WHERE dw.id = ? AND dw.supplier_id = i.supplier_id AND dw.is_default = 1)))';
             $params[] = (int) $filters['warehouse_id'];
             $params[] = (int) $filters['warehouse_id'];
