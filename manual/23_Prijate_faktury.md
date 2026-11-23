@@ -408,8 +408,12 @@ Filtr **Neuhrazené k datu** na rozdíl od volby **Pouze neuhrazené** (dnešní
 u kterých k tomu dni nebyl uhrazen celý závazek. Doklad zaplacený až po tomto dni se proto ve výpisu objeví, i když má dnes
 stav **Uhrazená**. Stejná funkce a definice úhrady je i u [vystavených faktur](14_Faktury.md#14114-filtry)
 a sedí na [Saldokonto](60_Saldokonto.md). Další filtry: **Zaúčtování** (Vše, Zaúčtováno, Nezaúčtováno, jen podvojné
-účetnictví) a **Předání k úhradě** (viz [Platební příkazy](26_Platebni_prikazy.md)). Filtry jdou do adresy stránky
-a do uložených filtrů stejně jako u vydaných faktur. Na rozdíl od vydaných faktur seznam přijatých **nemá žádný CSV export**
+účetnictví), **Předání k úhradě** (viz [Platební příkazy](26_Platebni_prikazy.md)) a se zapnutými dimenzemi
+**Dimenze**: doklad vyhovuje, když hodnotu (výchozí včetně podřízených) nese na hlavičce, na některé položce nebo
+v rozpadu, a doklad rozdělený mezi víc hodnot se ukáže u každé z nich celý. Pravidla jsou stejná jako u vydaných faktur
+([§ 14.11.4](14_Faktury.md#14114-filtry)), podíl hodnoty na DPH ukáže Kniha DPH s filtrem dimenze
+([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-dph-a-soupis-kh-podle-dimenze)). Filtry jdou do adresy stránky,
+do uložených filtrů, do knihy přijatých faktur a do hromadných akcí stejně jako u vydaných faktur. Na rozdíl od vydaných faktur seznam přijatých **nemá žádný CSV export**
 v seznamu. Doklady předáte přes [Export přijatých](24_Export_prijatych.md) (ZIP, ISDOC, Pohoda, CSV tabulka).
 
 #### Nákladová šablona a pravidlo účtování z detailu

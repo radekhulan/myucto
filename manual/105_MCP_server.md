@@ -365,11 +365,20 @@ Pak se ho můžete zeptat například:
 - „Ukaž rozvahu a výsledovku k 30. červnu pro projekt Stavba A.“
 - „Jaké je cash flow tohoto projektu za první pololetí?“
 - „Sečti zisk této globální dimenze přes všechny firmy skupiny, ke kterým mám přístup.“
+- „Kolik DPH připadá za říjen na jednotlivá střediska a sedí součet na přiznání?“
+- „Z jakých dokladů se skládá DPH střediska Výroba za 3. čtvrtletí?“
 
 Filtr `dimension_value_id` používá ID hodnoty z přehledu dimenzí. Standardně
 zahrnuje i podřízené hodnoty; `dimension_descendants=false` vybere pouze přesnou
 hodnotu. Filtr podporují rozvaha, obě výsledovky, výkazy po účtech, obratovka,
-hlavní kniha, účetní deník a dimenzní cash flow.
+hlavní kniha, účetní deník a dimenzní cash flow. Záznamní evidence DPH
+(`vat_ledger`) s filtrem vrátí jen díl dokladů připadající na hodnotu, a to jen
+pro hodnoty jednoho typu.
+
+`vat_by_dimension` rozdělí DPH za zdaňovací období po hodnotách zvoleného typu
+dimenze a řádku bez dimenze. Odpověď obsahuje i kontrolu, že součet sedí na
+evidenci DPH a přiznání, a porovnání s obratem účtu 343 po dimenzích. Pravidla
+popisuje [kapitola Kniha DPH](42_Kniha_DPH.md#4295-dimenze-v-evidenci-dph).
 
 `dimension_profit` a `dimension_analytics` s `scope=group` sčítají globální
 typ dimenze přes dostupné firmy jeho skupiny. U `dimension_cash_flow` je pro

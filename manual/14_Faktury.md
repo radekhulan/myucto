@@ -372,6 +372,7 @@ KH). Po výběru sestavy lze sloupce dále jednotlivě upravit.
 | Kategorie tržby | Výběr několika kategorií najednou a přepínač **Zobrazit jen vybrané** / **Skrýt vybrané** |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno. Jen podvojné účetnictví, viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku) |
 | Místo plnění (OSS) | Místo plnění (OSS): vše / Nejisté místo plnění (OSS) / Nejisté - v OSS podání / Nejisté - v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění, viz [§ 40.5](40_Fakturujeme.md#40913-zahranicni-fakturace). Filtr je vidět, i když OSS zapnuté nemáte |
+| Dimenze | Hodnota dimenze (středisko, projekt …), viz níže. Jen se zapnutými dimenzemi |
 | Hledat | Volný text, viz [§ 14.11.9](#14119-vyhledavani) |
 
 Filtr **Zaúčtování** jde do adresy (sdílitelný odkaz) a do [uložených
@@ -383,6 +384,20 @@ Filtr **Neuhrazené k datu** je jiná otázka než filtr **Nezaplacené**. Ten s
 „kdo mi k 30. 6. dlužil“). Doklad zaplacený až po tomto dni se proto ve výpisu objeví
 (k danému dni ještě nebyl uhrazen), i když má dnes stav **Zaplaceno**. Filtr používá stejnou
 definici úhrady jako [Saldokonto](60_Saldokonto.md), takže si obě sestavy neodporují.
+
+#### Dimenze
+
+Máte-li zapnuté [dimenze](114_Dimenze.md), klikněte ve filtrech na **Přidat dimenzi**
+a vyberte hodnotu. Seznam ukáže doklady, které hodnotu nesou na hlavičce, na některé
+položce nebo v rozpadu mezi víc hodnot. Zaškrtávátko **včetně podřízených** zahrne
+i podřízené hodnoty; hodnoty stejného typu se sčítají, hodnoty různých typů musí platit
+zároveň. Filtr jde do adresy, do uložených filtrů, do knihy vystavených faktur
+([§ 14.7.1](#1471-kniha-vystavenych-faktur)) i do hromadných akcí nad filtrem.
+
+Doklad rozdělený mezi víc hodnot (například položka na dvě střediska nebo rozpad
+hlavičky 60 % a 40 %) se zobrazí u každé hodnoty **celý**, částky seznamu jsou vždy
+celé doklady. Kolik DPH připadá na hodnotu, ukazuje Kniha DPH s filtrem dimenze
+a sestava DPH podle dimenze ([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-dph-a-soupis-kh-podle-dimenze)).
 
 #### Kategorie tržby
 

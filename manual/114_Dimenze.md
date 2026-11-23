@@ -189,6 +189,14 @@ Podrobnosti v [§ 114.11.10](#1141110-pravidla-dimenzi-podle-uctu).
 
 **Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených). Tlačítkem **Přidat dimenzi** zkombinujete víc dimenzí, například projekt a středisko.
 
+**DPH po dimenzích:**
+
+1. Otevřete `Daně → DPH podle dimenze`, zvolte období (měsíc nebo čtvrtletí) a typ dimenze.
+2. Řádky ukazují DPH na výstupu, nárok na odpočet a výsledek po hodnotách a řádek **Bez dimenze**; kontrolní řádek **Rozdíl** proti evidenci DPH musí být nulový.
+3. Kliknutím na hodnotu otevřete Knihu DPH filtrovanou na tuto hodnotu. Postup a pravidla jsou v [kapitole Kniha DPH](42_Kniha_DPH.md#427-krok-za-krokem-sestava-dph-podle-dimenze).
+
+**Filtr v seznamech dokladů:** seznamy vydaných a přijatých faktur mají filtr **Dimenze**. Doklad vyhovuje, když hodnotu nese na hlavičce, na položce nebo v rozpadu, viz [§ 114.11.14](#1141114-sestavy).
+
 **Jak poznáte, že je hotovo:** vidíte výnosy, náklady a zisk po hodnotách a řádek **Celkem**.
 
 ## 114.10 Když něco nejde
@@ -921,6 +929,23 @@ Rozvaha po dimenzi dává smysl u projektu nebo zakázky, jejíž doklady nesou
 hodnotu na všech řádcích (dimenze z hlavičky dokladu). Vyrovnaná je jen tehdy,
 když hodnotu nesou obě strany zápisů. Úhrada faktury projektu v bance bez
 projektu nechá pohledávku projektu v rozvaze otevřenou.
+
+#### Filtr na dimenzi v seznamech faktur a v evidenci DPH
+
+Seznamy **vydaných** a **přijatých faktur** mají filtr **Dimenze** se stejným
+výběrem hodnot (tlačítko **Přidat dimenzi**, volba **včetně podřízených**).
+Doklad vyhovuje, když hodnotu nese na hlavičce, na některé položce nebo
+v rozpadu hlavičky či položky. Doklad rozdělený mezi víc hodnot se proto
+ukáže u každé z nich celý. Filtr je součástí uložených filtrů, knihy faktur
+(export seznamu) i hromadných akcí nad filtrem.
+
+**Kniha DPH**, soupisy oddílů kontrolního hlášení a sestava **DPH podle
+dimenze** (`Daně`) dělí DPH dokladu po položkách: položka s vlastní hodnotou
+patří své hodnotě, ostatní položky hodnotě hlavičky, rozpad se dělí podle
+podílů na haléře. Výchozí dimenze klienta, zakázky a produktu ani pravidla
+dimenzí se tu nepoužijí, rozhoduje jen to, co je zadané na dokladu. Evidenci
+DPH lze filtrovat podle hodnot jednoho typu. Podrobnosti a kontrola na
+přiznání a na obrat účtu 343 jsou v [kapitole Kniha DPH](42_Kniha_DPH.md#4295-dimenze-v-evidenci-dph).
 
 #### Výkazy po dimenzi
 
