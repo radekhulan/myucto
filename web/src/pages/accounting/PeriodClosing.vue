@@ -34,6 +34,8 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
+import AccrualAgendaCheckValue from '@/components/accounting/AccrualAgendaCheckValue.vue'
+import AccrualClosingBlock from '@/components/accounting/AccrualClosingBlock.vue'
 import FxSettlementWarnings from '@/components/accounting/FxSettlementWarnings.vue'
 import FxSaldoDetails from '@/components/accounting/FxSaldoDetails.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -1028,7 +1030,8 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                          s tisícem nálezů je to pořád zeď textu a navíc se to chovalo jinak
                          než ostatní kontroly. CheckFindings rozhoduje podle TVARU dat, takže
                          nová kontrola se zachová správně, aniž by o ní kdokoli věděl. -->
-                    <CheckFindings v-if="c.value !== null && typeof c.value === 'object'"
+                    <AccrualAgendaCheckValue v-if="c.key === 'deferrals_agenda_difference'" :value="c.value" />
+                    <CheckFindings v-else-if="c.value !== null && typeof c.value === 'object'"
                       :check-key="c.key" :label="checkLabel(c.key)"
                       :value="c.value" :export-url="checkExportUrl(c.key)"
                       :list-link="docListLink(c.key)" :period-id="periodId" />
@@ -1207,6 +1210,8 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- 4/5) Dohady + časové rozlišení -->
         <template v-else-if="selected === 'estimates' || selected === 'deferrals'">
+          <!-- Položky agendy Časové rozlišení: roční rozpuštění zaúčtuje krok, měsíční řádky patří do agendy. -->
+          <AccrualClosingBlock v-if="selected === 'deferrals'" :period-id="periodId" class="mb-3 max-w-3xl" />
           <div v-if="!isClosing && step(selected)?.status === 'pending'" class="text-sm text-neutral-500">
             {{ t('accounting.closing.assist.needs_closing') }}
           </div>

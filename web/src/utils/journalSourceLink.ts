@@ -30,6 +30,8 @@ export interface JournalSourceRef {
   source_asset_id?: number | null
   source_settlement_doc_type?: string | null
   source_settlement_doc_id?: number | null
+  /** Rozpuštění a ukončení časového rozlišení: položka agendy, ze které zápis vznikl. */
+  source_accrual_item_id?: number | null
 }
 
 /**
@@ -58,6 +60,9 @@ export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | n
   }
   if (entry.source_type === 'other_item' && sourceId) {
     return { name: 'other-item-detail', params: { id: sourceId } }
+  }
+  if ((entry.source_type === 'accrual_release' || entry.source_type === 'accrual_termination') && entry.source_accrual_item_id) {
+    return { name: 'accounting-accrual-detail', params: { id: entry.source_accrual_item_id } }
   }
   if (entry.source_type === 'bank' && entry.source_statement_id) {
     return { name: 'bank-detail', params: { id: entry.source_statement_id } }

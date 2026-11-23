@@ -17,6 +17,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
 import OtherItemPlans, { type OtherItemPlansState } from '@/components/accounting/OtherItemPlans.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -924,6 +925,7 @@ onMounted(load)
           <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.edit_note_hint') }}</p>
         </div>
       </div>
+      <AccrualSourcePanel v-if="isDoubleEntry && item.status !== 'draft' && auth.canRead('accounting.accruals')" class="block" source-type="other_item" :source-id="id" />
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="block" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       </div>
     </template>

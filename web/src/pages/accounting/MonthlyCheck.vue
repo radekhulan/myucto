@@ -10,6 +10,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import AccrualAgendaCheckValue from '@/components/accounting/AccrualAgendaCheckValue.vue'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -384,6 +385,8 @@ async function saveLock() {
                     </span>
                   </template>
 
+
+                  <AccrualAgendaCheckValue v-else-if="c.key === 'deferrals_agenda_difference'" :value="c.value" />
 
                   <!-- ostatní (info/číselné) -->
                   <template v-else>

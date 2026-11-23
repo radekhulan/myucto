@@ -681,6 +681,8 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
         // Interní doklady (ID) hned pod ostatními pohledávkami a závazky: zápočty, přeúčtování, odpisy, kurzové rozdíly.
         { to: '/accounting/internal-documents', label: t('nav.internal_documents'), icon: ICONS.documents, permission: 'accounting' as PermissionKey, newTo: '/accounting/internal-documents/new' },
+        // Časové rozlišení (381/384) hned pod interními doklady: položky s plánem rozpouštění.
+        { to: '/accounting/accruals', label: t('nav.accruals'), icon: ICONS.recurring, permission: 'accounting.accruals' as PermissionKey, newTo: '/accounting/accruals/new', newPermission: 'accounting.accruals.write' as PermissionKey },
         // 2) Automatizace a doúčtování.
         { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting', dividerBefore: true },
         { to: '/accounting/ai-assistant',   label: t('nav.ai_assistant'),        icon: ICONS.ai, permission: 'accounting' },

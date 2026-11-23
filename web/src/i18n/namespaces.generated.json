@@ -43,6 +43,7 @@
     "abra_flexi",
     "accrual_period",
     "accrual_suggest",
+    "accruals",
     "activation",
     "activity_log",
     "aiGateway",
@@ -388,6 +389,7 @@
     "invoice-detail": [
       "accrual_period",
       "accrual_suggest",
+      "accruals",
       "activation",
       "automation",
       "bank",
@@ -582,6 +584,7 @@
       "vendor"
     ],
     "purchase-invoice-detail": [
+      "accruals",
       "activation",
       "attachment_check",
       "automation",
@@ -645,6 +648,7 @@
     ],
     "other-item-detail": [
       "accrual_period",
+      "accruals",
       "dimensions",
       "documents",
       "linked_documents",
@@ -791,6 +795,7 @@
       "number_series"
     ],
     "accounting-internal-document-detail": [
+      "accruals",
       "documents",
       "internal_documents",
       "linked_documents"
@@ -799,6 +804,22 @@
       "dimensions",
       "internal_documents",
       "number_series"
+    ],
+    "accounting-accruals": [
+      "accruals"
+    ],
+    "accounting-accrual-new": [
+      "accruals"
+    ],
+    "accounting-accruals-takeover": [
+      "accruals"
+    ],
+    "accounting-accrual-detail": [
+      "accruals",
+      "list_nav"
+    ],
+    "accounting-accrual-edit": [
+      "accruals"
     ],
     "accounting-ai-assistant": [
       "internal_documents",
@@ -873,6 +894,7 @@
       "documentCompleteness"
     ],
     "accounting-balance-inventory": [
+      "accruals",
       "activation"
     ],
     "accounting-section18-statements": [
@@ -882,6 +904,7 @@
       "parallelRun"
     ],
     "accounting-monthly-check": [
+      "accruals",
       "checks"
     ],
     "accounting-tax-base-adjustments": [
@@ -907,6 +930,7 @@
       "dimensions"
     ],
     "accounting-period-closing": [
+      "accruals",
       "checks",
       "dimensions",
       "fx504",

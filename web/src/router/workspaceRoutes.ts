@@ -251,6 +251,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/internal-documents/new', name: 'accounting-internal-document-new', component: () => import('@/pages/internal-documents/InternalDocumentEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/internal-documents/:id(\\d+)', name: 'accounting-internal-document-detail', component: () => import('@/pages/internal-documents/InternalDocumentDetail.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/internal-documents/:id(\\d+)/edit', name: 'accounting-internal-document-edit', component: () => import('@/pages/internal-documents/InternalDocumentEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals', name: 'accounting-accruals', component: () => import('@/pages/accounting/Accruals.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/new', name: 'accounting-accrual-new', component: () => import('@/pages/accounting/AccrualEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/takeover', name: 'accounting-accruals-takeover', component: () => import('@/pages/accounting/AccrualTakeover.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/:id(\\d+)', name: 'accounting-accrual-detail', component: () => import('@/pages/accounting/AccrualDetail.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/:id(\\d+)/edit', name: 'accounting-accrual-edit', component: () => import('@/pages/accounting/AccrualEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       // AI asistent k účtování — chat s přílohami, návrhy zápisů a zařazení do Dokumentů.
       { path: 'accounting/ai-assistant', name: 'accounting-ai-assistant', component: () => import('@/pages/accounting/AiAssistant.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/payroll',       name: 'accounting-payroll',       component: () => import('@/pages/accounting/PayrollRecap.vue'),    meta: { requiresDoubleEntry: true, requiresSupplier: true } },

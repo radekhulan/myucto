@@ -4,6 +4,7 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import { eshopApi } from '@/api/eshop'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
 import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -4226,6 +4227,7 @@ useWindowRefresh(async () => {
         :invoice-id="invoice.id"
         @saved="load" />
 
+      <AccrualSourcePanel v-if="invoice && invoice.status !== 'draft' && isDoubleEntry && auth.canRead('accounting.accruals')" class="mt-4 block" source-type="invoice" :source-id="invoice.id" />
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="invoice" :entity-id="invoice.id" />
     </DocumentPreviewSplit>
     <WorkspaceTeleport>

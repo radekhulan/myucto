@@ -151,6 +151,9 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // Interní doklady: čtení jako deník, koncept jako ruční zápis (zaúčtování hlídá server právem accounting.journal.post).
   'accounting-internal-documents': ['accounting'], 'accounting-internal-document-detail': ['accounting'],
   'accounting-internal-document-new': ['accounting.journal.write', 'write'], 'accounting-internal-document-edit': ['accounting.journal.write', 'write'],
+  'accounting-accruals': ['accounting.accruals'], 'accounting-accrual-detail': ['accounting.accruals'],
+  'accounting-accrual-new': ['accounting.accruals.write', 'write'], 'accounting-accrual-edit': ['accounting.accruals.write', 'write'],
+  'accounting-accruals-takeover': ['accounting.accruals.write', 'write'],
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],

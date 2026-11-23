@@ -10,6 +10,7 @@ import {
   type BalanceInventorySavePayload,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
@@ -19,6 +20,7 @@ import OpenItemsListPanel from '@/components/accounting/OpenItemsListPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
 const route = useRoute()
 
 /** Účet z prokliku z inventury účtu se v protokolu zvýrazní. */
@@ -238,6 +240,12 @@ async function save(complete: boolean) {
   }
 }
 
+/** Účty 381–385: proklik do agendy Časové rozlišení k rozvahovému dni (položky tvoří soupis). */
+function accrualAgendaLink(row: BalanceInventoryRow) {
+  if (!/^38[1-5]/.test(row.account_code) || !auth.canRead('accounting.accruals') || !report.value) return null
+  return { name: 'accounting-accruals', query: { account: row.account_code, as_of: report.value.as_of } }
+}
+
 function statementLink(row: BalanceInventoryRow) {
   return {
     name: 'accounting-account-statement',
@@ -439,6 +447,8 @@ onMounted(async () => {
                 </td>
                 <td class="px-3 py-2 text-neutral-600 align-top">
                   <div>{{ item.row.documentation_hint }}</div>
+                  <RouterLink v-if="accrualAgendaLink(item.row)" :to="accrualAgendaLink(item.row)!" :data-test="`inventory-accruals-${item.row.account_code}`"
+                    class="text-xs text-primary-600 hover:underline">{{ t('accruals.inventory_link') }}</RouterLink>
                   <input v-if="editable" v-model="edits[item.row.account_id].note" type="text"
                     :placeholder="t('accounting.balance_inventory.note_ph')"
                     class="mt-1 w-full h-7 px-2 border border-neutral-200 rounded text-xs bg-surface" />

@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   exportReport: vi.fn(),
   getOpenItemsList: vi.fn(),
   query: {} as Record<string, string>,
+  readable: ['accounting.accruals'] as string[],
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastWarning: vi.fn(),
@@ -51,8 +52,10 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
 }))
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: (permission: string) => m.readable.includes(permission) }) }))
+
 vi.mock('vue-router', () => ({
-  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
   useRoute: () => ({ query: m.query }),
 }))
 
@@ -267,5 +270,28 @@ describe('BalanceInventory.vue', () => {
     expect(m.saveClosingInventory).toHaveBeenCalledTimes(1)
     expect(m.saveClosingInventory.mock.calls[0][1].complete).toBe(true)
     expect(m.toastWarning).toHaveBeenCalled()
+  })
+
+  it('u účtů 381–385 nabídne proklik do agendy Časové rozlišení k rozvahovému dni', async () => {
+    const base = makeReport()
+    m.getClosingInventory.mockResolvedValue(makeReport({
+      rows: [...base.rows, { ...base.rows[0], account_id: 13, account_code: '381', name: 'Náklady příštích období' }],
+      count: 3,
+    }))
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+    const link = wrapper.get('[data-test="inventory-accruals-381"]')
+    expect(JSON.parse(link.attributes('data-to')!)).toEqual({ name: 'accounting-accruals', query: { account: '381', as_of: '2093-12-31' } })
+    expect(wrapper.find('[data-test="inventory-accruals-221"]').exists()).toBe(false)
+  })
+
+  it('bez práva k agendě proklik nenabídne', async () => {
+    m.readable = []
+    const base = makeReport()
+    m.getClosingInventory.mockResolvedValue(makeReport({ rows: [{ ...base.rows[0], account_code: '384' }], count: 1 }))
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+    expect(wrapper.find('[data-test="inventory-accruals-384"]').exists()).toBe(false)
+    m.readable = ['accounting.accruals']
   })
 })

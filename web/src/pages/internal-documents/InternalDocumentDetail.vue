@@ -14,6 +14,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -318,6 +319,8 @@ onMounted(load)
           </li>
         </ul>
       </section>
+
+      <AccrualSourcePanel v-if="doc.status === 'posted' && auth.canRead('accounting.accruals')" class="mt-4 block" source-type="internal_document" :source-id="id" />
 
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="internal_document" :entity-id="id"
         :uploadable="canWrite" :readonly="!canWrite" :upload-folder-path="documentFolderPath" :title="t('internal_documents.attachments')" />

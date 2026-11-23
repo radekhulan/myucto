@@ -42,7 +42,8 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ can: () => true, canWrite: () => true }),
+  // Blok agendy Časové rozlišení (vlastní spec AccrualClosingBlock) tu zůstane skrytý.
+  useAuthStore: () => ({ can: () => true, canWrite: () => true, canRead: () => false }),
 }))
 
 vi.mock('@/composables/useToast', () => ({

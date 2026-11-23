@@ -123,6 +123,7 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^accounting\/cash(?:\/|$)/, ['cash']],
   [/^accounting\/(?:small-)?assets(?:\/|$)/, ['assets']],
   [/^accounting\/(?:journal|account-statement|general-ledger|trial-balance|balance-sheet|balance-inventory|income-statement|income-statement-by-function|saldo|offsets|monthly-report|monthly-check|document-completeness|manual-posting-queue|transition-report|dimension-profit|reports|archive|internal-documents)(?:\/|$)/, LEDGER_READ],
+  [/^accounting\/accruals(?:\/\d+)?$/, LEDGER_READ],
   [/^accounting(?:\/|$)/, LEDGER_READ, 'manual'],
   [/^tax-evidence\/(?:cash-journal|receivables-payables|tax-estimate)$/, LEDGER_READ],
   [/^tax-evidence(?:\/|$)/, ['settings'], 'manual'],

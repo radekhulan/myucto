@@ -24,6 +24,16 @@ describe('journalSourceLink', () => {
     })
     expect(journalSourceLink({ source_type: 'other_item', source_id: null })).toBeNull()
   })
+
+  it('rozpuštění a ukončení časového rozlišení vede na položku agendy', () => {
+    expect(journalSourceLink({ source_type: 'accrual_release', source_id: 901, source_accrual_item_id: 7 })).toEqual({
+      name: 'accounting-accrual-detail', params: { id: 7 },
+    })
+    expect(journalSourceLink({ source_type: 'accrual_termination', source_id: null, source_link_id: 902, source_accrual_item_id: 8 })).toEqual({
+      name: 'accounting-accrual-detail', params: { id: 8 },
+    })
+    expect(journalSourceLink({ source_type: 'accrual_release', source_id: 901 })).toBeNull()
+  })
 })
 
 describe('journalSourceRefLabel', () => {

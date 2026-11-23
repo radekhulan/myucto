@@ -3,6 +3,7 @@ import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
@@ -2204,6 +2205,7 @@ useWindowRefresh(async () => {
         :confirm-label="t('purchase_invoice.payment_summary.settle_rest')"
         @close="settleRestOpen = false" @done="onSettleRestDone" />
 
+      <AccrualSourcePanel v-if="invoice && invoice.status !== 'draft' && isDoubleEntry && auth.canRead('accounting.accruals')" class="mt-4 block" source-type="purchase_invoice" :source-id="invoice.id" />
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
 
       <section v-if="invoice && stockIntegrationVisible"
