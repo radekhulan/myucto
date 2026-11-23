@@ -83,7 +83,7 @@ describe('AccrualSourcePanel', () => {
     expect(wrapper.find('[data-test="accrual-source-panel"]').exists()).toBe(false)
   })
 
-  it('jediný řádek s obdobím pošle editoru jako řádek položky', async () => {
+  it('řádek dokladu neurčuje sám, vybere ho editor (i u jediného řádku s obdobím)', async () => {
     m.sourceCandidates.mockResolvedValue(candidates({
       accrual_lines: [{ entry_id: 70, entry_date: '2099-01-05', account_code: '381', account_name: 'Náklady příštích období', kind: 'prepaid_expense', amount: 1200 }],
       periods: [{ item_id: 44, from: '2099-01-01', to: '2099-12-31' }],
@@ -91,7 +91,7 @@ describe('AccrualSourcePanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     const query = JSON.parse(wrapper.get('[data-test="accrual-panel-create-line"]').attributes('data-to')!).query
-    expect(query.source_item_id).toBe('44')
+    expect(query.source_item_id).toBeUndefined()
   })
 
   it('řádek odložený uzávěrkou nabídne převzetí do agendy se zůstatkem k datu', async () => {

@@ -937,7 +937,9 @@
       "link_imported": "An imported link cannot be removed manually. Cancel the item or run the takeover again.",
       "period_not_closing": "Closing posts agenda releases only in a period that is being closed.",
       "accrual_agenda_pending": "The agenda still has unposted releases due by the period end.",
-      "no_closing_deferral": "The document has no deferral posted by closing."
+      "no_closing_deferral": "The document has no deferral posted by closing.",
+      "origin_required": "Link the origin entry to release from before activating.",
+      "negative_basis": "The basis must be positive. Assign a credit note to the original item as an entry, or enter it as an item of the opposite kind."
     },
     "reconciliation": {
       "title": "Reconciliation with the general ledger",
@@ -1059,7 +1061,12 @@
       "saved": "The item is saved.",
       "from_source": "The item is created from a document: {source}",
       "origin_entry": "Origin entry #{entry} will be linked.",
-      "reload": "Reload"
+      "reload": "Reload",
+      "source_line": "Document line managed by the item",
+      "source_line_none": "None (closing keeps deferring lines with a period)",
+      "source_line_option": "{description} · {from} – {to} · {amount}",
+      "source_line_hint": "Closing stops deferring the selected line and the agenda releases it. Closing keeps deferring the other lines with a period.",
+      "basis_follows_links": "The schedule follows the item balance from linked entries. Changing the basis does not change it until you link an entry with the new amount."
     },
     "panel": {
       "title": "Accruals and deferrals",

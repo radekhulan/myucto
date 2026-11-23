@@ -305,7 +305,7 @@ export interface AccrualSourceCandidates {
   partner_name: string | null
   title: string | null
   accrual_lines: Array<{ entry_id: number; entry_date: string; account_code: string; account_name: string; kind: string; amount: number }>
-  periods: Array<{ item_id: number | null; from: string; to: string }>
+  periods: Array<{ item_id: number | null; from: string; to: string; amount?: number; description?: string }>
   items: Array<{ id: number; item_no: string; title: string; status: AccrualStatus }>
   /** Řádky dokladu, které odložila uzávěrka: nabídka předání do agendy se zůstatkem k datu. */
   closing_deferrals?: AccrualClosingHandover[]

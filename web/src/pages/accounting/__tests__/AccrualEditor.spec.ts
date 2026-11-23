@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   update: vi.fn(),
   get: vi.fn(),
   planPreview: vi.fn(),
+  sourceCandidates: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
   route: { params: {} as Record<string, string>, query: {} as Record<string, string> },
@@ -15,7 +16,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/accruals', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/accruals')>()
-  return { ...actual, accrualsApi: { create: m.create, update: m.update, get: m.get, planPreview: m.planPreview } }
+  return { ...actual, accrualsApi: { create: m.create, update: m.update, get: m.get, planPreview: m.planPreview, sourceCandidates: m.sourceCandidates } }
 })
 vi.mock('@/api/accounting', () => ({
   accountingApi: {
@@ -145,5 +146,41 @@ describe('AccrualEditor', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(m.create.mock.calls[0][0]).toMatchObject({ source_type: 'purchase_invoice', source_id: 12, source_item_id: 44, closing_handover: true })
+  })
+
+  it('u faktury s řádky s obdobím nabídne výběr řádku s návrhem podle shody částky a období', async () => {
+    m.route.query = { source_type: 'purchase_invoice', source_id: '12', account: '381', amount: '12000', from: '2099-10-01', to: '2100-09-30', title: 'Syntetické pojištění' }
+    m.sourceCandidates.mockResolvedValue({ source_type: 'purchase_invoice', source_id: 12, document_no: 'PF-1', document_date: null, partner_id: null, partner_name: null,
+      title: null, accrual_lines: [], items: [], periods: [
+        { item_id: 51, from: '2099-07-01', to: '2100-06-30', amount: 24400, description: 'Předplatné' },
+        { item_id: 52, from: '2099-10-01', to: '2100-09-30', amount: 12000, description: 'Pojištění' },
+      ] })
+    m.planPreview.mockResolvedValue({ rows: [{ kind: 'release', due_on: '2099-10-31', from_on: '2099-10-01', to_on: '2099-10-31', days: 31, amount_planned: 1000 }] })
+    m.create.mockResolvedValue({ id: 9 })
+    const wrapper = mountEditor()
+    await flushPromises()
+    const select = wrapper.get('[data-test="source-line-select"]')
+    expect((select.element as HTMLSelectElement).value).toBe('52')
+    expect(wrapper.findAll('[data-test="source-line-select"] option')).toHaveLength(3)
+    wrapper.findAllComponents(ChartAccountSelect)[1].vm.$emit('update:modelValue', '548')
+    await select.setValue('0')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.create.mock.calls[0][0]).toMatchObject({ source_type: 'purchase_invoice', source_id: 12, source_item_id: 0 })
+  })
+
+  it('u změny základu upozorní, že plán sleduje zůstatek podle vazeb', async () => {
+    m.route = { params: { id: '5' }, query: {} }
+    m.get.mockResolvedValue({ id: 5, title: 'Syntetické pojištění', kind: 'prepaid_expense', accrual_account_code: '381',
+      counter_account_code: '548', termination_account_code: null, basis_amount: 1200, period_from: '2099-01-01', period_to: '2099-02-28',
+      method: 'monthly_days', partner_id: null, partner_name: null, contract_ref: null, cost_center: null, note: null,
+      source_type: 'manual', source_id: null, status: 'active', row_version: 4, can: { edit: true } })
+    const wrapper = mountEditor()
+    await flushPromises()
+    expect(wrapper.find('[data-test="basis-warning"]').exists()).toBe(false)
+    await wrapper.get('[data-test="basis-amount"]').setValue('2400')
+    expect(wrapper.find('[data-test="basis-warning"]').exists()).toBe(true)
   })
 })

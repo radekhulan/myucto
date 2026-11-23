@@ -49,8 +49,10 @@ a jejich budoucí část k datu. Nic se tam neukládá ani neúčtuje. Postup uz
 
 Jakmile k řádku dokladu založíte a aktivujete položku agendy, uzávěrka tento řádek přestane odkládat
 a otevření roku ho nerozpouští. Ostatní řádky dokladu s obdobím odkládá uzávěrka dál. Koncept položky
-doklad ještě nepřebírá. Má-li doklad víc řádků s obdobím, vyberte řádek, který položka spravuje (bez výběru
-se dohledá podle částky a období).
+doklad ještě nepřebírá. Má-li doklad řádky s obdobím, editor je nabídne v poli **Řádek dokladu, který položka
+spravuje** a předvyplní řádek, který odpovídá částkou a obdobím. Volba **Žádný** znamená, že položka nepřebírá
+žádný řádek a uzávěrka odkládá všechny řádky dokladu dál. Řádek, který neodpovídá částkou ani obdobím,
+se položce sám nepřiřadí, ani když je na dokladu jediný.
 
 Řádek, který už uzávěrka odložila, převezmete do agendy z panelu **Časové rozlišení** v detailu dokladu
 akcí **Převzít do agendy**. Položka dostane zůstatek k datu, od kterého ho rozpouští (den po posledním
@@ -70,8 +72,10 @@ upozornění: uzávěrka by fakturu s obdobím od–do odložila znovu.
    a středisko ([§ 125.10.1](#125101-pole-polozky)).
 4. Zkontrolujte **náhled plánu** pod formulářem. Přepočítává se při každé změně základu, období a metody.
 5. Nechte zaškrtnuté **Aktivovat hned**, nebo položku uložte jako koncept a aktivujte později.
-6. Naváže-li se položka na zápis vzniku až dodatečně, přiřaďte ho v odsouhlasení
-   ([§ 125.7](#1257-krok-za-krokem-odsouhlasit-agendu-s-hlavni-knihou)).
+   Aktivovat jde jen položku s navázaným **zápisem vzniku** (kromě ruční metody), jinak by plán neměl
+   z čeho rozpouštět.
+6. Ruční položku bez zdrojového dokladu uložte jako koncept, zápis vzniku jí přiřaďte v odsouhlasení
+   ([§ 125.7](#1257-krok-za-krokem-odsouhlasit-agendu-s-hlavni-knihou)) a teprve potom ji aktivujte.
 
 **Jak poznáte, že je hotovo:** Položka má stav **Aktivní**, v detailu je plán rozpouštění a zůstatek
 odpovídá zápisu vzniku.
@@ -83,7 +87,8 @@ Detail vydané faktury, přijaté faktury, ostatní pohledávky či závazku a i
 
 1. V panelu zkontrolujte řádky dokladu na účtech časového rozlišení a navázané položky.
 2. U řádku bez položky zvolte **Založit položku**. Editor převezme zdrojový doklad, partnera, účet, částku
-   a zápis vzniku. Má-li řádek dokladu vyplněné období, předvyplní ho také.
+   a zápis vzniku. Má-li řádek dokladu vyplněné období, předvyplní ho také. U faktury s řádky s obdobím
+   zkontrolujte vybraný řádek dokladu ([§ 125.3](#1253-dve-cesty-casoveho-rozliseni)).
 3. Doplňte metodu a protiúčet a položku uložte.
 
 Ze stejného panelu otevřete existující položku dokladu.
@@ -104,8 +109,10 @@ druh podle účtu, účet, základ ve výši nenavázané části a zápis vznik
 3. Potvrďte zaúčtování. Vznikne zápis k poslednímu dni úseku (u měsíční metody ke konci měsíce),
    s číslem dokladu podle čísla položky.
 
-Řádky se účtují po sobě: zaúčtovat jde jen nejstarší nezaúčtovaný řádek. Zápis nikdy nerozpustí víc, než je
-zůstatek položky v deníku (ručně přiřazené rozpuštění zůstatek už snížilo).
+Řádky se účtují po sobě: zaúčtovat jde jen nejstarší nezaúčtovaný řádek, který lze zaúčtovat. Starší řádek,
+jehož datum leží v uzavřeném období nebo za zámkem účtování k datu, pořadí neblokuje: zaúčtovaný řádek
+převezme jeho částku a úsek a starší řádek z plánu zmizí. Zápis nikdy nerozpustí víc, než je zůstatek položky
+v deníku (ručně přiřazené rozpuštění zůstatek už snížilo).
 
 Zaúčtované rozpuštění vezmete zpět akcí **Stornovat** u řádku, vždy od posledního zaúčtovaného. Vznikne
 protizápis ke dni původního zápisu a řádek se vrátí do plánu. Storno jde jen v otevřeném a neuzamčeném
@@ -146,6 +153,7 @@ se nevracejí, plán je dopočte znovu.
 4. Ruční vazbu omylem přiřazenou odeberete v detailu položky. Vazbu ze zaúčtování agendy tak zrušit nejde,
    použijte storno rozpuštění nebo ukončení. Vazbu převzatou z POHODY také ne: položku zrušte nebo
    převezměte znovu. Zrušená položka své vazby uvolní a zápisy se vrátí mezi řádky bez položky.
+   Poslední zápis vzniku aktivní položky odebrat nejde, nejdřív přiřaďte jiný nebo položku zrušte.
 
 **Jak poznáte, že je hotovo:** Rozdíl je na všech účtech nulový a kontrola rozdílu agendy v uzávěrce
 nehlásí varování.
@@ -174,6 +182,9 @@ doplní se jen nové zápisy a přepočte nerozepsaný zůstatek. Pravidla páro
 |---|---|---|
 | Druh nejde zvolit, jen 381 a 384 | Agenda rozpouští náklady a výnosy příštích období | Účty 382, 383 a 385 se zobrazují jen v odsouhlasení. |
 | Položku nejde aktivovat | Chybí protiúčet rozpouštění | Doplňte protiúčet, nebo zvolte ruční metodu. |
+| Položku nejde aktivovat, chybí zápis vzniku | Položka nemá navázaný zápis, ze kterého se rozpouští | Přiřaďte zápis vzniku v odsouhlasení a pak položku aktivujte. |
+| Základ je odmítnut | Základ je záporný | Zadejte kladný základ. Dobropis přiřaďte k původní položce jako zápis, nebo založte položku opačného druhu. |
+| Editor chce vybrat řádek dokladu | Částce a období odpovídá víc řádků dokladu | Vyberte řádek, který položka spravuje, nebo zvolte **Žádný**. |
 | Protiúčet je odmítnut | Protiúčet nesmí být účet časového rozlišení (38x) | Zvolte nákladový, výnosový nebo jiný rozvahový účet. |
 | Řádek plánu nejde zaúčtovat | Datum řádku je v budoucnu, nebo období je uzavřené, uzavírané či uzamčené | Zaúčtujte ho v den konce úseku nebo později, v otevřeném období. |
 | Zůstatek položky je záporný nebo nulový | Položka nemá navázaný zápis vzniku | Přiřaďte zápis v odsouhlasení ([§ 125.7](#1257-krok-za-krokem-odsouhlasit-agendu-s-hlavni-knihou)). |
@@ -198,7 +209,9 @@ doplní se jen nové zápisy a přepočte nerozepsaný zůstatek. Pravidla páro
   ruční.
 - **Protiúčet ukončení**: účet pro zbytek zůstatku při předčasném ukončení, například mimořádný náklad.
   Bez něj se zbytek ukončí na protiúčet rozpouštění. Při ukončení ho lze změnit.
-- **Základ**: částka, která se za celé období rozpustí.
+- **Základ**: kladná částka, která se za celé období rozpustí. Směr určuje druh, záporný základ editor
+  i náhled plánu odmítnou.
+- **Řádek dokladu**: u položky z faktury řádek s obdobím, který položka spravuje ([§ 125.3](#1253-dve-cesty-casoveho-rozliseni)).
 - **Období od a do** a **metoda** ([§ 125.10.3](#125103-metody-rozpousteni)).
 - **Partner**, **středisko** (přenáší se na řádek protiúčtu zápisu) a zdrojový doklad.
 - **Aktivovat hned**: položka se uloží rovnou jako aktivní s plánem, jinak jako koncept.
@@ -208,6 +221,8 @@ Upravit lze koncept a aktivní položku. Jakmile má položka navázaný zápis 
 zápis), druh a účet zůstávají pevné. Změna poznámky, názvu či protiúčtu plán nemění. Změna základu,
 období nebo metody přepočte nezaúčtované řádky: zaúčtované a převzaté řádky i nezaúčtované řádky před nimi
 zůstávají na svém místě a zbývající zůstatek položky se rozloží do nezaúčtovaných řádků poměrem dnů.
+Plán se tedy řídí zůstatkem podle navázaných zápisů, ne zadaným základem. Editor na to při změně základu
+upozorní: aby se změna promítla do plánu, navažte zápis s novou částkou.
 Když položku mezitím upravil někdo jiný, uložení odmítne a vyzve k novému načtení.
 
 ### 125.10.2 Stavy položky
@@ -232,7 +247,10 @@ Když položku mezitím upravil někdo jiný, uložení odmítne a vyzve k nové
 | Ručně | Bez plánu. Rozpouští se ručními zápisy, které k položce přiřadíte. |
 
 Pokračuje-li plán za zaúčtovanými nebo převzatými řádky, začíná dnem po nich a cílem je zbývající
-zůstatek. Rozdíl mezi zbývajícím zůstatkem a součtem plánu vyrovná poslední řádek.
+zůstatek. Rozdíl mezi zbývajícím zůstatkem a součtem plánu vyrovná poslední řádek. Nezaúčtované řádky
+s datem v uzavřeném období (například v uzavřeném minulém roce) se při přepočtu přičtou k prvnímu řádku
+v otevřeném období, takže neblokují položku ani uzavření dalšího roku. Řádky v uzavíraném období zůstávají,
+zaúčtuje je krok uzávěrky.
 
 ### 125.10.4 Zápisy agendy
 

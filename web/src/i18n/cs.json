@@ -937,7 +937,9 @@
       "link_imported": "Převzatou vazbu nelze zrušit ručně. Položku zrušte nebo převezměte znovu.",
       "period_not_closing": "Uzávěrka zaúčtuje rozpuštění agendy jen v období, které se uzavírá.",
       "accrual_agenda_pending": "V agendě zbývá nezaúčtované rozpuštění splatné do konce období.",
-      "no_closing_deferral": "Doklad nemá odklad zaúčtovaný uzávěrkou."
+      "no_closing_deferral": "Doklad nemá odklad zaúčtovaný uzávěrkou.",
+      "origin_required": "Před aktivací navažte zápis vzniku, ze kterého se rozpouští.",
+      "negative_basis": "Základ musí být kladný. Dobropis přiřaďte k původní položce jako zápis, nebo ho zadejte jako položku opačného druhu."
     },
     "reconciliation": {
       "title": "Odsouhlasení s hlavní knihou",
@@ -1059,7 +1061,12 @@
       "saved": "Položka je uložená.",
       "from_source": "Položka vzniká z dokladu: {source}",
       "origin_entry": "Naváže se zápis vzniku #{entry}.",
-      "reload": "Načíst znovu"
+      "reload": "Načíst znovu",
+      "source_line": "Řádek dokladu, který položka spravuje",
+      "source_line_none": "Žádný (řádky s obdobím dál odkládá uzávěrka)",
+      "source_line_option": "{description} · {from} – {to} · {amount}",
+      "source_line_hint": "Vybraný řádek uzávěrka přestane odkládat a rozpouští ho agenda. Ostatní řádky s obdobím odkládá uzávěrka dál.",
+      "basis_follows_links": "Plán se řídí zůstatkem položky podle navázaných zápisů. Změna základu ho nezmění, dokud nenavážete zápis s novou částkou."
     },
     "panel": {
       "title": "Časové rozlišení",

@@ -65,6 +65,38 @@ const source = reactive({
 })
 /** Chyba načtení upravované položky: formulář se neukáže prázdný, aby ho nešlo uložit naslepo. */
 const loadError = ref('')
+/**
+ * Řádky zdrojové faktury s obdobím od–do. Položka spravuje nejvýš jeden; ten uzávěrka přestane
+ * odkládat, ostatní odkládá dál. Hodnota `0` = položka nespravuje žádný řádek s obdobím.
+ */
+const sourceLines = ref<Array<{ item_id: number | null; from: string; to: string; amount?: number; description?: string }>>([])
+const sourceLineError = ref(false)
+const loadedBasis = ref<number | null>(null)
+const basisChanged = computed(() => isEdit.value && loadedBasis.value !== null && Number(form.basis_amount) !== loadedBasis.value)
+/** Výchozí výběr řádku: řádek, který se s položkou shoduje částkou a obdobím, částkou nebo obdobím. */
+function suggestLine() {
+  const lines = sourceLines.value.filter(l => l.item_id)
+  const basis = Number(form.basis_amount)
+  for (const match of [
+    (l: typeof lines[number]) => l.from === form.period_from && l.to === form.period_to && Math.abs(Number(l.amount) - basis) < 0.005,
+    (l: typeof lines[number]) => Math.abs(Number(l.amount) - basis) < 0.005,
+    (l: typeof lines[number]) => l.from === form.period_from && l.to === form.period_to,
+  ]) {
+    const found = lines.filter(match)
+    if (found.length === 1) return found[0].item_id
+  }
+  return 0
+}
+async function loadSourceLines() {
+  if (isEdit.value || !source.source_id || (source.source_type !== 'invoice' && source.source_type !== 'purchase_invoice')) return
+  try {
+    const candidates = await accrualsApi.sourceCandidates(source.source_type, source.source_id)
+    sourceLines.value = candidates.periods.filter(p => p.item_id)
+    if (source.source_item_id === null && sourceLines.value.length) source.source_item_id = suggestLine()
+  } catch {
+    sourceLines.value = []
+  }
+}
 
 const activeAccounts = computed(() => accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const KIND_PREFIX: Record<string, string> = { prepaid_expense: '381', deferred_revenue: '384' }
@@ -156,7 +188,8 @@ function payload(): AccrualPayload {
       : {
           activate: form.activate,
           ...(source.source_type ? { source_type: source.source_type, source_id: source.source_id } : {}),
-          ...(source.source_item_id ? { source_item_id: source.source_item_id } : {}),
+          // 0 = položka výslovně nespravuje žádný řádek s obdobím (server ho pak nedohledává).
+          ...(source.source_item_id !== null && (source.source_item_id > 0 || sourceLines.value.length) ? { source_item_id: source.source_item_id } : {}),
           ...(source.closing_handover ? { closing_handover: true } : {}),
           ...(source.origin_entry_id ? { origin_entry_id: source.origin_entry_id, origin_amount: source.origin_amount } : {}),
         }),
@@ -177,6 +210,8 @@ async function save() {
     await router.push({ name: 'accounting-accrual-detail', params: { id: saved.id } })
   } catch (e: any) {
     error.value = errorText(e)
+    sourceLineError.value = accrualErrorCode(e) === 'source_item_required'
+    if (sourceLineError.value && !sourceLines.value.length) void loadSourceLines()
   } finally {
     saving.value = false
   }
@@ -239,6 +274,7 @@ async function load() {
         form.counter_account_code = item.counter_account_code || ''
         form.termination_account_code = item.termination_account_code || ''
         form.basis_amount = Number(item.basis_amount)
+        loadedBasis.value = Number(item.basis_amount)
         form.period_from = item.period_from
         form.period_to = item.period_to
         form.method = item.method
@@ -261,6 +297,7 @@ async function load() {
     loading.value = false
   }
   void loadPlan()
+  void loadSourceLines()
 }
 
 onMounted(load)
@@ -288,6 +325,17 @@ onMounted(load)
         </template>
         <span v-if="source.origin_entry_id && !isEdit" class="ml-1">{{ t('accruals.editor.origin_entry', { entry: source.origin_entry_id }) }}</span>
       </p>
+      <label v-if="!isEdit && sourceLines.length" class="block max-w-3xl text-sm font-medium" data-test="source-line">
+        {{ t('accruals.editor.source_line') }}
+        <select v-model.number="source.source_item_id" data-test="source-line-select"
+          :class="['mt-1 block h-9 w-full rounded-md border bg-surface px-2', sourceLineError ? 'border-danger-500' : 'border-neutral-300']">
+          <option :value="0">{{ t('accruals.editor.source_line_none') }}</option>
+          <option v-for="line in sourceLines" :key="line.item_id ?? 0" :value="line.item_id">
+            {{ t('accruals.editor.source_line_option', { description: line.description || `#${line.item_id}`, from: formatDate(line.from), to: formatDate(line.to), amount: formatMoney(line.amount ?? 0) }) }}
+          </option>
+        </select>
+        <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('accruals.editor.source_line_hint') }}</span>
+      </label>
 
       <section class="rounded-lg border border-neutral-200 bg-surface p-4">
         <h2 class="mb-4 font-semibold">{{ t('accruals.editor.basics') }}</h2>
@@ -319,6 +367,9 @@ onMounted(load)
             <input v-model.number="form.basis_amount" type="number" step="0.01" min="0.01" required data-test="basis-amount"
               class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-right tabular-nums" />
           </label>
+          <p v-if="basisChanged" class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800 sm:col-span-2 lg:col-span-4" role="status" data-test="basis-warning">
+            {{ t('accruals.editor.basis_follows_links') }}
+          </p>
         </div>
       </section>
 

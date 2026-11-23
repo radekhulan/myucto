@@ -45,13 +45,10 @@ function createQuery(line?: AccrualSourceCandidates['accrual_lines'][number]) {
   const source = data.value
   if (!source) return {}
   const period = source.periods.find(p => !p.item_id) ?? source.periods[0]
-  // Jediný řádek s obdobím je řádek položky; u víc řádků ho server dohledá podle částky
-  // a období, nebo si o výběr řekne.
-  const onlyLine = source.periods.length === 1 ? source.periods[0].item_id ?? undefined : undefined
+  // Řádek dokladu, který položka spravuje, vybere editor (návrh podle shody částky a období).
   return accrualPrefillQuery({
     source_type: source.source_type,
     source_id: source.source_id,
-    source_item_id: onlyLine,
     ...(line ? { origin_entry_id: line.entry_id, origin_amount: Math.abs(Number(line.amount)), account: line.account_code, amount: Math.abs(Number(line.amount)) } : {}),
     from: period?.from,
     to: period?.to,
