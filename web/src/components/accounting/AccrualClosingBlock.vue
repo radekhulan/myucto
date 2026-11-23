@@ -12,7 +12,7 @@ import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
  * Krok Časové rozlišení v uzávěrce: nezaúčtované řádky položek agendy do konce období.
  * Roční řádky zaúčtuje krok uzávěrky, měsíční patří do agendy (jen upozornění s odkazem).
  */
-const props = defineProps<{ periodId: number }>()
+const props = withDefaults(defineProps<{ periodId: number; periodStatus?: string | null; rowVersion?: number }>(), { periodStatus: null, rowVersion: 0 })
 const emit = defineEmits<{ posted: [] }>()
 
 const { t } = useI18n()
@@ -24,8 +24,11 @@ const loading = ref(false)
 const posting = ref(false)
 
 const canRead = computed(() => auth.canRead('accounting.accruals'))
-const canPostYearly = computed(() => auth.canWrite('accounting.accruals.write') && auth.canWrite('accounting.journal.post')
-  && auth.canWrite('accounting.periods.close'))
+// Uzávěrka zaúčtuje rozpuštění agendy jen v období, které se uzavírá; v otevřeném období
+// se účtuje v agendě (se zámkem k datu jako každý zápis).
+const canPostYearly = computed(() => props.periodStatus === 'closing' && auth.canWrite('accounting.accruals.write')
+  && auth.canWrite('accounting.journal.post') && auth.canWrite('accounting.periods.close'))
+const pendingTotal = computed(() => (pending.value?.yearly_total ?? 0) + (pending.value?.monthly_total ?? 0))
 
 async function load() {
   if (!canRead.value || !props.periodId) return
@@ -41,10 +44,10 @@ async function load() {
 
 async function postYearly() {
   if (!pending.value || posting.value || blockDemoMutation()
-    || !window.confirm(t('accruals.closing.confirm', { amount: formatMoney(pending.value.yearly_total) }))) return
+    || !window.confirm(t('accruals.closing.confirm', { amount: formatMoney(pendingTotal.value) }))) return
   posting.value = true
   try {
-    const result = await accrualsApi.closingPost(props.periodId)
+    const result = await accrualsApi.closingPost(props.periodId, props.rowVersion)
     toast.success(t('accruals.closing.posted', { count: result.posted, amount: formatMoney(result.total) }))
     emit('posted')
     await load()
@@ -104,16 +107,19 @@ defineExpose({ reload: load })
             </tfoot>
           </table>
         </div>
-        <button v-if="canPostYearly" type="button" :disabled="posting" data-test="accrual-closing-post"
-          :class="[btnFilled('primary'), 'whitespace-nowrap']" @click="postYearly">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-          {{ t('accruals.closing.post') }}
-        </button>
       </div>
       <div v-if="pending.monthly.length" role="alert" class="rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-test="accrual-closing-monthly">
         {{ t('accruals.closing.monthly_warning', { count: pending.monthly.length, amount: formatMoney(pending.monthly_total) }) }}
         <RouterLink :to="{ name: 'accounting-accruals', query: { status: 'active', as_of: pending.ends_on } }" class="ml-1 font-medium underline">{{ t('accruals.closing.open_agenda') }}</RouterLink>
       </div>
+      <button v-if="canPostYearly && (pending.yearly.length || pending.monthly.length)" type="button" :disabled="posting" data-test="accrual-closing-post"
+        :class="[btnFilled('primary'), 'whitespace-nowrap']" @click="postYearly">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+        {{ t('accruals.closing.post') }}
+      </button>
+      <p v-else-if="periodStatus !== 'closing' && (pending.yearly.length || pending.monthly.length)" class="text-xs text-neutral-500" data-test="accrual-closing-not-closing">
+        {{ t('accruals.closing.not_closing') }}
+      </p>
     </template>
   </div>
 </template>

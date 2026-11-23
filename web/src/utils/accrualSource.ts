@@ -14,6 +14,10 @@ export function accrualSourceRoute(type: string | null | undefined, id: number |
 export interface AccrualPrefill {
   source_type?: string
   source_id?: number
+  /** Řádek zdrojové faktury, který položka spravuje (uzávěrka pak odkládá jen ostatní řádky). */
+  source_item_id?: number
+  /** Předání řádku odloženého uzávěrkou do agendy (zůstatek k datu a navázání odkladu). */
+  closing_handover?: 1
   origin_entry_id?: number
   origin_amount?: number
   account?: string

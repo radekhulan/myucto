@@ -122,4 +122,28 @@ describe('AccrualEditor', () => {
     expect(payload).toMatchObject({ row_version: 4, accrual_account_code: '381' })
     expect(payload).not.toHaveProperty('activate')
   })
+
+  it('chyba načtení upravované položky neukáže prázdný formulář', async () => {
+    m.route = { params: { id: '5' }, query: {} }
+    m.get.mockRejectedValue({ response: { data: { error: { message: 'Výpadek' } } } })
+    const wrapper = mountEditor()
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.get('[data-test="editor-load-error"]').text()).toContain('Výpadek')
+  })
+
+  it('předání z uzávěrky pošle řádek dokladu a příznak převzetí', async () => {
+    m.route.query = { source_type: 'purchase_invoice', source_id: '12', source_item_id: '44', closing_handover: '1', account: '381',
+      amount: '36600', from: '2099-07-01', to: '2100-06-30', title: 'Syntetické pojištění' }
+    m.planPreview.mockResolvedValue({ rows: [{ kind: 'release', due_on: '2099-07-31', from_on: '2099-07-01', to_on: '2099-07-31', days: 31, amount_planned: 3100 }] })
+    m.create.mockResolvedValue({ id: 9 })
+    const wrapper = mountEditor()
+    await flushPromises()
+    wrapper.findAllComponents(ChartAccountSelect)[1].vm.$emit('update:modelValue', '548')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.create.mock.calls[0][0]).toMatchObject({ source_type: 'purchase_invoice', source_id: 12, source_item_id: 44, closing_handover: true })
+  })
 })

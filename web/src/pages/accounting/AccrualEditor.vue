@@ -13,6 +13,7 @@ import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { isCalendarIsoDate } from '@/utils/date'
 import { accrualSourceRoute } from '@/utils/accrualSource'
+import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
@@ -59,7 +60,11 @@ const source = reactive({
   source_id: null as number | null,
   origin_entry_id: null as number | null,
   origin_amount: null as number | null,
+  source_item_id: null as number | null,
+  closing_handover: false,
 })
+/** Chyba načtení upravované položky: formulář se neukáže prázdný, aby ho nešlo uložit naslepo. */
+const loadError = ref('')
 
 const activeAccounts = computed(() => accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const KIND_PREFIX: Record<string, string> = { prepaid_expense: '381', deferred_revenue: '384' }
@@ -151,6 +156,8 @@ function payload(): AccrualPayload {
       : {
           activate: form.activate,
           ...(source.source_type ? { source_type: source.source_type, source_id: source.source_id } : {}),
+          ...(source.source_item_id ? { source_item_id: source.source_item_id } : {}),
+          ...(source.closing_handover ? { closing_handover: true } : {}),
           ...(source.origin_entry_id ? { origin_entry_id: source.origin_entry_id, origin_amount: source.origin_amount } : {}),
         }),
   }
@@ -189,6 +196,9 @@ function applyPrefill(q: LocationQuery) {
     source.source_type = sourceType as AccrualSourceType
     source.source_id = positive(str(q.source_id))
   }
+  const line = positive(str(q.source_item_id))
+  source.source_item_id = line && Number.isInteger(line) ? line : null
+  source.closing_handover = str(q.closing_handover) === '1' && !!source.source_id
   source.origin_entry_id = positive(str(q.origin_entry_id))
   source.origin_amount = positive(str(q.origin_amount))
   const account = str(q.account)
@@ -209,6 +219,7 @@ function applyPrefill(q: LocationQuery) {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const requests: Promise<unknown>[] = [
       accountingApi.listAccounts().then(value => { accounts.value = value }).catch(() => { accounts.value = [] }),
@@ -244,6 +255,7 @@ async function load() {
     }
     await Promise.all(requests)
   } catch (e: any) {
+    if (isEdit.value) loadError.value = errorText(e)
     toast.error(errorText(e))
   } finally {
     loading.value = false
@@ -264,6 +276,10 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="py-12 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
+    <div v-else-if="loadError" class="rounded-md border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700" role="alert" data-test="editor-load-error">
+      <p>{{ loadError }}</p>
+      <button type="button" :class="[btnOutlineSm('neutral'), 'mt-2 whitespace-nowrap']" @click="load">{{ t('accruals.editor.reload') }}</button>
+    </div>
     <form v-else class="max-w-5xl space-y-4" @submit.prevent="save">
       <p v-if="source.source_type || source.origin_entry_id" class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800" data-test="prefill-source">
         <template v-if="source.source_type">

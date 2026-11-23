@@ -201,4 +201,27 @@ describe('AccrualDetail', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="terminate-error"]').text()).toBe('BLR:2099-05-31')
   })
+
+  it('změna data ukončení hned zahodí starý náhled a zamkne potvrzení', async () => {
+    const preview = {
+      item_id: 5, date: '2099-06-15', covered_through: '2099-05-31', balance: 700, release_amount: 50, remainder_amount: 650, total: 700,
+      counter_account_code: '548', termination_account_code: '548', lines: [{ account_code: '548', side: 'debit', amount: 700 }, { account_code: '381', side: 'credit', amount: 700 }],
+      future_rows: [], requires_linked_confirmation: false,
+      lock: { postable: true, closed: false, closing: false, date_locked: false, period_status: 'open' },
+    }
+    m.terminationPreview.mockResolvedValue(preview)
+    const wrapper = mountDetail()
+    await flushPromises()
+    action(wrapper, 'terminate').run!()
+    await flushPromises()
+    expect(wrapper.get('[data-test="terminate-confirm"]').attributes('disabled')).toBeUndefined()
+    wrapper.findAllComponents({ name: 'DateInput' }).at(-1)!.vm.$emit('update:modelValue', '2099-04-30')
+    await wrapper.vm.$nextTick()
+    // Během zpoždění náhledu nejde potvrdit ukončení k novému datu nad starými čísly.
+    expect(wrapper.get('[data-test="terminate-confirm"]').attributes('disabled')).toBeDefined()
+    m.terminationPreview.mockResolvedValue({ ...preview, date: '2099-04-30' })
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+    expect(wrapper.get('[data-test="terminate-confirm"]').attributes('disabled')).toBeUndefined()
+  })
 })

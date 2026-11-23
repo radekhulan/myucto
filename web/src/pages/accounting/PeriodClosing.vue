@@ -1211,7 +1211,8 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
         <!-- 4/5) Dohady + časové rozlišení -->
         <template v-else-if="selected === 'estimates' || selected === 'deferrals'">
           <!-- Položky agendy Časové rozlišení: roční rozpuštění zaúčtuje krok, měsíční řádky patří do agendy. -->
-          <AccrualClosingBlock v-if="selected === 'deferrals'" :period-id="periodId" class="mb-3 max-w-3xl" />
+          <AccrualClosingBlock v-if="selected === 'deferrals'" :period-id="periodId" :period-status="state?.period.status ?? null"
+            :row-version="rowVersion" class="mb-3 max-w-3xl" @posted="load" />
           <div v-if="!isClosing && step(selected)?.status === 'pending'" class="text-sm text-neutral-500">
             {{ t('accounting.closing.assist.needs_closing') }}
           </div>

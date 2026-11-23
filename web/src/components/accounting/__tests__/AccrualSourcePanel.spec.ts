@@ -82,4 +82,28 @@ describe('AccrualSourcePanel', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="accrual-source-panel"]').exists()).toBe(false)
   })
+
+  it('jediný řádek s obdobím pošle editoru jako řádek položky', async () => {
+    m.sourceCandidates.mockResolvedValue(candidates({
+      accrual_lines: [{ entry_id: 70, entry_date: '2099-01-05', account_code: '381', account_name: 'Náklady příštích období', kind: 'prepaid_expense', amount: 1200 }],
+      periods: [{ item_id: 44, from: '2099-01-01', to: '2099-12-31' }],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    const query = JSON.parse(wrapper.get('[data-test="accrual-panel-create-line"]').attributes('data-to')!).query
+    expect(query.source_item_id).toBe('44')
+  })
+
+  it('řádek odložený uzávěrkou nabídne převzetí do agendy se zůstatkem k datu', async () => {
+    m.sourceCandidates.mockResolvedValue(candidates({
+      periods: [{ item_id: 44, from: '2099-07-01', to: '2100-06-30' }],
+      closing_deferrals: [{ deferral_entry_id: 90, account_code: '381', period_ends_on: '2099-12-31', basis: 36600, period_from: '2099-07-01',
+        period_to: '2100-06-30', deferred: 18200, released: 0, remaining: 18200, opening_as_of: '2100-01-01', source_item_id: 44 }],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="accrual-source-panel"]').exists()).toBe(true)
+    const query = JSON.parse(wrapper.get('[data-test="accrual-panel-handover"]').attributes('data-to')!).query
+    expect(query).toMatchObject({ source_type: 'purchase_invoice', source_id: '12', source_item_id: '44', closing_handover: '1', account: '381' })
+  })
 })

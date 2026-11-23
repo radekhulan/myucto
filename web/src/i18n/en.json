@@ -922,7 +922,22 @@
       "nothing_to_terminate": "There is nothing to terminate on the item.",
       "allocation_exceeds": "The amount exceeds the unassigned part of the entry.",
       "changed": "Another user changed the item in the meantime. Reload it.",
-      "link_from_schedule": "Remove the link of an agenda entry by reversing the release or termination."
+      "link_from_schedule": "Remove the link of an agenda entry by reversing the release or termination.",
+      "not_active": "The item is not an active agenda item.",
+      "not_draft": "Only a draft item can be activated.",
+      "row_not_planned": "The schedule row is already posted or cancelled.",
+      "not_editable": "A terminated, completed or cancelled item cannot be edited.",
+      "row_not_first": "Post the earlier release first.",
+      "row_not_last": "Reverse the later release first.",
+      "nothing_to_release": "The item has no ledger balance to release. Link the origin entry.",
+      "has_links": "The kind and account of an item with linked entries cannot be changed.",
+      "source_item_required": "The document has several lines with a period. Choose the line the item manages.",
+      "source_item_not_found": "The line does not belong to the source document.",
+      "project_not_found": "The project does not exist.",
+      "link_imported": "An imported link cannot be removed manually. Cancel the item or run the takeover again.",
+      "period_not_closing": "Closing posts agenda releases only in a period that is being closed.",
+      "accrual_agenda_pending": "The agenda still has unposted releases due by the period end.",
+      "no_closing_deferral": "The document has no deferral posted by closing."
     },
     "reconciliation": {
       "title": "Reconciliation with the general ledger",
@@ -1043,23 +1058,28 @@
       "created": "The item is created.",
       "saved": "The item is saved.",
       "from_source": "The item is created from a document: {source}",
-      "origin_entry": "Origin entry #{entry} will be linked."
+      "origin_entry": "Origin entry #{entry} will be linked.",
+      "reload": "Reload"
     },
     "panel": {
       "title": "Accruals and deferrals",
       "create": "Create item",
       "lines_hint": "Document lines on accrual accounts:",
-      "lines_hint_none": "The document has lines on accrual accounts without an agenda item:"
+      "lines_hint_none": "The document has lines on accrual accounts without an agenda item:",
+      "handover_hint": "Document lines deferred by closing. Take them over into the agenda with the balance as of the date:",
+      "handover_as_of": "balance from {date}",
+      "handover": "Take over into the agenda"
     },
     "closing": {
       "title": "Accruals agenda items",
-      "hint": "Closing does not defer or release agenda items. Post the yearly release here, monthly lines in the agenda.",
+      "hint": "Closing does not defer or release agenda items. Post releases due by the period end (yearly and monthly) here while the period is being closed; earlier, post them in the agenda.",
       "nothing": "No unposted agenda release is waiting until the period end.",
       "open_agenda": "Open agenda",
-      "post": "Post yearly agenda release",
-      "confirm": "Post the yearly release of agenda items totalling {amount}?",
+      "post": "Post agenda releases up to the period end",
+      "confirm": "Post agenda releases up to the period end, {amount} in total?",
       "posted": "Posted {count} releases, total {amount}.",
-      "monthly_warning": "Unposted monthly lines until the period end: {count}, total {amount}. Post them in the agenda."
+      "monthly_warning": "Unposted monthly rows up to the period end: {count}, {amount} in total. Post them in the agenda or here while the period is being closed.",
+      "not_closing": "They can be posted here once closing has started. Until then, post them in the agenda. The books cannot be closed while they remain unposted."
     },
     "check": {
       "open_agenda": "Open agenda"
@@ -1094,6 +1114,10 @@
       "remainder": "Unallocated balance",
       "terminations": "Terminations from internal documents",
       "unmatched": "not paired with an item"
+    },
+    "warning": {
+      "internal_document_unlinked": "The internal document is not linked (Related) to the source document. If the source invoice has a period, closing will defer it again.",
+      "origin_document_has_period_lines": "The origin entry belongs to a document whose lines have a period. Check that closing does not defer them as well."
     }
   },
   "invoice_default_note": {

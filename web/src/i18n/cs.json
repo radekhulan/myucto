@@ -922,7 +922,22 @@
       "nothing_to_terminate": "Položka nemá co ukončit.",
       "allocation_exceeds": "Částka je vyšší než nenavázaná část zápisu.",
       "changed": "Položku mezitím změnil jiný uživatel. Načtěte ji znovu.",
-      "link_from_schedule": "Vazbu zápisu agendy zrušíte stornem rozpuštění nebo ukončení."
+      "link_from_schedule": "Vazbu zápisu agendy zrušíte stornem rozpuštění nebo ukončení.",
+      "not_active": "Položka není aktivní položkou agendy.",
+      "not_draft": "Aktivovat lze jen koncept položky.",
+      "row_not_planned": "Řádek plánu už je zaúčtovaný nebo zrušený.",
+      "not_editable": "Ukončenou, dokončenou nebo zrušenou položku nelze upravit.",
+      "row_not_first": "Nejdřív zaúčtujte starší rozpuštění.",
+      "row_not_last": "Nejdřív stornujte pozdější rozpuštění.",
+      "nothing_to_release": "Položka nemá v deníku zůstatek k rozpuštění. Navažte zápis vzniku.",
+      "has_links": "Druh a účet položky s navázanými zápisy nelze změnit.",
+      "source_item_required": "Doklad má víc řádků s obdobím. Vyberte řádek, který položka spravuje.",
+      "source_item_not_found": "Řádek nepatří ke zdrojovému dokladu.",
+      "project_not_found": "Projekt neexistuje.",
+      "link_imported": "Převzatou vazbu nelze zrušit ručně. Položku zrušte nebo převezměte znovu.",
+      "period_not_closing": "Uzávěrka zaúčtuje rozpuštění agendy jen v období, které se uzavírá.",
+      "accrual_agenda_pending": "V agendě zbývá nezaúčtované rozpuštění splatné do konce období.",
+      "no_closing_deferral": "Doklad nemá odklad zaúčtovaný uzávěrkou."
     },
     "reconciliation": {
       "title": "Odsouhlasení s hlavní knihou",
@@ -1043,23 +1058,28 @@
       "created": "Položka je založená.",
       "saved": "Položka je uložená.",
       "from_source": "Položka vzniká z dokladu: {source}",
-      "origin_entry": "Naváže se zápis vzniku #{entry}."
+      "origin_entry": "Naváže se zápis vzniku #{entry}.",
+      "reload": "Načíst znovu"
     },
     "panel": {
       "title": "Časové rozlišení",
       "create": "Založit položku",
       "lines_hint": "Řádky dokladu na účtech časového rozlišení:",
-      "lines_hint_none": "Doklad má řádky na účtech časového rozlišení bez položky agendy:"
+      "lines_hint_none": "Doklad má řádky na účtech časového rozlišení bez položky agendy:",
+      "handover_hint": "Řádky dokladu odložené uzávěrkou. Do agendy je převezmete se zůstatkem k datu:",
+      "handover_as_of": "zůstatek od {date}",
+      "handover": "Převzít do agendy"
     },
     "closing": {
       "title": "Položky agendy Časové rozlišení",
-      "hint": "Uzávěrka položky agendy neodkládá ani nerozpouští. Roční rozpuštění zaúčtujte tady, měsíční řádky v agendě.",
+      "hint": "Uzávěrka položky agendy neodkládá ani nerozpouští. Rozpuštění splatná do konce období (roční i měsíční) zaúčtujte tady, když se období uzavírá; dřív je zaúčtujte v agendě.",
       "nothing": "Do konce období nečeká žádné nezaúčtované rozpuštění agendy.",
       "open_agenda": "Otevřít agendu",
-      "post": "Zaúčtovat roční rozpuštění agendy",
-      "confirm": "Zaúčtovat roční rozpuštění položek agendy celkem {amount}?",
+      "post": "Zaúčtovat rozpuštění agendy do konce období",
+      "confirm": "Zaúčtovat rozpuštění položek agendy do konce období celkem {amount}?",
       "posted": "Zaúčtováno {count} rozpuštění, celkem {amount}.",
-      "monthly_warning": "Nezaúčtované měsíční řádky do konce období: {count}, celkem {amount}. Zaúčtujte je v agendě."
+      "monthly_warning": "Nezaúčtované měsíční řádky do konce období: {count}, celkem {amount}. Zaúčtujte je v agendě nebo tady, když se období uzavírá.",
+      "not_closing": "Zaúčtovat je tady jde až po zahájení uzávěrky. Do té doby je zaúčtujte v agendě. Knihy nepůjde uzavřít, dokud zůstanou nezaúčtované."
     },
     "check": {
       "open_agenda": "Otevřít agendu"
@@ -1094,6 +1114,10 @@
       "remainder": "Nerozepsaný zůstatek",
       "terminations": "Ukončení z interních dokladů",
       "unmatched": "nespárováno s položkou"
+    },
+    "warning": {
+      "internal_document_unlinked": "Interní doklad není vazbou „Souvisí“ spojený se zdrojovým dokladem. Má-li zdrojová faktura období od–do, uzávěrka ji odloží znovu.",
+      "origin_document_has_period_lines": "Zápis vzniku patří dokladu, jehož řádky mají období od–do. Zkontrolujte, že je neodkládá i uzávěrka."
     }
   },
   "invoice_default_note": {

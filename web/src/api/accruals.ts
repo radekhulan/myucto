@@ -94,6 +94,8 @@ export interface AccrualItem {
 }
 
 export interface AccrualDetail extends AccrualItem {
+  /** Upozornění na možné dvojí odložení dokladu agendou a uzávěrkou. */
+  warnings?: Array<{ code: string; message: string }>
   as_of: string
   balance: number
   released: number
@@ -107,6 +109,8 @@ export interface AccrualDetail extends AccrualItem {
 }
 
 export interface AccrualListFilter {
+  /** Jediná položka (rozpis z detailu položky). */
+  item_id?: number
   as_of?: string
   status?: string
   kind?: string
@@ -155,6 +159,8 @@ export interface AccrualPayload {
   origin_entry_id?: number | null
   origin_amount?: number | null
   activate?: boolean
+  /** Převzít řádek odložený uzávěrkou (zůstatek k datu, navázání odkladu). */
+  closing_handover?: boolean
   row_version?: number
 }
 
@@ -301,6 +307,22 @@ export interface AccrualSourceCandidates {
   accrual_lines: Array<{ entry_id: number; entry_date: string; account_code: string; account_name: string; kind: string; amount: number }>
   periods: Array<{ item_id: number | null; from: string; to: string }>
   items: Array<{ id: number; item_no: string; title: string; status: AccrualStatus }>
+  /** Řádky dokladu, které odložila uzávěrka: nabídka předání do agendy se zůstatkem k datu. */
+  closing_deferrals?: AccrualClosingHandover[]
+}
+
+export interface AccrualClosingHandover {
+  deferral_entry_id: number
+  account_code: string
+  period_ends_on: string
+  basis: number
+  period_from: string | null
+  period_to: string | null
+  deferred: number
+  released: number
+  remaining: number
+  opening_as_of: string
+  source_item_id: number | null
 }
 
 export interface AccrualClosingRow {
@@ -381,7 +403,7 @@ export interface AccrualActivity {
   created_at: string
 }
 
-const BOOK_KEYS = ['as_of', 'status', 'kind', 'method', 'source_type', 'managed_by', 'account', 'partner_id', 'ends_by', 'active_on', 'with_balance', 'q', 'sort_by', 'sort_dir'] as const
+const BOOK_KEYS = ['item_id', 'as_of', 'status', 'kind', 'method', 'source_type', 'managed_by', 'account', 'partner_id', 'ends_by', 'active_on', 'with_balance', 'q', 'sort_by', 'sort_dir'] as const
 
 export const accrualsApi = {
   list: (params: AccrualListFilter & { page?: number; per_page?: number }) =>
@@ -432,8 +454,8 @@ export const accrualsApi = {
     api.get<AccrualSourceCandidates>('/accounting/accruals/source-candidates', { params: { source_type: sourceType, source_id: sourceId } }).then(r => r.data),
   closingPending: (periodId: number) =>
     api.get<AccrualClosingPending>('/accounting/accruals/closing', { params: { period_id: periodId } }).then(r => r.data),
-  closingPost: (periodId: number) =>
-    api.post<{ posted: number; total: number }>(`/accounting/accruals/closing/${periodId}/post`).then(r => r.data),
+  closingPost: (periodId: number, rowVersion: number) =>
+    api.post<{ posted: number; total: number }>(`/accounting/accruals/closing/${periodId}/post`, { row_version: rowVersion }).then(r => r.data),
   takeoverPreview: () => api.get<AccrualTakeoverPreview>('/accounting/accruals/takeover/pohoda').then(r => r.data),
   takeoverApply: () =>
     api.post<AccrualTakeoverPreview & { created: number; updated: number }>('/accounting/accruals/takeover/pohoda').then(r => r.data),

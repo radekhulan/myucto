@@ -27,8 +27,8 @@ const ALL = ['accounting.accruals', 'accounting.accruals.write', 'accounting.jou
 const yearlyRow = { schedule_id: 1, due_on: '2099-12-31', amount_planned: 1200, item_id: 4, item_no: 'CR-2099-0003', title: 'Syntetické nájemné',
   kind: 'prepaid_expense', method: 'yearly', accrual_account_code: '381', counter_account_code: '518' }
 
-function mountBlock() {
-  return mount(AccrualClosingBlock, { props: { periodId: 7 }, global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+function mountBlock(periodStatus = 'closing') {
+  return mount(AccrualClosingBlock, { props: { periodId: 7, periodStatus, rowVersion: 3 }, global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
 }
 
 describe('AccrualClosingBlock', () => {
@@ -48,7 +48,7 @@ describe('AccrualClosingBlock', () => {
     expect(wrapper.find('[data-test="accrual-closing-monthly"]').exists()).toBe(true)
     await wrapper.get('[data-test="accrual-closing-post"]').trigger('click')
     await flushPromises()
-    expect(m.closingPost).toHaveBeenCalledWith(7)
+    expect(m.closingPost).toHaveBeenCalledWith(7, 3)
     expect(wrapper.emitted('posted')).toHaveLength(1)
   })
 
@@ -59,6 +59,14 @@ describe('AccrualClosingBlock', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="accrual-closing-yearly"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="accrual-closing-post"]').exists()).toBe(false)
+  })
+
+  it('v otevřeném období tlačítko nenabídne, jen odkáže do agendy', async () => {
+    m.closingPending.mockResolvedValue({ period_id: 7, ends_on: '2099-12-31', yearly: [yearlyRow], monthly: [], yearly_total: 1200, monthly_total: 0 })
+    const wrapper = mountBlock('open')
+    await flushPromises()
+    expect(wrapper.find('[data-test="accrual-closing-post"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="accrual-closing-not-closing"]').exists()).toBe(true)
   })
 
   it('bez práva k agendě se blok nenačte ani nevykreslí', async () => {

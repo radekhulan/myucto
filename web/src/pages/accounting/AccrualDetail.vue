@@ -121,6 +121,8 @@ async function mutate(call: () => Promise<AccrualDetail>, success: string): Prom
     return true
   } catch (error: any) {
     toast.error(errorText(error))
+    // Konflikt (409): položka se mezitím změnila, detail se načte znovu.
+    if (error?.response?.status === 409) void load()
     return false
   } finally {
     busy.value = false
@@ -210,8 +212,10 @@ function openTerminate() {
   terminateOpen.value = true
   void loadTermPreview()
 }
+let termKey = ''
 async function loadTermPreview() {
   const request = ++termRequest
+  termKey = `${termDate.value}|${termAccount.value.trim()}`
   if (!/^\d{4}-\d{2}-\d{2}$/.test(termDate.value)) return
   termPreviewLoading.value = true
   termError.value = ''
@@ -228,7 +232,11 @@ async function loadTermPreview() {
   }
 }
 watch([termDate, termAccount], () => {
-  if (!terminateOpen.value) return
+  if (!terminateOpen.value || `${termDate.value}|${termAccount.value.trim()}` === termKey) return
+  // Starý náhled nesmí jít potvrdit: zahodí se hned a tlačítko zůstane zamčené, než dorazí nový.
+  termPreview.value = null
+  termRequest++
+  termPreviewLoading.value = true
   if (termTimer) clearTimeout(termTimer)
   termTimer = setTimeout(() => void loadTermPreview(), 300)
 })
@@ -238,6 +246,7 @@ const hasImportedFuture = computed(() => !!termPreview.value?.requires_linked_co
 const canConfirmTerminate = computed(() => {
   const preview = termPreview.value
   if (!preview || termPreviewLoading.value || busy.value || !preview.lock.postable) return false
+  if (preview.date !== termDate.value) return false
   if (hasFutureRows.value && !reverseFuture.value) return false
   if (hasImportedFuture.value && !confirmLinked.value) return false
   return true
@@ -258,6 +267,10 @@ async function confirmTerminate() {
     toast.success(t('accruals.detail.terminated'))
   } catch (error: any) {
     termError.value = errorText(error)
+    if (error?.response?.status === 409) {
+      void load()
+      void loadTermPreview()
+    }
   } finally {
     busy.value = false
   }
@@ -281,7 +294,7 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'cancel_termination', label: t('accruals.detail.cancel_termination'), icon: 'uturn', tier: 'overflow', variant: 'warning',
       show: can.cancel_termination && canPost.value, disabled: busy.value, run: cancelTermination },
     { key: 'export', label: t('accruals.detail.export'), icon: 'download', tier: 'overflow', variant: 'neutral',
-      href: accrualsApi.bookUrl({ q: current.item_no, ...(asOf.value ? { as_of: asOf.value } : {}) }, 'pdf') },
+      href: accrualsApi.bookUrl({ item_id: current.id, ...(asOf.value ? { as_of: asOf.value } : {}) }, 'pdf') },
     { key: 'cancel', label: t('accruals.detail.cancel'), icon: 'x', tier: 'overflow', variant: 'danger',
       show: can.cancel && canWrite.value, disabled: busy.value, run: cancelItem },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
@@ -344,6 +357,9 @@ onMounted(load)
           <ActionBar :actions="actions" />
         </div>
         <div class="text-lg font-semibold text-neutral-900" data-test="detail-title">{{ item.title }}</div>
+        <div v-for="w in item.warnings ?? []" :key="w.code" class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800" role="status" data-test="detail-warning">
+          {{ t(`accruals.warning.${w.code}`, w.message) }}
+        </div>
 
         <p v-if="canPost && item.next_release && item.status === 'active' && !nextReleaseDue" class="text-sm text-neutral-500" data-test="next-release-hint">
           {{ t('accruals.detail.next_release_hint', { date: formatDate(item.next_release.due_on), amount: formatMoney(item.next_release.amount_planned) }) }}

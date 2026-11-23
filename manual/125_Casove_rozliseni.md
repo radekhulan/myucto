@@ -47,8 +47,17 @@ Záložka **Spravuje uzávěrka** v agendě jen zobrazuje řádky dokladů s obd
 a jejich budoucí část k datu. Nic se tam neukládá ani neúčtuje. Postup uzávěrky popisuje
 [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni).
 
-Jakmile k dokladu (nebo k jeho řádku) založíte položku agendy, uzávěrka ho přestane odkládat a otevření
-roku ho nerozpouští. Rozpouštění tím přebírá agenda a nic se neúčtuje dvakrát.
+Jakmile k řádku dokladu založíte a aktivujete položku agendy, uzávěrka tento řádek přestane odkládat
+a otevření roku ho nerozpouští. Ostatní řádky dokladu s obdobím odkládá uzávěrka dál. Koncept položky
+doklad ještě nepřebírá. Má-li doklad víc řádků s obdobím, vyberte řádek, který položka spravuje (bez výběru
+se dohledá podle částky a období).
+
+Řádek, který už uzávěrka odložila, převezmete do agendy z panelu **Časové rozlišení** v detailu dokladu
+akcí **Převzít do agendy**. Položka dostane zůstatek k datu, od kterého ho rozpouští (den po posledním
+rozpuštění v otevření roku), naváže se na zápis odkladu a plán začne tímto dnem.
+
+Položka založená z interního dokladu, který není vazbou **Souvisí** spojený se zdrojovou fakturou, ukáže
+upozornění: uzávěrka by fakturu s obdobím od–do odložila znovu.
 
 ## 125.4 Krok za krokem: založit položku
 
@@ -95,9 +104,12 @@ druh podle účtu, účet, základ ve výši nenavázané části a zápis vznik
 3. Potvrďte zaúčtování. Vznikne zápis k poslednímu dni úseku (u měsíční metody ke konci měsíce),
    s číslem dokladu podle čísla položky.
 
-Zaúčtované rozpuštění vezmete zpět akcí **Stornovat** u řádku. Vznikne protizápis ke dni původního zápisu
-a řádek se vrátí do plánu. Storno jde jen v otevřeném a neuzamčeném období a ne u ukončené položky
-(nejdřív zrušte ukončení).
+Řádky se účtují po sobě: zaúčtovat jde jen nejstarší nezaúčtovaný řádek. Zápis nikdy nerozpustí víc, než je
+zůstatek položky v deníku (ručně přiřazené rozpuštění zůstatek už snížilo).
+
+Zaúčtované rozpuštění vezmete zpět akcí **Stornovat** u řádku, vždy od posledního zaúčtovaného. Vznikne
+protizápis ke dni původního zápisu a řádek se vrátí do plánu. Storno jde jen v otevřeném a neuzamčeném
+období a ne u ukončené položky (nejdřív zrušte ukončení).
 
 **Jak poznáte, že je hotovo:** Řádek má stav **Zaúčtováno** s odkazem na zápis v deníku a zůstatek položky
 se snížil. Po zaúčtování posledního řádku s nulovým zůstatkem přejde položka do stavu **Dokončená**.
@@ -129,10 +141,11 @@ se nevracejí, plán je dopočte znovu.
    a **rozdíl**.
 3. Je-li rozdíl nenulový, otevřete seznam **řádků bez položky**. U každého zápisu zvolte:
    - **Přiřadit k položce**: zápis se naváže na vybranou položku se stejným účtem (celá nenavázaná část,
-     nebo zadaná částka),
+     nebo zadaná částka). Plán položky se přepočte na nový zůstatek,
    - **Založit položku**: viz [§ 125.4.3](#12543-z-radku-bez-polozky).
 4. Ruční vazbu omylem přiřazenou odeberete v detailu položky. Vazbu ze zaúčtování agendy tak zrušit nejde,
-   použijte storno rozpuštění nebo ukončení.
+   použijte storno rozpuštění nebo ukončení. Vazbu převzatou z POHODY také ne: položku zrušte nebo
+   převezměte znovu. Zrušená položka své vazby uvolní a zápisy se vrátí mezi řádky bez položky.
 
 **Jak poznáte, že je hotovo:** Rozdíl je na všech účtech nulový a kontrola rozdílu agendy v uzávěrce
 nehlásí varování.
@@ -191,8 +204,11 @@ doplní se jen nové zápisy a přepočte nerozepsaný zůstatek. Pravidla páro
 - **Aktivovat hned**: položka se uloží rovnou jako aktivní s plánem, jinak jako koncept.
 - **Náhled plánu**: živý výpočet řádků plánu podle zadaných údajů.
 
-Upravit lze koncept a aktivní položku. Po zaúčtovaném nebo převzatém rozpuštění zůstávají druh a účet
-pevné. Změna základu, období nebo metody přepočte jen nezaúčtovanou část plánu, zaúčtované řádky zůstávají.
+Upravit lze koncept a aktivní položku. Jakmile má položka navázaný zápis (vznik, rozpuštění, převzatý
+zápis), druh a účet zůstávají pevné. Změna poznámky, názvu či protiúčtu plán nemění. Změna základu,
+období nebo metody přepočte nezaúčtované řádky: zaúčtované a převzaté řádky i nezaúčtované řádky před nimi
+zůstávají na svém místě a zbývající zůstatek položky se rozloží do nezaúčtovaných řádků poměrem dnů.
+Když položku mezitím upravil někdo jiný, uložení odmítne a vyzve k novému načtení.
 
 ### 125.10.2 Stavy položky
 
@@ -270,20 +286,18 @@ Slouží jako inventurní soupis účtů 381 až 385 k [inventarizaci](69_Invent
 ### 125.10.8 Uzávěrka, průběžný výkaz a projekce DPPO
 
 **Krok uzávěrky Časové rozlišení.** Blok agendy v kroku ukáže nezaúčtované řádky plánu splatné do
-rozvahového dne:
+rozvahového dne (roční i měsíční). Když se období uzavírá, zaúčtuje je akce **Zaúčtovat rozpuštění agendy
+do konce období** najednou; potřebuje oprávnění k uzavření období. V otevřeném období je zaúčtujte v agendě.
 
-- **roční řádky** (metoda ročně) zaúčtuje krok k 31. 12. sám, i do období ve stavu Uzavírá se. Potřebuje
-  oprávnění k uzavření období,
-- **měsíční řádky** jen ukáže ke kontrole. Zaúčtujte je v agendě před zahájením uzávěrky, do období ve stavu
-  Uzavírá se je agenda nezaúčtuje.
+**Uzavření knih** se zastaví, dokud v agendě zůstává nezaúčtované rozpuštění splatné do konce období.
 
 Uzávěrka ani otevření dalšího roku položky agendy neodkládají ani nerozpouštějí. Řádky dokladů, ke kterým
 položka agendy existuje, vynechají.
 
 **Kontrola rozdílu agendy.** Předběžné kontroly uzávěrky a [měsíční kontrola](62_Mesicni_kontrola.md)
 porovnají agendu s hlavní knihou k datu a při rozdílu ohlásí varování **rozdíl agendy časového rozlišení
-proti hlavní knize** s účty a částkami. Uzavření knih neblokuje, rozhoduje účetní. Firma bez položek agendy
-kontrolu nemá.
+proti hlavní knize** s účty a částkami, spolu s počtem nezaúčtovaných splatných rozpuštění. Rozdíl uzavření
+knih neblokuje, rozhoduje účetní. Firma bez položek agendy kontrolu nemá.
 
 **Průběžný výkaz.** Volba **Průběžné časové rozlišení a odpisy** ve výsledovce a rozvaze
 ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)) přidá to, co agenda ještě
@@ -294,6 +308,7 @@ v deníku a výkaz ho čte odtud.
 **Projekce DPPO.** Panel projekce závěrkových operací v přiznání k DPPO
 ([§ 43.11.7](43_Dan_z_prijmu.md#43117-jak-se-pocita-dppo)) zahrne nezaúčtované rozpuštění položek agendy do
 konce období (náklad z 381 sníží výsledek, výnos z 384 ho zvýší). Po zaúčtování řádek z projekce zmizí.
+Odklad dokladu, který převzala agenda, projekce nehlásí jako nezaúčtované rozpuštění minulého roku.
 
 ### 125.10.9 Převzetí z POHODY
 
@@ -303,8 +318,8 @@ konce období (náklad z 381 sníží výsledek, výnos z 384 ho zvýší). Po z
   přijatá podle čísla dodavatele nebo variabilního symbolu, ostatní pohledávka či závazek podle čísla.
   Ze zdroje se převezme partner, začátek období (datum vystavení) a základ (řádek dokladu na účtu položky,
   jinak základ dokladu).
-- **Metoda** podle rytmu: jen zápisy k 31. 12. znamenají ročně, více rozpuštění v jednom roce měsíčně podle
-  dnů. Konec období se dopočte z denní sazby rozpouštění. Bez zdroje nebo konce období dostane položka
+- **Metoda** podle rytmu: rozpuštění jen ke konci účetního roku znamenají ročně, rozpuštění od sebe méně než
+  300 dní měsíčně podle dnů. Konec období se dopočte z denní sazby rozpouštění. Bez zdroje nebo konce období dostane položka
   ruční metodu.
 - **Ukončení** se hledají v interních a ručních zápisech mimo řadu CR, které snižují 381 či 384 a v popisu
   mluví o ukončení, vyřazení nebo předčasném ukončení. Smlouva se pozná podle čísla v textu (`20240005`
@@ -316,8 +331,11 @@ konce období (náklad z 381 sníží výsledek, výnos z 384 ho zvýší). Po z
   vidět. Rozepište ji na smlouvy nebo vyjasněte.
 - **Navázání.** Převzaté zápisy roku (i předgenerované do budoucna) se navážou jako převzaté řádky plánu.
   Plán za nimi dopočte agenda.
-- **Nic se neúčtuje** a převzetí je opakovatelné. Položky se poznají podle čísla z POHODY, existující se
-  nepřepíšou.
+- **Nic se neúčtuje** a převzetí je opakovatelné. Položky se poznají podle čísla z POHODY. Existující
+  položka si ponechá svůj rozpad i úpravy; položku, kterou agenda ukončila, dokončila nebo kterou jste
+  zrušili, převzetí nezmění. Převzatý zápis se nenaváže na úsek, který už rozpustila agenda (náhled ho ukáže
+  jako konflikt), ani na zápis vzniku navázaný na jinou položku. Klesne-li nerozepsaný zůstatek PS na nulu,
+  položka zbytku se zruší.
 
 ### 125.10.10 Oprávnění
 
@@ -326,7 +344,7 @@ konce období (náklad z 381 sníží výsledek, výnos z 384 ho zvýší). Po z
 | Prohlížení agendy, odsouhlasení, panel v dokladu, export | **Časové rozlišení** |
 | Založení, úprava, aktivace, zrušení a smazání položky, přiřazení zápisů, převzetí z POHODY | navíc **Spravovat položky časového rozlišení** |
 | Zaúčtování a storno rozpuštění, ukončení a jeho zrušení | navíc **Zaúčtovat doklad** |
-| Zaúčtování ročních řádků v kroku uzávěrky | **Časové rozlišení** a **Uzavřít období** |
+| Zaúčtování rozpuštění agendy v kroku uzávěrky | navíc **Zaúčtovat doklad** a **Uzavřít období** |
 
 Oprávnění se nastavují v rolích ([kap. 101](101_Bezpecnost.md)). Agenda je jen pro podvojné účetnictví.
 
