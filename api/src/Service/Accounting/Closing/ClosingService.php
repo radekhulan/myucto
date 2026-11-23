@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Service\Accounting\AccountingFrameworkException;
@@ -2088,24 +2089,13 @@ final class ClosingService
             $netCzk = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costsByInvoice);
             // EP-15: odloží se net − kumulativně uznaný náklad do konce období (kotva pro
             // přesné víceleté rozpouštění; pro jednoleté rozlišení = původní chování).
-            $deferred = AccrualDeferralService::deferredAmount($netCzk, $from, $to, $endsOn);
+            $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, $from, $to, $endsOn);
             if ((int) round($deferred * 100) === 0) {
                 continue;
             }
             // EP-15: harmonogram rozpouštění po (kalendářních) obdobích — kolik odloženého
             // nákladu se uvolní do 5xx v každém následujícím roce. Σ = deferred (telescopuje).
-            $schedule = [];
-            $toYear = (int) substr($to, 0, 4);
-            for ($fy = (int) substr($nextStart, 0, 4); $fy <= $toYear; $fy++) {
-                $rel = round(
-                    AccrualDeferralService::cumRecognized($netCzk, $from, $to, $fy . '-12-31')
-                    - AccrualDeferralService::cumRecognized($netCzk, $from, $to, ($fy - 1) . '-12-31'),
-                    2,
-                );
-                if ((int) round($rel * 100) !== 0) {
-                    $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
-                }
-            }
+            $schedule = AccrualScheduleCalculator::fiscalYearTranches($netCzk, $from, $to, (int) substr($nextStart, 0, 4));
             $accounts = $this->accruals->prepaidExpenseAccounts($supplierId, $row, $accountsByInvoice);
 
             $total = round($total + $deferred, 2);
@@ -2352,8 +2342,8 @@ final class ClosingService
             // Tranše cílového období = kumul. uznáno k min(to, targetEnd) − kumul. uznáno
             // k originEndsOn (= den před targetStart). Dolní hranici kotvíme na originEndsOn,
             // aby první rozpouštěné období navazovalo přesně na odloženou částku.
-            $upper = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
-            $lower = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $originEndsOn);
+            $upper = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
+            $lower = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $originEndsOn);
             $release = round($upper - $lower, 2);
             if ((int) round($release * 100) === 0) {
                 continue;
@@ -2438,18 +2428,7 @@ final class ClosingService
             if ((int) round($deferred * 100) === 0) {
                 continue;
             }
-            $schedule = [];
-            $toYear = (int) substr($to, 0, 4);
-            for ($fy = (int) substr($nextStart, 0, 4); $fy <= $toYear; $fy++) {
-                $rel = round(
-                    AccrualDeferralService::cumRecognized($netCzk, $from, $to, $fy . '-12-31')
-                    - AccrualDeferralService::cumRecognized($netCzk, $from, $to, ($fy - 1) . '-12-31'),
-                    2,
-                );
-                if ((int) round($rel * 100) !== 0) {
-                    $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
-                }
-            }
+            $schedule = AccrualScheduleCalculator::fiscalYearTranches($netCzk, $from, $to, (int) substr($nextStart, 0, 4));
 
             $total = round($total + $deferred, 2);
             AccrualDeferralService::addLines($byLine, AccrualDeferralService::spreadByAllocation(
@@ -2657,8 +2636,8 @@ final class ClosingService
             [$netCzk, $accounts] = isset($row['snapshot'])
                 ? [round((float) $row['snapshot']['basis'], 2), AccrualDeferralService::snapshotAccounts($row['snapshot'])]
                 : $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
-            $upper = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
-            $lower = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $originEndsOn);
+            $upper = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
+            $lower = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $originEndsOn);
             $release = round($upper - $lower, 2);
             if ((int) round($release * 100) === 0) {
                 continue;
@@ -2959,17 +2938,17 @@ final class ClosingService
     /**
      * Část výnosu [from..to], kterou uzávěrka k `endsOn` odloží na 384. Volají ji i náhledy
      * dokladů (členský předpis NNO), aby návrh odkladu seděl s krokem uzávěrky na haléř.
-     * Výpočet žije v {@see AccrualDeferralService::deferredAmount()}.
+     * Výpočet žije v {@see AccrualScheduleCalculator::deferredAmount()}.
      */
     public static function deferredRevenueAmount(float $netCzk, string $from, string $to, string $endsOn): float
     {
-        return AccrualDeferralService::deferredAmount($netCzk, $from, $to, $endsOn);
+        return AccrualScheduleCalculator::deferredAmount($netCzk, $from, $to, $endsOn);
     }
 
     /** Počet dnů intervalu VČETNĚ obou krajů (rozvahový den se počítá). */
     private static function daysInclusive(string $from, string $to): int
     {
-        return AccrualDeferralService::daysInclusive($from, $to);
+        return AccrualScheduleCalculator::daysInclusive($from, $to);
     }
 
     /**

@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
@@ -2204,54 +2205,25 @@ final class AccrualDeferralService
     }
 
     // ── poměr dnů ─────────────────────────────────────────────────────────────
+    // Výpočet žije v {@see AccrualScheduleCalculator}; tyto metody na něj jen předávají
+    // (zůstávají kvůli dosavadním volajícím, vlastní výpočet tu není).
 
-    /**
-     * Část základu řádku s obdobím [from..to], která k rozvahovému dni `asOf` připadá na dny
-     * za ním a odkládá se na 381/384: základ − kumulativně uznaná část k `asOf` včetně.
-     * Období celé za `asOf` = celý základ, období končící do `asOf` = 0. Neplatné období
-     * (konec před začátkem) se nerozlišuje.
-     */
+    /** {@see AccrualScheduleCalculator::deferredAmount()} */
     public static function deferredAmount(float $netCzk, string $from, string $to, string $asOf): float
     {
-        if (self::daysInclusive($from, $to) <= 0) {
-            return 0.0;
-        }
-        return round($netCzk - self::cumRecognized($netCzk, $from, $to, $asOf), 2);
+        return AccrualScheduleCalculator::deferredAmount($netCzk, $from, $to, $asOf);
     }
 
-    /**
-     * EP-15: kumulativně uznaný náklad či výnos z rovnoměrného rozlišení [from..to] DO dne
-     * $through včetně (na haléře). $through < from → 0; $through >= to → celý $netCzk. Kotva
-     * pro konzistentní odklad (net − cumRecognized(konec N)) i víceleté rozpouštění: rozdíl
-     * dvou kumulativních hodnot na hranicích období telescopuje přesně na odloženou částku,
-     * takže 381/384 se rozpustí do haléře bez zbytku napříč N+1, N+2, …
-     */
+    /** {@see AccrualScheduleCalculator::cumRecognized()} */
     public static function cumRecognized(float $netCzk, string $from, string $to, string $through): float
     {
-        $from = substr($from, 0, 10);
-        $to = substr($to, 0, 10);
-        $through = substr($through, 0, 10);
-        if ($through < $from) {
-            return 0.0;
-        }
-        $totalDays = self::daysInclusive($from, $to);
-        if ($totalDays <= 0) {
-            return 0.0;
-        }
-        $end = $through >= $to ? $to : $through;
-        $days = self::daysInclusive($from, $end);
-        return round($netCzk * min(1.0, $days / $totalDays), 2);
+        return AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $through);
     }
 
-    /** Počet dnů intervalu VČETNĚ obou krajů (rozvahový den se počítá). */
+    /** {@see AccrualScheduleCalculator::daysInclusive()} */
     public static function daysInclusive(string $from, string $to): int
     {
-        $a = \DateTimeImmutable::createFromFormat('!Y-m-d', substr($from, 0, 10));
-        $b = \DateTimeImmutable::createFromFormat('!Y-m-d', substr($to, 0, 10));
-        if ($a === false || $b === false || $b < $a) {
-            return 0;
-        }
-        return (int) $a->diff($b)->days + 1;
+        return AccrualScheduleCalculator::daysInclusive($from, $to);
     }
 
     /**

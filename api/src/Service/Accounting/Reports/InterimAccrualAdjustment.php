@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Service\Accounting\Assets\AssetException;
+use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
@@ -62,7 +63,7 @@ final class InterimAccrualAdjustment
             $costsByInvoice = [];
             foreach ($this->accruals->prepaidExpenseRows($supplierId, $asOf, $periodStartsOn, $asOf, $asOf) as $row) {
                 $netCzk = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costsByInvoice);
-                $deferred = AccrualDeferralService::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
+                $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0) {
                     continue;
                 }
@@ -77,7 +78,7 @@ final class InterimAccrualAdjustment
             $contexts = [];
             foreach ($this->accruals->deferredRevenueRows($supplierId, $asOf, $periodStartsOn, $asOf, null, false, $asOf) as $row) {
                 [$netCzk, $accounts] = $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
-                $deferred = AccrualDeferralService::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
+                $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0 || $accounts === []) {
                     continue;
                 }
