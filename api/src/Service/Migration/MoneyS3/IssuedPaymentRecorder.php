@@ -160,7 +160,8 @@ final class IssuedPaymentRecorder
         }
     }
 
-    private static function note(string $kind, string $paymentNo): string
+    /** Poznámka platby převodu podle druhu úhrady; podle ní opakovaný převod platbu pozná. */
+    public static function note(string $kind, string $paymentNo): string
     {
         return self::NOTE_PREFIX . match ($kind) {
             'credit_note' => 'zápočet dobropisu ',

@@ -331,11 +331,67 @@ final class DocumentLinker
         $this->recordMissingIssuedPayments($ctx, $issuedPayments, $movements);
         (new AdvanceLinker($this->db, $this->map))->link($ctx);
         $this->markBookedWithoutInvoice($ctx);
+        $this->recordSettledWithoutDocument($ctx);
+        $this->restorePurchaseSettlements($ctx);
+        (new AdvanceLinker($this->db, $this->map))->linkTaxDocumentPayments($ctx->supplierId, $ctx->protocol);
         if ($cashMulti !== []) {
             $p->info(self::STEP_PAYMENTS, 'cash_multi_invoice', count($cashMulti) . ' pokladních dokladů hradí víc faktur; pokladní doklad ukazuje vazbu jen na první, faktury jsou uhrazené podle Money.',
                 ['documents' => array_slice(array_keys($cashMulti), 0, 50)]);
         }
         $p->finish(self::STEP_PAYMENTS);
+    }
+
+    /**
+     * Úhrady vydaných dokladů, které Money vede jen datem úhrady a převedená data k nim doklad
+     * úhrady nemají ({@see MoneyS3SettledPayments}): zápočet interním dokladem navázaným na
+     * doklad, zbytek jedna platba bez dokladu úhrady s číslem úhrady z Money v poznámce. Jen
+     * do konce posledního převáděného období.
+     */
+    private function recordSettledWithoutDocument(ImportContext $ctx): void
+    {
+        $payments = new MoneyS3SettledPayments($this->db);
+        $lastEnd = $payments->lastTransferredPeriodEnd($ctx->supplierId, $ctx);
+        if ($lastEnd === null) {
+            return;
+        }
+        $paymentNos = [];
+        foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
+            $docId = $ctx->issuedInvoices[$ctx->yearOf($r) . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
+            $settledBy = trim((string) ($r['UDoklad'] ?? ''));
+            if ($docId !== null && $settledBy !== '') {
+                $paymentNos[$docId] = $settledBy;
+            }
+        }
+        $out = $payments->recordIssued($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd, $paymentNos);
+        foreach (['settlements' => 'settled_internal_document', 'inserted' => 'settled_without_document', 'updated' => 'settled_without_document_updated',
+            'deleted' => 'settled_without_document_removed'] as $key => $counter) {
+            if ($out[$key] > 0) {
+                $ctx->protocol->count(self::STEP_PAYMENTS, $counter, $out[$key]);
+            }
+        }
+    }
+
+    /**
+     * Přijaté doklady uhrazené podle Money, které evidované úhrady nepokrývají (zápočet mimo
+     * párovací symbol, úhrada bez dokladu), dostanou zápočet interním dokladem navázaným na
+     * doklad a zbytek do `settled_outside_amount` ({@see MoneyS3SettledPayments::restorePurchaseSettlements()}).
+     * Bez nich je párování banky bere jako nekryté a spáruje s platbou se stejným symbolem
+     * v dalším roce.
+     */
+    private function restorePurchaseSettlements(ImportContext $ctx): void
+    {
+        $payments = new MoneyS3SettledPayments($this->db);
+        $lastEnd = $payments->lastTransferredPeriodEnd($ctx->supplierId, $ctx);
+        if ($lastEnd === null) {
+            return;
+        }
+        $out = $payments->restorePurchaseSettlements($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd);
+        if ($out['settlements'] > 0) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'purchase_settled_internal_document', $out['settlements']);
+        }
+        if ($out['updated'] > 0) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'purchase_settled_outside', $out['updated']);
+        }
     }
 
     /**

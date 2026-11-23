@@ -1,0 +1,452 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\MoneyS3;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Invoice\TakenOverPayment;
+use MyInvoice\Support\Sql\JournalSettlementAllocationSql;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
+use PDO;
+
+/**
+ * Úhrady dokladů z Money S3, ke kterým převedená data nemají doklad úhrady.
+ *
+ * Money vede úhradu dokladu datem `Uhrazeno` a číslem posledního dokladu úhrady
+ * (`UDoklad`). Převod z nich nastaví vydanému dokladu uhrazenou částku (`paid_total`)
+ * a stav, evidovanou platbu ale zakládá jen k pohybu banky, pokladnímu dokladu a zápočtu
+ * ({@see IssuedPaymentRecorder}). Úhrada zápočtem či interním dokladem mimo párovací
+ * symbol, nebo s prázdným `UDoklad`, tak zůstala jen v `paid_total`. Každá změna plateb
+ * dokladu ({@see \MyInvoice\Service\Invoice\InvoicePaymentService::recomputeLocked()})
+ * pak `paid_total` přepočte ze součtu plateb a doklad se vrátí mezi neuhrazené
+ * (upomínky, saldokonto, výpis neuhrazených).
+ *
+ * Vydaný doklad (faktura, zálohová faktura) proto dostane na rozdíl `paid_total` proti
+ * evidovaným platbám:
+ *  - zápočet interním dokladem ({@see recordSettlement()}), když na něj převod navázal
+ *    ruční zápis interního dokladu, který saldo dokladu snižuje (vazba
+ *    `journal_entry_document_links`). Stejně jako {@see PairingSymbolMatcher}: `invoice_settlements`
+ *    s vazbou na zápis a evidovaná platba `settlement`. Saldokonto pak čte zápočet jen
+ *    přes platbu, vazba zůstane odkazem ({@see \MyInvoice\Support\Sql\LinkedManualSettlementSql}),
+ *    jinak by vazbu i platbu započetlo dvakrát,
+ *  - zbytek jednou platbou `settlement` s poznámkou {@see TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE}
+ *    ke dni úhrady. Bez bankovního pohybu, pokladního dokladu i zápisu v deníku, smazat ji
+ *    nejde ({@see TakenOverPayment::isProtected()}).
+ *
+ * Přijatý doklad uhrazený podle Money, který evidované úhrady nepokrývají, dostane stejně
+ * zápočet interním dokladem navázaným na doklad a zbytek do `settled_outside_amount`
+ * ({@see restorePurchaseSettlements()}), jako převod z POHODY.
+ *
+ * Jen doklady uhrazené do konce posledního převáděného období ({@see lastTransferredPeriodEnd()}):
+ * úhradu po něm nese rok, který už běží v MyÚčtu. Vše se nastavuje absolutně a nejvýš do
+ * uhrazené částky podle Money, opakovaný převod ani oprava dříve převedených firem
+ * ({@see MoneyS3SettledPaymentRepair}) nic nezdvojí. Deník, `paid_total`, stav a datum
+ * úhrady dokladu se nemění. Platba je v měně dokladu.
+ */
+final class MoneyS3SettledPayments
+{
+    public const SOURCE = 'settlement';
+
+    /** Druhy vydaných dokladů s evidovanými platbami (jako {@see \MyInvoice\Service\Invoice\InvoicePaymentService}). */
+    public const PAYABLE_TYPES = ['invoice', 'proforma'];
+
+    /** Druhy přijatých dokladů, které se platí (DDKP úhradu nemá, dobropis má částku k úhradě zápornou). */
+    public const PURCHASE_KINDS = ['invoice', 'advance'];
+
+    /**
+     * Saldokontní účty dokladů Money, na kterých zápis interního dokladu doklad vyrovnává,
+     * a strana, na které saldo dokladu snižuje: vydané pohledávky a přijaté zálohy na straně
+     * Dal, přijaté závazky a poskytnuté zálohy na straně Má dáti.
+     */
+    private const SETTLEMENT_ACCOUNTS = [
+        'invoice' => ['side' => 'credit', 'prefixes' => ['311', '315', '324']],
+        'purchase_invoice' => ['side' => 'debit', 'prefixes' => ['321', '325', '314']],
+    ];
+
+    public function __construct(private readonly Connection $db) {}
+
+    /** Poznámka platby bez dokladu úhrady, s číslem úhrady z Money (`UDoklad`), pokud ho Money vede. */
+    public static function note(?string $paymentNo = null): string
+    {
+        $paymentNo = trim((string) $paymentNo);
+        return mb_substr(TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ($paymentNo === '' ? '' : ' (' . $paymentNo . ')'), 0, 255);
+    }
+
+    /**
+     * Konec posledního převáděného období: do něj patří úhrady, které převod z Money přebírá.
+     * Úhradu po něm vede Money v roce, který už běží v MyÚčtu.
+     *
+     * V běhu převodu je to poslední období rozvrhu deníku (`ImportContext::$periods`), v opravě
+     * dříve převedené firmy poslední období z mapy převodu (druh `period`).
+     *
+     * Dočasná náhrada `ImportContext::lastPeriodEnd()` (výběr převáděných let „Převést do roku"),
+     * po jeho zavedení volat jen to; pravidlo je stejné.
+     */
+    public function lastTransferredPeriodEnd(int $supplierId, ?ImportContext $ctx = null): ?string
+    {
+        if ($ctx !== null) {
+            $ends = array_map(static fn (array $p): string => substr((string) $p['ends_on'], 0, 10), $ctx->periods);
+            return $ends === [] ? null : max($ends);
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MAX(ap.ends_on) FROM money_s3_import_map m
+               JOIN accounting_periods ap ON ap.id = m.target_id AND ap.supplier_id = m.supplier_id
+              WHERE m.supplier_id = ? AND m.kind = ?"
+        );
+        $stmt->execute([$supplierId, MoneyS3ImportRepository::KIND_PERIOD]);
+        $end = $stmt->fetchColumn();
+        return is_string($end) && $end !== '' ? substr($end, 0, 10) : null;
+    }
+
+    /**
+     * Vydané doklady převodu, jejichž uhrazená částka (`paid_total`) převyšuje evidované
+     * platby, nebo které už platbu bez dokladu úhrady mají (k přepočtu): id, číslo, měna,
+     * kurz, částky a datum úhrady. Jen doklady uhrazené do `$lastEnd`; platba bez dokladu
+     * úhrady u dokladu uhrazeného později se zruší.
+     *
+     * @return list<array{id:int,document_no:string,invoice_type:string,status:string,currency:string,rate:?float,
+     *                    paid_at:?string,paid_total:float,amount_to_pay:float,others:float,own_id:?int,own_amount:float,in_range:bool}>
+     */
+    public function issuedCandidates(int $supplierId, string $lastEnd, bool $forUpdate = false): array
+    {
+        $types = "'" . implode("','", self::PAYABLE_TYPES) . "'";
+        $note = TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE;
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.id, COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS document_no, i.invoice_type, i.status,
+                    cur.code AS currency, i.exchange_rate, i.paid_at, i.paid_total, i.amount_to_pay,
+                    COALESCE(pay.others, 0) AS others, pay.own_id, COALESCE(pay.own_amount, 0) AS own_amount
+               FROM invoices i
+               JOIN currencies cur ON cur.id = i.currency_id
+               LEFT JOIN (SELECT ip.invoice_id,
+                                 SUM(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN 0 ELSE ip.amount END) AS others,
+                                 MIN(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN ip.id END) AS own_id,
+                                 SUM(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN ip.amount ELSE 0 END) AS own_amount
+                            FROM invoice_payments ip WHERE ip.supplier_id = ? GROUP BY ip.invoice_id) pay ON pay.invoice_id = i.id
+              WHERE i.supplier_id = ? AND i.invoice_type IN ({$types}) AND i.status NOT IN ('draft', 'cancelled')
+                AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = i.supplier_id AND m.kind = ? AND m.target_id = i.id)
+                AND (i.paid_total - COALESCE(pay.others, 0) - COALESCE(pay.own_amount, 0) >= 0.01 OR pay.own_id IS NOT NULL)
+              ORDER BY i.id" . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([self::SOURCE, $note . '%', self::SOURCE, $note . '%', self::SOURCE, $note . '%', $supplierId, $supplierId, MoneyS3ImportRepository::KIND_INVOICE]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $paidAt = $r['paid_at'] === null ? null : substr((string) $r['paid_at'], 0, 10);
+            $out[] = [
+                'id' => (int) $r['id'], 'document_no' => (string) $r['document_no'], 'invoice_type' => (string) $r['invoice_type'],
+                'status' => (string) $r['status'], 'currency' => (string) $r['currency'],
+                'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                'paid_at' => $paidAt, 'paid_total' => (float) $r['paid_total'], 'amount_to_pay' => (float) $r['amount_to_pay'],
+                'others' => (float) $r['others'], 'own_id' => $r['own_id'] !== null ? (int) $r['own_id'] : null,
+                'own_amount' => (float) $r['own_amount'], 'in_range' => $paidAt !== null && $paidAt <= $lastEnd,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Zapíše úhrady vydaných dokladů bez dokladu úhrady (viz třída). Volat UVNITŘ transakce
+     * volajícího.
+     *
+     * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`) do poznámky
+     * @param list<int>|null $only jen tyto doklady (oprava vybraných)
+     * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>}
+     */
+    public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], ?array $only = null): array
+    {
+        $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => []];
+        $candidates = $this->issuedCandidates($supplierId, $lastEnd, true);
+        if ($only !== null) {
+            $keep = array_flip($only);
+            $candidates = array_values(array_filter($candidates, static fn (array $c): bool => isset($keep[$c['id']])));
+        }
+        if ($candidates === []) {
+            return $out;
+        }
+        $pdo = $this->db->pdo();
+        $linked = $this->linkedSettlements($supplierId, 'invoice', array_column($candidates, 'id'));
+        $insert = $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $update = $pdo->prepare('UPDATE invoice_payments SET amount = ?, paid_on = ?, note = ? WHERE id = ? AND supplier_id = ?');
+        foreach ($candidates as $c) {
+            $room = round($c['paid_total'] - $c['others'], 2);
+            $settled = 0.0;
+            if ($c['in_range']) {
+                foreach ($linked[$c['id']] ?? [] as $entry) {
+                    $amount = $this->inDocumentCurrency($c, $entry);
+                    $amount = round(min($amount, $room - $settled), 2);
+                    if ($amount < 0.01 || $entry['account_id'] === null) {
+                        continue;
+                    }
+                    $this->recordSettlement($supplierId, $userId, 'invoice', $c, $entry, $amount);
+                    $settled += $amount;
+                    $out['settlements']++;
+                    $out['settlement_amount'] += $amount;
+                }
+            }
+            $target = $c['in_range'] ? round($room - $settled, 2) : 0.0;
+            $note = self::note($paymentNos[$c['id']] ?? null);
+            $action = null;
+            if ($c['own_id'] !== null) {
+                if ($target < 0.01) {
+                    $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND source = ? AND note LIKE ?')
+                        ->execute([$c['id'], $supplierId, self::SOURCE, TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%']);
+                    $out['deleted']++;
+                    $action = 'deleted';
+                } else {
+                    // Nejvýš jedna platba bez dokladu úhrady na doklad: případné další se slijí do první.
+                    $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND source = ? AND note LIKE ? AND id <> ?')
+                        ->execute([$c['id'], $supplierId, self::SOURCE, TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%', $c['own_id']]);
+                    if (abs($target - $c['own_amount']) >= 0.005 || isset($paymentNos[$c['id']])) {
+                        $update->execute([number_format($target, 2, '.', ''), (string) $c['paid_at'], isset($paymentNos[$c['id']]) ? $note : $this->currentNote($c['own_id']), $c['own_id'], $supplierId]);
+                        if ($update->rowCount() > 0) {
+                            $out['updated']++;
+                            $action = 'updated';
+                        }
+                    }
+                }
+            } elseif ($target >= 0.01) {
+                $insert->execute([$supplierId, $c['id'], (string) $c['paid_at'], number_format($target, 2, '.', ''), $c['currency'], $note, self::SOURCE, $userId]);
+                $out['inserted']++;
+                $action = 'inserted';
+            }
+            if ($action !== null || $settled >= 0.01) {
+                $out['invoices'][] = $c + ['settled' => round($settled, 2), 'amount' => max(0.0, $target), 'action' => $action];
+            }
+        }
+        $out['settlement_amount'] = round($out['settlement_amount'], 2);
+        return $out;
+    }
+
+    /**
+     * Přijaté doklady převodu uhrazené podle Money do `$lastEnd`, které evidované úhrady
+     * (banka, pokladna, zápočty) nepokrývají, nebo které už úhradu mimo evidenci mají (k přepočtu).
+     * Money vede úhradu jen datem a celou: nekrytá je částka k úhradě minus evidované úhrady,
+     * v měně dokladu.
+     *
+     * @return list<array{id:int,document_no:string,currency:string,rate:?float,paid_at:string,amount_to_pay:float,covered:float,outside:float}>
+     */
+    public function purchaseCandidates(int $supplierId, string $lastEnd, bool $forUpdate = false): array
+    {
+        $kinds = "'" . implode("','", self::PURCHASE_KINDS) . "'";
+        $settled = PurchaseSettledExpr::settled('pi', currentRead: $forUpdate);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM (
+                SELECT pi.id, COALESCE(NULLIF(pi.vendor_invoice_number, ''), NULLIF(pi.varsymbol, ''), CONCAT('#', pi.id)) AS document_no,
+                       cur.code AS currency, pi.exchange_rate, pi.paid_at, pi.amount_to_pay, pi.settled_outside_amount AS outside,
+                       ({$settled}) - pi.settled_outside_amount AS covered
+                  FROM purchase_invoices pi
+                  JOIN currencies cur ON cur.id = pi.currency_id
+                 WHERE pi.supplier_id = ? AND pi.status = 'paid' AND pi.document_kind IN ({$kinds})
+                   AND pi.paid_at IS NOT NULL AND pi.paid_at <= ? AND pi.amount_to_pay > 0
+                   AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = pi.supplier_id AND m.kind = ? AND m.target_id = pi.id)
+             ) d
+             WHERE d.amount_to_pay - d.covered - d.outside >= 0.01 OR d.outside >= 0.01
+             ORDER BY d.id" . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$supplierId, $lastEnd, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[] = [
+                'id' => (int) $r['id'], 'document_no' => (string) $r['document_no'], 'currency' => (string) $r['currency'],
+                'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                'paid_at' => substr((string) $r['paid_at'], 0, 10), 'amount_to_pay' => (float) $r['amount_to_pay'],
+                'covered' => round(max(0.0, (float) $r['covered']), 2), 'outside' => (float) $r['outside'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Úhrady přijatých dokladů uhrazených podle Money, které evidované úhrady nepokrývají:
+     * zápočet interním dokladem navázaným na doklad (`invoice_settlements` se zápisem, jako
+     * {@see PairingSymbolMatcher}), zbytek do `settled_outside_amount` (absolutně). Bez nich
+     * párování banky bere doklad uhrazený zápočtem v Money jako nekrytý a spáruje s ním
+     * platbu se stejným symbolem. Volat UVNITŘ transakce volajícího.
+     *
+     * @return array{updated:int,settlements:int,settlement_amount:float,amount:float,documents:list<array<string,mixed>>}
+     */
+    public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd): array
+    {
+        $out = ['updated' => 0, 'settlements' => 0, 'settlement_amount' => 0.0, 'amount' => 0.0, 'documents' => []];
+        $rows = $this->purchaseCandidates($supplierId, $lastEnd, true);
+        if ($rows === []) {
+            return $out;
+        }
+        $linked = $this->linkedSettlements($supplierId, 'purchase_invoice', array_column($rows, 'id'));
+        $update = $this->db->pdo()->prepare('UPDATE purchase_invoices SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
+        foreach ($rows as $r) {
+            $open = round($r['amount_to_pay'] - $r['covered'], 2);
+            $settled = 0.0;
+            foreach ($linked[$r['id']] ?? [] as $entry) {
+                $amount = round(min($this->inDocumentCurrency($r, $entry), $open - $settled), 2);
+                if ($amount < 0.01 || $entry['account_id'] === null) {
+                    continue;
+                }
+                $this->recordSettlement($supplierId, $userId, 'purchase_invoice', $r, $entry, $amount);
+                $settled += $amount;
+                $out['settlements']++;
+                $out['settlement_amount'] += $amount;
+            }
+            $target = round(max(0.0, $open - $settled), 2);
+            if (abs($target - $r['outside']) >= 0.005) {
+                $update->execute([number_format($target, 2, '.', ''), $r['id'], $supplierId]);
+                $out['updated'] += $update->rowCount();
+                $out['amount'] += $target - $r['outside'];
+            } elseif ($settled < 0.01) {
+                continue;
+            }
+            $out['documents'][] = $r + ['settled' => round($settled, 2), 'target' => $target];
+        }
+        $out['amount'] = round($out['amount'], 2);
+        $out['settlement_amount'] = round($out['settlement_amount'], 2);
+        return $out;
+    }
+
+    /**
+     * Ruční zápisy navázané na doklady, které saldo dokladu snižují a saldokonto je dnes čte
+     * jen přes vazbu ({@see \MyInvoice\Support\Sql\LinkedManualSettlementSql}): zápis navázaný
+     * právě na jeden doklad téhož druhu, bez zápočtu se zápisem, bez rozpadu a mimo skupinu
+     * zaúčtování dokladu. Po dokladech v pořadí data, s protiúčtem (účet druhé strany s největší
+     * částkou) a vyrovnáním v Kč a v cizí měně.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param list<int> $docIds
+     * @return array<int,list<array{entry_id:int,date:string,document_no:string,czk:float,foreign:float,currency:?string,account_id:?int}>>
+     */
+    private function linkedSettlements(int $supplierId, string $docType, array $docIds): array
+    {
+        if ($docIds === []) {
+            return [];
+        }
+        $side = self::SETTLEMENT_ACCOUNTS[$docType]['side'];
+        $receivable = implode(' OR ', array_map(static fn (string $p): string => "COALESCE(pa.account_code, ca.account_code) LIKE '{$p}%'", self::SETTLEMENT_ACCOUNTS[$docType]['prefixes']));
+        $out = [];
+        foreach (array_chunk($docIds, 500) as $chunk) {
+            $in = implode(',', array_map('intval', $chunk));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT dl.doc_id, e.id AS entry_id, e.entry_date, COALESCE(e.document_no, '') AS document_no,
+                        SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN l.signed_amount ELSE -l.signed_amount END) ELSE 0 END) AS czk,
+                        SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN COALESCE(l.signed_amount_foreign, 0) ELSE -COALESCE(l.signed_amount_foreign, 0) END) ELSE 0 END) AS foreign_amount,
+                        MAX(CASE WHEN ({$receivable}) THEN l.currency_code END) AS currency_code
+                   FROM journal_entry_document_links dl
+                   JOIN journal_entries e ON e.id = dl.entry_id AND e.supplier_id = dl.supplier_id
+                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  WHERE dl.supplier_id = ? AND dl.doc_type = ? AND dl.doc_id IN ({$in})
+                    AND e.source_type = 'manual' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links other
+                                     WHERE other.supplier_id = dl.supplier_id AND other.entry_id = dl.entry_id
+                                       AND other.doc_type = dl.doc_type AND other.doc_id <> dl.doc_id)
+                    AND NOT EXISTS (SELECT 1 FROM invoice_settlements s
+                                     WHERE s.supplier_id = dl.supplier_id AND s.journal_entry_id = dl.entry_id
+                                       AND s.doc_type = dl.doc_type AND s.doc_id = dl.doc_id AND s.status = 'confirmed')
+                    AND " . JournalSettlementAllocationSql::noAllocationSql('dl.supplier_id', 'dl.entry_id', 'dl.doc_type') . "
+                    AND NOT EXISTS (SELECT 1 FROM journal_document_postings own
+                                     WHERE own.supplier_id = dl.supplier_id AND own.entry_id = dl.entry_id
+                                       AND own.doc_type = dl.doc_type AND own.doc_id = dl.doc_id)
+                  GROUP BY dl.doc_id, e.id, e.entry_date, e.document_no
+                 HAVING czk >= 0.01
+                  ORDER BY dl.doc_id, e.entry_date, e.id"
+            );
+            $stmt->execute([$supplierId, $docType]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($rows === []) {
+                continue;
+            }
+            $counter = $this->counterAccounts($supplierId, array_map(static fn (array $r): int => (int) $r['entry_id'], $rows), $receivable, $side === 'credit' ? 'debit' : 'credit');
+            foreach ($rows as $r) {
+                $out[(int) $r['doc_id']][] = [
+                    'entry_id' => (int) $r['entry_id'], 'date' => substr((string) $r['entry_date'], 0, 10),
+                    'document_no' => (string) $r['document_no'], 'czk' => round((float) $r['czk'], 2),
+                    'foreign' => round((float) $r['foreign_amount'], 2), 'currency' => $r['currency_code'] !== null ? (string) $r['currency_code'] : null,
+                    'account_id' => $counter[(int) $r['entry_id']] ?? null,
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Protiúčet zápočtu: účet na druhé straně zápisu mimo saldokontní účty (kam zápis
+     * interního dokladu doklad vyrovnal), s největší částkou.
+     *
+     * @param list<int> $entryIds
+     * @param 'debit'|'credit' $side
+     * @return array<int,int>
+     */
+    private function counterAccounts(int $supplierId, array $entryIds, string $receivable, string $side): array
+    {
+        $in = implode(',', array_map('intval', array_unique($entryIds)));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.entry_id, l.account_id, SUM(l.signed_amount) AS amount
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts ca ON ca.id = l.account_id
+               LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+              WHERE l.supplier_id = ? AND l.entry_id IN ({$in}) AND l.side = ? AND NOT ({$receivable})
+              GROUP BY l.entry_id, l.account_id
+              ORDER BY l.entry_id, amount DESC, l.account_id"
+        );
+        $stmt->execute([$supplierId, $side]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['entry_id']] ??= (int) $r['account_id'];
+        }
+        return $out;
+    }
+
+    /**
+     * Vyrovnání zápisu v měně dokladu: korunový doklad korunami, doklad v cizí měně částkou
+     * řádku v jeho měně, jinak korunami kurzem dokladu.
+     *
+     * @param array<string,mixed> $c
+     * @param array<string,mixed> $entry
+     */
+    private function inDocumentCurrency(array $c, array $entry): float
+    {
+        if ($c['currency'] === 'CZK') {
+            return $entry['czk'];
+        }
+        if ($entry['currency'] === $c['currency'] && $entry['foreign'] >= 0.01) {
+            return $entry['foreign'];
+        }
+        return $c['rate'] !== null ? round($entry['czk'] / $c['rate'], 2) : 0.0;
+    }
+
+    /**
+     * Zápočet interním dokladem jako {@see PairingSymbolMatcher}: `invoice_settlements`
+     * s vazbou na zápis, vydaný doklad i s evidovanou platbou `settlement` (saldokonto vydaných
+     * dokladů čte jen ji).
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param array<string,mixed> $doc
+     * @param array<string,mixed> $entry
+     */
+    private function recordSettlement(int $supplierId, ?int $userId, string $docType, array $doc, array $entry, float $amount): void
+    {
+        $pdo = $this->db->pdo();
+        $docNo = $entry['document_no'] !== '' ? $entry['document_no'] : '#' . $entry['entry_id'];
+        $paymentId = null;
+        if ($docType === 'invoice') {
+            $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$supplierId, $doc['id'], $entry['date'], number_format($amount, 2, '.', ''), $doc['currency'],
+                    IssuedPaymentRecorder::note('settlement', $docNo), self::SOURCE, $userId]);
+            $paymentId = (int) $pdo->lastInsertId();
+        }
+        $pdo->prepare(
+            "INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, note, status, journal_entry_id, invoice_payment_id, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)"
+        )->execute([$supplierId, $docType, $doc['id'], $entry['date'], number_format($amount, 2, '.', ''), $entry['account_id'],
+            'Převzato z Money S3, interní doklad ' . $docNo, $entry['entry_id'], $paymentId, $userId]);
+    }
+
+    private function currentNote(int $paymentId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT note FROM invoice_payments WHERE id = ?');
+        $stmt->execute([$paymentId]);
+        return (string) $stmt->fetchColumn();
+    }
+}
