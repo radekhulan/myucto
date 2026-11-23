@@ -14,6 +14,8 @@ import { DIMENSION_FILTER_MAX_VALUES } from '@/utils/dimensionFilter'
 const props = defineProps<{
   valueIds: number[]
   descendants: boolean
+  /** Hodnoty jen jednoho typu: další řádky nabízí jen typ první vybrané hodnoty (evidence DPH). */
+  singleType?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -41,6 +43,10 @@ watch(() => props.valueIds, (ids) => {
 
 // Tlačítko je vidět hned (aby šla kombinace dimenzí objevit), použít jde až po výběru hodnoty v každém řádku.
 const canAdd = computed(() => rows.value.every(r => r.valueId !== null))
+const lockedType = computed<number | null>(() => {
+  const first = rows.value[0]?.valueId
+  return props.singleType && first != null ? (dims.valueById.value.get(first)?.type_id ?? null) : null
+})
 const atLimit = computed(() => rows.value.length >= DIMENSION_FILTER_MAX_VALUES)
 
 function setRow(index: number, valueId: number | null) {
@@ -66,6 +72,7 @@ function removeRow(index: number) {
   <div v-if="dims.enabled.value" class="flex flex-col gap-2" data-test="dimension-report-filters">
     <div v-for="(r, index) in rows" :key="r.key" class="flex flex-wrap items-end gap-2" data-test="dimension-report-filters-row">
       <DimensionReportFilter :value-id="r.valueId" :descendants="descendants" hide-descendants
+        :lock-type-id="index > 0 ? lockedType : null"
         @update:value-id="setRow(index, $event)" />
       <button v-if="rows.length > 1" type="button" :class="btnOutline('danger')" class="whitespace-nowrap"
               :title="t('dimensions.filter_remove')" :aria-label="t('dimensions.filter_remove')"

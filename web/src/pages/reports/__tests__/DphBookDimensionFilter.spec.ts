@@ -95,6 +95,21 @@ describe('Kniha DPH – filtr dimenze', () => {
     wrapper.unmount()
   })
 
+  it('výběr dimenze v knize omezí na jeden typ a vypíše doklady s rozpisem DPH bez vazby na položky', async () => {
+    m.route.query = { year: '2026', month: '10', period: 'monthly', dimension_value_id: '2551' }
+    m.api.dphBookPreview.mockResolvedValue({ ...preview(), dimension_unassigned: [
+      { source: 'purchase', document_kind: 'invoice', invoice_id: 7, doc_number: 'PF-7', counterparty_name: 'Dodavatel', base: 1000, vat: 210 },
+    ] })
+    const wrapper = mountReport()
+    await flushPromises()
+
+    expect(wrapper.findComponent(DimensionReportFilters).props('singleType')).toBe(true)
+    const unassigned = wrapper.get('[data-test="dph-book-dimension-unassigned"]').text()
+    expect(unassigned).toContain('PF-7')
+    expect(unassigned).toContain('reports.dph_book.dimension_unassigned')
+    wrapper.unmount()
+  })
+
   it('soupis oddílu KH dostane filtr dimenze v náhledu i v exportu', async () => {
     m.route.query = { year: '2026', month: '9', period: 'quarterly', kh_section: 'A.4', dimension_value_id: '2551' }
     const wrapper = mountReport()

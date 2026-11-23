@@ -31533,7 +31533,9 @@
       "dimension_filtered": "Dimension filter: {label}",
       "dimension_filtered_note": "For a document split between several values only the share of lines and splits of that value is listed (base and VAT by lines). The ledger and the KH listing support a single dimension type only.",
       "dimension_corrections_note": "Corrections under § 43, § 46 and § 74b are not linked to a dimension, so they are not part of the filtered listing.",
-      "dimension_label": "Dimension"
+      "dimension_label": "Dimension",
+      "dimension_unassigned": "The VAT breakdown of these documents cannot be assigned to items with different dimensions and is not in the filtered book (the VAT by dimension report shows it separately):",
+      "dimension_unassigned_amounts": "base {base} CZK, VAT {vat} CZK"
     },
     "vatCorrections": {
       "title": "One-off VAT corrections",
@@ -32023,7 +32025,7 @@
       "type": "Dimension type",
       "download_pdf": "Download PDF",
       "download_xlsx": "Download XLSX",
-      "split_note": "The values together with the Without dimension row must add up to the VAT records of the period. Amounts are in CZK before the rounding of the return.",
+      "split_note": "All rows (values, Without dimension, VAT breakdown not linked to items and return corrections) must add up to the VAT records for the period. Amounts are in CZK before the return is rounded.",
       "no_dimension": "Without dimension",
       "total": "Total",
       "evidence": "VAT records (the same data as the return)",
@@ -32034,9 +32036,9 @@
       "line_difference": "line {line}: base {base}, VAT {vat}",
       "control_ok": "The report total matches the VAT records of the period.",
       "return_title": "VAT return lines 62/63/64",
-      "return_note": "The return also contains corrections under § 43, § 46 and § 74b and rounding that are not linked to a dimension. The Return corrections and rounding row is the difference between the return and the VAT records.",
+      "return_note": "The adjustments row is the difference between the return and the report total: deduction correction on registration (§ 79), reduced deduction coefficient (§ 76), deduction adjustment (§ 78) and rounding of return lines to whole CZK. Corrections under § 43, § 46 and § 74b have their own row in the report.",
       "return_lines": "Return lines 62/63/64",
-      "bridge": "Return corrections and rounding",
+      "bridge": "Return adjustments (§ 79, § 76, § 78) and rounding",
       "account343_title": "Account 343 turnover check",
       "account343_excluded": "Excluded from the check: payments to the tax office {payments} ({payments_net}), opening balances {opening} ({opening_net}).",
       "col": {
@@ -32056,7 +32058,10 @@
         "net": "Balance (Cr − Dr)",
         "report_result": "Report result",
         "account_net": "Account 343 balance"
-      }
+      },
+      "row_vat_allocation": "VAT breakdown not linked to items",
+      "row_corrections": "Return corrections (§ 43, § 46, § 74b)",
+      "preliminary": "Preliminary: a foreign-currency document has no exchange rate, its amounts are converted at 1.0. Add the rate on the document."
     }
   },
   "tax_evidence": {

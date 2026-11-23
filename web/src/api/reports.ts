@@ -204,6 +204,8 @@ function vatDimensionParams(dimension?: VatDimensionFilter): Record<string, stri
 
 export interface DphBookPreview {
   dimension?: VatReportDimension | null
+  /** Přijaté doklady s hodnotou filtru, jejichž rozpis DPH nejde přiřadit k položkám. */
+  dimension_unassigned?: { source: string; document_kind: string | null; invoice_id: number; doc_number: string | null; counterparty_name: string; base: number; vat: number }[]
   period: {
     year: number
     month: number
@@ -287,6 +289,8 @@ export type VatByDimensionAmountKey = typeof VAT_BY_DIMENSION_AMOUNT_KEYS[number
 export type VatByDimensionAmounts = Record<VatByDimensionAmountKey, number>
 
 export interface VatByDimensionRow extends VatByDimensionAmounts {
+  /** value = hodnota typu, none = bez dimenze, vat_allocation = rozpis DPH bez vazby na položky, corrections = opravy § 43/46/74b. */
+  kind?: 'value' | 'none' | 'vat_allocation' | 'corrections'
   /** null = doklady a řádky bez hodnoty tohoto typu („Bez dimenze"). */
   value_id: number | null
   code: string | null
@@ -341,6 +345,9 @@ export interface VatByDimensionReport {
     note: string
   }
   account343_unavailable: string | null
+  /** U dokladu v cizí měně chybí kurz: částky jsou předběžné. */
+  preliminary?: boolean
+  missing_rates?: { invoice_id: number; source: string; currency: string; doc?: string }[]
   warnings: string[]
 }
 

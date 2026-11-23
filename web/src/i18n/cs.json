@@ -31533,7 +31533,9 @@
       "dimension_filtered": "Filtr dimenze: {label}",
       "dimension_filtered_note": "U dokladu rozděleného mezi víc hodnot je ve výpisu jen podíl řádků a rozpadu dané hodnoty (základ i DPH po řádcích). Kniha i soupis KH podporují jen jeden typ dimenze.",
       "dimension_corrections_note": "Opravy podle § 43, § 46 a § 74b nemají vazbu na dimenzi, proto ve filtrovaném výpisu nejsou.",
-      "dimension_label": "Dimenze"
+      "dimension_label": "Dimenze",
+      "dimension_unassigned": "Rozpis DPH těchto dokladů nejde přiřadit k položkám s různými dimenzemi, ve filtrované knize není (sestava DPH podle dimenze ho vykazuje samostatně):",
+      "dimension_unassigned_amounts": "základ {base} Kč, DPH {vat} Kč"
     },
     "vatCorrections": {
       "title": "Jednorázové opravy DPH",
@@ -32023,7 +32025,7 @@
       "type": "Typ dimenze",
       "download_pdf": "Stáhnout PDF",
       "download_xlsx": "Stáhnout XLSX",
-      "split_note": "Součet hodnot a řádku Bez dimenze musí dát evidenci DPH za období. Částky jsou v Kč před zaokrouhlením přiznání.",
+      "split_note": "Součet všech řádků (hodnoty, Bez dimenze, rozpis DPH bez vazby na položky a opravy přiznání) musí dát evidenci DPH za období. Částky jsou v Kč před zaokrouhlením přiznání.",
       "no_dimension": "Bez dimenze",
       "total": "Celkem",
       "evidence": "Evidence DPH (stejná data jako přiznání)",
@@ -32034,9 +32036,9 @@
       "line_difference": "ř. {line}: základ {base}, DPH {vat}",
       "control_ok": "Součet sestavy odpovídá evidenci DPH za období.",
       "return_title": "Přiznání k DPH ř. 62/63/64",
-      "return_note": "Přiznání navíc obsahuje opravy podle § 43, § 46 a § 74b a zaokrouhlení, které vazbu na dimenzi nemají. Řádek Opravy a zaokrouhlení přiznání je rozdíl mezi přiznáním a evidencí DPH.",
+      "return_note": "Řádek úprav je rozdíl mezi přiznáním a součtem sestavy: korekce odpočtu při registraci (§ 79), krácení odpočtu koeficientem (§ 76), úprava odpočtu (§ 78) a zaokrouhlení řádků přiznání na celé Kč. Opravy § 43, § 46 a § 74b jsou v sestavě v samostatném řádku.",
       "return_lines": "Přiznání ř. 62/63/64",
-      "bridge": "Opravy a zaokrouhlení přiznání",
+      "bridge": "Úpravy přiznání (§ 79, § 76, § 78) a zaokrouhlení",
       "account343_title": "Kontrola obratů účtu 343",
       "account343_excluded": "Mimo kontrolu: platby finančnímu úřadu {payments} ({payments_net}), počáteční stavy {opening} ({opening_net}).",
       "col": {
@@ -32056,7 +32058,10 @@
         "net": "Saldo (D − MD)",
         "report_result": "Výsledek sestavy",
         "account_net": "Saldo účtu 343"
-      }
+      },
+      "row_vat_allocation": "Rozpis DPH bez vazby na položky",
+      "row_corrections": "Opravy přiznání (§ 43, § 46, § 74b)",
+      "preliminary": "Předběžné: u dokladu v cizí měně chybí kurz, jeho částky jsou přepočtené kurzem 1,0. Doplňte kurz na dokladu."
     }
   },
   "tax_evidence": {

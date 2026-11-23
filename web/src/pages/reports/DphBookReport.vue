@@ -47,6 +47,7 @@ const dimensionFilter = computed<VatDimensionFilter | null>(() => {
 })
 // Bez filtru se volá s původními argumenty, filtr se přidává jen když je zapnutý.
 const dimensionArgs = (): [VatDimensionFilter] | [] => dimensionFilter.value ? [dimensionFilter.value] : []
+const fmtUnassigned = (v: number) => new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)
 const dimensionLabel = computed(() => (khSection.value === '' ? preview.value?.dimension : khReport.value?.dimension)?.label ?? '')
 
 // Období drží v URL useVatReportPeriod; stránka zapisuje jen vlastní filtr.
@@ -295,13 +296,21 @@ onMounted(() => { void initialize() })
     </div>
 
     <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
-    <DimensionReportFilters class="mb-4" :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+    <DimensionReportFilters class="mb-4" :value-ids="dimensionValueIds" :descendants="dimensionDescendants" single-type
       @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
 
     <div v-if="dimensionValueIds.length > 0" class="mb-4 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm" data-test="dph-book-dimension-note">
       <p class="font-semibold text-primary-700">{{ t('reports.dph_book.dimension_filtered', { label: dimensionLabel || dimensionValueIds.join(', ') }) }}</p>
       <p class="mt-1 text-neutral-600">{{ t('reports.dph_book.dimension_filtered_note') }}</p>
       <p class="mt-1 text-neutral-600">{{ t('reports.dph_book.dimension_corrections_note') }}</p>
+      <div v-if="khSection === '' && preview?.dimension_unassigned?.length" class="mt-2" data-test="dph-book-dimension-unassigned">
+        <p class="font-medium text-warning-700">{{ t('reports.dph_book.dimension_unassigned') }}</p>
+        <ul class="mt-1 space-y-0.5 text-neutral-700">
+          <li v-for="u in preview.dimension_unassigned" :key="`${u.source}-${u.invoice_id}`">
+            {{ u.doc_number || '—' }} · {{ u.counterparty_name }} · {{ t('reports.dph_book.dimension_unassigned_amounts', { base: fmtUnassigned(u.base), vat: fmtUnassigned(u.vat) }) }}
+          </li>
+        </ul>
+      </div>
     </div>
 
     <div v-if="dphLine" class="mb-4 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm">

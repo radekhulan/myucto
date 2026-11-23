@@ -171,6 +171,32 @@ describe('DPH podle dimenze', () => {
     wrapper.unmount()
   })
 
+  it('řádky rozpisu DPH a oprav mají vlastní popisek bez prokliku a chybějící kurz označí sestavu jako předběžnou', async () => {
+    const base = report()
+    m.api.vatByDimensionPreview.mockResolvedValue({
+      ...base,
+      preliminary: true,
+      rows: [
+        ...base.rows,
+        row({ kind: 'vat_allocation', value_id: null, code: null, name: 'Rozpis', label: 'Rozpis', documents: 1 }, 0, 21),
+        row({ kind: 'corrections', value_id: null, code: null, name: 'Opravy', label: 'Opravy', documents: 0 }, -178, 0),
+      ],
+    })
+    const wrapper = mountReport()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="vat-dimension-preliminary"]').text()).toContain('reports.vat_by_dimension.preliminary')
+    const text = wrapper.get('[data-test="vat-dimension-table"]').text()
+    expect(text).toContain('reports.vat_by_dimension.row_vat_allocation')
+    expect(text).toContain('reports.vat_by_dimension.row_corrections')
+    const links = wrapper.findAll('a').map(a => a.attributes('data-to'))
+    // Proklik mají jen hodnoty (tabulka i mobilní karty), zvláštní řádky ne.
+    const bookLinks = links.filter(l => l?.includes('dimension_value_id'))
+    expect(bookLinks).toHaveLength(4)
+    expect(bookLinks.every(l => l!.includes('2551') || l!.includes('2552'))).toBe(true)
+    wrapper.unmount()
+  })
+
   it('box účtu 343 ukáže obraty po hodnotách, porovnání, poznámku a vyloučené platby', async () => {
     m.route.query = { year: '2026', month: '10', period: 'monthly', type_id: '11' }
     const wrapper = mountReport()

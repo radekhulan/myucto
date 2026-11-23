@@ -14,6 +14,8 @@ const props = defineProps<{
   valueId: number | null
   descendants: boolean
   hideDescendants?: boolean
+  /** Jen tento typ dimenze (filtr, který přijímá hodnoty jediného typu). */
+  lockTypeId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -27,7 +29,12 @@ const typeId = ref<number | null>(null)
 
 onMounted(() => { void dims.load() })
 
-const activeTypes = computed(() => dims.types.value.filter(ty => ty.is_active))
+const activeTypes = computed(() => dims.types.value.filter(ty => ty.is_active
+  && (props.lockTypeId == null || ty.id === props.lockTypeId)))
+
+watch(() => props.lockTypeId, (locked) => {
+  if (locked != null && !props.valueId) typeId.value = locked
+}, { immediate: true })
 
 // Vybraná hodnota určuje typ (např. filtr převzatý z URL).
 watch([() => props.valueId, () => dims.valueById.value], () => {

@@ -89,7 +89,7 @@ function download(format: 'pdf' | 'xlsx') {
 // remember=0: odkaz nemění zapamatované období ostatních výkazů DPH.
 function bookLink(row: VatByDimensionRow) {
   const period = report.value?.period
-  if (row.value_id === null || !period) return null
+  if (row.value_id === null || (row.kind ?? 'value') !== 'value' || !period) return null
   return { path: '/reports/dph-book', query: {
     year: String(period.year), month: String(period.month), period: period.period_type,
     dimension_value_id: String(row.value_id), dimension_descendants: '0', remember: '0',
@@ -97,6 +97,8 @@ function bookLink(row: VatByDimensionRow) {
 }
 
 function rowLabel(row: VatByDimensionRow): string {
+  if (row.kind === 'vat_allocation') return t('reports.vat_by_dimension.row_vat_allocation')
+  if (row.kind === 'corrections') return t('reports.vat_by_dimension.row_corrections')
   return row.value_id === null ? t('reports.vat_by_dimension.no_dimension') : row.label
 }
 
@@ -245,6 +247,9 @@ onActivated(() => {
           {{ t('reports.vat_by_dimension.type') }}: <span class="font-medium" data-test="vat-dimension-type-name">{{ report.dimension_type.name }}</span>
         </div>
         <p class="text-xs text-neutral-500 mt-2">{{ t('reports.vat_by_dimension.split_note') }}</p>
+        <p v-if="report.preliminary" class="mt-2 rounded-md border border-warning-500/40 bg-warning-50 p-2 text-sm font-medium text-warning-700" data-test="vat-dimension-preliminary">
+          {{ t('reports.vat_by_dimension.preliminary') }}
+        </p>
         <ul v-if="report.warnings.length" class="mt-2 space-y-1 text-xs text-warning-700" data-test="vat-dimension-warnings">
           <li v-for="(warning, i) in report.warnings" :key="i">{{ warning }}</li>
         </ul>
