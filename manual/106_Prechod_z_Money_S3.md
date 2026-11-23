@@ -455,11 +455,20 @@ a daň za prosinec pak spárujete s úhradou v Bance.
 - Závazek s vlastním zápisem v deníku (pojistné, daň) převezme zápis bez nového
   zaúčtování.
 - Čistou mzdu vede Money na témže účtu na obou stranách, předpis nese interní
-  doklad mezd. Vznikne jako potvrzená položka bez zápisu; saldokonto 331 ji
-  neukáže a kontrolní sestava (viz [§ 106.10.5](#106105-rekonciliace-a-protokol))
-  ji vypíše jako rozdíl.
+  doklad mezd. Vznikne jako potvrzená položka bez zápisu a jako předpis dostane
+  část řádku Dal 331 interního dokladu mezd téhož měsíce, stejně jako položka
+  založená ze zůstatku zápisu. Saldokonto 331 ji tak ukáže. Nenajde-li převod
+  takový řádek, protokol závazek vyjmenuje a kontrolní sestava (viz
+  [§ 106.10.5](#106105-rekonciliace-a-protokol)) ho vypíše jako rozdíl.
 - Závazky jiných účtů (exekuce, insolvence na 379) převod jen vyjmenuje.
-- Část uhrazená do konce roku se vede jako uhrazená mimo banku a pokladnu.
+- Část uhrazená do konce roku závazku se vede jako uhrazená mimo banku
+  a pokladnu.
+- Převedete-li později i další rok, lednovou úhradu převod spáruje s převedeným
+  pohybem banky či pokladny, kterým ji Money uhradilo. Saldokonto k 31. 12.
+  předchozího roku tak závazek dál ukazuje. Úhradu, kterou v převedené bance
+  ani pokladně nenajde, protokol vyjmenuje a závazek zůstane otevřený.
+- Měsíc, jehož zaúčtování mezd je už načtené z PAMICY, mzdové závazky
+  z Money nedostane. A naopak: měsíc převzatý z Money PAMICA znovu nenačte.
 
 ### 106.10.3 Co převod nepřenese
 
