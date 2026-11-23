@@ -57,6 +57,7 @@ konkrétní postup závisí na typu instalace.
    **Upgrade zařazen do fronty**.
 4. Do 30 sekund požadavek převezme update watcher na hostu, aktualizuje image,
    restartuje stack a spustí migrace. Stav se obnovuje každých 5 sekund.
+   Připnutou verzi služby `app` v souboru Compose přepíše až po úspěšných kontrolách před restartem aplikace.
 
 **Jak poznáte, že je hotovo:** Stránka ukáže **Upgrade úspěšně dokončen**
 s časem **Dokončeno** a **Aktuální verze** odpovídá nové verzi.

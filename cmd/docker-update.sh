@@ -117,6 +117,8 @@ port_holder_status() {
 }
 
 # --- 1. fetch new code/image ---------------------------------------------
+target_image=""
+pin_compose=""
 if [[ "${MODE}" == "source" ]]; then
   if [[ -n "$(git status --porcelain)" ]]; then
     echo "WARN: working tree is dirty — local changes won't be pulled." >&2
@@ -128,8 +130,41 @@ if [[ "${MODE}" == "source" ]]; then
   echo "==> Rebuilding app image…"
   "${DC[@]}" build --pull app
 else
-  echo "==> Pulling latest image from registry…"
-  "${DC[@]}" pull app
+  requested_version="${MYINVOICE_TARGET_VERSION:-}"
+  if [[ "$requested_version" =~ ^v?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$ ]]; then
+    if [[ ! -f "${PROJECT_ROOT}/cmd/lib/image-tag.sh" ]]; then
+      echo "ERROR: Chybí cmd/lib/image-tag.sh, dotáhni repo." >&2
+      exit 1
+    fi
+    # shellcheck source=lib/image-tag.sh
+    . "${PROJECT_ROOT}/cmd/lib/image-tag.sh"
+    bump="$("${DC[@]}" config | image_tag_bump - "$requested_version")"
+    if [[ -n "$bump" ]]; then
+      if [[ -n "$COMPOSE_ARGS" ]]; then
+        pin_compose="${COMPOSE_ARGS#-f }"
+      elif [[ -z "${COMPOSE_FILE:-}" ]]; then
+        compose_files=()
+        for file in compose.yaml compose.yml docker-compose.yaml docker-compose.yml \
+          compose.override.yaml compose.override.yml docker-compose.override.yaml docker-compose.override.yml; do
+          [[ ! -f "$file" ]] || compose_files+=("$file")
+        done
+        if [[ "${#compose_files[@]}" == 1 && "${compose_files[0]}" != *.override.* ]]; then
+          pin_compose="${compose_files[0]}"
+        fi
+      fi
+      if [[ -z "$pin_compose" || -L "$pin_compose" || "$(image_tag_bump "$pin_compose" "$requested_version")" != "$bump" ]]; then
+        echo "ERROR: Připnutý image služby app nelze jednoznačně změnit v souboru Compose. Nastav cílovou verzi ručně." >&2
+        exit 1
+      fi
+      read -r pinned_image target_image <<< "$bump"
+      echo "==> Připnutá verze ${pinned_image##*:} → cílová ${target_image##*:}"
+      docker pull "$target_image"
+    fi
+  fi
+  if [[ -z "$target_image" ]]; then
+    echo "==> Pulling latest image from registry…"
+    "${DC[@]}" pull app
+  fi
 fi
 
 # --- 1b. detect legacy 3-volume layout and auto-migrate (3.5.x → 3.6.0) --
@@ -237,6 +272,21 @@ done
 
 # App až po zdravé DB. Nový image → compose app tak jako tak rekreuje; s
 # --remove-orphans + auto-recovery níže je restart odolný proti kolizi portu/sítě.
+if [[ -n "$target_image" ]]; then
+  compose_before="$(cksum < "$pin_compose")"
+  compose_stage="$(mktemp "${pin_compose}.XXXXXX")"
+  trap 'rm -f -- "$compose_stage"' EXIT
+  cp -p -- "$pin_compose" "$compose_stage"
+  image_tag_write "$compose_stage" "$pinned_image" "$target_image"
+  resolved_image="$(docker compose -f "$compose_stage" config | image_tag_app_image -)"
+  if [[ "$resolved_image" != "$target_image" || "$(cksum < "$pin_compose")" != "$compose_before" ]]; then
+    echo "ERROR: Změnu připnuté verze služby app v $pin_compose se nepodařilo ověřit." >&2
+    exit 1
+  fi
+  mv -f -- "$compose_stage" "$pin_compose"
+  trap - EXIT
+  echo "    $pin_compose: $target_image"
+fi
 echo "==> Restarting app…"
 "${DC[@]}" up -d --remove-orphans app
 
@@ -264,6 +314,14 @@ for i in {1..90}; do
     exit 1
   fi
 done
+
+if [[ -n "$target_image" ]]; then
+  actual_version="$("${DC[@]}" exec -T app cat /var/www/html/VERSION)"
+  if [[ "$actual_version" != "${target_image##*:}" ]]; then
+    echo "ERROR: Služba app hlásí verzi '$actual_version', očekávána je '${target_image##*:}'." >&2
+    exit 1
+  fi
+fi
 
 # --- 3c. úklid osiřelých vrstev po updatu (bezpečné — jen dangling) -------
 echo "==> Úklid dangling image vrstev…"
