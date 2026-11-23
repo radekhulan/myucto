@@ -1235,7 +1235,8 @@
         "2329_isds_access_profiles.sql",
         "2330_bank_statement_rebases.sql",
         "2331_accrual_agenda.sql",
-        "2332_accrual_agenda_permissions.sql"
+        "2332_accrual_agenda_permissions.sql",
+        "2333_purchase_renumber_date_basis.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -28102,6 +28103,7 @@
                 "purchase_invoice_numbering": "enum('shared','by_kind') NOT NULL DEFAULT 'shared'",
                 "purchase_invoice_qr_include_due_date": "tinyint(1) NOT NULL DEFAULT 0",
                 "purchase_receipt_number_format": "varchar(60) NULL DEFAULT NULL",
+                "purchase_renumber_date_basis": "enum('issue','received','tax') NOT NULL DEFAULT 'issue'",
                 "purchase_tax_document_number_format": "varchar(60) NULL DEFAULT NULL",
                 "receipt_payable_account_code": "varchar(10) NULL DEFAULT NULL",
                 "reminder_days_after_due": "int(11) NOT NULL DEFAULT 3",

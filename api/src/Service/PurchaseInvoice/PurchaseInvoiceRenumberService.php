@@ -12,13 +12,22 @@ use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 use PDO;
 
 /**
- * Přečíslování přijatých dokladů jednoho měsíce podle data vystavení.
+ * Přečíslování přijatých dokladů jednoho měsíce podle zvoleného data.
  *
  * Interní číslo dostává doklad při přijetí, takže pořadí v řadě odpovídá pořadí
  * přijímání, ne datu. Přečíslování vezme automaticky očíslované doklady měsíce
- * (číslo odpovídá šabloně některé řady pro daný měsíc), seřadí je podle data vystavení
+ * (číslo odpovídá šabloně některé řady pro daný měsíc), seřadí je podle zvoleného data
  * a v každé řadě jim přidělí čísla od 1. Řadu určuje AKTUÁLNÍ typ dokladu, takže
  * doklad, kterému se po očíslování změnil typ, se přesune do správné řady.
+ *
+ * Datum pro výběr měsíce i pořadí ({@see BASES}): datum vystavení (výchozí), datum přijetí
+ * nebo DUZP. Doklad bez zvoleného data se řadí podle data vystavení. Volba se uloží
+ * do `supplier.purchase_renumber_date_basis` při provedení přečíslování.
+ *
+ * Měsíc v čísle dokladu plyne z data vystavení ({@see PurchaseInvoiceRepository::ensureVarsymbol()}),
+ * takže při výběru podle jiného data může doklad měsíce nést číslo jiného měsíce. Takový
+ * doklad zůstane beze změny (důvod `number_other_month`), stejně jako doklad s číslem
+ * tohoto měsíce, jehož zvolené datum leží v jiném měsíci (`date_other_month`).
  *
  * Mimo přečíslování zůstávají ručně zadaná a cizí čísla (neodpovídají šabloně)
  * i čísla jiného měsíce. Jejich čísla se při přidělování přeskočí.
@@ -38,34 +47,61 @@ final class PurchaseInvoiceRenumberService
         private readonly ActivityLogger $activity,
     ) {}
 
+    /** Datum pro výběr měsíce a pořadí: vystavení (výchozí), přijetí, DUZP. */
+    public const BASES = ['issue', 'received', 'tax'];
+
+    private const BASIS_COLUMN = ['issue' => 'issue_date', 'received' => 'received_at', 'tax' => 'tax_date'];
+
+    /** Uložená volba firmy ({@see BASES}), bez uložené volby datum vystavení. */
+    public function storedBasis(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT purchase_renumber_date_basis FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $basis = (string) $stmt->fetchColumn();
+        return in_array($basis, self::BASES, true) ? $basis : 'issue';
+    }
+
     /**
      * Náhled přečíslování (nic nezapisuje).
      *
-     * @return array{period: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>}
+     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = uložená volba firmy
+     * @return array{period: string, date_basis: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>}
      */
-    public function preview(int $supplierId, string $period): array
+    public function preview(int $supplierId, string $period, ?string $basis = null): array
     {
         $period = self::normalizePeriod($period);
+        $basis = $basis === null ? $this->storedBasis($supplierId) : self::normalizeBasis($basis);
         $settings = $this->repo->purchaseSeriesSettings($supplierId);
         $series = PurchaseNumberSeries::all($settings);
         $regexes = [];
+        /** @var array<string, true> $monthly řady, jejichž číslo nese měsíc */
+        $monthly = [];
         foreach ($series as $key => $s) {
             $regex = PurchaseNumberSeries::counterRegex($s['template'], $period);
             if ($regex !== null) {
                 $regexes[$key] = $regex;
+                if (str_contains($s['template'], '{MM}')) {
+                    $monthly[$key] = true;
+                }
             }
         }
+
+        // Prázdné nebo nulové datum (starší data z nestriktního režimu) = doklad bez data.
+        $column = self::BASIS_COLUMN[$basis];
+        $basisDate = $basis === 'issue'
+            ? 'p.issue_date'
+            : "CASE WHEN p.{$column} >= '1000-01-01' THEN p.{$column} END";
 
         $from = substr($period, 0, 4) . '-' . substr($period, 4, 2) . '-01';
         $to = date('Y-m-t', (int) strtotime($from));
         $stmt = $this->db->pdo()->prepare(
             "SELECT p.id, p.supplier_id, p.varsymbol, p.vendor_invoice_number, p.document_kind, p.issue_date,
-                    p.tax_date, p.effective_cost_date, p.booked_at, p.status, p.vat_deduction, p.tax_deductible,
-                    c.company_name
+                    p.tax_date, p.received_at, p.effective_cost_date, p.booked_at, p.status, p.vat_deduction,
+                    p.tax_deductible, c.company_name, {$basisDate} AS basis_date
                FROM purchase_invoices p
                LEFT JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
               WHERE p.supplier_id = ? AND p.varsymbol IS NOT NULL AND p.varsymbol <> ''
-              ORDER BY p.issue_date ASC, p.id ASC"
+              ORDER BY COALESCE({$basisDate}, p.issue_date) ASC, p.issue_date ASC, p.id ASC"
         );
         $stmt->execute([$supplierId]);
 
@@ -73,23 +109,35 @@ final class PurchaseInvoiceRenumberService
         $kept = [];
         /** @var array<string, true> $occupied čísla, která přečíslování nesmí použít */
         $occupied = [];
+        /** @var array<string, list<string>> $issueRegexes vzory čísel měsíce vystavení (YYYYMM) */
+        $issueRegexes = [];
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
             $vs = (string) $row['varsymbol'];
-            $inMonth = $row['issue_date'] >= $from && $row['issue_date'] <= $to;
+            $row['date_fallback'] = $row['basis_date'] === null;
+            $row['basis_date'] = $row['basis_date'] ?? $row['issue_date'];
+            $inMonth = $row['basis_date'] >= $from && $row['basis_date'] <= $to;
             $auto = false;
-            foreach ($regexes as $regex) {
+            $monthNumber = false;
+            foreach ($regexes as $key => $regex) {
                 if (preg_match($regex, $vs)) {
                     $auto = true;
+                    $monthNumber = isset($monthly[$key]);
                     break;
                 }
             }
             if ($inMonth && $auto) {
                 $participants[] = $row;
-            } else {
-                $occupied[$vs] = true;
-                if ($inMonth) {
-                    $kept[] = self::describe($row) + ['reason' => 'manual_number'];
-                }
+                continue;
+            }
+            $occupied[$vs] = true;
+            if ($inMonth) {
+                $issuePeriod = substr(str_replace('-', '', (string) $row['issue_date']), 0, 6);
+                $issueRegexes[$issuePeriod] ??= self::monthlyRegexes($series, $issuePeriod);
+                $otherMonth = $issuePeriod !== $period && self::matchesAny($issueRegexes[$issuePeriod], $vs);
+                $kept[] = self::describe($row) + ['reason' => $otherMonth ? 'number_other_month' : 'manual_number'];
+            } elseif ($monthNumber) {
+                // Číslo tohoto měsíce, ale zvolené datum leží jinde: číslo zůstane obsazené.
+                $kept[] = self::describe($row) + ['reason' => 'date_other_month'];
             }
         }
 
@@ -124,17 +172,49 @@ final class PurchaseInvoiceRenumberService
             $changes[] = self::describe($row) + ['new_varsymbol' => $new, 'series' => $key, 'changed' => $new !== (string) $row['varsymbol']];
         }
 
-        return ['period' => $period, 'changes' => $changes, 'kept' => $kept, 'blocked' => $blocked];
+        return ['period' => $period, 'date_basis' => $basis, 'changes' => $changes, 'kept' => $kept, 'blocked' => $blocked];
+    }
+
+    /**
+     * Vzory čísel řad s měsícem v šabloně pro dané období.
+     *
+     * @param array<string, array{template: string, kinds: list<string>}> $series
+     * @return list<string>
+     */
+    private static function monthlyRegexes(array $series, string $period): array
+    {
+        $out = [];
+        foreach ($series as $s) {
+            $regex = str_contains($s['template'], '{MM}') ? PurchaseNumberSeries::counterRegex($s['template'], $period) : null;
+            if ($regex !== null) {
+                $out[] = $regex;
+            }
+        }
+        return $out;
+    }
+
+    /** @param list<string> $regexes */
+    private static function matchesAny(array $regexes, string $value): bool
+    {
+        foreach ($regexes as $regex) {
+            if (preg_match($regex, $value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Přečísluje měsíc. Vrací stejný tvar jako {@see preview()} + počet změněných dokladů.
+     * Zadané datum pro výběr a pořadí se uloží jako volba firmy.
      *
-     * @return array{period: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>, renumbered: int}
+     * @param string|null $basis datum pro výběr a pořadí ({@see BASES}), null = uložená volba firmy
+     * @return array{period: string, date_basis: string, changes: list<array<string,mixed>>, kept: list<array<string,mixed>>, blocked: list<array<string,mixed>>, renumbered: int}
      * @throws \DomainException měsíc obsahuje doklad v uzavřeném nebo uzamčeném období
      */
-    public function renumber(int $supplierId, string $period, ?int $userId): array
+    public function renumber(int $supplierId, string $period, ?int $userId, ?string $basis = null): array
     {
+        $basis = $basis === null ? null : self::normalizeBasis($basis);
         $pdo = $this->db->pdo();
         $ownTransaction = !$pdo->inTransaction();
         if ($ownTransaction) {
@@ -146,7 +226,7 @@ final class PurchaseInvoiceRenumberService
             // které přečíslování právě rozdává.
             $pdo->prepare('SELECT period FROM purchase_invoice_counters WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
 
-            $plan = $this->preview($supplierId, $period);
+            $plan = $this->preview($supplierId, $period, $basis);
             if ($plan['blocked'] !== []) {
                 throw new \DomainException('Měsíc je po uzávěrce nebo uzamčený k datu, přečíslovat ho nelze.');
             }
@@ -168,9 +248,14 @@ final class PurchaseInvoiceRenumberService
                 $this->repo->setPurchaseCounter($supplierId, PurchaseNumberSeries::counterKey($key, $s['template'], $plan['period']), $highest);
             }
 
+            if ($basis !== null) {
+                $pdo->prepare('UPDATE supplier SET purchase_renumber_date_basis = ? WHERE id = ?')->execute([$basis, $supplierId]);
+            }
+
             if ($moves !== []) {
                 $this->activity->log('purchase_invoice.renumbered', $userId, 'supplier', $supplierId, [
-                    'period'  => $plan['period'],
+                    'period'     => $plan['period'],
+                    'date_basis' => $plan['date_basis'],
                     'changes' => array_map(static fn (array $m): array => [
                         'id' => $m['id'], 'from' => $m['varsymbol'], 'to' => $m['new_varsymbol'],
                     ], $moves),
@@ -257,7 +342,19 @@ final class PurchaseInvoiceRenumberService
             'vendor_name'           => (string) ($row['company_name'] ?? ''),
             'document_kind'         => (string) ($row['document_kind'] ?? 'invoice'),
             'issue_date'            => (string) $row['issue_date'],
+            'received_at'           => (string) ($row['received_at'] ?? ''),
+            'tax_date'              => (string) ($row['tax_date'] ?? ''),
+            'date'                  => (string) ($row['basis_date'] ?? $row['issue_date']),
+            'date_fallback'         => (bool) ($row['date_fallback'] ?? false),
         ];
+    }
+
+    private static function normalizeBasis(string $basis): string
+    {
+        if (!in_array($basis, self::BASES, true)) {
+            throw new \InvalidArgumentException('Datum pro přečíslování musí být issue, received nebo tax.');
+        }
+        return $basis;
     }
 
     private static function normalizePeriod(string $period): string

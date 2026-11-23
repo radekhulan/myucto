@@ -44,7 +44,28 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 import Renumber from '../Renumber.vue'
 
-const emptyPlan = { period: '209908', changes: [], kept: [], blocked: [] }
+const emptyPlan = { period: '209908', date_basis: 'issue', changes: [], kept: [], blocked: [] }
+
+function purchaseRow(id: number, varsymbol: string, extra: Record<string, unknown> = {}) {
+  return {
+    id, varsymbol, vendor_invoice_number: `DOD-${id}`, vendor_name: 'Syntetický dodavatel', document_kind: 'invoice',
+    issue_date: '2099-08-02', received_at: '2099-08-20', tax_date: '', date: '2099-08-20', date_fallback: false,
+    ...extra,
+  }
+}
+
+function receivedPlan() {
+  return {
+    period: '209908',
+    date_basis: 'received',
+    changes: [
+      purchaseRow(2, 'PF9908002', { issue_date: '2099-08-10', received_at: '0000-00-00', date: '2099-08-10', date_fallback: true, new_varsymbol: 'PF9908001', changed: true }),
+      purchaseRow(1, 'PF9908001', { new_varsymbol: 'PF9908002', changed: true }),
+    ],
+    kept: [purchaseRow(3, 'PF9907001', { issue_date: '2099-07-30', received_at: '2099-08-03', date: '2099-08-03', reason: 'number_other_month' })],
+    blocked: [],
+  }
+}
 
 function cashPlan() {
   return {
@@ -121,5 +142,48 @@ describe('Renumber', () => {
     await wrapper.find('[data-test="renumber-run"]').trigger('click')
     await flushPromises()
     expect(m.agendaRenumber).toHaveBeenCalledWith('cash', expect.any(String), { register_id: 8 })
+  })
+
+  it('přijaté doklady: výchozí volbu převezme z náhledu, změna přenačte náhled a přečíslování ji pošle', async () => {
+    m.writable = new Set(['purchase_invoices'])
+    m.purchasePreview.mockResolvedValueOnce({ ...emptyPlan, date_basis: 'received' })
+    m.purchasePreview.mockResolvedValue(receivedPlan())
+    m.purchaseRenumber.mockResolvedValue({ ...receivedPlan(), renumbered: 2 })
+    const wrapper = mount(Renumber)
+    await flushPromises()
+
+    expect(m.purchasePreview).toHaveBeenNthCalledWith(1, expect.any(String), undefined)
+    const select = wrapper.find('[data-test="renumber-basis"]')
+    expect((select.element as HTMLSelectElement).value).toBe('received')
+    expect(wrapper.text()).toContain('purchase_invoice.renumber.period_by_basis.received')
+
+    await select.setValue('issue')
+    await flushPromises()
+    expect(m.purchasePreview).toHaveBeenLastCalledWith(expect.any(String), 'issue')
+
+    await select.setValue('received')
+    await flushPromises()
+    expect(m.purchasePreview).toHaveBeenLastCalledWith(expect.any(String), 'received')
+    expect(wrapper.find('[data-test="renumber-col-issued"]').text()).toBe('purchase_invoice.renumber.col_date')
+    expect(wrapper.find('[data-test="renumber-col-received"]').text()).toBe('purchase_invoice.renumber.col_received')
+    expect(wrapper.find('[data-test="renumber-col-taxDate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="renumber-fallback"]').text()).toBe('purchase_invoice.renumber.fallback.received')
+
+    await wrapper.find('[data-test="renumber-kept"] button').trigger('click')
+    expect(wrapper.find('[data-test="renumber-kept-reason-3"]').text()).toBe('purchase_invoice.renumber.reason.number_other_month')
+
+    await wrapper.find('[data-test="renumber-run"]').trigger('click')
+    await flushPromises()
+    expect(m.purchaseRenumber).toHaveBeenCalledWith(expect.any(String), 'received')
+  })
+
+  it('podle DUZP ukáže i sloupec DUZP', async () => {
+    m.writable = new Set(['purchase_invoices'])
+    m.purchasePreview.mockResolvedValue({ ...receivedPlan(), date_basis: 'tax' })
+    const wrapper = mount(Renumber)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="renumber-col-taxDate"]').text()).toBe('purchase_invoice.renumber.col_tax_date')
+    expect(wrapper.find('[data-test="renumber-fallback"]').text()).toBe('purchase_invoice.renumber.fallback.tax')
   })
 })

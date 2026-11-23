@@ -23740,13 +23740,30 @@
     },
     "renumber": {
       "title": "Přečíslování přijatých dokladů",
-      "intro": "Interní číslo dostane doklad při přijetí, takže pořadí čísel odpovídá pořadí přijímání. Přečíslování seřadí automaticky očíslované doklady zvoleného měsíce podle data vystavení a v každé číselné řadě je očísluje znovu od 1. Ručně zadaná čísla zůstanou beze změny.",
+      "intro": "Interní číslo dostane doklad při přijetí, takže pořadí čísel odpovídá pořadí přijímání. Přečíslování vybere automaticky očíslované doklady zvoleného měsíce podle zvoleného data (vystavení, přijetí nebo DUZP), seřadí je podle něj a v každé číselné řadě je očísluje znovu od 1. Ručně zadaná čísla a čísla jiného měsíce zůstanou beze změny.",
       "tax_note": "Přepíše se i interní číslo v účetním deníku a v popisu příjemky. Do kontrolního hlášení jde číslo dodavatele, na daně tedy přečíslování vliv nemá.",
-      "period": "Měsíc podle data vystavení",
+      "basis": "Řadit podle",
+      "basis_option": {
+        "issue": "Datum vystavení",
+        "received": "Datum přijetí",
+        "tax": "DUZP"
+      },
+      "period_by_basis": {
+        "issue": "Měsíc podle data vystavení",
+        "received": "Měsíc podle data přijetí",
+        "tax": "Měsíc podle DUZP"
+      },
+      "fallback": {
+        "issue": "bez data vystavení",
+        "received": "bez data přijetí, řazeno podle data vystavení",
+        "tax": "bez DUZP, řazeno podle data vystavení"
+      },
       "load": "Zobrazit náhled",
       "run": "Přečíslovat ({count})",
       "confirm": "Přečíslovat {count} dokladů za {period}?",
       "col_date": "Vystaveno",
+      "col_received": "Přijato",
+      "col_tax_date": "DUZP",
       "col_vendor": "Dodavatel",
       "col_vendor_number": "Číslo dodavatele",
       "col_kind": "Typ",
@@ -23754,10 +23771,10 @@
       "col_new": "Nové číslo",
       "unchanged": "beze změny",
       "nothing": "V měsíci nejsou žádné automaticky očíslované doklady.",
-      "in_order": "Čísla už odpovídají pořadí podle data vystavení.",
+      "in_order": "Čísla už odpovídají pořadí podle zvoleného data.",
       "changes_count": "Změní se čísla {count} dokladů.",
       "kept_title": "Ponechaná čísla ({count})",
-      "kept_hint": "Ručně zadaná nebo cizí čísla, přečíslování se jich netýká.",
+      "kept_hint": "Ručně zadaná a cizí čísla a čísla jiného měsíce, přečíslování se jich netýká.",
       "blocked_title": "Měsíc nelze přečíslovat",
       "blocked_hint": "Po uzávěrce se čísla dokladů nemění. Tyto doklady leží v uzavřeném nebo uzamčeném období:",
       "reason": {
@@ -23766,6 +23783,8 @@
         "period_closed": "uzavřené období",
         "date_locked": "uzamčeno k datu",
         "manual_number": "ruční číslo",
+        "number_other_month": "číslo patří do měsíce vystavení, ne do zvoleného měsíce",
+        "date_other_month": "číslo tohoto měsíce, zvolené datum leží v jiném měsíci",
         "cash_in": "příjmový doklad, číslo má plátce",
         "eet": "evidováno v EET",
         "vat_document": "doklad s DPH",

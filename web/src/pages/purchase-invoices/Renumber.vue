@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { purchaseInvoicesApi, type PurchaseRenumberPlan } from '@/api/purchaseInvoices'
+import { purchaseInvoicesApi, type PurchaseRenumberBasis, type PurchaseRenumberPlan } from '@/api/purchaseInvoices'
 import { renumberApi, type AgendaRenumberPlan, type RenumberAgenda } from '@/api/renumber'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { apiErrorMessage } from '@/api/errors'
@@ -15,7 +15,9 @@ import { ICONS, btnFilled, disabledTitle } from '@/components/ui/buttonStyles'
 /**
  * Přečíslování dokladů jednoho měsíce podle data. Záložky = agendy: přijaté doklady
  * (výchozí), pokladna, ostatní pohledávky, ostatní závazky a interní doklady. Náhled
- * se načte po výběru měsíce, samotné přečíslování až po potvrzení. Pravidla (co se
+ * se načte po výběru měsíce, samotné přečíslování až po potvrzení. Přijaté doklady se
+ * řadí podle zvoleného data (vystavení, přijetí, DUZP); výchozí volbu vrací náhled
+ * a server ji uloží při přečíslování. Pravidla (co se
  * přečísluje, co zůstane, kdy je měsíc zamčený) drží backend
  * (PurchaseInvoiceRenumberService, AgendaRenumberService), stránka je jen zobrazuje.
  * Záložka se ukáže jen s právem zápisu dané agendy, stejným, jaké chce server.
@@ -32,6 +34,10 @@ interface ViewRow {
   newNumber: string
   changed: boolean
   reason: string
+  issued?: string
+  received?: string
+  taxDate?: string
+  fallback?: boolean
 }
 
 interface ViewPlan {
@@ -74,6 +80,13 @@ const plan = ref<ViewPlan | null>(null)
 const loading = ref(false)
 const running = ref(false)
 const keptOpen = ref(false)
+const dateBasis = ref<PurchaseRenumberBasis | null>(null)
+const bases: PurchaseRenumberBasis[] = ['issue', 'received', 'tax']
+
+type DateCol = 'issued' | 'received' | 'taxDate'
+const dateColLabel: Record<DateCol, string> = { issued: 'col_date', received: 'col_received', taxDate: 'col_tax_date' }
+const basisCol = computed<DateCol>(() => dateBasis.value === 'received' ? 'received' : dateBasis.value === 'tax' ? 'taxDate' : 'issued')
+const dateCols = computed<DateCol[]>(() => dateBasis.value === 'tax' ? ['issued', 'received', 'taxDate'] : ['issued', 'received'])
 
 const registers = ref<CashRegister[]>([])
 const registerId = ref<number | null>(null)
@@ -100,7 +113,9 @@ function fromPurchase(p: PurchaseRenumberPlan): ViewPlan {
     id: r.id, date: r.issue_date, party: r.vendor_name, detail: r.vendor_invoice_number,
     kind: t(`purchase_invoice.document_kind.${r.document_kind}`), number: r.varsymbol,
     newNumber: r.new_varsymbol ?? '', changed: !!r.changed, reason: r.reason ?? '',
+    issued: r.issue_date, received: r.received_at, taxDate: r.tax_date, fallback: !!r.date_fallback,
   }))
+  dateBasis.value = p.date_basis
   return { changes: map(p.changes), kept: map(p.kept), blocked: map(p.blocked) }
 }
 
@@ -126,7 +141,7 @@ async function ensureRegisters(): Promise<void> {
 
 async function fetchPlan(): Promise<ViewPlan | null> {
   const a = agenda.value
-  if (a === 'purchase') return fromPurchase(await purchaseInvoicesApi.renumberPreview(period.value))
+  if (a === 'purchase') return fromPurchase(await purchaseInvoicesApi.renumberPreview(period.value, dateBasis.value ?? undefined))
   if (a === 'cash' && registerId.value === null) return null
   return fromAgenda(await renumberApi.preview(a, period.value, { register_id: registerId.value ?? undefined }))
 }
@@ -158,7 +173,7 @@ async function run(): Promise<void> {
   try {
     const a = agenda.value
     const result = a === 'purchase'
-      ? await purchaseInvoicesApi.renumber(period.value)
+      ? await purchaseInvoicesApi.renumber(period.value, dateBasis.value ?? undefined)
       : await renumberApi.renumber(a, period.value, { register_id: registerId.value ?? undefined })
     toast.success(t('purchase_invoice.renumber.done', { count: result.renumbered }))
     plan.value = await fetchPlan()
@@ -202,10 +217,17 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
       <div class="flex flex-wrap items-end gap-3">
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1" for="renumber-period">
-            {{ isPurchase ? t('purchase_invoice.renumber.period') : t(`purchase_invoice.renumber.period_by.${agendaGroup}`) }}
+            {{ isPurchase ? t(`purchase_invoice.renumber.period_by_basis.${dateBasis ?? 'issue'}`) : t(`purchase_invoice.renumber.period_by.${agendaGroup}`) }}
           </label>
           <input id="renumber-period" v-model="period" type="month" data-test="renumber-period"
             class="h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface" />
+        </div>
+        <div v-if="isPurchase">
+          <label class="block text-sm font-medium text-neutral-700 mb-1" for="renumber-basis">{{ t('purchase_invoice.renumber.basis') }}</label>
+          <select id="renumber-basis" v-model="dateBasis" data-test="renumber-basis" :disabled="dateBasis === null"
+            class="h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface min-w-48" @change="load()">
+            <option v-for="b in bases" :key="b" :value="b">{{ t(`purchase_invoice.renumber.basis_option.${b}`) }}</option>
+          </select>
         </div>
         <div v-if="agenda === 'cash'">
           <label class="block text-sm font-medium text-neutral-700 mb-1" for="renumber-register">{{ t('purchase_invoice.renumber.register') }}</label>
@@ -254,7 +276,10 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
         <table class="hidden md:table w-full text-sm" data-test="renumber-table">
           <thead class="bg-neutral-50 text-neutral-500 text-xs">
             <tr>
-              <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_date') : t(`purchase_invoice.renumber.col_date_by.${agendaGroup}`) }}</th>
+              <template v-if="isPurchase">
+                <th v-for="col in dateCols" :key="col" class="text-left font-medium px-3 py-2" :data-test="`renumber-col-${col}`">{{ t(`purchase_invoice.renumber.${dateColLabel[col]}`) }}</th>
+              </template>
+              <th v-else class="text-left font-medium px-3 py-2">{{ t(`purchase_invoice.renumber.col_date_by.${agendaGroup}`) }}</th>
               <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_vendor') : t('purchase_invoice.renumber.col_partner') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_vendor_number') : t('purchase_invoice.renumber.col_description') }}</th>
               <th v-if="showKind" class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_kind') }}</th>
@@ -264,7 +289,16 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
           </thead>
           <tbody>
             <tr v-for="c in plan.changes" :key="c.id" class="border-t border-neutral-100" :class="c.changed ? '' : 'text-neutral-400'">
-              <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(c.date) }}</td>
+              <template v-if="isPurchase">
+                <td v-for="col in dateCols" :key="col" class="px-3 py-2 whitespace-nowrap" :class="col === basisCol ? 'font-medium' : ''">
+                  <template v-if="c.fallback && col === basisCol">
+                    <span>—</span>
+                    <span class="block text-xs font-normal text-warning-700" data-test="renumber-fallback">{{ t(`purchase_invoice.renumber.fallback.${dateBasis}`) }}</span>
+                  </template>
+                  <template v-else>{{ c[col] ? formatDate(c[col]) : '—' }}</template>
+                </td>
+              </template>
+              <td v-else class="px-3 py-2 whitespace-nowrap">{{ formatDate(c.date) }}</td>
               <td class="px-3 py-2">{{ c.party }}</td>
               <td class="px-3 py-2" :class="isPurchase ? 'font-mono' : ''">{{ c.detail }}</td>
               <td v-if="showKind" class="px-3 py-2">{{ c.kind }}</td>
@@ -284,6 +318,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
               <span class="text-xs">{{ formatDate(c.date) }}</span>
             </div>
             <div class="text-xs text-neutral-500">{{ [c.kind, c.detail].filter(Boolean).join(' · ') }}</div>
+            <div v-if="isPurchase && c.fallback" class="text-xs text-warning-700">{{ t(`purchase_invoice.renumber.fallback.${dateBasis}`) }}</div>
             <div class="mt-1 font-mono text-xs">
               {{ c.number }} → <span :class="c.changed ? 'font-semibold text-warning-700' : ''">{{ c.changed ? c.newNumber : t('purchase_invoice.renumber.unchanged') }}</span>
             </div>
@@ -304,24 +339,30 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
           <table class="hidden md:table w-full text-sm border-t border-neutral-200">
             <thead class="bg-neutral-50 text-neutral-500 text-xs">
               <tr>
-                <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_date') : t(`purchase_invoice.renumber.col_date_by.${agendaGroup}`) }}</th>
+                <template v-if="isPurchase">
+                <th v-for="col in dateCols" :key="col" class="text-left font-medium px-3 py-2" :data-test="`renumber-col-${col}`">{{ t(`purchase_invoice.renumber.${dateColLabel[col]}`) }}</th>
+              </template>
+              <th v-else class="text-left font-medium px-3 py-2">{{ t(`purchase_invoice.renumber.col_date_by.${agendaGroup}`) }}</th>
                 <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_vendor') : t('purchase_invoice.renumber.col_partner') }}</th>
                 <th class="text-left font-medium px-3 py-2">{{ isPurchase ? t('purchase_invoice.renumber.col_vendor_number') : t('purchase_invoice.renumber.col_description') }}</th>
                 <th v-if="showKind" class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_kind') }}</th>
                 <th class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_old') }}</th>
-                <th v-if="!isPurchase" class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_reason') }}</th>
+                <th class="text-left font-medium px-3 py-2">{{ t('purchase_invoice.renumber.col_reason') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="k in plan.kept" :key="k.id" class="border-t border-neutral-100 text-neutral-600">
-                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(k.date) }}</td>
+                <template v-if="isPurchase">
+                  <td v-for="col in dateCols" :key="col" class="px-3 py-2 whitespace-nowrap">{{ k[col] && !(k.fallback && col === basisCol) ? formatDate(k[col]) : '—' }}</td>
+                </template>
+                <td v-else class="px-3 py-2 whitespace-nowrap">{{ formatDate(k.date) }}</td>
                 <td class="px-3 py-2">{{ k.party }}</td>
                 <td class="px-3 py-2" :class="isPurchase ? 'font-mono' : ''">{{ k.detail }}</td>
                 <td v-if="showKind" class="px-3 py-2">{{ k.kind }}</td>
                 <td class="px-3 py-2 font-mono">
                   <RouterLink :to="docLink(k.id)" class="hover:underline">{{ k.number }}</RouterLink>
                 </td>
-                <td v-if="!isPurchase" class="px-3 py-2">{{ t(`purchase_invoice.renumber.reason.${k.reason}`) }}</td>
+                <td class="px-3 py-2" :data-test="`renumber-kept-reason-${k.id}`">{{ t(`purchase_invoice.renumber.reason.${k.reason}`) }}</td>
               </tr>
             </tbody>
           </table>
@@ -332,7 +373,7 @@ watch([period, agenda, registerId], () => { void load() }, { immediate: true })
                 <span class="text-xs">{{ formatDate(k.date) }}</span>
               </div>
               <RouterLink :to="docLink(k.id)" class="font-mono text-xs hover:underline">{{ k.number }}</RouterLink>
-              <span v-if="!isPurchase" class="text-xs"> · {{ t(`purchase_invoice.renumber.reason.${k.reason}`) }}</span>
+              <span class="text-xs"> · {{ t(`purchase_invoice.renumber.reason.${k.reason}`) }}</span>
             </li>
           </ul>
         </template>

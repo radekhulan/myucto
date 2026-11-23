@@ -884,14 +884,24 @@ export interface PurchaseRenumberRow {
   vendor_name: string
   document_kind: PurchaseDocumentKind
   issue_date: string
+  received_at: string
+  tax_date: string
+  /** Datum podle zvolené volby, podle kterého se doklad vybral a seřadil. */
+  date: string
+  /** Doklad zvolené datum nemá, řadí se podle data vystavení. */
+  date_fallback: boolean
   new_varsymbol?: string
   series?: string
   changed?: boolean
-  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number'
+  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number' | 'number_other_month' | 'date_other_month'
 }
+
+/** Datum pro výběr měsíce a pořadí přečíslování: vystavení, přijetí, DUZP. */
+export type PurchaseRenumberBasis = 'issue' | 'received' | 'tax'
 
 export interface PurchaseRenumberPlan {
   period: string
+  date_basis: PurchaseRenumberBasis
   changes: PurchaseRenumberRow[]
   kept: PurchaseRenumberRow[]
   blocked: PurchaseRenumberRow[]
@@ -1015,13 +1025,16 @@ export const purchaseInvoicesApi = {
     api.put<PurchaseInvoice & { _repost?: { entry_id: number } }>(`/purchase-invoices/${id}/expense-kinds`, { items })
       .then(r => r.data),
 
-  /** Náhled přečíslování měsíce podle data vystavení (period = 'RRRR-MM'). */
-  renumberPreview: (period: string) =>
-    api.get<PurchaseRenumberPlan>('/purchase-invoices/renumber', { params: { period } }).then(r => r.data),
+  /**
+   * Náhled přečíslování měsíce (period = 'RRRR-MM') podle zvoleného data. Bez volby
+   * platí volba uložená při posledním přečíslování (vrací se v date_basis).
+   */
+  renumberPreview: (period: string, dateBasis?: PurchaseRenumberBasis) =>
+    api.get<PurchaseRenumberPlan>('/purchase-invoices/renumber', { params: { period, date_basis: dateBasis } }).then(r => r.data),
 
-  /** Přečíslování měsíce podle data vystavení. */
-  renumber: (period: string) =>
-    api.post<PurchaseRenumberPlan & { renumbered: number }>('/purchase-invoices/renumber', { period }).then(r => r.data),
+  /** Přečíslování měsíce podle zvoleného data; volba se uloží firmě. */
+  renumber: (period: string, dateBasis?: PurchaseRenumberBasis) =>
+    api.post<PurchaseRenumberPlan & { renumbered: number }>('/purchase-invoices/renumber', { period, date_basis: dateBasis }).then(r => r.data),
 
   /** Rychlá změna typu dokladu (#232) — oprava AI klasifikace po importu. */
   setDocumentKind: (id: number, documentKind: PurchaseDocumentKind) =>

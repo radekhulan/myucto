@@ -800,11 +800,23 @@ nepřečíslujete.
 v jakém jste doklady přijímali, ne datu vystavení. Hromadné **Označit jako přijaté** v seznamu přijímá vybrané
 doklady v pořadí podle data vystavení. Doklady očíslované v jiném pořadí srovnáte v menu `Nákup → Přečíslování`:
 
-1. Zvolte měsíc podle data vystavení. Zobrazí se náhled se současným a novým číslem každého dokladu.
-2. Klikněte na **Přečíslovat** a potvrďte.
+1. V poli **Řadit podle** zvolte datum vystavení, datum přijetí nebo DUZP. Aplikace nabídne volbu z posledního
+   přečíslování, napoprvé datum vystavení.
+2. Zvolte měsíc. Zobrazí se náhled se sloupci **Vystaveno** a **Přijato** (při řazení podle DUZP i **DUZP**) a se
+   současným a novým číslem každého dokladu.
+3. Klikněte na **Přečíslovat** a potvrďte. Zvolené datum se uloží jako výchozí pro firmu.
 
-Přečíslují se jen automaticky očíslované doklady zvoleného měsíce. Každá řada začne znovu od 1 a doklady jdou podle
-data vystavení. Ručně zadaná a cizí čísla zůstanou beze změny a nová čísla je přeskočí. Interní číslo se přepíše i
+Zvolené datum určuje, které doklady do měsíce patří, i jejich pořadí. Doklad, který zvolené datum nemá, se řadí podle
+data vystavení a náhled u něj uvede „bez data přijetí, řazeno podle data vystavení“ (u DUZP obdobně). Přečíslují se jen
+automaticky očíslované doklady zvoleného měsíce. Každá řada začne znovu od 1 a doklady jdou podle zvoleného data.
+
+Měsíc v interním čísle se odvozuje z data vystavení. Při řazení podle data přijetí nebo DUZP proto může doklad měsíce
+nést číslo jiného měsíce, například faktura vystavená 30. 7. a přijatá 2. 8. má červencové číslo. Takový doklad zůstane
+beze změny a v náhledu je mezi ponechanými čísly s důvodem „číslo patří do měsíce vystavení, ne do zvoleného měsíce“.
+Naopak doklad s číslem zvoleného měsíce, jehož zvolené datum leží v jiném měsíci, si číslo také nechá („číslo tohoto
+měsíce, zvolené datum leží v jiném měsíci“) a nová čísla ho přeskočí.
+
+Ručně zadaná a cizí čísla zůstanou beze změny a nová čísla je přeskočí. Interní číslo se přepíše i
 v účetním deníku (číslo dokladu a popis zápisu, včetně storna) a v popisu příjemky. Do kontrolního hlášení jde číslo
 dodavatele, takže přečíslování na daně vliv nemá. Po uzávěrce se čísla nemění: měsíc v uzavřeném nebo právě
 uzavíraném účetním období, v roce s dokončenou roční uzávěrkou daňové evidence nebo v období uzamčeném k datu

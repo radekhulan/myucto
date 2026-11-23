@@ -23740,13 +23740,30 @@
     },
     "renumber": {
       "title": "Renumbering received documents",
-      "intro": "A document gets its internal number when it is received, so the numbers follow the order of receiving. Renumbering sorts the automatically numbered documents of the selected month by issue date and numbers them again from 1 in each number series. Manually entered numbers stay unchanged.",
+      "intro": "A document gets its internal number when it is received, so the numbers follow the order of receiving. Renumbering selects the automatically numbered documents of the month by the chosen date (issue, receipt or tax point), sorts them by it and numbers them again from 1 in each number series. Manually entered numbers and numbers of another month stay unchanged.",
       "tax_note": "The internal number is also rewritten in the accounting journal and in the stock receipt description. The VAT control statement uses the supplier number, so renumbering has no tax effect.",
-      "period": "Month by issue date",
+      "basis": "Sort by",
+      "basis_option": {
+        "issue": "Issue date",
+        "received": "Receipt date",
+        "tax": "Tax point date"
+      },
+      "period_by_basis": {
+        "issue": "Month by issue date",
+        "received": "Month by receipt date",
+        "tax": "Month by tax point date"
+      },
+      "fallback": {
+        "issue": "no issue date",
+        "received": "no receipt date, sorted by issue date",
+        "tax": "no tax point date, sorted by issue date"
+      },
       "load": "Show preview",
       "run": "Renumber ({count})",
       "confirm": "Renumber {count} documents for {period}?",
       "col_date": "Issued",
+      "col_received": "Received",
+      "col_tax_date": "Tax point",
       "col_vendor": "Supplier",
       "col_vendor_number": "Supplier number",
       "col_kind": "Type",
@@ -23754,10 +23771,10 @@
       "col_new": "New number",
       "unchanged": "unchanged",
       "nothing": "There are no automatically numbered documents in this month.",
-      "in_order": "The numbers already follow the issue dates.",
+      "in_order": "The numbers already follow the chosen date.",
       "changes_count": "Numbers of {count} documents will change.",
       "kept_title": "Numbers kept ({count})",
-      "kept_hint": "Manually entered or foreign numbers are not renumbered.",
+      "kept_hint": "Manually entered and foreign numbers and numbers of another month are not renumbered.",
       "blocked_title": "This month cannot be renumbered",
       "blocked_hint": "Document numbers do not change after closing. These documents are in a closed or locked period:",
       "reason": {
@@ -23766,6 +23783,8 @@
         "period_closed": "closed period",
         "date_locked": "locked to date",
         "manual_number": "manual number",
+        "number_other_month": "the number belongs to the month of issue, not to the selected month",
+        "date_other_month": "number of this month, the chosen date is in another month",
         "cash_in": "receipt document, the payer has the number",
         "eet": "recorded in EET",
         "vat_document": "document with VAT",
