@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
+use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use PDO;
 
 /**
@@ -15,39 +17,68 @@ use PDO;
  * v MyÚčtu nikdo nepracoval. Jinak (a když se změnil druh dokladu, členění DPH nebo měna)
  * převod změnu jen ohlásí.
  *
- * Otisk v mapě převodu má dvě poloviny ({@see fingerprint()}): zdroj = pole dokladu v Money,
- * která se do dokladu převádějí ({@see sourceHash()}), stav = doklad, jak ho převod zapsal
+ * Otisk v mapě převodu má tři části ({@see fingerprint()}): pole dokladu v Money, která
+ * aktualizace přepíše (částky, sazby, data vystavení, plnění a splatnosti), ostatní pole
+ * Money, na kterých doklad závisí ({@see sourceHash()}), a stav dokladu, jak ho převod zapsal
  * (součty, data a položky, {@see stateHash()}). Jiný zdroj = Money doklad změnilo, jiný stav
- * = doklad upravil uživatel. Doklad převedený před zavedením otisků se jen ohlásí (jako dřív)
- * a otisk se mu doplní, až ho Money a MyÚčto mají shodně.
+ * = doklad upravil uživatel. Změnu ostatních polí (číslo dokladu dodavatele, doručení,
+ * variabilní symbol, zaúčtování, záloha, druh) aktualizace přenést neumí a jen ji ohlásí.
+ * Doklad převedený před zavedením otisků se jen ohlásí (jako dřív) a otisk se mu doplní,
+ * až ho Money a MyÚčto mají shodně.
+ *
+ * Doklad v období, za které je podané přiznání DPH nebo kontrolní hlášení, převod nemění
+ * ({@see FiledVatPeriodLookup}).
  */
 final class DocumentRefresh
 {
-    /** Pole dokladu Money, na kterých převzatý doklad závisí (bez textů). */
-    private const SOURCE_FIELDS = [
-        'Vystaveno', 'DatUcPr', 'PlnenoDPH', 'Splatno', 'Doruceno', 'CelkemSDPH', 'SumZaloha', 'KodDPH', 'Druh', 'Dobropis',
-        'Storno', 'Neuctovat', 'RevCH', 'Mena', 'Kurs', 'PocetJedn', 'VarSymbol', 'PrijatDokl',
+    /** Pole dokladu Money, která aktualizace přepíše ({@see update()}). */
+    private const APPLIED_FIELDS = [
+        'Vystaveno', 'PlnenoDPH', 'Splatno', 'CelkemSDPH',
         'Zaklad_0', 'Zaklad_1', 'Zaklad_2', 'Zaklad_3', 'Zaklad_4', 'Zaklad_5', 'Zaklad_6',
         'SazbaDPH1', 'SazbaDPH2', 'SazbaDPH3', 'SazbaDPH4', 'SazbaDPH5', 'SazbaDPH6',
         'DPH_1', 'DPH_2', 'DPH_3', 'DPH_4', 'DPH_5', 'DPH_6', 'DPH1', 'DPH2', 'DPH3', 'DPH4', 'DPH5', 'DPH6',
+    ];
+
+    /** Ostatní pole dokladu Money, na kterých převzatý doklad závisí (bez textů); jejich změnu převod jen ohlásí. */
+    private const OTHER_FIELDS = [
+        'DatUcPr', 'Doruceno', 'SumZaloha', 'KodDPH', 'Druh', 'Dobropis', 'Storno', 'Neuctovat', 'RevCH',
+        'Mena', 'Kurs', 'PocetJedn', 'VarSymbol', 'PrijatDokl',
         'ValutyZak0', 'ValutyZak1', 'ValutyZak2', 'ValutyZak3', 'ValutyZak4', 'ValutyZak5', 'ValutyZak6',
         'ValutyDPH1', 'ValutyDPH2', 'ValutyDPH3', 'ValutyDPH4', 'ValutyDPH5', 'ValutyDPH6',
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    private readonly FiledVatPeriodLookup $filed;
 
-    /** @param array<string,mixed> $r řádek dokladu Money */
+    public function __construct(private readonly Connection $db)
+    {
+        $this->filed = new FiledVatPeriodLookup(new TaxSubmissionRepository($db));
+    }
+
+    /**
+     * Otisk polí dokladu Money: 16 znaků za pole, která aktualizace přepíše, a 16 za ostatní.
+     *
+     * @param array<string,mixed> $r řádek dokladu Money
+     */
     public static function sourceHash(array $r): string
     {
-        $out = [];
-        foreach (self::SOURCE_FIELDS as $field) {
-            if (!array_key_exists($field, $r)) {
-                continue;
+        $hash = static function (array $fields) use ($r): string {
+            $out = [];
+            foreach ($fields as $field) {
+                if (!array_key_exists($field, $r)) {
+                    continue;
+                }
+                $v = $r[$field];
+                $out[$field] = is_float($v) || is_int($v) ? number_format((float) $v, 2, '.', '') : trim((string) $v);
             }
-            $v = $r[$field];
-            $out[$field] = is_float($v) || is_int($v) ? number_format((float) $v, 2, '.', '') : trim((string) $v);
-        }
-        return substr(hash('sha256', (string) json_encode($out)), 0, 32);
+            return substr(hash('sha256', (string) json_encode($out)), 0, 16);
+        };
+        return $hash(self::APPLIED_FIELDS) . $hash(self::OTHER_FIELDS);
+    }
+
+    /** Liší se ostatní pole Money (ta, která aktualizace nepřenese)? */
+    public static function otherFieldsChanged(string $stored, string $source): bool
+    {
+        return substr($stored, 16, 16) !== substr($source, 16, 16);
     }
 
     /**
@@ -75,7 +106,7 @@ final class DocumentRefresh
      * Stav dokladů, jak jsou dnes v MyÚčtu ({@see stateHash()}), dvěma dotazy na dávku.
      *
      * @param list<int> $ids
-     * @return array<int,array{state:string,status:string,currency:string,invoice_type:?string,document_kind:?string,vat_classification_code:?string,reverse_charge:bool,issue_date:string,tax_date:?string,client_id:?int}>
+     * @return array<int,array{state:string,status:string,currency:string,invoice_type:?string,document_kind:?string,vat_classification_code:?string,reverse_charge:bool,issue_date:string,tax_date:?string,client_id:?int,received_at:?string}>
      */
     public function states(int $supplierId, bool $issued, array $ids): array
     {
@@ -89,7 +120,7 @@ final class DocumentRefresh
             while (($r = $stmt->fetch(PDO::FETCH_NUM)) !== false) {
                 $items[(int) $r[0]][] = [$r[1], $r[2]];
             }
-            $kind = $issued ? 'd.invoice_type, NULL AS document_kind, d.client_id' : 'NULL AS invoice_type, d.document_kind, NULL AS client_id';
+            $kind = $issued ? 'd.invoice_type, NULL AS document_kind, d.client_id, NULL AS received_at' : 'NULL AS invoice_type, d.document_kind, NULL AS client_id, d.received_at';
             $stmt = $this->db->pdo()->prepare(
                 "SELECT d.id, d.issue_date, d.tax_date, d.total_without_vat, d.total_vat, d.total_with_vat, d.status, cur.code AS currency,
                         {$kind}, d.vat_classification_code, d.reverse_charge
@@ -110,6 +141,7 @@ final class DocumentRefresh
                     'issue_date' => (string) $r['issue_date'],
                     'tax_date' => $r['tax_date'],
                     'client_id' => $r['client_id'] === null ? null : (int) $r['client_id'],
+                    'received_at' => $r['received_at'] === null ? null : substr((string) $r['received_at'], 0, 10),
                 ];
             }
         }
@@ -117,38 +149,104 @@ final class DocumentRefresh
     }
 
     /**
-     * Doklady, se kterými se v MyÚčtu pracovalo: úhrada nebo párování zadané v MyÚčtu,
-     * zápočet, dohoda o započtení, dobropis či daňový doklad navázaný na doklad, čerpání
-     * zálohy. Takový doklad převod nemění.
+     * Doklady, se kterými se v MyÚčtu pracovalo ({@see touchedSql()}), a doklady navázané
+     * na zápis deníku, který převod ponechal kvůli zásahu uživatele (`$keptEntries`) - doklad
+     * se nepřepíše, aby se nerozešel se svým zápisem.
      *
      * @param list<int> $ids
+     * @param list<int> $keptEntries
      * @return array<int,true>
      */
-    public function touched(int $supplierId, bool $issued, array $ids): array
+    public function touched(int $supplierId, bool $issued, array $ids, array $keptEntries = []): array
     {
         $out = [];
-        $type = $issued ? 'invoice' : 'purchase_invoice';
+        $table = $issued ? 'invoices' : 'purchase_invoices';
         foreach (array_chunk($ids, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            $sql = $issued
-                ? "SELECT d.id FROM invoices d WHERE d.supplier_id = ? AND d.id IN ({$in}) AND (
-                       EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = d.id AND (ip.note IS NULL OR ip.note NOT LIKE ?))
-                    OR EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.invoice_id = d.id AND NOT " . DocumentLinker::ownMatchSql('pm') . ")
-                    OR EXISTS (SELECT 1 FROM invoices c WHERE c.supplier_id = d.supplier_id AND c.parent_invoice_id = d.id)
-                    OR EXISTS (SELECT 1 FROM invoice_advance_deductions x WHERE x.final_invoice_id = d.id OR x.advance_invoice_id = d.id)"
-                : "SELECT d.id FROM purchase_invoices d WHERE d.supplier_id = ? AND d.id IN ({$in}) AND (
-                       EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = d.id AND NOT " . DocumentLinker::ownMatchSql('pm') . ")
-                    OR EXISTS (SELECT 1 FROM purchase_advance_deductions x WHERE x.final_invoice_id = d.id OR x.advance_invoice_id = d.id)";
-            $sql .= " OR EXISTS (SELECT 1 FROM invoice_settlements s WHERE s.doc_type = ? AND s.doc_id = d.id)
-                    OR EXISTS (SELECT 1 FROM offset_agreement_items o WHERE o.doc_type = ? AND o.doc_id = d.id)
-                    OR EXISTS (SELECT 1 FROM credit_note_offsets n WHERE n.doc_type = ? AND (n.invoice_id = d.id OR n.credit_note_id = d.id)))";
-            $stmt = $this->db->pdo()->prepare($sql);
-            $stmt->execute([$supplierId, ...$chunk, ...($issued ? [IssuedPaymentRecorder::NOTE_PREFIX . '%'] : []), $type, $type, $type]);
+            $stmt = $this->db->pdo()->prepare("SELECT d.id FROM {$table} d WHERE d.supplier_id = ? AND d.id IN ({$in}) AND " . self::touchedSql($issued, 'd'));
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                $out[(int) $id] = true;
+            }
+        }
+        $type = $issued ? 'invoice' : 'purchase_invoice';
+        foreach (array_chunk($keptEntries, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT k.doc_id FROM journal_entry_document_links k WHERE k.supplier_id = ? AND k.doc_type = ? AND k.entry_id IN ({$in})
+                 UNION SELECT e.source_id FROM journal_entries e WHERE e.supplier_id = ? AND e.source_type = ? AND e.id IN ({$in}) AND e.source_id IS NOT NULL"
+            );
+            $stmt->execute([$supplierId, $type, ...$chunk, $supplierId, $type, ...$chunk]);
             foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
                 $out[(int) $id] = true;
             }
         }
         return $out;
+    }
+
+    /**
+     * SQL podmínka „s dokladem `$alias` se v MyÚčtu pracovalo" (bez parametrů): stornovaný,
+     * odeslaný, upomínaný nebo s poděkováním za platbu, s uloženou verzí PDF, přílohou,
+     * dokumentem, dimenzí typu, který převod nespravuje, splátkovým kalendářem, úhradou nebo
+     * párováním zadaným v MyÚčtu, zápočtem, dohodou o započtení, dobropisem, navázaným
+     * dokladem (dobropis, daňový doklad k platbě), čerpáním zálohy, opravou § 46 / § 74b,
+     * opravnou položkou, dodaněním neuhrazeného závazku; přijatý doklad navíc se skenem,
+     * schvalováním, majetkem, drobným majetkem nebo skladem z položky.
+     * Společná aktualizaci dokladu i zápisu, který na doklad odkazuje ({@see JournalEntryRefresh}).
+     */
+    public static function touchedSql(bool $issued, string $alias): string
+    {
+        $d = $alias;
+        $type = $issued ? "'invoice'" : "'purchase_invoice'";
+        $managed = implode(', ', array_map(static fn (string $c): string => "'{$c}'", DimensionImporter::MANAGED_TYPE_CODES));
+        $common = "
+             OR EXISTS (SELECT 1 FROM document_links x WHERE x.supplier_id = {$d}.supplier_id AND x.entity_type = {$type} AND x.entity_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM document_dimensions x JOIN dimension_types t ON t.id = x.dimension_type_id
+                         WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id AND t.code NOT IN ({$managed}))
+             OR EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.supplier_id = {$d}.supplier_id AND pm." . ($issued ? 'invoice_id' : 'purchase_invoice_id') . " = {$d}.id
+                         AND NOT " . DocumentLinker::ownMatchSql('pm') . ")
+             OR EXISTS (SELECT 1 FROM invoice_settlements x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM offset_agreement_items x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM credit_note_offsets x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND (x.invoice_id = {$d}.id OR x.credit_note_id = {$d}.id))";
+        if ($issued) {
+            $note = str_replace("'", "''", IssuedPaymentRecorder::NOTE_PREFIX) . '%';
+            return "({$d}.status = 'cancelled' OR {$d}.sent_at IS NOT NULL OR {$d}.reminder_count > 0 OR {$d}.last_reminder_at IS NOT NULL
+             OR {$d}.payment_thanks_sent_at IS NOT NULL
+             OR EXISTS (SELECT 1 FROM invoice_pdfs x WHERE x.invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM invoice_attachments x WHERE x.invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM invoice_payment_schedule x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM invoice_payments x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id AND (x.note IS NULL OR x.note NOT LIKE '{$note}'))
+             OR EXISTS (SELECT 1 FROM invoices c WHERE c.supplier_id = {$d}.supplier_id AND c.parent_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM invoice_advance_deductions x WHERE x.supplier_id = {$d}.supplier_id AND (x.final_invoice_id = {$d}.id OR x.advance_invoice_id = {$d}.id))
+             OR EXISTS (SELECT 1 FROM vat_s46_corrections x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM accounting_receivable_provisions x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id){$common})";
+        }
+        return "({$d}.status = 'cancelled' OR {$d}.pdf_path IS NOT NULL
+             OR EXISTS (SELECT 1 FROM purchase_invoice_approvals x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM purchase_advance_deductions x WHERE x.supplier_id = {$d}.supplier_id AND (x.final_invoice_id = {$d}.id OR x.advance_invoice_id = {$d}.id))
+             OR EXISTS (SELECT 1 FROM assets x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM purchase_invoice_items i JOIN assets x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = {$d}.supplier_id WHERE i.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM small_assets x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM purchase_invoice_items i JOIN stock_document_lines x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = {$d}.supplier_id WHERE i.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM vat_s74b_corrections x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
+             OR EXISTS (SELECT 1 FROM tax_unpaid_liability_addbacks x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id){$common})";
+    }
+
+    /**
+     * Popis podaného přiznání DPH, kontrolního hlášení nebo OSS, které pokrývá některé
+     * z dat (plnění, u přijatého dokladu i nárok na odpočet), nebo null.
+     *
+     * @param list<?string> $dates
+     */
+    public function filedPeriod(int $supplierId, array $dates): ?string
+    {
+        foreach (array_unique(array_filter($dates)) as $date) {
+            $filed = $this->filed->describe($supplierId, substr((string) $date, 0, 10));
+            if ($filed !== null) {
+                return $filed;
+            }
+        }
+        return null;
     }
 
     /**

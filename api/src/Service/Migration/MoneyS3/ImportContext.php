@@ -79,6 +79,17 @@ final class ImportContext
 
     public ?int $runId = null;
 
+    /**
+     * Zápisy deníku, které Money změnilo, ale převod je kvůli zásahu uživatele ponechal
+     * ({@see JournalImporter}); doklad navázaný na takový zápis se nepřepisuje.
+     *
+     * @var list<int>
+     */
+    public array $keptEntries = [];
+
+    /** @var list<int> vydané doklady, které převod aktualizoval podle Money (zahození uloženého PDF po převodu) */
+    public array $refreshedInvoices = [];
+
     /** @var (callable(string,int,int):void)|null */
     public $progress = null;
 

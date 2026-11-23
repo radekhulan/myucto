@@ -1060,7 +1060,7 @@ final class InvoiceImporter
             'issued' => $issued,
             'stored' => $ids === [] ? [] : $this->map->fingerprints($ctx->supplierId, $kind),
             'states' => $ids === [] ? [] : $this->documentRefresh->states($ctx->supplierId, $issued, $ids),
-            'touched' => $ids === [] ? [] : $this->documentRefresh->touched($ctx->supplierId, $issued, $ids),
+            'touched' => $ids === [] ? [] : $this->documentRefresh->touched($ctx->supplierId, $issued, $ids, $ctx->keptEntries),
             'fingerprints' => [],
             'updated' => [],
             'kept' => [],
@@ -1100,7 +1100,10 @@ final class InvoiceImporter
             return;
         }
         $label = "{$docNo} ({$year})";
-        $updated = substr($stored, 32) === $current['state'] && !isset($refresh['touched'][$id])
+        // Změnu čísla dokladu dodavatele, doručení, symbolu, zaúčtování, zálohy či druhu
+        // aktualizace nepřenese - doklad se ponechá a ohlásí.
+        $updated = !DocumentRefresh::otherFieldsChanged($stored, $source)
+            && substr($stored, 32) === $current['state'] && !isset($refresh['touched'][$id])
             && $this->updateDocument($ctx, $issued, $id, $r, $current, $lineCodes);
         if (!$updated) {
             $refresh['kept'][] = $label;
@@ -1129,6 +1132,11 @@ final class InvoiceImporter
         }
         $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
         if (!$ctx->writable($taxDate) || !$ctx->writable($issue) || !$ctx->writable($current['tax_date'] ?? $current['issue_date']) || !$ctx->writable($current['issue_date'])) {
+            return false;
+        }
+        // Doklad v období s podaným přiznáním DPH, kontrolním nebo OSS hlášením (staré i nové
+        // datum plnění, u přijatého dokladu i den nároku na odpočet) převod nepřepisuje.
+        if ($this->documentRefresh->filedPeriod($ctx->supplierId, [$current['tax_date'] ?? $current['issue_date'], $taxDate, $current['received_at']]) !== null) {
             return false;
         }
         $step = $issued ? self::STEP_ISSUED : self::STEP_PURCHASE;
@@ -1164,6 +1172,9 @@ final class InvoiceImporter
             'issue_date' => $issue, 'tax_date' => $taxDate, 'due_date' => self::date($r, ['Splatno']) ?? $issue,
             'base' => $amounts['base'], 'vat' => $amounts['vat'], 'total' => $amounts['total'], 'rounding' => $amounts['rounding'],
         ], $items, $this->writer);
+        if ($issued) {
+            $ctx->refreshedInvoices[] = $id;
+        }
         return true;
     }
 
@@ -1186,7 +1197,7 @@ final class InvoiceImporter
         }
         if ($refresh['kept'] !== []) {
             $ctx->protocol->warn($step, 'changed_in_money', sprintf(
-                '%d dokladů Money od minulého převodu změnilo, převod je ale nezměnil: v MyÚčtu se s nimi už pracovalo (úhrada, párování, úprava, navázaný doklad), změnil se druh dokladu, členění DPH nebo měna, nebo leží v uzavřeném období. Upravte je ručně podle Money: %s.',
+                '%d dokladů Money od minulého převodu změnilo, převod je ale nezměnil: v MyÚčtu se s nimi už pracovalo (úhrada, párování, odeslání, úprava, navázaný doklad nebo zápis), leží v uzavřeném nebo zamčeném období či v období s podaným přiznáním DPH nebo kontrolním hlášením, nebo se změnilo, co převod nepřenese (druh dokladu, členění DPH, měna, číslo dokladu dodavatele, doručení, symbol, záloha). Upravte je ručně podle Money: %s.',
                 count($refresh['kept']), $list($refresh['kept']),
             ), ['documents' => array_slice($refresh['kept'], 0, ImportProtocol::LIST_LIMIT)]);
         }

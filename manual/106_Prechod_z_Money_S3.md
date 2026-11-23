@@ -625,6 +625,9 @@ letech nezakládá ani nová párování úhrad, čerpání záloh a vazby dokla
 deník. Ty v uzavřených letech doplní jen opravný převod vazeb (dávka, volba
 **Firma už v MyÚčtu je: opravný převod vazeb**). Rok, do kterého převod
 zapisuje, nesmí zasahovat do zámku účtování k datu, jinak se převod nespustí.
+Opravný převod vazeb deník ani DPH nemění, zámek k datu ho proto nezastaví;
+kontrola před převodem upozorní, že vazby, párování a úhrady opraví i
+v zamčeném období.
 
 **Převod roku vedle běžícího dalšího roku.** Firma může v MyÚčtu účtovat nový
 rok (třeba 2027), zatímco předchozí rok (2026) se ještě účtuje v Money a do
@@ -649,29 +652,49 @@ a zbytek zůstane k úhradě.
 aktualizuje to, co Money od minulého převodu změnilo:
 
 - zápis deníku převzatý z Money, který Money změnilo, přepíše podle Money
-  (zápis zůstává tentýž, vazby na doklad zůstanou), a zápis, který Money
-  smazalo, smaže. Doklad, kterému Money změnilo datum nebo číslo, se převede
-  jako nový zápis a starý se smaže,
-- u vydané a přijaté faktury přepíše částky po sazbách, data a položky.
+  (zápis zůstává tentýž, vazby na doklad i dimenze přiřazené v MyÚčtu zůstanou),
+  a zápis, který Money smazalo, smaže. Doklad, kterému Money změnilo datum nebo
+  číslo, se převede jako nový zápis a starý se smaže,
+- u vydané a přijaté faktury přepíše částky po sazbách, data vystavení, plnění
+  a splatnosti a položky. Uložené PDF aktualizované faktury se zahodí a vytvoří
+  se znovu s novými částkami.
 
 Jen u záznamů, se kterými se v MyÚčtu nepracovalo. Zápis upravený v MyÚčtu,
-stornovaný, spárovaný v saldokontu, s poznámkou, přílohou nebo vazbou zadanou
-v MyÚčtu převod nezmění, stejně jako doklad s úhradou nebo párováním zadaným
-v MyÚčtu, zápočtem, navázaným dobropisem, daňovým dokladem nebo čerpáním
-zálohy. Nezmění ani doklad, u kterého se v Money změnil druh, členění DPH nebo
-měna. Takové záznamy protokol vypíše jako změněné v Money a ponechané v MyÚčtu;
-upravte je ručně podle Money. Doklady a zápisy převedené dřív, než převod začal
-změny sledovat, protokol při změně jen vypíše a od dalšího převodu už se
-sledují.
+stornovaný, spárovaný v saldokontu, s poznámkou, přílohou, dokumentem nebo
+vazbou zadanou v MyÚčtu převod nezmění. Nezmění ani doklad odeslaný nebo
+upomínaný z MyÚčta, s přílohou, dokumentem, splátkovým kalendářem, úhradou nebo
+párováním zadaným v MyÚčtu, zápočtem, navázaným dobropisem, daňovým dokladem,
+čerpáním zálohy, opravou základu DPH, opravnou položkou, přijatý doklad
+s nahraným skenem, schvalováním, majetkem nebo skladem z položky, a doklad
+v období, za které je podané přiznání DPH, kontrolní nebo OSS hlášení. Takový
+doklad a jeho zápis v deníku zůstanou oba, aby se nerozešly. Změnu druhu dokladu,
+členění DPH, měny, čísla dokladu dodavatele, data doručení, variabilního symbolu
+nebo odečtené zálohy převod nepřenese. Všechny tyto záznamy protokol vypíše jako
+změněné v Money a ponechané v MyÚčtu; upravte je ručně podle Money a rekonciliace
+do té doby ukáže rozdíl k přijetí.
+
+Doklady převedené dřív, než převod začal změny sledovat, protokol při změně jen
+vypíše a od dalšího převodu se sledují. Zápis deníku převedený před sledováním
+změn převod podle Money přepíše jen tehdy, když se jeho řádky od převodu v MyÚčtu
+nezměnily; jinak ho vypíše k porovnání s Money.
 
 **Pohyby stažené z banky.** Stahuje-li MyÚčto pohyby účtu, který dosud vede
 Money (bankovní API, nahrané výpisy GPC nebo PDF), převod je na tomto účtu od
-začátku převáděného roku do data posledního pohybu v Money smaže a nahradí
-pohyby z Money. Pohyby po posledním pohybu v Money zůstanou. Pohyb, který už
-je v MyÚčtu spárovaný, zaúčtovaný nebo ignorovaný, převod nesmaže a zastaví se
-s jeho výpisem: zrušte u něj párování a zaúčtování (nebo ho smažte) a převod
-spusťte znovu. Dokud firma účtuje banku v Money, pohyby těchto účtů v MyÚčtu
-nepárujte ani neúčtujte.
+začátku převáděného roku do data posledního pohybu v Money (nejvýš do konce
+roku) porovná s pohyby Money podle data, částky a variabilního symbolu:
+
+- pohyb, který má v Money protějšek, smaže a nahradí pohybem z Money; smazané
+  pohyby vyjmenuje v protokolu,
+- pohyb bez protějšku v Money nechá a vyjmenuje k ověření, zda v Money nechybí,
+- pohyb s protějškem, který je v MyÚčtu spárovaný, zaúčtovaný, ignorovaný nebo
+  jinak navázaný (zařazení v peněžním deníku, záloha na daň, tankování), nesmaže
+  a převod se zastaví s jeho výpisem: zrušte u něj párování a zaúčtování (nebo
+  ho smažte) a převod spusťte znovu.
+
+Pohyby po posledním pohybu v Money zůstanou. Nemá-li účet v Money kód banky ani
+IBAN a v MyÚčtu jsou výpisy stejného čísla účtu u více bank, převod se zastaví;
+doplňte v Money kód banky. Dokud firma účtuje banku v Money, pohyby těchto účtů
+v MyÚčtu nepárujte ani neúčtujte.
 
 Daňovou uznatelnost nákladových účtů převezme převod z osnovy Money jen u účtů,
 které zakládá, a při prvním převodu firmy. Opakovaný převod ji u existujících

@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Shared\FiscalYearMismatchException;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\RecurringSeriesTakeover;
+use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use PDO;
 
 /**
@@ -68,6 +69,7 @@ final class MoneyS3Importer
         private readonly TaxRecordsReconciler $taxRecordsReconciler,
         private readonly VatFilingsTakeover $vatFilings,
         private readonly AccountingSupplierSettingsRepository $settings,
+        private readonly InvoicePdfRenderer $pdf,
     ) {}
 
     /**
@@ -424,7 +426,12 @@ final class MoneyS3Importer
             }
             $period = $this->periods->findByYear($supplierId, $item['year']);
             $blocker = self::periodBlocker((int) $item['year'], $period ?? ['status' => 'open', 'starts_on' => $item['starts_on']], $lockedUntil);
-            if ($blocker !== null && $blocker->errorCode === 'date_locked') {
+            if ($blocker !== null && $blocker->errorCode === 'date_locked' && $options->relinkOnly) {
+                // Opravný převod vazeb deník ani DPH nemění, jen vazby, párování a úhrady.
+                $add('warning', 'relink_under_date_lock', "Účetní období {$item['year']} zasahuje do zámku účtování k "
+                    . date('j. n. Y', (int) strtotime((string) $lockedUntil)) . '. Opravný převod vazeb deník ani DPH nemění, vazby, párování a úhrady převzatých dokladů ale opraví i v zamčeném období.',
+                    ['year' => $item['year'], 'locked_until' => $lockedUntil]);
+            } elseif ($blocker !== null && $blocker->errorCode === 'date_locked') {
                 // Rok, do kterého by převod zapisoval, zasahuje do zámku účtování k datu.
                 $add('error', $blocker->errorCode, $blocker->getMessage(), $blocker->context);
             }
@@ -612,6 +619,8 @@ final class MoneyS3Importer
         // Roky, do kterých převod zapisuje: otevřená (nebo nová) období rozvrhu. Uzavřené
         // historické roky převod přeskočí; zapisované se ověřují v transakci každého kroku.
         $targets = $automationManaged ? $this->writableTargets($supplierId, $frameworkPeriods) : [];
+        // Opravný převod vazeb deník ani DPH nemění: zámek k datu ho nezastaví, jen uzavření období.
+        $lockChecked = !$options->relinkOnly;
         $pdo = $this->db->pdo();
         $dryRun = $options->isDryRun();
         // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes
@@ -632,14 +641,14 @@ final class MoneyS3Importer
             // na firmu) by na něj čekal; převod sám automatiku ke své práci nepotřebuje.
             // Daňová evidence účetní období ani účetní rámec nemá, ochrana rámce se jí netýká.
             if ($automationManaged && !$dryRun) {
-                $frameworkGuard->writeCz500Periods($supplierId, $frameworkPeriods, function () use ($runId, $supplierId, $snapshot, $userId, $targets): void {
-                    $this->assertPeriodsWritable($supplierId, $targets, true);
+                $frameworkGuard->writeCz500Periods($supplierId, $frameworkPeriods, function () use ($runId, $supplierId, $snapshot, $userId, $targets, $lockChecked): void {
+                    $this->assertPeriodsWritable($supplierId, $targets, true, $lockChecked);
                     if ($runId !== null) $this->map->saveAutomationSnapshot($runId, $supplierId, $snapshot);
                     $this->unit->disableAutomation($supplierId, $userId > 0 ? $userId : null);
                 });
             } elseif ($automationManaged) {
                 $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods, true);
-                $this->assertPeriodsWritable($supplierId, $targets, false);
+                $this->assertPeriodsWritable($supplierId, $targets, false, $lockChecked);
             }
             $automation = ['before' => $snapshot, 'during' => $dryRun || !$automationManaged ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
             if ($automationManaged) {
@@ -664,12 +673,12 @@ final class MoneyS3Importer
                     // obalit ji by znamenalo, že se chyba uprostřed kroku nevrátí.
                     if ($dryRun || $key === HistoricalYearCloser::STEP) {
                         // Zkouška nanečisto zámky v jediné transakci nedrží (blokovala by firmu).
-                        $this->assertPeriodsWritable($supplierId, $targets, false);
+                        $this->assertPeriodsWritable($supplierId, $targets, false, $lockChecked);
                         $fn();
                     } else {
-                        $this->transactional(function () use ($frameworkGuard, $supplierId, $frameworkPeriods, $fn, $targets): void {
+                        $this->transactional(function () use ($frameworkGuard, $supplierId, $frameworkPeriods, $fn, $targets, $lockChecked): void {
                             $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods, true);
-                            $this->assertPeriodsWritable($supplierId, $targets, true);
+                            $this->assertPeriodsWritable($supplierId, $targets, true, $lockChecked);
                             $fn();
                         });
                     }
@@ -700,6 +709,18 @@ final class MoneyS3Importer
             $ctx->report('done', $total, $total);
             if (!$dryRun) {
                 $this->invoices->recomputeClientStats($ctx);
+                // Vydané doklady aktualizované podle Money: uložené PDF má staré částky.
+                foreach (array_unique($ctx->refreshedInvoices) as $invoiceId) {
+                    try {
+                        $this->pdf->invalidate($invoiceId, 'invalidate_money_s3_refresh');
+                    } catch (\Throwable $e) {
+                        if (TransactionFailure::aborted($e)) {
+                            throw $e;
+                        }
+                        // Úklid souboru po zapsaném převodu jeho výsledek nemění.
+                        error_log(sprintf('Money S3: PDF faktury %d se po aktualizaci nezahodilo: %s', $invoiceId, $e->getMessage()));
+                    }
+                }
             }
 
             if ($automationManaged && !$dryRun && !$protocol->hasErrors()) {
@@ -773,13 +794,14 @@ final class MoneyS3Importer
      * s převodem počká na konec kroku, nebo krok zastaví dřív, než cokoli zapíše.
      *
      * @param array<int,string> $targets rok => začátek období ({@see writableTargets()})
+     * @param bool $lockChecked hlídat i zámek k datu (opravný převod vazeb ho nehlídá)
      */
-    private function assertPeriodsWritable(int $supplierId, array $targets, bool $currentRead): void
+    private function assertPeriodsWritable(int $supplierId, array $targets, bool $currentRead, bool $lockChecked = true): void
     {
         if ($targets === []) {
             return;
         }
-        $lockedUntil = $this->settings->getLockedUntil($supplierId, $currentRead);
+        $lockedUntil = $lockChecked ? $this->settings->getLockedUntil($supplierId, $currentRead) : null;
         foreach ($targets as $year => $startsOn) {
             $period = $this->periods->findByYear($supplierId, $year, $currentRead) ?? ['status' => 'open', 'starts_on' => $startsOn];
             $blocker = self::periodBlocker($year, $period, $lockedUntil);

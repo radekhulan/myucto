@@ -13,6 +13,7 @@ use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\BankTransactionLinks;
 use PDO;
 
 /**
@@ -55,17 +56,14 @@ final class PohodaForeignBankRepair
     private const MISS_EXAMPLES = 5;
 
     /** Stavy návrhů zaúčtování, které oprava ruší (nic nezaúčtovaly). */
-    private const OPEN_SUGGESTIONS = "('pending','needs_input','blocked','rejected')";
+    private const OPEN_SUGGESTIONS = BankTransactionLinks::OPEN_SUGGESTIONS;
 
     /**
-     * Vazby pohybu, které nesou peníze nebo zápis: výpis s takovým pohybem se na jinou měnu
-     * nepřepne (párování, úhrady, mzdy, platby jednotek, třídění peněžního deníku, doložení
-     * jiným importem).
+     * Doložení pohybu jiným importem: výpis s takovým pohybem se na jinou měnu nepřepne.
+     * Ostatní vazby, které nesou peníze, zápis nebo rozhodnutí uživatele, jsou společné
+     * převodům ({@see BankTransactionLinks}).
      */
-    private const MONEY_LINKS = [
-        'payment_matches', 'invoice_payments', 'other_item_allocations', 'payment_event_allocations',
-        'payroll_payment_matches', 'unit_payment_sources', 'gopay_clearings', 'de_movement_classification', 'bank_transaction_imports',
-    ];
+    private const MONEY_LINKS = ['bank_transaction_imports'];
 
     /** Doporučený ruční postup podle důvodu, proč se účet nepřevedl. */
     private const ADVICE = [
@@ -797,13 +795,11 @@ final class PohodaForeignBankRepair
             self::MONEY_LINKS,
         ));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM bank_transactions bt
+            'SELECT COUNT(*) FROM bank_transactions bt
               WHERE bt.statement_id = ?
-                AND (bt.match_status <> 'unmatched' OR {$exists}
-                     OR EXISTS (SELECT 1 FROM journal_entry_document_links k WHERE k.supplier_id = ? AND k.doc_type = 'bank' AND k.doc_id = bt.id)
-                     OR EXISTS (SELECT 1 FROM bank_posting_suggestions s WHERE s.bank_transaction_id = bt.id AND s.status NOT IN " . self::OPEN_SUGGESTIONS . '))'
+                AND (' . BankTransactionLinks::linkedSql('bt') . " OR {$exists})"
         );
-        $stmt->execute([$statementId, $supplierId]);
+        $stmt->execute([$statementId, $supplierId, $supplierId]);
         return (int) $stmt->fetchColumn();
     }
 

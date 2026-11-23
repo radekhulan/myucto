@@ -44,6 +44,8 @@ final class JournalImporter
 
     private readonly JournalEntryRefresh $refresh;
 
+    private readonly DocumentRefresh $documents;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
@@ -53,6 +55,7 @@ final class JournalImporter
     ) {
         $this->plans = new \WeakMap();
         $this->refresh = new JournalEntryRefresh($db);
+        $this->documents = new DocumentRefresh($db);
     }
 
     /**
@@ -224,9 +227,30 @@ final class JournalImporter
         $stored = $refresh ? $this->map->fingerprints($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|') : [];
         $current = $refresh ? $this->refresh->entryFingerprints($ctx->supplierId, array_values($existing)) : [];
         $touched = $refresh ? $this->refresh->touchedEntries($ctx->supplierId, (int) $period['id']) : [];
+        // Zápisy převedené před zavedením otisků: rozdíl proti Money převod přepíše, jen když
+        // se řádky zápisu od převodu nezměnily (K1 - jinak by vrátil opravu z MyÚčta).
+        $pristine = $refresh ? $this->refresh->pristineEntries($ctx->supplierId, array_values(array_filter(
+            $existing, static fn (int $id, string $key): bool => ($stored[$key] ?? null) === null, ARRAY_FILTER_USE_BOTH,
+        ))) : [];
+        // Zápis, se kterým se v MyÚčtu pracovalo (nebo ho upravil uživatel), se nepřepíše ani nesmaže.
+        $keeps = static function (string $key, int $entryId, ?string $entryState) use ($stored, $touched, $pristine): bool {
+            $fingerprint = $stored[$key] ?? null;
+            $edited = $fingerprint !== null ? $fingerprint !== $entryState : !isset($pristine[$entryId]);
+            return $edited || isset($touched[$entryId]);
+        };
+        // Zápisy mapy, které v deníku Money pod svým klíčem už nejsou, podle `zdroj|číslo`:
+        // změnilo-li Money datum (číslo) zápisu, se kterým se pracovalo, nový se nezaloží.
+        $groupKeys = array_fill_keys(array_map(static fn (string $g): string => $year . '|' . $g, array_keys($groups)), true);
+        $staleByDocument = [];
+        foreach ($refresh ? $existing : [] as $key => $entryId) {
+            $parts = explode('|', (string) $key);
+            if (!isset($groupKeys[$key]) && count($parts) >= 4 && $parts[2] !== '') {
+                $staleByDocument[$parts[1] . '|' . $parts[2]][$key] = $entryId;
+            }
+        }
         $fingerprints = [];
         $seen = [];
-        $refreshed = ['replaced' => [], 'deleted' => [], 'kept' => []];
+        $refreshed = ['replaced' => [], 'deleted' => [], 'kept' => [], 'differs' => []];
         $stats = [
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
             'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
@@ -256,11 +280,13 @@ final class JournalImporter
                 ));
                 $entryState = $current[$entryId] ?? null;
                 if ($entryState !== null && ($stored[$key] ?? null) !== $source && $entryState !== $source) {
-                    // Money zápis změnilo. Přepíše se, jen když ho v MyÚčtu nikdo neupravil:
-                    // zápis odpovídá otisku z převodu (starší převod otisk nemá) a nemá zásah uživatele.
-                    $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $entryState;
-                    if ($edited || isset($touched[$entryId]) || !$this->replaceEntry($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms)) {
-                        $refreshed['kept'][] = $docLabel;
+                    // Money zápis změnilo (nebo se zápis převedený před zavedením otisků od
+                    // Money liší). Přepíše se, jen když ho v MyÚčtu nikdo neupravil: zápis
+                    // odpovídá otisku z převodu, nebo jeho řádky od převodu nikdo nezměnil,
+                    // a nemá zásah uživatele.
+                    if ($keeps($key, $entryId, $entryState) || !$this->replaceEntry($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms)) {
+                        $refreshed[($stored[$key] ?? null) === null ? 'differs' : 'kept'][] = $docLabel;
+                        $ctx->keptEntries[] = $entryId;
                         $p->count(self::STEP, 'changed_kept');
                     } else {
                         $refreshed['replaced'][] = $docLabel;
@@ -293,6 +319,24 @@ final class JournalImporter
                 continue;
             }
             if ($ctx->skipsNew(self::STEP)) {
+                continue;
+            }
+            $keyParts = explode('|', $key);
+            $staleKept = [];
+            foreach ($staleByDocument[($keyParts[1] ?? '') . '|' . ($keyParts[2] ?? '')] ?? [] as $staleKey => $staleId) {
+                if (isset($current[$staleId]) && $keeps($staleKey, $staleId, $current[$staleId])) {
+                    $staleKept[$staleKey] = $staleId;
+                }
+            }
+            if ($staleKept !== []) {
+                // Money zápisu, se kterým se v MyÚčtu pracovalo, změnilo datum: nový zápis by
+                // doklad v deníku zdvojil. Starý zůstane a ohlásí se jako jeden případ.
+                foreach ($staleKept as $staleKey => $staleId) {
+                    $seen[$staleKey] = true;
+                    $ctx->keptEntries[] = $staleId;
+                }
+                $refreshed['kept'][] = trim((string) ($first['Doklad'] ?? '')) ?: $groupKey;
+                $p->count(self::STEP, 'changed_kept');
                 continue;
             }
 
@@ -374,13 +418,13 @@ final class JournalImporter
                     continue;
                 }
                 $label = explode('|', $key)[2] ?? $key;
-                $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $current[$entryId];
-                if (!$edited && !isset($touched[$entryId]) && $this->refresh->delete($ctx->supplierId, $entryId)) {
+                if (!$keeps($key, $entryId, $current[$entryId]) && $this->refresh->delete($ctx->supplierId, $entryId)) {
                     $this->map->forget($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $key);
                     $refreshed['deleted'][] = $label;
                     $p->count(self::STEP, 'deleted_in_money');
                 } else {
-                    $refreshed['kept'][] = $label;
+                    $refreshed[($stored[$key] ?? null) === null ? 'differs' : 'kept'][] = $label;
+                    $ctx->keptEntries[] = $entryId;
                     $p->count(self::STEP, 'changed_kept');
                 }
             }
@@ -419,8 +463,9 @@ final class JournalImporter
 
     /**
      * Přepíše řádky převzatého zápisu podle skupiny deníku Money; hlavička zápisu (zdroj,
-     * vazba na doklad, datum, popis) zůstává. False = přepis odmítla pojistka deníku
-     * (zápis je součástí jiné evidence) a zápis zůstává, jak byl.
+     * vazba na doklad, datum, popis) zůstává, dimenze přiřazené v MyÚčtu se přenesou na
+     * řádky se stejným pořadím. False = přepis odmítla pojistka deníku (zápis je součástí
+     * jiné evidence) nebo doklad zápisu leží v podaném období DPH; zápis zůstává, jak byl.
      *
      * @param list<array<string,mixed>> $groupRows
      * @param array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> $fxAccounts
@@ -430,9 +475,10 @@ final class JournalImporter
     {
         [$lines, , , $texts] = $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on']);
         $header = $this->refresh->header($ctx->supplierId, $entryId);
-        if ($lines === [] || $header === null) {
+        if ($lines === [] || $header === null || $this->refresh->documentInFiledPeriod($ctx->supplierId, $header, $this->documents)) {
             return false;
         }
+        $dimensions = $this->refresh->userDimensions($ctx->supplierId, $entryId);
         PostingService::assertBalanced($lines);
         if ($forms->singleAt((string) $header['entry_date'])) {
             $lines = SourceJournalPairs::pair($lines, $texts)['lines'];
@@ -445,13 +491,14 @@ final class JournalImporter
         } catch (PostingException) {
             return false;
         }
+        $this->refresh->restoreUserDimensions($ctx->supplierId, $entryId, $dimensions);
         return true;
     }
 
     /**
      * Protokol aktualizace otevřeného období ({@see JournalEntryRefresh}).
      *
-     * @param array{replaced:list<string>,deleted:list<string>,kept:list<string>} $refreshed
+     * @param array{replaced:list<string>,deleted:list<string>,kept:list<string>,differs:list<string>} $refreshed
      */
     private function reportRefresh(ImportContext $ctx, int $year, array $refreshed): void
     {
@@ -464,9 +511,16 @@ final class JournalImporter
         }
         if ($refreshed['kept'] !== []) {
             $ctx->protocol->warn(self::STEP, 'journal_changed_kept', sprintf(
-                'Rok %d: %d zápisů Money od minulého převodu změnilo nebo smazalo, v MyÚčtu se s nimi ale už pracovalo (úprava, párování, storno, vazba, poznámka). Převod je nechal beze změny, upravte je ručně podle Money: %s.',
+                'Rok %d: %d zápisů Money od minulého převodu změnilo nebo smazalo, v MyÚčtu se s nimi ale už pracovalo (úprava, párování, storno, vazba, poznámka, doklad s úhradou nebo odeslaný), nebo jejich doklad leží v období s podaným přiznáním DPH. Převod je nechal beze změny, upravte je ručně podle Money: %s.',
                 $year, count($refreshed['kept']), $list($refreshed['kept']),
             ), ['year' => $year, 'documents' => array_slice($refreshed['kept'], 0, ImportProtocol::LIST_LIMIT)]);
+        }
+        if ($refreshed['differs'] !== []) {
+            $ctx->protocol->warn(self::STEP, 'journal_differs_kept', sprintf(
+                'Rok %d: %d zápisů převedených dřív, než převod začal změny sledovat, se liší od deníku Money a v MyÚčtu se s nimi pracovalo (oprava řádků, párování, poznámka, vazba). '
+                . 'Převod neví, zda rozdíl způsobilo Money, nebo oprava v MyÚčtu, a nechal je beze změny. Porovnejte je s Money: %s.',
+                $year, count($refreshed['differs']), $list($refreshed['differs']),
+            ), ['year' => $year, 'documents' => array_slice($refreshed['differs'], 0, ImportProtocol::LIST_LIMIT)]);
         }
     }
 
