@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const auth = useAuthStore()
+// Kontrola dat po převodu čte účetnictví (stejné právo jako její routa).
+const canCheck = computed(() => auth.canRead('accounting'))
 
 const systems = [
   { key: 'myucto', path: '/imports/myucto', name: 'MyÚčto / MyInvoice', category: 'accounting' },
@@ -66,6 +71,20 @@ const systems = [
           <p class="mt-1 flex-1 text-sm leading-5 text-neutral-600">{{ t('migration_overview.custom_hint') }}</p>
           <span class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700">{{ t('migration_overview.custom_contact') }}<svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 17 17 7m0 0H9m8 0v8" /></svg></span>
         </a>
+        <RouterLink v-if="canCheck" :to="{ name: 'imports-checks' }" data-testid="migration-overview-checks"
+          class="group flex min-h-52 flex-col rounded-xl border border-neutral-200 bg-surface p-5 shadow-sm transition-all hover:-translate-y-1 hover:border-primary-400 hover:bg-primary-50 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-600">
+          <div class="flex items-start justify-between gap-3">
+            <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-success-50 text-success-700">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4" />
+              </svg>
+            </span>
+            <span class="rounded-full bg-success-50 px-2.5 py-1 text-xs font-medium text-success-700">{{ t('migration_overview.checks_tag') }}</span>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-neutral-900">{{ t('migration_overview.checks_title') }}</h3>
+          <p class="mt-1 flex-1 text-sm leading-5 text-neutral-600">{{ t('migration_overview.checks_hint') }}</p>
+          <span class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700">{{ t('migration_overview.checks_open') }}<svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6" /></svg></span>
+        </RouterLink>
       </div>
     </section>
   </div>

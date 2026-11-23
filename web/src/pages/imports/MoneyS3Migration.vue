@@ -152,6 +152,7 @@ const actions = computed<ActionItem[]>(() => {
   if (importDone.value) return [
     { key: 'journal', label: t('money_s3.open_journal'), icon: 'doc', tier: 'primary', variant: 'primary', to: { name: 'accounting-journal' } },
     { key: 'trial', label: t('money_s3.open_trial_balance'), icon: 'chart', tier: 'secondary', variant: 'neutral', to: { name: 'accounting-trial-balance' } },
+    { key: 'checks', label: t('money_s3.open_checks'), icon: 'clipboardCheck', tier: 'secondary', variant: 'neutral', to: { name: 'imports-checks' } },
   ]
   const icoPending = icoUnverified.value && !confirmIco.value
   const importReason = missingRights.value.length

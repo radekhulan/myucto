@@ -30,6 +30,8 @@ describe('contextual manual for application menu', () => {
   it.each([
     ['/imports', '21_Importy'],
     ['/imports/stereo-nx', '21_Importy'],
+    ['/imports/checks', '126_Kontrola_dat_po_prevodu'],
+    ['/imports/checks/tax_document_advance_link', '126_Kontrola_dat_po_prevodu'],
     ['/other-items', '52_Ucetni_denik'],
     ['/other-items/new', '52_Ucetni_denik'],
     ['/accounting/internal-documents', '52_Ucetni_denik'],

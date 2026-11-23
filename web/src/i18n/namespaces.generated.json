@@ -107,6 +107,7 @@
     "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
+    "migrationChecks",
     "migration_nonprofit_notice",
     "migration_overview",
     "migration_payroll_notice",
@@ -498,6 +499,12 @@
       "imports",
       "migration_nonprofit_notice",
       "myucto_import"
+    ],
+    "imports-checks": [
+      "migrationChecks"
+    ],
+    "imports-check-detail": [
+      "migrationChecks"
     ],
     "imports-money-s3": [
       "company_profile",

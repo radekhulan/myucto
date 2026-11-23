@@ -478,6 +478,7 @@ const actions = computed<ActionItem[]>(() => {
     : [
         { key: 'journal', label: tt('open_journal'), icon: 'doc', tier: 'primary', variant: 'primary', to: { name: 'accounting-journal' } },
         { key: 'trial', label: tt('open_trial_balance'), icon: 'chart', tier: 'secondary', variant: 'neutral', to: { name: 'accounting-trial-balance' } },
+        { key: 'checks', label: tt('open_checks'), icon: 'clipboardCheck', tier: 'secondary', variant: 'neutral', to: { name: 'imports-checks' } },
       ]
   const importReason = missingRights.value.length
     ? rightsMessage.value

@@ -83,6 +83,17 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
         },
       },
+      // Kontrola dat po převodu: kontroly chyb převzatých dat s náhledem a opravou. Poslední
+      // dlaždice přehledu převodů; čtení podle práva účetnictví (routePermissions), opravu
+      // hlídá server (RequestAuthorization::canFixMigrationData).
+      {
+        path: 'imports/checks', name: 'imports-checks',
+        component: () => import('@/pages/imports/MigrationDataChecks.vue'), meta: { requiresSupplier: true },
+      },
+      {
+        path: 'imports/checks/:key([a-z0-9_]+)', name: 'imports-check-detail',
+        component: () => import('@/pages/imports/MigrationDataCheckDetail.vue'), meta: { requiresSupplier: true },
+      },
       // Průvodce „Přechod z Money S3" — převod celé účetní agendy ze zálohy Money.
       // Bez requiresDoubleEntry: firmu v daňové evidenci převod sám přepne.
       {

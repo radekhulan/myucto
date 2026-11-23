@@ -132,6 +132,8 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'imports-overview': ['utilities.import', 'write'],
   'imports-myucto': ['utilities.import', 'write'],
   'imports-money-s3': ['utilities.import', 'write'],
+  // Kontrola dat po převodu — stejné právo jako BE MigrationDataCheckAction (accounting, čtení).
+  'imports-checks': ['accounting'], 'imports-check-detail': ['accounting'],
   'imports-pohoda': ['utilities.import', 'write'],
   'imports-pamica': ['utilities.import', 'write'],
   'imports-premier': ['utilities.import', 'write'],

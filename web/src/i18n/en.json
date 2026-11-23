@@ -2807,7 +2807,11 @@
     "custom_tag": "Tailored",
     "custom_title": "Helios, MRP-K/S, Money S4",
     "custom_hint": "We have already transferred data from Helios, MRP-K/S and Money S4 for our clients. We will be happy to prepare a tailored transfer for you too.",
-    "custom_contact": "Contact support"
+    "custom_contact": "Contact support",
+    "checks_tag": "Check",
+    "checks_title": "Data check after migration",
+    "checks_hint": "Find and fix the most common errors in migrated data: payments, bank, advances and VAT.",
+    "checks_open": "Check the data"
   },
   "maintenance_notice": {
     "title": "Planned maintenance",
@@ -36951,7 +36955,8 @@
       "history_title": "Previous batches",
       "history_empty": "No batch yet.",
       "history_companies": "{n} companies"
-    }
+    },
+    "open_checks": "Check data after migration"
   },
   "pohoda": {
     "stock": {
@@ -37584,7 +37589,8 @@
       "keep_confirm": "I confirm that MyÚčto will calculate {from} to {last} itself, although PAMICA has already processed them.",
       "keep_confirm_first": "Confirm the transfer without moving the payroll start first.",
       "will_set": "The company has no payroll start in MyÚčto yet. The transfer sets it to {period}, the month after the last month processed by the previous program ({last}). All selected years are taken over as processed by the previous program."
-    }
+    },
+    "open_checks": "Check data after migration"
   },
   "credit_cards": {
     "title": "Credit cards",
@@ -46318,6 +46324,124 @@
       "canceled": "Cancelled",
       "cancelled": "Cancelled",
       "approved": "Approved"
+    }
+  },
+  "migrationChecks": {
+    "title": "Data check after migration",
+    "subtitle": "Checks of the most common errors in data migrated from another accounting program. Each shows findings by document and, where the fix is unambiguous, offers a preview and a fix.",
+    "refresh": "Check again",
+    "back_to_migrations": "Migration from other systems",
+    "back": "Back to checks",
+    "manual": "Manual",
+    "loading": "Loading checks…",
+    "load_failed": "Checks could not be loaded.",
+    "no_migration_title": "The company has no migration from another program",
+    "no_migration_hint": "Checks apply to companies with a completed migration from POHODA, Money S3, ABRA Flexi and other programs.",
+    "sources_label": "Migrated from",
+    "total_fixable": "to fix {count}",
+    "total_review": "to review {count}",
+    "total_ok": "OK {count}",
+    "col_check": "Check",
+    "col_status": "Status",
+    "col_count": "Findings",
+    "col_fixable": "To fix",
+    "col_amount": "Amount",
+    "col_document": "Document",
+    "col_date": "Date",
+    "col_state": "State",
+    "col_reason": "Reason",
+    "col_change": "Change",
+    "open_detail": "Detail",
+    "report_only": "report only",
+    "locked_count": "in a protected period: {count}",
+    "report_only_hint": "The check has no unambiguous fix. Fix the findings following the manual.",
+    "no_fix_right": "Only the company administrator or a role with accounting write access may run the fix.",
+    "no_findings": "No findings",
+    "filter_all": "All",
+    "filter_fixable": "To fix",
+    "filter_locked": "Protected period",
+    "filter_review": "To review",
+    "fix": "Fix",
+    "fix_nothing": "The check has nothing to fix.",
+    "fixing": "Fixing…",
+    "cancel": "Cancel",
+    "confirm_fix": "Run the fix ({count})",
+    "preview_title": "Fix preview: {check}",
+    "preview_failed": "The fix preview could not be loaded.",
+    "preview_summary": "Findings to fix: {count} ({amount}). Findings only reported: {skipped}.",
+    "preview_audit": "The fix runs in a single transaction, running it again doubles nothing and every change is written to the audit trail. Closed, locked and filed periods are not changed.",
+    "fix_done": "Findings fixed: {count} ({amount}).",
+    "fix_failed": "The fix could not be run.",
+    "status": {
+      "ok": "OK",
+      "fixable": "To fix",
+      "review": "To review",
+      "error": "Check failed"
+    },
+    "state": {
+      "fixable": "To fix",
+      "locked": "Protected period",
+      "review": "To review"
+    },
+    "entity": {
+      "invoice": "Issued document",
+      "purchase_invoice": "Received document",
+      "bank_statement": "Bank statement",
+      "account": "Account",
+      "other_item": "Other item"
+    },
+    "sources": {
+      "pohoda": "POHODA",
+      "money_s3": "Money S3",
+      "abra_flexi": "ABRA Flexi",
+      "premier": "PREMIER",
+      "stereo_nx": "Stereo NX",
+      "helios": "Helios"
+    },
+    "options": {
+      "include_uploaded": "Also switch statements uploaded after the migration that clearly belong to the account by their file to the account currency."
+    },
+    "checks": {
+      "settled_without_payment": {
+        "title": "Paid amount of invoices without a payment record",
+        "hint": "POHODA: prior-year payments, Money S3: offsets and payments without a payment document.",
+        "description": "The migration kept part of the payments of issued documents only in the paid amount. The first payment match or deletion would erase it by recalculation and the document would become unpaid again. The fix adds the missing payment or offset without a journal entry."
+      },
+      "foreign_bank_in_czk": {
+        "title": "Foreign currency bank account migrated in CZK",
+        "hint": "An EUR or other currency account with statements and transactions in CZK, uploaded statements in another currency.",
+        "description": "The POHODA migration used to create all bank accounts in CZK. The fix converts the statements, transactions, matches and the account's ledger analytics to its currency; statements uploaded after the migration are switched only with the option."
+      },
+      "imported_statement_balances": {
+        "title": "Balances of migrated statements against the journal",
+        "hint": "Opening and closing balances of migrated statements that do not follow the journal.",
+        "description": "Balances of migrated statements may have been shifted by the first bank statement or by merging two accounts with the same number. The check compares them with the opening balance of the 221 analytic account in the journal. The fix recalculates the balances from the journal where it is unambiguous."
+      },
+      "payroll_liabilities": {
+        "title": "Payroll liabilities 331, 336 and 342",
+        "hint": "Balance of payroll accounts against unpaid other liabilities.",
+        "description": "Older migrations kept payroll liabilities only in the journal and they were missing in Other receivables and payables. The check compares the account balance at the end of the migrated year with unpaid other liabilities. The fix is not unambiguous, see the manual."
+      },
+      "subledger_vs_ledger": {
+        "title": "Subledger against the general ledger",
+        "hint": "Accounts 311, 321, 324 and 325 by year.",
+        "description": "Compares open items of the subledger with the account balance in the general ledger at the end of each year. A difference may be legitimate (overpayment without a document), so it is only reported with a link to the subledger."
+      },
+      "purchase_settled_uncovered": {
+        "title": "Received documents paid without coverage",
+        "hint": "Paid according to the original program, bank matching would offer them again.",
+        "description": "Received documents paid according to the original program that recorded payments do not cover. Bank matching would offer a payment with the same symbol again. The fix adds an offset or a payment outside the records."
+      },
+      "tax_document_advance_link": {
+        "title": "Payment tax documents without an advance link",
+        "hint": "Tax documents for received payments that are not linked to an advance.",
+        "description": "Without the link, the final invoice does not deduct VAT from the tax document and manual matching doubles it. The fix links the tax document to the advance by the number in its text, for the same customer and with a matching amount."
+      },
+      "final_invoice_advance_vat": {
+        "title": "Final invoice with advance VAT counted twice",
+        "hint": "Advance with a tax document deducted only in the header without deduction lines.",
+        "description": "The final invoice deducts an advance with a tax document only in the header, so the advance VAT is in the return twice. The fix is done in the app by deducting the advance with a line, see the manual."
+      }
     }
   }
 }

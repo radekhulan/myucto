@@ -10,6 +10,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/imports\/pamica(?:\/|$)/, '108_Prechod_z_PAMICA'],
   [/^\/imports\/premier(?:\/|$)/, '109_Prechod_z_PREMIER'],
   [/^\/imports\/abra-flexi(?:\/|$)/, '110_Prechod_z_ABRA_Flexi'],
+  [/^\/imports\/checks(?:\/|$)/, '126_Kontrola_dat_po_prevodu'],
   [/^\/imports\/stereo-nx(?:\/|$)/, '21_Importy'],
   [/^\/imports(?:\/|$)/, '21_Importy'],
   [/^\/accounting\/setup-assistant(?:\/|$)/, '65_Sablony'],

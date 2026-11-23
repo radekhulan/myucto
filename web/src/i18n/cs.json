@@ -2807,7 +2807,11 @@
     "custom_tag": "Na míru",
     "custom_title": "Helios, MRP-K/S, Money S4",
     "custom_hint": "Převod dat z Heliosu, MRP-K/S a Money S4 jsme už pro klienty připravovali. Rádi ho připravíme na míru i pro vás.",
-    "custom_contact": "Kontaktovat podporu"
+    "custom_contact": "Kontaktovat podporu",
+    "checks_tag": "Kontrola",
+    "checks_title": "Kontrola dat po převodu",
+    "checks_hint": "Najděte a opravte nejčastější chyby převzatých dat: úhrady, banku, zálohy a DPH.",
+    "checks_open": "Zkontrolovat data"
   },
   "maintenance_notice": {
     "title": "Plánovaná údržba",
@@ -36951,7 +36955,8 @@
       "history_title": "Předchozí dávky",
       "history_empty": "Zatím žádná dávka.",
       "history_companies": "firem {n}"
-    }
+    },
+    "open_checks": "Zkontrolovat data po převodu"
   },
   "pohoda": {
     "stock": {
@@ -37584,7 +37589,8 @@
       "keep_confirm": "Potvrzuji, že MyÚčto bude měsíce {from} až {last} počítat samo, i když je PAMICA už zpracovala.",
       "keep_confirm_first": "Převod bez posunu začátku vedení mezd nejdřív potvrďte.",
       "will_set": "Firma nemá nastavený začátek vedení mezd v MyÚčtu. Převod ho nastaví na {period}, měsíc po posledním měsíci zpracovaném předchozím programem ({last}). Všechny vybrané roky se převezmou jako zpracované předchozím programem."
-    }
+    },
+    "open_checks": "Zkontrolovat data po převodu"
   },
   "credit_cards": {
     "title": "Kreditní karty",
@@ -46318,6 +46324,124 @@
       "canceled": "Stornovaná",
       "cancelled": "Stornovaná",
       "approved": "Schválená"
+    }
+  },
+  "migrationChecks": {
+    "title": "Kontrola dat po převodu",
+    "subtitle": "Kontroly nejčastějších chyb dat převzatých z jiného účetního programu. Každá ukáže nálezy po dokladech, a kde je oprava jednoznačná, nabídne náhled a opravu.",
+    "refresh": "Znovu zkontrolovat",
+    "back_to_migrations": "Přechod z jiných systémů",
+    "back": "Zpět na kontroly",
+    "manual": "Postup v manuálu",
+    "loading": "Načítám kontroly…",
+    "load_failed": "Kontroly se nepodařilo načíst.",
+    "no_migration_title": "Firma nemá převod z jiného programu",
+    "no_migration_hint": "Kontroly se týkají firem s dokončeným převodem z POHODY, Money S3, ABRA Flexi a dalších programů.",
+    "sources_label": "Převedeno z",
+    "total_fixable": "k opravě {count}",
+    "total_review": "ke kontrole {count}",
+    "total_ok": "v pořádku {count}",
+    "col_check": "Kontrola",
+    "col_status": "Stav",
+    "col_count": "Nálezů",
+    "col_fixable": "K opravě",
+    "col_amount": "Částka",
+    "col_document": "Doklad",
+    "col_date": "Datum",
+    "col_state": "Stav",
+    "col_reason": "Důvod",
+    "col_change": "Co se změní",
+    "open_detail": "Detail",
+    "report_only": "jen hlášení",
+    "locked_count": "v chráněném období: {count}",
+    "report_only_hint": "Kontrola nemá jednoznačnou opravu. Nálezy opravte podle postupu v manuálu.",
+    "no_fix_right": "Opravu smí spustit správce firmy nebo role se zápisem do účetnictví.",
+    "no_findings": "Bez nálezů",
+    "filter_all": "Vše",
+    "filter_fixable": "K opravě",
+    "filter_locked": "Chráněné období",
+    "filter_review": "Ke kontrole",
+    "fix": "Opravit",
+    "fix_nothing": "Kontrola nemá nic k opravě.",
+    "fixing": "Opravuji…",
+    "cancel": "Zrušit",
+    "confirm_fix": "Provést opravu ({count})",
+    "preview_title": "Náhled opravy: {check}",
+    "preview_failed": "Náhled opravy se nepodařilo načíst.",
+    "preview_summary": "Opraví se nálezů: {count} ({amount}). Jen ohlášených nálezů: {skipped}.",
+    "preview_audit": "Oprava proběhne v jedné transakci, opakované spuštění nic nezdvojí a každá změna se zapíše do auditní stopy. Uzavřená, zamčená a podaná období se nemění.",
+    "fix_done": "Opraveno nálezů: {count} ({amount}).",
+    "fix_failed": "Opravu se nepodařilo provést.",
+    "status": {
+      "ok": "V pořádku",
+      "fixable": "K opravě",
+      "review": "Ke kontrole",
+      "error": "Chyba kontroly"
+    },
+    "state": {
+      "fixable": "K opravě",
+      "locked": "Chráněné období",
+      "review": "Ke kontrole"
+    },
+    "entity": {
+      "invoice": "Vydaný doklad",
+      "purchase_invoice": "Přijatý doklad",
+      "bank_statement": "Bankovní výpis",
+      "account": "Účet",
+      "other_item": "Ostatní položka"
+    },
+    "sources": {
+      "pohoda": "POHODA",
+      "money_s3": "Money S3",
+      "abra_flexi": "ABRA Flexi",
+      "premier": "PREMIER",
+      "stereo_nx": "Stereo NX",
+      "helios": "Helios"
+    },
+    "options": {
+      "include_uploaded": "Přepnout na měnu účtu i výpisy nahrané po převodu, které k účtu podle souboru jednoznačně patří."
+    },
+    "checks": {
+      "settled_without_payment": {
+        "title": "Uhrazená částka faktur bez záznamu platby",
+        "hint": "POHODA: úhrady minulých let, Money S3: zápočty a úhrady bez dokladu úhrady.",
+        "description": "Převod nesl část úhrad vydaných dokladů jen v uhrazené částce. První spárování nebo smazání platby by ji přepočtem smazalo a doklad by se vrátil mezi neuhrazené. Oprava doplní chybějící platbu nebo zápočet bez zápisu v deníku."
+      },
+      "foreign_bank_in_czk": {
+        "title": "Bankovní účet v cizí měně převedený v Kč",
+        "hint": "Účet v EUR či jiné měně s výpisy a pohyby v korunách, nahrané výpisy v jiné měně.",
+        "description": "Převod z POHODY dřív zakládal všechny bankovní účty v Kč. Oprava převede výpisy, pohyby, párování a deník analytiky účtu na jeho měnu; výpisy nahrané po převodu přepne jen s volbou."
+      },
+      "imported_statement_balances": {
+        "title": "Stavy převzatých výpisů proti deníku",
+        "hint": "Počáteční a konečné stavy převzatých výpisů, které nenavazují na deník.",
+        "description": "Stavy převzatých výpisů mohl posunout první výpis banky nebo spojení dvou účtů se stejným číslem. Kontrola je porovná s počátečním stavem analytiky 221 v deníku. Oprava spočte stavy znovu od deníku tam, kde je jednoznačná."
+      },
+      "payroll_liabilities": {
+        "title": "Mzdové závazky 331, 336 a 342",
+        "hint": "Zůstatek mzdových účtů proti neuhrazeným ostatním závazkům.",
+        "description": "Starší převody nechaly mzdové závazky jen v deníku a v agendě Ostatní pohledávky a závazky chyběly. Kontrola porovná zůstatek účtů ke konci převedeného roku s neuhrazenými ostatními závazky. Oprava není jednoznačná, postup je v manuálu."
+      },
+      "subledger_vs_ledger": {
+        "title": "Saldokonto proti hlavní knize",
+        "hint": "Účty 311, 321, 324 a 325 po letech.",
+        "description": "Porovná otevřené položky saldokonta se zůstatkem účtu v hlavní knize ke konci každého roku. Rozdíl může být oprávněný (přeplatek bez dokladu), proto se jen hlásí s proklikem do saldokonta."
+      },
+      "purchase_settled_uncovered": {
+        "title": "Přijaté doklady uhrazené bez krytí",
+        "hint": "Uhrazené podle původního programu, párování banky by je nabídlo znovu.",
+        "description": "Přijaté doklady uhrazené podle původního programu, které evidované úhrady nepokrývají. Párování banky by k nim nabídlo platbu se stejným symbolem znovu. Oprava doplní zápočet nebo úhradu mimo evidenci."
+      },
+      "tax_document_advance_link": {
+        "title": "DDKP bez vazby na zálohu",
+        "hint": "Daňové doklady k přijaté platbě, které nejsou navázané na zálohu.",
+        "description": "Bez vazby na zálohu konečná faktura neodečte DPH z DDKP a ruční spárování ji zdvojí. Oprava naváže DDKP na zálohu podle čísla v textu dokladu, u téhož odběratele a se shodnou částkou."
+      },
+      "final_invoice_advance_vat": {
+        "title": "Konečná faktura s DPH ze zálohy podruhé",
+        "hint": "Záloha s DDKP odečtená jen v hlavičce bez odpočtových řádků.",
+        "description": "Konečná faktura odečítá zálohu s DDKP jen v hlavičce, takže DPH zálohy je v přiznání dvakrát. Oprava se dělá v aplikaci odpočtem zálohy řádkem podle manuálu."
+      }
     }
   }
 }
