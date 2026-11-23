@@ -106,6 +106,23 @@ final class MoneyS3OpeningOnlyNextYearTest extends MoneyS3ImportTestCase
         self::assertNotEmpty($mismatch[0]['context']['diffs'] ?? []);
     }
 
+    /**
+     * Převod od roku 2025 s počátečními stavy z dalšího roku: posledním převáděným rokem je
+     * předposlední rok zálohy 2024, rozsah je prázdný. Převod se zastaví a rok 2025 určený
+     * jen pro počáteční stavy nepřevezme celý.
+     */
+    public function testEmptyRangeStopsInsteadOfConvertingOpeningOnlyYear(): void
+    {
+        $supplierId = $this->supplier(SyntheticAgenda::ICO, 'double_entry');
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2025, openingOnlyNext: true));
+
+        self::assertTrue($protocol->failed(), $this->explain($protocol));
+        self::assertContains('opening_only_empty', array_column(array_filter($protocol->get('preflight'), static fn (array $m): bool => $m['level'] === 'error'), 'code'));
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId));
+        self::assertSame(0, $this->rowCount('invoices', $supplierId));
+    }
+
     // ── pomocníci ─────────────────────────────────────────────────────────────
 
     private function convert(int $supplierId, ImportOptions $options): ImportProtocol

@@ -239,9 +239,19 @@ final class MoneyS3Importer
         }
         $openingOnly = null;
         if ($options->openingOnlyNext && !$options->relinkOnly) {
-            if ($options->toYear === null && count($full) >= 2) {
+            if ($options->toYear === null) {
                 // Bez „Převést do roku" je posledním převáděným rokem předposlední rok zálohy.
-                $options = $options->withToYear((int) $full[count($full) - 2]['year']);
+                // Prázdný rozsah převod zastaví: jinak by převzal celý rok určený jen pro počáteční stavy.
+                $toYear = self::openingOnlyToYear($this->fullPlan($supplierId, $backup, new ImportOptions(), $journalPreview));
+                if ($toYear === null || ($options->fromYear !== null && $toYear < $options->fromYear)) {
+                    $notes[] = ['level' => 'error', 'code' => 'opening_only_empty', 'message' => $toYear === null
+                        ? 'Záloha má jediný účetní rok. S volbou „Z dalšího roku jen počáteční stavy“ je posledním převáděným rokem předposlední rok zálohy, není tedy co převést. Zvolte „Převést do roku“, nebo volbu vypněte.'
+                        : sprintf('S volbou „Z dalšího roku jen počáteční stavy“ je posledním převáděným rokem %d (předposlední rok zálohy), převod ale začíná rokem %d. Rok %d je určený jen pro počáteční stavy, není tedy co převést.',
+                            $toYear, $options->fromYear, $toYear + 1),
+                        'context' => ['to_year' => $toYear, 'from_year' => $options->fromYear]];
+                    return [$options, $notes, $explicit, null];
+                }
+                $options = $options->withToYear($toYear);
             }
             $openingOnly = $options->toYear !== null ? self::openingOnlyItem($full, $options->toYear) : null;
             if ($openingOnly === null) {
@@ -272,6 +282,22 @@ final class MoneyS3Importer
             }
         }
         return [$options, $notes, $explicit, $openingOnly];
+    }
+
+    /**
+     * Poslední převáděný rok s volbou „Z dalšího roku jen počáteční stavy" ({@see ImportOptions::$openingOnlyNext})
+     * bez „Převést do roku": předposlední rok zálohy, poslední je určený jen pro počáteční
+     * stavy. Null = záloha nemá dva roky a převádět není co. Podle něj vybírá i dávka
+     * „od roku" automaticky ({@see MoneyS3BatchImporter}): rok jen s počátečními stavy do
+     * navazování let nepatří.
+     *
+     * @param list<array<string,mixed>> $plan rozvrh celé zálohy (bez „od roku" i „do roku")
+     */
+    public static function openingOnlyToYear(array $plan): ?int
+    {
+        $years = array_values(array_unique(array_map(static fn (array $p): int => (int) $p['year'], $plan)));
+        sort($years);
+        return count($years) >= 2 ? $years[count($years) - 2] : null;
     }
 
     /**

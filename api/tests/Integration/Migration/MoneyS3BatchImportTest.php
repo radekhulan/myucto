@@ -152,6 +152,31 @@ final class MoneyS3BatchImportTest extends TestCase
         self::assertSame(1, $this->rows('money_s3_imports', (int) $a['id']), 'Protokol převodu zůstává u firmy jako u průvodce jedné firmy.');
     }
 
+    /**
+     * „Z dalšího roku jen počáteční stavy" s „od roku" i „do roku" automaticky nad zálohou,
+     * ve které konečné stavy 2024 nesedí na počáteční stavy 2025. Rok 2025 je určený jen pro
+     * počáteční stavy, „od roku" na něj nepadne: převede se rok 2024 a z roku 2025 jen
+     * otevírací zápis, doklady, banka ani deník 2025 nepřibudou.
+     */
+    public function testOpeningOnlyYearIsNotPickedAsFromYear(): void
+    {
+        $results = $this->runBatch(['beta.lz'], $this->options(self::LIVE, ['opening_only_next' => true]));
+
+        $r = $results[0];
+        $dump = json_encode($r, JSON_UNESCAPED_UNICODE) ?: '';
+        self::assertContains($r['status'], [MigrationBatchRunner::COMPLETED, MigrationBatchRunner::COMPLETED_WITH_WARNINGS], $dump);
+        self::assertNull($r['from_year'], $dump);
+        self::assertSame([2024], $r['summary']['years'], $dump);
+        self::assertSame([['year' => 2024, 'status' => 'mismatch'], ['year' => 2025, 'status' => 'opening_only']], $r['summary']['closing'], $dump);
+        $supplierId = (int) $r['target_supplier_id'];
+        self::assertGreaterThan(0, $this->rows('journal_entries', $supplierId, "entry_date < '2025-01-01'"));
+        self::assertSame(1, $this->rows('journal_entries', $supplierId, "entry_date >= '2025-01-01' AND source_type = 'opening'"));
+        self::assertSame(0, $this->rows('journal_entries', $supplierId, "entry_date >= '2025-01-01' AND source_type <> 'opening'"));
+        self::assertSame(0, $this->rows('invoices', $supplierId, "issue_date >= '2025-01-01'"));
+        self::assertSame(0, $this->rows('purchase_invoices', $supplierId, "issue_date >= '2025-01-01'"));
+        self::assertSame(0, $this->rows('cash_documents', $supplierId, "issue_date >= '2025-01-01'"));
+    }
+
     public function testRepeatedBatchUpdatesExistingCompaniesWithoutDuplicatesOrSkipsThem(): void
     {
         $first = $this->runBatch(['alfa.lz'], $this->options(self::LIVE));

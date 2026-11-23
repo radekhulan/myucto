@@ -257,6 +257,15 @@ final class MoneyS3BatchImporter
             // firma už účtuje v MyÚčtu) volbu „od roku" neposune.
             $toYear = is_int($options->toYear) ? $options->toYear
                 : ($targetId !== null ? $this->importer->effectiveToYear($targetId, $backup, new ImportOptions(relinkOnly: $relink)) : null);
+            if ($toYear === null && $options->openingOnlyNext && !$relink) {
+                // Rok jen s počátečními stavy do navazování nepatří: při rozdílu proti předchozímu
+                // roku by na něj padlo „od roku" a převod by ho převzal celý. Bez dvou roků zálohy
+                // zastaví převod kontrola před převodem (opening_only_empty).
+                $toYear = MoneyS3Importer::openingOnlyToYear($this->journal->plan($backup, new ImportOptions(), $calendar));
+                if ($toYear === null) {
+                    return null;
+                }
+            }
             return JournalImporter::suggestedFromYear($this->journal->chainBreaks($backup, new ImportOptions(toYear: $toYear), $calendar));
         }
         return is_int($options->fromYear) ? $options->fromYear : null;
