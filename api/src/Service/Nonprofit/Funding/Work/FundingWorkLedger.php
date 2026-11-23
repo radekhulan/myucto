@@ -70,8 +70,10 @@ final class FundingWorkLedger
 
     /**
      * Řádky pro zápis vůči zdroji: aktuální stav, důvod nezpůsobilosti a počet dobropisů. Zamykací čtení
-     * (vidí potvrzené přeúčtování i při starším snímku transakce); S zámky na účtech a dimenzích jsou
-     * krátké a všechny zapisující cesty zamykají nejdřív období, takže pořadí zámků se nekříží.
+     * (vidí potvrzené přeúčtování i při starším snímku transakce). Drží krátké S zámky i na řádcích účtů
+     * a typu dimenze; účetní cesty zamykají nejdřív období, které evidence drží také, takže s nimi se pořadí
+     * nekříží. Souběžná úprava účtu nebo dimenze mimo zámek období může skončit uváznutím, akce ho vrátí
+     * jako 409 funding_work_busy (opakovatelné).
      * @param list<int> $ids @return array<int,array<string,mixed>>
      */
     public function linesFor(int $supplier, int $sourceId, string $kind, array $ids): array
@@ -168,22 +170,29 @@ final class FundingWorkLedger
 
     /**
      * Nabídka „Navázat znovu“: řádky se stejným účtem v témže zápisu, nebo v zápisu téhož dokladu
-     * (odúčtování a nové zaúčtování dokladu založí nový zápis). Jeden dotaz pro všechny vazby.
+     * (odúčtování a nové zaúčtování dokladu, storno a nové zaúčtování převzatého dokladu nebo dokladu
+     * v měsíci s podaným DPH). Jen platné zápisy daného období. Protizápis storna se nenabízí: nese doklad
+     * bez source_id (JournalEntryRepository::insertReversal), takže se s dokladem vazby nespáruje.
+     * Filtr účtu v SQL jen zmenšuje výsledek pod limit; pravidlo „stejný účet“ uplatní volající.
+     * Jeden dotaz pro všechny vazby.
      * @param list<array{entry_id:int,account_id:int,entry_source_type:?string,entry_source_id:?int}> $links
      * @return list<array<string,mixed>>
      */
-    public function relinkCandidates(int $supplier, array $links): array
+    public function relinkCandidates(int $supplier, int $period, array $links): array
     {
         $entries = [];
         $documents = [];
+        $accounts = [];
         foreach ($links as $link) {
             $entries[] = $link['entry_id'];
+            $accounts[] = $link['account_id'];
             if ($link['entry_source_type'] !== null && $link['entry_source_id'] !== null) $documents[$link['entry_source_type'] . ':' . $link['entry_source_id']] = [$link['entry_source_type'], $link['entry_source_id']];
         }
         $entries = self::ids($entries);
+        $accounts = self::ids($accounts);
         if ($entries === []) return [];
         $where = 'e.id IN (' . self::marks($entries) . ')';
-        $params = [$supplier, ...$entries];
+        $params = [$supplier, $period, ...$accounts, ...$entries];
         foreach ($documents as [$type, $id]) {
             $where .= ' OR (e.source_type = ? AND e.source_id = ?)';
             array_push($params, $type, $id);
@@ -193,10 +202,25 @@ final class FundingWorkLedger
             JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
             LEFT JOIN dimension_types t ON t.supplier_id = l.supplier_id AND t.system_key = \'activity_kind\'
             LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = t.id
-            WHERE e.supplier_id = ? AND (' . $where . ') AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND l.is_red_storno = 0 AND l.amount > 0
-            ORDER BY e.id, l.line_no, l.id LIMIT 500');
+            WHERE e.supplier_id = ? AND e.period_id = ? AND l.account_id IN (' . self::marks($accounts) . ') AND (' . $where . ')
+              AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND l.is_red_storno = 0 AND l.amount > 0
+            ORDER BY e.id, l.line_no, l.id LIMIT 5000');
         $q->execute($params);
         return array_map(self::line(...), $q->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Do nabídky doplní počet dobropisů k přijaté faktuře řádku (upozornění před přiřazením). @param list<array<string,mixed>> $rows */
+    public function attachCreditNotes(int $supplier, array &$rows): void
+    {
+        $ids = self::ids(array_map(static fn(array $r) => $r['entry_id'], $rows));
+        $counts = [];
+        if ($ids !== []) {
+            $q = $this->db->pdo()->prepare('SELECT e.id, ' . self::creditNotesSql() . ' FROM journal_entries e WHERE e.supplier_id = ? AND e.id IN (' . self::marks($ids) . ')');
+            $q->execute([$supplier, ...$ids]);
+            foreach ($q->fetchAll(PDO::FETCH_NUM) as [$entry, $count]) $counts[(int) $entry] = (int) $count;
+        }
+        foreach ($rows as &$row) $row['credit_notes'] = $counts[$row['entry_id']] ?? 0;
+        unset($row);
     }
 
     /** SQL součtu aktivních přiřazení na řádku přes všechny aktivní zdroje (kapacita nákladu). */

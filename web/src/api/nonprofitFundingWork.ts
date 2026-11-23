@@ -9,7 +9,7 @@ export interface FundingWorkLine {
  amount_cents: number; date: string; document_no: string | null; description: string | null; source_type: string; source_id: number | null
  posted: boolean; reversed: boolean; is_reversal: boolean; activity_kind_id: number | null
 }
-export interface FundingWorkCandidate extends FundingWorkLine { allocated_cents?: number; capacity_cents?: number; confirmed_source_key?: string | null }
+export interface FundingWorkCandidate extends FundingWorkLine { allocated_cents?: number; capacity_cents?: number; confirmed_source_key?: string | null; credit_notes?: number }
 export interface FundingWorkSourceInput {
  provider_id: number; kind: FundingKind; title: string; contract_ref: string | null; budget_cents: number; valid_from: string; valid_to: string
  activity_kind_ids: number[]; account_prefixes: string[]; legacy_source_key: string | null

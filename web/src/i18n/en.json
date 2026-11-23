@@ -44785,7 +44785,8 @@
       "reason_account": "The account is not among the eligible accounts of the source.",
       "reason_activity": "The activity type does not match the source.",
       "reason_overallocated": "The sources together carry more than the line amount.",
-      "reason_credit_note": "A credit note was posted to the invoice. Check the amount and confirm the link with Link again."
+      "reason_credit_note": "A credit note was posted to the invoice. Check the amount and confirm the link with Link again.",
+      "hasCreditNote": "A credit note is posted to the invoice. The link will need review after assignment."
     }
   },
   "eet": {

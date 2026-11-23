@@ -252,6 +252,8 @@ onMounted(() => { void reload().then(() => { mounted = true }) })
 // Po návratu na stránku (KeepAlive) načíst znovu: řádky deníku mohl mezitím přeúčtovat nebo stornovat jiný doklad.
 onActivated(() => { if (mounted) void reload() })
 onBeforeUnmount(() => { alive = false; generation++ })
+// Návrat ze záložky Potvrzené zdroje (J6): upozornění na souběh s J6 se mohla změnit.
+defineExpose({ reload })
 </script>
 
 <template>
@@ -391,7 +393,7 @@ onBeforeUnmount(() => { alive = false; generation++ })
      <p v-if="!busy && !candidates.length" class="rounded border p-4 text-sm text-neutral-500" data-section="no-candidates">{{ t('nonprofitFunding.work.noCandidates') }}</p>
      <ul v-else class="max-h-96 divide-y overflow-y-auto rounded border" data-section="candidates">
       <li v-for="row in candidates" :key="row.id" class="flex flex-wrap items-center gap-3 p-2 text-sm" :data-line="row.id">
-       <label class="flex min-w-0 flex-1 items-start gap-2"><input type="checkbox" :checked="row.id in picked" @change="togglePick(row)" /><span class="min-w-0">{{ lineLabel(row) }}<span v-if="row.description" class="block truncate text-xs text-neutral-500">{{ row.description }}</span><span v-if="dialog.kind === 'costs' && row.allocated_cents" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.freeCapacity', { amount: money(row.capacity_cents ?? 0) }) }}</span><span v-if="row.confirmed_source_key" class="block text-xs text-warning-700">{{ t('nonprofitFunding.work.costInConfirmed') }}</span></span></label>
+       <label class="flex min-w-0 flex-1 items-start gap-2"><input type="checkbox" :checked="row.id in picked" @change="togglePick(row)" /><span class="min-w-0">{{ lineLabel(row) }}<span v-if="row.description" class="block truncate text-xs text-neutral-500">{{ row.description }}</span><span v-if="dialog.kind === 'costs' && row.allocated_cents" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.freeCapacity', { amount: money(row.capacity_cents ?? 0) }) }}</span><span v-if="row.confirmed_source_key" class="block text-xs text-warning-700">{{ t('nonprofitFunding.work.costInConfirmed') }}</span><span v-if="row.credit_notes" class="block text-xs text-warning-700" data-warning="credit-note">{{ t('nonprofitFunding.work.hasCreditNote') }}</span></span></label>
        <input v-if="dialog.kind === 'costs' && row.id in picked" v-model="picked[row.id]" inputmode="decimal" :class="[input, 'w-32']" :aria-label="t('nonprofitFunding.work.amount')" data-field="pick-amount" />
       </li>
      </ul>

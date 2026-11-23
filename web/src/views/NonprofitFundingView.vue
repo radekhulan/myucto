@@ -22,7 +22,12 @@ const tabs = computed(() => [
 const tab = computed<Tab>(() => route.query.tab === 'confirmed' ? 'confirmed' : 'work')
 // Záložky přes v-show (vzor Členské příspěvky): rozpracovaný stav přežije přepnutí; J6 se načte až při první návštěvě.
 const visited = ref<Record<Tab, boolean>>({ work: false, confirmed: false })
-watch(tab, value => { visited.value[value] = true }, { immediate: true })
+const workPanel = ref<{ reload: () => Promise<void> } | null>(null)
+watch(tab, (value, previous) => {
+ // Návrat na průběžné čerpání načte data znovu: v J6 se mohl změnit potvrzený zdroj (upozornění na souběh).
+ if (value === 'work' && previous === 'confirmed' && visited.value.work) void workPanel.value?.reload()
+ visited.value[value] = true
+}, { immediate: true })
 function setTab(next: Tab) { if (tab.value !== next) void router.replace({ query: { ...route.query, tab: next === 'work' ? undefined : next } }) }
 function onTabKey(event: KeyboardEvent) {
  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -45,7 +50,7 @@ function onTabKey(event: KeyboardEvent) {
     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" /></svg>{{ item.label }}
    </button>
   </div>
-  <section v-show="tab === 'work'" id="funding-panel-work" role="tabpanel" aria-labelledby="funding-tab-work" data-panel="work"><FundingWorkPanel v-if="visited.work" :supplier="id" :can-manage="canManageWork" /></section>
+  <section v-show="tab === 'work'" id="funding-panel-work" role="tabpanel" aria-labelledby="funding-tab-work" data-panel="work"><FundingWorkPanel v-if="visited.work" ref="workPanel" :supplier="id" :can-manage="canManageWork" /></section>
   <section v-show="tab === 'confirmed'" id="funding-panel-confirmed" role="tabpanel" aria-labelledby="funding-tab-confirmed" data-panel="confirmed"><FundingWorkspace v-if="visited.confirmed" :supplier="id" :can-manage="canManage" embedded /></section>
  </div>
 </template>

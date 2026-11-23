@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Security\RoutePermissionMap;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
@@ -400,6 +402,41 @@ final class FundingWorkTest extends TestCase
         self::assertSame('ok', $detail['allocations'][0]['state']);
     }
 
+    /** Rozhodnutí 2 i pro storno: oprava převzatého dokladu nebo dokladu v měsíci s podaným DPH = storno + nový zápis téhož dokladu. */
+    public function testReversedDocumentRepostedIntoNewEntryCanBeRelinked(): void
+    {
+        $invoice = $this->purchaseInvoice('invoice', null);
+        $cost = $this->post('518', '500.00', '2026-06-01', -1, null, ['purchase_invoice', $invoice]);
+        $source = $this->source();
+        $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 40000]], $this->actor);
+        $this->reverse($cost);
+        $allocation = $this->work->detail($this->supplier, $this->period, $source)['allocations'][0];
+        self::assertSame('reversed', $allocation['state']);
+        self::assertSame([], $allocation['relink_candidates'], 'Bez nového zaúčtování dokladu není kam navázat (storno se nenabízí).');
+        $new = $this->post('518', '500.00', '2026-06-02', -1, null, ['purchase_invoice', $invoice]);
+        $allocation = $this->work->detail($this->supplier, $this->period, $source)['allocations'][0];
+        self::assertSame([$new], array_column($allocation['relink_candidates'], 'id'));
+        $detail = $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $new, null, $allocation['row_version'], $this->actor);
+        self::assertSame('ok', $detail['allocations'][0]['state']);
+    }
+
+    /** Rozhodnutí 1 i pro dobropis zaúčtovaný už před přiřazením: nabídka upozorní, vazba je ke kontrole do potvrzení. */
+    public function testCreditNotePostedBeforeAllocationIsFlagged(): void
+    {
+        $invoice = $this->purchaseInvoice('invoice', null);
+        $cost = $this->post('518', '1000.00', '2026-06-01', -1, null, ['purchase_invoice', $invoice]);
+        $this->post('321', '200.00', '2026-06-10', null, null, ['purchase_invoice', $this->purchaseInvoice('credit_note', $invoice)]);
+        $source = $this->source();
+        $offer = $this->work->costCandidates($this->supplier, $this->period, $source, '', 1)['rows'];
+        self::assertSame([[$cost, 1]], array_map(static fn($r) => [$r['id'], $r['credit_notes']], $offer));
+        $detail = $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 100000]], $this->actor);
+        self::assertSame(['changed', 'credit_note'], [$detail['allocations'][0]['state'], $detail['allocations'][0]['review_reason']]);
+        self::assertSame(0, $detail['totals']['documented_cents']);
+        $allocation = $detail['allocations'][0];
+        $detail = $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $cost, 80000, $allocation['row_version'], $this->actor);
+        self::assertSame(80000, $detail['totals']['documented_cents']);
+    }
+
     /** Hodnota druhu činnosti smazaná z číselníku úpravu zdroje neblokuje; neznámá hodnota u nového zdroje je chyba. */
     public function testDeletedActivityValueDoesNotBlockSourceUpdate(): void
     {
@@ -496,27 +533,39 @@ final class FundingWorkTest extends TestCase
         return $ids;
     }
 
-    /** Přeúčtování jako JournalEntryRepository::deleteLines + nové řádky téhož zápisu. @return list<int> */
+    /**
+     * Přeúčtování skutečnou cestou JournalEntryRepository::replace (smaže a vloží řádky téhož zápisu,
+     * se systémovými dimenzemi jako při zaúčtování dokladu). @return list<int>
+     */
     private function repost(int $line, string $amount): array
     {
         $q = $this->pdo->prepare('SELECT l.entry_id, a.account_code, d.dimension_value_id FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
             LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = ? WHERE l.id = ?');
         $q->execute([$this->catalog['activity_kind']['id'], $line]);
         [$entry, $code, $activity] = $q->fetch(PDO::FETCH_NUM);
-        $this->pdo->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$entry]);
-        return $this->lines((int) $entry, (string) $code, $amount, $activity === null ? null : (int) $activity);
+        $q = $this->pdo->prepare('SELECT supplier_id, period_id, entry_date, document_no, source_type, source_id, posted_at FROM journal_entries WHERE id = ?');
+        $q->execute([$entry]);
+        $header = $q->fetch(PDO::FETCH_ASSOC);
+        $header['supplier_id'] = (int) $header['supplier_id'];
+        $header['period_id'] = (int) $header['period_id'];
+        $expense = str_starts_with((string) $code, '5');
+        $dimensions = [$this->catalog['activity']['id'] => $this->catalog['activity']['values']['main'], $this->catalog['activity_kind']['id'] => $activity === null ? $this->sport : (int) $activity,
+            $this->catalog['tax_regime']['id'] => $this->catalog['tax_regime']['values']['exempt']];
+        $this->c->get(JournalEntryRepository::class)->replace((int) $entry, $header, [
+            ['account_id' => $this->accounts[(string) $code], 'side' => $expense ? 'debit' : 'credit', 'amount' => $amount, 'line_no' => 0, 'dimensions' => $dimensions],
+            ['account_id' => $this->accounts['221'], 'side' => $expense ? 'credit' : 'debit', 'amount' => $amount, 'line_no' => 1],
+        ]);
+        $q = $this->pdo->prepare('SELECT id FROM journal_entry_lines WHERE entry_id = ? ORDER BY line_no, id');
+        $q->execute([$entry]);
+        return array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
     }
 
-    /** Storno: opravný zápis s opačnými stranami a `reversed_by` na originálu. */
+    /** Storno skutečnou cestou PostingService::reverse (protizápis a `reversed_by` na originálu). */
     private function reverse(int $line): void
     {
         $q = $this->pdo->prepare('SELECT entry_id FROM journal_entry_lines WHERE id = ?');
         $q->execute([$line]);
-        $entry = (int) $q->fetchColumn();
-        $this->pdo->prepare("INSERT INTO journal_entries(supplier_id, period_id, entry_date, source_type, posted_at) VALUES (?, ?, '2026-06-30', 'manual', NOW())")->execute([$this->supplier, $this->period]);
-        $storno = (int) $this->pdo->lastInsertId();
-        $this->pdo->prepare("INSERT INTO journal_entry_lines(supplier_id, entry_id, line_no, account_id, side, amount) SELECT supplier_id, ?, line_no, account_id, IF(side = 'debit', 'credit', 'debit'), amount FROM journal_entry_lines WHERE entry_id = ?")->execute([$storno, $entry]);
-        $this->pdo->prepare('UPDATE journal_entries SET reversed_by = ? WHERE id = ?')->execute([$storno, $entry]);
+        $this->c->get(PostingService::class)->reverse($this->supplier, (int) $q->fetchColumn(), ['entry_date' => '2026-06-30', 'user_id' => $this->actor, 'posted_by' => $this->actor]);
     }
 
     private function input(array $override = []): array

@@ -42712,7 +42712,8 @@
       "reason_account": "Účet nepatří mezi způsobilé účty zdroje.",
       "reason_activity": "Druh činnosti neodpovídá zdroji.",
       "reason_overallocated": "Zdroje dohromady nesou víc, než je částka řádku.",
-      "reason_credit_note": "K faktuře byl zaúčtován dobropis. Zkontrolujte částku a vazbu potvrďte tlačítkem Navázat znovu."
+      "reason_credit_note": "K faktuře byl zaúčtován dobropis. Zkontrolujte částku a vazbu potvrďte tlačítkem Navázat znovu.",
+      "hasCreditNote": "K faktuře je zaúčtovaný dobropis. Po přiřazení bude vazba ke kontrole."
     }
   },
   "securities504": {

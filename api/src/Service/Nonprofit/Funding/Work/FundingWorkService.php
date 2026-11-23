@@ -79,7 +79,7 @@ final class FundingWorkService
         $allocations = $this->links($supplier, 'cost', [$sourceId], max(1, $page));
         $more = count($allocations) > self::PAGE;
         $allocations = array_slice($allocations, 0, self::PAGE);
-        $this->attachRelinkCandidates($supplier, $incomes, $allocations);
+        $this->attachRelinkCandidates($supplier, $period, $incomes, $allocations);
         $this->attachConfirmedLinks($supplier, $incomes, $allocations);
         $this->attachPaymentState($supplier, $allocations);
         $history = $this->db->pdo()->prepare('SELECT h.id, h.income_id, h.allocation_id, h.action, h.before_json, h.after_json, h.reason, h.created_at, u.name AS actor_name
@@ -140,6 +140,7 @@ final class FundingWorkService
         $source = $this->source($supplier, $period, $sourceId, false);
         if (mb_strlen($search) > 100) self::invalid('Hledaný text je příliš dlouhý.');
         $result = $this->ledger->candidates($supplier, $source, $this->period($supplier, $period, false), 'cost', $search, max(1, $page));
+        $this->ledger->attachCreditNotes($supplier, $result['rows']);
         $uses = $this->confirmedCostUses($supplier);
         foreach ($result['rows'] as &$row) $row['confirmed_source_key'] = $uses[$row['id']] ?? null;
         unset($row);
@@ -326,8 +327,10 @@ final class FundingWorkService
             foreach ($wanted as $lineId => $item) {
                 $line = $lines[$lineId];
                 $values[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                // Dobropis zaúčtovaný už před přiřazením se počítá jako nepotvrzený (credit_notes_seen = 0), shodně
+                // s J6 (NativeCostCoverage dá ke kontrole každý dobropis); potvrzení = Navázat znovu.
                 array_push($params, $supplier, $sourceId, $lineId, $lineId, $line['entry_id'], $line['source_type'], $line['source_id'], $line['account_id'],
-                    $line['amount_cents'], $line['date'], $line['credit_notes'], $item['amount_cents'], $item['note'], $actor);
+                    $line['amount_cents'], $line['date'], 0, $item['amount_cents'], $item['note'], $actor);
             }
             $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_allocations (supplier_id, source_id, line_id, linked_line_id, entry_id, entry_source_type, entry_source_id, account_id, line_amount_cents, entry_date, credit_notes_seen, amount_cents, note, created_by)
                 VALUES ' . implode(', ', $values))->execute($params);
@@ -597,12 +600,15 @@ final class FundingWorkService
         return $out;
     }
 
-    /** Pro vazby ke kontrole nabídne řádky téhož zápisu nebo dokladu se stejným účtem (jedním dotazem). */
-    private function attachRelinkCandidates(int $supplier, array &$incomes, array &$allocations): void
+    /**
+     * Pro vazby ke kontrole nabídne řádky téhož zápisu nebo dokladu se stejným účtem (jedním dotazem).
+     * Stornovaná vazba dostane nabídku jen z nového zápisu téhož dokladu (storno a nové zaúčtování).
+     */
+    private function attachRelinkCandidates(int $supplier, int $period, array &$incomes, array &$allocations): void
     {
-        $open = static fn(array $row) => $row['state'] === self::STATE_REMOVED || $row['state'] === self::STATE_CHANGED;
+        $open = static fn(array $row) => $row['state'] !== self::STATE_OK;
         $pending = array_values(array_filter([...$incomes, ...$allocations], $open));
-        $lines = $this->ledger->relinkCandidates($supplier, $pending);
+        $lines = $this->ledger->relinkCandidates($supplier, $period, $pending);
         $pick = static fn(array $row) => $open($row) ? array_values(array_filter($lines, static fn(array $line) => $line['account_id'] === $row['account_id'] && self::sameDocument($row, $line))) : [];
         foreach ($incomes as &$income) $income['relink_candidates'] = $pick($income);
         unset($income);
