@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
 use MyInvoice\Support\CompanyIdNormalizer;
@@ -21,6 +22,7 @@ final class PohodaExport
     private ?PohodaMdbAccounting $mdb = null;
     private array $warnings = [];
     private bool $warningsScanned = false;
+    private array $countsByPeriod = [];
     /** Osnova pro neziskové organizace ({@see hasNonprofitChart()}), spočtená při prvním dotazu. */
     private ?bool $nonprofitChart = null;
     /** Typ účetní jednotky z přehledu jednotek ({@see unitType()}); `false` = ještě nečteno. */
@@ -467,6 +469,10 @@ final class PohodaExport
                         $stock = null;
                     }
                 }
+                $counts = $export->counts();
+                if (PohodaImporter::isTaxEvidenceAgenda($export)) {
+                    $counts['later_years'] = [];
+                }
                 $out[] = [
                     'dir' => basename($dir),
                     'ico' => $export->ico,
@@ -474,7 +480,8 @@ final class PohodaExport
                     'company' => $names[$export->ico . '_' . $export->year] ?? '',
                     'program' => $export->info['program'],
                     'exported_at' => $export->info['timestamp'] !== '' ? $export->info['timestamp'] : null,
-                    'counts' => $export->counts(),
+                    'counts' => $counts,
+                    'later_years_complete' => true,
                     'files' => array_map(static fn (array $f): array => ['file' => $f['file'], 'state' => $f['state'], 'note' => $f['note']], $export->files()),
                     'has_accounting' => true,
                     'has_payroll' => $payroll !== null,
@@ -573,17 +580,28 @@ final class PohodaExport
     /**
      * Počty záznamů agendy pro náhled: řádky deníku (z toho počáteční stavy), rozsah dat,
      * vydané a přijaté doklady, interní doklady, pokladna, banka, adresář, zakázky a činnosti. `later_years` =
-     * roky po roce agendy, do kterých padají zápisy deníku ({@see PohodaJournal::laterYear()}).
+     * roky po roce agendy, do kterých padají zápisy, doklady nebo úhrady.
      *
      * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int,contracts:int,activities:int}
      */
-    public function counts(): array
+    public function counts(?FiscalCalendar $calendar = null, ?int $year = null): array
     {
+        $calendar ??= FiscalCalendar::calendar();
+        $year ??= $this->year;
+        $periodKey = $calendar->periodStart($year);
+        if (isset($this->countsByPeriod[$periodKey])) {
+            return $this->countsByPeriod[$periodKey];
+        }
         $journal = 0;
         $opening = 0;
         $first = null;
         $last = null;
         $later = [];
+        $rememberLaterYear = static function (?string $date) use ($calendar, $year, &$later): void {
+            if ($date !== null && ($laterYear = $calendar->fiscalYearOfDate($date)) > $year) {
+                $later[$laterYear] = true;
+            }
+        };
         $groups = [
             'issued' => [['issued', 'issued_credit', 'issued_debit', 'issued_advance', 'issued_proforma', 'issued_corrective', 'receivable'], 'invoice'],
             'purchase' => [['received', 'received_credit', 'received_debit', 'received_advance', 'received_proforma', 'received_corrective', 'commitment'], 'invoice'],
@@ -596,7 +614,7 @@ final class PohodaExport
         ];
         // Z MDB převodu se deník i všechny počítané agendy čtou jedním průchodem souborem.
         $tally = [];
-        $journalItems = (function () use ($groups, &$tally): \Generator {
+        $journalItems = (function () use ($groups, &$tally, $rememberLaterYear): \Generator {
             if ($this->mdb === null) {
                 yield from $this->records('journal', 'accountingItem');
                 return;
@@ -611,6 +629,9 @@ final class PohodaExport
                     continue;
                 }
                 $tally[$key] = ($tally[$key] ?? 0) + 1;
+                foreach (self::documentDates($key, $record) as $date) {
+                    $rememberLaterYear($date);
+                }
             }
         })();
         foreach ($journalItems as $item) {
@@ -619,21 +640,29 @@ final class PohodaExport
                 $opening++;
                 continue;
             }
-            $laterYear = PohodaJournal::laterYear($item, $this->year);
-            if ($laterYear !== null) {
-                $later[$laterYear] = true;
-            }
             $date = PohodaXml::date($item, 'date');
+            if (!PohodaJournal::isYearEndClosing($item)) {
+                $rememberLaterYear($date);
+            }
             if ($date !== null) {
                 $first = $first === null || $date < $first ? $date : $first;
                 $last = $last === null || $date > $last ? $date : $last;
             }
         }
-        $sum = function (array $keys, string $tag) use (&$tally): int {
+        $sum = function (array $keys, string $tag) use (&$tally, $rememberLaterYear): int {
             $n = 0;
             foreach ($keys as $key) {
                 if ($this->mdb !== null && $this->mdb->has($key)) {
                     $n += $tally[$key] ?? 0;
+                    continue;
+                }
+                if (in_array($tag, ['invoice', 'intDoc', 'voucher', 'bank'], true)) {
+                    foreach ($this->records($key, $tag) as $record) {
+                        $n++;
+                        foreach (self::documentDates($key, $record) as $date) {
+                            $rememberLaterYear($date);
+                        }
+                    }
                     continue;
                 }
                 $path = $this->path($key);
@@ -641,18 +670,38 @@ final class PohodaExport
             }
             return $n;
         };
-        ksort($later);
         $out = [
             'journal' => $journal,
             'opening' => $opening,
             'first_date' => $first,
             'last_date' => $last,
-            'later_years' => array_keys($later),
+            'later_years' => [],
         ];
         foreach ($groups as $name => [$keys, $tag]) {
             $out[$name] = $sum($keys, $tag);
         }
-        return $out;
+        ksort($later);
+        $out['later_years'] = array_keys($later);
+        return $this->countsByPeriod[$periodKey] = $out;
+    }
+
+    private static function documentDates(string $key, array $record): \Generator
+    {
+        if (in_array($key, ['addressbook', 'contracts', 'activities'], true)) {
+            return;
+        }
+        $header = PohodaXml::get($record, match ($key) {
+            'cash' => 'voucherHeader', 'bank' => 'bankHeader', 'internal' => 'intDocHeader', default => 'invoiceHeader',
+        });
+        yield match ($key) {
+            'cash' => PohodaXml::date($header, 'date') ?? PohodaXml::date($header, 'datePayment'),
+            'bank' => PohodaXml::date($header, 'datePayment') ?? PohodaXml::date($header, 'dateStatement'),
+            default => PohodaXml::date($header, 'dateAccounting') ?? PohodaXml::date($header, 'date'),
+        };
+        yield PohodaXml::date($header, 'liquidation/date');
+        foreach (PohodaXml::all($record, 'liquidations/liquidation') as $liquidation) {
+            yield PohodaXml::date($liquidation, 'date');
+        }
     }
 
     /** První hodnota klíče v libovolné hloubce záznamu (přehled účetních jednotek). */

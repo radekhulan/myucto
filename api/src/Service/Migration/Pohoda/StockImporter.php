@@ -79,10 +79,14 @@ final class StockImporter
             $p->info(self::STEP, 'stock_not_selected', 'Sklad se v tomto převodu nepřevádí. Převádí se jen z nejnovější agendy exportu a jen když ho v průvodci vyberete.');
             return;
         }
+        $stock = PohodaStock::read($path);
+        if ($ctx->skipsDate($stock->lastMovement)) {
+            $p->warn(self::STEP, 'stock_movement_outside_selection', 'Stav skladu obsahuje pohyb mimo vybrané roky. Připravte stav k předávacímu dni a převeďte jej samostatně.', ['date' => $stock->lastMovement]);
+            return;
+        }
         if (!$this->writer->stockEnabled($ctx->supplierId) && !$this->enableStock($ctx)) {
             return;
         }
-        $stock = PohodaStock::read($path);
         $date = $stock->stockDate($ctx->year(), $ctx->calendar->periodEnd($ctx->year()));
         $end = $ctx->lastPeriodEnd();
         if ($end !== null && $date > $end) {

@@ -314,6 +314,10 @@ final class InvoiceImporter
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
         }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
+            return;
+        }
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
@@ -334,10 +338,6 @@ final class InvoiceImporter
             return;
         }
         if ($ctx->skipsNew($step)) {
-            return;
-        }
-        if ($ctx->skipsDate($doc['accounting'])) {
-            $p->count($step, 'later_year_skipped');
             return;
         }
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
@@ -486,6 +486,10 @@ final class InvoiceImporter
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
         }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
+            return;
+        }
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
@@ -506,10 +510,6 @@ final class InvoiceImporter
             return;
         }
         if ($ctx->skipsNew($step)) {
-            return;
-        }
-        if ($ctx->skipsDate($doc['accounting'])) {
-            $p->count($step, 'later_year_skipped');
             return;
         }
         // DUZP z dokladu dodavatele a datum odpočtu ({@see PohodaPurchaseVatDates}); `tax`
@@ -896,7 +896,7 @@ final class InvoiceImporter
     private function refreshSettlement(PohodaContext $ctx, string $step, string $table, int $id, array $doc): void
     {
         // Daňová evidence vede úhradu jen z navázaných pohybů ({@see PohodaTaxEvidenceImporter::payments()}).
-        if ($ctx->taxEvidence) {
+        if ($ctx->taxEvidence || ($doc['payment_outside_selection'] ?? false)) {
             return;
         }
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
@@ -942,6 +942,9 @@ final class InvoiceImporter
     private static function payment(array $doc, array $amounts, bool $proforma = false): array
     {
         $toPay = round($amounts['total'] - $amounts['advance'], 2);
+        if ($doc['payment_outside_selection'] ?? false) {
+            return ['paid' => 0.0, 'settled' => false, 'paid_at' => null];
+        }
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
         $paid = round($toPay - $remaining, 2);
         $settled = abs($remaining) < 0.005
@@ -1319,12 +1322,19 @@ final class InvoiceImporter
      */
     private static function withoutSkippedPayments(PohodaContext $ctx, array $doc, array $r): array
     {
-        if ($ctx->skippedYears === []) {
+        if ($ctx->skippedYears === [] && $ctx->selectedYears === null && $ctx->ownJournalFrom === null) {
             return $doc;
         }
         $skipped = 0.0;
         $last = null;
-        foreach (PohodaXml::all($r, 'liquidations/liquidation') as $l) {
+        $liquidations = PohodaXml::all($r, 'liquidations/liquidation');
+        if ($liquidations === [] && $ctx->skipsDate($doc['paid_date'])) {
+            $doc['remaining'] = '';
+            $doc['paid_date'] = null;
+            $doc['payment_outside_selection'] = true;
+            return $doc;
+        }
+        foreach ($liquidations as $l) {
             $date = PohodaXml::date($l, 'date');
             if ($ctx->skipsDate($date)) {
                 $skipped += PohodaXml::num($l, 'amount');

@@ -146,6 +146,9 @@ final class PohodaContext
      */
     public array $skippedYears = [];
 
+    /** @var array<int,true>|null */
+    public ?array $selectedYears = null;
+
     /**
      * Převod skladu zvolený v průvodci: volba po skladech POHODY (kód skladu => `goods`,
      * `material` nebo `skip`) pro karty bez druhu zásoby. `null` = sklad se nepřevádí.
@@ -226,11 +229,11 @@ final class PohodaContext
         if ($this->ownJournalFrom !== null && substr($date, 0, 10) >= $this->ownJournalFrom) {
             return true;
         }
-        if ($this->skippedYears === []) {
+        if ($this->skippedYears === [] && $this->selectedYears === null) {
             return false;
         }
         $year = $this->calendar->fiscalYearOfDate(substr($date, 0, 10));
-        return $year > $this->year() && isset($this->skippedYears[$year]);
+        return $year > $this->year() && (isset($this->skippedYears[$year]) || ($this->selectedYears !== null && !isset($this->selectedYears[$year])));
     }
 
     /** @return list<int> */

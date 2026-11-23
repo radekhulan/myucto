@@ -118,6 +118,7 @@ final class ChartJournalImporter
         $ctx->periods = [$year => $period];
 
         $groups = [];
+        $skippedGroups = [];
         $closingRows = 0;
         $unknownAgendas = [];
         foreach ($ctx->export->records('journal', 'accountingItem') as $item) {
@@ -125,9 +126,14 @@ final class ChartJournalImporter
                 $closingRows++;
                 continue;
             }
-            $groups[PohodaJournal::groupKey($item)][] = $item;
+            $groupKey = PohodaJournal::groupKey($item);
+            if ($groupKey !== PohodaJournal::OPENING_KEY && $ctx->skipsDate(PohodaXml::date($item, 'date'))) {
+                $skippedGroups[$groupKey] = true;
+                continue;
+            }
+            $groups[$groupKey][] = $item;
             $source = PohodaJournal::source($item);
-            if ($source === PohodaJournal::BANK && !$ctx->skipsDate(PohodaXml::date($item, 'date'))) {
+            if ($source === PohodaJournal::BANK) {
                 $row = PohodaBankJournal::row($item);
                 if ($row !== null) {
                     $ctx->bankJournalRows[PohodaJournal::number($item)][] = $row;
@@ -178,7 +184,7 @@ final class ChartJournalImporter
         };
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
-        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => 0];
+        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => count($skippedGroups)];
         $moved = [];
         $later = [];
         // Forma zápisu firmy: deník POHODY (řádek = účet MD, účet Dal, částka) jde ve formě
@@ -218,10 +224,6 @@ final class ChartJournalImporter
             }
             $isOpening = $groupKey === PohodaJournal::OPENING_KEY;
             $first = $rows[0];
-            if (!$isOpening && $ctx->skipsDate(PohodaXml::date($first, 'date'))) {
-                $stats['later_year_skipped']++;
-                continue;
-            }
             $number = PohodaJournal::number($first);
 
             $lines = [];

@@ -143,8 +143,7 @@ final class PohodaActivityImportTest extends TestCase
         $this->assertActivitiesImported($supplierId, 'Činnost');
     }
 
-    /** Činnost se nedoplní do uzavřeného období; protokol to řekne a hodnoty dimenze vzniknou. */
-    public function testRepeatImportLeavesClosedPeriodUntouched(): void
+    public function testRepeatImportOfClosedPeriodStopsBeforeChangingActivities(): void
     {
         $supplierId = $this->supplier();
         $plainDir = $this->tmp . DIRECTORY_SEPARATOR . 'plain';
@@ -156,10 +155,10 @@ final class PohodaActivityImportTest extends TestCase
         SyntheticPohodaExport::withActivities($dir);
         $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
 
-        self::assertSame(3, $this->rows('dimension_values', $supplierId), $this->explain($protocol));
+        self::assertSame(0, $this->rows('dimension_values', $supplierId), $this->explain($protocol));
         self::assertSame(0, $this->rows('journal_entry_line_dimensions', $supplierId));
         self::assertSame(0, $this->rows('document_dimensions', $supplierId));
-        self::assertStringContainsString('uzavřeném', $this->message($protocol, 'activity_period_not_open'), $this->explain($protocol));
+        self::assertContains('period_not_open', array_column((array) $protocol->get('preflight'), 'code'));
     }
 
     /**

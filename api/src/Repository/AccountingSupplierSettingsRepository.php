@@ -264,10 +264,10 @@ final class AccountingSupplierSettingsRepository
     /**
      * B8 (audit 2026-07): měkký zámek účtování k datu. NULL = žádný zámek.
      */
-    public function getLockedUntil(int $supplierId): ?string
+    public function getLockedUntil(int $supplierId, bool $currentRead = false): ?string
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?'
+            'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId]);
         $v = $stmt->fetchColumn();

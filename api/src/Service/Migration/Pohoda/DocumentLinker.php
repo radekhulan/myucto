@@ -50,7 +50,8 @@ final class DocumentLinker
     public function link(PohodaContext $ctx): void
     {
         $p = $ctx->protocol;
-        $index = $this->journalIndex($ctx->supplierId);
+        $index = $this->journalIndex($ctx->supplierId, inScope: fn (string $date): bool => !$ctx->skipsDate($date));
+        $linkedEntryIds = [];
         $unbooked = [
             'invoice' => $this->unbookedIds('invoices', $ctx->supplierId),
             'purchase_invoice' => $this->unbookedIds('purchase_invoices', $ctx->supplierId),
@@ -133,6 +134,9 @@ final class DocumentLinker
                     continue;
                 }
                 $new = $this->entries->attach($ctx->supplierId, $ctx->userOrNull(), $retype ?? $sourceType, $sourceType, $docType, $docId, $entryIds);
+                foreach ($entryIds as $entryId) {
+                    $linkedEntryIds[$entryId] = true;
+                }
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
         }
@@ -149,7 +153,7 @@ final class DocumentLinker
         }
         $this->linkAdvances($ctx);
         $this->linkTaxDocumentsToAdvances($ctx);
-        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK);
+        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK, entryIds: array_keys($linkedEntryIds));
         $p->finish(self::STEP_LINK);
     }
 
@@ -175,13 +179,11 @@ final class DocumentLinker
             [PohodaImportRepository::KIND_INVOICE, ['issued', 'receivable'], ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id'],
         ] as [$kind, $finalAgendas, $advanceAgendas, $table, $column]) {
             $byNumber = [];
-            $finals = [];
-            foreach ($this->map->all($ctx->supplierId, $kind) as $key => $id) {
-                [$agenda, $number] = array_pad(explode('|', (string) $key, 3), 2, '');
-                if (in_array($agenda, $advanceAgendas, true)) {
+            $finals = $this->map->all($ctx->supplierId, $kind);
+            foreach ($finals as $key => $id) {
+                [$agenda, $number, $date] = array_pad(explode('|', (string) $key, 3), 3, '');
+                if (in_array($agenda, $advanceAgendas, true) && !$ctx->skipsDate($date)) {
                     $byNumber[$number][] = (int) $id;
-                } elseif (in_array($agenda, $finalAgendas, true)) {
-                    $finals[$agenda . '|' . $number][] = (int) $id;
                 }
             }
             if ($byNumber === []) {
@@ -196,8 +198,15 @@ final class DocumentLinker
             );
             foreach ($finalAgendas as $agenda) {
                 foreach ($ctx->export->records($agenda, 'invoice') as $record) {
-                    $number = PohodaXml::text(PohodaXml::get($record, 'invoiceHeader'), 'number/numberRequested');
-                    $finalIds = $finals[$agenda . '|' . $number] ?? [];
+                    $header = PohodaXml::get($record, 'invoiceHeader');
+                    $number = PohodaXml::text($header, 'number/numberRequested');
+                    $accounting = PohodaXml::date($header, 'dateAccounting');
+                    $issue = PohodaXml::date($header, 'date') ?? $accounting;
+                    if ($ctx->skipsDate($accounting ?? $issue)) {
+                        continue;
+                    }
+                    $finalId = $finals[$agenda . '|' . $number . '|' . $issue] ?? null;
+                    $finalIds = $finalId === null ? [] : [(int) $finalId];
                     $advances = [];
                     foreach (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') as $item) {
                         $ref = PohodaXml::text($item, 'sourceDocument/number');
@@ -267,13 +276,11 @@ final class DocumentLinker
             [PohodaImportRepository::KIND_INVOICE, 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type'],
         ] as [$kind, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn]) {
             $advances = [];
-            $taxDocuments = [];
-            foreach ($this->map->all($ctx->supplierId, $kind) as $key => $id) {
-                [$agenda, $number] = array_pad(explode('|', (string) $key, 3), 2, '');
-                if (in_array($agenda, $advanceAgendas, true)) {
+            $taxDocuments = $this->map->all($ctx->supplierId, $kind);
+            foreach ($taxDocuments as $key => $id) {
+                [$agenda, $number, $date] = array_pad(explode('|', (string) $key, 3), 3, '');
+                if (in_array($agenda, $advanceAgendas, true) && !$ctx->skipsDate($date)) {
                     $advances[$number][] = (int) $id;
-                } elseif ($agenda === 'internal') {
-                    $taxDocuments[$number][] = (int) $id;
                 }
             }
             if ($advances === [] || $taxDocuments === []) {
@@ -288,7 +295,10 @@ final class DocumentLinker
             foreach ($ctx->export->records('internal', 'intDoc') as $record) {
                 $header = PohodaXml::get($record, 'intDocHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
-                if (count($taxDocuments[$number] ?? []) !== 1) {
+                $accounting = PohodaXml::date($header, 'dateAccounting');
+                $issue = PohodaXml::date($header, 'date') ?? $accounting;
+                $taxDocumentId = $taxDocuments['internal|' . $number . '|' . $issue] ?? null;
+                if ($taxDocumentId === null || $ctx->skipsDate($accounting ?? $issue)) {
                     continue;
                 }
                 $refs = [];
@@ -304,7 +314,7 @@ final class DocumentLinker
                 if ($refs === [] && preg_match('/zálohov\w*\s+faktu\w*\s+č\.?\s*(\S+)/u', PohodaXml::text($header, 'text'), $m) === 1
                     && count($advances[rtrim($m[1], '.,;')] ?? []) === 1) {
                     $candidate = $advances[rtrim($m[1], '.,;')][0];
-                    $same->execute([$candidate, $taxDocuments[$number][0], $ctx->supplierId]);
+                    $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
                     if ($same->fetchColumn() !== false) {
                         $refs[$m[1]] = $candidate;
                     }
@@ -312,7 +322,7 @@ final class DocumentLinker
                 if (count($refs) !== 1) {
                     continue;
                 }
-                $set->execute([reset($refs), $taxDocuments[$number][0], $ctx->supplierId]);
+                    $set->execute([reset($refs), $taxDocumentId, $ctx->supplierId]);
                 if ($set->rowCount() > 0) {
                     $p->count(self::STEP_LINK, 'tax_document_advance_linked');
                 }
@@ -347,10 +357,14 @@ final class DocumentLinker
 
         $internal = [];
         foreach ($ctx->liquidations as $l) {
+            if ($ctx->skipsDate($l['date'])) {
+                $p->count(self::STEP_PAYMENTS, 'later_year_skipped');
+                continue;
+            }
             $mapKey = $l['doc'] . '|' . $l['id'] . '|' . $l['liq'];
             $isIssued = $l['doc'] === 'invoice';
             if ($l['agenda'] === 'internalDocuments' && in_array($l['doc'], ['invoice', 'purchase_invoice'], true)
-                && !$ctx->skipsDate($l['date']) && ($l['date'] === null || $l['date'] >= $start)) {
+                && ($l['date'] === null || $l['date'] >= $start)) {
                 // Zápočet interním dokladem: vyřeší se po dokladech celého interního dokladu níže.
                 $internal[(string) $l['source']][] = $l;
                 continue;
@@ -368,11 +382,6 @@ final class DocumentLinker
                     $this->recordIssuedPayment($ctx, $l, 'cash', null, (int) $existing[$mapKey]);
                 }
                 $p->count(self::STEP_PAYMENTS, 'existing');
-                continue;
-            }
-            if ($ctx->skipsDate($l['date'])) {
-                // Úhrada v roce, který se nepřevádí - pohyb v převodu není, doklad zůstává neuhrazený.
-                $p->count(self::STEP_PAYMENTS, 'later_year_skipped');
                 continue;
             }
             if ($l['date'] !== null && $l['date'] < $start) {
@@ -598,6 +607,9 @@ final class DocumentLinker
             if (!is_string($date)) {
                 return;
             }
+        }
+        if ($ctx->skipsDate($date)) {
+            return;
         }
         $pdo->prepare(
             'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, bank_transaction_id, created_by)
@@ -864,6 +876,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $match = $pdo->prepare('INSERT INTO payment_matches (supplier_id, bank_transaction_id, invoice_id, purchase_invoice_id, amount, match_type, matched_by_user_id) VALUES (?, ?, NULL, ?, ?, "manual", ?)');
         foreach ($refunds as $t) {
+            if ($ctx->skipsDate($t['posted'])) {
+                continue;
+            }
             $candidates = array_keys($bySymbol[preg_replace('/\D+/', '', (string) $t['variable_symbol']) ?? ''] ?? []);
             if (count($candidates) !== 1 || $advances[$candidates[0]]['left'] + 0.005 < (float) $t['amount']) {
                 continue;
@@ -875,7 +890,7 @@ final class DocumentLinker
 
         // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
         $exact = $pdo->query(
-            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+            "SELECT f.id, p.pairing_symbol, MAX(e.entry_date) AS entry_date, SUM(l.signed_amount) AS amount
                FROM purchase_invoices f
                JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'purchase_invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'credit'
@@ -888,6 +903,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $deductExact = $pdo->prepare('INSERT IGNORE INTO purchase_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, created_by) VALUES (?, ?, ?, ?, ?)');
         foreach ($exact as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             // Víc záloh se stejným symbolem (smlouva na energie) se čerpá od nejstarší.
             $amount = round((float) $f['amount'], 2);
             foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
@@ -919,6 +937,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $deduct = $pdo->prepare('INSERT IGNORE INTO purchase_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, created_by) VALUES (?, ?, ?, ?, ?)');
         foreach ($finals as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $credit = round((float) $f['credit'], 2);
             foreach ($advances as $advanceId => &$advance) {
                 if ($credit < 0.01) {
@@ -975,7 +996,7 @@ final class DocumentLinker
         // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
         $deduct = $pdo->prepare("INSERT IGNORE INTO invoice_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, source, created_by) VALUES (?, ?, ?, ?, 'import', ?)");
         foreach ($pdo->query(
-            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+            "SELECT f.id, p.pairing_symbol, MAX(e.entry_date) AS entry_date, SUM(l.signed_amount) AS amount
                FROM invoices f
                JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'debit'
@@ -986,6 +1007,9 @@ final class DocumentLinker
                 AND NOT EXISTS (SELECT 1 FROM invoice_advance_deductions iad WHERE iad.supplier_id = f.supplier_id AND iad.final_invoice_id = f.id)
               GROUP BY f.id, p.pairing_symbol"
         )->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $amount = round((float) $f['amount'], 2);
             foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
                 if ($amount < 0.01 || $advances[$advanceId]['left'] < 0.01) {
@@ -1011,6 +1035,9 @@ final class DocumentLinker
               ORDER BY entry_date, f.id"
         )->fetchAll(PDO::FETCH_ASSOC);
         foreach ($finals as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $debit = round((float) $f['debit'], 2);
             foreach ($advances as $advanceId => &$advance) {
                 if ($debit < 0.01) {
@@ -1049,6 +1076,7 @@ final class DocumentLinker
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = {$s} AND i.status = 'paid' AND i.invoice_type = 'invoice' AND i.paid_at IS NOT NULL
+                AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = i.supplier_id AND m.kind = 'invoice' AND m.target_id = i.id)
                 AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links jl
                                   JOIN journal_entries je ON je.id = jl.entry_id AND je.supplier_id = jl.supplier_id AND je.source_type = 'manual'
                                  WHERE jl.supplier_id = i.supplier_id AND jl.doc_type = 'invoice' AND jl.doc_id = i.id)
@@ -1060,6 +1088,9 @@ final class DocumentLinker
              VALUES (?, ?, ?, ?, ?, 'Převzato z POHODY, dorovnání úhrady', 'settlement', ?)"
         );
         foreach ($rows as $r) {
+            if ($ctx->skipsDate($r['paid_on'])) {
+                continue;
+            }
             $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], $ctx->userOrNull()]);
             $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payment_remainder');
         }
@@ -1100,6 +1131,9 @@ final class DocumentLinker
              VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)"
         );
         foreach ($rows as $r) {
+            if ($ctx->skipsDate($r['entry_date'])) {
+                continue;
+            }
             $issued = $r['invoice_id'] !== null;
             $docType = $issued ? 'invoice' : 'purchase_invoice';
             $docId = (int) ($issued ? $r['invoice_id'] : $r['purchase_id']);
@@ -1615,7 +1649,7 @@ final class DocumentLinker
      *
      * @return array<string,array<string,list<array{year:int,date:string,id:int}>>>
      */
-    private function journalIndex(int $supplierId, ?int $year = null, ?FiscalCalendar $calendar = null): array
+    private function journalIndex(int $supplierId, ?int $year = null, ?FiscalCalendar $calendar = null, ?callable $inScope = null): array
     {
         $index = [];
         $yearStart = $year !== null ? ($calendar ?? FiscalCalendar::calendar())->periodStart($year) : '';
@@ -1625,7 +1659,7 @@ final class DocumentLinker
                 continue; // otevírací zápis "rok|PS"
             }
             [$agenda, $source, $number, $date] = $parts;
-            if ($year !== null && !self::inAgendaYear((int) $agenda, $date, $year, $yearStart)) {
+            if (($year !== null && !self::inAgendaYear((int) $agenda, $date, $year, $yearStart)) || ($inScope !== null && !$inScope($date))) {
                 continue;
             }
             $index[$source][$number][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['year' => (int) $agenda, 'date' => $date, 'id' => $entryId];

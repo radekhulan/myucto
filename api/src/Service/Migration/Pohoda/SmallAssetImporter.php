@@ -51,6 +51,11 @@ final class SmallAssetImporter
 
         foreach ($ctx->export->records('assets', 'DM') as $row) {
             $number = PohodaXml::text($row, 'Cislo');
+            $date = PohodaXml::date($row, 'Datum');
+            if ($ctx->skipsDate($date)) {
+                $p->count(self::STEP, 'later_year_skipped');
+                continue;
+            }
             $key = 'small_asset|' . ($number !== '' ? $number : '#' . PohodaXml::text($row, 'ID'));
             if (isset($existing[$key])) {
                 $p->count(self::STEP, 'existing');
@@ -60,7 +65,6 @@ final class SmallAssetImporter
             if ($ctx->skipsNew(self::STEP)) {
                 continue;
             }
-            $date = PohodaXml::date($row, 'Datum');
             $name = PohodaXml::text($row, 'SText') ?: $number;
             if ($date === null || $name === '') {
                 $p->warn(self::STEP, 'small_asset_incomplete', "Karta drobného majetku {$number} nemá datum nebo název, nepřevzata.", ['document_no' => $number]);
@@ -70,6 +74,9 @@ final class SmallAssetImporter
             $price = round(PohodaXml::num($row, 'Kc'), 2);
             $unitPrice = UnitPricePrecision::normalize(PohodaXml::num($row, 'KcJedn'));
             $disposed = PohodaXml::date($row, 'DatLikv');
+            if ($ctx->skipsDate($disposed)) {
+                $disposed = null;
+            }
             $vendor = PohodaXml::text($row, 'Firma');
             $note = PohodaXml::text($row, 'Pozn');
             $data = SmallAssetCard::payload(

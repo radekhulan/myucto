@@ -156,12 +156,13 @@ převodníku MDB, nebo `<IČO>_<rok>.zip`). Souhrn nástroje neuvádí chybu.
    upozornění tlačítko **Převést mzdy z PAMICA**.
 5. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
    samostatný řádek pod agendou (u hospodářského roku jako další účetní rok
-   firmy). Pozdější rok jde převést jen spolu s rokem agendy; nevybraný převod
-   přeskočí ([§ 107.9.4](#10794-postup)).
+   firmy). Náhled počítá i s nezaúčtovanými doklady a daty úhrad. Pozdější rok
+   lze převést jen spolu s rokem agendy. Nevybraný rok převod přeskočí
+   ([§ 107.9.4](#10794-postup)).
 6. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
    zastaví, když export patří firmě s jiným IČO, chybí nebo nejde přečíst deník,
    osnova nebo členění DPH, účetní období v MyÚčtu už obsahuje zápisy, které
-   nevznikly převodem, nebo je období uzavřené.
+   nevznikly převodem, období není otevřené nebo zasahuje do zámku účtování k datu.
 7. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
    zkoušku nanečisto**. Proběhne celý převod včetně rekonciliace, na konci se ale
    všechno vrátí.
@@ -844,9 +845,11 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
    - v exportu chybí nebo nejde přečíst účetní deník, osnova nebo členění DPH,
    - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem
      (uzávěrkové zápisy a kurzové přecenění se nepočítají),
-   - období je v MyÚčtu uzavřené.
+   - období v MyÚčtu není otevřené, a to i při opakovaném převodu,
+   - do vybraného období zasahuje zámek účtování k datu. Kontrola se vztahuje
+     k celému období. Zámek může být nastavený i u jinak otevřeného období.
 
-   Obojí platí i pro vybrané období následujícího roku, do kterého padají
+   Stejné kontroly platí i pro vybrané období následujícího roku, do kterého padají
    doklady agendy s pozdějším datem.
 3. **Zkouška nanečisto.** Proběhne celý převod vybraných roků včetně
    rekonciliace, na konci se ale všechno vrátí. Výsledkem je protokol za každý
@@ -1010,7 +1013,7 @@ období podle jeho data (jen v otevřených obdobích a mimo uzamčené datum).
 
 Kontrola před převodem ([§ 107.9.4](#10794-postup)) běží i při opakovaném převodu
 a stejně přísně: vznikl-li mezitím v některém z převáděných roků (včetně
-pozdějšího roku agendy) ruční zápis, který nepochází z převodu, převod se zastaví
+pozdějšího roku agendy) zápis, který nepochází z převodu, převod se zastaví
 a nic nezapíše. Opakovaný převod do roku s vlastními zápisy tedy nejde; další rok
 převádějte dřív, než v něm začnete účtovat ručně. Výjimkou je opravný převod vazeb
 už převedené firmy: vlastní zápisy v MyÚčtu nechá beze změny a nové doklady
@@ -1026,9 +1029,9 @@ tu může hlásit rozdíl, protože deník nese i vlastní zápisy.
 doplníte novým exportem z aktuální verze nástroje a opakovaným převodem téhož roku.
 Převod založí hodnoty dimenzí Zakázka a Činnost a zakázky u klienta a doplní je
 k už převedeným dokladům a řádkům deníku. Nic nezdvojí a hodnotu, kterou jste
-v MyÚčtu změnili, nepřepíše. Zápisy a doklady v uzavřeném období nebo se zmrazenými
-dimenzemi zůstanou bez zakázky a činnosti a protokol uvede jejich počet; po
-znovuotevření knih je doplní další opakovaný převod.
+v MyÚčtu změnili, nepřepíše. Převod spusťte v otevřeném období mimo zámek účtování.
+Zápisy a doklady se zmrazenými dimenzemi zůstanou bez nového přiřazení a protokol
+uvede jejich počet.
 
 Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
@@ -1055,8 +1058,8 @@ ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-
 
 ### 107.9.8 Omezení
 
-- Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
-  (i období následujícího roku pro doklady agendy s pozdějším datem).
+- Převádí se kalendářní nebo hospodářský účetní rok. Hranice období musí
+  odpovídat účetnímu roku nastavenému u firmy v MyÚčtu.
 - Převod čte jen export vytvořený nástrojem, nikdy živou databázi POHODY.
 - Jeden běh převede vybrané roky jedné firmy, každý rok s vlastním
   protokolem. Agenda roku musí mít IČO firmy v MyÚčtu.

@@ -106,6 +106,10 @@ final class CashBankImporter
                 $p->warn(self::STEP_CASH, 'number_or_date_missing', "Pokladní doklad {$number} nemá číslo nebo datum, nepřevzat.");
                 continue;
             }
+            if ($ctx->skipsDate($issue)) {
+                $p->count(self::STEP_CASH, 'later_year_skipped');
+                continue;
+            }
             // Doklad bez zaúčtování k začátku období (počáteční stav pokladny, doklady přelomu
             // roku) je v počátečních stavech - naváže se na otevírací zápis.
             $inOpening = PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting' && $issue <= $periodStart;
@@ -119,10 +123,6 @@ final class CashBankImporter
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_CASH)) {
-                continue;
-            }
-            if ($ctx->skipsDate($issue)) {
-                $p->count(self::STEP_CASH, 'later_year_skipped');
                 continue;
             }
             $registerId = $registerIds[PohodaXml::text($h, 'cashAccount/ids')] ?? null;

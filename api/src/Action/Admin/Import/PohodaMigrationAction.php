@@ -218,7 +218,7 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             if ((bool) ($agenda['has_payroll'] ?? false) && !PohodaPayrollImporter::summaryComplete($agenda['payroll'] ?? null)) {
                 return false;
             }
-            if ((bool) ($agenda['has_accounting'] ?? true) && !is_array($agenda['counts']['later_years'] ?? null)) {
+            if ((bool) ($agenda['has_accounting'] ?? true) && (!is_array($agenda['counts']['later_years'] ?? null) || ($agenda['later_years_complete'] ?? false) !== true)) {
                 return false;
             }
             // Přehled skladu (sklady k volbě v průvodci) nese jen přehled nahraný po jeho zavedení.

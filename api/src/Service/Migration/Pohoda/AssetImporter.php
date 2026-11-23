@@ -70,6 +70,10 @@ final class AssetImporter
                 $p->count(self::STEP, 'existing');
                 continue;
             }
+            if ($ctx->skipsDate(PohodaXml::date($row, 'DatZar') ?? PohodaXml::date($row, 'Datum'))) {
+                $p->count(self::STEP, 'later_year_skipped');
+                continue;
+            }
             $disposal = PohodaXml::date($row, 'DatLikv');
             if ($disposal !== null && $disposal < $periodStart) {
                 $p->count(self::STEP, 'disposed_before');
@@ -84,6 +88,10 @@ final class AssetImporter
             $card = $plan['card'];
             $review = $plan['review'];
             $improvements = $plan['improvements'];
+            if (array_any($improvements, static fn (array $improvement): bool => $ctx->skipsDate($improvement['completed_on']))) {
+                $p->warn(self::STEP, 'asset_improvement_outside_selection', "Karta majetku {$number} obsahuje technické zhodnocení mimo vybrané roky. Ověřte ji samostatně.", ['document_no' => $number]);
+                continue;
+            }
             // Počáteční stav majetkového účtu obsahuje zhodnocení dokončená před obdobím agendy.
             $openingPrice = (float) $card['input_price'];
             foreach ($improvements as $imp) {

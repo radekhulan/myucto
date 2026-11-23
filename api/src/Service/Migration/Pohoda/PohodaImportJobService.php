@@ -216,6 +216,7 @@ final class PohodaImportJobService extends AbstractImportJobService
             // Export se po převodu smaže, jen když z něj nic nezbývá: prošly všechny agendy
             // firmy a žádná nemá druhou část (účetnictví / mzdy).
             $purge = !$dryRun && ($status === 'completed' || $status === 'completed_with_warnings')
+                && array_all($plan, static fn (array $item): bool => $item['skip'] === [])
                 && self::nothingLeft($meta, $ico, $planYears, $payroll);
         } catch (\Throwable $e) {
             $this->jobs->markFailed($jobId, $this->failureMessage($e, sprintf('převod exportu %s firmy %d selhal', $token, $supplierId), static::RUN_FAILED));
@@ -285,7 +286,8 @@ final class PohodaImportJobService extends AbstractImportJobService
                             PohodaPayrollPeriodRange::fromParams($params))
                         : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false),
                             self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null),
-                            payroll: $agenda['has_payroll'] ? $agenda['payroll'] : null),
+                            payroll: $agenda['has_payroll'] ? $agenda['payroll'] : null,
+                            selectedYears: PohodaImporter::isTaxEvidenceAgenda($export) ? null : $included),
                     'journal' => static fn (array $byStep): array => $payroll
                         ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
                         : $byStep['journal']['counts'] ?? [],
@@ -482,7 +484,8 @@ final class PohodaImportJobService extends AbstractImportJobService
         if ($agenda['later_years'] !== null) {
             return $agenda['later_years'];
         }
-        return ChartJournalImporter::laterYears(PohodaExport::open(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir']));
+        $export = PohodaExport::open(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir']);
+        return PohodaImporter::isTaxEvidenceAgenda($export) ? [] : $export->counts()['later_years'];
     }
 
     /**

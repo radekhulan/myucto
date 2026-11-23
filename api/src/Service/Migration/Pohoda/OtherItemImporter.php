@@ -58,8 +58,9 @@ final class OtherItemImporter
             foreach ($ctx->export->records($agenda, 'invoice') as $record) {
                 $header = PohodaXml::get($record, 'invoiceHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
-                $issued = PohodaXml::date($header, 'date') ?? PohodaXml::date($header, 'dateAccounting');
-                if ($number === '' || $issued === null || $ctx->skipsDate($issued)) {
+                $accounting = PohodaXml::date($header, 'dateAccounting');
+                $issued = PohodaXml::date($header, 'date') ?? $accounting;
+                if ($number === '' || $issued === null || $ctx->skipsDate($accounting ?? $issued)) {
                     $p->count(self::STEP, 'skipped');
                     continue;
                 }
@@ -72,7 +73,9 @@ final class OtherItemImporter
                     continue;
                 }
                 if (isset($mappedAdvances[$key])) {
-                    self::captureLiquidations($ctx, 'tax_advance', (int) $mappedAdvances[$key], $number, $record);
+                    if (!$ctx->skipsDate(PohodaXml::date($header, 'dateDue') ?? $issued)) {
+                        self::captureLiquidations($ctx, 'tax_advance', (int) $mappedAdvances[$key], $number, $record);
+                    }
                     $p->count(self::STEP, 'existing');
                     continue;
                 }
@@ -99,7 +102,7 @@ final class OtherItemImporter
                 foreach ($journal as $journalKey => $entryId) {
                     $parts = explode('|', (string) $journalKey, 4);
                     if (count($parts) === 4 && $parts[1] === $source && $parts[2] === $number
-                        && (int) $parts[0] >= $ctx->year() - 1 && (int) $parts[0] <= $ctx->year()) {
+                        && (int) $parts[0] >= $ctx->year() - 1 && (int) $parts[0] <= $ctx->year() && !$ctx->skipsDate($parts[3])) {
                         $candidates[] = ['year' => (int) $parts[0], 'date' => $parts[3], 'id' => (int) $entryId];
                     }
                 }
@@ -202,7 +205,10 @@ final class OtherItemImporter
         $taxpayer = (string) $type->fetchColumn() === 'fo' ? 'fo' : 'po';
         $byYear = [];
         foreach ($advances as $advance) {
-            $byYear[(int) substr((string) $advance['candidate']['due'], 0, 4)][] = $advance;
+            $due = $advance['candidate']['due'];
+            if (!$ctx->skipsDate($due)) {
+                $byYear[(int) substr($due, 0, 4)][] = $advance;
+            }
         }
         ksort($byYear);
         $existing = $pdo->prepare("SELECT COUNT(*) FROM tax_advance_schedules
@@ -226,11 +232,16 @@ final class OtherItemImporter
                 $paidOn = null;
                 foreach (PohodaXml::all($row['record'], 'liquidations/liquidation') as $l) {
                     $date = PohodaXml::date($l, 'date');
+                    if ($ctx->skipsDate($date)) {
+                        $paid -= abs(PohodaXml::num($l, 'amount'));
+                        continue;
+                    }
                     if ($date !== null && ($paidOn === null || $date > $paidOn)) {
                         $paidOn = $date;
                     }
                 }
-                $settled = $c['remaining'] < 0.005;
+                $paid = max(0.0, round($paid, 2));
+                $settled = $c['amount'] - $paid < 0.005;
                 $insert->execute([
                     $ctx->supplierId, $taxpayer, $year, $seq + 1, number_format($c['amount'], 2, '.', ''), $c['due'],
                     $c['symbol'] !== null && strlen($c['symbol']) <= 20 ? $c['symbol'] : null,

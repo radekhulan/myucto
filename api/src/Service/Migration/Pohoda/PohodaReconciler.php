@@ -71,7 +71,7 @@ final class PohodaReconciler
         $pohoda = PohodaJournal::trialBalance($ctx->export, $ctx->skipsDate(...));
         // Úhrady, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY, v deníku POHODY
         // nejsou - předvaha MyÚčta je proti ní má navíc a kontrola je přičítá k POHODĚ.
-        $derived = $this->derivedTurnover($ctx->supplierId);
+        $derived = $this->derivedTurnover($ctx->supplierId, $periodIds);
         foreach ($derived['accounts'] as $syn => $net) {
             $pohoda[$syn] ??= [0.0, 0.0, 0.0];
             $pohoda[$syn][1] = round($pohoda[$syn][1] + $net, 2);
@@ -236,24 +236,28 @@ final class PohodaReconciler
      *
      * @return array{entries:int,accounts:array<string,float>}
      */
-    private function derivedTurnover(int $supplierId): array
+    private function derivedTurnover(int $supplierId, array $periodIds): array
     {
+        $periodFilter = implode(',', array_fill(0, count($periodIds), '?'));
+        $scope = "FROM pohoda_import_map m
+                    JOIN journal_entries e ON e.supplier_id = m.supplier_id AND e.id = m.target_id
+                   WHERE m.supplier_id = ? AND m.kind = ? AND e.period_id IN ({$periodFilter})";
+        $params = [$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY, ...$periodIds];
         $stmt = $this->db->pdo()->prepare(
-            "SELECT LEFT(a.account_code, 3) AS syn, COUNT(DISTINCT l.entry_id) AS entries,
+            "SELECT LEFT(a.account_code, 3) AS syn,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
-               FROM pohoda_import_map m
-               JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id AND l.entry_id = m.target_id
+               FROM (SELECT DISTINCT e.id, e.supplier_id {$scope}) e
+               JOIN journal_entry_lines l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE m.supplier_id = ? AND m.kind = ?
               GROUP BY LEFT(a.account_code, 3)"
         );
-        $stmt->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        $stmt->execute($params);
         $accounts = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             $accounts[(string) $r['syn']] = round((float) $r['net'], 2);
         }
-        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM pohoda_import_map WHERE supplier_id = ? AND kind = ?');
-        $count->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        $count = $this->db->pdo()->prepare("SELECT COUNT(DISTINCT e.id) {$scope}");
+        $count->execute($params);
         return ['entries' => (int) $count->fetchColumn(), 'accounts' => $accounts];
     }
 

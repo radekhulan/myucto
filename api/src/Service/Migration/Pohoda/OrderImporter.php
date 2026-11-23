@@ -117,6 +117,10 @@ final class OrderImporter
             return;
         }
         $date = $order['date'] !== '' ? $order['date'] : $ctx->periodEnd();
+        if ($ctx->skipsDate($date)) {
+            $p->count(self::STEP, 'later_year_skipped');
+            return;
+        }
         $currency = $this->currency($ctx, $order);
         $lines = [];
         $quantified = false;
