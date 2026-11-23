@@ -230,11 +230,12 @@ final class StockReportAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         if (!is_string($body['date'] ?? null)
-            || (isset($body['warehouse_id']) && (!is_int($body['warehouse_id']) || $body['warehouse_id'] < 1))) {
-            return Json::error($response, 'validation_failed', 'Neplatné datum nebo sklad.', 422);
+            || (isset($body['warehouse_id']) && (!is_int($body['warehouse_id']) || $body['warehouse_id'] < 1))
+            || (isset($body['category_id']) && (!is_int($body['category_id']) || $body['category_id'] < 1))) {
+            return Json::error($response, 'validation_failed', 'Neplatné datum, sklad nebo kategorie.', 422);
         }
         try {
-            $filters = isset($body['warehouse_id']) ? ['warehouse_id' => $body['warehouse_id']] : [];
+            $filters = array_intersect_key($body, ['warehouse_id' => true, 'category_id' => true]);
             $job = $this->valuationJobs->enqueue($supplierId, $body['date'], $filters);
             unset($job['input'], $job['lease_token']);
             return Json::ok($response, $job, 202);

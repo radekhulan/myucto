@@ -529,8 +529,10 @@ a doplnění zásob ho začne navrhovat znovu. Zavřenou objednávku vrátíte t
    tlačítkem sloupců přidáte prodejní cenu nebo poznámku karty a v poli
    **Parametr** vyberete parametr karty, který se zobrazí jako další sloupec.
 3. Záložka **Ocenění k datu** spočítá stav k historickému datu. Výpočet běží na
-   pozadí, průběh je vidět na stránce. V poli **Seskupit podle kategorií** zvolte
-   kategorii a nad tabulkou se objeví hodnota zásob po jejích podkategoriích.
+   pozadí, průběh je vidět na stránce. Pole **Kategorie** omezí výpis na karty
+   v kategorii (včetně podkategorií), takže vznikne položkový soupis kategorie
+   k datu. V poli **Seskupit podle kategorií** zvolte kategorii a nad tabulkou se
+   objeví hodnota zásob po jejích podkategoriích.
 4. Záložka **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích ke koncům měsíců
    vedle sebe. Zadejte **Od** (první sloupec je první konec měsíce od tohoto data)
    a **Do** (poslední sloupec je přesně toto datum, třeba dnešek), případně sklad
@@ -1375,6 +1377,11 @@ omezit nedá a vždy zahrne celý sklad.
     Kdo kartu mezitím přeřadil, uvidí ji v nové kategorii i ve starším ocenění.
   - Změna seskupení výpočet neopakuje, jen znovu načte hotové ocenění. Export XLSX
     přidá list **Podle kategorií**, export PDF souhrnnou tabulku nad seznam.
+  - **Kategorie** omezí ocenění na karty v kategorii včetně podkategorií. Platí
+    pro řádky, součet, seskupení i export PDF a XLSX, v jehož hlavičce je kategorie
+    uvedená. Karty se vybírají podle zařazení v době výpočtu, ne k datu ocenění.
+    Karta přeřazená po rozhodném dni se proto započítá do nové kategorie. Změna
+    kategorie nebo zařazení karet spustí nový výpočet.
 - **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích **k více datům vedle sebe**:
   ke koncům měsíců od data **Od** a k datu **Do** (nejvýše 36 sloupců, jinak
   aplikace vyzve zkrátit období). Řádky jsou přímé podkategorie zvolené kategorie

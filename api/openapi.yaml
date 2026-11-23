@@ -33628,6 +33628,10 @@ paths:
                 warehouse_id:
                   type: integer
                   minimum: 1
+                category_id:
+                  type: integer
+                  minimum: 1
+                  description: Ocení jen karty v této kategorii včetně podkategorií (podle zařazení karet v době výpočtu). Výsledek a export pak nesou `category`.
       responses:
         '202':
           description: OK
@@ -33636,7 +33640,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CatalogJob'
         '422':
-          description: Neplatné datum nebo sklad
+          description: Neplatné datum, sklad nebo kategorie (i kategorie jiné firmy)
 
   /api/v1/stock/reports/valuation-jobs/{id}:
     parameters:
@@ -48042,6 +48046,13 @@ components:
               type: string
         category_groups:
           $ref: '#/components/schemas/StockValuationCategoryGroups'
+        category:
+          type: object
+          description: Jen u ocenění omezeného na kategorii (`category_id` při založení), název z doby výpočtu.
+          properties:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
         pagination:
           type: object
           properties:

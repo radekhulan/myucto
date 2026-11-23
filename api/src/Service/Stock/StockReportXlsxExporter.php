@@ -81,6 +81,10 @@ final class StockReportXlsxExporter
         $sheet->setTitle('Ocenění zásob');
         $sheet->setCellValue('A1', 'Ocenění zásob k ' . $this->czDate($date));
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        if (is_array($data['category'] ?? null)) {
+            // Ocenění omezené na kategorii (název z doby výpočtu), stejný text jako v PDF.
+            $sheet->setCellValue('A2', 'Kategorie: ' . $data['category']['name'] . ' (včetně podkategorií)');
+        }
 
         $headers = ['Sklad', 'SKU', 'Název', 'MJ', 'Množství', 'Hodnota'];
         $cols = count($headers);

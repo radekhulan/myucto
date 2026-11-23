@@ -11,6 +11,7 @@ use MyInvoice\Service\Pdf\StockValuationPdfRenderer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockReportService;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
+use MyInvoice\Service\Stock\StockValuation;
 use MyInvoice\Service\Stock\StockValuationCategoryGroups;
 use MyInvoice\Service\Stock\StockValuationJobService;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -23,13 +24,16 @@ use Slim\Psr7\Response;
  * zvolené kategorie (nebo kategorie nejvyšší úrovně), „přímo v kategorii“
  * a „ostatní“. Karta ve více kategoriích se počítá jen jednou (primární, jinak
  * první v pořadí karty) a součet skupin se rovná celkovému ocenění.
+ *
+ * Úloha ocenění omezená na kategorii (`category_id`) bere jen karty ve stromu
+ * kategorie včetně podkategorií; řádky, součty, seskupení i export jsou z nich.
  */
 #[Group('integration')]
 final class StockValuationCategoryGroupsTest extends StockTestCase
 {
     use \MyInvoice\Tests\Support\StockCategoryFixtureTrait;
 
-    /** @return array{sid:int, root:int, c1:int, c2:int, c2a:int, other:int, empty:int} */
+    /** @return array{sid:int, wh:int, root:int, c1:int, c2:int, c2a:int, other:int, empty:int} */
     private function fixture(): array
     {
         $sid = $this->createSupplier();
@@ -63,7 +67,7 @@ final class StockValuationCategoryGroupsTest extends StockTestCase
                 $this->receiveStock($sid, $warehouse, $item, '1', $value, '2099-01-05');
             }
         }
-        return ['sid' => $sid, 'root' => $root, 'c1' => $c1, 'c2' => $c2, 'c2a' => $c2a, 'other' => $other, 'empty' => $empty];
+        return ['sid' => $sid, 'wh' => $wh, 'root' => $root, 'c1' => $c1, 'c2' => $c2, 'c2a' => $c2a, 'other' => $other, 'empty' => $empty];
     }
 
     /** @param array<string,mixed> $grouping @return array<string,array{0:int,1:string}> */
@@ -216,6 +220,150 @@ final class StockValuationCategoryGroupsTest extends StockTestCase
         $export = $action->export($this->request($f['sid'], ['format' => 'xlsx', 'job_id' => (string) $jobId, 'group_by' => 'category']), new Response(), ['name' => 'valuation']);
         self::assertSame(200, $export->getStatusCode());
         self::assertSame(['Ocenění zásob', 'Podle kategorií'], $this->sheetNames((string) $export->getBody()));
+    }
+
+    public function testCategoryFilterKeepsOnlyCardsInTheSubtree(): void
+    {
+        $f = $this->fixture();
+        $result = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c2']]);
+
+        // VAL-2 (C2A) na dvou skladech, VAL-4 (i v C2) a VAL-5 (i v C2A). VAL-1 je jen v C1, ostatní mimo strom.
+        self::assertSame(['VAL-2', 'VAL-2', 'VAL-4', 'VAL-5'], array_column($result['items'], 'sku'));
+        self::assertSame(['count' => 4, 'value_total' => '268.00'], $result['totals']);
+        $sumC = 0;
+        foreach ($result['items'] as $row) {
+            $sumC += StockValuation::valueToC((string) $row['value_total']);
+        }
+        self::assertSame('268.00', StockValuation::cToDecimal($sumC), 'Součet řádků sedí s celkem.');
+        self::assertSame(['id' => $f['c2'], 'code' => 'VAL-C2', 'name' => 'Kategorie VAL-C2'], $result['category']);
+
+        $jobs = $this->container->get(StockValuationJobService::class);
+        $grouping = $jobs->categoryGroups($f['sid'], $result['job_id'], $f['c2']);
+        self::assertSame('268.00', $grouping['value_total'], 'Seskupení počítá jen s řádky kategorie.');
+    }
+
+    public function testCategoryFilterFollowsTheValuationDate(): void
+    {
+        $f = $this->fixture();
+        $late = $this->item($f['sid'], 'VAL-LATE');
+        $this->assignCategory($f['sid'], $late, $f['c2a'], true);
+        $this->receiveStock($f['sid'], $f['wh'], $late, '2', 40.0, '2099-02-10');
+        $outside = $this->item($f['sid'], 'VAL-OUT');
+        $this->receiveStock($f['sid'], $f['wh'], $outside, '1', 500.0, '2099-02-10');
+
+        $before = $this->valuate($f['sid'], '2099-01-04', ['category_id' => $f['c2']]);
+        self::assertSame([], $before['items']);
+        self::assertSame(0, $before['totals']['count']);
+
+        $january = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c2']]);
+        self::assertSame(['count' => 4, 'value_total' => '268.00'], $january['totals']);
+
+        $february = $this->valuate($f['sid'], '2099-02-28', ['category_id' => $f['c2']]);
+        self::assertSame(['VAL-2', 'VAL-2', 'VAL-4', 'VAL-5', 'VAL-LATE'], array_column($february['items'], 'sku'));
+        self::assertSame(['count' => 5, 'value_total' => '348.00'], $february['totals']);
+    }
+
+    public function testJobWithoutCategoryIsUnchangedAndNotSharedWithFilteredJob(): void
+    {
+        $f = $this->fixture();
+        $all = $this->valuate($f['sid'], '2099-01-31');
+        $c1 = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c1']]);
+
+        self::assertSame(['job_id', 'date', 'items', 'source_versions', 'totals', 'pagination'], array_keys($all));
+        self::assertSame(['count' => 9, 'value_total' => '447.00'], $all['totals']);
+        self::assertNotSame($all['job_id'], $c1['job_id'], 'Omezená úloha nesmí vrátit hotové ocenění celého skladu.');
+        // C1: VAL-1, VAL-4, VAL-5, VAL-8 (karty i v jiných kategoriích se počítají, když jsou i v C1).
+        self::assertSame(['count' => 4, 'value_total' => '137.00'], $c1['totals']);
+        self::assertSame($all['job_id'], $this->valuate($f['sid'], '2099-01-31')['job_id'], 'Úloha bez kategorie se dál použije znovu.');
+        self::assertSame($c1['job_id'], $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c1']])['job_id']);
+    }
+
+    public function testRecategorisedCardStartsANewCategoryJob(): void
+    {
+        $f = $this->fixture();
+        $before = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c2']]);
+        // Přeřazení karty verze skladu nezmění; hotové ocenění se starým seznamem karet se nesmí vrátit.
+        $val7 = (int) $this->db->pdo()->query("SELECT id FROM stock_items WHERE sku = 'VAL-7' AND supplier_id = " . $f['sid'])->fetchColumn();
+        $this->assignCategory($f['sid'], $val7, $f['c2a'], true);
+
+        $after = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c2']]);
+        self::assertNotSame($before['job_id'], $after['job_id']);
+        self::assertSame(['count' => 5, 'value_total' => '285.00'], $after['totals']);
+        self::assertSame(['id', 'code', 'name'], array_keys($after['category']));
+    }
+
+    public function testApiAndExportsWithCategory(): void
+    {
+        $f = $this->fixture();
+        $foreign = $this->category($this->createSupplier(), 'VAL-FOREIGN');
+        $action = $this->container->get(StockReportAction::class);
+        foreach (['abc', 0, '5', $foreign] as $bad) {
+            $response = $action->createValuationJob($this->request($f['sid'])->withParsedBody(['date' => '2099-01-31', 'category_id' => $bad]), new Response());
+            self::assertSame(422, $response->getStatusCode(), 'category_id ' . var_export($bad, true));
+        }
+
+        $created = $action->createValuationJob($this->request($f['sid'])->withParsedBody(['date' => '2099-01-31', 'category_id' => $f['c2']]), new Response());
+        self::assertSame(202, $created->getStatusCode(), (string) $created->getBody());
+        $jobId = (int) json_decode((string) $created->getBody(), true, 512, JSON_THROW_ON_ERROR)['id'];
+        self::assertSame('completed', $this->container->get(StockValuationJobService::class)->tick($f['sid'])['status']);
+        $result = $this->json($action->valuationJobResult($this->request($f['sid']), new Response(), ['id' => $jobId]));
+        self::assertSame('268.00', $result['totals']['value_total']);
+        self::assertSame('Kategorie VAL-C2', $result['category']['name']);
+
+        $export = $action->export($this->request($f['sid'], ['format' => 'xlsx', 'job_id' => (string) $jobId]), new Response(), ['name' => 'valuation']);
+        self::assertSame(200, $export->getStatusCode());
+        $rows = $this->sheetRows((string) $export->getBody(), 'Ocenění zásob');
+        self::assertSame(['Kategorie: Kategorie VAL-C2 (včetně podkategorií)'], $rows[2]);
+        self::assertSame(['VAL-2', 'VAL-2', 'VAL-4', 'VAL-5'], array_map(static fn (array $r) => $r[1], array_slice($rows, 3, 4)));
+        self::assertSame(['CELKEM (4 položek)', 268.0], $rows[8]);
+
+        // Bez kategorie export beze změny: titulek, prázdný řádek 2, hlavička, 9 řádků a CELKEM.
+        $plain = $this->valuate($f['sid'], '2099-01-31');
+        $plainRows = $this->sheetRows($this->container->get(StockReportXlsxExporter::class)->valuation($plain)['bytes'], 'Ocenění zásob');
+        self::assertCount(13, $plainRows);
+        self::assertStringStartsWith('Ocenění zásob k ', $plainRows[1][0]);
+        self::assertSame([], $plainRows[2]);
+        self::assertSame(['Sklad', 'SKU', 'Název', 'MJ', 'Množství', 'Hodnota'], $plainRows[3]);
+        self::assertSame(['CELKEM (9 položek)', 447.0], $plainRows[13]);
+
+        $pdf = $action->export($this->request($f['sid'], ['format' => 'pdf', 'job_id' => (string) $jobId]), new Response(), ['name' => 'valuation']);
+        self::assertSame(200, $pdf->getStatusCode());
+        self::assertStringStartsWith('%PDF', (string) $pdf->getBody());
+        $renderer = $this->container->get(StockValuationPdfRenderer::class);
+        $html = (fn (array $data): string => $this->renderTemplate('stock_valuation.twig', $data))->call($renderer, $result);
+        self::assertStringContainsString('Kategorie: Kategorie VAL-C2 (včetně podkategorií)', $html);
+    }
+
+    public function testRenamedOrDeletedCategoryStillMarksTheResultAsFiltered(): void
+    {
+        $f = $this->fixture();
+        $jobId = $this->valuate($f['sid'], '2099-01-31', ['category_id' => $f['c2']])['job_id'];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE stock_categories SET name = ? WHERE id = ?')->execute(['Přejmenovaná', $f['c2']]);
+        $pdo->prepare('DELETE FROM stock_item_categories WHERE category_id IN (?, ?)')->execute([$f['c2'], $f['c2a']]);
+        $pdo->prepare('DELETE FROM stock_categories WHERE id IN (?, ?)')->execute([$f['c2a'], $f['c2']]);
+
+        $jobs = $this->container->get(StockValuationJobService::class);
+        $result = $jobs->result($f['sid'], $jobId, 1, 500);
+        self::assertSame(['count' => 4, 'value_total' => '268.00'], $result['totals']);
+        self::assertSame(['id' => $f['c2'], 'code' => 'VAL-C2', 'name' => 'Kategorie VAL-C2'], $result['category'], 'Kategorie z doby výpočtu.');
+        $rows = $this->sheetRows($this->container->get(StockReportXlsxExporter::class)->valuation($result)['bytes'], 'Ocenění zásob');
+        self::assertSame(['Kategorie: Kategorie VAL-C2 (včetně podkategorií)'], $rows[2]);
+        self::assertStringStartsWith('%PDF', $this->container->get(StockValuationPdfRenderer::class)->render($result));
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @return array<string,mixed>
+     */
+    private function valuate(int $sid, string $date, array $filters = []): array
+    {
+        $jobs = $this->container->get(StockValuationJobService::class);
+        $job = $jobs->enqueue($sid, $date, $filters);
+        if ($job['status'] !== 'completed') {
+            self::assertSame('completed', $jobs->tick($sid)['status']);
+        }
+        return $jobs->result($sid, (int) $job['id'], 1, 500);
     }
 
     public function testJobOfAnotherCompanyIsNotExposed(): void
