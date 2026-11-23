@@ -67,6 +67,11 @@ function onDimensionDescendants(value: boolean) {
   void load()
 }
 
+function dimensionRouteQuery() {
+  const ids = dimensionValueIdsParam(filters.dimension_value_ids)
+  return ids ? { dimension_value_id: ids, dimension_descendants: filters.dimension_descendants ? '1' : '0' } : {}
+}
+
 async function load() {
   if (!filters.period_id) return
   loading.value = true
@@ -78,10 +83,7 @@ async function load() {
       to: filters.to || report.value.to,
       analytics: filters.analytics ? '1' : '0',
       ...(filters.after_closing ? { after_closing: '1' } : {}),
-      ...(filters.dimension_value_ids.length > 0 ? {
-        dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
-        dimension_descendants: filters.dimension_descendants ? '1' : '0',
-      } : {}),
+      ...dimensionRouteQuery(),
     } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -104,7 +106,7 @@ function statementLink(row: TrialBalanceRow) {
   return {
     name: 'accounting-account-statement',
     params: { accountId: row.account_id },
-    query: { from: report.value?.from, to: report.value?.to },
+    query: { from: report.value?.from, to: report.value?.to, ...dimensionRouteQuery() },
   }
 }
 

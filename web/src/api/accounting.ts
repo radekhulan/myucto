@@ -1478,6 +1478,7 @@ export interface AccountStatementParams {
   item?: string
   dimension_value_id?: number | string
   dimension_descendants?: 0 | 1
+  group_by_dimension_type?: number
 }
 
 export interface AccountStatementItem {
@@ -1625,6 +1626,13 @@ export interface PairingSuggestion {
   lines: Array<{ line_id: number; entry_id: number; entry_date: string; document_no: string | null; description: string | null; side: JournalSide; amount: number }>
 }
 
+export interface AccountStatementDimensionAmounts {
+  opening_balance_signed: number
+  turnover_md: number
+  turnover_d: number
+  closing_balance_signed: number
+}
+
 export interface AccountStatementReport {
   account: {
     id: number
@@ -1659,6 +1667,13 @@ export interface AccountStatementReport {
   dimension?: ReportDimensionFilter | null
   opening_date?: string | null
   include_analytics?: boolean
+  dimension_breakdown?: {
+    type_id: number
+    type_name: string
+    rows: Array<AccountStatementDimensionAmounts & { value_id: number | null; code: string | null; name: string | null }>
+    totals: AccountStatementDimensionAmounts
+    matches: boolean
+  }
 }
 
 export type StatementScope = 'auto' | 'full' | 'small' | 'micro'

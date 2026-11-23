@@ -21192,6 +21192,12 @@
         "empty": "K datu nejsou žádné otevřené položky."
       },
       "mode_inventory": "Inventura účtu",
+      "group_by_dimension": "Rozpad podle",
+      "no_dimension_breakdown": "Bez rozpadu",
+      "dimension_breakdown_title": "Rozpad podle dimenze {type}",
+      "dimension_breakdown_total": "Celkem",
+      "dimension_breakdown_mismatch": "Součet rozpadu nesouhlasí se součtem výpisu účtu.",
+      "dimension_unassigned": "Bez dimenze",
       "filter_counter": "Protiúčet",
       "counter_all": "Všechny protiúčty",
       "counter_none": "bez protiúčtu",
@@ -21207,10 +21213,10 @@
         "no_rows": "Účet nemá v období žádný pohyb.",
         "no_period": "K tomuto datu není založené účetní období."
       },
-      "scope_title": "Zúženo podle hlavní knihy:",
+      "scope_title": "Aktivní filtry",
       "scope_own_only": "Jen zápisy účtu bez analytik",
       "scope_remove": "Odebrat filtr",
-      "scope_export_blocked": "Zúžený opis nelze exportovat. Pro export zrušte filtry hlavní knihy."
+      "scope_export_blocked": "Pro export vyberte rozpad podle dimenze nebo zrušte filtry."
     },
     "section18": {
       "title": "Peněžní toky a změny vlastního kapitálu",

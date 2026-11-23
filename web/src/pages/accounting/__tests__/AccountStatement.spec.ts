@@ -22,6 +22,15 @@ vi.mock('@/api/accounting', () => ({
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v), formatDate: (v: string) => v }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+vi.mock('@/composables/useDimensions', () => ({
+  useDimensions: () => ({
+    enabled: { value: true },
+    types: { value: [{ id: 1, name: 'Středisko', is_active: true }] },
+    valueById: { value: new Map([[9, { type_id: 1 }], [10, { type_id: 1 }]]) },
+    valueLabel: (id: number) => id === 9 ? 'A Výroba' : 'B Servis',
+    load: () => Promise.resolve(),
+  }),
+}))
 vi.mock('@/components/accounting/JournalSourceDrawer.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/utils/journalSourceLink', () => ({ journalSourceLink: () => null, journalEntryLink: () => ({ name: 'x' }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
@@ -55,12 +64,12 @@ function statement(patch: Record<string, unknown> = {}) {
 }
 
 function mountPage() {
-  return mount(AccountStatement, { global: { stubs: { DateInput: true, EmptyState: true } } })
+  return mount(AccountStatement, { global: { stubs: { DateInput: true, EmptyState: true, DimensionPicker: true } } })
 }
 
 describe('AccountStatement.vue', () => {
   beforeEach(() => {
-    for (const fn of [m.getAccountStatement, m.getAccountInventory, m.getOpenItems, m.replace]) fn.mockReset()
+    for (const fn of [m.getAccountStatement, m.getAccountInventory, m.getOpenItems, m.replace, m.exportReport]) fn.mockReset()
     for (const k of Object.keys(m.query)) delete m.query[k]
     m.getAccountStatement.mockResolvedValue(statement())
   })
@@ -134,6 +143,78 @@ describe('AccountStatement.vue', () => {
     await flushPromises()
 
     expect(m.exportReport.mock.calls[0][1].counter_account_id).toBe(21)
+  })
+
+  it('sdíleným filtrem vybere více hodnot a vypne podřízené hodnoty', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const filter = wrapper.get('[data-test="dimension-report-filters"]')
+    await filter.get('select').setValue('1')
+    filter.findComponent({ name: 'DimensionPicker' }).vm.$emit('update:modelValue', 9)
+    await flushPromises()
+    await filter.get('[data-test="dimension-report-filters-add"]').trigger('click')
+    await filter.findAll('select')[1].setValue('1')
+    filter.findAllComponents({ name: 'DimensionPicker' })[1].vm.$emit('update:modelValue', 10)
+    await flushPromises()
+    await filter.get('input[type="checkbox"]').setValue(false)
+    await flushPromises()
+    expect(m.getAccountStatement).toHaveBeenLastCalledWith(7, expect.objectContaining({ dimension_value_id: '9,10', dimension_descendants: 0, page: 1 }))
+    expect(m.replace).toHaveBeenLastCalledWith({ query: expect.objectContaining({ dimension_value_id: '9,10', dimension_descendants: '0' }) })
+  })
+
+  it('rozpad ukáže součet a varování, hodnota nastaví přesný filtr a export zachová obě volby', async () => {
+    const totals = { opening_balance_signed: 800, turnover_md: 900, turnover_d: 0, closing_balance_signed: -100 }
+    m.getAccountStatement.mockImplementation(async (_id, params) => statement(params.group_by_dimension_type ? {
+      dimension_breakdown: {
+        type_id: 1, type_name: 'Středisko', matches: false, totals,
+        rows: [
+          { value_id: 9, code: 'A', name: 'Výroba', ...totals },
+          { value_id: null, code: null, name: null, opening_balance_signed: 0, turnover_md: 0, turnover_d: 0, closing_balance_signed: 0 },
+        ],
+      },
+    } : {}))
+    m.query.counter = '21'
+    m.exportReport.mockResolvedValue({ data: new Blob() })
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="group-by-dimension"]').setValue('1')
+    await flushPromises()
+
+    expect(m.getAccountStatement).toHaveBeenLastCalledWith(7, expect.objectContaining({ group_by_dimension_type: 1 }))
+    const breakdown = wrapper.get('[data-testid="dimension-breakdown"]')
+    expect(breakdown.get('tfoot').text()).toContain('900')
+    expect(breakdown.get('[role="alert"]').text()).toBe('accounting.account_statement.dimension_breakdown_mismatch')
+    const rows = breakdown.findAll('tbody tr')
+    expect(rows[1].text()).toContain('accounting.account_statement.dimension_unassigned')
+    expect(rows[1].find('button').exists()).toBe(false)
+    await rows[0].get('button').trigger('click')
+    await flushPromises()
+
+    const params = m.getAccountStatement.mock.calls.at(-1)?.[1]
+    expect(params).toMatchObject({ group_by_dimension_type: 1, dimension_value_id: '9', dimension_descendants: 0 })
+    expect(params).not.toHaveProperty('counter_account_id')
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.account_statement.export_xlsx')!.trigger('click')
+    await flushPromises()
+    expect(m.exportReport).toHaveBeenCalledWith('/accounting/reports/account-statement/7/export', expect.objectContaining({
+      format: 'xlsx', group_by_dimension_type: 1, dimension_value_id: '9', dimension_descendants: 0,
+    }))
+  })
+
+  it('pomalejší odpověď na původní rozpad nepřepíše novější výpis', async () => {
+    let completeGrouped!: (result: ReturnType<typeof statement>) => void
+    const grouped = new Promise<ReturnType<typeof statement>>(resolve => { completeGrouped = resolve })
+    m.getAccountStatement.mockResolvedValueOnce(statement()).mockReturnValueOnce(grouped).mockResolvedValueOnce(statement())
+    const wrapper = mountPage()
+    await flushPromises()
+    const select = wrapper.get('[data-testid="group-by-dimension"]')
+    await select.setValue('1')
+    await select.setValue('')
+    await flushPromises()
+    completeGrouped(statement({ opening_balance_signed: 500 }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="opening-amount"]').text()).toBe('800')
   })
 
   it('proklik z měsíce hlavní knihy zúží opis jejími filtry a ukáže je jako štítky', async () => {
