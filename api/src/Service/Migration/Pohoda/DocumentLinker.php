@@ -42,6 +42,7 @@ final class DocumentLinker
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
         private readonly OtherItemService $otherItems,
+        private readonly PohodaPriorYearPayments $priorYear,
     ) {
         $this->entries = new JournalEntryLinker($db, 'Pohody');
     }
@@ -342,6 +343,7 @@ final class DocumentLinker
         $start = $ctx->periodStart();
         $cashLink = $pdo->prepare('SELECT invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?');
         $cashMulti = [];
+        $prior = [];
 
         $internal = [];
         foreach ($ctx->liquidations as $l) {
@@ -375,6 +377,11 @@ final class DocumentLinker
             }
             if ($l['date'] !== null && $l['date'] < $start) {
                 // Úhrada v minulém roce - pohyb je v agendě minulého roku, ne v tomto exportu.
+                // Vydaný doklad ji dostane jako evidovanou platbu ({@see PohodaPriorYearPayments}),
+                // přijatý v settled_outside_amount ({@see restorePurchaseSettlements()}).
+                if ($isIssued) {
+                    $prior[(int) $l['id']] = round(($prior[(int) $l['id']] ?? 0.0) + abs((float) $l['amount']), 2);
+                }
                 $p->count(self::STEP_PAYMENTS, 'previous_period');
                 continue;
             }
@@ -460,6 +467,10 @@ final class DocumentLinker
             }
             // Zápočet interním dokladem, odpočet zálohy apod. - úhrada bez pohybu peněz.
             $p->count(self::STEP_PAYMENTS, $l['agenda'] !== '' ? 'other_' . $l['agenda'] : 'without_document');
+        }
+        $recorded = $this->priorYear->record($ctx->supplierId, $ctx->userOrNull(), $start, $prior, true);
+        if ($recorded['inserted'] > 0) {
+            $p->count(self::STEP_PAYMENTS, 'previous_period_paid', $recorded['inserted']);
         }
         $this->settleByInternalDocuments($ctx, $internal);
         $this->restoreOtherItemSettlements($ctx);
@@ -1024,7 +1035,9 @@ final class DocumentLinker
      * bez dokladu banky či pokladny (tržby z pokladny účtované souhrnně). Zbytek
      * dostane evidovanou platbu se zdrojem `settlement` k datu úhrady, jinak by saldokonto drželo
      * doklad otevřený, i když ho hlavní kniha má uzavřený. Doklad s ručním vyrovnáním v deníku
-     * (vazba nebo rozpad zápisu) ten zbytek už nese. Opakovaný převod nic nezdvojí.
+     * (vazba nebo rozpad zápisu) ten zbytek už nese. Úhrady z doby před začátkem agendy
+     * už nese platba {@see PohodaPriorYearPayments}, zbytek je jen to, co nepokryla.
+     * Opakovaný převod nic nezdvojí.
      */
     private function settleIssuedRemainders(PohodaContext $ctx): void
     {

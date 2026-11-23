@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Pdf\PdfArchiveService;
 use PDO;
@@ -38,7 +39,8 @@ final class FinalDraftToTaxDocument
     ) {}
 
     /**
-     * Platby zálohové faktury, ke kterým zatím není platný daňový doklad.
+     * Platby zálohové faktury, ke kterým zatím není platný daňový doklad. Úhrada minulého
+     * roku převzatá z POHODY sem nepatří, daň z ní přiznala POHODA.
      *
      * @return list<array{id:int, paid_on:string, amount:float}>
      */
@@ -48,7 +50,7 @@ final class FinalDraftToTaxDocument
             "SELECT p.id, p.paid_on, p.amount
                FROM invoice_payments p
                LEFT JOIN invoices td ON td.id = p.tax_document_invoice_id
-              WHERE p.invoice_id = ? AND p.amount > 0
+              WHERE p.invoice_id = ? AND p.amount > 0 AND NOT " . PohodaPriorYearPayments::isPriorYearSql('p') . "
                 AND (p.tax_document_invoice_id IS NULL OR td.id IS NULL OR td.status = 'cancelled')
               ORDER BY p.paid_on, p.id"
         );

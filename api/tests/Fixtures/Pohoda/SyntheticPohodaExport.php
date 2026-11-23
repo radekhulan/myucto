@@ -545,6 +545,33 @@ final class SyntheticPohodaExport
             . '<typ:sourceDocument><typ:number>BAN9990001</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
+    /** Vydaná faktura minulého roku uhrazená zčásti v minulém roce ({@see withIssuedPaidEarlier()}). */
+    public const ISSUED_PAID_EARLIER = '25FV0098';
+
+    /**
+     * Vydaná faktura 25FV0098 na 1 000 Kč mimo DPH z listopadu minulého roku, kterou POHODA
+     * přenesla do agendy: 600 Kč uhrazeno 10. 12. minulého roku bankou minulé agendy, zbývá
+     * 400 Kč. Počáteční stav 311 nese její zbytek 400 a neuhrazenou 25FV0099 (500).
+     */
+    public static function withIssuedPaidEarlier(string $dir): void
+    {
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::ISSUED_PAID_EARLIER . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>250098</inv:symVar><inv:date>2025-11-10</inv:date><inv:dateTax>2025-11-10</inv:dateTax>'
+            . '<inv:dateAccounting>2025-11-10</inv:dateAccounting><inv:dateDue>2025-11-24</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Služby z minulého roku</inv:text>'
+            . self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO)
+            . '<inv:liquidation><typ:amountHome>400</typ:amountHome><typ:date>2025-12-10</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>1000</typ:priceNone><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('25FV0098liq')) . '</typ:id><typ:date>2025-12-10</typ:date><typ:sourceAgenda>bank</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>BAN9990002</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 900, '311001', '701000', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 900, '701000', '411000', '2026-01-01'));
+    }
+
     /** Přijatá faktura vyrovnaná zápočtem bez pohybu peněz ({@see withPurchaseSettledByOffset()}). */
     public const PURCHASE_SETTLED_BY_OFFSET = '26PF0050';
 

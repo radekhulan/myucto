@@ -18,6 +18,9 @@ use MyInvoice\Service\Migration\Pohoda\NonprofitActivityByCentre;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
 use MyInvoice\Service\Oss\OssLedgerService;
@@ -647,6 +650,96 @@ final class PohodaImportTest extends TestCase
             self::assertEqualsWithDelta(400.0, (float) $row['remaining'], 0.001, "běh {$run}");
             self::assertNotSame('paid', $row['status'], "běh {$run}");
         }
+    }
+
+    /**
+     * Vydaná faktura minulého roku uhrazená zčásti před začátkem agendy: úhrada minulého roku
+     * je evidovanou platbou k poslednímu dni před agendou, bez pohybu v bance a zápisu v deníku.
+     * Saldokonto sedí na hlavní knihu, opakovaný převod platbu nezdvojí a nová platba ani její
+     * smazání převzatou úhradu nesmaže (přepočet uhrazené částky ze součtu plateb).
+     */
+    public function testIssuedInvoicePaidPartlyInEarlierYearKeepsPriorPayment(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withIssuedPaidEarlier($dir);
+        $export = PohodaExport::open($dir);
+        $pdo = $this->db->pdo();
+        $id = 0;
+        $journal = null;
+        $state = static function () use ($pdo, &$id): array {
+            return $pdo->query("SELECT status, paid_total FROM invoices WHERE id = {$id}")->fetch(\PDO::FETCH_ASSOC);
+        };
+        foreach ([1, 2] as $run) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $id = $this->documentId('invoices', $supplierId, SyntheticPohodaExport::ISSUED_PAID_EARLIER);
+            self::assertSame([['2025-12-31', '600.00', 'settlement', PohodaPriorYearPayments::NOTE, null]],
+                $pdo->query("SELECT paid_on, amount, source, note, bank_transaction_id FROM invoice_payments WHERE invoice_id = {$id}")->fetchAll(\PDO::FETCH_NUM), "běh {$run}");
+            self::assertSame(['status' => 'sent', 'paid_total' => '600.00'], $state(), "běh {$run}");
+            $journal ??= $this->rows('journal_entries', $supplierId);
+            self::assertSame($journal, $this->rows('journal_entries', $supplierId), "běh {$run}");
+            self::assertSame(['difference' => 0.0, 'gl' => 900.0, 'open' => 900.0], $this->saldoOf($supplierId, '311'), "běh {$run}");
+        }
+        // Párování banky platbu minulého roku jako protějšek pohybu nebere.
+        self::assertSame(0, $this->rows('invoice_payments', $supplierId, "invoice_id = {$id} AND " . InvoicePaymentService::bankReconcilableSql('invoice_payments')));
+
+        $payments = Bootstrap::buildContainer()->get(InvoicePaymentService::class);
+        $new = $payments->recordPayment($id, 100.0, '2026-03-02');
+        self::assertSame(['status' => 'sent', 'paid_total' => '700.00'], $state());
+        $payments->deletePayment($new['payment_id']);
+        self::assertSame(['status' => 'sent', 'paid_total' => '600.00'], $state());
+        self::assertSame(['difference' => 0.0, 'gl' => 900.0, 'open' => 900.0], $this->saldoOf($supplierId, '311'));
+        self::assertSame($journal, $this->rows('journal_entries', $supplierId));
+    }
+
+    /**
+     * Oprava firmy převedené dřív, než převod platbu za úhrady minulých let zakládal: nanečisto
+     * nic nezapíše, zápis doplní platbu na rozdíl uhrazené částky bez změny deníku a stavu
+     * dokladu, druhý běh už nic nenajde a opravený převod platbu nezdvojí.
+     */
+    public function testPriorYearPaymentRepairRestoresPaymentOnce(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withIssuedPaidEarlier($dir);
+        $export = PohodaExport::open($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $pdo = $this->db->pdo();
+        $id = $this->documentId('invoices', $supplierId, SyntheticPohodaExport::ISSUED_PAID_EARLIER);
+        // Stav po dřívějším převodu: uhrazenou část nese jen paid_total.
+        $pdo->exec("DELETE FROM invoice_payments WHERE invoice_id = {$id}");
+        $invoice = static fn (): array => $pdo->query("SELECT status, paid_total, paid_at FROM invoices WHERE id = {$id}")->fetch(\PDO::FETCH_ASSOC);
+        $before = $invoice();
+        $journal = $this->rows('journal_entries', $supplierId);
+        // Dokončený převod eviduje úloha převodu, rok agendy určuje datum platby.
+        $pdo->prepare("INSERT INTO pohoda_imports (supplier_id, mode, status, agenda_year) VALUES (?, 'import', 'completed', ?)")
+            ->execute([$supplierId, SyntheticPohodaExport::YEAR]);
+        $repair = Bootstrap::buildContainer()->get(PohodaPriorYearPaymentRepair::class);
+        self::assertContains($supplierId, $repair->convertedSuppliers());
+
+        $dry = $repair->run([$supplierId], false)[0];
+        self::assertSame(['would_repair', 1, 600.0, '2025-12-31'], [$dry['status'], $dry['count'], $dry['amount_czk'], $dry['paid_on']]);
+        self::assertSame([$id], array_column($dry['invoices'], 'id'));
+        self::assertSame(0, $this->rows('invoice_payments', $supplierId, "invoice_id = {$id}"), 'Nanečisto se nic nezapíše.');
+
+        $applied = $repair->run([$supplierId], true, $this->userId)[0];
+        self::assertSame(['repaired', 1, 600.0], [$applied['status'], $applied['count'], $applied['amount_czk']]);
+        self::assertSame([['2025-12-31', '600.00', 'settlement', PohodaPriorYearPayments::NOTE, null]],
+            $pdo->query("SELECT paid_on, amount, source, note, bank_transaction_id FROM invoice_payments WHERE invoice_id = {$id}")->fetchAll(\PDO::FETCH_NUM));
+        self::assertSame($before, $invoice());
+        self::assertSame($journal, $this->rows('journal_entries', $supplierId));
+        self::assertSame(1, $this->rows('activity_log', $supplierId, "action = '" . PohodaPriorYearPaymentRepair::AUDIT_ACTION . "' AND entity_id = {$id}"));
+
+        $again = $repair->run([$supplierId], true, $this->userId)[0];
+        self::assertSame(['nothing', 0], [$again['status'], $again['count']]);
+        self::assertSame(1, $this->rows('invoice_payments', $supplierId, "invoice_id = {$id}"));
+
+        $relink = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($relink->hasErrors(), $this->explain($relink));
+        self::assertSame(['600.00'], $pdo->query("SELECT amount FROM invoice_payments WHERE invoice_id = {$id}")->fetchAll(\PDO::FETCH_COLUMN));
+        self::assertSame(['difference' => 0.0, 'gl' => 900.0, 'open' => 900.0], $this->saldoOf($supplierId, '311'));
     }
 
     /**

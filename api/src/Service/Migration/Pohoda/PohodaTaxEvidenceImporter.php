@@ -10,7 +10,6 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\Shared\MigratedPaymentWriter;
-use PDO;
 
 /**
  * Převod agendy, kterou POHODA vede jako daňovou evidenci (typ jednotky `singleEntry`).
@@ -39,8 +38,6 @@ final class PohodaTaxEvidenceImporter
     public const STEP_PAYMENTS = DocumentLinker::STEP_PAYMENTS;
     public const STEP_RECONCILIATION = 'tax_evidence_reconciliation';
 
-    private const PREVIOUS_YEAR_NOTE = 'Převzato z POHODY, úhrada v minulém roce';
-
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
@@ -49,6 +46,7 @@ final class PohodaTaxEvidenceImporter
         private readonly AccountingModeRepository $modes,
         private readonly AccountingPeriodRepository $periods,
         private readonly AccountingSupplierSettingsRepository $settings,
+        private readonly PohodaPriorYearPayments $priorYear,
     ) {}
 
     /**
@@ -233,38 +231,18 @@ final class PohodaTaxEvidenceImporter
     /**
      * Úhrady dokladů přenesených z minulého roku, které padly do minulého roku: pohyb je
      * v agendě minulého roku, ne v tomto exportu. Vydaný doklad je dostane jako evidovanou
-     * platbu se zdrojem `settlement` (peněžní deník ji nepočítá), přijatý jako vyrovnání mimo
-     * párované úhrady (`settled_outside_amount`). Jen doklady v korunách; nastavuje se
-     * absolutně, opakovaný převod nic nezdvojí.
+     * platbu se zdrojem `settlement` ({@see PohodaPriorYearPayments}, peněžní deník ji
+     * nepočítá), přijatý jako vyrovnání mimo párované úhrady (`settled_outside_amount`).
+     * Jen doklady v korunách; nastavuje se absolutně, opakovaný převod nic nezdvojí.
      *
      * @param array{invoice:array<int,float>,purchase_invoice:array<int,float>} $previous
      */
     private function previousYearPayments(PohodaContext $ctx, array $previous): void
     {
         $pdo = $this->db->pdo();
-        $issued = $pdo->prepare("SELECT i.id, ABS(i.total_with_vat) - i.advance_paid_amount AS to_pay,
-                (SELECT ip.id FROM invoice_payments ip WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id AND ip.source = 'settlement' AND ip.note = ? LIMIT 1) AS payment_id
-              FROM invoices i JOIN currencies c ON c.id = i.currency_id AND c.supplier_id = i.supplier_id
-             WHERE i.id = ? AND i.supplier_id = ? AND c.code = 'CZK' AND i.status NOT IN ('draft', 'cancelled')");
-        $insert = $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
-            VALUES (?, ?, ?, ?, 'CZK', ?, 'settlement', ?)");
-        $update = $pdo->prepare('UPDATE invoice_payments SET amount = ? WHERE id = ? AND supplier_id = ?');
-        $lastDay = date('Y-m-d', (int) strtotime($ctx->periodStart() . ' -1 day'));
-        foreach ($previous['invoice'] as $id => $amount) {
-            $issued->execute([self::PREVIOUS_YEAR_NOTE, $id, $ctx->supplierId]);
-            $row = $issued->fetch(PDO::FETCH_ASSOC);
-            if ($row === false) {
-                continue;
-            }
-            $amount = number_format(min($amount, max(0.0, (float) $row['to_pay'])), 2, '.', '');
-            if ($row['payment_id'] !== null) {
-                $update->execute([$amount, (int) $row['payment_id'], $ctx->supplierId]);
-                continue;
-            }
-            if ((float) $amount >= 0.01) {
-                $insert->execute([$ctx->supplierId, $id, $lastDay, $amount, self::PREVIOUS_YEAR_NOTE, $ctx->userOrNull()]);
-                $ctx->protocol->count(self::STEP_PAYMENTS, 'previous_period_paid');
-            }
+        $recorded = $this->priorYear->record($ctx->supplierId, $ctx->userOrNull(), $ctx->periodStart(), $previous['invoice'], false);
+        if ($recorded['inserted'] > 0) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'previous_period_paid', $recorded['inserted']);
         }
         $purchase = $pdo->prepare("UPDATE purchase_invoices pi JOIN currencies c ON c.id = pi.currency_id AND c.supplier_id = pi.supplier_id
                SET pi.settled_outside_amount = LEAST(GREATEST(pi.amount_to_pay, 0), ?)
