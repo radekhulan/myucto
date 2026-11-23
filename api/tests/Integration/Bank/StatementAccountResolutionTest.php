@@ -181,6 +181,41 @@ final class StatementAccountResolutionTest extends TestCase
     }
 
     /**
+     * Korunový a EUR účet se stejným číslem i bankou (Raiffeisenbank): detail, seznam
+     * i „Všechny pohyby" korunového výpisu nesou název korunového účtu, ne prvního
+     * nalezeného (EUR je založený dřív).
+     */
+    public function testSameNumberInTwoCurrenciesUsesLabelOfStatementCurrency(): void
+    {
+        $account = '9912345681';
+        $this->registerCurrency('EUR', $account, '5500');
+        $this->registerCurrency('CZK', $account, '5500');
+        $this->db->pdo()->prepare(
+            "INSERT INTO bank_statements (source, file_name, file_hash, account_number, bank_code, currency, statement_date, curr_balance)
+             VALUES ('pdf', 'TEST-label-czk.pdf', ?, ?, '5500', 'CZK', '2026-06-30', 100.00)"
+        )->execute([hash('sha256', uniqid('label-czk', true)), $account]);
+        $statementId = (int) $this->db->pdo()->lastInsertId();
+        $this->statementIds[] = $statementId;
+        $this->db->pdo()->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount) VALUES (?, '2026-06-30', 100.00)")
+            ->execute([$statementId]);
+
+        $detail = json_decode((string) $this->action->detail(
+            $this->mockRequest($this->supplierId, 'admin', [], []), new Response(), ['id' => (string) $statementId],
+        )->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('TEST CZK/5500 #206', $detail['account_label'] ?? null, 'detail korunového výpisu nese název korunového účtu');
+
+        $list = json_decode((string) $this->action->list(
+            $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['account' => $account]]), new Response(),
+        )->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $listed = array_values(array_filter($list['items'] ?? [], static fn (array $i): bool => (int) $i['id'] === $statementId));
+        $this->assertSame('TEST CZK/5500 #206', $listed[0]['account_label'] ?? null);
+
+        $movements = Bootstrap::buildContainer()->get(\MyInvoice\Repository\BankPostingSuggestionRepository::class);
+        $page = $movements->paginateUnposted($this->supplierId, 10, 0, ['scope' => 'all', 'account' => $account]);
+        $this->assertSame(['TEST CZK/5500 #206'], array_column($page['items'], 'account_label'), 'pohyb korunového výpisu nese název korunového účtu');
+    }
+
+    /**
      * Jediný odpovídající účet → import proběhne automaticky (regrese #167/#206 nesmí
      * rozbít běžný jednoúčtový případ).
      */

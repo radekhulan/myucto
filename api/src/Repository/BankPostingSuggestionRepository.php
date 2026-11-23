@@ -11,6 +11,7 @@ use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\OtherItemPaymentMatchReader;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
+use MyInvoice\Service\Bank\StatementAccountLabel;
 use PDO;
 use PDOException;
 
@@ -741,12 +742,7 @@ final class BankPostingSuggestionRepository
                         LIMIT 1),
                       bs.bank_code
                     ) AS bank_code,
-                    (SELECT cur.label FROM currencies cur
-                      WHERE cur.supplier_id = ?
-                        AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                          = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                        AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                      LIMIT 1) AS account_label,
+                    " . StatementAccountLabel::sql('bs') . " AS account_label,
                     (
                         NOT EXISTS (
                             SELECT 1 FROM accounting_periods ap

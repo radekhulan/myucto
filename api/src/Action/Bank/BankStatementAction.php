@@ -27,6 +27,7 @@ use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementProcessingState;
 use MyInvoice\Service\Bank\StatementTransactionScope;
+use MyInvoice\Service\Bank\StatementAccountLabel;
 use MyInvoice\Service\Bank\BankNoticeLifecycle;
 use MyInvoice\Service\Bank\BankPaymentCandidateScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
@@ -969,8 +970,7 @@ final class BankStatementAction
         $countStmt->execute(array_merge($scopeParams, $filterParams));
         $total = (int) $countStmt->fetchColumn();
 
-        // account_label: vlastní pojmenování účtu z currencies.label (např. "CZK — Fio Bank")
-        // přes scalar subselect (LIMIT 1 — sup. může mít jen 1 záznam per account_number+bank_code).
+        // account_label: vlastní pojmenování účtu podle čísla, banky a měny výpisu.
         $stmt = $this->db->pdo()->prepare(
             "SELECT bs.id, bs.source, bs.file_name, bs.account_number,
                     -- Uložený kód výpisu je autoritativní. Starší NULL doplň jen při
@@ -1002,18 +1002,7 @@ final class BankStatementAction
                     " . StatementTransactionScope::countSql('bs.id', 'ubt', "ubt.source = 'statement'
                         AND ubt.match_status <> 'ignored' AND NOT " . BankTransactionPostingScope::existsSql($sid, 'ubt.id')) . " AS unposted_count,
                     " . StatementTransactionScope::countSql('bs.id', 'pbt', StatementProcessingState::failedSql('pbt')) . " AS unprocessed_count,
-                    (SELECT CASE
-                              WHEN COUNT(DISTINCT COALESCE(NULLIF(cur.bank_code, ''), '?')) = 1
-                              THEN MAX(cur.label)
-                              ELSE NULL
-                            END
-                       FROM currencies cur
-                      WHERE cur.supplier_id = ?
-                        AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                          = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                        AND (bs.currency IS NULL OR cur.code = bs.currency)
-                        AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                    ) AS account_label
+                    " . StatementAccountLabel::sql('bs') . " AS account_label
                FROM bank_statements bs
               WHERE $scopeSql$filterSql
               ORDER BY bs.statement_date DESC, bs.id DESC
@@ -1848,12 +1837,7 @@ final class BankStatementAction
                     bs.imported_at, bs.imported_by,
                     (bs.file_content IS NOT NULL) AS has_file,
                     (bs.pdf_content IS NOT NULL) AS has_pdf, bs.pdf_name,
-                    (SELECT cur.label FROM currencies cur
-                      WHERE cur.supplier_id = ?
-                        AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                          = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                        AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                      LIMIT 1) AS account_label
+                    " . StatementAccountLabel::sql('bs') . " AS account_label
                FROM bank_statements bs
               WHERE bs.id = ?
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
