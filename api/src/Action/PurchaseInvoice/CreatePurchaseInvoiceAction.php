@@ -8,6 +8,7 @@ use MyInvoice\Service\NumberSeries\NumberSeriesException;
 use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
@@ -356,14 +357,16 @@ final class CreatePurchaseInvoiceAction
                 $supplierId,
             );
         }
-        try {
-            $this->aiSuggestions->enqueuePurchase($supplierId, $id);
-        } catch (\Throwable) {
+        $preview = $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) === true;
+        // Fronta AI návrhů je vedlejší zápis: až po commitu a v náhledu zápisu vůbec.
+        if (!$preview) {
+            AfterCommit::run($this->db->pdo(), 'ai_suggestions.purchase.' . $id, function () use ($supplierId, $id): void {
+                $this->aiSuggestions->enqueuePurchase($supplierId, $id);
+            });
         }
 
         $transition = null;
-        if ($requestedStatus === 'received'
-            && $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+        if ($requestedStatus === 'received' && !$preview) {
             $transition = $this->receiveCreated($request, $id);
         }
 

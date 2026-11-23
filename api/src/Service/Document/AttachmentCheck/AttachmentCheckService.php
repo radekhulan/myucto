@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Document\AttachmentCheck;
 
+use MyInvoice\Infrastructure\Database\AfterCommit;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AttachmentCheckRepository;
 use MyInvoice\Service\ActivityLogger;
 
@@ -28,6 +30,7 @@ final class AttachmentCheckService
     public function __construct(
         private readonly AttachmentCheckRepository $repo,
         private readonly ActivityLogger $activity,
+        private readonly Connection $db,
     ) {}
 
     public static function isEntityType(string $type): bool
@@ -104,6 +107,26 @@ final class AttachmentCheckService
         }
         $this->repo->deleteStale($supplierId, $entityType, $entityId, array_values(array_unique(array_column($rows, 'sha256'))));
         return $rows;
+    }
+
+    /**
+     * {@see recheckEntity()} jako vedlejší přepočet po uložení dokladu: až po commitu
+     * transakce, ve které se doklad uložil, a bez vlivu na její výsledek. Zápis do
+     * `attachment_checks` souběží s vytěžováním příloh; uvnitř transakce uložení by
+     * odvolaný snapshot (1020) shodil i uložení dokladu.
+     */
+    public function recheckEntityAfterCommit(int $supplierId, string $entityType, int $entityId): void
+    {
+        if (!self::isEntityType($entityType)) {
+            return;
+        }
+        AfterCommit::run(
+            $this->db->pdo(),
+            'attachment_check.' . $entityType . '.' . $entityId,
+            function () use ($supplierId, $entityType, $entityId): void {
+                $this->recheckEntity($supplierId, $entityType, $entityId);
+            },
+        );
     }
 
     /**

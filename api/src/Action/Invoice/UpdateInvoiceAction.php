@@ -16,6 +16,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -764,9 +765,8 @@ final class UpdateInvoiceAction
             $this->rateApplier->ensureRate($id);
         }
 
-        // Force update vystavené faktury → revenue cache musí přijmout nové total/currency
-        $this->stats->recomputeForInvoiceId($id);
-
+        // Force update vystavené faktury → revenue cache musí přijmout nové total/currency.
+        // Cache je odvozená: přepočet až po commitu, v náhledu zápisu vůbec.
         // Přesun faktury na jiného klienta/projekt: recomputeForInvoiceId čte vazbu z už
         // zapsaného řádku, takže přepočte jen nového. Původnímu by v client_revenue_cache
         // zůstal nafouknutý invoice_count/revenue → dopočítej i jeho.
@@ -776,11 +776,17 @@ final class UpdateInvoiceAction
             && $prevClientId !== (int) $body['client_id'];
         $movedProject  = $prevProjectId > 0 && array_key_exists('project_id', $body)
             && $prevProjectId !== (int) $body['project_id'];
-        if ($movedClient || $movedProject) {
-            $this->stats->recomputeForIds(
-                $movedClient ? $prevClientId : null,
-                $movedProject ? $prevProjectId : null,
-            );
+        if ($request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+            AfterCommit::run($this->db->pdo(), 'stats.invoice.' . $id, function () use ($id): void {
+                $this->stats->recomputeForInvoiceId($id);
+            });
+            if ($movedClient || $movedProject) {
+                $previousClient = $movedClient ? $prevClientId : null;
+                $previousProject = $movedProject ? $prevProjectId : null;
+                AfterCommit::run($this->db->pdo(), 'stats.invoice_moved.' . $id, function () use ($previousClient, $previousProject): void {
+                    $this->stats->recomputeForIds($previousClient, $previousProject);
+                });
+            }
         }
 
         // Force-edit vystavené faktury: přepiš snapshoty z opravených live dat, aby se

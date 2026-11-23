@@ -8,7 +8,9 @@ use MyInvoice\Service\NumberSeries\NumberSeriesException;
 use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
@@ -480,10 +482,12 @@ final class UpdatePurchaseInvoiceAction
             throw $e;
         }
 
-        // Změna dokladu → nové porovnání s vytěžením přílohy (přehled rozporů).
-        try {
-            $this->attachmentChecks->recheckEntity($supplierId, 'purchase_invoice', $id);
-        } catch (\Throwable) {
+        // Náhled zápisu ukládá v transakci, která se odvolá: vedlejší přepočty se mu nedělají.
+        $preview = $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) === true;
+
+        // Změna dokladu → nové porovnání s vytěžením přílohy (přehled rozporů), až po commitu.
+        if (!$preview) {
+            $this->attachmentChecks->recheckEntityAfterCommit($supplierId, 'purchase_invoice', $id);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -515,12 +519,11 @@ final class UpdatePurchaseInvoiceAction
                 $request->getHeaderLine('User-Agent'),
             );
         }
-        if ($existing['status'] === 'draft') {
-            try {
+        if ($existing['status'] === 'draft' && !$preview) {
+            AfterCommit::run($pdo, 'ai_suggestions.purchase.' . $id, function () use ($supplierId, $id): void {
                 $this->aiSuggestions->invalidatePurchase($supplierId, $id);
                 $this->aiSuggestions->enqueuePurchase($supplierId, $id);
-            } catch (\Throwable) {
-            }
+            });
         }
 
         // B11 reconcile: stornuj původní zápis a přeúčtuj opravenou PF do otevřeného období.
@@ -571,6 +574,10 @@ final class UpdatePurchaseInvoiceAction
             try {
                 $this->smallAssets->syncFromPurchaseInvoice($supplierId, $id, $user['id'] ?? null);
             } catch (\Throwable $e) {
+                // Odvolanou cizí transakci (náhled zápisu, hromadná oprava) řeší její vlastník.
+                if (!$ownTransaction && TransactionFailure::aborted($e)) {
+                    throw $e;
+                }
                 // Uložení faktury shodit nesmí, ale tiché spolknutí znamenalo, že o
                 // nezaložené kartě nevěděl nikdo — ani uživatel, ani audit.
                 $this->logger->log('purchase_invoice.small_asset_sync_failed', $user['id'] ?? null,
