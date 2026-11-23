@@ -32,10 +32,11 @@ import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useResultAccounts } from '@/composables/useResultAccounts'
+import { useUnitLabels } from '@/composables/useUnitLabels'
 import { isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 import { amountItems, isTextItem } from '@/utils/invoiceTextRow'
 
-const { t, tm, rt } = useI18n()
+const { t, tm, rt, locale } = useI18n()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
@@ -105,6 +106,7 @@ const projects = ref<Project[]>([])
 const currencies = ref<Currency[]>([])
 const vatRates = ref<VatRate[]>([])
 const units = ref<Unit[]>([])
+const { unitLabel } = useUnitLabels(units, locale)
 const revenueCategories = ref<RevenueCategory[]>([])
 const brandingProfiles = ref<BrandingProfile[]>([])
 const priceListItems = ref<PriceListItem[]>([])
@@ -1383,8 +1385,8 @@ async function submit() {
               </td>
               <td class="py-1.5 pr-2">
                 <select v-model="it.unit" @change="onItemUnitChange(it)" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
-                  <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                  <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
+                  <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                  <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ unitLabel(it.unit) }}</option>
                 </select>
               </td>
               <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
@@ -1565,8 +1567,8 @@ async function submit() {
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.unit') }}</label>
                 <select v-model="it.unit" @change="onItemUnitChange(it)" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
-                  <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
-                  <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
+                  <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
+                  <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ unitLabel(it.unit) }}</option>
                 </select>
               </div>
             </div>

@@ -262,9 +262,9 @@ final class UnitsDecimalsTest extends TestCase
         $html = $c->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class)
             ->renderHtml($invoice, includeCss: false, includeWorkReport: false);
 
-        self::assertMatchesRegularExpression('~<td class="num nowrap">1,50</td>\s*<td>' . $this->prefix . 'KG~', $html);
-        self::assertMatchesRegularExpression('~<td class="num nowrap">1,5</td>\s*<td>' . $this->prefix . 'm~', $html);
-        self::assertMatchesRegularExpression('~<td class="num nowrap">2,125</td>\s*<td>' . $this->prefix . 'ks~', $html);
+        self::assertMatchesRegularExpression('~<td class="num nowrap">1,50</td>\s*<td>kg</td>~', $html);
+        self::assertMatchesRegularExpression('~<td class="num nowrap">1,5</td>\s*<td>m</td>~', $html);
+        self::assertMatchesRegularExpression('~<td class="num nowrap">2,125</td>\s*<td>ks</td>~', $html);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

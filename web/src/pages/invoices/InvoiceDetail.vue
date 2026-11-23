@@ -54,6 +54,8 @@ import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
+import { codebooksApi, type Unit } from '@/api/codebooks'
+import { useUnitLabels } from '@/composables/useUnitLabels'
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -887,9 +889,21 @@ async function loadVatClassifications() {
   }
 }
 
+const units = ref<Unit[]>([])
+const { unitLabel } = useUnitLabels(units, locale)
+
+async function loadUnits() {
+  try {
+    units.value = await codebooksApi.units()
+  } catch {
+    units.value = []
+  }
+}
+
 onMounted(() => {
   void load()
   void loadVatClassifications()
+  void loadUnits()
 })
 // Detail se recykluje při navigaci /invoices/:id → :id (proklik na související doklad,
 // dobropis/parent) → onMounted se znovu nespustí, proto přenačtení řídí watch.
@@ -3191,7 +3205,7 @@ useWindowRefresh(async () => {
                 </div>
               </td>
               <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity) }}</td>
-              <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
+              <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : unitLabel(item.unit) }}</td>
               <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-center text-xs">{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-right font-mono">{{ formatMoney(item.total_without_vat ?? 0, invoice.currency) }}</td>
@@ -3228,7 +3242,7 @@ useWindowRefresh(async () => {
             <div v-if="item.item_kind !== 'discount'" class="flex items-baseline justify-between text-xs text-neutral-500">
               <span>
                 <span class="font-mono text-neutral-700">{{ isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity }}</span>
-                <span class="ml-1">{{ item.unit }}</span>
+                <span class="ml-1">{{ unitLabel(item.unit) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</span>
                 <template v-if="supplierIsVatPayer">
@@ -3766,7 +3780,7 @@ useWindowRefresh(async () => {
               <tr v-for="(m, i) in workReport.materials" :key="i">
                 <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ m.description }}</td>
                 <td class="px-4 py-2 text-right font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }}</td>
-                <td class="px-4 py-2 text-neutral-600">{{ m.unit }}</td>
+                <td class="px-4 py-2 text-neutral-600">{{ unitLabel(m.unit) }}</td>
                 <td class="px-4 py-2 text-right font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</td>
                 <td class="px-5 py-2 text-right font-mono">{{ formatMoney(Number(m.total_amount ?? Number(m.quantity) * Number(m.unit_price)), invoice.currency) }}</td>
               </tr>
@@ -3783,7 +3797,7 @@ useWindowRefresh(async () => {
           <div v-for="(m, i) in workReport.materials" :key="`mm-${i}`" class="p-3 space-y-1">
             <div class="text-sm whitespace-pre-wrap text-neutral-800">{{ m.description }}</div>
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
-              <span class="font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }} {{ m.unit }}</span>
+              <span class="font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }} {{ unitLabel(m.unit) }}</span>
               <span>
                 <span class="font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
