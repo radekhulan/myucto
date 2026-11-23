@@ -136,6 +136,11 @@ function amountOf(i: MigrationCheckItem): string {
   return i.currency && i.currency !== 'CZK' && i.amount !== null ? `${formatMoney(i.amount, i.currency)} (${czk})` : czk
 }
 
+function filterCount(value: MigrationCheckItemState | ''): number | null {
+  const d = detail.value
+  if (!d) return null
+  return value === '' ? d.count : value === 'fixable' ? d.fixable_count : value === 'locked' ? d.locked_count : value === 'review' ? d.review_count : null
+}
 const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
   { value: '', label: 'migrationChecks.filter_all' },
   { value: 'fixable', label: 'migrationChecks.filter_fixable' },
@@ -176,10 +181,14 @@ const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
         </ul>
       </div>
 
-      <div class="flex flex-wrap gap-2 mb-3">
-        <button v-for="f in filters" :key="f.value" type="button" class="whitespace-nowrap"
-          :class="state === f.value ? btnFilled('primary') : btnOutline('neutral')" :data-testid="`filter-${f.value || 'all'}`" @click="setState(f.value)">
+      <div role="tablist" class="mb-3 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('migrationChecks.col_count')">
+        <button v-for="f in filters" :key="f.value" type="button" role="tab" :aria-selected="state === f.value"
+          :data-active="state === f.value || undefined" :data-testid="`filter-${f.value || 'all'}`"
+          class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition"
+          :class="state === f.value ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+          @click="setState(f.value)">
           {{ t(f.label) }}
+          <span v-if="detail && filterCount(f.value) !== null" class="inline-flex items-center rounded-full bg-neutral-100 px-1.5 text-xs text-neutral-600">{{ filterCount(f.value) }}</span>
         </button>
       </div>
 
