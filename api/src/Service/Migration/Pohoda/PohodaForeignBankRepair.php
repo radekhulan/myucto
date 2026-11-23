@@ -10,6 +10,7 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankLedgerAccount;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
@@ -88,6 +89,7 @@ final class PohodaForeignBankRepair
         private readonly CnbExchangeRateClient $cnb,
         private readonly DocumentLockService $locks,
         private readonly ActivityLogger $activity,
+        private readonly BankLedgerAccount $ledger,
     ) {}
 
     /** Firmy s výpisy převzatými z POHODY. @return list<int> */
@@ -875,30 +877,7 @@ final class PohodaForeignBankRepair
      */
     private function ledgerAccount(int $supplierId, array $txIds): array
     {
-        $counts = [];
-        $entries = [];
-        foreach (array_chunk($txIds, 500) as $chunk) {
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT l.account_id, a.account_code, k.entry_id
-                   FROM journal_entry_document_links k
-                   JOIN journal_entry_lines l ON l.entry_id = k.entry_id AND l.supplier_id = k.supplier_id
-                   JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-                  WHERE k.supplier_id = ? AND k.doc_type = 'bank' AND k.doc_id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
-                    AND a.account_code LIKE '221%'
-                  GROUP BY l.account_id, a.account_code, k.entry_id"
-            );
-            $stmt->execute(array_merge([$supplierId], $chunk));
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $counts[(int) $r['account_id']] = ['code' => (string) $r['account_code'], 'n' => ($counts[(int) $r['account_id']]['n'] ?? 0) + 1];
-                $entries[(int) $r['entry_id']] = true;
-            }
-        }
-        if ($counts === []) {
-            return [null, null, 0.0];
-        }
-        uasort($counts, static fn (array $a, array $b): int => $b['n'] <=> $a['n']);
-        $id = (int) array_key_first($counts);
-        return [$id, $counts[$id]['code'], $counts[$id]['n'] / max(1, count($entries))];
+        return $this->ledger->forTransactions($supplierId, $txIds);
     }
 
     /**
@@ -1084,13 +1063,7 @@ final class PohodaForeignBankRepair
 
     private function ledgerOpening(int $supplierId, int $periodId, int $accountId): int
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
-               FROM journal_entry_lines l JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type = 'opening'"
-        );
-        $stmt->execute([$supplierId, $periodId, $accountId]);
-        return PohodaForeignBank::cents((float) $stmt->fetchColumn());
+        return $this->ledger->openingCents($supplierId, $periodId, $accountId) ?? 0;
     }
 
     /** Korunové obraty analytiky a počet řádků s měnou (kontrola před a po opravě). @return array{lines:int,debit:int,credit:int,foreign_lines:int} */
