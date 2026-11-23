@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Check\Checks;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Invoice\TaxDocumentAdvanceLink;
 use MyInvoice\Service\Migration\Check\CheckItem;
 use MyInvoice\Service\Migration\Check\CheckResult;
 use MyInvoice\Service\Migration\Check\FixableMigrationDataCheck;
@@ -14,7 +15,6 @@ use MyInvoice\Service\Migration\Check\FixResult;
 use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
-use MyInvoice\Service\Migration\Check\TaxDocumentAdvanceLinker;
 use MyInvoice\Service\Migration\Pohoda\DocumentLinker;
 use PDO;
 
@@ -32,7 +32,11 @@ use PDO;
  *  - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH (jen hlášení):
  *    vazba rozhoduje o odpočtu DPH zálohy na konečné faktuře, proto platí plné pojistky
  *    ({@see MigrationCheckLocks::reason()}).
- * Oprava doplní vazbu ({@see TaxDocumentAdvanceLinker}); částky, DPH ani zaúčtování se nemění.
+ *  - stejný odběratel a měna, kladná částka a součet DDKP navázaných na zálohu nepřekročí její
+ *    částku (stejná pravidla jako ruční navázání, nález, který by je porušil, jen ohlásí).
+ * Vazbu zapíše ruční navázání DDKP na zálohu ({@see TaxDocumentAdvanceLink::link()}, SSOT
+ * s detailem faktury): validace, vazba na jedinou platbu zálohy se stejnou částkou a záznam
+ * v auditní stopě. Částky, DPH ani zaúčtování DDKP se nemění.
  */
 final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements FixableMigrationDataCheck
 {
@@ -45,7 +49,7 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
         MigrationSources $sources,
         private readonly Connection $db,
         private readonly MigrationCheckLocks $locks,
-        private readonly TaxDocumentAdvanceLinker $linker,
+        private readonly TaxDocumentAdvanceLink $links,
     ) {
         parent::__construct($sources);
     }
@@ -96,10 +100,17 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
             $fixed = [];
             $skipped = [];
             foreach ($this->candidates($supplierId, true) as $c) {
-                if ($c['item']->state === CheckItem::FIXABLE && $this->linker->link($supplierId, (int) $c['item']->entityId, (int) $c['proforma_id'], $userId, 'migration_data_check')) {
-                    $fixed[] = $c['item'];
-                } else {
+                if ($c['item']->state !== CheckItem::FIXABLE) {
                     $skipped[] = $c['item'];
+                    continue;
+                }
+                try {
+                    // Ruční navázání ověří doklady dřív, než cokoli zapíše: odmítnutí nález
+                    // jen ohlásí a ostatní vazby pokračují.
+                    $this->links->link($supplierId, (int) $c['item']->entityId, (int) $c['proforma_id'], $userId, '', 'migration-data-check');
+                    $fixed[] = $c['item'];
+                } catch (\DomainException|\OutOfBoundsException $e) {
+                    $skipped[] = $c['item']->withState(CheckItem::REVIEW, $e->getMessage());
                 }
             }
             $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT migration_check_ddkp');
@@ -122,7 +133,7 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            "SELECT td.id, td.client_id, td.varsymbol, td.issue_date, td.tax_date, td.total_with_vat, td.total_vat, td.note_above_items,
+            "SELECT td.id, td.client_id, td.currency_id, td.varsymbol, td.issue_date, td.tax_date, td.total_with_vat, td.total_vat, td.note_above_items,
                     EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = td.supplier_id AND m.kind = 'invoice' AND m.target_id = td.id) AS migrated
                FROM invoices td
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
@@ -142,6 +153,14 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
         unset($r);
         $advances = $this->advances($supplierId, array_keys($refs));
 
+        // Zbývající kapacita záloh: částka + tolerance minus DDKP už navázané (stejně jako
+        // ruční navázání); fixable nálezy ji postupně čerpají.
+        $capacity = [];
+        foreach ($advances as $list) {
+            foreach ($list as $p) {
+                $capacity[(int) $p['id']] = (float) $p['total_with_vat'] + ((string) $p['currency'] === 'CZK' ? 1.0 : 0.01) - (float) $p['linked'];
+            }
+        }
         $out = [];
         foreach ($rows as $r) {
             $label = (string) ($r['varsymbol'] ?: '#' . $r['id']);
@@ -155,12 +174,13 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
                 }
                 continue;
             }
-            $matches = array_values(array_filter($advances[$r['ref']] ?? [], static fn (array $p): bool => (int) $p['client_id'] === (int) $r['client_id']));
+            $matches = array_values(array_filter($advances[$r['ref']] ?? [], static fn (array $p): bool => (int) $p['client_id'] === (int) $r['client_id']
+                && (int) $p['currency_id'] === (int) $r['currency_id']));
             $details = $base + ['advance_no' => $r['ref']];
             if (count($matches) !== 1) {
                 $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount, CheckItem::REVIEW,
                     $matches === []
-                        ? sprintf('Záloha %s u téhož odběratele neexistuje.', $r['ref'])
+                        ? sprintf('Záloha %s u téhož odběratele ve stejné měně neexistuje.', $r['ref'])
                         : sprintf('Zálohu %s nejde určit jednoznačně (%d zálohy se stejným číslem).', $r['ref'], count($matches)),
                     details: $details), 'proforma_id' => null];
                 continue;
@@ -174,7 +194,17 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
                     details: $details), 'proforma_id' => null];
                 continue;
             }
+            if ($amount <= 0.0 || $amount > $capacity[(int) $p['id']] + 0.005) {
+                $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount, CheckItem::REVIEW,
+                    $amount <= 0.0 ? 'DDKP se zápornou nebo nulovou částkou se na zálohu nenavazuje.'
+                        : sprintf('Součet DDKP navázaných na zálohu %s by překročil její částku.', $r['ref']),
+                    details: $details), 'proforma_id' => null];
+                continue;
+            }
             $lock = $this->locks->reason($supplierId, $date, true);
+            if ($lock === null) {
+                $capacity[(int) $p['id']] -= $amount;
+            }
             $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount,
                 $lock === null ? CheckItem::FIXABLE : CheckItem::LOCKED,
                 $lock ?? sprintf('DDKP se naváže na zálohu %s%s.', $r['ref'], $diff !== 0.0 ? sprintf(' (rozdíl částek %s)', self::money($diff)) : ''),
@@ -184,19 +214,29 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
     }
 
     /**
-     * Nestornované zálohy firmy podle čísla.
+     * Nestornované zálohy firmy podle čísla s částkou DDKP, které už na ně navazují (vazbou
+     * i přes platbu, každý doklad jednou, stejně jako ruční navázání).
      *
      * @param list<string> $numbers
-     * @return array<string,list<array{id:int,client_id:int,total_with_vat:string}>>
+     * @return array<string,list<array<string,mixed>>>
      */
     private function advances(int $supplierId, array $numbers): array
     {
         $out = [];
         foreach (array_chunk($numbers, 500) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id, client_id, varsymbol, total_with_vat FROM invoices
-                  WHERE supplier_id = ? AND varsymbol IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
-                    AND invoice_type = 'proforma' AND status <> 'cancelled'"
+                "SELECT a.id, a.client_id, a.currency_id, cur.code AS currency, a.varsymbol, a.total_with_vat,
+                        COALESCE((SELECT SUM(d.total_with_vat) FROM invoices d
+                                   WHERE d.supplier_id = a.supplier_id AND d.parent_invoice_id = a.id
+                                     AND d.invoice_type = 'tax_document' AND d.status <> 'cancelled'), 0)
+                      + COALESCE((SELECT SUM(d.total_with_vat) FROM invoice_payments p
+                                    JOIN invoices d ON d.id = p.tax_document_invoice_id AND d.supplier_id = p.supplier_id
+                                   WHERE p.supplier_id = a.supplier_id AND p.invoice_id = a.id
+                                     AND d.invoice_type = 'tax_document' AND d.status <> 'cancelled'
+                                     AND (d.parent_invoice_id IS NULL OR d.parent_invoice_id <> p.invoice_id)), 0) AS linked
+                   FROM invoices a JOIN currencies cur ON cur.id = a.currency_id
+                  WHERE a.supplier_id = ? AND a.varsymbol IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
+                    AND a.invoice_type = 'proforma' AND a.status <> 'cancelled'"
             );
             $stmt->execute([$supplierId, ...$chunk]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {

@@ -151,14 +151,17 @@ neodečte DPH z DDKP a ruční spárování se zálohou DPH zdvojí.
 
 - text DDKP uvádí číslo zálohy (POHODA ho píše jako „Daňový doklad k přijaté platbě (zálohová faktura
   č. …)" nebo „… k uhrazené zálohové faktuře č. …"),
-- s tímto číslem existuje právě jedna nestornovaná záloha téhož odběratele,
-- celková částka DDKP a zálohy se liší nejvýš o 1 Kč,
+- s tímto číslem existuje právě jedna nestornovaná záloha téhož odběratele ve stejné měně,
+- celková částka DDKP a zálohy se liší nejvýš o 1 Kč a součet DDKP navázaných na zálohu nepřekročí její
+  částku,
 - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH.
 
-Částky, DPH ani zaúčtování DDKP se nemění.
+Vazbu zapíše stejně jako tlačítko **Navázat na zálohu** v detailu dokladu: má-li záloha jedinou platbu se
+stejnou částkou jako DDKP, naváže DDKP i na ni. Částky, DPH ani zaúčtování DDKP se nemění.
 
 **Jen ke kontrole:** převzatý DDKP bez čísla zálohy v textu, záloha nenalezená nebo nejednoznačná, jiná
-částka. Takový DDKP navažte na zálohu ručně, patří-li k nějaké.
+částka, záloha už vyčerpaná jinými DDKP. Takový DDKP navažte na zálohu ručně tlačítkem **Navázat na zálohu**
+v detailu dokladu, patří-li k nějaké.
 
 ## 126.10 Konečná faktura s DPH ze zálohy podruhé
 

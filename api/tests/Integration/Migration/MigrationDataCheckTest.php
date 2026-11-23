@@ -19,7 +19,6 @@ use MyInvoice\Service\Migration\Check\Checks\SubledgerLedgerCheck;
 use MyInvoice\Service\Migration\Check\Checks\TaxDocumentAdvanceLinkCheck;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckService;
-use MyInvoice\Service\Migration\Check\TaxDocumentAdvanceLinker;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PDO;
@@ -224,26 +223,33 @@ final class MigrationDataCheckTest extends TestCase
 
     public function testTaxDocumentLinksToAdvanceOutsideFiledPeriod(): void
     {
-        $this->invoice('proforma', 'ZF25901', '2025-03-01', 1210.0, 0.0);
+        $advance = $this->invoice('proforma', 'ZF25901', '2025-03-01', 1210.0, 0.0);
+        $this->pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, note) VALUES (?, ?, '2025-03-04', 1210.50, 'CZK', 'manual', 'Platba zalohy')")
+            ->execute([$this->supplierId, $advance]);
+        $payment = (int) $this->pdo->lastInsertId();
         $this->invoice('proforma', 'ZF25902', '2025-03-01', 5000.0, 0.0);
         $this->invoice('proforma', 'ZF25903', '2025-04-01', 2420.0, 0.0);
         $linkable = $this->invoice('tax_document', 'DD25901', '2025-03-05', 1210.5, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25901)');
         $amount = $this->invoice('tax_document', 'DD25902', '2025-03-06', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25902)');
         $filed = $this->invoice('tax_document', 'DD25903', '2025-04-10', 2420.0, 420.0, note: 'Daňový doklad k uhrazené zálohové faktuře č. ZF25903');
         $noRef = $this->invoice('tax_document', 'DD25904', '2025-04-11', 100.0, 17.36, note: 'Daňový doklad k přijaté platbě');
+        $over = $this->invoice('tax_document', 'DD25905', '2025-03-07', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25901)');
         $this->filedVat(2025, 4);
 
         $detail = $this->service->detail($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
-        self::assertSame([$linkable => 'fixable', $amount => 'review', $filed => 'locked', $noRef => 'review'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertSame([$linkable => 'fixable', $amount => 'review', $over => 'review', $filed => 'locked', $noRef => 'review'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertStringContainsString('překročil', array_column($detail['items'], 'reason', 'entity_id')[$over]);
 
         $preview = $this->service->preview($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
         $result = $this->service->fix($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY, $this->userId, [], $preview['fingerprint']);
         self::assertSame(1, $result['fixed_count']);
         self::assertSame($this->invoiceId('ZF25901'), (int) $this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$linkable}")->fetchColumn());
-        foreach ([$amount, $filed, $noRef] as $id) {
+        // Ruční navázání naváže i jedinou platbu zálohy se stejnou částkou.
+        self::assertSame($linkable, (int) $this->pdo->query("SELECT tax_document_invoice_id FROM invoice_payments WHERE id = {$payment}")->fetchColumn());
+        foreach ([$amount, $filed, $noRef, $over] as $id) {
             self::assertNull($this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$id}")->fetchColumn(), (string) $id);
         }
-        self::assertSame(1, $this->rows('activity_log', "action = '" . TaxDocumentAdvanceLinker::AUDIT_ACTION . "' AND entity_id = {$linkable}"));
+        self::assertSame(1, $this->rows('activity_log', "action = 'invoice.tax_document_advance_linked' AND entity_id = {$linkable}"));
         $this->assertNothingToFix(TaxDocumentAdvanceLinkCheck::KEY);
     }
 
