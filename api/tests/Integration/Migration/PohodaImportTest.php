@@ -1409,6 +1409,88 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Pojistky opravy dokladů v cizí měně převzatých v Kč: doklad se zápočtem v Kč, ručně
+     * uhrazený bez bankovního pohybu, se zápisem v deníku za zámkem účtování, s dimenzí na
+     * položce, z exportu cizí agendy (soubor jiného IČO) nebo z jiného běhu převodu se
+     * nepřevede a ohlásí. Saldo zápočtu by po převodu četlo koruny v měně dokladu, peněžní
+     * deník by úhradu přecenil, dimenze by se posunula na jinou položku.
+     */
+    public function testForeignPurchaseRepairSkipsDocumentsItCannotConvertSafely(): void
+    {
+        $cases = [
+            'settlement' => ['review', 'zápočet'],
+            'manual_paid' => ['review', 'bez bankovního pohybu'],
+            'entry_locked' => ['locked', 'zámkem účtování'],
+            'item_dimension' => ['review', 'dimenze přiřazené položkám'],
+            'foreign_file' => ['review', 'je z agendy IČO 99999999'],
+            'other_run' => ['review', 'běh převodu agendy'],
+        ];
+        foreach ($cases as $case => [$status, $reason]) {
+            [$supplierId, $dir, $id] = $this->foreignPurchaseTakenOverInCrowns($case);
+            $pdo = $this->db->pdo();
+            match ($case) {
+                'settlement' => $pdo->prepare("INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, note, status)
+                        SELECT ?, 'purchase_invoice', ?, '2026-02-20', 1000, id, 'Zápočet', 'confirmed' FROM chart_of_accounts WHERE supplier_id = ? ORDER BY id LIMIT 1")
+                    ->execute([$supplierId, $id, $supplierId]),
+                'manual_paid' => $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = '2026-03-01' WHERE id = ?")->execute([$id]),
+                'entry_locked' => (function () use ($pdo, $supplierId, $id): void {
+                    $pdo->prepare("UPDATE journal_entries SET entry_date = '2026-01-30' WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?")->execute([$supplierId, $id]);
+                    $pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+                        ->execute([$supplierId, '2026-01-31']);
+                })(),
+                'item_dimension' => (function () use ($pdo, $supplierId, $id): void {
+                    $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR', 'Středisko', 'cost_center')")->execute([$supplierId]);
+                    $type = (int) $pdo->lastInsertId();
+                    $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'S1', 'Středisko 1')")->execute([$type, $supplierId]);
+                    $pdo->prepare("INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
+                        VALUES (?, 'purchase_invoice', ?, 2, ?, ?)")->execute([$supplierId, $id, $type, (int) $pdo->lastInsertId()]);
+                })(),
+                'foreign_file' => file_put_contents($dir . '/20_faktury_receivedInvoice.xml', str_replace('ico="' . SyntheticPohodaExport::ICO . '"', 'ico="99999999"',
+                    (string) file_get_contents($dir . '/20_faktury_receivedInvoice.xml'))),
+                'other_run' => (function () use ($pdo, $supplierId, $id): void {
+                    $pdo->prepare("INSERT INTO pohoda_imports (supplier_id, mode, status, agenda_ico, agenda_year) VALUES (?, 'import', 'completed', ?, 2019)")
+                        ->execute([$supplierId, SyntheticPohodaExport::ICO]);
+                    $pdo->prepare('UPDATE pohoda_import_map SET run_id = ? WHERE supplier_id = ? AND target_id = ? AND kind = ?')
+                        ->execute([(int) $pdo->lastInsertId(), $supplierId, $id, PohodaImportRepository::KIND_PURCHASE_INVOICE]);
+                })(),
+            };
+            $repair = Bootstrap::buildContainer()->get(\MyInvoice\Service\Migration\Pohoda\PohodaForeignPurchaseRepair::class);
+            $rows = $repair->run($supplierId, PohodaExport::open($dir), true, $this->userId);
+            self::assertSame([$status], array_column($rows, 'status'), $case . ': ' . json_encode($rows, JSON_UNESCAPED_UNICODE));
+            self::assertStringContainsString($reason, (string) $rows[0]['reason'], $case);
+            self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "id = {$id} AND exchange_rate IS NULL AND total_with_vat = 2530"), $case);
+        }
+    }
+
+    /**
+     * Firma se službou z EU 100 EUR / 2 530 Kč (samovyměření ze základu 2 500 Kč) převzatou
+     * starším převodem v Kč: řádek samovyměření a položka rozdílu kurzu „mimo".
+     *
+     * @return array{int,string,int} firma, adresář exportu, doklad
+     */
+    private function foreignPurchaseTakenOverInCrowns(string $tag): array
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp . '/' . $tag);
+        SyntheticPohodaExport::withSelfAssessedForeignPurchase($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $pdo = $this->db->pdo();
+        $id = $this->documentId('purchase_invoices', $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE);
+        $czk = (int) $pdo->query("SELECT currency_id FROM purchase_invoices WHERE supplier_id = {$supplierId} AND exchange_rate IS NULL LIMIT 1")->fetchColumn();
+        $pdo->prepare("UPDATE purchase_invoices SET currency_id = ?, exchange_rate = NULL, total_without_vat = 2530, total_with_vat = 2530,
+                              note_below_items = 'Převzato z Pohody, doklad 26PF0010; doklad v EUR, převzat v Kč (samovyměření DPH - zdroj daň vyměřil kurzem ke dni plnění, ne kurzem faktury)'
+                        WHERE id = ?")->execute([$czk, $id]);
+        $pdo->prepare('UPDATE purchase_invoice_items SET unit_price_without_vat = 2500, total_without_vat = 2500, total_with_vat = 2500, import_tax_base_czk = NULL
+                        WHERE purchase_invoice_id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO purchase_invoice_items (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                              total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+                       SELECT purchase_invoice_id, 'Rozdíl proti základu samovyměření (kurz)', 1, 'ks', 30, vat_rate_id, 0, 30, 0, 30, 1, 'mimo'
+                         FROM purchase_invoice_items WHERE purchase_invoice_id = ?")->execute([$id]);
+        return [$supplierId, $dir, $id];
+    }
+
+    /**
      * Zahraniční dodavatel, kterého adresář POHODY vede bez DIČ a státu: DIČ z dokladu se
      * doplní na kontakt i se státem podle předpony, jinak by evidence DPH brala samovyměření
      * jako tuzemský doklad a zařadila ho podle data vystavení místo DUZP.

@@ -200,15 +200,21 @@ php api/bin/repair-pohoda-foreign-purchases.php --supplier=12 --export=/cesta/12
 php api/bin/repair-pohoda-foreign-purchases.php --supplier=12 --export=/cesta/12345678_2026.zip --commit
 ```
 
-Export je tentýž ZIP (nebo rozbalený adresář), ze kterého se převádělo, k firmě se přiřadí podle IČO.
+Export je tentýž ZIP (nebo rozbalený adresář), ze kterého se převádělo. K firmě se přiřadí podle IČO;
+IČO každého souboru exportu i agenda a rok převodu, který doklad založil, musí sedět. Dvě firmy se
+stejným IČO dostanou export jen výslovně přes `--supplier`.
 Doklad dostane měnu a kurz z POHODY a jednu položku s částkou v měně. Když POHODA vyměřila daň jiným kurzem
 (ke dni plnění), nese položka základ samovyměření v Kč z POHODY a poznámka dokladu to uvádí. Položka
 „Rozdíl proti základu samovyměření (kurz)" zanikne. Přiznání DPH, kontrolní hlášení, deník, úhrady
-a párování se nemění; oprava evidenci DPH před a po zápisu porovná a při rozdílu se vrátí.
+a párování se nemění. Oprava doklady zapíše v transakci pod zámkem období a podání, porovná evidenci DPH,
+saldokonto v Kč a peněžní deník před a po zápisu a doklad, kterému by se cokoli změnilo, vrátí a ukáže
+ke kontrole. Nanečisto proběhne totéž a na konci se vrátí všechno.
 
-**Jen ke kontrole:** doklad s odečtenou zálohou, s částí úhrady mimo evidenci, s tuzemskou daní dodavatele,
-se samovyměřením ve více sazbách nebo s kurzem, který nedává Kč dokladu na haléř. Takový doklad zůstává v Kč,
-měnu a kurz lze opravit ručně v detailu dokladu. Doklad v chráněném období oprava nemění
+**Jen ke kontrole:** doklad s odečtenou zálohou, se zápočtem nebo úhradou mimo evidenci, s úhradou bez
+bankovního pohybu i pokladního dokladu (v měně by se úhrada přecenila kurzem dne úhrady), s dimenzí
+přiřazenou položce, s tuzemskou daní dodavatele, se samovyměřením ve více sazbách nebo s kurzem, který
+nedává Kč dokladu na haléř. Takový doklad zůstává v Kč,
+měnu a kurz lze opravit ručně v detailu dokladu. Doklad v chráněném období (i podle data účetního zápisu) oprava nemění
 ([§ 126.12](#12612-opravneni-a-pojistky)).
 
 ## 126.12 Oprávnění a pojistky

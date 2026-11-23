@@ -12,7 +12,8 @@ declare(strict_types=1);
  * (ZIP nebo rozbalený adresář, týž jako pro převod; přiřazuje se podle IČO). Bez --export
  * jen vypíše dotčené doklady (stejně jako Kontrola dat po převodu).
  *
- * Výchozí je zkouška nanečisto s výpisem, zápis jen s --commit. Idempotentní.
+ * Výchozí je zkouška nanečisto: oprava zapíše, porovná evidenci DPH, saldokonto a peněžní
+ * deník a vrátí se; výpis ukazuje, co by se převedlo. Zápis jen s --commit. Idempotentní.
  *
  * Použití:
  *   php api/bin/repair-pohoda-foreign-purchases.php --all-pohoda                                  # přehled bez exportu
@@ -97,8 +98,19 @@ $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
 echo ($commit ? '' : '[NANEČISTO] ') . 'Přijaté doklady v cizí měně se samovyměřením převzaté z POHODY v Kč' . PHP_EOL;
 $totals = [];
 $failed = false;
+// Export se přiřazuje podle IČO. Dvě firmy se stejným IČO (např. dvě účetní období vedená
+// jako dvě firmy) dostanou export jen výslovně přes --supplier; s --all-pohoda se přeskočí.
+$byIco = [];
 foreach ($ids as $supplierId) {
-    $export = $opened[$repair->supplierIco($supplierId)] ?? null;
+    $byIco[$repair->supplierIco($supplierId)][] = $supplierId;
+}
+foreach ($ids as $supplierId) {
+    $ico = $repair->supplierIco($supplierId);
+    if ($all && isset($opened[$ico]) && count($byIco[$ico]) > 1) {
+        echo PHP_EOL . sprintf('Firma %d: IČO %s mají firmy %s, export přiřaďte výslovně přes --supplier.', $supplierId, $ico, implode(', ', $byIco[$ico])) . PHP_EOL;
+        continue;
+    }
+    $export = $opened[$ico] ?? null;
     try {
         $rows = $repair->run($supplierId, $export, $commit && $export !== null);
     } catch (Throwable $e) {
