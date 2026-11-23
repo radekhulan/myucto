@@ -341,6 +341,8 @@ export const integrationsApi = {
   testAiConnection: (provider: AiProvider) =>
     api.post<AiCredentialsUpdateResult>('/admin/imports/ai/credentials/test', { provider }).then(r => r.data),
   // POST kvůli CSRF ochraně — server se podle adresy připojuje ven.
+  listOpenAiModels: (signal: AbortSignal) =>
+    api.post<{ models: string[] }>('/admin/imports/ai/openai/models', {}, { signal }).then(r => r.data),
   listOllamaModels: (baseUrl: string) =>
     api.post<{ models: OllamaModel[] }>('/admin/imports/ai/ollama/models', { base_url: baseUrl }).then(r => r.data),
   extractPdfAi: (file: File, model?: string, importBatchId?: string, withoutItems = false) => {

@@ -169,10 +169,14 @@ final readonly class LlmProviderCapabilities
     public static function openai(?string $baseUrl, ?string $defaultModel): self
     {
         $region = self::openaiRegion($baseUrl);
+        $models = self::OPENAI_MODELS;
+        if ($defaultModel !== null && self::isOpenaiPdfModel($defaultModel) && !in_array($defaultModel, $models, true)) {
+            $models[] = $defaultModel;
+        }
         return new self(
             id: 'openai',
             label: 'OpenAI',
-            models: self::OPENAI_MODELS,
+            models: $models,
             defaultModel: ($defaultModel !== null && $defaultModel !== '') ? $defaultModel : self::OPENAI_DEFAULT_MODEL,
             maxPdfBytes: 20 * 1024 * 1024,
             dataRegion: $region,
@@ -180,6 +184,16 @@ final readonly class LlmProviderCapabilities
             supportsPdfDocumentBlock: false,
             requiresStructuredOutputJsonMode: true,
         );
+    }
+
+    /**
+     * /v1/models vrací ID bez údajů o modalitách. Vybíráme rodiny GPT pro chat s PDF
+     * a strukturovaným výstupem včetně datovaných verzí.
+     */
+    public static function isOpenaiPdfModel(string $model): bool
+    {
+        return strlen($model) <= 128
+            && preg_match('/\Agpt-(?:4(?:\.1|o)|(?:[5-9]|[1-9]\d+)(?:\.\d+)?)(?:-(?:astra|sol|terra|luna|mini|nano))?(?:-\d{4}-\d{2}-\d{2})?\z/', $model) === 1;
     }
 
     /**

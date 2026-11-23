@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Import\LlmProviderCapabilities;
+use MyInvoice\Service\Import\OpenAiClient;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ServerRequestInterface;
@@ -244,7 +245,7 @@ final class AiProviderCredentialsActionTest extends TestCase
      *
      * @param array<int,array{request:\Psr\Http\Message\RequestInterface}> $history
      */
-    private function mockedAction(array &$history): AiProviderCredentialsAction
+    private function mockedAction(array &$history, ?OpenAiClient $openai = null): AiProviderCredentialsAction
     {
         $c = Bootstrap::buildContainer();
         $queue = [];
@@ -267,7 +268,7 @@ final class AiProviderCredentialsActionTest extends TestCase
         return new AiProviderCredentialsAction(
             $c->get(\MyInvoice\Service\Import\AnthropicClient::class),
             $c->get(\MyInvoice\Service\Import\AzureOpenAiClient::class),
-            $c->get(\MyInvoice\Service\Import\OpenAiClient::class),
+            $openai ?? $c->get(OpenAiClient::class),
             $c->get(\MyInvoice\Service\Import\GeminiClient::class),
             $ollama,
             $c->get(Connection::class),
@@ -276,6 +277,50 @@ final class AiProviderCredentialsActionTest extends TestCase
             $c->get(\MyInvoice\Service\Import\AiCredentialsBulkApplier::class),
             $c->get(\MyInvoice\Service\Import\ClientAiExtractionQuota::class),
         );
+    }
+
+    public function testOpenAiProjectModelCanBeListedAndSavedAsDefault(): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT openai_api_key_enc, openai_default_model, openai_base_url FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplierId]);
+        $saved = $stmt->fetch(\PDO::FETCH_NUM);
+        $container = Bootstrap::buildContainer();
+        $history = [];
+        $reply = new \GuzzleHttp\Psr7\Response(200, [], '{"data":[{"id":"gpt-6.2-sol"},{"id":"gpt-4o-realtime-preview"}]}');
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([$reply, clone $reply, clone $reply]));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $client = new OpenAiClient(
+            $this->db,
+            $container->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+            $container->get(\Psr\Log\LoggerInterface::class),
+            new \GuzzleHttp\Client(['handler' => $stack]),
+        );
+        $ollamaHistory = [];
+        $action = $this->mockedAction($ollamaHistory, $client);
+
+        try {
+            $client->setCredentials($this->supplierId, 'sk-test-fixture', 'gpt-5.4-mini', 'https://eu.api.openai.com');
+            self::assertSame(403, $action->openaiModels($this->req('POST', 'accountant'), new Psr7Response())->getStatusCode());
+            self::assertSame([], $history);
+
+            $list = $action->openaiModels($this->req('POST', 'admin'), new Psr7Response());
+            self::assertSame(200, $list->getStatusCode());
+            self::assertSame(['models' => ['gpt-6.2-sol']], json_decode((string) $list->getBody(), true));
+
+            $update = $this->req('PUT', 'admin');
+            $unavailable = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6.2-terra']), new Psr7Response());
+            self::assertSame(400, $unavailable->getStatusCode());
+            self::assertSame('gpt-5.4-mini', $client->capabilities($this->supplierId)->defaultModel);
+
+            $accepted = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6.2-sol']), new Psr7Response());
+            self::assertSame(200, $accepted->getStatusCode());
+            self::assertSame('gpt-6.2-sol', $client->capabilities($this->supplierId)->defaultModel);
+            self::assertCount(3, $history);
+        } finally {
+            $pdo->prepare('UPDATE supplier SET openai_api_key_enc = ?, openai_default_model = ?, openai_base_url = ? WHERE id = ?')
+                ->execute([...$saved, $this->supplierId]);
+        }
     }
 
     private function storeOllamaKey(string $baseUrl, string $key): string

@@ -11,7 +11,7 @@ import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/se
 import { useSupplierStore } from '@/stores/supplier'
 import { useRoute } from 'vue-router'
 import { useToast } from '@/composables/useToast'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import OllamaProviderFields from '@/components/admin/OllamaProviderFields.vue'
@@ -293,7 +293,10 @@ const aiRegion = ref<AiDataRegion>('us')
 const aiEuRequired = ref(false)
 const aiSavingSelection = ref(false)
 let aiContextVersion = 0
-onBeforeUnmount(() => { aiContextVersion++ })
+onBeforeUnmount(() => {
+  aiContextVersion++
+  clearOpenAiModels()
+})
 const clientAiEnabled = ref(false)
 const clientAiMonthlyLimit = ref(100)
 const validClientAiLimit = computed(() => Number.isInteger(clientAiMonthlyLimit.value) && clientAiMonthlyLimit.value >= 0 && clientAiMonthlyLimit.value <= 100000)
@@ -332,7 +335,12 @@ const bulkOnlyUnconfigured = ref(true)
 const bulkResult = ref<AiBulkResult | null>(null)
 
 const providerInfo = computed(() => aiCreds.value?.providers?.[aiProvider.value])
-const models = computed(() => providerInfo.value?.models ?? [])
+const openAiModels = ref<string[] | null>(null)
+const openAiModelsLoading = ref(false)
+let openAiModelsRequest: AbortController | null = null
+const canLoadOpenAiModels = computed(() => aiProvider.value === 'openai' && !!providerInfo.value?.configured
+  && !credForm.api_key && credForm.base_url.trim() === (providerInfo.value.base_url ?? '').trim())
+const models = computed(() => openAiModels.value ?? providerInfo.value?.models ?? [])
 function euCapable(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.eu_capable ?? false }
 function providerConfigured(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.configured ?? false }
 function providerBadge(p: AiProvider) { return aiProviderBadge(p, aiCreds.value?.ai_provider, providerConfigured(p)) }
@@ -343,6 +351,7 @@ const aiConfigured = computed(() => !!providerInfo.value?.configured)
 const aiExtractCount = computed(() => providerInfo.value?.extractions_count ?? 0)
 
 function syncCredForm() {
+  clearOpenAiModels()
   const inf = providerInfo.value
   credForm.api_key = ''
   credForm.clear_api_key = false
@@ -353,6 +362,34 @@ function syncCredForm() {
   credForm.base_url = inf?.base_url ?? ''
   credForm.workspace_id = inf?.workspace_id ?? ''
   credTestMsg.value = null
+}
+
+function clearOpenAiModels() {
+  openAiModelsRequest?.abort()
+  openAiModelsRequest = null
+  openAiModelsLoading.value = false
+  openAiModels.value = null
+}
+
+watch(canLoadOpenAiModels, (canLoad) => { if (!canLoad) clearOpenAiModels() })
+
+async function loadOpenAiModels() {
+  if (!canLoadOpenAiModels.value || openAiModelsLoading.value) return
+  const request = new AbortController()
+  openAiModelsRequest = request
+  openAiModelsLoading.value = true
+  try {
+    const result = await integrationsApi.listOpenAiModels(request.signal)
+    if (!request.signal.aborted) openAiModels.value = result.models
+  } catch (e) {
+    if (!request.signal.aborted) toast.error(t(apiErrorCode(e) === 'residency_conflict'
+      ? 'aiGateway.residency_conflict' : 'aiGateway.openai_models_failed'))
+  } finally {
+    if (openAiModelsRequest === request) {
+      openAiModelsRequest = null
+      openAiModelsLoading.value = false
+    }
+  }
 }
 
 // keepProvider: po uložení/smazání klíče zůstane vybraná záložka, kterou uživatel
@@ -601,6 +638,7 @@ async function deleteAiCredentials() {
 
 watch(() => suppliers.currentSupplierId, () => {
   aiContextVersion++
+  clearOpenAiModels()
   aiCreds.value = null
   clientAiEnabled.value = false
   clientAiMonthlyLimit.value = 100
@@ -1258,12 +1296,22 @@ onMounted(() => {
                                   v-model:api-key="credForm.api_key" v-model:clear-api-key="credForm.clear_api_key"
                                   :has-api-key="!!providerInfo?.has_api_key" />
 
-            <!-- Model whitelist z capability descriptoru -->
-            <div v-if="models.length && aiProvider !== 'ollama'">
-              <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.model') }}</label>
-              <select v-model="credForm.default_model" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-                <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
-              </select>
+            <div v-if="aiProvider !== 'ollama' && (models.length || openAiModels !== null)">
+              <label for="ai-extraction-default-model" class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.model') }}</label>
+              <div class="flex flex-wrap items-center gap-2">
+                <select id="ai-extraction-default-model" v-model="credForm.default_model" class="min-w-0 flex-1 h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                  <option v-if="aiProvider === 'openai' && !models.includes(credForm.default_model)" :value="credForm.default_model" disabled>
+                    {{ t('aiGateway.openai_model_not_listed', { model: credForm.default_model }) }}
+                  </option>
+                  <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+                </select>
+                <button v-if="canLoadOpenAiModels" type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+                        :disabled="openAiModelsLoading || credSaving" @click="loadOpenAiModels">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" /></svg>
+                  {{ t(openAiModelsLoading ? 'aiGateway.openai_models_loading' : 'aiGateway.openai_models_load') }}
+                </button>
+              </div>
+              <p v-if="openAiModels?.length === 0" role="status" class="text-xs text-neutral-500 mt-1">{{ t('aiGateway.openai_models_empty') }}</p>
             </div>
           </div>
 
