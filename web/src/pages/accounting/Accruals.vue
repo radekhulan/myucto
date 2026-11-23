@@ -59,7 +59,9 @@ const loadMoreTarget = ref<HTMLElement | null>(null)
 useFillViewportHeight(listBox)
 
 // ─── Filtry (drží je URL) ───
-const tab = ref<'items' | 'closing'>('items')
+// Výchozí je přehled dokladů, které časově rozlišuje uzávěrka: běžná firma rozlišuje fakturami
+// a do uzávěrky jsou účty 381–385 nulové, takže samotné položky agendy bývají prázdné.
+const tab = ref<'items' | 'closing'>('closing')
 const status = ref('')
 const kind = ref('')
 const method = ref('')
@@ -629,15 +631,12 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
       </div>
     </section>
 
-    <div role="tablist" class="mb-3 flex flex-wrap items-center gap-1.5" :aria-label="t('accruals.title')">
-      <button type="button" role="tab" :aria-selected="tab === 'items'" data-test="tab-items"
-        class="inline-flex h-8 cursor-pointer items-center whitespace-nowrap rounded-full border px-3 text-sm transition-colors"
-        :class="tab === 'items' ? 'border-primary-300 bg-primary-50 font-medium text-primary-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
-        @click="tab = 'items'">{{ t('accruals.tab_items') }}</button>
-      <button type="button" role="tab" :aria-selected="tab === 'closing'" data-test="tab-closing"
-        class="inline-flex h-8 cursor-pointer items-center whitespace-nowrap rounded-full border px-3 text-sm transition-colors"
-        :class="tab === 'closing' ? 'border-primary-300 bg-primary-50 font-medium text-primary-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
-        @click="tab = 'closing'">{{ t('accruals.tab_closing') }}</button>
+    <div role="tablist" class="mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('accruals.title')">
+      <button v-for="tt in (['closing', 'items'] as const)" :key="tt" type="button" role="tab" :aria-selected="tab === tt" :data-test="`tab-${tt}`"
+        :data-active="tab === tt || undefined"
+        class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition"
+        :class="tab === tt ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+        @click="tab = tt">{{ t(tt === 'items' ? 'accruals.tab_items' : 'accruals.tab_closing') }}</button>
     </div>
 
     <template v-if="tab === 'items'">
