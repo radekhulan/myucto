@@ -15,7 +15,10 @@ use PDO;
  * Adresář partnerů (`30_adresar.xml`) a předkontace (`03_predkontace_pu.xml`).
  *
  * Partner se stejným IČO, který už ve firmě je, se použije - převod nezakládá druhého
- * a u existující karty jen doplní chybějící údaje. Vlastní firma se přeskakuje.
+ * a u existující karty jen doplní chybějící údaje. Vlastní firma se přeskakuje. Vede-li
+ * adresář totéž IČO na kartách s různými názvy (přejmenování, transformace), je každý
+ * název samostatný kontakt a doklad patří ke kartě podle vazby nebo názvu
+ * ({@see mappedPartner()}).
  * Doklad s partnerem mimo adresář (Pohoda drží na dokladu kopii adresy) partnera založí
  * z údajů dokladu ({@see resolvePartner()}).
  *
@@ -40,6 +43,10 @@ final class PartnerImporter
 
     /** @var array<string,int|null> */
     private array $countryIds = [];
+
+    /** @var array<int,array<string,true>> IČO, u kterých protokol už nejednoznačný název ohlásil */
+    private array $ambiguousIcos = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
@@ -50,8 +57,12 @@ final class PartnerImporter
     {
         $p = $ctx->protocol;
         $this->loadClientIndex($ctx);
+        $existingByName = $this->clientsByIcoName($ctx->supplierId);
         $ownIco = self::ico($ctx->export->ico);
 
+        $cards = [];
+        /** @var array<string,array<string,true>> $names IČO => názvy jeho karet */
+        $names = [];
         foreach ($ctx->export->records('addressbook', 'addressbook') as $r) {
             $h = PohodaXml::get($r, 'addressbookHeader');
             $id = PohodaXml::text($h, 'id');
@@ -60,14 +71,27 @@ final class PartnerImporter
                 $p->count(self::STEP_PARTNERS, 'skipped');
                 continue;
             }
+            $cards[] = [$id, $h, $s];
+            if ($s['ico'] !== '') {
+                $names[$s['ico']][self::nameKey($s['name'])] = true;
+            }
+        }
+        foreach ($names as $cardNames) {
+            if (count($cardNames) > 1) {
+                $p->count(self::STEP_PARTNERS, 'split_by_name');
+            }
+        }
+
+        foreach ($cards as [$id, $h, $s]) {
+            $nameKey = self::nameKey($s['name']);
+            // IČO vedené na kartách s různými názvy (přejmenování, transformace): každý
+            // název je samostatný kontakt, karty se stejným názvem sdílí jeden.
+            $byName = $s['ico'] !== '' && count($names[$s['ico']]) > 1;
             $key = 'ab:' . $id;
             $mapped = $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT, $key)
                 ?? $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key);
             if ($mapped !== null) {
-                $ctx->clientsByPohodaId[$id] = $mapped;
-                if ($s['ico'] !== '') {
-                    $ctx->clientsByIco[$s['ico']] ??= $mapped;
-                }
+                $this->index($ctx, $id, $s['ico'], $nameKey, $mapped);
                 $p->count(self::STEP_PARTNERS, 'existing');
                 continue;
             }
@@ -77,8 +101,13 @@ final class PartnerImporter
             $s['email'] = PohodaXml::text($h, 'email');
             $s['phone'] = PohodaXml::text($h, 'mobil') ?: PohodaXml::text($h, 'phone');
             $s['note'] = 'Převzato z Pohody (adresář č. ' . $id . ')';
-            if ($s['ico'] !== '' && isset($ctx->clientsByIco[$s['ico']])) {
-                $clientId = $ctx->clientsByIco[$s['ico']];
+            $existing = match (true) {
+                $s['ico'] === '' => null,
+                $byName => $ctx->clientsByIcoName[$s['ico']][$nameKey] ?? $existingByName[$s['ico']][$nameKey] ?? null,
+                default => $ctx->clientsByIco[$s['ico']] ?? null,
+            };
+            if ($existing !== null) {
+                $clientId = $existing;
                 $this->identity->fillMissing($ctx->supplierId, $clientId, $s);
                 $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key, $clientId, $ctx->runId);
                 $p->count(self::STEP_PARTNERS, 'matched');
@@ -87,13 +116,48 @@ final class PartnerImporter
                 $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CLIENT, $key, $clientId, $ctx->runId);
                 $p->count(self::STEP_PARTNERS, 'created');
             }
-            $ctx->clientsByPohodaId[$id] = $clientId;
-            if ($s['ico'] !== '') {
-                $ctx->clientsByIco[$s['ico']] = $clientId;
-            }
+            $this->index($ctx, $id, $s['ico'], $nameKey, $clientId);
         }
         $this->completeForeignVatIdsFromDocuments($ctx);
         $p->finish(self::STEP_PARTNERS);
+    }
+
+    /** Kontakt karty adresáře do indexů převodu (první karta IČO zůstává výchozí pro IČO). */
+    private function index(PohodaContext $ctx, string $cardId, string $ico, string $nameKey, int $clientId): void
+    {
+        $ctx->clientsByPohodaId[$cardId] = $clientId;
+        if ($ico !== '') {
+            $ctx->clientsByIco[$ico] ??= $clientId;
+            $ctx->clientsByIcoName[$ico][$nameKey] ??= $clientId;
+        }
+    }
+
+    /**
+     * Klíč názvu pro porovnání karty, dokladu a kontaktu: bez rozdílu velikosti písmen
+     * a opakovaných mezer.
+     */
+    public static function nameKey(string $name): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $name)));
+    }
+
+    /**
+     * Nearchivované kontakty firmy podle IČO a názvu (nejstarší s daným názvem).
+     *
+     * @return array<string,array<string,int>>
+     */
+    private function clientsByIcoName(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT id, ic, company_name FROM clients WHERE supplier_id = ? AND ic IS NOT NULL AND ic <> '' AND archived_at IS NULL ORDER BY id");
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $ico = self::ico((string) $row['ic']);
+            if ($ico !== '') {
+                $out[$ico][self::nameKey((string) $row['company_name'])] ??= (int) $row['id'];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -183,18 +247,49 @@ final class PartnerImporter
         $this->identity->fillMissing($ctx->supplierId, $clientId, ['dic' => $dic, 'street' => '', 'city' => '', 'zip' => '', 'email' => '', 'phone' => '']);
     }
 
-    /** @param array{pohoda_id:string,ico:string} $s */
+    /**
+     * Kontakt dokladu z převodu: rozhoduje vazba na kartu adresáře (`typ:id`). Doklad bez
+     * vazby dostane kontakt podle IČO, a vede-li adresář IČO na kartách s různými názvy,
+     * ten se stejným názvem jako doklad ({@see partnerByIco()}).
+     *
+     * @param array{pohoda_id:string,ico:string} $s
+     */
     private function mappedPartner(PohodaContext $ctx, array $s, string $name): ?int
     {
         if ($s['pohoda_id'] !== '' && isset($ctx->clientsByPohodaId[$s['pohoda_id']])) {
             return $ctx->clientsByPohodaId[$s['pohoda_id']];
         }
         if ($s['ico'] !== '' && isset($ctx->clientsByIco[$s['ico']])) {
-            return $ctx->clientsByIco[$s['ico']];
+            return $this->partnerByIco($ctx, $s['ico'], $name);
         }
         $key = PartnerIdentityMatcher::documentKey($s['ico'], $name);
         return $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT, $key)
             ?? $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key);
+    }
+
+    /**
+     * Kontakt podle IČO. Vede-li adresář IČO na kartách s různými názvy, kontakt karty se
+     * stejným názvem jako doklad; bez jednoznačné shody první karta IČO a upozornění
+     * v protokolu (jednou za IČO).
+     */
+    private function partnerByIco(PohodaContext $ctx, string $ico, string $name): int
+    {
+        $byName = $ctx->clientsByIcoName[$ico] ?? [];
+        if (count(array_unique($byName)) <= 1) {
+            return $ctx->clientsByIco[$ico];
+        }
+        $found = $byName[self::nameKey($name)] ?? null;
+        if ($found !== null) {
+            return $found;
+        }
+        $ctx->protocol->count(self::STEP_PARTNERS, 'partner_name_ambiguous');
+        if (!isset($this->ambiguousIcos[$ctx->supplierId][$ico])) {
+            $this->ambiguousIcos[$ctx->supplierId][$ico] = true;
+            $ctx->protocol->warn(self::STEP_PARTNERS, 'partner_name_ambiguous',
+                "Adresář vede IČO {$ico} na více kartách s různými názvy a doklad s názvem „{$name}“ neodpovídá žádné z nich. Doklady s tímto názvem jsou u kontaktu první karty, ověřte je.",
+                ['ico' => $ico, 'name' => $name]);
+        }
+        return reset($byName);
     }
 
     public function importPostingRules(PohodaContext $ctx): void

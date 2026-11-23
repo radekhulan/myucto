@@ -37310,6 +37310,8 @@
       "matched": "spárováno s existujícím",
       "skipped": "vynecháno",
       "created_from_documents": "partnerů z dokladů",
+      "split_by_name": "IČO s více názvy v adresáři (samostatné kontakty)",
+      "partner_name_ambiguous": "dokladů s nejednoznačným názvem partnera",
       "duplicate_code": "duplicitních zkratek",
       "kept": "ponecháno",
       "previous_period": "z minulého období",

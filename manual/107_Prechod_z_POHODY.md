@@ -525,7 +525,7 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | účtová osnova (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy |
 | účetní rok | účetní období 1. 1. až 31. 12. |
 | účetní deník včetně počátečních stavů | účetní zápisy, počáteční stavy jako otevírací zápis k 1. dni období |
-| adresář | klienti, párování podle IČO |
+| adresář | klienti, párování podle IČO; vede-li adresář totéž IČO na více kartách s různými názvy (přejmenování firmy), je každý název samostatný klient; doklad patří ke kartě podle vazby na adresář, doklad bez vazby ke klientovi se stejným IČO a názvem; bez shody názvu k první kartě s upozorněním v protokolu |
 | předkontace | pravidla zaúčtování se zkratkou z POHODY |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
 | ostatní pohledávky a závazky bez DPH | otevřené položky s jednoznačným již převedeným účetním zápisem na 315 nebo 325 |

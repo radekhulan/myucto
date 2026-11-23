@@ -37310,6 +37310,8 @@
       "matched": "matched to existing",
       "skipped": "skipped",
       "created_from_documents": "partners from documents",
+      "split_by_name": "company IDs with several names in the address book (separate contacts)",
+      "partner_name_ambiguous": "documents with an ambiguous partner name",
       "duplicate_code": "duplicate codes",
       "kept": "kept",
       "previous_period": "from the previous period",

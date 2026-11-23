@@ -77,6 +77,9 @@ final class PohodaContext
     /** @var array<string,int> IČO => clients.id */
     public array $clientsByIco = [];
 
+    /** @var array<string,array<string,int>> IČO => [klíč názvu karty adresáře => clients.id] */
+    public array $clientsByIcoName = [];
+
     /** @var array<string,int> číslo dokladu => invoices.id */
     public array $issuedInvoices = [];
 
