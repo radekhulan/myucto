@@ -10,7 +10,8 @@ use MyInvoice\Service\Tax\Return\TaxReturnException;
 
 /**
  * Připravenost DPPO 504 po krocích: podklady a posouzení, právní profil, jejich shoda
- * a údaje pro přiznání.
+ * a návaznost na výkazy (krok return_data: ř. 62 a podklady výpočtu bez vstupů přiznání;
+ * úpravy, dary a snížení zadané v přiznání ověřuje výpočet přiznání).
  *
  * Výpočet (NonprofitDppoDataProvider::gather) zůstává jediným zdrojem pravdy a končí
  * na první chybě. Připravenost z něj převezme, které kroky splnil a na kterém skončil.
@@ -80,7 +81,7 @@ final readonly class NonprofitDppoReadiness
         $steps = self::pending();
         if (in_array($failure['code'], self::GENERAL, true)) return ['ready' => false, 'steps' => $steps, 'findings' => [$failure]];
         // Krok podle kódu chyby: legacy cesta kontroluje právní profil dřív než posouzení. Už splněný krok
-        // chybu nedostane (stejný kód může přijít i z pozdější kontroly údajů pro přiznání).
+        // chybu nedostane (stejný kód může přijít i z pozdější kontroly návaznosti na výkazy).
         $mapped = self::CODE_STEPS[$failure['code']] ?? null;
         $failed = $mapped !== null && !isset($passed[$mapped]) ? $mapped : current(array_diff(self::STEPS, array_keys($passed)));
         $findings = [$failure];
@@ -126,5 +127,4 @@ final readonly class NonprofitDppoReadiness
         $error = NonprofitDppoDataProvider::legalProfileRequired();
         return ['code' => $error->errorCode, 'message' => $error->getMessage()];
     }
-
 }

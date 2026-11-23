@@ -48020,7 +48020,7 @@ components:
                 official_source: { type: string, format: uri }
             preparation_findings:
               type: array
-              description: Všechna zjištění kontroly připravenosti (může jich být víc); zjištění kroku je zároveň v readiness_steps, ostatní (akceptace, nepodporované období) jen zde.
+              description: Všechna zjištění kontroly připravenosti (může jich být víc); zjištění kroku je zároveň v readiness_steps, ostatní (akceptace výpočtu, jiný účetní rámec v části období, nepodporovaná pravidla nebo formulář) jen zde.
               items: { type: object }
             readiness_steps:
               type: array

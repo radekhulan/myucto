@@ -65,9 +65,9 @@ describe('Nonprofit DPPO workspace', () => {
  })
  it('gives no statement link for return data and hides unevaluated steps behind a general reason', async () => {
   const pending = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'not_evaluated', code: null, message: null }))
-  const returnData = pending.map(step => step.step === 'return_data' ? { ...step, status: 'failed', code: 'nonprofit_dppo_adjustment_invalid', message: 'Synthetic adjustment' } : { ...step, status: 'ok' })
+  const returnData = pending.map(step => step.step === 'return_data' ? { ...step, status: 'failed', code: 'nonprofit_dppo_statement_reconciliation_failed', message: 'Synthetic statement mismatch' } : { ...step, status: 'ok' })
   api.readiness
-   .mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: returnData, preparation_findings: [{ code: 'nonprofit_dppo_adjustment_invalid', message: 'Synthetic adjustment' }] } })
+   .mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: returnData, preparation_findings: [{ code: 'nonprofit_dppo_statement_reconciliation_failed', message: 'Synthetic statement mismatch' }] } })
    .mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: pending, preparation_findings: [{ code: 'nonprofit_legal_profile_framework_required', message: 'Synthetic framework reason' }] } })
   const w = render(); await flushPromises()
   await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
