@@ -217,6 +217,7 @@ const publicLinkBusy = ref(false)
 
 const activity = ref<Array<{ id: number; user_name: string | null; action: string; payload: any; created_at: string }>>([])
 const activityOpen = ref(false)
+const signingOpen = ref(false)
 const pdfHistory = ref<Array<{ id: number; filename: string; size_bytes: number; sha256: string; was_sent: boolean; sent_to: string[] | null; reason: string; archived_at: string }>>([])
 const pdfHistoryOpen = ref(false)
 // Náhled zdrojového PDF z importu — stejný lepkavý přepínač jako u přijatých dokladů,
@@ -3619,80 +3620,6 @@ useWindowRefresh(async () => {
         </dl>
       </div>
 
-      <!-- Elektronický podpis dokumentu -->
-      <div v-if="canManageSignatureSelection" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.signing.title') }}</h3>
-          <p class="text-xs text-neutral-500 mt-0.5">{{ t('invoice.signing.hint') }}</p>
-        </header>
-        <div v-if="signatureSelectionLoading && signatureSelectionRows.some(row => !signatureSelection(row.entityType))"
-          class="px-5 py-4 text-sm text-neutral-500">
-          {{ t('common.loading') }}
-        </div>
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-xs">
-            <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
-              <tr>
-                <th class="px-5 py-2 text-left font-medium">{{ t('invoice.signing.output') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_selection_source') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_profile') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('invoice.signing.effective') }}</th>
-                <th class="px-5 py-2 w-24"></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="row in signatureSelectionRows" :key="row.entityType">
-                <td class="px-5 py-2 font-medium text-neutral-800">{{ row.label }}</td>
-                <td class="px-3 py-2">
-                  <select
-                    :value="signatureSelection(row.entityType)?.selection_source || 'inherit'"
-                    @change="setSignatureSelectionSource(row.entityType, ($event.target as HTMLSelectElement).value as PdfSignatureDocumentSelectionSource)"
-                    class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
-                    <option value="inherit">{{ t('invoice.signing.source_inherit') }}</option>
-                    <option value="logged_in_user">{{ t('settings.signing_output_source_logged_in_user') }}</option>
-                    <option value="admin_profile_settings">{{ t('settings.signing_output_source_admin_profile_settings') }}</option>
-                  </select>
-                </td>
-                <td class="px-3 py-2">
-                  <select
-                    v-if="isAdmin && signatureSelection(row.entityType)?.selection_source === 'admin_profile_settings'"
-                    :value="signatureSelection(row.entityType)?.admin_profile_id || ''"
-                    @change="setSignatureAdminProfile(row.entityType, ($event.target as HTMLSelectElement).value ? Number(($event.target as HTMLSelectElement).value) : null)"
-                    class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
-                    <option value="">{{ t('invoice.signing.admin_profile_inherited') }}</option>
-                    <option v-for="profile in adminSigningProfiles" :key="profile.id" :value="profile.id">
-                      {{ profile.name }} ({{ profile.code }})
-                    </option>
-                  </select>
-                  <span v-else class="text-neutral-500">
-                    {{ signatureSelection(row.entityType)?.selection_source === 'admin_profile_settings'
-                      ? t('invoice.signing.admin_profile_inherited')
-                      : '—' }}
-                  </span>
-                </td>
-                <td class="px-3 py-2 text-neutral-600">
-                  <template v-if="signatureSelection(row.entityType)">
-                    {{ signatureSelectionSourceLabel(signatureSelection(row.entityType)!.effective_selection_source) }}
-                    <span v-if="signatureSelection(row.entityType)!.effective_selection_source === 'admin_profile_settings'"
-                      class="text-neutral-400">
-                      · {{ signatureProfileName(signatureSelection(row.entityType)!.effective_admin_profile_id) }}
-                    </span>
-                  </template>
-                </td>
-                <td class="px-5 py-2 text-right">
-                  <button @click="saveSignatureSelection(row.entityType)" type="button"
-                    :disabled="signatureSelectionSaving === row.entityType || !signatureSelection(row.entityType)"
-                    class="cursor-pointer text-primary-600 hover:text-primary-700 disabled:opacity-50">
-                    {{ signatureSelectionSaving === row.entityType ? t('common.loading') : t('common.save') }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-
       <!-- Výkaz víceprací -->
       <div v-if="workReport" id="invoice-work-report" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden scroll-mt-4">
         <header class="px-5 py-3 border-b border-neutral-200 flex items-baseline justify-between gap-3">
@@ -4102,6 +4029,88 @@ useWindowRefresh(async () => {
             </div>
           </li>
         </ul>
+      </div>
+
+      <!-- Elektronický podpis dokumentu -->
+      <div v-if="canManageSignatureSelection" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <button type="button" @click="signingOpen = !signingOpen"
+          class="w-full px-5 py-3 flex items-center justify-between gap-3 text-left hover:bg-neutral-50 cursor-pointer"
+          :class="signingOpen ? 'border-b border-neutral-200' : ''">
+          <span class="min-w-0">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.signing.title') }}</h3>
+            <span v-if="signingOpen" class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice.signing.hint') }}</span>
+          </span>
+          <svg class="w-4 h-4 text-neutral-400 shrink-0 transition-transform" :class="signingOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <template v-if="signingOpen">
+        <div v-if="signatureSelectionLoading && signatureSelectionRows.some(row => !signatureSelection(row.entityType))"
+          class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('common.loading') }}
+        </div>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-5 py-2 text-left font-medium">{{ t('invoice.signing.output') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_selection_source') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_profile') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('invoice.signing.effective') }}</th>
+                <th class="px-5 py-2 w-24"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="row in signatureSelectionRows" :key="row.entityType">
+                <td class="px-5 py-2 font-medium text-neutral-800">{{ row.label }}</td>
+                <td class="px-3 py-2">
+                  <select
+                    :value="signatureSelection(row.entityType)?.selection_source || 'inherit'"
+                    @change="setSignatureSelectionSource(row.entityType, ($event.target as HTMLSelectElement).value as PdfSignatureDocumentSelectionSource)"
+                    class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
+                    <option value="inherit">{{ t('invoice.signing.source_inherit') }}</option>
+                    <option value="logged_in_user">{{ t('settings.signing_output_source_logged_in_user') }}</option>
+                    <option value="admin_profile_settings">{{ t('settings.signing_output_source_admin_profile_settings') }}</option>
+                  </select>
+                </td>
+                <td class="px-3 py-2">
+                  <select
+                    v-if="isAdmin && signatureSelection(row.entityType)?.selection_source === 'admin_profile_settings'"
+                    :value="signatureSelection(row.entityType)?.admin_profile_id || ''"
+                    @change="setSignatureAdminProfile(row.entityType, ($event.target as HTMLSelectElement).value ? Number(($event.target as HTMLSelectElement).value) : null)"
+                    class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
+                    <option value="">{{ t('invoice.signing.admin_profile_inherited') }}</option>
+                    <option v-for="profile in adminSigningProfiles" :key="profile.id" :value="profile.id">
+                      {{ profile.name }} ({{ profile.code }})
+                    </option>
+                  </select>
+                  <span v-else class="text-neutral-500">
+                    {{ signatureSelection(row.entityType)?.selection_source === 'admin_profile_settings'
+                      ? t('invoice.signing.admin_profile_inherited')
+                      : '—' }}
+                  </span>
+                </td>
+                <td class="px-3 py-2 text-neutral-600">
+                  <template v-if="signatureSelection(row.entityType)">
+                    {{ signatureSelectionSourceLabel(signatureSelection(row.entityType)!.effective_selection_source) }}
+                    <span v-if="signatureSelection(row.entityType)!.effective_selection_source === 'admin_profile_settings'"
+                      class="text-neutral-400">
+                      · {{ signatureProfileName(signatureSelection(row.entityType)!.effective_admin_profile_id) }}
+                    </span>
+                  </template>
+                </td>
+                <td class="px-5 py-2 text-right">
+                  <button @click="saveSignatureSelection(row.entityType)" type="button"
+                    :disabled="signatureSelectionSaving === row.entityType || !signatureSelection(row.entityType)"
+                    class="cursor-pointer text-primary-600 hover:text-primary-700 disabled:opacity-50">
+                    {{ signatureSelectionSaving === row.entityType ? t('common.loading') : t('common.save') }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        </template>
       </div>
 
       <!-- Aktivita -->
