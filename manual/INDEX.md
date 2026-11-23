@@ -180,6 +180,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 108. [Přechod z PAMICA](108_Prechod_z_PAMICA.md)
 109. [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 110. [Přechod z ABRA Flexi](110_Prechod_z_ABRA_Flexi.md)
+126. [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md)
 
 ### Reference
 

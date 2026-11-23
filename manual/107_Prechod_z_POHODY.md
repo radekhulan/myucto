@@ -215,14 +215,20 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
 9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
    zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
    podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
-   Daňový doklad bez vazby na zálohu protokol nehlásí. Pokud odkaz chybí, otevřete doklad,
-   klikněte na **Navázat na zálohu** a vyberte zálohu ještě před vystavením konečné faktury.
-10. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
+   Daňové doklady bez vazby na zálohu najde [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md#1269-ddkp-bez-vazby-na-zalohu)
+   a jednoznačné vazby doplní. Ostatní navažte ručně: otevřete doklad, klikněte na **Navázat na zálohu**
+   a vyberte zálohu ještě před vystavením konečné faktury.
+10. Spusťte [Kontrolu dat po převodu](126_Kontrola_dat_po_prevodu.md#1262-krok-za-krokem-kontrola-a-oprava)
+   (tlačítko **Zkontrolovat data po převodu** na konci průvodce): úhrady minulých let, bankovní účty v cizí
+   měně, stavy převzatých výpisů, mzdové závazky, saldokonto, krytí přijatých dokladů, vazby DDKP na zálohy
+   a DPH ze zálohy podruhé.
+11. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
    do agendy [Časové rozlišení](125_Casove_rozliseni.md#1258-krok-za-krokem-prevzit-casove-rozliseni-z-pohody).
    Převzetí nic neúčtuje a lze ho opakovat.
 
 **Jak poznáte, že je hotovo:** Kontroly rekonciliace projdou, nezbývají doklady
-v konceptu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají POHODĚ.
+v konceptu ani nepřijaté rozdíly, Kontrola dat po převodu nemá nálezy k opravě a obraty
+v MyÚčtu odpovídají POHODĚ.
 
 ## 107.7 Krok za krokem: navázání číselné řady
 
@@ -1124,6 +1130,7 @@ karty majetku a daňové odpisy zadejte ručně.
 
 ## 107.10 Související kapitoly
 
+- [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md) - kontroly a opravy převzatých dat
 - [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy z POHODY Mzdy a PAMICA
 - [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 - [Režim OSS](45_OSS.md)

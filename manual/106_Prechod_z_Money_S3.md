@@ -156,10 +156,14 @@ jedné firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
    [§ 106.10.6](#106106-uzaverka-historickych-let)).
 7. Doplňte, co se nepřevádí: skeny dokladů v `Dokumenty → Skeny k dokladům`,
    zaměstnance importem podání JMHZ v `Mzdy → Importy`.
+8. Spusťte [Kontrolu dat po převodu](126_Kontrola_dat_po_prevodu.md#1262-krok-za-krokem-kontrola-a-oprava)
+   (tlačítko **Zkontrolovat data po převodu** na konci průvodce): zápočty a úhrady bez dokladu úhrady,
+   krytí přijatých dokladů, stavy převzatých výpisů, saldokonto a DPH ze zálohy podruhé.
 
 **Jak poznáte, že je hotovo:** Všechny kontroly K1 až K4 (viz
 [§ 106.10.9](#106109-davkovy-prevod-vice-firem)) projdou, nezbývají doklady bez
-zápisu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají Money.
+zápisu ani nepřijaté rozdíly, Kontrola dat po převodu nemá nálezy k opravě a obraty
+v MyÚčtu odpovídají Money.
 
 ## 106.7 Krok za krokem: navázání číselné řady
 
@@ -918,6 +922,7 @@ doplňte ručně.
 
 ## 106.11 Související kapitoly
 
+- [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md) - kontroly a opravy převzatých dat
 - [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 - [Účetní deník](52_Ucetni_denik.md)
 - [Uzávěrka](72_Uzaverka.md)
