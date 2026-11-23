@@ -155,6 +155,33 @@ final class MoneyS3MigrationDataCheckTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Zápočet, který oprava najde jen podle dne a částky (ID25040 bez čísla dokladu, partneři
+     * vydaného a přijatého dokladu se liší), kontrola ukáže jako návrh ke kontrole a oprava ho
+     * nikdy nezapíše: doklad dostane výplň.
+     */
+    public function testSettlementProposalIsReviewNeverWritten(): void
+    {
+        $pdo = $this->db->pdo();
+        $fv40 = $this->invoice('FV25040');
+        $entry = (int) $pdo->query("SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND document_no = 'ID25040'")->fetchColumn();
+        // Stav firmy převedené dřív: zápočty ID25040 ani výplň vydaného dokladu nejsou.
+        $pdo->prepare('DELETE s, p FROM invoice_settlements s LEFT JOIN invoice_payments p ON p.id = s.invoice_payment_id WHERE s.supplier_id = ? AND s.journal_entry_id = ?')
+            ->execute([$this->supplierId, $entry]);
+        $pdo->prepare("DELETE FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ? AND source = 'settlement'")->execute([$this->supplierId, $fv40]);
+
+        $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        $proposals = array_values(array_filter([...($preview['skipped'] ?? []), ...($preview['changes'] ?? [])],
+            static fn (array $i): bool => ($i['details']['settlement_proposal']['entry_no'] ?? null) === 'ID25040'));
+        self::assertNotEmpty($proposals, json_encode($preview, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['review'], array_values(array_unique(array_column($proposals, 'state'))));
+        self::assertContains($fv40, array_column($proposals, 'entity_id'));
+
+        $this->service->fix($this->supplierId, SettledWithoutPaymentCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM invoice_settlements WHERE journal_entry_id = {$entry}")->fetchColumn(), 'Návrh se nezapíše.');
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$fv40} AND source = 'settlement' AND amount = 1210.00")->fetchColumn());
+    }
+
+    /**
      * Změna platby, která ji naváže na DDKP nebo z něj odváže.
      *
      * @param list<array<string,mixed>> $items
