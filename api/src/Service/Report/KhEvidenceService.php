@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 
 /**
  * Evidence pro kontrolní hlášení (issue #142): soupis dokladů vybraného oddílu KH
@@ -52,11 +53,16 @@ final class KhEvidenceService
         return implode(', ', $parts);
     }
 
-    public static function filterLabel(string $section): string
+    /** @param array{label?:?string}|null $dimension filtr dimenze sestavy ({@see DimensionFilter::toArray()}) */
+    public static function filterLabel(string $section, ?array $dimension = null): string
     {
-        return $section === 'all'
+        $label = $section === 'all'
             ? 'všechny oddíly'
             : ($section === 'none' ? 'mimo KH' : 'oddíl ' . $section) . ' - ' . (self::SECTION_LABELS[$section] ?? '');
+        if (($dimension['label'] ?? null) !== null) {
+            $label .= '; dimenze ' . $dimension['label'] . ' (podíl dokladů připadající na hodnotu, bez oprav § 43, 46 a 74b)';
+        }
+        return $label;
     }
 
     public function __construct(
@@ -354,18 +360,22 @@ final class KhEvidenceService
     /**
      * Sestava z aktuálních dat.
      *
+     * `$dimension` zúží soupis na díl dokladů připadající na hodnotu dimenze
+     * ({@see KontrolniHlaseniBuilder::sectionDocuments()}).
+     *
      * @param string $section oddíl (A.4, …), 'none' = mimo KH, 'all' = všechny oddíly
      * @return array<string,mixed>
      */
-    public function current(int $supplierId, int $year, int $month, string $period, string $section): array
+    public function current(int $supplierId, int $year, int $month, string $period, string $section, ?DimensionFilter $dimension = null): array
     {
-        $docs = $this->kh->sectionDocuments($supplierId, $year, $month, $period);
+        $docs = $this->kh->sectionDocuments($supplierId, $year, $month, $period, $dimension);
         return [
             'source'       => 'current',
             'submission'   => null,
             'supplier'     => $this->supplier($supplierId),
             'period'       => $docs['period'],
             'section'      => $section,
+            'dimension'    => $dimension?->toArray(),
             'generated_at' => date('Y-m-d H:i:s'),
             'sections'     => self::filterSections($docs['sections'], $section),
             'excluded'     => array_values(array_filter(

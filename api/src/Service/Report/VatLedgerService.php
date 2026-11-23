@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\MultiPurposeVoucher;
@@ -111,11 +113,19 @@ final class VatLedgerService
      * pokladní doklady pak nevrací. Hodí se tam, kde se ptáme na zařazení konkrétních
      * dokladů (stránka seznamu), ne na celé období.
      *
+     * `$dimension` zúží evidenci na hodnotu dimenze (a případně její podřízené): z řádku
+     * zůstane jen díl připadající na hodnoty filtru, řádek bez dílu vypadne
+     * ({@see VatLedgerDimensionAllocation::filter()}). Filtr smí mít jen jeden typ.
+     *
      * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
      * @return \Generator<int, array<string,mixed>>
      */
-    public function iterateRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null): \Generator
+    public function iterateRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): \Generator
     {
+        if ($dimension !== null) {
+            yield from $this->filterByDimension($supplierId, $dimension, $this->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds));
+            return;
+        }
         $map = $this->classificationMap($supplierId);
         // Práh základní/snížená sazba (per rok období) pro remapování 12% RC řádků (S3).
         $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
@@ -136,6 +146,35 @@ final class VatLedgerService
                 yield $this->normalize($r, $r['doc_type'] === 'in' ? 'sale' : 'purchase', $map, $bucket);
             }
         }
+    }
+
+    /**
+     * Kanonické řádky (z {@see iterateRows()} / {@see iterateReturnRows()}) rozdělené mezi
+     * hodnoty typu dimenze: každý řádek dá díl pro každou svou hodnotu a díl „bez dimenze"
+     * (`dimension_value_id` null) za zbytek. Pravidlo i zaokrouhlení jsou tatáž jako
+     * u filtru `$dimension`, takže díl hodnoty sedí na evidenci filtrovanou na hodnotu.
+     *
+     * @param iterable<array<string,mixed>> $rows
+     * @return \Generator<int, array<string,mixed>>
+     */
+    public function allocateByDimension(int $supplierId, int $typeId, iterable $rows): \Generator
+    {
+        yield from (new VatLedgerDimensionAllocation($this->db))->parts($supplierId, $typeId, $rows);
+    }
+
+    /**
+     * @param iterable<array<string,mixed>> $rows
+     * @return \Generator<int, array<string,mixed>>
+     */
+    private function filterByDimension(int $supplierId, DimensionFilter $dimension, iterable $rows): \Generator
+    {
+        if ($dimension->also !== []) {
+            throw new DimensionException(
+                'dimension_filter_single_type',
+                'Evidenci DPH lze filtrovat jen podle jednoho typu dimenze.',
+            );
+        }
+        yield from (new VatLedgerDimensionAllocation($this->db))->filter($supplierId, $dimension->typeId, $dimension->valueIds, $rows);
     }
 
     /**
@@ -639,6 +678,7 @@ final class VatLedgerService
                        END
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
+                   ii.id AS line_id, 'invoice_item' AS line_source,
                    vr.country AS tax_country,
                    ii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
@@ -732,8 +772,12 @@ final class VatLedgerService
      * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
      * @return \Generator<int, array<string,mixed>>
      */
-    public function iterateReturnRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null): \Generator
+    public function iterateReturnRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): \Generator
     {
+        if ($dimension !== null) {
+            yield from $this->filterByDimension($supplierId, $dimension, $this->iterateReturnRows($supplierId, $start, $end, $includeDrafts, $documentIds));
+            return;
+        }
         yield from $this->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds);
         $saleIds = $documentIds === null ? null : ($documentIds['sale'] ?? []);
         if ($saleIds !== []) {
@@ -794,6 +838,7 @@ final class VatLedgerService
                    0 AS is_fixed_asset,
                    '24z' AS code,
                    0 AS vat_rate,
+                   ii.id AS line_id, 'invoice_item' AS line_source,
                    ii.description AS description,
                    ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
                    0 AS vat
@@ -1173,6 +1218,7 @@ final class VatLedgerService
                               AND pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                          THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
+                   pii.id AS line_id, pii.line_source,
                    pii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
                    {$docSign} * COALESCE(pii.total_without_vat, 0) AS base,
@@ -1185,7 +1231,7 @@ final class VatLedgerService
          LEFT JOIN countries co ON co.id = c.country_id
          LEFT JOIN purchase_invoices parent ON parent.id = pi.parent_purchase_invoice_id
               JOIN (
-                    SELECT i.id, i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
+                    SELECT i.id, 'purchase_item' AS line_source, i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
                            i.total_without_vat, i.total_vat, i.vat_classification_code,
                            i.is_fixed_asset, NULL AS vat_deduction,
                            NULL AS vat_deduction_percent,
@@ -1202,7 +1248,7 @@ final class VatLedgerService
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
                            )
                     UNION ALL
-                    SELECT a.id, a.purchase_invoice_id, a.description, a.vat_rate,
+                    SELECT a.id, 'purchase_allocation' AS line_source, a.purchase_invoice_id, a.description, a.vat_rate,
                            a.base_amount, a.vat_amount, a.vat_classification_code,
                            0 AS is_fixed_asset, a.vat_deduction,
                            a.vat_deduction_percent,
@@ -1490,6 +1536,11 @@ final class VatLedgerService
             'is_fixed_asset'        => (bool) $r['is_fixed_asset'],
             'exchange_rate'         => $rate,
             'exchange_rate_missing' => $exchangeRateMissing,
+            // Zdrojový řádek dokladu (položka faktury, rozpis DPH přijatého dokladu, řádek
+            // DPH pokladního dokladu). Podle něj se řádek evidence přiřazuje k dimenzi položky
+            // ({@see VatLedgerDimensionAllocation}).
+            'line_id'               => isset($r['line_id']) ? (int) $r['line_id'] : null,
+            'line_source'           => isset($r['line_source']) ? (string) $r['line_source'] : null,
         ];
     }
 
@@ -1689,7 +1740,8 @@ final class VatLedgerService
                                  THEN CASE WHEN cl.vat_rate >= ? THEN '1'  ELSE '2'  END
                                  ELSE CASE WHEN cl.vat_rate >= ? THEN '40' ELSE '41' END
                             END) AS code,
-                   cl.vat_rate, cd.description, cl.base_amount AS base, cl.vat_amount AS vat
+                   cl.vat_rate, cl.id AS line_id, 'cash_vat_line' AS line_source,
+                   cd.description, cl.base_amount AS base, cl.vat_amount AS vat
               FROM cash_documents cd
               JOIN cash_document_vat_lines cl ON cl.cash_document_id = cd.id
              WHERE cd.supplier_id = ?

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 use MyInvoice\Service\Tax\Vat\Section43Service;
@@ -61,6 +62,12 @@ final class DphBookBuilder
      * `$documentIds` zúží řádky dokladů na vybrané vydané a přijaté doklady (sloupec KH
      * a DPH na stránce seznamu); součty a opravy pak nepopisují celé období.
      *
+     * `$dimension` zúží knihu na hodnotu dimenze (jeden typ): u dokladu rozděleného mezi
+     * hodnoty zůstane jen díl řádků připadající na filtr ({@see VatLedgerService::iterateRows()}).
+     * Opravy § 43, § 46, § 74b a § 79 se do filtrované knihy nepřidávají: vážou se
+     * k dokladu po sazbách, ne k položkám, a podíl na hodnotě dimenze nemají. Zařazení
+     * do oddílů KH (sloupec KH) zůstává podle celého dokladu.
+     *
      * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
      * @return array{
      *   period: array{year:int, month:int, period_type:string, quarter:int|null, start:string, end:string, label:string},
@@ -73,7 +80,7 @@ final class DphBookBuilder
      *   }
      * }
      */
-    public function build(int $supplierId, int $year, int $month, ?string $period = null, ?array $documentIds = null): array
+    public function build(int $supplierId, int $year, int $month, ?string $period = null, ?array $documentIds = null, ?DimensionFilter $dimension = null): array
     {
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : 'monthly';
         // Kvartální období: $month nese (jako u DPH přiznání) libovolný měsíc kvartálu;
@@ -100,7 +107,7 @@ final class DphBookBuilder
         // žurnál). Seskupíme per (doklad, kód, sazba) do jednoho řádku přehledu a
         // zařadíme do sekcí dle dphdp3_line (+ mirror 43, + ř.47 majetek).
         $sections = [];
-        $groups = $this->groupLedgerRows($supplierId, $start, $end, $documentIds);
+        $groups = $this->groupLedgerRows($supplierId, $start, $end, $documentIds, $dimension);
         foreach ($groups as $g) {
             $scope = $g['source'] === 'sale' ? 'issued' : 'received';
             $line = $g['dphdp3_line'];
@@ -156,7 +163,7 @@ final class DphBookBuilder
         // EVIDOVANÉ opravy §46 (věřitel) jsou zrcadlo na straně výstupu: ř.1/2 (oprava
         // záporně, obnova po úhradě kladně), aby daň na výstupu seděla s ř. 1/2 DPHDP3.
         // Opravy §74b, §46 i §43 jen u plátce k poslednímu dni období, stejně jako DphPriznaniBuilder.
-        if (!empty($supplier['is_vat_payer'])) {
+        if (!empty($supplier['is_vat_payer']) && $dimension === null) {
             $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
             $this->appendSection46Corrections($sections, $supplierId, $year, $month, $period, $khSections);
             $this->appendSection43Corrections($sections, $supplierId, $year, $month, $period, $khSections);
@@ -164,7 +171,9 @@ final class DphBookBuilder
         // §79/§79a (ř. 45) přiznání započítává bez podmínky plátcovství: snížení při zrušení
         // registrace patří do posledního období registrace, kdy stav k poslednímu dni
         // období už může být „neplátce".
-        $this->appendSection79Corrections($sections, $supplierId, $start, $end);
+        if ($dimension === null) {
+            $this->appendSection79Corrections($sections, $supplierId, $start, $end);
+        }
 
         // Convert sections asociativní mapy → indexované pole, seřazené.
         $sectionList = array_values($sections);
@@ -248,6 +257,7 @@ final class DphBookBuilder
                 'label'       => $label,
             ],
             'supplier' => $supplier,
+            'dimension' => $dimension?->toArray(),
             'sections' => $sectionList,
             'totals' => [
                 'issued'      => $issued,
@@ -538,10 +548,10 @@ final class DphBookBuilder
      * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
      * @return list<array<string,mixed>>
      */
-    private function groupLedgerRows(int $supplierId, string $start, string $end, ?array $documentIds = null): array
+    private function groupLedgerRows(int $supplierId, string $start, string $end, ?array $documentIds = null, ?DimensionFilter $dimension = null): array
     {
         $grouped = [];
-        foreach ($this->ledger->iterateReturnRows($supplierId, $start, $end, true, $documentIds) as $r) {
+        foreach ($this->ledger->iterateReturnRows($supplierId, $start, $end, true, $documentIds, $dimension) as $r) {
             $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
             if (!isset($grouped[$key])) {
                 // Jen atributy, které build() a toBookRow() čtou: kniha firmy s desítkami

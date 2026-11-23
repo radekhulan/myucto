@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 use MyInvoice\Service\Tax\Vat\Section43Service;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 
 /**
  * Builder XML pro Kontrolní hlášení (DPHKH1) — EPO portál MFČR.
@@ -981,9 +982,9 @@ final class KontrolniHlaseniBuilder
      *   a4:list<array<string,mixed>>, a5:array<string,mixed>, b1:list<array<string,mixed>>,
      *   b2:list<array<string,mixed>>, b3:array<string,mixed>, missing_rates:list<array<string,mixed>>}
      */
-    private function finalSections(int $supplierId, int $year, int $month, string $period, string $start, string $end, array &$warnings, array &$excluded = [], bool $includeDrafts = false, ?array $documentIds = null): array
+    private function finalSections(int $supplierId, int $year, int $month, string $period, string $start, string $end, array &$warnings, array &$excluded = [], bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): array
     {
-        $r = $this->buildSections($supplierId, $start, $end, $includeDrafts, $documentIds);
+        $r = $this->buildSections($supplierId, $start, $end, $includeDrafts, $documentIds, $dimension);
         ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3] = $r['sections'];
         $missingRates = $r['missing_rates'];
         // #238: doklady v cizí měně bez kurzu — akce je při stažení doplní z ČNB.
@@ -999,6 +1000,13 @@ final class KontrolniHlaseniBuilder
         $a2 = $this->resolveA2Identification($a2, $warnings);
         $a4 = $this->filterKhAttributeConflicts($a4, 'A.4', $warnings, $excluded);
         $b2 = $this->filterKhAttributeConflicts($b2, 'B.2', $warnings, $excluded);
+        if ($dimension !== null) {
+            // Soupis filtrovaný podle dimenze: opravy § 74b, § 46 a § 43 se vážou k dokladu
+            // po sazbách, podíl na hodnotě dimenze nemají, proto se nepřidávají (stejně jako
+            // v knize DPH, DphBookBuilder::build()).
+            return ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
+                    'missing_rates' => $missingRates, 'outside' => $r['outside']];
+        }
         // § 74b korekce odpočtu dlužníka — do B.2 se zdph_44='P' VŽDY (i pod 10 000 Kč);
         // musí předcházet rekapitulaci VetaC, ať pln23/pln5 sedí s DPHDP3 ř. 40/41.
         $this->appendSection74bCorrections($b2, $supplierId, $year, $month, $period, $warnings);
@@ -1028,15 +1036,20 @@ final class KontrolniHlaseniBuilder
      * B.1, B.2) jako součet řádků, u souhrnných vět A.5/B.3 z nezaokrouhlených částek
      * dokladů a zaokrouhlují se až na konci — přesně jako hodnota věty A.5/B.3 v XML.
      *
+     * `$dimension` (jeden typ) zúží soupis na díl dokladů připadající na hodnotu dimenze:
+     * částky řádků jsou jen díl položek hodnoty ({@see VatLedgerService::iterateRows()}),
+     * zařazení do oddílu (limit 10 000 Kč) se ale dál posuzuje podle CELÉHO dokladu.
+     * Opravy § 43, § 46 a § 74b ve filtrovaném soupisu nejsou.
+     *
      * @return array{period: array<string,mixed>, sections: array<string, array{rows: list<array<string,mixed>>, totals: array<string,mixed>}>,
      *               excluded: list<array<string,mixed>>, warnings: list<string>}
      */
-    public function sectionDocuments(int $supplierId, int $year, int $month, string $period = 'monthly'): array
+    public function sectionDocuments(int $supplierId, int $year, int $month, string $period = 'monthly', ?DimensionFilter $dimension = null): array
     {
         [$start, $end, $quarter] = self::periodBounds($year, $month, $period);
         $warnings = [];
         $excludedRaw = [];
-        $s = $this->finalSections($supplierId, $year, $month, $period, $start, $end, $warnings, $excludedRaw);
+        $s = $this->finalSections($supplierId, $year, $month, $period, $start, $end, $warnings, $excludedRaw, false, null, $dimension);
 
         $map = [
             'A.1' => [$s['a1'], 'sale'], 'A.2' => [$s['a2'], 'purchase'], 'A.4' => [$s['a4'], 'sale'],
@@ -1258,7 +1271,7 @@ final class KontrolniHlaseniBuilder
      *
      * @return array{sections: array<string,mixed>, invoices: list<array<string,mixed>>}
      */
-    private function buildSections(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null): array
+    private function buildSections(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): array
     {
         // Konstanty pro rok OBDOBÍ výkazu (ne aktuální) — zpětně generované KH za
         // staré období musí použít tehdejší limit/sazby.
@@ -1276,11 +1289,11 @@ final class KontrolniHlaseniBuilder
         // jednoho dokladu za sebou (ORDER BY … id dokladu, id položky), takže se nedrží
         // agregace celého období najednou. Pořadí dokladů zůstává pořadím prvního výskytu.
         $missingByDoc = [];
-        $documents = (function () use ($supplierId, $start, $end, $includeDrafts, $documentIds, $bucket, &$missingByDoc): \Generator {
+        $documents = (function () use ($supplierId, $start, $end, $includeDrafts, $documentIds, $dimension, $bucket, &$missingByDoc): \Generator {
             $inv = [];
             $currentKey = null;
             $finished = [];
-            foreach ($this->ledger->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds) as $r) {
+            foreach ($this->ledger->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds, $dimension) as $r) {
                 VatLedgerService::collectMissingExchangeRate($missingByDoc, $r);
                 $key = VatLedgerService::documentIdentity($r);
                 if ($key !== $currentKey) {
