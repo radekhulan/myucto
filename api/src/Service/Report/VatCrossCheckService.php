@@ -933,15 +933,12 @@ final class VatCrossCheckService
      * accountTurnovers (posted_at NOT NULL, bez filtru reversed_by — storno páry se vynetují,
      * entry_date BETWEEN, analytiky přes parent_id) PLUS níže popsané vyloučení úhrad/vratek DPH.
      *
-     * VYLOUČENÍ ÚHRAD/VRATEK DPH: zápis z banky/pokladny (source_type IN ('bank','cash')),
-     * jehož 343 řádek stojí VÝHRADNĚ proti peněžnímu účtu (211/221/261) a NEobsahuje žádnou
-     * jinou (základovou/nákladovou/výnosovou) protistranu, je vypořádání JIŽ PŘIZNANÉ daně
-     * minulého období na FÚ (nebo vratka nadměrného odpočtu) — pohybuje 343, ale není plněním
-     * období a v přiznání za období nemá protějšek. Kdyby se do obratu započítal, kontrola by
-     * hlásila falešný „nevysvětlený rozdíl" ve výši úhrady a zablokovala stažení. Podmínka
-     * NOT EXISTS (jiná než 343/peněžní protistrana) záměrně NEVYLUČUJE reálné pokladní DPH
-     * doklady (211/6xx/343) ani DPH z bankovních poplatků (568/343/221) — ty základovou/
-     * nákladovou stranu mají, takže zůstávají a dál se řádně smiřují.
+     * VYLOUČENÍ ÚHRAD/VRATEK DPH ({@see Vat343Turnover::settlementLineSql()}, sdílené s kontrolou
+     * 343 po dimenzích): úhrada daně finančnímu úřadu nebo vratka nadměrného odpočtu pohybuje
+     * 343, ale není plněním období a v přiznání za období nemá protějšek. Kdyby se do obratu
+     * započítala, kontrola by hlásila falešný „nevysvětlený rozdíl" ve výši úhrady a zablokovala
+     * stažení. Reálné pokladní DPH doklady (211/6xx/343) ani DPH z bankovních poplatků
+     * (568/343/221) se nevylučují — ty základovou/nákladovou stranu mají a dál se smiřují.
      *
      * @return array<string, array{net:float, entry_date:string}>
      *         klíč "{source_type}:{source_id}" | "manual:{entry_id}" (zápis bez zdroje)
@@ -969,25 +966,9 @@ final class VatCrossCheckService
                 -- uzávěrkový zápis padne jen do Q4, takže dřívější volání za jedno období
                 -- na něj většinou nenarazilo. Je to přitom stejný druh výjimky jako
                 -- vyloučení úhrad DPH níž — jen na něj nikdo nepomyslel.
-                AND e.source_type NOT IN ('closing', 'opening')
-                AND NOT (
-                    e.source_type IN ('bank', 'cash')
-                    AND EXISTS (
-                        SELECT 1 FROM journal_entry_lines ml
-                          JOIN chart_of_accounts mca ON mca.id = ml.account_id
-                         WHERE ml.entry_id = e.id
-                           AND (mca.account_code LIKE '211%' OR mca.account_code LIKE '221%' OR mca.account_code LIKE '261%')
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM journal_entry_lines ol
-                          JOIN chart_of_accounts oca ON oca.id = ol.account_id
-                         WHERE ol.entry_id = e.id
-                           AND oca.account_code NOT LIKE '343%'
-                           AND oca.account_code NOT LIKE '211%'
-                           AND oca.account_code NOT LIKE '221%'
-                           AND oca.account_code NOT LIKE '261%'
-                    )
-                )
+                AND NOT " . Vat343Turnover::bookTransferSql('e') . "
+                -- Úhrada vlastní daně finančnímu úřadu nebo vratka odpočtu (Vat343Turnover).
+                AND NOT " . Vat343Turnover::settlementLineSql('l', 'e') . "
               GROUP BY doc_key
              HAVING ABS(net) > 0.004"
         );
