@@ -783,7 +783,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
 
     <!-- Položky spravované uzávěrkou (období na řádku dokladu): jen zobrazení. -->
     <section v-else data-test="projection">
-      <p class="mb-3 text-sm text-neutral-500">{{ t('accruals.projection.hint') }}</p>
+      <p class="mb-3 text-sm text-neutral-500">{{ t('accruals.projection.hint', { date: projection?.year_end ? formatDate(projection.year_end) : '' }) }}</p>
       <div v-if="projectionLoading && !projection" class="py-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
       <EmptyState v-else-if="!projection || !projection.items.length" boxed dense accent="neutral" icon="doc" :title="t('accruals.projection.empty')" />
       <div v-else class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">

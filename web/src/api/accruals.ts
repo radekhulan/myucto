@@ -291,6 +291,7 @@ export interface AccrualProjectionItem {
 
 export interface AccrualProjection {
   as_of: string
+  year_end: string
   items: AccrualProjectionItem[]
   totals: { prepaid_expense: number; deferred_revenue: number }
   truncated: boolean

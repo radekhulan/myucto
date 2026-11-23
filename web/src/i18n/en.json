@@ -975,8 +975,8 @@
       "amount": "Assigned amount"
     },
     "projection": {
-      "hint": "Period entered directly on the document line. Closing posts the deferral and release, this is an overview only.",
-      "empty": "Closing manages no document lines with a period.",
+      "hint": "Document lines whose period extends beyond the end of the accounting period {date}. The balance is the part falling after that day, which the closing defers to 381/384 and releases next year. Periods entirely within the year are not deferred, so they are not listed.",
+      "empty": "No document line has a period extending beyond the end of the accounting period.",
       "document": "Document",
       "totals": "Prepaid expenses {prepaid} · deferred revenue {deferred}",
       "truncated": "Only the first lines are shown."

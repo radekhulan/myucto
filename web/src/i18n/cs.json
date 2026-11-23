@@ -975,8 +975,8 @@
       "amount": "Přiřazená částka"
     },
     "projection": {
-      "hint": "Období zadané přímo na řádku dokladu. Odklad a rozpuštění účtuje uzávěrka, tady je jen přehled.",
-      "empty": "Uzávěrka žádné řádky dokladů s obdobím nespravuje.",
+      "hint": "Řádky dokladů s obdobím přesahujícím konec účetního období {date}. Zůstatek je část připadající po tomto dni, kterou uzávěrka odloží na 381/384 a v dalším roce rozpustí. Období celé uvnitř roku se časově nerozlišuje, proto tu není.",
+      "empty": "Žádný řádek dokladu nemá období přesahující konec účetního období.",
       "document": "Doklad",
       "totals": "Náklady příštích období {prepaid} · výnosy příštích období {deferred}",
       "truncated": "Zobrazeny jsou jen první řádky."
