@@ -12,7 +12,7 @@ import { formatDate } from '@/composables/useFormat'
 import { fundingApi as api, type FundingChoices, type FundingConfirmation, type FundingOverview, type FundingPolicy, type FundingPreview, type FundingSource } from '@/api/nonprofitFunding'
 import type { AccountingPeriod } from '@/api/accounting'
 import { fundingCents } from './fundingMoney'
-const props = defineProps<{ supplier: number; canManage: boolean }>()
+const props = defineProps<{ supplier: number; canManage: boolean; embedded?: boolean }>()
 const { t, locale } = useI18n()
 const overview = ref<FundingOverview | null>(null), periods = ref<AccountingPeriod[]>([]), period = ref(0), choices = ref<FundingChoices | null>(null)
 const draft = ref<FundingPolicy | null>(null), sourceKey = ref(''), editing = ref(false), providerLabel = ref(''), search = ref(''), budget = ref(''), reason = ref('')
@@ -112,7 +112,7 @@ onMounted(() => { void reload() })
 </script>
 <template>
  <div class="space-y-5">
-  <h1 class="text-xl font-semibold">{{ t('nonprofitFunding.title') }}</h1>
+  <h1 v-if="!embedded" class="text-xl font-semibold">{{ t('nonprofitFunding.title') }}</h1>
   <p class="text-sm text-neutral-500">{{ t('nonprofitFunding.help') }}</p>
   <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitFunding.readOnly') }}</p>
   <p v-if="error" role="alert" class="rounded border border-danger-300 p-3" data-section="workspace-error">{{ error }}</p>

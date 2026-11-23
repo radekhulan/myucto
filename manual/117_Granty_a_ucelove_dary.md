@@ -2,6 +2,8 @@
 
 V podvojném účetnictví podle vyhlášky 504 otevřete **Účetnictví → Granty a účelové dary**. Přehled spojuje poskytovatele, smluvní účel a schválený rozpočet s účetně doloženým zdrojem a skutečným použitím v potvrzeném daňovém posouzení.
 
+Stránka má dvě záložky. **Průběžné čerpání** je pracovní evidence, do které během roku přiřazujete přijaté výnosy a nákladové řádky k jednotlivým zdrojům ([117.6](#1176-prubezne-cerpani)). **Potvrzené zdroje (J6)** obsahují potvrzené účelové zdroje a jejich použití v daňovém posouzení, popsané v oddílech 117.1 až 117.5.
+
 ## 117.1 Příprava účetního zdroje
 
 Nejprve zaúčtujte příjem nebo nárok na dotaci či dar běžným účetním postupem. Výsledkové řádky musí mít druh činnosti, činnost a předběžný daňový režim. V daňovém posouzení období doložte právní titul příjmu. U daru potvrďte volbu osvobození a odpovídající účel. Potvrzená volba osvobození zůstává součástí historie.
@@ -40,3 +42,17 @@ Přehled uvádí název a účel zdroje, historické údaje poskytovatele, rozpo
 U daru jsou dostupné také původní účetní řádky s datem a částkou včetně oprav a potvrzená volba osvobození. Tyto podklady slouží ke kontrole evidence a k přípravě potvrzení externím nástrojem. Použitý kontakt poskytovatele archivujte; jeho historická vazba brání smazání.
 
 Pro potvrzení o daru nabízí REST API a MCP server čtení ověřitelných podkladů zdroje z potvrzeného stránkovaného posouzení J6: datum a částku přijetí daru, právní titul, rozhodnutí o osvobození se zákonným kódem, souhrn čerpání a jednotlivé čerpané náklady. Dárce je uveden jen identifikátorem kontaktu; volné texty a důkazy se nevracejí. Text potvrzení ani dopis aplikace netvoří, připraví je externí nástroj nad těmito podklady. Podrobnosti jsou v kapitolách [REST API](103_API.md) a [MCP server](105_MCP_server.md).
+
+## 117.6 Průběžné čerpání
+
+Záložka **Průběžné čerpání** slouží k evidenci čerpání v průběhu roku, ještě před daňovým posouzením. Daňový výpočet J6 z ní nečte a potvrzené zdroje nemění. Nevytváří ani účetní zápis.
+
+Vyberte účetní období a zvolte **Nový zdroj**. Vyplňte poskytovatele, druh zdroje, název, číslo smlouvy nebo rozhodnutí, schválený rozpočet a období způsobilosti. Druhy činnosti a nákladové účty jsou nepovinné; pokud je vyplníte, nabídka nákladů je respektuje. Odpovídá-li zdroj už potvrzenému zdroji J6, můžete ho k němu přiřadit.
+
+V detailu zdroje přidejte **Výnos**, tedy zaúčtovaný řádek přijaté dotace nebo daru na účtu třídy 6. Zdroj může mít více výnosových řádků (splátek), jeden výnosový řádek ale patří jen jednomu zdroji. Tlačítkem **Přidat náklady** vyberte zaúčtované nákladové řádky téhož období a u každého částku, kterou zdroj nese. Jeden náklad mohou nést i dva zdroje, dohromady nejvýše do výše řádku. Součet přiřazených nákladů nesmí překročit rozpočet; aplikace v takovém případě uloží všechny vybrané řádky, nebo žádný, a ukáže zbývající částku.
+
+Souhrn zdroje ukazuje rozpočet, přijatou částku, přiřazené a doložené náklady, zůstatek rozpočtu a vazby, které vyžadují kontrolu. U nákladu z přijaté faktury je pro informaci uveden stav její úhrady.
+
+Evidence nebrání opravám v účetnictví. Když se nákladový nebo výnosový řádek po přiřazení přeúčtuje, stornuje nebo změní, vazba zůstane a ukáže se ke kontrole. Po přeúčtování zvolte **Navázat znovu** a vyberte aktuální řádek téhož zápisu se stejným účtem. Stornovaný řádek znovu navázat nelze, vazbu odeberte. Odebrání vazby i zrušení zdroje vyžaduje důvod. Zdroj s přiřazenými náklady zrušit nelze.
+
+Každá změna se zapisuje do **Historie změn** zdroje i do auditní stopy. Upravit evidenci může uživatel s právem zápisu do účetnictví z přihlášené relace; v uzavřeném účetním období je evidence jen ke čtení.
