@@ -1239,6 +1239,45 @@ final class PohodaImportTest extends TestCase
         self::assertSame(2, $this->rows('purchase_invoices', $own, "vendor_id = {$manual}"));
     }
 
+    /**
+     * Mapa dřívějšího převodu, který obě karty IČO spojil do kontaktu první karty: karta
+     * s novým názvem se při dalším převodu přesměruje na jediný kontakt se stejným IČO
+     * a názvem karty (doklad s vazbou na ni jde k němu). Bez takového kontaktu vazba zůstává
+     * a protokol ji ohlásí - převod nové kontakty naslepo nezakládá.
+     */
+    public function testStaleCardMappingIsVerifiedAgainstAddressbookCardName(): void
+    {
+        foreach ([true, false] as $withNamedContact) {
+            $supplierId = $this->supplier();
+            $pdo = $this->db->pdo();
+            $insert = $pdo->prepare("INSERT INTO clients (supplier_id, company_name, ic, street, city, zip, country_id, currency_default_id)
+                SELECT ?, ?, ?, 'Testovací 1', 'Brno', '60200', ?, default_currency_id FROM supplier WHERE id = ?");
+            $insert->execute([$supplierId, SyntheticPohodaExport::RENAMED_OLD_NAME, SyntheticPohodaExport::RENAMED_ICO, $this->czId, $supplierId]);
+            $old = (int) $pdo->lastInsertId();
+            $map = $pdo->prepare('INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id, run_id) VALUES (?, ?, ?, ?, NULL)');
+            $map->execute([$supplierId, PohodaImportRepository::KIND_CLIENT, 'ab:' . SyntheticPohodaExport::RENAMED_OLD_CARD, $old]);
+            $map->execute([$supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, 'ab:' . SyntheticPohodaExport::RENAMED_NEW_CARD, $old]);
+            $named = null;
+            if ($withNamedContact) {
+                $insert->execute([$supplierId, SyntheticPohodaExport::RENAMED_NEW_NAME, SyntheticPohodaExport::RENAMED_ICO, $this->czId, $supplierId]);
+                $named = (int) $pdo->lastInsertId();
+            }
+            $dir = SyntheticPohodaExport::write($this->tmp . '/' . ($withNamedContact ? 'a' : 'b'));
+            SyntheticPohodaExport::withRenamedVendor($dir);
+            $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $vendor = (int) $pdo->query("SELECT vendor_id FROM purchase_invoices WHERE supplier_id = {$supplierId} AND varsymbol = '" . SyntheticPohodaExport::RENAMED_BY_CARD . "'")->fetchColumn();
+            $target = (int) $pdo->query("SELECT target_id FROM pohoda_import_map WHERE supplier_id = {$supplierId} AND pohoda_key = 'ab:" . SyntheticPohodaExport::RENAMED_NEW_CARD . "'")->fetchColumn();
+            if ($withNamedContact) {
+                self::assertSame([$named, $named], [$vendor, $target], $this->explain($protocol));
+                self::assertSame(1, self::stepCounts($protocol, 'partners')['remapped_by_name'] ?? null);
+            } else {
+                self::assertSame([$old, $old], [$vendor, $target], $this->explain($protocol));
+                self::assertContains('partner_mapping_name_mismatch', $this->messageCodes($protocol));
+            }
+        }
+    }
+
     /** @return array<string,string> číslo přijaté faktury z {@see SyntheticPohodaExport::withRenamedVendor()} => název jejího kontaktu */
     private function renamedVendors(int $supplierId): array
     {

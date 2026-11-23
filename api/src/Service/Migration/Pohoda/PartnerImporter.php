@@ -58,6 +58,7 @@ final class PartnerImporter
         $p = $ctx->protocol;
         $this->loadClientIndex($ctx);
         $existingByName = $this->clientsByIcoName($ctx->supplierId);
+        $this->clientIdentityCache = [];
         $ownIco = self::ico($ctx->export->ico);
 
         $cards = [];
@@ -88,8 +89,15 @@ final class PartnerImporter
             // název je samostatný kontakt, karty se stejným názvem sdílí jeden.
             $byName = $s['ico'] !== '' && count($names[$s['ico']]) > 1;
             $key = 'ab:' . $id;
-            $mapped = $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT, $key)
-                ?? $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key);
+            $kind = PohodaImportRepository::KIND_CLIENT;
+            $mapped = $this->map->get($ctx->supplierId, $kind, $key);
+            if ($mapped === null) {
+                $kind = PohodaImportRepository::KIND_CLIENT_MATCH;
+                $mapped = $this->map->get($ctx->supplierId, $kind, $key);
+            }
+            if ($mapped !== null && $byName) {
+                $mapped = $this->verifiedCardMapping($ctx, $id, $s, $nameKey, $kind, $mapped);
+            }
             if ($mapped !== null) {
                 $this->index($ctx, $id, $s['ico'], $nameKey, $mapped);
                 $p->count(self::STEP_PARTNERS, 'existing');
@@ -120,6 +128,56 @@ final class PartnerImporter
         }
         $this->completeForeignVatIdsFromDocuments($ctx);
         $p->finish(self::STEP_PARTNERS);
+    }
+
+    /**
+     * Karta adresáře, jejíž IČO vedou i karty s jiným názvem, z mapy dřívějšího převodu: ten
+     * všechny karty IČO spojil do kontaktu první karty. Nese-li kontakt jiný název než karta
+     * a firma má jediný kontakt se stejným IČO a názvem karty, mapa se přesměruje na něj.
+     * Jinak vazba zůstává a protokol ji ohlásí k ruční kontrole - převod ji naslepo nemění.
+     *
+     * @param array{ico:string,name:string} $s
+     */
+    private function verifiedCardMapping(PohodaContext $ctx, string $cardId, array $s, string $nameKey, string $kind, int $mapped): int
+    {
+        $clients = $this->clientIdentities($ctx->supplierId);
+        if (!isset($clients[$mapped]) || $clients[$mapped][1] === $nameKey) {
+            return $mapped;
+        }
+        $sameIcoAndName = array_keys(array_filter($clients, static fn (array $c): bool => $c[0] === $s['ico'] && $c[1] === $nameKey));
+        if (count($sameIcoAndName) === 1) {
+            $this->map->repoint($ctx->supplierId, $kind, 'ab:' . $cardId, $sameIcoAndName[0], $ctx->runId);
+            $ctx->protocol->count(self::STEP_PARTNERS, 'remapped_by_name');
+            $ctx->protocol->info(self::STEP_PARTNERS, 'partner_remapped_by_name', sprintf(
+                'Karta adresáře č. %s „%s" (IČO %s) byla dřívějším převodem spojená s kontaktem jiného názvu; nové doklady jdou ke kontaktu se stejným názvem.',
+                $cardId, $s['name'], $s['ico']), ['card' => $cardId, 'ico' => $s['ico'], 'from' => $mapped, 'to' => $sameIcoAndName[0]]);
+            return $sameIcoAndName[0];
+        }
+        $ctx->protocol->count(self::STEP_PARTNERS, 'partner_mapping_name_mismatch');
+        $ctx->protocol->warn(self::STEP_PARTNERS, 'partner_mapping_name_mismatch', sprintf(
+            'Karta adresáře č. %s „%s" (IČO %s) je z dřívějšího převodu spojená s kontaktem jiného názvu a kontakt s názvem karty %s. '
+                . 'Nové doklady karty jdou k původnímu kontaktu; přeřaďte je ručně.', $cardId, $s['name'], $s['ico'],
+                $sameIcoAndName === [] ? 've firmě není' : 'je ve firmě víckrát'),
+            ['card' => $cardId, 'ico' => $s['ico'], 'client_id' => $mapped]);
+        return $mapped;
+    }
+
+    /** @var array<int,array<int,array{string,string}>> firma => kontakt => [IČO, klíč názvu] */
+    private array $clientIdentityCache = [];
+
+    /** @return array<int,array{string,string}> nearchivované kontakty firmy => [IČO, klíč názvu] */
+    private function clientIdentities(int $supplierId): array
+    {
+        if (!isset($this->clientIdentityCache[$supplierId])) {
+            $stmt = $this->db->pdo()->prepare('SELECT id, ic, company_name FROM clients WHERE supplier_id = ? AND archived_at IS NULL');
+            $stmt->execute([$supplierId]);
+            $out = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $out[(int) $row['id']] = [self::ico((string) ($row['ic'] ?? '')), self::nameKey((string) $row['company_name'])];
+            }
+            $this->clientIdentityCache[$supplierId] = $out;
+        }
+        return $this->clientIdentityCache[$supplierId];
     }
 
     /** Kontakt karty adresáře do indexů převodu (první karta IČO zůstává výchozí pro IČO). */

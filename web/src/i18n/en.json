@@ -37329,6 +37329,8 @@
       "created_from_documents": "partners from documents",
       "split_by_name": "company IDs with several names in the address book (separate contacts)",
       "partner_name_ambiguous": "documents with an ambiguous partner name",
+      "remapped_by_name": "address book cards redirected to the contact by name",
+      "partner_mapping_name_mismatch": "address book cards linked to a contact with another name (to reassign manually)",
       "duplicate_code": "duplicate codes",
       "kept": "kept",
       "previous_period": "from the previous period",

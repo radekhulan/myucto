@@ -37329,6 +37329,8 @@
       "created_from_documents": "partnerů z dokladů",
       "split_by_name": "IČO s více názvy v adresáři (samostatné kontakty)",
       "partner_name_ambiguous": "dokladů s nejednoznačným názvem partnera",
+      "remapped_by_name": "karet adresáře přesměrovaných na kontakt podle názvu",
+      "partner_mapping_name_mismatch": "karet adresáře s vazbou na kontakt jiného názvu (k ručnímu přeřazení)",
       "duplicate_code": "duplicitních zkratek",
       "kept": "ponecháno",
       "previous_period": "z minulého období",
