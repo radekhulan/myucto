@@ -35,6 +35,16 @@ final class ImportContext
     public ?array $openingOnlyPeriod = null;
 
     /**
+     * Počáteční stavy roku jen s počátečními stavy (XP) z AKTUÁLNÍ zálohy: kód účtu => MD − D,
+     * bez účtů třídy 7. Uzávěrka posledního převáděného roku je porovná s otevíracím zápisem
+     * roku v MyÚčtu, který převod ponechal (převzatý dřív z Money nebo založený v MyÚčtu).
+     * Null = adresář roku počáteční stavy nemá.
+     *
+     * @var array<string,float>|null
+     */
+    public ?array $openingOnlyBalances = null;
+
+    /**
      * Adresáře zálohy z let před prvním převáděným rokem (volba „Převést od roku"): adresář
      * => účetní rok. Převod z nich bere jen doklady otevřené k začátku prvního převáděného
      * období ({@see OpeningDocuments}), jako doklady počátečního stavu.

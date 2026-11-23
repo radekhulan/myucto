@@ -9,8 +9,10 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -107,6 +109,52 @@ final class MoneyS3OpeningOnlyNextYearTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Otevírací zápis 2025 převzatý dřívějším převodem (nebo založený v MyÚčtu) sedí na konečné
+     * stavy 2024, aktuální záloha Money má ale počáteční stavy 2025 jiné (100 Kč přesunutých
+     * z pokladny na účet). Převod zápis nemění, rok 2024 nechá otevřený a rozdíly vyjmenuje
+     * po účtech.
+     */
+    #[DataProvider('retainedOpeningOrigins')]
+    public function testRetainedOpeningEntryIsComparedWithCurrentBackup(bool $ownEntry): void
+    {
+        $supplierId = $this->companyRunning2025();
+        $first = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, closeHistory: false, toYear: 2024, openingOnlyNext: true));
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $entryId = (int) $this->map->get($supplierId, 'journal_entry', '2025|XP');
+        self::assertGreaterThan(0, $entryId);
+        if ($ownEntry) {
+            $this->map->forget($supplierId, 'journal_entry', '2025|XP');
+        }
+        $lines = $this->entryLines($entryId);
+
+        SyntheticAgenda::writeLzFiles($this->tmp . '/reclass.lz', SyntheticAgenda::filesWithOpeningReclass());
+        $protocol = $this->importer->run($supplierId, $this->userId, Ms3Backup::extract($this->tmp . '/reclass.lz', $this->tmp . '/reclass'),
+            new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2024, openingOnlyNext: true));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('open', (string) $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024)['status'], $this->explain($protocol));
+        $closing = array_column((array) $protocol->get('closing'), 'status', 'year');
+        self::assertSame('opening_differs', $closing[2024] ?? null, $this->explain($protocol));
+        $messages = array_column($protocol->toArray()['steps'], null, 'key')['closing']['messages'];
+        $differs = array_values(array_filter($messages, static fn (array $m): bool => $m['code'] === 'opening_differs_from_money'));
+        self::assertCount(1, $differs, $this->explain($protocol));
+        $diffs = array_column($differs[0]['context']['diffs'], null, 'account_code');
+        self::assertEqualsCanonicalizing(['211.000', '221.001'], array_keys($diffs));
+        self::assertSame(-100.0, $diffs['211.000']['difference']);
+        self::assertSame(100.0, $diffs['221.001']['difference']);
+        self::assertStringContainsString('221.001: otevírací zápis v MyÚčtu 62 150,00, počáteční stav z Money 62 250,00', $differs[0]['text']);
+        // Otevírací zápis bez rozhodnutí uživatele beze změny.
+        self::assertSame([$entryId], array_map('intval', array_column($this->openingEntries($supplierId, 2025), 'id')));
+        self::assertSame($lines, $this->entryLines($entryId));
+    }
+
+    /** @return array<string,array{bool}> */
+    public static function retainedOpeningOrigins(): array
+    {
+        return ['převzatý dřív z Money' => [false], 'založený v MyÚčtu' => [true]];
+    }
+
+    /**
      * Převod od roku 2025 s počátečními stavy z dalšího roku: posledním převáděným rokem je
      * předposlední rok zálohy 2024, rozsah je prázdný. Převod se zastaví a rok 2025 určený
      * jen pro počáteční stavy nepřevezme celý.
@@ -173,6 +221,14 @@ final class MoneyS3OpeningOnlyNextYearTest extends MoneyS3ImportTestCase
               WHERE e.supplier_id = ? AND e.entry_date >= '2025-01-01' AND e.source_type <> 'opening' ORDER BY e.id, l.id"
         );
         $stmt->execute([$supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function entryLines(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT account_id, side, amount FROM journal_entry_lines WHERE entry_id = ? ORDER BY id');
+        $stmt->execute([$entryId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

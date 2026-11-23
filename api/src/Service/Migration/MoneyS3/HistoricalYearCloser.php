@@ -37,7 +37,9 @@ use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
  *
  * S rokem po posledním převáděném jen s počátečními stavy ({@see ImportOptions::$openingOnlyNext})
  * se stejně ověří a uzavře i poslední převáděný rok. Rozdíly počátečních stavů Money proti
- * konečným stavům roku v MyÚčtu protokol vyjmenuje. Nedovolí-li uzavření kurzové přecenění
+ * konečným stavům roku v MyÚčtu protokol vyjmenuje. Otevírací zápis dalšího roku, který převod
+ * ponechal (převzatý dřív, nebo založený v MyÚčtu), se navíc porovná s počátečními stavy
+ * z aktuální zálohy: při rozdílu zůstane rok otevřený a zápis se bez rozhodnutí uživatele nemění. Nedovolí-li uzavření kurzové přecenění
  * nebo zásoby, uzávěrka roku zůstane rozpracovaná: kroky, které proběhly v Money, jsou
  * přeskočené s poznámkou a průvodce je znovu nenabídne, zbytek dokončí uživatel.
  */
@@ -83,6 +85,14 @@ final class HistoricalYearCloser
                     $results[] = ['year' => $year, 'status' => 'already_closed'];
                     continue;
                 }
+                $moneyDiffs = $last ? $this->moneyOpeningDiffs($ctx, $periods[$next]['id']) : [];
+                if ($moneyDiffs !== []) {
+                    $results[] = ['year' => $year, 'status' => 'opening_differs', 'diffs' => $moneyDiffs];
+                    $p->warn(self::STEP, 'opening_differs_from_money', self::moneyDiffMessage($year, $next, $moneyDiffs),
+                        ['year' => $year, 'next' => $next, 'diffs' => array_slice($moneyDiffs, 0, 50)]);
+                    $blocked = true;
+                    continue;
+                }
                 // Knihy se uzavřely, ale otevření dalšího roku selhalo (nebo neproběhlo) —
                 // bez dotažení by se další rok nikdy neotevřel.
                 $row = $this->finishOpenNext($ctx, $year, $periodId, $periods[$next]['id'], (int) $state['row_version']);
@@ -99,10 +109,23 @@ final class HistoricalYearCloser
                 $blocked = true;
                 continue;
             }
+            // Otevírací zápis roku jen s počátečními stavy převod ponechal (převzatý dřív, nebo
+            // založený v MyÚčtu): musí sedět na počáteční stavy z aktuální zálohy, jinak by se
+            // rok uzavřel proti zastaralým stavům.
+            $moneyDiffs = $last ? $this->moneyOpeningDiffs($ctx, $periods[$next]['id']) : [];
+            if ($moneyDiffs !== []) {
+                $p->warn(self::STEP, 'opening_differs_from_money', self::moneyDiffMessage($year, $next, $moneyDiffs),
+                    ['year' => $year, 'next' => $next, 'diffs' => array_slice($moneyDiffs, 0, 50)]);
+            }
             if ($status !== 'match') {
                 $results[] = $row + ['status' => 'mismatch', 'message' => $takeover['message'] ?? null];
                 $p->warn(self::STEP, 'closing_mismatch', "Konečné stavy roku {$year} nesedí na počáteční stavy roku {$next} z Money — rok zůstává otevřený."
                     . ($last ? self::diffText($row['diffs']) : ''), ['year' => $year] + ($last ? ['next' => $next, 'diffs' => array_slice($row['diffs'], 0, 50)] : []));
+                $blocked = true;
+                continue;
+            }
+            if ($moneyDiffs !== []) {
+                $results[] = ['year' => $year, 'status' => 'opening_differs', 'diffs' => $moneyDiffs] + $row;
                 $blocked = true;
                 continue;
             }
@@ -331,6 +354,50 @@ final class HistoricalYearCloser
             $periods[(int) $ctx->openingOnly['year']] = $ctx->openingOnlyPeriod;
         }
         return $periods;
+    }
+
+    /**
+     * Počáteční stavy z aktuální zálohy ({@see ImportContext::$openingOnlyBalances}) proti
+     * otevíracímu zápisu dalšího roku v MyÚčtu po účtech, bez účtů třídy 7.
+     *
+     * @return list<array{account_code:string,existing:float,money:float,difference:float}>
+     */
+    private function moneyOpeningDiffs(ImportContext $ctx, int $nextPeriodId): array
+    {
+        if ($ctx->openingOnlyBalances === null) {
+            return [];
+        }
+        $existing = [];
+        foreach ($this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId) as $code => $balance) {
+            if (!str_starts_with((string) $code, '7')) {
+                $existing[(string) $code] = $balance;
+            }
+        }
+        $money = [];
+        foreach ($ctx->openingOnlyBalances as $code => $balance) {
+            $money[(string) $code] = $balance;
+        }
+        $out = [];
+        foreach (array_unique(array_merge(array_keys($existing), array_keys($money))) as $code) {
+            $code = (string) $code;
+            $diff = round(($money[$code] ?? 0.0) - ($existing[$code] ?? 0.0), 2);
+            if ((int) round($diff * 100) !== 0) {
+                $out[] = ['account_code' => $code, 'existing' => round($existing[$code] ?? 0.0, 2), 'money' => round($money[$code] ?? 0.0, 2), 'difference' => $diff];
+            }
+        }
+        usort($out, static fn (array $a, array $b): int => $a['account_code'] <=> $b['account_code']);
+        return $out;
+    }
+
+    /** @param list<array{account_code:string,existing:float,money:float,difference:float}> $diffs */
+    private static function moneyDiffMessage(int $year, int $next, array $diffs): string
+    {
+        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ');
+        $rows = array_map(static fn (array $d): string => sprintf('%s: otevírací zápis v MyÚčtu %s, počáteční stav z Money %s, rozdíl %s',
+            $d['account_code'], $fmt($d['existing']), $fmt($d['money']), $fmt($d['difference'])), array_slice($diffs, 0, 10));
+        return "Otevírací zápis roku {$next} v MyÚčtu nesedí na počáteční stavy z aktuální zálohy Money. Převod ho bez vašeho rozhodnutí nemění, "
+            . "rok {$year} proto zůstává otevřený. Rozdíly (" . count($diffs) . ' účtů): ' . implode('; ', $rows) . (count($diffs) > 10 ? '; …' : '')
+            . ". Otevírací zápis opravte podle Money (nebo zálohu Money podle MyÚčta) a převod spusťte znovu.";
     }
 
     /**

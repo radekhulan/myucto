@@ -199,6 +199,7 @@ final class JournalImporter
         $period = (new MigrationPeriods($this->periods))
             ->ensure($ctx->supplierId, $year, $item['starts_on'], $item['ends_on'], $p, self::STEP, static fn (int $id): null => null, null, true);
         $ctx->openingOnlyPeriod = $period;
+        $ctx->openingOnlyBalances = $item['has_opening'] ? self::openingBalances($ctx->backup, (string) $item['dir']) : null;
         $stats = ['year' => $year, 'opening_only' => true, 'entries' => 0, 'existing' => 0];
         if ($period['locked']) {
             $p->warn(self::STEP, 'opening_only_year_locked', "Rok {$year} je v MyÚčtu uzavřený, počáteční stavy z Money se do něj nepřevezmou.", ['year' => $year]);
@@ -221,6 +222,32 @@ final class JournalImporter
             }
         }
         return $stats + $this->importYear($ctx, $item, $period, false, true);
+    }
+
+    /**
+     * Počáteční stavy (XP) adresáře zálohy po účtech MyÚčta: kód účtu => MD − D, bez účtů
+     * třídy 7 (protiúčet počátečních stavů). Stejné účty a strany jako otevírací zápis, který
+     * z nich převod zakládá ({@see groupLines()}).
+     *
+     * @return array<string,float>
+     */
+    private static function openingBalances(Ms3Backup $backup, string $dir): array
+    {
+        $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $dir);
+        $out = [];
+        foreach ($table !== null ? $table->rows(['Zdroj', 'Castka', 'UcMD', 'UcD']) : [] as $r) {
+            $effect = Ms3Journal::isOpening($r) ? Ms3Journal::effect($r) : null;
+            if ($effect === null) {
+                continue;
+            }
+            foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
+                $code = AccountCode::fromMoney((string) $code) ?? (string) $code;
+                if (!str_starts_with($code, '7')) {
+                    $out[$code] = ($out[$code] ?? 0.0) + $sign * $effect['amount'];
+                }
+            }
+        }
+        return array_map(static fn (float $v): float => round($v, 2), $out);
     }
 
     /**
