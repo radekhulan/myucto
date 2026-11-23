@@ -247,8 +247,9 @@ final class MoneyS3RefreshSafetyTest extends MoneyS3ImportTestCase
 
         $protocol = $this->import($supplierId);
 
-        $bank = array_column($protocol->toArray()['steps'], null, 'key')['bank'] ?? [];
-        self::assertContains('bank_foreign_movements_used', array_column($bank['messages'] ?? [], 'code'), $this->explain($protocol));
+        // Kontrola před převodem: převod se zastaví dřív, než cokoli zapíše.
+        self::assertTrue($protocol->failed());
+        self::assertContains('bank_foreign_movements_used', array_column($protocol->get('preflight'), 'code'), $this->explain($protocol));
         self::assertSame(1, $this->movements($supplierId, '2024-03-20', '24200.00'));
     }
 
@@ -286,8 +287,9 @@ final class MoneyS3RefreshSafetyTest extends MoneyS3ImportTestCase
 
         $protocol = $this->import($supplierId);
 
-        $bank = array_column($protocol->toArray()['steps'], null, 'key')['bank'] ?? [];
-        self::assertContains('bank_account_ambiguous', array_column($bank['messages'] ?? [], 'code'), $this->explain($protocol));
+        // Kontrola před převodem: převod se zastaví dřív, než cokoli zapíše.
+        self::assertTrue($protocol->failed());
+        self::assertContains('bank_account_ambiguous', array_column($protocol->get('preflight'), 'code'), $this->explain($protocol));
         self::assertSame(2, $this->movements($supplierId, '2024-03-20', '24200.00'));
     }
 

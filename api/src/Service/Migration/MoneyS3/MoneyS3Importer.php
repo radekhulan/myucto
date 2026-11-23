@@ -374,6 +374,9 @@ final class MoneyS3Importer
     private function checks(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview, array $explicit, ?array $openingOnly = null): array
     {
         $calendar = $this->periods->fiscalCalendar($supplierId);
+        // Adresáře s deníkem z náhledu nahrání (celá záloha), ať kontrola adresářů bez deníku deníky znovu nečte.
+        $journalDirs = self::journalPreviewComplete($journalPreview) && $journalPreview['start_month'] === $calendar->startMonth()
+            ? array_column($journalPreview['plan'], 'dir') : [];
         if ($options->fromYear !== null || $options->firstPeriodStart !== null || !self::journalPreviewComplete($journalPreview)
             || $journalPreview['start_month'] !== $calendar->startMonth()) {
             $journalPreview = null;
@@ -505,7 +508,7 @@ final class MoneyS3Importer
             array_push($out, ...$this->openingOnlyChecks($supplierId, $openingOnly, $lockedUntil));
         }
         if (!$taxRecords) {
-            foreach (self::directoriesWithoutJournal($backup) as $dir => $counts) {
+            foreach (self::directoriesWithoutJournal($backup, $journalDirs) as $dir => $counts) {
                 $add('warning', 'dir_without_journal', sprintf(
                     'Adresář %s zálohy nemá účetní deník, ale obsahuje doklady (%s). Převod bere jen roky s deníkem, tyto doklady se nepřevedou. Bývá to čerstvě založený rok v Money.',
                     $dir, implode(', ', array_map(static fn (string $t, int $n): string => "{$t} {$n}", array_keys($counts), $counts)),
@@ -539,13 +542,18 @@ final class MoneyS3Importer
      * Adresáře zálohy bez účetního deníku, které přesto nesou doklady, banku nebo pokladnu:
      * rozvrh převodu stojí na deníku, takový adresář by převod vynechal bez zmínky.
      *
+     * @param list<string> $journalDirs adresáře, o kterých je známo, že deník mají (náhled nahrání)
      * @return array<string,array<string,int>> adresář => tabulka => počet řádků
      */
-    private static function directoriesWithoutJournal(Ms3Backup $backup): array
+    private static function directoriesWithoutJournal(Ms3Backup $backup, array $journalDirs = []): array
     {
         $labels = ['VFaktury' => 'vydané faktury', 'PFaktury' => 'přijaté faktury', 'BankKnih' => 'banka', 'PoklKnih' => 'pokladna'];
+        $known = array_fill_keys(array_map('strtoupper', $journalDirs), true);
         $out = [];
         foreach ($backup->yearDirs() as $dir) {
+            if (isset($known[strtoupper(basename($dir))])) {
+                continue;
+            }
             $journal = $backup->table('UcDenik', $dir);
             if ($journal !== null && $journal->hasData()) {
                 continue;
