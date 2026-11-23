@@ -350,7 +350,7 @@ final class BulkActionAction
         } elseif ($target === 'bank_transaction') {
             $result = $this->bankMovements->listIds($supplierId, $query, ($query['scope'] ?? '') === 'unposted' ? 'unposted' : 'all', $limit);
         } else {
-            $filters = $target === 'invoice' ? InvoiceListFilters::issued($scoped) : InvoiceListFilters::purchase($scoped);
+            $filters = $target === 'invoice' ? InvoiceListFilters::issued($scoped, $this->dimensions) : InvoiceListFilters::purchase($scoped, $this->dimensions);
             if (is_string($filters)) {
                 throw new BulkActionException('validation_failed', $filters, 422);
             }

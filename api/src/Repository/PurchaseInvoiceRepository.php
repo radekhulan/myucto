@@ -29,6 +29,8 @@ use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use MyInvoice\Support\Sql\PurchaseCostSql;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
+
 
 /**
  * CRUD pro přijaté faktury (purchase invoices) — paralel k InvoiceRepository,
@@ -945,6 +947,12 @@ final class PurchaseInvoiceRepository
             $where[] = (string) $filters['has_structured_source'] === '1' ? $structured : "NOT {$structured}";
         }
 
+        // Hodnota dimenze na hlavičce, položce nebo v rozpadu (DimensionFilter::documentSql).
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$dimensionSql, $dimensionParams] = $filters['dimension']->documentSql('pi', 'purchase_invoice', $supplierId);
+            $where[] = $dimensionSql;
+            array_push($params, ...$dimensionParams);
+        }
         if (!empty($filters['status'])) {
             $statuses = is_array($filters['status']) ? $filters['status'] : [$filters['status']];
             $place = implode(',', array_fill(0, count($statuses), '?'));

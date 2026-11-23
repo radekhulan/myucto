@@ -22,6 +22,8 @@ use MyInvoice\Support\PaymentMethods;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
+
 
 /**
  * CRUD pro faktury + položky + listing s grupováním po měsících (DUZP).
@@ -1066,6 +1068,12 @@ final class InvoiceRepository
                 $where[] = 'i.revenue_category_id IS NOT NULL';
             }
             // Prázdné ids bez `none` = vyloučené kategorie tenantovi nepatří → nevylučuje se nic.
+        }
+        // Hodnota dimenze na hlavičce, položce nebo v rozpadu (DimensionFilter::documentSql).
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$dimensionSql, $dimensionParams] = $filters['dimension']->documentSql('i', 'invoice', $supplierId);
+            $where[] = $dimensionSql;
+            array_push($params, ...$dimensionParams);
         }
         if (!empty($filters['year'])) {
             // Sargovatelný půlotevřený rozsah místo YEAR(...) — využije idx_inv_supplier_efftax.

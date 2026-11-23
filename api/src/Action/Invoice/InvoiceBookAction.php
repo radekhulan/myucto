@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\Invoice\Book\InvoiceBook;
 use MyInvoice\Service\Invoice\Book\InvoiceBookService;
@@ -32,6 +33,7 @@ final class InvoiceBookAction
         private readonly InvoiceBookService $service,
         private readonly InvoiceBookPdfRenderer $pdf,
         private readonly InvoiceBookXlsxExporter $xlsx,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function issued(Request $request, Response $response): Response
@@ -43,7 +45,7 @@ final class InvoiceBookAction
         if ($format === null) {
             return Json::error($response, 'validation_failed', 'Neplatný formát (pdf, xlsx).', 422);
         }
-        $filters = InvoiceListFilters::issued($request);
+        $filters = InvoiceListFilters::issued($request, $this->dimensions);
         if (is_string($filters)) {
             return Json::error($response, 'validation_failed', $filters, 422);
         }
@@ -61,7 +63,7 @@ final class InvoiceBookAction
         if ($format === null) {
             return Json::error($response, 'validation_failed', 'Neplatný formát (pdf, xlsx).', 422);
         }
-        $filters = InvoiceListFilters::purchase($request);
+        $filters = InvoiceListFilters::purchase($request, $this->dimensions);
         if (is_string($filters)) {
             return Json::error($response, 'validation_failed', $filters, 422);
         }

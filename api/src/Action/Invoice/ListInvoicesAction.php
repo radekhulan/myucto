@@ -15,6 +15,7 @@ use MyInvoice\Repository\InvoiceListExtrasRepository;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,6 +30,7 @@ final class ListInvoicesAction
         private readonly InvoiceListDetailsRepository $listDetails,
         private readonly InvoiceListExtrasRepository $listExtras,
         private readonly DimensionListSummaryRepository $dimensionSummaries,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -51,7 +53,7 @@ final class ListInvoicesAction
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
-        $filters = InvoiceListFilters::issued($request);
+        $filters = InvoiceListFilters::issued($request, $this->dimensions);
         if (is_string($filters)) {
             return Json::error($response, 'validation_failed', $filters, 422);
         }

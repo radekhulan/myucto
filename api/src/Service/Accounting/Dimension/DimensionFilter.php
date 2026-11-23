@@ -246,6 +246,41 @@ final class DimensionFilter
     }
 
     /**
+     * Samostatná podmínka (bez vedoucího AND) nad aliasem DOKLADU pro seznamy vydaných
+     * a přijatých faktur: doklad projde, nese-li hodnotu (nebo podřízenou) na hlavičce,
+     * na některé položce, nebo v rozpadu hlavičky či položky (`document_dimensions`,
+     * `document_dimension_splits`). Doklad rozdělený mezi víc hodnot tak vyhoví každé
+     * z nich celý; podíl hodnoty na částkách ukazují až výkazy po řádcích (evidence DPH
+     * filtrovaná podle dimenze, {@see \MyInvoice\Service\Report\VatLedgerDimensionAllocation}).
+     *
+     * U filtru s více podmínkami musí doklad splnit každou (ne nutně na téže položce).
+     * Textový kód střediska na dokladu není, `costCenterCodes` se tu neuplatní.
+     *
+     * Nekorelované IN poddotazy jdou po indexu (firma, druh dokladu, typ, hodnota, doklad)
+     * z migrace 2335 a materializují se jednou; vnější dotaz pak jen hledá id dokladu.
+     *
+     * @param 'invoice'|'purchase_invoice'|'cash_document' $docType
+     * @return array{0:string,1:list<int|string>}
+     */
+    public function documentSql(string $docAlias, string $docType, int $supplierId): array
+    {
+        $where = [];
+        $params = [];
+        foreach ($this->criteria() as $i => $criterion) {
+            $marks = implode(',', array_fill(0, count($criterion->valueIds), '?'));
+            $where[] = "({$docAlias}.id IN (SELECT dd_f{$i}.doc_id FROM document_dimensions dd_f{$i}
+                              WHERE dd_f{$i}.supplier_id = ? AND dd_f{$i}.doc_type = ? AND dd_f{$i}.dimension_type_id = ?
+                                AND dd_f{$i}.dimension_value_id IN ({$marks}))
+                      OR {$docAlias}.id IN (SELECT dds_f{$i}.doc_id FROM document_dimension_splits dds_f{$i}
+                              WHERE dds_f{$i}.supplier_id = ? AND dds_f{$i}.doc_type = ? AND dds_f{$i}.dimension_type_id = ?
+                                AND dds_f{$i}.dimension_value_id IN ({$marks})))";
+            $one = [$supplierId, $docType, $criterion->typeId, ...$criterion->valueIds];
+            array_push($params, ...$one, ...$one);
+        }
+        return ['(' . implode(' AND ', $where) . ')', $params];
+    }
+
+    /**
      * Podmínka nad aliasem ŘÁDKU deníku: řádek nese hodnotu z větve jako jedinou
      * hodnotu nebo v rozpadu, případně (u Střediska) textový kód navázaného střediska.
      *

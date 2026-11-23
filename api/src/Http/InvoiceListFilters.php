@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Http;
 
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilterQuery;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
@@ -14,14 +18,23 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Vrací pole filtrů pro `InvoiceRepository::listWhere()` / `PurchaseInvoiceRepository::listWhere()`,
  * nebo text validační chyby (422).
+ *
+ * Filtr na hodnotu dimenze (`filter[dimension_value_id]`, `filter[dimension_descendants]`)
+ * se skládá přes {@see DimensionFilterQuery} stejně jako v účetním deníku a sestavách;
+ * v `dimension` je pak {@see DimensionFilter}.
+ * Volající, který dimenze nepředá, filtr dostane jako chybu, ne tiché „nefiltrovat".
  */
 final class InvoiceListFilters
 {
     /** @return array<string,mixed>|string */
-    public static function issued(Request $request): array|string
+    public static function issued(Request $request, ?DimensionService $dimensions = null): array|string
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        $dimension = self::dimension($request, $filter, $dimensions);
+        if (is_string($dimension)) {
+            return $dimension;
+        }
 
         // Neuhrazené K DATU X (task #4) — na rozdíl od `unpaid_only` (dnešní status) jde
         // o historický dotaz: doklad vystavený do X, u kterého k X nebyl uhrazen celý
@@ -63,16 +76,21 @@ final class InvoiceListFilters
             'oss_review'  => is_scalar($filter['oss_review'] ?? null) && !empty($filter['oss_review'])
                 ? (string) $filter['oss_review']
                 : null,
+            'dimension'   => $dimension,
         ] + self::common($request, $q, $filter);
 
         return self::splitLists($filters, ['status', 'type']);
     }
 
     /** @return array<string,mixed>|string */
-    public static function purchase(Request $request): array|string
+    public static function purchase(Request $request, ?DimensionService $dimensions = null): array|string
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        $dimension = self::dimension($request, $filter, $dimensions);
+        if (is_string($dimension)) {
+            return $dimension;
+        }
         foreach (['has_visual_document', 'has_structured_source'] as $key) {
             if (array_key_exists($key, $filter) && !in_array($filter[$key], ['0', '1'], true)) {
                 return "filter[{$key}] musí být 0 nebo 1.";
@@ -109,6 +127,7 @@ final class InvoiceListFilters
             'has_visual_document' => $filter['has_visual_document'] ?? null,
             'has_structured_source' => $filter['has_structured_source'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
+            'dimension'     => $dimension,
         ] + self::common($request, $q, $filter);
 
         return self::splitLists($filters, ['status', 'document_kind']);
@@ -127,6 +146,31 @@ final class InvoiceListFilters
             'sort_key'       => is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '',
             'sort_dir'       => is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '',
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $filter
+     * @return DimensionFilter|string|null text = validační chyba
+     */
+    private static function dimension(Request $request, array $filter, ?DimensionService $dimensions): DimensionFilter|string|null
+    {
+        $raw = $filter['dimension_value_id'] ?? null;
+        if ($raw === null || $raw === '' || $raw === '0') {
+            return null;
+        }
+        if ($dimensions === null) {
+            return 'Filtr podle dimenze tu není k dispozici.';
+        }
+        try {
+            return DimensionFilterQuery::parse(
+                $dimensions,
+                (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
+                $raw,
+                $filter['dimension_descendants'] ?? null,
+            );
+        } catch (DimensionException $e) {
+            return $e->getMessage();
+        }
     }
 
     /** @param array<string,mixed> $filter */

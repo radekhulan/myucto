@@ -1238,6 +1238,7 @@
         "2332_accrual_agenda_permissions.sql",
         "2333_purchase_renumber_date_basis.sql",
         "2334_money_s3_import_fingerprint.sql",
+        "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql"
     ],
     "tables": {
@@ -5400,6 +5401,7 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)",
+                "idx_docdims_doc_filter": "BTREE (supplier_id, doc_type, dimension_type_id, dimension_value_id, doc_id)",
                 "idx_docdims_type_value": "BTREE (dimension_type_id, dimension_value_id)",
                 "idx_docdims_value": "BTREE (supplier_id, dimension_value_id)"
             },
@@ -5427,6 +5429,7 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (supplier_id, doc_type, doc_id, item_no, dimension_type_id)",
+                "idx_docdim_doc_filter": "BTREE (supplier_id, doc_type, dimension_type_id, dimension_value_id, doc_id)",
                 "idx_docdim_type_value": "BTREE (dimension_type_id, dimension_value_id)",
                 "idx_docdim_value": "BTREE (supplier_id, dimension_value_id)"
             },
