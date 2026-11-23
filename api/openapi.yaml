@@ -14472,6 +14472,84 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
 
+  /api/v1/invoices/{id}/tax-document-advance-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+        description: ID daňového dokladu k přijaté platbě nebo zálohové faktury.
+    get:
+      tags: [InvoiceOps]
+      summary: Nabídne protějšky k navázání daňového dokladu k přijaté platbě na zálohu
+      description: Vyžaduje čtení vydaných faktur. Vrací až 50 vhodných dokladů stejné firmy, odběratele a měny, od nejnovějších.
+      responses:
+        '200':
+          description: Kandidáti k navázání
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidates]
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxDocumentAdvanceCandidate' }
+        '403': { description: Chybí oprávnění ke čtení vydaných faktur. }
+        '404': { description: Doklad v aktuální firmě nenalezen. }
+
+  /api/v1/invoices/{id}/tax-document-advance:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+        description: ID vydaného daňového dokladu k přijaté platbě.
+    post:
+      tags: [InvoiceOps]
+      summary: Naváže vydaný daňový doklad k přijaté platbě na zálohovou fakturu
+      description: |
+        Vyžaduje zápis vydaných faktur. Uloží vztah k záloze a případně k jednoznačné platbě se shodnou částkou.
+        Vazbu lze uložit i v podaném nebo uzavřeném období. Částky, DPH a účetní zápisy zůstávají stejné.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [advance_id]
+              properties:
+                advance_id: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Vazba uložena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxDocumentAdvanceLink' }
+        '400': { description: Chybí platné ID zálohové faktury. }
+        '403': { description: Chybí oprávnění k zápisu vydaných faktur nebo scope read_write. }
+        '404': { description: Doklad v aktuální firmě nenalezen. }
+        '409': { description: Doklady nesplňují podmínky pro navázání. }
+    delete:
+      tags: [InvoiceOps]
+      summary: Zruší vazbu daňového dokladu k přijaté platbě na zálohu a její platbu
+      description: Vyžaduje zápis vydaných faktur. Vazbu lze zrušit, pokud zálohu ještě nečerpá konečná faktura.
+      responses:
+        '200':
+          description: Vazba zrušena
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [advance_id]
+                properties:
+                  advance_id: { type: integer, format: int64 }
+        '403': { description: Chybí oprávnění k zápisu vydaných faktur nebo scope read_write. }
+        '404': { description: Doklad v aktuální firmě nenalezen. }
+        '409': { description: Vazba neexistuje nebo zálohu už čerpá konečná faktura. }
+
   /api/v1/invoices/{id}/other-item-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -54637,6 +54715,25 @@ components:
         total_amount: { type: number, format: float, default: 0 }
         note: { type: [string, "null"], maxLength: 255 }
 
+    TaxDocumentAdvanceCandidate:
+      type: object
+      required: [id, varsymbol, invoice_type, status, issue_date, total_with_vat, currency]
+      properties:
+        id: { type: integer, format: int64 }
+        varsymbol: { type: [string, "null"] }
+        invoice_type: { type: string, enum: [proforma, tax_document] }
+        status: { type: string, enum: [draft, issued, sent, reminded, paid] }
+        issue_date: { type: string, format: date }
+        total_with_vat: { type: number }
+        currency: { type: string }
+    TaxDocumentAdvanceLink:
+      type: object
+      required: [advance_id, payment_id, filed_vat_period, accounting_period_locked]
+      properties:
+        advance_id: { type: integer, format: int64 }
+        payment_id: { type: [integer, "null"], format: int64 }
+        filed_vat_period: { type: [string, "null"], description: Popis podaného výkazu za období DDKP. }
+        accounting_period_locked: { type: boolean }
     Invoice:
       type: object
       properties:
@@ -54802,6 +54899,19 @@ components:
         parent_invoice:
           type: [object, "null"]
           description: "Jen pokud je parent_invoice_id ({ id, varsymbol, status, invoice_type })"
+        advance_tax_documents:
+          type: array
+          description: Nestornované daňové doklady k platbám zálohy. Jen v detailu zálohové faktury.
+          items:
+            type: object
+            required: [id, varsymbol, status]
+            properties:
+              id: { type: integer, format: int64 }
+              varsymbol: { type: [string, "null"] }
+              status: { type: string, enum: [draft, issued, sent, reminded, paid] }
+        can_unlink_tax_document_advance:
+          type: boolean
+          description: Záloha je navázaná a ještě ji nečerpá konečná faktura. Jen v detailu DDKP. Zápisové oprávnění se ověřuje zvlášť.
         advance_drawdown:
           type: [object, "null"]
           description: "Konečná faktura: plnění a čerpání záloh odpočtovými řádky § 37a (i víc záloh). Částky v měně dokladu. NULL u jiných typů dokladu."

@@ -248,6 +248,7 @@ use MyInvoice\Action\Invoice\AdvanceCandidatesAction as InvoiceAdvanceCandidates
 use MyInvoice\Action\Invoice\FinalCandidatesAction;
 use MyInvoice\Action\Invoice\LinkAdvanceAction as LinkInvoiceAdvanceAction;
 use MyInvoice\Action\Invoice\UnlinkAdvanceAction as UnlinkInvoiceAdvanceAction;
+use MyInvoice\Action\Invoice\TaxDocumentAdvanceLinkAction;
 use MyInvoice\Action\Invoice\PdfAction;
 use MyInvoice\Action\Invoice\PublicInvoiceAttachmentAction;
 use MyInvoice\Action\Invoice\PublicInvoiceGetAction;
@@ -788,6 +789,9 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/final-candidates',   FinalCandidatesAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/link-advance',       LinkInvoiceAdvanceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}/link-advance',       UnlinkInvoiceAdvanceAction::class);
+        $app->get    ('/api/invoices/{id:[0-9]+}/tax-document-advance-candidates', [TaxDocumentAdvanceLinkAction::class, 'candidates']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/tax-document-advance', [TaxDocumentAdvanceLinkAction::class, 'link']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/tax-document-advance', [TaxDocumentAdvanceLinkAction::class, 'unlink']);
         // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
         $app->get    ('/api/invoices/{id:[0-9]+}/other-item-candidates', [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'candidates']);
         $app->post   ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'link']);

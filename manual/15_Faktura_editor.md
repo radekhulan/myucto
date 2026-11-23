@@ -226,10 +226,16 @@ odkaz na její DDKP.
 
 **B. Záloha a DDKP převzaté z POHODY nebo z jiného programu.**
 
-1. Ověřte, že DDKP je navázaný na zálohu: v detailu DDKP je odkaz na zálohovou fakturu.
-2. Konečnou fakturu pak vystavte postupem A. DDKP bez vazby na zálohu v aplikaci navázat nejde.
-   Konečnou fakturu k takové záloze nevystavujte, dokud vazbu nedoplní správce (převod znovu
-   nebo podpora MyÚčta).
+**Navázání převzatého daňového dokladu na zálohu**
+
+1. Otevřete vystavený DDKP. Pokud chybí odkaz na zálohovou fakturu, klikněte na **Navázat na
+   zálohu** a vyberte příslušnou zálohu. Z detailu zálohy můžete stejnou vazbu založit tlačítkem
+   **Navázat daňový doklad**.
+2. Vyberte doklad téhož odběratele ve stejné měně. Součet navázaných dokladů se musí vejít do
+   částky zálohy s tolerancí na zaokrouhlení do 1 Kč, v cizí měně do 0,01. Pokud má záloha
+   jedinou volnou platbu se shodnou částkou, MyÚčto naváže doklad i na ni.
+3. V detailu zálohy zkontrolujte seznam navázaných DDKP. Konečnou fakturu vystavte podle
+   postupu A. Tlačítko **Zrušit vazbu** v detailu DDKP můžete použít, dokud zálohu nečerpá konečná faktura.
 
 **C. Konečnou fakturu vystavujete jinde a do MyÚčta ji jen nahráváte (PDF, ISDOC).**
 
@@ -260,7 +266,7 @@ odkaz na její DDKP.
 Konečná faktura spárovaná se zálohou jen v hlavičce, nebo bez vazby s plnou DPH, se opravuje
 v období, které ještě není podané:
 
-1. Ověřte, že DDKP je navázaný na zálohu (postup B). Bez vazby ho nejdřív nechte navázat.
+1. Ověřte, že DDKP je navázaný na zálohu. Chybějící vazbu doplňte podle postupu B.
 2. Chybnou konečnou fakturu smažte (správce firmy, **Smazat** v detailu faktury). Smazáním se
    zruší i její zápis v deníku.
 3. Konečnou fakturu založte znovu: z detailu zálohy (**Vystavit fakturu k záloze**), nebo

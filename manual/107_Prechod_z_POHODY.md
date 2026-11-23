@@ -215,8 +215,8 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
 9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
    zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
    podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
-   Daňový doklad bez vazby na zálohu (jiná částka než záloha, text bez čísla zálohy) protokol
-   nehlásí a odečíst ho na konečné faktuře nejde, vazbu doplní podpora MyÚčta.
+   Daňový doklad bez vazby na zálohu protokol nehlásí. Pokud odkaz chybí, otevřete doklad,
+   klikněte na **Navázat na zálohu** a vyberte zálohu ještě před vystavením konečné faktury.
 10. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
    do agendy [Časové rozlišení](125_Casove_rozliseni.md#1258-krok-za-krokem-prevzit-casove-rozliseni-z-pohody).
    Převzetí nic neúčtuje a lze ho opakovat.

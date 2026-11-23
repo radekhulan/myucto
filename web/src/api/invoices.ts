@@ -177,6 +177,13 @@ export interface AdvanceCandidate {
   currency: string
 }
 
+export interface TaxDocumentAdvanceLink {
+  advance_id: number
+  payment_id: number | null
+  filed_vat_period: string | null
+  accounting_period_locked: boolean
+}
+
 /** Vybraný kus (sériové číslo) nebo šarže na řádku faktury; množství v základní jednotce karty. */
 export interface InvoiceItemTrackingAllocation {
   quantity: string
@@ -432,6 +439,8 @@ export interface Invoice {
   // u dokladu s parent_invoice_id → rodič (proforma / původní faktura).
   final_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus } | null
   parent_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus; invoice_type: InvoiceType } | null
+  advance_tax_documents?: { id: number; varsymbol: string | null; status: InvoiceStatus }[]
+  can_unlink_tax_document_advance?: boolean
   /** Konečná faktura: plnění a čerpání záloh odpočtovými řádky (i víc záloh). */
   advance_drawdown?: InvoiceAdvanceDrawdownSummary | null
   // U daňového dokladu bez vazby: existují u odběratele nespárované zálohy k propojení?
@@ -1111,6 +1120,12 @@ export const invoicesApi = {
     api.post<Invoice>(`/invoices/${id}/link-advance`, { advance_id: advanceId }).then(r => r.data),
   unlinkAdvance: (id: number) =>
     api.delete<Invoice>(`/invoices/${id}/link-advance`).then(r => r.data),
+  taxDocumentAdvanceCandidates: (id: number) =>
+    api.get<{ candidates: AdvanceCandidate[] }>(`/invoices/${id}/tax-document-advance-candidates`).then(r => r.data.candidates),
+  linkTaxDocumentAdvance: (id: number, advanceId: number) =>
+    api.post<TaxDocumentAdvanceLink>(`/invoices/${id}/tax-document-advance`, { advance_id: advanceId }).then(r => r.data),
+  unlinkTaxDocumentAdvance: (id: number) =>
+    api.delete<{ advance_id: number }>(`/invoices/${id}/tax-document-advance`).then(r => r.data),
   // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
   otherItemCandidates: (id: number, q = '') =>
     api.get<{ items: InvoiceOtherItemCandidate[] }>(`/invoices/${id}/other-item-candidates`, { params: q ? { q } : {} })

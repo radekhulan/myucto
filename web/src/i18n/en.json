@@ -26474,6 +26474,21 @@
       "no_candidates": "No unlinked advance invoices for this customer.",
       "no_candidates_final": "No unlinked tax documents for this customer."
     },
+    "tax_document_advance": {
+      "none": "The tax document is not linked to an advance invoice.",
+      "no_tax_documents": "No tax documents for payments received are linked to this advance invoice.",
+      "link_advance": "Link to an advance",
+      "link_tax_document": "Link a tax document",
+      "select_advance": "Select an advance invoice to link",
+      "select_tax_document": "Select a tax document for a payment received",
+      "no_candidates": "There are no eligible documents to link.",
+      "unlink": "Remove link",
+      "unlink_confirm": "Remove the link to the advance invoice and its payment, if linked?",
+      "linked": "The tax document was linked to the advance invoice.",
+      "unlinked": "The link between the tax document and the advance invoice was removed.",
+      "filed_period": "The tax document is in a period that has already been filed ({period}).",
+      "locked_period": "The tax document is in a locked accounting period."
+    },
     "imported_pdf": {
       "title": "Original PDF",
       "show": "Show PDF",

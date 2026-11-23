@@ -115,6 +115,17 @@ const listNav = useListNavigation({
 })
 
 const invoice = ref<Invoice | null>(null)
+const fetchedTaxDocumentLinks = ref<Pick<Invoice, 'id' | 'parent_invoice_id' | 'advance_tax_documents' | 'can_unlink_tax_document_advance'> | null>(null)
+watch(invoice, inv => {
+  if (inv?.advance_tax_documents !== undefined || inv?.can_unlink_tax_document_advance !== undefined) {
+    fetchedTaxDocumentLinks.value = {
+      id: inv.id, parent_invoice_id: inv.parent_invoice_id, advance_tax_documents: inv.advance_tax_documents,
+      can_unlink_tax_document_advance: inv.can_unlink_tax_document_advance,
+    }
+  } else if (inv?.id !== fetchedTaxDocumentLinks.value?.id) {
+    fetchedTaxDocumentLinks.value = null
+  }
+})
 
 // Cenová hladina dokladu (např. urgentní objednávka): jméno z číselníku, bez práva
 // k číselníku nebo u smazané hladiny aspoň id.
@@ -618,6 +629,17 @@ async function createTaxDocForPayment(paymentId: number, vatRateId?: number) {
 // Daňové doklady k platbám (nestornované) — viditelný cross-link banner na záloze.
 const paymentTaxDocs = computed(() =>
   payments.value.filter(p => p.tax_document_invoice_id && p.tax_document_status !== 'cancelled'))
+const advanceTaxDocuments = computed(() => {
+  const docs = new Map((fetchedTaxDocumentLinks.value?.advance_tax_documents ?? []).map(doc => [doc.id, doc]))
+  for (const payment of paymentTaxDocs.value) {
+    if (payment.tax_document_invoice_id && payment.tax_document_status) {
+      docs.set(payment.tax_document_invoice_id, {
+        id: payment.tax_document_invoice_id, varsymbol: payment.tax_document_varsymbol ?? null, status: payment.tax_document_status,
+      })
+    }
+  }
+  return [...docs.values()]
+})
 
 async function deletePayment(p: InvoicePayment) {
   if (!invoice.value) return
@@ -957,6 +979,8 @@ function actionLabel(a: string): string {
     'invoice.payment_thanks_queued':  'invoice.actions.payment_thanks_queued',
     'invoice.payment_thanks_failed':  'invoice.actions.payment_thanks_failed',
     'invoice.payment_thanks_skipped': 'invoice.actions.payment_thanks_skipped',
+    'invoice.tax_document_advance_linked': 'invoice.tax_document_advance.linked',
+    'invoice.tax_document_advance_unlinked': 'invoice.tax_document_advance.unlinked',
   }
   return map[a] ? (t(map[a]) as string) : a
 }
@@ -1304,10 +1328,27 @@ async function issueFinalFromProforma() {
 // 'advance' = jsem na daňovém dokladu, vybírám zálohu; 'final' = jsem na záloze,
 // vybírám daňový doklad. Vazba (parent_invoice_id) se vždy ukládá na daňový doklad.
 const advanceModalOpen = ref(false)
-const pairMode = ref<'advance' | 'final'>('advance')
+type PairMode = 'advance' | 'final' | 'tax-document' | 'tax-document-advance'
+const pairMode = ref<PairMode>('advance')
 const advanceCandidates = ref<AdvanceCandidate[]>([])
 const loadingCandidates = ref(false)
 const linkingAdvance = ref(false)
+const isTaxDocumentPair = computed(() => pairMode.value === 'tax-document' || pairMode.value === 'tax-document-advance')
+const pairModalTitle = computed(() => {
+  switch (pairMode.value) {
+    case 'tax-document': return t('invoice.tax_document_advance.select_tax_document')
+    case 'tax-document-advance': return t('invoice.tax_document_advance.select_advance')
+    case 'final': return t('invoice.advance_link.modal_title_final')
+    case 'advance': return t('invoice.advance_link.modal_title')
+  }
+})
+const noPairCandidates = computed(() => {
+  if (isTaxDocumentPair.value) return t('invoice.tax_document_advance.no_candidates')
+  return pairMode.value === 'advance' ? t('invoice.advance_link.no_candidates') : t('invoice.advance_link.no_candidates_final')
+})
+watch(() => route.params.id, () => {
+  if (isTaxDocumentPair.value) advanceModalOpen.value = false
+})
 
 // Daňový doklad bez rodiče → lze zpětně spárovat se zálohou.
 const canPairAdvance = computed(() =>
@@ -1328,19 +1369,36 @@ const canPairFinal = computed(() =>
 // Propojeno se zálohou (proforma) → lze odpojit. Rodič storna/dobropisu (non-proforma) ne.
 const linkedProforma = computed(() =>
   invoice.value?.parent_invoice?.invoice_type === 'proforma' ? invoice.value.parent_invoice : null)
+const canLinkTaxDocumentAdvance = computed(() => {
+  const inv = invoice.value
+  return !!inv && auth.canWrite('invoices') && inv.status !== 'cancelled'
+    && (inv.invoice_type === 'proforma' || (inv.invoice_type === 'tax_document' && !inv.parent_invoice_id && inv.status !== 'draft'))
+})
+const canUnlinkTaxDocumentAdvance = computed(() => {
+  const latest = fetchedTaxDocumentLinks.value
+  return auth.canWrite('invoices') && latest?.can_unlink_tax_document_advance === true
+    && latest.parent_invoice_id === linkedProforma.value?.id
+})
 // Odpočtový řádek zálohy § 37a = záporný řádek mimo slevový (stejná definice jako na serveru).
 const hasAdvanceDeduction = computed(() =>
   (invoice.value?.items ?? []).some(i => Number(i.total_with_vat) < 0 && (i.item_kind ?? 'standard') !== 'discount'))
 
-async function openPairModal(mode: 'advance' | 'final') {
+async function openPairModal(mode: PairMode) {
   if (!invoice.value) return
+  const id = invoice.value.id
   pairMode.value = mode
   advanceModalOpen.value = true
   loadingCandidates.value = true
   try {
-    advanceCandidates.value = mode === 'advance'
-      ? await invoicesApi.advanceCandidates(invoice.value.id)
-      : await invoicesApi.finalCandidates(invoice.value.id)
+    if (mode === 'tax-document' || mode === 'tax-document-advance') {
+      advanceCandidates.value = []
+      const candidates = await invoicesApi.taxDocumentAdvanceCandidates(id)
+      if (invoice.value?.id === id && pairMode.value === mode) advanceCandidates.value = candidates
+    } else {
+      advanceCandidates.value = mode === 'advance'
+        ? await invoicesApi.advanceCandidates(id)
+        : await invoicesApi.finalCandidates(id)
+    }
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -1351,8 +1409,21 @@ async function openPairModal(mode: 'advance' | 'final') {
 // candId = id druhého dokladu (zálohy nebo daňového dokladu, dle pairMode).
 async function pickCandidate(candId: number) {
   if (!invoice.value || linkingAdvance.value) return
+  const id = invoice.value.id
   linkingAdvance.value = true
   try {
+    if (isTaxDocumentPair.value) {
+      const fromAdvance = pairMode.value === 'tax-document'
+      const result = await invoicesApi.linkTaxDocumentAdvance(fromAdvance ? candId : id, fromAdvance ? id : candId)
+      if (invoice.value?.id === id) {
+        advanceModalOpen.value = false
+        await load()
+      }
+      toast.success(t('invoice.tax_document_advance.linked'))
+      if (result.filed_vat_period) toast.warning(t('invoice.tax_document_advance.filed_period', { period: result.filed_vat_period }))
+      if (result.accounting_period_locked) toast.warning(t('invoice.tax_document_advance.locked_period'))
+      return
+    }
     if (pairMode.value === 'advance') {
       // Jsem na daňovém dokladu, candId = záloha → vazba na current.
       invoice.value = await invoicesApi.linkAdvance(invoice.value.id, candId)
@@ -1366,6 +1437,22 @@ async function pickCandidate(candId: number) {
     if (invoice.value) {
       invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
     }
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    linkingAdvance.value = false
+  }
+}
+
+async function unlinkTaxDocumentAdvance() {
+  if (!invoice.value || !canUnlinkTaxDocumentAdvance.value || linkingAdvance.value) return
+  if (!confirm(t('invoice.tax_document_advance.unlink_confirm'))) return
+  const id = invoice.value.id
+  linkingAdvance.value = true
+  try {
+    await invoicesApi.unlinkTaxDocumentAdvance(id)
+    if (invoice.value?.id === id) await load()
+    toast.success(t('invoice.tax_document_advance.unlinked'))
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -2832,18 +2919,25 @@ useWindowRefresh(async () => {
         </button>
       </div>
       <!-- Daňové doklady k přijatým platbám zálohy (#89) — viditelný cross-link -->
-      <div v-if="isProforma && paymentTaxDocs.length > 0"
-        class="flex items-center justify-between gap-3 bg-amber-50 border border-amber-500/30 rounded-lg px-4 py-2.5 text-sm mb-4">
-        <span class="text-amber-700 min-w-0">
+      <div v-if="isProforma && (advanceTaxDocuments.length > 0 || canLinkTaxDocumentAdvance)"
+        class="flex flex-wrap items-center justify-between gap-3 bg-amber-50 border border-amber-500/30 rounded-lg px-4 py-2.5 text-sm mb-4"
+        data-test="advance-tax-documents">
+        <span v-if="advanceTaxDocuments.length > 0" class="text-amber-700 min-w-0">
           {{ t('invoice.payments.tax_docs_banner') }}
-          <template v-for="(p, i) in paymentTaxDocs" :key="p.id">
-            <RouterLink :to="`/invoices/${p.tax_document_invoice_id}`" class="font-mono font-medium hover:underline">
-              {{ p.tax_document_varsymbol || `#${p.tax_document_invoice_id}` }}</RouterLink><span v-if="p.tax_document_status === 'draft'" class="text-amber-600/80"> ({{ t('status.draft').toLowerCase() }})</span><span v-if="i < paymentTaxDocs.length - 1">, </span>
+          <template v-for="(doc, i) in advanceTaxDocuments" :key="doc.id">
+            <RouterLink :to="`/invoices/${doc.id}`" class="font-mono font-medium hover:underline">
+              {{ doc.varsymbol || `#${doc.id}` }}</RouterLink><span v-if="doc.status === 'draft'" class="text-amber-600/80"> ({{ t('status.draft').toLowerCase() }})</span><span v-if="i < advanceTaxDocuments.length - 1">, </span>
           </template>
         </span>
+        <span v-else class="text-neutral-600">{{ t('invoice.tax_document_advance.no_tax_documents') }}</span>
+        <button v-if="canLinkTaxDocumentAdvance" type="button" :class="btnOutlineSm('primary')" :disabled="linkingAdvance"
+          data-test="tax-document-advance-link" @click="openPairModal('tax-document')">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.link" /></svg>
+          {{ t('invoice.tax_document_advance.link_tax_document') }}
+        </button>
       </div>
       <!-- Nepropojená proforma → nabídka spárovat s daňovým dokladem (opačný směr) -->
-      <div v-else-if="canPairFinal"
+      <div v-if="paymentTaxDocs.length === 0 && canPairFinal"
         class="flex items-center justify-between gap-3 bg-neutral-50 border border-neutral-200 rounded-lg px-4 py-2.5 text-sm mb-4">
         <span class="text-neutral-500">{{ t('invoice.advance_link.none_final') }}</span>
         <button type="button" @click="openPairModal('final')"
@@ -2904,18 +2998,22 @@ useWindowRefresh(async () => {
       </RouterLink>
       <!-- Propojeno se zálohou (proforma) → odkaz + zrušení propojení -->
       <div v-else-if="linkedProforma"
-        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm mb-4">
+        class="flex flex-wrap items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm mb-4">
         <span class="text-primary-700 min-w-0">
           {{ t('invoice.linked.proforma') }}
           <RouterLink :to="`/invoices/${linkedProforma.id}`" class="font-mono font-medium hover:underline">
             {{ linkedProforma.varsymbol || `#${linkedProforma.id}` }}
           </RouterLink>
         </span>
-        <!-- Daňový doklad k přijaté platbě (#89) má vazbu strukturální (drží § 37a
-             odpočty finálu i vazbu na platbu) — rozpojit nelze, backend to odmítá.
-             Koncept s odpočtem zálohy § 37a rozpojí jen odebrání čerpání (smaže i odpočet);
+        <!-- Koncept s odpočtem zálohy § 37a rozpojí jen odebrání čerpání (smaže i odpočet);
              vystavený doklad s odpočtem backend rozpojit nedovolí. -->
-        <button v-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe && hasAdvanceDeduction && isDraft"
+        <button v-if="canUnlinkTaxDocumentAdvance"
+          type="button" :class="btnOutlineSm('danger')" :disabled="linkingAdvance"
+          data-test="tax-document-advance-unlink" @click="unlinkTaxDocumentAdvance">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.uturn" /></svg>
+          {{ t('invoice.tax_document_advance.unlink') }}
+        </button>
+        <button v-else-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe && hasAdvanceDeduction && isDraft"
           type="button" @click="removeDrawdown()" :disabled="busy !== null"
           class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
           {{ t('invoice.advance_drawdown.remove') }}
@@ -2923,6 +3021,15 @@ useWindowRefresh(async () => {
         <button v-else-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe && !hasAdvanceDeduction" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
           class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
           {{ t('invoice.advance_link.unlink') }}
+        </button>
+      </div>
+      <div v-else-if="invoice.invoice_type === 'tax_document' && !invoice.parent_invoice_id"
+        class="flex flex-wrap items-center justify-between gap-3 bg-neutral-50 border border-neutral-200 rounded-lg px-4 py-2.5 text-sm mb-4">
+        <span class="text-neutral-600">{{ t('invoice.tax_document_advance.none') }}</span>
+        <button v-if="canLinkTaxDocumentAdvance" type="button" :class="btnOutlineSm('primary')" :disabled="linkingAdvance"
+          data-test="tax-document-advance-link" @click="openPairModal('tax-document-advance')">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.link" /></svg>
+          {{ t('invoice.tax_document_advance.link_advance') }}
         </button>
       </div>
       <!-- Faktura čerpá víc záloh (vazbu dokladu nemá) → odkazy na zálohy a úprava čerpání -->
@@ -2952,19 +3059,27 @@ useWindowRefresh(async () => {
 
       <!-- Modal výběru dokladu k propojení (záloha ⇄ daňový doklad dle pairMode) -->
       <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
-        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
-          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
-            <h3 class="font-medium">{{ pairMode === 'advance' ? t('invoice.advance_link.modal_title') : t('invoice.advance_link.modal_title_final') }}</h3>
-            <button type="button" @click="advanceModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
+        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col"
+          role="dialog" aria-modal="true" :aria-label="pairModalTitle" :data-test="isTaxDocumentPair ? 'tax-document-advance-modal' : undefined">
+          <div class="px-5 py-3 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-medium">{{ pairModalTitle }}</h3>
+            <button type="button" @click="advanceModalOpen = false" :class="btnOutlineSm()" :aria-label="t('invoice.advance_drawdown.close')">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.x" /></svg>
+            </button>
           </div>
           <div class="p-4 overflow-y-auto">
             <div v-if="loadingCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-            <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ pairMode === 'advance' ? t('invoice.advance_link.no_candidates') : t('invoice.advance_link.no_candidates_final') }}</div>
+            <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ noPairCandidates }}</div>
             <ul v-else class="space-y-2">
               <li v-for="cand in advanceCandidates" :key="cand.id">
                 <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
-                  class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
-                  <span class="font-mono text-sm">{{ cand.varsymbol || ('#' + cand.id) }}</span>
+                  :data-test="isTaxDocumentPair ? 'tax-document-advance-candidate' : undefined"
+                  :class="isTaxDocumentPair ? btnOutline('primary') + ' min-h-9 h-auto py-2' : 'cursor-pointer px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50'"
+                  class="w-full flex flex-wrap justify-between items-center gap-3 text-left">
+                  <span class="inline-flex items-center gap-1.5 font-mono text-sm">
+                    <svg v-if="isTaxDocumentPair" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.link" /></svg>
+                    {{ cand.varsymbol || ('#' + cand.id) }}
+                  </span>
                   <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
                 </button>
               </li>

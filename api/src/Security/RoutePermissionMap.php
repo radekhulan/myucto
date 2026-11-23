@@ -145,6 +145,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/invoices/[0-9]+/convert-to-tax-document$#', 'invoices.delete', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/(request-approval|request-approval-test|approval-status)$#', 'invoices.approval', AccessLevel::WRITE],
         ['POST', '#^/api/invoices$#', 'invoices.create', AccessLevel::WRITE],
+        ['GET', '#^/api/invoices/[0-9]+/tax-document-advance-candidates$#', 'invoices', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/tax-document-advance$#', 'invoices', AccessLevel::WRITE],
         ['GET', '#^/api/invoices(/|$)#', 'invoices', AccessLevel::READ],
         ['*', '#^/api/invoices(/|$)#', 'invoices', AccessLevel::WRITE],
 

@@ -630,9 +630,8 @@ final class InvoiceRepository
      * advance_paid_amount ponecháme (ruční korekce). Odpojí jen vazbu na proformu —
      * původní fakturu storna/dobropisu (non-proforma parent) se nedotkne.
      *
-     * Jen pro invoice_type='invoice' (ručně párovatelný finál) — vazba daňového
-     * dokladu k přijaté platbě (#89) je strukturální (drží § 37a odpočty finálu
-     * i vazbu na platbu) a rozpojit nejde.
+     * Jen pro invoice_type='invoice' (ručně párovatelný finál). Vazbu DDKP na zálohu
+     * obsluhuje \MyInvoice\Service\Invoice\TaxDocumentAdvanceLink::unlink().
      */
     public function unlinkAdvance(int $finalId, int $supplierId): void
     {

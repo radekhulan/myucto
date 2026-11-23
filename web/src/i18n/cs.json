@@ -26474,6 +26474,21 @@
       "no_candidates": "Žádné nespárované zálohové faktury tohoto odběratele.",
       "no_candidates_final": "Žádné nepropojené daňové doklady tohoto odběratele."
     },
+    "tax_document_advance": {
+      "none": "Daňový doklad není navázaný na zálohu.",
+      "no_tax_documents": "Záloha nemá navázané daňové doklady k přijatým platbám.",
+      "link_advance": "Navázat na zálohu",
+      "link_tax_document": "Navázat daňový doklad",
+      "select_advance": "Vyberte zálohovou fakturu k navázání",
+      "select_tax_document": "Vyberte daňový doklad k přijaté platbě",
+      "no_candidates": "Pro tento doklad není k dispozici žádný vhodný protějšek.",
+      "unlink": "Zrušit vazbu",
+      "unlink_confirm": "Zrušit vazbu daňového dokladu na zálohovou fakturu a případně na její platbu?",
+      "linked": "Daňový doklad byl navázán na zálohu.",
+      "unlinked": "Vazba daňového dokladu na zálohu byla zrušena.",
+      "filed_period": "Období daňového dokladu je už podané ({period}).",
+      "locked_period": "Daňový doklad patří do zamčeného účetního období."
+    },
     "imported_pdf": {
       "title": "Originál PDF",
       "show": "Zobrazit PDF",
