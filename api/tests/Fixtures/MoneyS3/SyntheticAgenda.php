@@ -1273,11 +1273,13 @@ final class SyntheticAgenda
      * K agendě {@see filesWithSettledWithoutPaymentDocument()} záloha ZV25053 (1 210 Kč), kterou
      * Money vede jako uhrazenou interním dokladem ID25053 bez zápisu (číslo úhrady nevede na
      * pohyb), a týž den bankovní příjem BP25053 na 324 se symbolem zálohy, který Money s dokladem
-     * nespárovalo. DDKP DD25053 (1 000 + 210 DPH).
+     * nespárovalo. DDKP DD25053 (1 000 + 210 DPH). Symbol a protistranu příjmu lze změnit
+     * (`$symbol`, `$name`), `$secondAdvance` přidá druhou zálohu ZV25054 téhož odběratele na
+     * stejnou částku uhrazenou týž den interním dokladem ID25054.
      *
      * @return array<string,string>
      */
-    public static function filesWithAdvanceBankReceiptUnlinked(): array
+    public static function filesWithAdvanceBankReceiptUnlinked(string $symbol = '25053', string $name = 'Odběratel Zeta s.r.o.', bool $secondAdvance = false): array
     {
         $files = self::filesWithSettledWithoutPaymentDocument();
         $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
@@ -1296,15 +1298,65 @@ final class SyntheticAgenda
             'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
         ];
         $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
-        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), [
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), array_merge([
             ['Cislo' => 660, 'Druh' => 'L', 'Doklad' => 'ZV25053', 'VarSymbol' => '25053', 'Zaklad_0' => 1210.0,
                 'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-20', 'UDoklad' => 'ID25053', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-15'),
             ['Cislo' => 661, 'Druh' => 'D', 'Doklad' => 'DD25053', 'VarSymbol' => '25053', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
                 'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25053)'] + $zeta + $dates('2025-09-20'),
-        ]);
+        ], $secondAdvance ? [
+            ['Cislo' => 662, 'Druh' => 'L', 'Doklad' => 'ZV25054', 'VarSymbol' => '25054', 'Zaklad_0' => 1210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-20', 'UDoklad' => 'ID25054', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-16'),
+        ] : []));
         $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
             'Doklad' => 'BP25053', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2025-09-20', 'DatPlat' => '2025-09-20', 'Celkem' => 1210.0,
-            'VarSym' => '25053', 'AdNazev' => 'Odběratel Zeta s.r.o.', 'Popis' => 'Příjem zálohy', 'Vypis' => 31,
+            'VarSym' => $symbol, 'AdNazev' => $name, 'Popis' => 'Příjem zálohy', 'Vypis' => 31,
+        ]]);
+        return $files;
+    }
+
+    /**
+     * K agendě {@see filesWithAdvanceBankReceiptUnlinked()} devizový účet BE (221003, EUR) a záloha
+     * ZV25055 v eurech (`$advanceEur` kurzem 25) Odběratele Zeta, kterou Money vede jako uhrazenou
+     * 22. 9. 2025 interním dokladem ID25055 bez zápisu. Týž den příjem BE25055 1 000 EUR
+     * (25 000 Kč) se symbolem zálohy, ze kterého jde na 324 jen 100 EUR (2 500 Kč) a zbytek
+     * na 311. Řádky deníku Money nesou valutu (`Mena`, `Kurz`, `CastkaCM`) jen s `$valuta`;
+     * `$symbol` = variabilní symbol příjmu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAdvanceForeignReceiptSplit(bool $valuta, float $advanceEur = 1000.0, string $symbol = '25055'): array
+    {
+        $files = self::filesWithAdvanceBankReceiptUnlinked();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '221003', 'Nazev' => 'Devizový účet EUR']]);
+            $append($dir . '/SzUcPokl.DAT', self::REGISTER_FIELDS, [[
+                'Zkrat' => 'BE', 'Popis' => 'Devizový účet', 'UcPokl' => 'U', 'PrimUcet' => '221003',
+                'Ucet' => '5000000003', 'BKod' => '0100', 'Mena' => 'EUR', 'PSKurz' => 25.0,
+            ]]);
+        }
+        $fx = static fn (float $eur): array => $valuta ? ['Mena' => 'EUR', 'Kurz' => 25.0, 'CastkaCM' => $eur] : [];
+        $append('ROK.002/UcDenik.DAT', array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20], ['Mena', 'C', 3], ['Kurz', 'E', 10], ['CastkaCM', 'E', 10]]), [
+            ['Cislo' => 710, 'Zdroj' => 'BK', 'Doklad' => 'BE25055', 'Datum' => '2025-09-22', 'Popis' => 'Příjem zálohy', 'UcMD' => '221003', 'UcD' => '324000',
+                'Castka' => 2500.0, 'ParSym' => $symbol] + $fx(100.0),
+            ['Cislo' => 711, 'Zdroj' => 'BK', 'Doklad' => 'BE25055', 'Datum' => '2025-09-22', 'Popis' => 'Příjem úhrady', 'UcMD' => '221003', 'UcD' => '311000',
+                'Castka' => 22500.0, 'ParSym' => $symbol] + $fx(900.0),
+        ]);
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10], ['ValutyZak0', 'E', 10]]), [[
+            'Cislo' => 670, 'Druh' => 'L', 'Doklad' => 'ZV25055', 'VarSymbol' => '25055', 'Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0,
+            'Zaklad_0' => $advanceEur * 25.0, 'ValutyZak0' => $advanceEur, 'CelkemSDPH' => $advanceEur * 25.0, 'Uhrazeno' => '2025-09-22', 'UDoklad' => 'ID25055',
+            'Popis' => 'Záloha', 'O_ICO' => self::ADVANCE_CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::ADVANCE_CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Zeta s.r.o.',
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00', 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0,
+            'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+            'Vystaveno' => '2025-09-18', 'DatUcPr' => '2025-09-18', 'PlnenoDPH' => '2025-09-18', 'Splatno' => '2025-09-18',
+        ]]);
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
+            'Doklad' => 'BE25055', 'Ucet' => 'BE', 'Vydej' => 0, 'DatUcPr' => '2025-09-22', 'DatPlat' => '2025-09-22', 'Celkem' => 25000.0,
+            'VarSym' => $symbol, 'AdNazev' => 'Odběratel Zeta s.r.o.', 'Popis' => 'Příjem zálohy', 'Vypis' => 1, 'Mena' => 'EUR', 'Kurs' => 25.0, 'ValutyKUhr' => 1000.0,
         ]]);
         return $files;
     }
