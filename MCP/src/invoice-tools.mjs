@@ -721,7 +721,8 @@ export const INVOICE_TOOLS = [
     description:
       'Nevratně smaže evidovanou úhradu dokladu (ID z `list_invoice_payments`). Když pak doklad '
       + 'přestane být pokrytý, vrátí se ze stavu zaplaceno. Platba spárovaná z banky se ruší '
-      + 'zrušením spárování ve výpisu, platba s vystaveným daňovým dokladem až po jeho stornu.\n\n'
+      + 'zrušením spárování ve výpisu, platba s vystaveným daňovým dokladem až po jeho stornu. '
+      + 'Úhradu převzatou z POHODY bez protějšku v MyÚčtu (`taken_over_locked`) smazat nejde.\n\n'
       + 'Bez `confirm: true` nic nesmaže a jen vypíše platbu a doklad.',
     inputSchema: schema({
       id: id('ID faktury.'),
@@ -774,7 +775,8 @@ export const INVOICE_TOOLS = [
     description:
       'Vrátí zaplacený doklad do stavu vystaveno nebo odesláno a SMAŽE všechny jeho evidované '
       + 'úhrady. Jen pro administrátora firmy. Nejde, je-li doklad spárovaný s bankovním pohybem '
-      + '(to se ruší ve výpisu) nebo k platbě existuje daňový doklad.\n\n'
+      + '(to se ruší ve výpisu) nebo k platbě existuje daňový doklad. Úhrada převzatá z POHODY '
+      + 'bez protějšku v MyÚčtu (`taken_over_locked`) zůstává; hradí-li doklad celý, vrátit ho nejde.\n\n'
       + 'Bez `confirm: true` nic nezmění a jen vypíše doklad.',
     inputSchema: schema({ id: id('ID zaplaceného dokladu.'), confirm: CONFIRM }, ['id']),
     write: true,

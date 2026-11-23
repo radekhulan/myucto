@@ -14,6 +14,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eet\EetHistoryExistsException;
 use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\TakenOverPayment;
+use MyInvoice\Service\Invoice\TakenOverPaymentException;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,7 +25,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Guardy řeší InvoicePaymentService: platbu s bankovní vazbou maž přes „Zrušit
  * spárování" ve výpisu; platbu s vystaveným daňovým dokladem až po jeho
- * smazání/stornu. Pokud po smazání platby přestane být doklad pokrytý, vrátí se
+ * smazání/stornu; úhradu převzatou z POHODY bez protějšku v MyÚčtu nikdy
+ * ({@see TakenOverPayment::isProtected()}). Pokud po smazání platby přestane být doklad pokrytý, vrátí se
  * ze stavu 'paid' zpět (jako unmark-paid).
  */
 final class DeletePaymentAction
@@ -61,6 +64,8 @@ final class DeletePaymentAction
             $result = $this->payments->deletePayment($paymentId);
         } catch (EetHistoryExistsException $e) {
             return Json::error($response, EetHistoryGuard::ERROR_CODE, $e->getMessage(), 409);
+        } catch (TakenOverPaymentException $e) {
+            return Json::error($response, TakenOverPayment::ERROR_CODE, $e->getMessage(), 409);
         } catch (\RuntimeException $e) {
             return Json::error($response, 'payment_locked', $e->getMessage(), 409);
         }

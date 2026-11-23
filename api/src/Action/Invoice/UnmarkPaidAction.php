@@ -16,6 +16,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eet\EetHistoryExistsException;
 use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -108,6 +109,20 @@ final class UnmarkPaidAction
                 'K platbám faktury existuje daňový doklad k přijaté platbě. Nejdřív ho smaž (koncept) nebo stornuj.',
                 409,
             );
+        }
+
+        // Guard #3: úhrada převzatá z POHODY bez protějšku v MyÚčtu se nemaže
+        // (deleteAllForInvoice ji ponechá). Pokrývá-li doklad sama, vrátit ho na
+        // neuhrazený nejde; jinak se smažou jen platby zadané v MyÚčtu.
+        $keptStmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p
+              WHERE p.invoice_id = ? AND ' . TakenOverPayment::isProtectedSql('p')
+        );
+        $keptStmt->execute([$id]);
+        $kept = (float) $keptStmt->fetchColumn();
+        if ($kept > 0 && $kept >= (float) $invoice['amount_to_pay'] - InvoicePaymentService::TOLERANCE) {
+            return Json::error($response, TakenOverPayment::ERROR_CODE,
+                'Doklad je uhrazený úhradou převzatou z POHODY, která se nemaže. Vrátit ho na neuhrazený nejde; opravte převod opakovaným převodem.', 409);
         }
 
         if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note'

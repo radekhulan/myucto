@@ -7,7 +7,6 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\InvoiceRepository;
-use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Oss\OssItemCarryOver;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -181,7 +180,7 @@ final class PaymentTaxDocumentCreator
         if (($proforma['invoice_type'] ?? '') !== 'proforma') {
             throw new \RuntimeException('Daňový doklad k přijaté platbě lze vystavit jen k zálohové faktuře.');
         }
-        if ($payment['source'] === PohodaPriorYearPayments::SOURCE && $payment['note'] === PohodaPriorYearPayments::NOTE) {
+        if (TakenOverPayment::isPriorYear($payment)) {
             throw new PaymentTaxDocumentNotApplicableException(
                 'Úhrada z minulého roku převzatá z POHODY - daň z ní přiznala POHODA, daňový doklad k platbě se nevystavuje.'
             );

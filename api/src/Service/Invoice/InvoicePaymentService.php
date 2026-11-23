@@ -517,6 +517,9 @@ final class InvoicePaymentService
                 'Platba je úhradou navázané ostatní pohledávky. Odpojte úhradu v detailu pohledávky, nebo fakturu od pohledávky odpojte.'
             );
         }
+        if (TakenOverPayment::isProtected($payment)) {
+            throw new TakenOverPaymentException(TakenOverPayment::PROTECTED_MESSAGE);
+        }
         if ($payment['tax_document_invoice_id'] !== null) {
             $pdo = $this->db->pdo();
             $td = $pdo->prepare("SELECT status FROM invoices WHERE id = ?");
@@ -565,6 +568,9 @@ final class InvoicePaymentService
     /**
      * Smaže VŠECHNY platby faktury (unmark-paid flow). Guardy (bankovní vazby,
      * daňové doklady) ověřuje volající. Vrací počet smazaných plateb.
+     *
+     * Zůstává zrcadlo úhrad ostatní pohledávky (peníze patří pohledávce, ne faktuře)
+     * a platba převzatá bez protějšku v MyÚčtu ({@see TakenOverPayment::isProtected()}).
      */
     public function deleteAllForInvoice(int $invoiceId): int
     {
@@ -577,14 +583,14 @@ final class InvoicePaymentService
             $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
             $this->assertNoEetRecord('a.invoice_payment_id IN (SELECT p.id FROM invoice_payments p WHERE p.invoice_id = ?)', [$invoiceId]);
             $this->goPayPending->releaseForInvoice($invoiceId);
-            // Zrcadlo úhrad ostatní pohledávky zůstává: peníze patří pohledávce, ne faktuře.
-            $payments = $pdo->prepare('SELECT id, supplier_id FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $deletable = 'p.source <> ? AND NOT ' . TakenOverPayment::isProtectedSql('p');
+            $payments = $pdo->prepare("SELECT p.id, p.supplier_id FROM invoice_payments p WHERE p.invoice_id = ? AND {$deletable}");
             $payments->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             foreach ($payments->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
                 $this->eetReconciliation->releaseInvoicePayment((int) $p['supplier_id'], (int) $p['id']);
             }
             self::releaseCreditNotes($pdo, 'p.invoice_id = ?', [$invoiceId]);
-            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $del = $pdo->prepare("DELETE p FROM invoice_payments p WHERE p.invoice_id = ? AND {$deletable}");
             $del->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             $count = $del->rowCount();
             $transition = $this->recomputeLocked($pdo, $invoiceId);
@@ -880,6 +886,9 @@ final class InvoicePaymentService
         if (array_key_exists('bank_statement_id', $row)) {
             $row['bank_statement_id'] = $row['bank_statement_id'] !== null ? (int) $row['bank_statement_id'] : null;
         }
+        $row['taken_over'] = TakenOverPayment::isTakenOver($row);
+        $row['taken_over_locked'] = TakenOverPayment::isProtected($row);
+        $row['prior_year'] = TakenOverPayment::isPriorYear($row);
         return $row;
     }
 

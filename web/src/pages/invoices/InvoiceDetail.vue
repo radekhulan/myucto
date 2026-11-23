@@ -3359,7 +3359,12 @@ useWindowRefresh(async () => {
                 <td class="px-4 py-2.5">{{ formatDate(p.paid_on) }}</td>
                 <td class="px-4 py-2.5 text-right font-mono font-medium">{{ formatMoney(p.amount, p.currency) }}</td>
                 <td class="px-4 py-2.5">
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
+                  <span v-if="p.taken_over" data-test="payment-taken-over"
+                    class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 cursor-help"
+                    :title="t('invoice.payments.sources.' + p.source) + (p.note ? ': ' + p.note : '')">
+                    {{ t('invoice.payments.taken_over') }}
+                  </span>
+                  <span v-else class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
                     {{ t('invoice.payments.sources.' + p.source) }}
                   </span>
                   <RouterLink v-if="p.bank_statement_id" :to="`/bank/${p.bank_statement_id}`"
@@ -3377,7 +3382,7 @@ useWindowRefresh(async () => {
                     {{ p.tax_document_varsymbol || `#${p.tax_document_invoice_id}` }}
                     <span v-if="p.tax_document_status === 'draft'" class="text-neutral-400">({{ t('status.draft') }})</span>
                   </RouterLink>
-                  <button v-else-if="taxDocApplicable && auth.canWrite('invoices') && !lockedForMe" @click="createTaxDocForPayment(p.id)"
+                  <button v-else-if="taxDocApplicable && !p.prior_year && auth.canWrite('invoices') && !lockedForMe" @click="createTaxDocForPayment(p.id)"
                     :disabled="busy !== null"
                     class="cursor-pointer text-xs px-2 py-0.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded">
                     {{ t('invoice.payments.create_tax_doc') }}
@@ -3385,11 +3390,12 @@ useWindowRefresh(async () => {
                   <span v-else class="text-xs text-neutral-400">—</span>
                 </td>
                 <td class="px-4 py-2.5 text-right">
-                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !eetPaymentIds.has(p.id) && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
+                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !p.taken_over_locked && !eetPaymentIds.has(p.id) && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
                     @click="deletePayment(p)" :disabled="busy !== null"
                     class="cursor-pointer text-xs text-danger-500 hover:text-danger-700"
                     :title="t('common.delete')">✕</button>
                   <span v-else-if="p.bank_transaction_id" class="text-xs text-neutral-300" :title="t('invoice.payments.locked_bank')">🔒</span>
+                  <span v-else-if="p.taken_over_locked" data-test="payment-locked-taken-over" class="text-xs text-neutral-300" :title="t('invoice.payments.locked_taken_over')">🔒</span>
                   <span v-else-if="eetPaymentIds.has(p.id)" class="text-xs text-neutral-300" :title="t('eet.invoice.locked_eet')">🔒</span>
                 </td>
               </tr>

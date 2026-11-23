@@ -109,7 +109,10 @@ nebo Zaplaceno a v sumaci jsou řádky **Uhrazeno** a **Zbývá uhradit**.
 > [!WARNING]
 > Platbu navázanou na bankovní transakci nesmažete křížkem. Použijte **Zrušit
 > spárování** v detailu výpisu. Platbu s vystaveným daňovým dokladem smažete až po
-> smazání nebo stornu tohoto dokladu.
+> smazání nebo stornu tohoto dokladu. Úhrada se zdrojem **Převzato**, která nese
+> uhrazenou část z doby před převodem z POHODY (úhrada v minulém roce, dorovnání
+> úhrady), má místo křížku zámek a nesmaže ji ani **Zrušit úhradu**. Opravuje ji
+> opakovaný převod.
 
 U zálohové faktury a plátce DPH vzniká při částečné úhradě i daňový doklad
 k přijaté platbě, viz [§ 16.10.2](#16102-platby-a-castecne-uhrady).

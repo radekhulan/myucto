@@ -56,6 +56,12 @@ export interface InvoicePayment {
   tax_document_invoice_id: number | null
   tax_document_varsymbol?: string | null
   tax_document_status?: InvoiceStatus | null
+  /** Platbu založil převod z jiného systému (POHODA, Money S3). */
+  taken_over?: boolean
+  /** Převzatá platba bez protějšku v MyÚčtu: server ji nesmaže. */
+  taken_over_locked?: boolean
+  /** Úhrada minulého roku převzatá z POHODY: daňový doklad k ní se nevystavuje. */
+  prior_year?: boolean
   created_at: string
 }
 

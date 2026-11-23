@@ -33,6 +33,9 @@ final class DocumentLinker
     public const STEP_LINK = 'link';
     public const STEP_PAYMENTS = 'payments';
 
+    /** Poznámka platby `settlement`, která dorovnává uhrazenou částku podle POHODY ({@see settleIssuedRemainders()}). */
+    public const REMAINDER_NOTE = 'Převzato z POHODY, dorovnání úhrady';
+
     /** Pohyb a zápis se stejným číslem dokladu dál od sebe než půl roku jsou různé doklady. */
     private const SAME_BANK_NUMBER_SECONDS = 183 * 86400;
 
@@ -1085,13 +1088,13 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $insert = $pdo->prepare(
             "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
-             VALUES (?, ?, ?, ?, ?, 'Převzato z POHODY, dorovnání úhrady', 'settlement', ?)"
+             VALUES (?, ?, ?, ?, ?, ?, 'settlement', ?)"
         );
         foreach ($rows as $r) {
             if ($ctx->skipsDate($r['paid_on'])) {
                 continue;
             }
-            $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], $ctx->userOrNull()]);
+            $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], self::REMAINDER_NOTE, $ctx->userOrNull()]);
             $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payment_remainder');
         }
     }

@@ -29,7 +29,7 @@ use PDO;
 final class IssuedPaymentRecorder
 {
     /** Poznámka platby, kterou založil převod (a kterou smí převod upravit). */
-    private const NOTE_PREFIX = 'Převzato z Money S3, ';
+    public const NOTE_PREFIX = 'Převzato z Money S3, ';
 
     /** @var array<int,array{status:string,type:string,paid_total:float,to_pay:float,rate:?float,currency:string,recorded:float}|null> */
     private array $invoices = [];

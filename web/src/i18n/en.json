@@ -25910,6 +25910,8 @@
         "settlement": "Set-off",
         "credit_note": "Credit note set-off"
       },
+      "taken_over": "Taken over",
+      "locked_taken_over": "A payment taken over from POHODA cannot be deleted - it carries the part paid before the conversion. Fix it by running the conversion again.",
       "vs": "Payment VS",
       "reference": "Reference",
       "note": "Note",

@@ -25910,6 +25910,8 @@
         "settlement": "Zápočet",
         "credit_note": "Zápočet dobropisu"
       },
+      "taken_over": "Převzato",
+      "locked_taken_over": "Úhrada převzatá z POHODY se nemaže - nese uhrazenou část z doby před převodem. Opravte ji opakovaným převodem.",
       "vs": "VS platby",
       "reference": "Reference",
       "note": "Poznámka",
