@@ -192,16 +192,22 @@ například na středisko.
 2. Pod horní lištou klikněte na **Přidat dimenzi** a vyberte hodnotu.
    Zaškrtávátko **včetně podřízených** zahrne i podřízené hodnoty; po
    odškrtnutí platí jen vybraná hodnota. Filtrovat lze podle hodnot jednoho
-   typu dimenze; víc hodnot téhož typu se sčítá.
+   typu dimenze: další řádek filtru nabízí jen typ první vybrané hodnoty
+   a víc hodnot téhož typu se sčítá.
 3. Kniha ukáže v hlavičce použitý filtr. Řádky a součty obsahují jen díl
    dokladů připadající na hodnotu:
    - položka s vlastní hodnotou dimenze patří své hodnotě,
    - položka bez vlastní hodnoty patří hodnotě hlavičky dokladu,
    - u rozpadu mezi víc hodnot (například 60 % a 40 %) se základ i DPH
-     dělí podle podílů na haléře.
+     dělí podle podílů na haléře,
+   - rozpis DPH přijatého dokladu patří dimenzi dokladu, mají-li ji všechny
+     položky stejnou. Jinak ho kniha vypíše pod filtrem jako doklad s rozpisem
+     DPH bez vazby na položky a do součtů hodnoty ho nepočítá.
 4. Pro soupis oddílu KH zvolte v poli **Řádek přiznání / oddíl KH** oddíl.
-   Doklad zůstává v oddílu podle **celé** své částky (limit 10 000 Kč
-   posuzuje doklad, ne jeho díl), částky v soupisu jsou jen díl hodnoty.
+   Oddíl i vyřazení dokladu se posuzují jako ve skutečném kontrolním hlášení,
+   podle **celého** dokladu a po opravách (limit 10 000 Kč, vyúčtování
+   vynulované odpočtem zálohy, rozdílný režim položek, oprava § 43, která
+   přesune plnění mezi A.4 a A.5). Teprve potom se částky omezí na díl hodnoty.
 5. Tlačítka **Stáhnout PDF** a **Stáhnout XLSX** exportují filtrovaný výpis,
    filtr je uvedený v hlavičce exportu.
 
@@ -210,9 +216,10 @@ hodnoty v sestavě DPH podle dimenze ([§ 42.7](#427-krok-za-krokem-sestava-dph-
 za totéž období.
 
 > [!NOTE]
-> Opravy podle § 43, § 46, § 74b a § 79 se ve výpisu filtrovaném podle
+> Částky oprav podle § 43, § 46, § 74b a § 79 se ve výpisu filtrovaném podle
 > dimenze nezobrazují. Vážou se k dokladu po sazbách, ne k jeho položkám,
-> a podíl na hodnotě dimenze nemají. V nefiltrované knize jsou.
+> a podíl na hodnotě dimenze nemají. V nefiltrované knize jsou a sestava DPH
+> podle dimenze je vykazuje samostatným řádkem.
 
 ## 42.7 Krok za krokem: sestava DPH podle dimenze
 
@@ -222,20 +229,30 @@ například po střediscích, a ověří, že se součet rovná přiznání.
 1. Otevřete `Daně → DPH podle dimenze`. Položka je v menu, jen když má firma
    zapnuté dimenze.
 2. Zvolte **Měsíčně** nebo **Kvartálně**, období a **Typ dimenze**.
-3. Tabulka má řádek za každou hodnotu typu (podřízené hodnoty odsazené)
-   a řádek **Bez dimenze**. U každého řádku vidíte počet dokladů, DPH na
-   výstupu, DPH na vstupu (nárok na odpočet), výsledek (výstup minus vstup)
-   a základy na výstupu a na vstupu v základní a snížené sazbě a ostatní.
-   Řádek hodnoty obsahuje jen její vlastní díl, ne díl podřízených hodnot.
+   Identifikovaná osoba podává přiznání vždy za měsíc: sestava se pak stejně
+   jako přiznání sestaví za zvolený měsíc a upozorní na to.
+3. Tabulka má řádek za každou hodnotu typu (podřízené hodnoty odsazené),
+   řádek **Bez dimenze** a podle potřeby řádek **Rozpis DPH bez vazby na
+   položky** (přijatý doklad s rozpisem DPH a položkami v různých dimenzích)
+   a řádek **Opravy přiznání (§ 43, § 46, § 74b)**. U každého řádku vidíte
+   počet dokladů, DPH na výstupu, DPH na vstupu (nárok na odpočet), výsledek
+   (výstup minus vstup) a základy na výstupu a na vstupu v základní a snížené
+   sazbě a ostatní. Řádek hodnoty obsahuje jen její vlastní díl, ne díl
+   podřízených hodnot.
 4. Pod tabulkou zkontrolujte kontrolní řádky:
-   - **Celkem** - součet hodnot a řádku Bez dimenze,
-   - **Evidence DPH** - evidence DPH za období, stejná data jako přiznání,
+   - **Celkem** - součet všech řádků, tedy úplná evidence za období,
+   - **Evidence DPH** - evidence DPH za období včetně oprav, stejná data
+     jako přiznání před zaokrouhlením,
    - **Rozdíl** - musí být nula; zelená nula znamená, že se do sestavy
      dostal každý řádek evidence právě jednou,
-   - **Přiznání k DPH (ř. 62, 63, 64)** a **Opravy a zaokrouhlení
-     přiznání** - rozdíl evidence proti vyplněnému přiznání tvoří jen
-     opravy a úpravy bez vazby na doklad (§ 43, § 46, § 74b, § 79, krácení
-     odpočtu § 76, úprava odpočtu § 78) a zaokrouhlení řádků na celé Kč.
+   - **Přiznání k DPH (ř. 62, 63, 64)** a **Úpravy přiznání a zaokrouhlení**
+     - rozdíl součtu proti vyplněnému přiznání tvoří jen korekce odpočtu
+     při registraci (§ 79), krácení odpočtu koeficientem (§ 76), úprava
+     odpočtu (§ 78) a zaokrouhlení řádků na celé Kč.
+
+   Chybí-li u dokladu v cizí měně kurz, sestava je označená jako
+   **předběžná**: částky dokladu jsou přepočtené kurzem 1,0. Kurz doplňte
+   na dokladu, stejně jako před stažením přiznání.
 5. Kliknutím na hodnotu otevřete Knihu DPH za stejné období s filtrem na
    tuto hodnotu (bez podřízených hodnot). Tam vidíte doklady, ze kterých
    řádek vznikl.
@@ -350,10 +367,15 @@ nevytváří odpočet, ale u samovyměření zůstává daň na výstupu.
 2. jinak z hlavičky dokladu (hodnota nebo rozpad),
 3. jinak je řádek **bez dimenze**.
 
+Řádek rozpisu DPH přijatého dokladu k položce vázaný není. Mají-li všechny
+položky dokladu stejnou dimenzi (jediná položka, jen hlavička, nebo všechny
+položky stejně), patří řádek rozpisu jí. Jinak vazba jednoznačná není a částka
+je v sestavě v řádku **Rozpis DPH bez vazby na položky**.
+
 Rozhodují jen dimenze zadané na dokladu. Výchozí dimenze klienta, zakázky
 a produktu ani pravidla dimenzí podle účtu se nepoužijí, protože určují
 dimenze zaúčtovaných řádků nákladů a výnosů, ne dokladu. Pořadí položek je
-pořadí v editoru dokladu.
+pořadí v editoru dokladu a počítají se všechny položky včetně textových.
 
 Rozpad se dělí po haléřích stejným pravidlem jako rozpad řádku účetního
 deníku: každý díl se zaokrouhlí a zbytek dostane největší podíl. Součet
@@ -372,9 +394,18 @@ přiznání.
 analytik) s datem účetního případu v období. Hodnota řádku je dimenze řádku
 zápisu, u střediska navázaného na číselník středisek i textový kód střediska,
 u rozpadu díl řádku. Mimo obrat jsou zápisy uzavření a otevření knih
-a úhrady nebo vratky daně: zápis z banky nebo pokladny, který má jen účet
-343 a peněžní účty (211, 221, 261). DPH z bankovního poplatku nebo pokladní
-doklad s DPH protistranu nákladu či výnosu mají, a v obratu proto zůstávají.
+a úhrady nebo vratky daně. Řádek 343 je úhradou nebo vratkou, když:
+
+- zápis je z bankovního pohybu s protiúčtem u ČNB (kód banky 0710, účty
+  finančních úřadů); poplatek nebo penále ve stejném zápisu na tom nic
+  nemění,
+- v jednoduchém zápisu je ve dvojici s peněžním účtem (211, 221, 261),
+- zápis (z banky, pokladny i ruční) má jen účet 343 a peněžní účty.
+
+DPH z bankovního poplatku bez protiúčtu u ČNB nebo pokladní doklad s DPH
+protistranu nákladu či výnosu mají, a v obratu proto zůstávají. Stejné
+pravidlo používá kontrola obratu 343 proti přiznání. Počet vyloučených
+úhrad je počet zápisů.
 
 Rozdíl obratu 343 proti sestavě běžně způsobí:
 
