@@ -189,7 +189,7 @@ final class J6SourceFindingsHttpTest extends TestCase
             ->paginate($this->supplier, ['entry_ids' => [$bank, $reversal]], 2, 0)['items'], null, 'id');
         foreach ([$bank, $reversal] as $entry) {
             $expected = array_filter($journal[$entry], static fn (string $key): bool => str_starts_with($key, 'source_'), ARRAY_FILTER_USE_KEY);
-            self::assertNotSame([], $expected);
+            foreach (['source_statement_id', 'source_link_id', 'source_accrual_item_id', 'source_asset_id', 'source_settlement_doc_id'] as $key) self::assertArrayHasKey($key, $expected);
             self::assertSame($expected, array_intersect_key($rows[$entry], $expected));
         }
         [, $page] = $this->http('GET', '/source-findings/lines', ['code' => 'missing_activity', 'account' => '518']);

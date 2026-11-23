@@ -11,8 +11,8 @@ import { journalEntryLink, journalSourceLink } from '@/utils/journalSourceLink'
 /**
  * Zjištění podkladů daňového posouzení za období mimo koncept. Souhrn se počítá na
  * vyžádání jedním průchodem podkladů, řádky se čtou po stránkách přes kurzor serveru.
- * Proklik vede na prvotní doklad, kde se členění opravuje, jinak na zápis v deníku; řádky,
- * které se opravují ve společné alokaci, mají navíc odkaz na společné alokace.
+ * Proklik vede na prvotní doklad a vždy i na zápis v deníku (ne každý doklad umí upravit členění
+ * řádku, např. rozpuštění časového rozlišení); řádky ke společné alokaci mají odkaz na společné alokace.
  */
 const props = defineProps<{ supplierId: number; periodId: number; currentHash?: string }>()
 const JOINT_CODES = ['joint_allocation_required', 'joint_dimensions_changed']
@@ -187,6 +187,9 @@ watch(() => [props.supplierId, props.periodId], () => {
             <RouterLink :to="lineLink(line).to" data-test="source-finding-card-link" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
               {{ lineLink(line).document ? t('nonprofitTaxJ6.sourceFindings.openDocument') : t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
             </RouterLink>
+            <RouterLink v-if="lineLink(line).document" :to="journalEntryLink(line.entry_id)" data-test="source-finding-card-entry" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+              {{ t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
+            </RouterLink>
             <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" data-test="source-finding-card-joint" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
               {{ t('nonprofitTaxJ6.sourceFindings.openJointAllocations') }} →
             </RouterLink>
@@ -221,6 +224,9 @@ watch(() => [props.supplierId, props.periodId], () => {
               <td class="px-3 py-2 text-right">
                 <RouterLink :to="lineLink(line).to" data-test="source-finding-link" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                   {{ lineLink(line).document ? t('nonprofitTaxJ6.sourceFindings.openDocument') : t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
+                </RouterLink>
+                <RouterLink v-if="lineLink(line).document" :to="journalEntryLink(line.entry_id)" data-test="source-finding-entry" class="mt-1 block text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+                  {{ t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
                 </RouterLink>
                 <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" data-test="source-finding-joint" class="mt-1 block text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                   {{ t('nonprofitTaxJ6.sourceFindings.openJointAllocations') }} →

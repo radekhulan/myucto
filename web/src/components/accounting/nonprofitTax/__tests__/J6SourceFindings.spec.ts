@@ -105,6 +105,10 @@ describe('J6 source findings', () => {
       { name: 'bank-detail', params: { id: 9 } },
       { name: 'accounting-accrual-detail', params: { id: 12 } },
     ])
+    // U řádku s dokladem je vždy i zápis v deníku (doklad nemusí členění řádku upravovat).
+    expect(w.findAll('[data-test=source-finding-entry]').map(link => JSON.parse(link.attributes('data-to')!))).toEqual(
+      [21, 21, 21, 21, 21].map(id => ({ name: 'accounting-journal', query: { entry_id: String(id) } })))
+    expect(w.findAll('[data-test=source-finding-card-entry]')).toHaveLength(5)
   })
 
   it('keeps the page history when loading a page fails and offers further search on an empty scanned page', async () => {

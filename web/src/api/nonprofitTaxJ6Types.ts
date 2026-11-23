@@ -76,6 +76,10 @@ export interface J6SourceFindingLine extends JournalSourceRef {
   codes: J6FindingCode[]
   source_type: string
   source_id: number | null
+  /** Další pole zdroje, která deník vrací ke štítku (číslo dokladu zdroje, reference banky, název majetku). */
+  source_ref?: string | null
+  source_bank_ref?: string | null
+  source_asset_name?: string | null
   document_no: string | null
   description: string | null
 }
