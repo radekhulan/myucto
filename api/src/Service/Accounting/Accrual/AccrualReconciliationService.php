@@ -12,7 +12,8 @@ use PDO;
  * Odsouhlasení agendy Časové rozlišení s hlavní knihou po analytikách 381 až 385 k datu.
  *
  * Zůstatek účtu v hlavní knize se počítá jako v obratové předvaze: počáteční stav a pohyby
- * účetního období, do kterého datum patří, bez závěrkového zápisu. Rozdělí se na:
+ * od posledního otevřeného účetního období do data, bez závěrkového zápisu
+ * ({@see periodStart()}). Rozdělí se na:
  *  - položky agendy (vazby položek na zaúčtované zápisy, {@see AccrualItemRepository::balanceSql()}),
  *  - odklad uzávěrky (zápisy kroku Časové rozlišení a jejich rozpuštění v otevření roku,
  *    které spravuje uzávěrka podle řádků dokladů s obdobím),
@@ -291,10 +292,24 @@ final class AccrualReconciliationService
         return $out;
     }
 
+    /**
+     * Začátek okna zůstatku: začátek posledního účetního období do data, které má počáteční
+     * stav (otevírací zápis k prvnímu dni). Období bez otevíracího zápisu (rok ještě
+     * neotevřený, hospodářský rok před uzávěrkou) se počítá od posledního počátečního stavu
+     * před ním; bez počátečního stavu od začátku knih. Závěrkový zápis se nepočítá nikdy.
+     */
     private function periodStart(int $supplierId, string $asOf): string
     {
-        $stmt = $this->db->pdo()->prepare('SELECT starts_on FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ? ORDER BY starts_on DESC LIMIT 1');
-        $stmt->execute([$supplierId, $asOf, $asOf]);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT ap.starts_on
+               FROM accounting_periods ap
+              WHERE ap.supplier_id = ? AND ap.starts_on <= ?
+                AND EXISTS (SELECT 1 FROM journal_entries je
+                             WHERE je.supplier_id = ap.supplier_id AND je.source_type = 'opening'
+                               AND je.entry_date = ap.starts_on AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)
+              ORDER BY ap.starts_on DESC LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $asOf]);
         $start = $stmt->fetchColumn();
         return $start === false ? '1000-01-01' : (string) $start;
     }

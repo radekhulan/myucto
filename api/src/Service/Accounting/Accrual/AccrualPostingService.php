@@ -23,12 +23,25 @@ use MyInvoice\Service\Accounting\PostingService;
  */
 final class AccrualPostingService
 {
+    /** Dnešní den pro splatnost a rozlišení budoucích zápisů (testy a dávky ho mohou určit). */
+    private ?string $today = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccrualItemRepository $items,
         private readonly AccrualItemService $service,
         private readonly PostingService $posting,
     ) {}
+
+    public function setToday(?string $date): void
+    {
+        $this->today = $date;
+    }
+
+    private function today(): string
+    {
+        return $this->today ?? date('Y-m-d');
+    }
 
     /** @return array<string,mixed> */
     public function previewRow(int $supplierId, int $itemId, int $rowId): array
@@ -64,7 +77,7 @@ final class AccrualPostingService
         if ($row['kind'] !== 'release' || $row['status'] !== 'planned') {
             throw new AccrualException('row_not_planned', 'Řádek plánu už je zaúčtovaný nebo zrušený.', 409);
         }
-        if ($row['due_on'] > date('Y-m-d') && empty($meta['allow_future'])) {
+        if ($row['due_on'] > $this->today() && empty($meta['allow_future'])) {
             throw new AccrualException('row_not_due', 'Rozpuštění lze zaúčtovat nejdřív v den konce úseku.', 409);
         }
         $amount = (float) $row['amount_planned'];
@@ -158,20 +171,25 @@ final class AccrualPostingService
             throw new AccrualException('account_not_found', 'Účet ' . $account . ' není v účtové osnově.', 422, 'termination_account_code');
         }
 
+        // Zaúčtovaný či převzatý řádek s datem zápisu po dnešku i po datu ukončení je budoucí
+        // (POHODA zápisy předgeneruje do konce roku): ukončení ho nabídne ke stornu. Řádek
+        // zaúčtovaný do dneška, jehož zápis nebo pokrytý úsek leží po datu ukončení, ukončení
+        // nepřipustí: nesmí jít před poslední zaúčtované rozpuštění.
         $future = [];
         $kept = [];
+        $today = $this->today();
         foreach ($schedule as $row) {
             if ($row['kind'] !== 'release' || !in_array($row['status'], ['posted', 'linked'], true)) {
                 continue;
             }
-            $start = (string) ($row['from_on'] ?? $row['due_on']);
+            $entryDate = (string) ($row['entry_date'] ?? $row['due_on']);
             $end = (string) ($row['to_on'] ?? $row['due_on']);
-            if ($start > $date && (string) $row['entry_date'] > $date) {
+            if ($entryDate > $date && $entryDate > $today) {
                 $future[] = $row;
-            } elseif ($end > $date) {
+            } elseif ($entryDate > $date || $end > $date) {
                 throw new AccrualException('before_last_release',
-                    'Datum ukončení nesmí být před posledním zaúčtovaným rozpuštěním (' . $end . '). Zvolte pozdější datum nebo rozpuštění nejdřív stornujte.',
-                    409, 'date', ['last_release_to' => $end]);
+                    'Datum ukončení nesmí být před posledním zaúčtovaným rozpuštěním (' . max($entryDate, $end) . '). Zvolte pozdější datum nebo rozpuštění nejdřív stornujte.',
+                    409, 'date', ['last_release_to' => max($entryDate, $end)]);
             } else {
                 $kept[] = $row;
             }

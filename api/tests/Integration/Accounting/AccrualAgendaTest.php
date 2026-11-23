@@ -198,19 +198,20 @@ final class AccrualAgendaTest extends TestCase
 
     public function testTerminationGuards(): void
     {
+        $this->accrualPosting->setToday('2091-03-15');
         $item = $this->revenueItem(36_500.00, '2091-01-01', '2091-12-31');
-        $rows = $this->planned($item);
-        foreach (array_slice($rows, 0, 3) as $row) {
+        foreach (array_slice($this->planned($item), 0, 3) as $row) {
             $this->accrualPosting->postRow($this->supplierId, $item['id'], $row['id'], $this->meta());
         }
-        // Uvnitř zaúčtovaného úseku (březen) → nelze.
-        $this->assertAccrualError('before_last_release', fn () => $this->accrualPosting->terminationPreview($this->supplierId, $item['id'], '2091-03-10'));
-        // Před zaúčtovaným březnem (únor celý zaúčtovaný, březen je „budoucí"): nabídnout storno.
-        $preview = $this->accrualPosting->terminationPreview($this->supplierId, $item['id'], '2091-02-28');
+        // Únor je zaúčtovaný do dneška → ukončení před jeho koncem nejde.
+        $this->assertAccrualError('before_last_release', fn () => $this->accrualPosting->terminationPreview($this->supplierId, $item['id'], '2091-02-15'));
+        // Březen je zaúčtovaný dopředu (zápis 31. 3. je po dnešku) → nabídne se storno.
+        $preview = $this->accrualPosting->terminationPreview($this->supplierId, $item['id'], '2091-03-10');
         self::assertCount(1, $preview['future_rows']);
+        self::assertSame('2091-02-28', $preview['covered_through']);
         self::assertFalse($preview['requires_linked_confirmation']);
-        $this->assertAccrualError('future_rows', fn () => $this->accrualPosting->terminate($this->supplierId, $item['id'], ['date' => '2091-02-28'], $this->meta()));
-        $done = $this->accrualPosting->terminate($this->supplierId, $item['id'], ['date' => '2091-02-28', 'reverse_future' => true], $this->meta());
+        $this->assertAccrualError('future_rows', fn () => $this->accrualPosting->terminate($this->supplierId, $item['id'], ['date' => '2091-03-10'], $this->meta()));
+        $done = $this->accrualPosting->terminate($this->supplierId, $item['id'], ['date' => '2091-03-10', 'reverse_future' => true], $this->meta());
         self::assertSame('terminated', $done['status']);
         self::assertSame(0.0, $done['balance_after_all']);
 
@@ -221,6 +222,7 @@ final class AccrualAgendaTest extends TestCase
 
     public function testImportedFutureRowsNeedExplicitConfirmation(): void
     {
+        $this->accrualPosting->setToday('2091-07-15');
         $item = $this->revenueItem(36_500.00, '2091-01-01', '2091-12-31');
         // Převzatý zápis rozpuštění za prosinec (jako předgenerovaný POHODOU) navázaný jako linked.
         $entryId = $this->manualEntry('2091-12-31', '384', '602', 3_100.00, 'CR-SYN-1');

@@ -265,6 +265,31 @@ final class PohodaAccrualTakeoverService
             $opening[$p['account_code']]['items'] = ($opening[$p['account_code']]['items'] ?? 0) + 1;
         }
         unset($p);
+        // Rekonstrukce z faktury a rytmu dává smysl jen tehdy, když zhruba sedí na počáteční
+        // stav. Překročí-li ho o víc než 1 % (smlouvy rozpouštěné pevnou částkou, ne podle
+        // dnů), nesou rekonstruované položky jen to, co po převzetí rozpustily, a zbytek
+        // zůstane nerozepsaný k vyjasnění.
+        $warnings = [];
+        foreach ($opening as $code => $o) {
+            $ps = $openingEntries['amounts'][$code]['amount'] ?? 0.0;
+            if ($o['allocated'] - $ps > max(0.01, abs($ps) * 0.01)) {
+                $warnings[] = ['code' => 'reconstruction_exceeds_opening', 'account_code' => (string) $code,
+                    'opening_balance' => $ps, 'reconstructed' => $o['allocated']];
+                $allocated = 0.0;
+                foreach ($items as &$p) {
+                    if ($p['account_code'] === (string) $code && $p['opening_share'] !== null && $p['reconstructed']) {
+                        $p['opening_share'] = round(array_sum(array_column($p['releases'], 'amount')), 2);
+                        $p['reconstructed'] = false;
+                        $p['note'] .= ' Rekonstrukce počátečního stavu překročila počáteční stav účtu, položka nese jen část rozpuštěnou po převzetí.';
+                    }
+                    if ($p['account_code'] === (string) $code && $p['opening_share'] !== null) {
+                        $allocated = round($allocated + $p['opening_share'], 2);
+                    }
+                }
+                unset($p);
+                $opening[$code]['allocated'] = $allocated;
+            }
+        }
         $openingRows = [];
         foreach ($openingEntries['amounts'] as $code => $o) {
             $code = (string) $code;
@@ -293,6 +318,7 @@ final class PohodaAccrualTakeoverService
             'opening' => $openingRows,
             'terminations' => $terminations['matched'],
             'unmatched_terminations' => $terminations['unmatched'],
+            'warnings' => $warnings,
             'summary' => [
                 'items' => count($items),
                 'new' => count(array_filter($items, static fn (array $p): bool => $p['existing_id'] === null)),
@@ -386,7 +412,7 @@ final class PohodaAccrualTakeoverService
         $origin = $source === null ? null : $this->originLine($supplierId, $source, $account, $sign);
         $basis = $origin['amount'] ?? ($source['net'] ?? round(array_sum(array_column($releases, 'amount')), 2));
         $method = self::methodFromRhythm($releases);
-        $to = $from === null ? null : self::reconstructEnd((float) $basis, $from, $releases, $method, $openingDate);
+        $to = $from === null ? null : self::reconstructEnd((float) $basis, $from, $releases, $method, $openingDate, $this->service->fiscalYearEnd($supplierId));
         // Řádky plánu: úsek od předchozího rozpuštění (nebo začátku období) do data zápisu.
         $prev = $from === null ? null : AccrualPlanBuilder::dayBefore(max($from, $openingDate ?? $from));
         foreach ($releases as &$r) {
@@ -431,18 +457,20 @@ final class PohodaAccrualTakeoverService
     }
 
     /**
-     * Jen zápisy k 31. 12. → roční. Víc rozpuštění v jednom roce → měsíční podle dnů.
-     * Jediný zápis mimo 31. 12. (rozpuštění do data ukončení) se bere jako roční.
+     * Rytmus rozpouštění: dvě rozpuštění od sebe méně než 300 dní → měsíční podle dnů, jinak
+     * roční (jen ke konci účetního roku). Jediný zápis (rozpuštění do data ukončení či jediný
+     * rok) se bere jako roční.
      *
      * @param list<array<string,mixed>> $releases
      */
     private static function methodFromRhythm(array $releases): string
     {
-        $perYear = [];
-        foreach ($releases as $r) {
-            $perYear[substr($r['date'], 0, 4)] = ($perYear[substr($r['date'], 0, 4)] ?? 0) + 1;
+        for ($i = 1; $i < count($releases); $i++) {
+            if (AccrualScheduleCalculator::daysInclusive((string) $releases[$i - 1]['date'], (string) $releases[$i]['date']) < 300) {
+                return 'monthly_days';
+            }
         }
-        return max($perYear ?: [0]) >= 2 ? 'monthly_days' : 'yearly';
+        return 'yearly';
     }
 
     /**
@@ -451,13 +479,18 @@ final class PohodaAccrualTakeoverService
      *
      * @param list<array<string,mixed>> $releases
      */
-    private static function reconstructEnd(float $basis, string $from, array $releases, string $method, ?string $openingDate): ?string
+    private static function reconstructEnd(float $basis, string $from, array $releases, string $method, ?string $openingDate, string $yearEnd): ?string
     {
         $rate = null;
         foreach ($releases as $r) {
             $date = (string) $r['date'];
-            $segStart = $method === 'yearly' ? substr($date, 0, 4) . '-01-01' : substr($date, 0, 8) . '01';
-            $isFull = $method === 'yearly' ? str_ends_with($date, '-12-31') : $date === (new \DateTimeImmutable($date))->format('Y-m-t');
+            if ($method === 'yearly') {
+                $isFull = substr($date, 5, 5) === $yearEnd;
+                $segStart = AccrualPlanBuilder::dayAfter((new \DateTimeImmutable($date))->modify('-1 year')->format('Y-m-d'));
+            } else {
+                $isFull = $date === (new \DateTimeImmutable($date))->format('Y-m-t');
+                $segStart = substr($date, 0, 8) . '01';
+            }
             if ($isFull && $segStart > $from && (int) round($r['amount'] * 100) !== 0) {
                 $rate = $r['amount'] / AccrualScheduleCalculator::daysInclusive($segStart, $date);
                 break;

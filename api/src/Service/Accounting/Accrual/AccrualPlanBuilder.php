@@ -15,7 +15,8 @@ namespace MyInvoice\Service\Accounting\Accrual;
  *    řádků je přesně základ (shodně s POHODOU, která rozpouští stejně).
  *  - `monthly_equal`: řádek za každý měsíc období, každý měsíc stejným dílem bez ohledu na dny
  *    (kumulativně zaokrouhleno, zbytek v posledním řádku).
- *  - `yearly`: řádek za každý kalendářní rok k 31. 12., poslední ke konci období.
+ *  - `yearly`: řádek za každý účetní rok k jeho konci (výchozí 31. 12., u hospodářského roku
+ *    jeho poslední den), poslední ke konci období.
  *  - `manual`: bez plánu, rozpouští se ručními zápisy a vazbami.
  *
  * Řádek nese `due_on` (datum zápisu = konec úseku), `from_on`/`to_on` a `days` (pokryté dny).
@@ -29,12 +30,12 @@ final class AccrualPlanBuilder
     /**
      * @return list<array{kind:string, due_on:string, from_on:string, to_on:string, days:int, amount_planned:float}>
      */
-    public static function build(string $method, float $basis, string $from, string $to, ?string $coveredThrough = null, ?float $targetTotal = null): array
+    public static function build(string $method, float $basis, string $from, string $to, ?string $coveredThrough = null, ?float $targetTotal = null, string $yearEnd = '12-31'): array
     {
         if ($method === 'manual' || AccrualScheduleCalculator::daysInclusive($from, $to) <= 0) {
             return [];
         }
-        $segments = $method === 'yearly' ? self::yearSegments($from, $to) : self::monthSegments($from, $to);
+        $segments = $method === 'yearly' ? self::yearSegments($from, $to, $yearEnd) : self::monthSegments($from, $to);
         $n = count($segments);
         $rows = [];
         foreach ($segments as $k => [$segFrom, $segTo]) {
@@ -156,16 +157,40 @@ final class AccrualPlanBuilder
         return $out;
     }
 
-    /** @return list<array{0:string,1:string}> */
-    private static function yearSegments(string $from, string $to): array
+    /**
+     * Úseky po účetních rocích končících dnem `$yearEnd` (MM-DD).
+     *
+     * @return list<array{0:string,1:string}>
+     */
+    private static function yearSegments(string $from, string $to, string $yearEnd): array
     {
+        if (preg_match('/^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/', $yearEnd) !== 1) {
+            $yearEnd = '12-31';
+        }
         $out = [];
-        for ($y = (int) substr($from, 0, 4); $y <= (int) substr($to, 0, 4); $y++) {
-            $segFrom = max($from, $y . '-01-01');
-            $segTo = min($to, $y . '-12-31');
-            $out[] = [$segFrom, $segTo];
+        $cursor = $from;
+        while ($cursor <= $to) {
+            $end = self::yearEndOnOrAfter($cursor, $yearEnd);
+            $segTo = $end < $to ? $end : $to;
+            $out[] = [$cursor, $segTo];
+            $cursor = self::dayAfter($segTo);
         }
         return $out;
+    }
+
+    /** Nejbližší konec účetního roku (MM-DD) v den `$date` nebo po něm; 29. 2. mimo přestupný rok = 28. 2. */
+    public static function yearEndOnOrAfter(string $date, string $yearEnd): string
+    {
+        $year = (int) substr($date, 0, 4);
+        foreach ([$year, $year + 1] as $y) {
+            [$m, $d] = array_map('intval', explode('-', $yearEnd));
+            $d = min($d, (int) (new \DateTimeImmutable(sprintf('%04d-%02d-01', $y, $m)))->format('t'));
+            $candidate = sprintf('%04d-%02d-%02d', $y, $m, $d);
+            if ($candidate >= substr($date, 0, 10)) {
+                return $candidate;
+            }
+        }
+        return substr($date, 0, 10);
     }
 
     public static function dayBefore(string $date): string

@@ -111,7 +111,7 @@ final class AccrualItemService
      * @param array<string,mixed> $input
      * @return list<array<string,mixed>>
      */
-    public function previewPlan(array $input): array
+    public function previewPlan(int $supplierId, array $input): array
     {
         $method = (string) ($input['method'] ?? 'monthly_days');
         if (!in_array($method, AccrualPlanBuilder::METHODS, true)) {
@@ -127,7 +127,7 @@ final class AccrualItemService
             ? AccrualPlanBuilder::dayBefore((string) $input['opening_as_of']) : null;
         $target = isset($input['opening_balance']) && $input['opening_balance'] !== null && $input['opening_balance'] !== ''
             ? self::amount($input['opening_balance'], 'opening_balance') : null;
-        return AccrualPlanBuilder::build($method, $basis, $from, $to, $covered, $target);
+        return AccrualPlanBuilder::build($method, $basis, $from, $to, $covered, $target, $this->fiscalYearEnd($supplierId));
     }
 
     /**
@@ -317,7 +317,7 @@ final class AccrualItemService
         $covered = self::coveredThrough($item, $schedule);
         $target = round(($item['opening_balance'] ?? $item['basis_amount']) - $done, 2);
         $rows = AccrualPlanBuilder::build((string) $item['method'], (float) $item['basis_amount'],
-            (string) $item['period_from'], (string) $item['period_to'], $covered, $target);
+            (string) $item['period_from'], (string) $item['period_to'], $covered, $target, $this->fiscalYearEnd($supplierId));
         $kept = [];
         foreach ($schedule as $row) {
             if ($row['kind'] === 'release' && in_array($row['status'], ['posted', 'linked'], true)) {
@@ -325,6 +325,18 @@ final class AccrualItemService
             }
         }
         $this->items->replacePlanned($supplierId, $id, array_values(array_filter($rows, static fn (array $r): bool => !isset($kept[$r['due_on']]))));
+    }
+
+    /**
+     * Konec účetního roku firmy (MM-DD) podle posledního účetního období; bez období 12-31.
+     * Roční rozpouštění se účtuje ke konci účetního roku, u hospodářského roku tedy ne k 31. 12.
+     */
+    public function fiscalYearEnd(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT ends_on FROM accounting_periods WHERE supplier_id = ? ORDER BY starts_on DESC LIMIT 1');
+        $stmt->execute([$supplierId]);
+        $end = $stmt->fetchColumn();
+        return $end === false ? '12-31' : substr((string) $end, 5, 5);
     }
 
     /**

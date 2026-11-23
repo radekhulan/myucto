@@ -90,7 +90,7 @@ final class AccrualAction
     public function planPreview(Request $request, Response $response): Response
     {
         if (!$this->guard($request, $response, false, $err)) return $err;
-        return $this->run($response, fn () => ['rows' => $this->items->previewPlan((array) ($request->getParsedBody() ?? []))]);
+        return $this->run($response, fn () => ['rows' => $this->items->previewPlan($this->currentSupplierId($request), (array) ($request->getParsedBody() ?? []))]);
     }
 
     public function create(Request $request, Response $response): Response
