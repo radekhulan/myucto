@@ -155,6 +155,22 @@ final class MoneyS3OpeningDocumentsTest extends MoneyS3ImportTestCase
         self::assertTrue(OpeningBalanceDocuments::isInOpening($this->db->pdo(), $supplierId, 'invoice', $manual));
     }
 
+    /**
+     * Počáteční stav 311 nese víc než doklady počátečního stavu (pohledávka bez dokladu):
+     * rekonciliace dokladů proti deníku (K4) doklad počátečního stavu ani otevírací zápis
+     * za předpis roku nebere a nesedí-li jen o zůstatek bez dokladu, nehlásí chybu.
+     */
+    public function testOpeningDocumentsDoNotBreakDocumentReconciliation(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithDocumentsBeforeFirstYear(1500.0));
+        $supplierId = $this->supplier();
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2024, toYear: 2024));
+
+        self::assertNotNull($this->invoice($supplierId, 'FV23001'), $this->explain($protocol));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+    }
+
     // ── pomocníci ─────────────────────────────────────────────────────────────
 
     private function convert(int $supplierId, bool $closeHistory = true): ImportProtocol

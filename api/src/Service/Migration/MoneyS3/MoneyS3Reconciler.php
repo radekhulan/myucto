@@ -167,12 +167,14 @@ final class MoneyS3Reconciler
         // Banka se porovnává celá: pohyb je doklad sám o sobě a převod mezi vlastními účty
         // (221 na obou stranách) se v součtu pohybů vyruší stejně jako v deníku.
         // Navázaný ruční zápis (`manual`, zápočet interním dokladem) je vyrovnání, ne předpis.
+        // Doklad počátečního stavu ({@see OpeningDocuments}) je navázaný na otevírací zápis,
+        // který nese celý počáteční stav účtu: předpisem roku není ani jeden z nich.
         $ledger = static fn (string $docType, string $prefix, string $sign, bool $onlyOneSided = true): string =>
             "SELECT COALESCE(SUM({$sign}), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND e.source_type <> 'manual'
+              WHERE l.supplier_id = ? AND e.period_id = ? AND e.source_type NOT IN ('manual', 'opening')
                 AND a.account_code LIKE '{$prefix}%'
                 " . ($onlyOneSided ? 'AND ' . $oneSided('e.id', 'l.supplier_id', $prefix) : '') . "
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
@@ -185,7 +187,7 @@ final class MoneyS3Reconciler
               WHERE d.supplier_id = ?
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
-                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id = ? AND e.source_type <> 'manual'
+                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id = ? AND e.source_type NOT IN ('manual', 'opening')
                               AND k.doc_type = '" . ($kind === 'bank_transaction' ? 'bank' : ($kind === 'cash_document' ? 'cash' : $kind)) . "'
                               AND " . ($onAccount ? '' : 'NOT ') . $oneSided('k.entry_id', 'k.supplier_id', $prefix) . ")
                 AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
