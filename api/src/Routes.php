@@ -3890,6 +3890,10 @@ final class Routes
         // Kniha DPH (interní VAT žurnál — NE EPO podání, vždy měsíční)
         $app->get    ('/api/reports/dph-book/preview', [DphBookAction::class, 'preview']);
         $app->get    ('/api/reports/dph-book',         [DphBookAction::class, 'download']);
+        // DPH podle dimenze — evidence DPH za období po hodnotách typu dimenze s kontrolou na
+        // přiznání a obrat účtu 343. Práva jako Kniha DPH (náhled reports, export reports.export).
+        $app->get    ('/api/reports/vat-by-dimension/preview', [\MyInvoice\Action\Report\VatDimensionReportAction::class, 'preview']);
+        $app->get    ('/api/reports/vat-by-dimension',         [\MyInvoice\Action\Report\VatDimensionReportAction::class, 'download']);
         // Evidence pro KH (issue #142) — soupis dokladů oddílu KH, PDF/XLSX export.
         $app->get    ('/api/reports/kh-evidence/preview', [\MyInvoice\Action\Report\KhEvidenceAction::class, 'preview']);
         $app->get    ('/api/reports/kh-evidence',         [\MyInvoice\Action\Report\KhEvidenceAction::class, 'download']);

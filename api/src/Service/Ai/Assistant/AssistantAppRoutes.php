@@ -48,6 +48,7 @@ final class AssistantAppRoutes
         '/reports/kh' => 'Kontrolní hlášení',
         '/reports/shv' => 'Souhrnné hlášení',
         '/reports/dph-book' => 'Kniha DPH',
+        '/reports/vat-by-dimension' => 'DPH podle dimenze',
         '/reports/income-tax' => 'Daň z příjmů',
         '/reports/submissions' => 'Archiv podání',
         '/tax' => 'Daňový kalendář a přehledy',

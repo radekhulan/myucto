@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>DPH podle dimenze</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .title { font-size: 13pt; font-weight: bold; }
+    .meta { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm 0; }
+    .meta td { font-size: 8pt; padding: 0.5mm 0; vertical-align: top; }
+    .meta-label { color: #555; width: 28mm; }
+    .section-title { font-size: 9pt; font-weight: bold; margin-top: 5mm; padding: 1mm 0; border-bottom: 0.5pt solid #999; }
+    table.list { width: 100%; border-collapse: collapse; margin: 0; }
+    table.list thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: right; padding: 1mm 1.2mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom; }
+    table.list thead th.left { text-align: left; }
+    table.list tbody td { padding: 0.8mm 1.2mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    table.list tr.total td { font-weight: bold; border-top: 0.5pt solid #333; }
+    table.list tr.control td { color: #444; }
+    table.list tr.diff td { font-weight: bold; }
+    .num { text-align: right; }
+    .bad { color: #b91c1c; }
+    .ok { color: #15803d; }
+    .note { font-size: 7pt; color: #666; margin-top: 1.5mm; }
+    .disclaimer { text-align: center; font-size: 7pt; color: #888; margin-top: 6mm; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="title">DPH podle dimenze</div>
+<table class="meta">
+    <tr><td class="meta-label">Firma:</td><td><strong>{{ supplier.company_name }}</strong>{% if supplier.ic %}, IČO {{ supplier.ic }}{% endif %}{% if supplier.dic %}, DIČ {{ supplier.dic }}{% endif %}</td></tr>
+    <tr><td class="meta-label">Období:</td><td>{{ period.label }} ({{ period.start|cz_date }} - {{ period.end|cz_date }})</td></tr>
+    <tr><td class="meta-label">Typ dimenze:</td><td>{{ dimension_type.name }}</td></tr>
+    <tr><td class="meta-label">Sestaveno:</td><td>{{ generated_at|cz_datetime }}</td></tr>
+</table>
+
+<table class="list">
+    <thead>
+        <tr>
+            <th class="left">Hodnota</th>
+            <th>Dokladů</th>
+            {% for key, label in columns %}<th>{{ label }}</th>{% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td style="padding-left: {{ 1.2 + row.depth * 3 }}mm;">{{ row.label }}{% if not row.is_active %} (neaktivní){% endif %}</td>
+            <td class="num">{{ row.documents }}</td>
+            {% for key, label in columns %}<td class="num">{{ attribute(row, key)|cz_money }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+        <tr class="total">
+            <td>Celkem</td><td></td>
+            {% for key, label in columns %}<td class="num">{{ attribute(total, key)|cz_money }}</td>{% endfor %}
+        </tr>
+        <tr class="control">
+            <td>Evidence DPH za období (stejná data jako přiznání)</td><td></td>
+            {% for key, label in columns %}<td class="num">{{ attribute(control.evidence, key)|cz_money }}</td>{% endfor %}
+        </tr>
+        <tr class="diff">
+            <td class="{{ control.ok ? 'ok' : 'bad' }}">Rozdíl</td><td></td>
+            {% for key, label in columns %}<td class="num {{ attribute(control.difference, key) != 0 ? 'bad' : 'ok' }}">{{ attribute(control.difference, key)|cz_money }}</td>{% endfor %}
+        </tr>
+        {% if control.return %}
+        <tr class="control">
+            <td>Přiznání k DPH (ř. 62, 63, 64)</td><td></td>
+            <td class="num">{{ control.return.vat_output|cz_money }}</td>
+            <td class="num">{{ control.return.vat_input|cz_money }}</td>
+            <td class="num">{{ control.return.vat_result|cz_money }}</td>
+            <td colspan="6"></td>
+        </tr>
+        <tr class="control">
+            <td>Opravy a zaokrouhlení přiznání (přiznání − evidence)</td><td></td>
+            <td class="num">{{ control.return.bridge.vat_output|cz_money }}</td>
+            <td class="num">{{ control.return.bridge.vat_input|cz_money }}</td>
+            <td class="num">{{ control.return.bridge.vat_result|cz_money }}</td>
+            <td colspan="6"></td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+{% for d in control.line_differences %}
+    <div class="note bad">Rozdíl na ř. {{ d.line }}: základ {{ d.base|cz_money }}, DPH {{ d.vat|cz_money }}</div>
+{% endfor %}
+{% if control.return_error %}<div class="note">{{ control.return_error }}</div>{% endif %}
+<div class="note">DPH dokladu se dělí podle dimenze položky, jinak hlavičky, u rozpadu podle podílů (po haléřích). Opravy § 43, § 46, § 74b, § 79, krácení odpočtu (§ 76) a úprava odpočtu (§ 78) nemají vazbu na položky dokladu, jsou v řádku „Opravy a zaokrouhlení přiznání“ spolu se zaokrouhlením řádků přiznání na celé Kč.</div>
+
+{% if account343 %}
+<div class="section-title">Kontrola obratů účtu 343</div>
+<table class="list">
+    <thead>
+        <tr><th class="left">Hodnota</th><th>MD</th><th>D</th><th>Saldo (D − MD)</th><th>Výsledek sestavy</th><th>Rozdíl</th></tr>
+    </thead>
+    <tbody>
+        {% for row in account343.rows %}
+        {% set cmp = account343.comparison[loop.index0] %}
+        <tr>
+            <td>{{ row.label }}</td>
+            <td class="num">{{ row.debit|cz_money }}</td>
+            <td class="num">{{ row.credit|cz_money }}</td>
+            <td class="num">{{ row.net|cz_money }}</td>
+            <td class="num">{{ cmp.report_result|cz_money }}</td>
+            <td class="num">{{ cmp.difference|cz_money }}</td>
+        </tr>
+        {% endfor %}
+        {% set cmp = account343.comparison|last %}
+        <tr class="total">
+            <td>Celkem</td>
+            <td class="num">{{ account343.total.debit|cz_money }}</td>
+            <td class="num">{{ account343.total.credit|cz_money }}</td>
+            <td class="num">{{ account343.total.net|cz_money }}</td>
+            <td class="num">{{ cmp.report_result|cz_money }}</td>
+            <td class="num">{{ cmp.difference|cz_money }}</td>
+        </tr>
+    </tbody>
+</table>
+<div class="note">Mimo obrat: úhrady a vratky DPH finančnímu úřadu {{ account343.excluded.payments.count }} zápisů (saldo {{ account343.excluded.payments.net|cz_money }}), počáteční stavy a uzávěrka {{ account343.excluded.opening.count }} zápisů (saldo {{ account343.excluded.opening.net|cz_money }}).</div>
+<div class="note">{{ account343.note }}</div>
+{% elseif account343_unavailable %}
+<div class="note">{{ account343_unavailable }}</div>
+{% endif %}
+
+{% for w in warnings %}<div class="note bad">{{ w }}</div>{% endfor %}
+
+<div class="disclaimer">Interní sestava, není podáním finančnímu úřadu.</div>
+</body>
+</html>

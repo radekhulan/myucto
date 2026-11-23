@@ -173,136 +173,17 @@ final class VatClassificationMapper
     /**
      * Projekce kanonických řádků (VatLedgerService) na řádky DPHDP3. Sdílená logika
      * (klasifikace, CZK, RC samovyměření, rate bucket) žije ve službě; tady jen agregace
-     * po dphdp3_line + mirror ř.43 (secondary) + ř.47 (majetek).
+     * po dphdp3_line + mirror ř.43 (secondary) + ř.47 (majetek), viz {@see DphLineProjection}.
      *
      * @param iterable<array<string,mixed>> $rows
      * @return array<string, array{base:float, vat:float, count:int, label:string}>
      */
     public function projectDphLines(iterable $rows): array
     {
-        $byLine = [];
-        $invoiceLineSeen = []; // per document identity × line → distinct count
-        $mirrorParts = [];     // zrcadlový odpočet ř. 43/44 rozpadlý podle primárního ř. 3–13
+        $projection = new DphLineProjection();
         foreach ($rows as $r) {
-            $primary = $r['dphdp3_line'];
-            if ($r['code'] === null || $primary === null) continue; // bez řádku DPHDP3 → přeskoč
-
-            $baseCzk = (float) $r['base_czk'];
-            $vatCzk  = (float) $r['vat_czk'];
-            $label   = (string) $r['label'];
-            // Count distinct dokladů per řádek včetně odděleného namespace pokladny.
-            $documentKey = VatLedgerService::documentIdentity($r);
-
-            $this->addLine($byLine, $primary, $baseCzk, $vatCzk, $documentKey, $invoiceLineSeen, $label);
-
-            // Secondary (typicky ř.43 — mirror odpočet u RC / dovozu služby). U plnění bez
-            // nároku na odpočet ('none', § 72/4 — např. reprezentace ze zahraničí v RC) se
-            // zrcadlový odpočet POTLAČÍ: výstupní samovyměření (primární ř.) zůstává, odpočet ne.
-            $secondary = $r['dphdp3_line_secondary'];
-            if ($secondary !== null && $secondary !== '' && $secondary !== $primary && empty($r['vat_deduction_none'])) {
-                // Ř.51 je pouze doplňující základ plnění vyloučeného z koeficientu §76;
-                // daň zůstává výhradně na primárním ř.1/2.
-                $secondaryVat = in_array($secondary, ['51', '51b'], true)
-                    ? 0.0
-                    : (float) ($r['deduction_vat_czk'] ?? $vatCzk);
-                $secondaryBase = (float) ($r['deduction_base_czk'] ?? $baseCzk);
-                $this->addLine(
-                    $byLine,
-                    $secondary,
-                    $secondaryBase,
-                    $secondaryVat,
-                    $documentKey,
-                    $invoiceLineSeen,
-                    $label,
-                );
-                if (isset(self::SELF_ASSESSMENT_MIRROR_LINES[$secondary])) {
-                    $mirrorParts[$secondary][$primary]['base'] = ($mirrorParts[$secondary][$primary]['base'] ?? 0.0) + $secondaryBase;
-                    $mirrorParts[$secondary][$primary]['vat']  = ($mirrorParts[$secondary][$primary]['vat'] ?? 0.0) + $secondaryVat;
-                }
-            }
-
-            // ř.47 — hodnota pořízeného majetku (doplňující údaj k ř.40-45).
-            if ($r['is_fixed_asset']) {
-                $assetEligibleLine = $this->countsAsFixedAssetLine($primary)
-                    ? $primary
-                    : (($secondary !== null && $this->countsAsFixedAssetLine($secondary)) ? $secondary : null);
-                if ($assetEligibleLine !== null) {
-                    $assetBase = $assetEligibleLine === $secondary
-                        ? (float) ($r['deduction_base_czk'] ?? $baseCzk)
-                        : $baseCzk;
-                    // Daň ř.47 jde do sloupce „V plné výši" (od_maj); u kráceného odpočtu
-                    // (ř.40k-44k) se sloupec „Krácený odpočet" zatím neplní.
-                    $assetVat = str_ends_with($assetEligibleLine, 'k')
-                        ? 0.0
-                        : ($assetEligibleLine === $secondary
-                            ? (float) ($r['deduction_vat_czk'] ?? $vatCzk)
-                            : $vatCzk);
-                    $this->addLine($byLine, '47', $assetBase, $assetVat, $documentKey, $invoiceLineSeen, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
-                }
-            }
+            $projection->add($r);
         }
-
-        // Ř. 43/44 (odpočet ze samovyměření) je v přiznání protějškem ř. 3–13: nárok na
-        // odpočet je ve výši daně, kterou plátce na výstupu PŘIZNAL (§ 72 odst. 2,
-        // § 73 odst. 1 písm. b) ZDPH), tedy součet řádků tak, jak jsou vyplněné na celé Kč.
-        // Samovyměření se tím přesně vyruší. Proto se zrcadlový řádek skládá ze
-        // zaokrouhlených podílů jednotlivých primárních řádků, stejně jako se ř. 46
-        // skládá z řádků 40–45, ne zaokrouhlením haléřového součtu.
-        //
-        // EPO ř. 43/44 ověřuje JINAK: výpočtem ze základu řádku krát sazba („Přesně
-        // vypočtená hodnota součtu daní na ř. 43 je …"). Obě cesty se mohou kvůli
-        // zaokrouhlení rozejít o koruny a EPO pak vytkne propustnou chybu; podání přijme
-        // (ověřeno zkušebním podáním, #264). Builder přiznání na to předem upozorní.
-        // Dřívější výklad, že EPO sčítá vyplněné řádky (chyba č. 90), byl nepřesný:
-        // hlášený případ ř. 5 = 50 646 a ř. 12 = 539 vyšel 51 185 oběma cestami.
-        foreach ($mirrorParts as $mirrorLine => $parts) {
-            $base = 0.0;
-            $vat = 0.0;
-            foreach ($parts as $part) {
-                $base += EpoAmount::wholeCzk($part['base']);
-                $vat  += EpoAmount::wholeCzk($part['vat']);
-            }
-            $byLine[$mirrorLine]['base'] = $base;
-            $byLine[$mirrorLine]['vat']  = $vat;
-        }
-
-        return $byLine;
-    }
-
-    /**
-     * Zrcadlové řádky odpočtu ze samovyměření (ř. 43/44 plná i krácená výše), které
-     * {@see projectDphLines()} skládá ze zaokrouhlených podílů primárních ř. 3–13.
-     */
-    private const SELF_ASSESSMENT_MIRROR_LINES = ['43' => true, '44' => true, '43k' => true, '44k' => true];
-
-    /**
-     * @param array<string, array{base:float, vat:float, count:int, label:string}> $byLine by-ref
-     * @param array<string, bool> $invoiceLineSeen by-ref
-     */
-    private function addLine(array &$byLine, string $line, float $baseCzk, float $vatCzk, string $documentKey, array &$invoiceLineSeen, string $label): void
-    {
-        if (!isset($byLine[$line])) {
-            $byLine[$line] = ['base' => 0.0, 'vat' => 0.0, 'count' => 0, 'label' => $label];
-        }
-        $byLine[$line]['base'] += $baseCzk;
-        $byLine[$line]['vat']  += $vatCzk;
-        $seenKey = $documentKey . ':' . $line;
-        if (!isset($invoiceLineSeen[$seenKey])) {
-            $invoiceLineSeen[$seenKey] = true;
-            $byLine[$line]['count']++;
-        }
-    }
-
-    /**
-     * Smí dané plnění figurovat na ř. 47 (hodnota pořízeného majetku)?
-     *
-     * Doplňující údaj k odpočtu — vstup do ř. 40-45 (tuzemsko 40/41, dovoz CÚ 42,
-     * RC mirror 43, korekce 44, registrace 45). NE pro výstupové řádky 3-13
-     * samotné (ty se počítají odděleně přes secondary='43' mirror).
-     */
-    private function countsAsFixedAssetLine(string $primaryLine): bool
-    {
-        $n = (int) $primaryLine;
-        return $n >= 40 && $n <= 45;
+        return $projection->lines();
     }
 }
