@@ -8,7 +8,6 @@ use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -110,8 +109,6 @@ final class SetPurchaseInvoiceItemsAction
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
             $pdo->beginTransaction();
-        } else {
-            $pdo->exec('SAVEPOINT set_purchase_items');
         }
         try {
             $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
@@ -123,15 +120,15 @@ final class SetPurchaseInvoiceItemsAction
             $this->advanceLinks->sync($supplierId, $id);
             if ($ownTx) {
                 $pdo->commit();
-            } else {
-                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
             }
         } catch (\Throwable $e) {
-            if ($ownTx && $pdo->inTransaction()) {
+            // Vnořený zápis řádků s FULLTEXT odvolává vlastník celé transakce.
+            // Částečný rollback může při dalším přepisu řádků shodit MariaDB 12.3.3.
+            if (!$ownTx) {
+                throw $e;
+            }
+            if ($pdo->inTransaction()) {
                 $pdo->rollBack();
-            } elseif (!$ownTx && $pdo->inTransaction() && !TransactionFailure::aborted($e)) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT set_purchase_items');
-                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
             }
             if ($e instanceof PurchaseAdvanceLinkException) {
                 return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);

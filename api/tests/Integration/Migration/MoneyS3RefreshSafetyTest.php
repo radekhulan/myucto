@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
+use MyInvoice\Tests\Support\SavepointStatus;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -18,6 +19,43 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class MoneyS3RefreshSafetyTest extends MoneyS3ImportTestCase
 {
+    #[Group('fulltext-transactions')]
+    public function testRefreshPreviewRollsBackBeforeRewritingTheSameInvoiceAgain(): void
+    {
+        $supplierId = $this->supplier();
+        self::assertFalse($this->import($supplierId)->hasErrors());
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $this->filesWithFv25001Changed());
+        $pdo = $this->db->pdo();
+        $before = SavepointStatus::read($pdo);
+
+        $pdo->beginTransaction();
+        try {
+            $this->rowCount('invoices', $supplierId);
+            try {
+                $this->import($supplierId, ImportOptions::MODE_DRY_RUN);
+                self::fail('Vnořená zkouška převodu musí být odmítnuta.');
+            } catch (\LogicException $e) {
+                self::assertSame('Zkouška převodu Money S3 vyžaduje vlastní transakci.', $e->getMessage());
+            }
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame($before, SavepointStatus::read($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $preview = $this->import($supplierId, ImportOptions::MODE_DRY_RUN);
+            self::assertFalse($preview->hasErrors(), $this->explain($preview));
+            $step = array_column($preview->toArray()['steps'], null, 'key')['issued_invoices'];
+            self::assertSame(1, $step['counts']['updated']);
+            self::assertFalse($pdo->inTransaction());
+            self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV25001' AND total_with_vat = 1210.00"));
+        }
+        $applied = $this->import($supplierId);
+        self::assertFalse($applied->hasErrors(), $this->explain($applied));
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV25001' AND total_with_vat = 1331.00"));
+    }
+
     /**
      * Firma převedená před migrací 2334 (otisk v mapě je NULL). Účetní v MyÚčtu opravila
      * účet nákladu FP25001 (518 -> 568). Money zápis nezměnilo. Opakovaný převod ale opravu

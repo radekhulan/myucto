@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Migration;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Importer;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
+use MyInvoice\Tests\Support\OwnedSandboxDatabase;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -22,6 +24,7 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class MoneyS3PayrollImportTest extends TestCase
 {
+    use OwnedSandboxDatabase;
     private Connection $db;
     private MoneyS3Importer $importer;
     private string $tmp = '';
@@ -29,15 +32,19 @@ final class MoneyS3PayrollImportTest extends TestCase
     private int $anyCurrencyId = 0;
     private int $vatRateId = 0;
     private int $czId = 0;
-    private bool $inTx = false;
 
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
+        $ownsTransactions = in_array('fulltext-transactions', $this->groups(), true);
         try {
             $container = Bootstrap::buildContainer();
+            if ($ownsTransactions) {
+                $container->set(Config::class, self::sandboxConfig('money_pay_preview'));
+                $container->set(Connection::class, self::sandboxConnection('money_pay_preview'));
+            }
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(MoneyS3Importer::class);
         } catch (\Throwable $e) {
@@ -58,13 +65,14 @@ final class MoneyS3PayrollImportTest extends TestCase
         }
         $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ms3pay_' . bin2hex(random_bytes(5));
         mkdir($this->tmp, 0755, true);
-        $pdo->beginTransaction();
-        $this->inTx = true;
+        if (!$ownsTransactions) {
+            $pdo->beginTransaction();
+        }
     }
 
     protected function tearDown(): void
     {
-        if (isset($this->db) && $this->inTx) {
+        if (isset($this->db)) {
             $pdo = $this->db->pdo();
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -151,6 +159,7 @@ final class MoneyS3PayrollImportTest extends TestCase
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_offices WHERE supplier_id = ?', $supplierId));
     }
 
+    #[Group('fulltext-transactions')]
     public function testDryRunEnablesNothing(): void
     {
         $supplierId = $this->supplier();

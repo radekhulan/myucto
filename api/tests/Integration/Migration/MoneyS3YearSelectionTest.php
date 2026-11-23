@@ -24,6 +24,7 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
 {
+    #[Group('fulltext-transactions')]
     public function testAgendaYearOnlyKeepsNextYearRunningInMyUcto(): void
     {
         $supplierId = $this->companyRunning2025();
@@ -56,6 +57,7 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
      * nepoužije a převod ohlásí vlastní zápisy jako dřív. Uzavřený rok zvolený výslovně
      * v „Převést do roku" je chyba.
      */
+    #[Group('fulltext-transactions')]
     public function testClosedYearsWithOwnJournalAfterThemStopImport(): void
     {
         $supplierId = $this->supplier();
@@ -252,6 +254,7 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
     }
 
     /** Adresář zálohy s doklady, ale bez deníku (čerstvě založený rok) kontrola ohlásí. */
+    #[Group('fulltext-transactions')]
     public function testDirectoryWithDocumentsWithoutJournalIsReported(): void
     {
         $files = SyntheticAgenda::patch(SyntheticAgenda::files(), 'ROK.003/VFaktury.DAT', null, [$this->issued('FV26001', '2026-01-10', 1000.0, 210.0)]);
@@ -271,6 +274,7 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
      * závazek, ostatní pohledávka, interní doklad) kontrola ohlásí také: převod ho vynechá
      * celý stejně jako adresář s fakturami.
      */
+    #[Group('fulltext-transactions')]
     public function testDirectoryWithOtherDocumentsWithoutJournalIsReported(): void
     {
         $fields = [['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['Celkem', 'E', 10]];

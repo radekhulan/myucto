@@ -17,7 +17,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService;
 use MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\SavepointStatus;
 use PDO;
+use PDOStatement;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -63,7 +65,7 @@ final class DraftPostingPreviewConflictTest extends TestCase
         }
         try {
             $c = Bootstrap::buildContainer();
-            $this->db = $c->get(Connection::class);
+            $this->db = Connection::withoutSharedTestConnection(fn (): Connection => $c->get(Connection::class));
             $this->preview = $c->get(DraftPostingPreviewAction::class);
             $this->updatePurchase = $c->get(UpdatePurchaseInvoiceAction::class);
             $this->checks = $c->get(AttachmentCheckService::class);
@@ -152,26 +154,68 @@ final class DraftPostingPreviewConflictTest extends TestCase
     /**
      * BEZ OPRAVY PADÁ: uložení v náhledu přepočítalo kontrolu přílohy uvnitř transakce
      * náhledu, zápis `attachment_checks` dostal 1020, catch chybu spolkl a náhled skončil
-     * LogicException (v cizí transakci 1305 z ROLLBACK TO SAVEPOINT). Náhled kontrolu
-     * přílohy nepřepočítává vůbec, takže souběžná změna jejího řádku mu nevadí a
-     * transakce volajícího zůstane otevřená.
+     * LogicException. Náhled kontrolu přílohy nepřepočítává, takže souběžná změna
+     * jejího řádku mu nevadí.
      */
     public function testConcurrentAttachmentCheckWriteDoesNotBreakPreview(): void
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
-        $this->takeSnapshot();
-        $this->touchCheckFromOtherConnection();
+        $touches = 0;
+        $afterRead = function () use ($pdo, &$touches): void {
+            if ($touches === 0 && $pdo->inTransaction()) {
+                $touches++;
+                $this->touchCheckFromOtherConnection();
+            }
+        };
+        $pdo->setAttribute(PDO::ATTR_STATEMENT_CLASS, [DraftPreviewConcurrentReadStatement::class, [$afterRead]]);
 
         $preview = $this->draftPreview($this->payload(['note_below_items' => 'Náhled při souběhu']));
 
+        self::assertSame(1, $touches);
         self::assertSame(200, $preview['status'], json_encode($preview['body'], JSON_UNESCAPED_UNICODE));
         self::assertTrue($preview['body']['balanced']);
-        self::assertTrue($pdo->inTransaction(), 'transakce volajícího zůstala otevřená');
-        $pdo->rollBack();
+        self::assertFalse($pdo->inTransaction());
 
         self::assertSame('draft', $this->purchaseStatus(), 'náhled nic neuložil');
         self::assertSame('2001-01-01 00:00:00', $this->checkedAt(), 'náhled kontrolu přílohy nepřepsal');
+    }
+
+    #[Group('fulltext-transactions')]
+    public function testPreviewRepeatsWithoutRollingBackToSavepoint(): void
+    {
+        $pdo = $this->db->pdo();
+        $before = SavepointStatus::read($pdo);
+        $payload = $this->payload();
+        $payload['items'][0]['description'] = 'Jiný text položky';
+        $description = $pdo->prepare('SELECT description FROM purchase_invoice_items WHERE purchase_invoice_id = ?');
+
+        $pdo->beginTransaction();
+        try {
+            $this->takeSnapshot();
+            try {
+                $this->draftPreview($payload);
+                self::fail('Vnořený náhled musí být odmítnut.');
+            } catch (\LogicException $e) {
+                self::assertSame('Náhled zápisu vyžaduje vlastní transakci.', $e->getMessage());
+            }
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame($before, SavepointStatus::read($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $preview = $this->draftPreview($payload);
+            self::assertSame(200, $preview['status'], json_encode($preview['body'], JSON_UNESCAPED_UNICODE));
+            self::assertTrue($preview['body']['balanced']);
+            self::assertFalse($pdo->inTransaction());
+            $description->execute([$this->purchaseId]);
+            self::assertSame('Služba', $description->fetchColumn());
+        }
+        // Uložení hlavičky v updateDraft má vlastní savepoint pro zámky období.
+        // Pracuje před výměnou položek a úspěšně skončí RELEASE.
+        $before['Com_savepoint'] += 2;
+        self::assertSame($before, SavepointStatus::read($pdo));
     }
 
     /**
@@ -340,5 +384,19 @@ final class DraftPostingPreviewConflictTest extends TestCase
         $decoded = json_decode((string) $response->getBody(), true);
 
         return ['status' => $response->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
+    }
+}
+
+final class DraftPreviewConcurrentReadStatement extends PDOStatement
+{
+    protected function __construct(private readonly \Closure $afterRead) {}
+
+    public function execute(?array $params = null): bool
+    {
+        $ok = parent::execute($params);
+        if ($ok && str_starts_with(ltrim($this->queryString), 'SELECT') && !str_contains($this->queryString, 'FOR UPDATE')) {
+            ($this->afterRead)();
+        }
+        return $ok;
     }
 }

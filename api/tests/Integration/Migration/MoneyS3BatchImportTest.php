@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 
 use MyInvoice\Action\Admin\Import\MoneyS3BatchAction;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -26,6 +27,8 @@ use MyInvoice\Service\Tax\Return\DppoXmlBuilder;
 use MyInvoice\Service\Tax\TaxConstants;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticTaxAgenda;
+use MyInvoice\Tests\Support\OwnedSandboxDatabase;
+use MyInvoice\Tests\Support\SavepointStatus;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -41,6 +44,7 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 final class MoneyS3BatchImportTest extends TestCase
 {
+    use OwnedSandboxDatabase;
     private const ICO_A = '24681351';
     private const ICO_B = '13579240';
     private const LIVE = 'import';
@@ -52,15 +56,19 @@ final class MoneyS3BatchImportTest extends TestCase
     private string $tmp = '';
     private int $userId = 0;
     private int $officeId = 0;
-    private bool $inTx = false;
 
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
+        $ownsTransactions = in_array('fulltext-transactions', $this->groups(), true);
         try {
             $this->container = Bootstrap::buildContainer();
+            if ($ownsTransactions) {
+                $this->container->set(Config::class, self::sandboxConfig('money_batch_preview'));
+                $this->container->set(Connection::class, self::sandboxConnection('money_batch_preview'));
+            }
             $this->db = $this->container->get(Connection::class);
             $this->importer = $this->container->get(MoneyS3BatchImporter::class);
         } catch (\Throwable $e) {
@@ -86,8 +94,9 @@ final class MoneyS3BatchImportTest extends TestCase
         SyntheticAgenda::writeLzFiles($this->tmp . '/beta.lz', SyntheticAgenda::forCompany(SyntheticAgenda::filesWithOpeningReclass(), self::ICO_B, 'Dávková beta s.r.o.', 'Vzorová 3', 'Jihlava', '586 01'));
         file_put_contents($this->tmp . '/rozbita.lz', 'tohle není záloha');
 
-        $pdo->beginTransaction();
-        $this->inTx = true;
+        if (!$ownsTransactions) {
+            $pdo->beginTransaction();
+        }
         $pdo->prepare(
             'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
              VALUES ("Účetní kancelář dávky", "Účetní 1", "Brno", "60200", ?, "kancelar@example.invalid", ?, ?)'
@@ -107,7 +116,7 @@ final class MoneyS3BatchImportTest extends TestCase
             @rmdir(MoneyS3BatchUploads::filingsDir($this->officeId));
             @rmdir(MoneyS3BatchUploads::store()->base($this->officeId));
         }
-        if (isset($this->db) && $this->inTx) {
+        if (isset($this->db)) {
             $pdo = $this->db->pdo();
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -197,9 +206,26 @@ final class MoneyS3BatchImportTest extends TestCase
         self::assertSame($supplierId, $skipped[0]['target_supplier_id']);
     }
 
+    #[Group('fulltext-transactions')]
     public function testDryRunLeavesNeitherCompanyNorRun(): void
     {
         $before = $this->rows('supplier', null);
+        $pdo = $this->db->pdo();
+        $counters = SavepointStatus::read($pdo);
+        $pdo->beginTransaction();
+        try {
+            $this->rows('supplier', null);
+            try {
+                $this->runBatch(['alfa.lz'], $this->options(self::DRY));
+                self::fail('Vnořená zkouška dávky musí být odmítnuta.');
+            } catch (\LogicException $e) {
+                self::assertSame('Dávková zkouška Money S3 vyžaduje vlastní transakci.', $e->getMessage());
+            }
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame($counters, SavepointStatus::read($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
         $results = $this->runBatch(['alfa.lz', 'beta.lz'], $this->options(self::DRY));
 
         foreach ($results as $r) {

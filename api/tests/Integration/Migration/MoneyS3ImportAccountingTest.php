@@ -800,6 +800,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         self::assertSame('double_entry', $h->fetchColumn());
     }
 
+    #[Group('fulltext-transactions')]
     public function testDifferenceAgainstMoneyReportIsReported(): void
     {
         $supplierId = $this->supplier();
@@ -815,6 +816,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     }
 
     /** Rozdíl předvahy do koruny včetně je zaokrouhlení: upozornění se seznamem účtů, K1 sedí. */
+    #[Group('fulltext-transactions')]
     public function testRoundingAgainstMoneyReportIsAWarning(): void
     {
         $supplierId = $this->supplier();

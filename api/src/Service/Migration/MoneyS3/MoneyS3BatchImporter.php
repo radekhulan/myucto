@@ -130,10 +130,10 @@ final class MoneyS3BatchImporter
 
             $dryRun = $options->isDryRun();
             $pdo = $this->db->pdo();
-            $savepoint = $dryRun && $pdo->inTransaction();
-            if ($savepoint) {
-                $pdo->exec('SAVEPOINT money_s3_batch_dry_run');
-            } elseif ($dryRun) {
+            if ($dryRun) {
+                if ($pdo->inTransaction()) {
+                    throw new \LogicException('Dávková zkouška Money S3 vyžaduje vlastní transakci.');
+                }
                 $pdo->beginTransaction();
             }
             try {
@@ -202,9 +202,7 @@ final class MoneyS3BatchImporter
                 return self::result($status, $dryRun && $action === 'created' ? null : $targetId, $action, $fromYear,
                     $dryRun ? null : $runId, $summary, $error);
             } finally {
-                if ($savepoint) {
-                    $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_batch_dry_run');
-                } elseif ($dryRun && $pdo->inTransaction()) {
+                if ($dryRun && $pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
             }
@@ -235,7 +233,10 @@ final class MoneyS3BatchImporter
                 'backup_sha256' => (string) hash_file('sha256', $lzPath),
             ], $userId > 0 ? $userId : null);
             try {
-                $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel, $agenda);
+                $protocol = $this->importer->run(
+                    $supplierId, $userId, $backup, $options, $runId, $progress, $cancel, $agenda,
+                    callerRollsBackPreview: $options->isDryRun(),
+                );
             } catch (\Throwable $e) {
                 $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $options->mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => 'Převod selhal na neočekávané chybě.', 'steps' => []]);
                 throw $e;

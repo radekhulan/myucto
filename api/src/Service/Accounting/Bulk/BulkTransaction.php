@@ -42,4 +42,19 @@ final class BulkTransaction
         }
         return $result;
     }
+
+    /**
+     * Zápis položek s FULLTEXT vyžaduje celý rollback před případným dalším zápisem.
+     *
+     * @template T
+     * @param callable():T $work
+     * @return T
+     */
+    public static function runOwned(PDO $pdo, callable $work, bool $discard = false): mixed
+    {
+        if ($pdo->inTransaction()) {
+            throw new \LogicException('Zápis položek hromadné akce vyžaduje vlastní transakci.');
+        }
+        return self::run($pdo, $work, $discard);
+    }
 }

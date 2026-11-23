@@ -742,6 +742,7 @@ final class MoneyS3Importer
     /**
      * `$agenda` a `$journalPreview` = náhled agendy a deníku, který už spočítal job nahrání
      * (`meta.json`); bez nich se čtou ze zálohy.
+     * Při `$callerRollsBackPreview` drží celou transakci náhledu dávka a vždy ji odvolá.
      *
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
@@ -757,7 +758,14 @@ final class MoneyS3Importer
         ?callable $shouldCancel = null,
         ?AgendaInfo $agenda = null,
         ?array $journalPreview = null,
+        bool $callerRollsBackPreview = false,
     ): ImportProtocol {
+        $pdo = $this->db->pdo();
+        $dryRun = $options->isDryRun();
+        if ($callerRollsBackPreview && (!$dryRun || !$pdo->inTransaction())) {
+            throw new \LogicException('Převzetí rollbacku vyžaduje otevřenou transakci zkoušky Money S3.');
+        }
+        $ownPreview = $dryRun && !$callerRollsBackPreview;
         $protocol = new ImportProtocol($options->mode, $options->acceptDifferences);
         $agenda ??= AgendaInfo::fromBackup($backup);
         $protocol->set('agenda', $agenda->toArray());
@@ -802,14 +810,12 @@ final class MoneyS3Importer
         $targets = $automationManaged ? $this->writableTargets($supplierId, $frameworkPeriods) : [];
         // Opravný převod vazeb deník ani DPH nemění: zámek k datu ho nezastaví, jen uzavření období.
         $lockChecked = !$options->relinkOnly;
-        $pdo = $this->db->pdo();
-        $dryRun = $options->isDryRun();
-        // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes
-        // savepoint — vlastní BEGIN by PDO odmítlo a vnější transakci by nesměla vrátit.
-        $savepoint = $dryRun && $pdo->inTransaction();
-        if ($savepoint) {
-            $pdo->exec('SAVEPOINT money_s3_dry_run');
-        } elseif ($dryRun) {
+        // Obnova dříve převzatých dokladů maže řádky s FULLTEXT. Po částečném rollbacku
+        // může další zápis do stejných řádků shodit MariaDB 12.3.3.
+        if ($ownPreview) {
+            if ($pdo->inTransaction()) {
+                throw new \LogicException('Zkouška převodu Money S3 vyžaduje vlastní transakci.');
+            }
             $pdo->beginTransaction();
         }
         try {
@@ -869,8 +875,7 @@ final class MoneyS3Importer
                     }
                     $protocol->finish($key);
                 } catch (\Throwable $e) {
-                    // Odvolaná transakce (1020/1213) nesmí zůstat viset jako otevřená:
-                    // savepoint zkušebního běhu i zbytek převodu by jinak pracovaly naslepo.
+                    // Odvolaná transakce (1020/1213) nesmí zůstat viset jako otevřená.
                     TransactionFailure::rollbackIfAborted($pdo, $e);
                     if ($e instanceof MoneyS3Exception || $e instanceof AccountingFrameworkException) {
                         $protocol->error($key, $e->errorCode, $e->getMessage());
@@ -917,9 +922,7 @@ final class MoneyS3Importer
             $protocol->error(self::STEP_PREFLIGHT, $e->errorCode, $e->getMessage());
             $protocol->fail(self::STEP_PREFLIGHT);
         } finally {
-            if ($savepoint && $pdo->inTransaction()) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_dry_run');
-            } elseif ($dryRun && $pdo->inTransaction()) {
+            if ($ownPreview && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             if ($dryRun) {
