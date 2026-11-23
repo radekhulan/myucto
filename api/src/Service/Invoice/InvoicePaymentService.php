@@ -889,6 +889,7 @@ final class InvoicePaymentService
         $row['taken_over'] = TakenOverPayment::isTakenOver($row);
         $row['taken_over_locked'] = TakenOverPayment::isProtected($row);
         $row['prior_year'] = TakenOverPayment::isPriorYear($row);
+        $row['tax_declared_by_origin'] = TakenOverPayment::isTaxDeclaredByOrigin($row);
         return $row;
     }
 

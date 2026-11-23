@@ -185,6 +185,11 @@ final class PaymentTaxDocumentCreator
                 'Úhrada z minulého roku převzatá z POHODY - daň z ní přiznala POHODA, daňový doklad k platbě se nevystavuje.'
             );
         }
+        if (TakenOverPayment::isTaxDeclaredByOrigin($payment)) {
+            throw new PaymentTaxDocumentNotApplicableException(
+                'Úhrada převzatá z Money S3 - daň z ní přiznal původní program (daňový doklad k platbě je mezi převzatými doklady), nový se nevystavuje.'
+            );
+        }
         // Guard proti dvojímu zdanění: jakmile k proformě existuje VYSTAVENÝ
         // (nestornovaný) finální doklad, jeho odpočtové řádky (§ 37a) jsou zafixované
         // a dodatečný daňový doklad k platbě by stejnou úplatu zdanil podruhé.

@@ -62,6 +62,8 @@ export interface InvoicePayment {
   taken_over_locked?: boolean
   /** Úhrada minulého roku převzatá z POHODY: daňový doklad k ní se nevystavuje. */
   prior_year?: boolean
+  /** Daň z platby přiznal původní program (POHODA minulý rok, Money S3): daňový doklad k ní se nevystavuje. */
+  tax_declared_by_origin?: boolean
   created_at: string
 }
 

@@ -26279,7 +26279,7 @@
         "credit_note": "Credit note set-off"
       },
       "taken_over": "Taken over",
-      "locked_taken_over": "A payment taken over from POHODA cannot be deleted - it carries the part paid before the conversion. Fix it by running the conversion again.",
+      "locked_taken_over": "A payment taken over from the original system cannot be deleted - it carries a paid part that has no payment document in MyÚčto. Fix it by running the conversion again.",
       "vs": "Payment VS",
       "reference": "Reference",
       "note": "Note",

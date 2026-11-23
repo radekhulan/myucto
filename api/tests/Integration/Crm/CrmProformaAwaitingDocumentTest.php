@@ -8,6 +8,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Crm\CrmAggregationService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\TakenOverPayment;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -144,6 +146,16 @@ final class CrmProformaAwaitingDocumentTest extends TestCase
     {
         $this->setMode(ProformaPaymentDocuments::MODE_MANUAL);
         $this->paidProforma(30, PohodaPriorYearPayments::SOURCE, PohodaPriorYearPayments::NOTE);
+
+        self::assertNull($this->item());
+    }
+
+    /** Platba zálohy převzatá z Money S3: daň přiznala Money, doklad k ní MyÚčto nevystavuje. */
+    public function testMoneyS3PaymentDoesNotSurfaceTheItem(): void
+    {
+        $this->setMode(ProformaPaymentDocuments::MODE_MANUAL);
+        $this->paidProforma(30, 'bank', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001');
+        $this->paidProforma(25, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)');
 
         self::assertNull($this->item());
     }

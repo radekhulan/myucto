@@ -12,6 +12,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\Invoice\TakenOverPaymentException;
 use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Service\Migration\Pohoda\DocumentLinker;
@@ -136,6 +137,42 @@ final class TakenOverPaymentDeleteTest extends TestCase
             $this->container->get(InvoicePaymentService::class)->listFor($invoiceId),
         );
         self::assertSame([[true, true, false], [true, false, false], [false, false, false]], $flags);
+    }
+
+    /**
+     * Úhrada, kterou Money S3 vede jen datem úhrady bez dokladu úhrady v převedených datech,
+     * nemá v MyÚčtu protějšek: nesmaže se, „Zrušit úhradu" ji ponechá a doklad nevrátí.
+     */
+    public function testMoneyS3PaymentWithoutDocumentIsProtected(): void
+    {
+        $invoiceId = $this->invoice(1210);
+        $paymentId = $this->payment($invoiceId, 1210, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)', '2025-11-30');
+
+        $response = $this->deletePayment($invoiceId, $paymentId);
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('taken_over_payment', $this->json($response)['error']['code']);
+        self::assertSame(409, $this->unmarkPaid($invoiceId)->getStatusCode());
+
+        self::assertSame(1, (int) $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE id = ?', [$paymentId]));
+        $invoice = $this->invoiceRow($invoiceId);
+        self::assertSame(1210.0, (float) $invoice['paid_total']);
+        self::assertSame('paid', $invoice['status']);
+    }
+
+    public function testTaxDeclaredByOriginFlag(): void
+    {
+        $invoiceId = $this->invoice(1210);
+        $this->payment($invoiceId, 100, 'settlement', PohodaPriorYearPayments::NOTE, '2025-10-31');
+        $this->payment($invoiceId, 100, 'bank', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001', '2025-11-11');
+        $this->payment($invoiceId, 100, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE, '2025-11-12');
+        $this->payment($invoiceId, 100, 'bank', 'Převzato z POHODY, úhrada 25BV0001', '2025-11-13');
+        $this->payment($invoiceId, 100, 'manual', null, '2025-11-14');
+
+        $flags = array_map(
+            static fn (array $p): array => [$p['taken_over_locked'], $p['tax_declared_by_origin']],
+            $this->container->get(InvoicePaymentService::class)->listFor($invoiceId),
+        );
+        self::assertSame([[true, true], [false, true], [true, true], [false, false], [false, false]], $flags);
     }
 
     public function testUnmarkPaidRefusesInvoiceCoveredByPriorYearPayment(): void

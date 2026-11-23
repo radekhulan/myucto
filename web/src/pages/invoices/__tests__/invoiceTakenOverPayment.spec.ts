@@ -28,6 +28,12 @@ const m = vi.hoisted(() => ({
       bank_transaction_id: null, tax_document_invoice_id: null, created_at: '2026-02-01 10:00:00',
       taken_over: false, taken_over_locked: false, prior_year: false,
     },
+    {
+      id: 73, invoice_id: 9, paid_on: '2025-11-30', amount: 100, currency: 'CZK', variable_symbol: null,
+      bank_reference: null, note: 'Převzato z Money S3, zápočet interním dokladem ID25001', source: 'settlement',
+      bank_transaction_id: null, tax_document_invoice_id: null, created_at: '2026-01-05 10:00:00',
+      taken_over: true, taken_over_locked: false, prior_year: false, tax_declared_by_origin: true,
+    },
   ],
 }))
 
@@ -111,6 +117,15 @@ describe('převzatá úhrada v detailu faktury', () => {
     expect(rows[0].text()).toContain('✕')
     expect(rows[0].text()).toContain('invoice.payments.create_tax_doc')
     expect(wrapper.findAll('[data-test="payment-locked-taken-over"]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('platbě z Money S3 ponechá ✕, ale daňový doklad nenabídne (daň přiznal původní program)', async () => {
+    const wrapper = await mountDetail()
+    const rows = wrapper.findAll('tr').filter(r => r.text().includes('ID25001') || r.html().includes('ID25001'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('✕')
+    expect(rows[0].text()).not.toContain('invoice.payments.create_tax_doc')
     wrapper.unmount()
   })
 })

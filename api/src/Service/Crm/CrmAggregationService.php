@@ -11,7 +11,7 @@ use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
-use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Report\TaxReportLink;
@@ -1436,12 +1436,13 @@ final class CrmAggregationService
         // nic, co by na běžící lhůtu upozornilo — platba by zapadla do výpisu a lhůta
         // by uplynula potichu. Proto je severity odstupňovaná podle STÁŘÍ nejstarší
         // nevyřízené platby, ne podle počtu: jedna zapomenutá dva týdny je horší než
-        // pět včerejších. Úhrada minulého roku převzatá z POHODY doklad nečeká, daň přiznala POHODA.
+        // pět včerejších. Platba, ze které daň přiznal původní program (úhrada minulého roku z POHODY, platby
+        // převzaté z Money S3), doklad nečeká ({@see TakenOverPayment::isTaxDeclaredByOrigin()}).
         if (ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL) {
             $stmt = $pdo->prepare(
                 "SELECT i.id, MIN(p.paid_on) AS oldest_payment
                    FROM invoices i
-                   JOIN invoice_payments p ON p.invoice_id = i.id AND NOT " . PohodaPriorYearPayments::isPriorYearSql('p') . "
+                   JOIN invoice_payments p ON p.invoice_id = i.id AND NOT " . TakenOverPayment::isTaxDeclaredByOriginSql('p') . "
                   WHERE i.supplier_id = ?
                     AND i.invoice_type = 'proforma'
                     AND i.status <> 'cancelled'

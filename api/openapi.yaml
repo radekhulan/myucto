@@ -6122,7 +6122,7 @@ paths:
         být doklad pokrytý, vrátí se ze stavu `paid` zpět (`sent`/`issued`).
         Úhradu zachycenou jako evidovaná tržba EET smazat nelze (409
         `eet_history_exists`); vrácení peněz se zadává jako oprava EET.
-        Úhradu převzatou z POHODY bez protějšku v MyÚčtu (`taken_over_locked`)
+        Úhradu převzatou z jiného programu bez protějšku v MyÚčtu (`taken_over_locked`)
         smazat nelze (409 `taken_over_payment`); opravuje ji opakovaný převod.
       responses:
         '200':
@@ -6141,8 +6141,8 @@ paths:
         '409':
           description: |
             Platba je zamčená (bankovní vazba / daňový doklad; `payment_locked`),
-            má evidenci tržeb EET (`eet_history_exists`) nebo je převzatá z POHODY
-            bez protějšku v MyÚčtu (`taken_over_payment`).
+            má evidenci tržeb EET (`eet_history_exists`) nebo je převzatá z jiného
+            programu bez protějšku v MyÚčtu (`taken_over_payment`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -7595,7 +7595,7 @@ paths:
       description: |
         Reverzace omylem označené platby. Audit log: `invoice.unmark_paid`.
         Úhrady zachycené jako evidovaná tržba EET se nemažou (409 `eet_history_exists`).
-        Úhrada převzatá z POHODY bez protějšku v MyÚčtu (`InvoicePayment.taken_over_locked`)
+        Úhrada převzatá z jiného programu bez protějšku v MyÚčtu (`InvoicePayment.taken_over_locked`)
         zůstává; pokrývá-li doklad sama, vrátit ho nejde (409 `taken_over_payment`).
       responses:
         '200':
@@ -7604,7 +7604,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '409':
-          description: Faktura není ve stavu `paid` (`invalid_state`), má bankovní vazbu nebo daňový doklad, úhradu s evidencí EET (`eet_history_exists`), nebo ji celou hradí úhrada převzatá z POHODY (`taken_over_payment`)
+          description: Faktura není ve stavu `paid` (`invalid_state`), má bankovní vazbu nebo daňový doklad, úhradu s evidencí EET (`eet_history_exists`), nebo ji celou hradí úhrada převzatá z jiného programu (`taken_over_payment`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -57061,8 +57061,9 @@ components:
         tax_document_varsymbol: { type: [string, "null"] }
         tax_document_status: { type: [string, "null"], enum: [draft, issued, sent, reminded, paid, cancelled, null] }
         taken_over: { type: boolean, description: "Platbu založil převod z jiného systému (POHODA, Money S3); `note` říká, jakou úhradu nese" }
-        taken_over_locked: { type: boolean, description: "Převzatá platba bez protějšku v MyÚčtu (úhrada minulého roku nebo dorovnání úhrady z POHODY). Smazat ji nelze (409 `taken_over_payment`), „Zrušit úhradu“ ji ponechá." }
+        taken_over_locked: { type: boolean, description: "Převzatá platba bez protějšku v MyÚčtu (úhrada minulého roku nebo dorovnání úhrady z POHODY, úhrada bez dokladu úhrady z Money S3). Smazat ji nelze (409 `taken_over_payment`), „Zrušit úhradu“ ji ponechá." }
         prior_year: { type: boolean, description: "Úhrada minulého roku převzatá z POHODY; daňový doklad k přijaté platbě se k ní nevystavuje" }
+        tax_declared_by_origin: { type: boolean, description: "Daň z platby přiznal původní program (úhrada minulého roku z POHODY, platba převzatá z Money S3); daňový doklad k přijaté platbě se k ní nevystavuje" }
         created_by: { type: [integer, "null"] }
         created_at: { type: string, format: date-time }
 

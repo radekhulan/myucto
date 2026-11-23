@@ -39,19 +39,6 @@ final class PohodaPriorYearPayments
 
     public function __construct(private readonly Connection $db) {}
 
-    /**
-     * SQL podmínka „platba `$alias` (alias `invoice_payments`) je úhrada minulého roku
-     * převzatá z POHODY". Daň z ní přiznala POHODA (daňový doklad k přijaté platbě je
-     * v minulé agendě), MyÚčto k ní daňový doklad nevystavuje.
-     */
-    public static function isPriorYearSql(string $alias): string
-    {
-        if (preg_match('/^[a-z_][a-z0-9_]*$/', $alias) !== 1) {
-            throw new \InvalidArgumentException('Neplatný alias.');
-        }
-        return "({$alias}.source = '" . self::SOURCE . "' AND {$alias}.note <=> '" . self::NOTE . "')";
-    }
-
     /** Datum platby: poslední den před začátkem agendy. */
     public static function paidOn(string $periodStart): string
     {

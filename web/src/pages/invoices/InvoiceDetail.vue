@@ -3383,7 +3383,7 @@ useWindowRefresh(async () => {
                     {{ p.tax_document_varsymbol || `#${p.tax_document_invoice_id}` }}
                     <span v-if="p.tax_document_status === 'draft'" class="text-neutral-400">({{ t('status.draft') }})</span>
                   </RouterLink>
-                  <button v-else-if="taxDocApplicable && !p.prior_year && auth.canWrite('invoices') && !lockedForMe" @click="createTaxDocForPayment(p.id)"
+                  <button v-else-if="taxDocApplicable && !p.prior_year && !p.tax_declared_by_origin && auth.canWrite('invoices') && !lockedForMe" @click="createTaxDocForPayment(p.id)"
                     :disabled="busy !== null"
                     class="cursor-pointer text-xs px-2 py-0.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded">
                     {{ t('invoice.payments.create_tax_doc') }}

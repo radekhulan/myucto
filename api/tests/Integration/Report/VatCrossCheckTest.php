@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Report\VatCrossCheckService;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -419,6 +420,36 @@ final class VatCrossCheckTest extends TestCase
             'draft_advance_tax_documents',
         );
         self::assertNotContains($proformaId, $finding === null ? [] : array_column($finding['documents'], 'invoice_id'));
+    }
+
+    /**
+     * Platba zálohy převzatá z Money S3: daň z ní přiznala Money (DDKP je mezi převzatými
+     * doklady, převod ho k platbě nemusí umět navázat). Kontrola ji jako chybějící DDKP nehlásí,
+     * nativní platba téže zálohy ve stejném období dál ano.
+     */
+    public function testMoneyS3PaymentIsNotMissingTaxDocument(): void
+    {
+        $cust = $this->client('Odběratel záloha z Money', 'CZ11111151');
+        $proformaId = $this->sale('ZAL-MONEY', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $nativeId = $this->sale('ZAL-NATIVE', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $paidOn = sprintf('%04d-%02d-27', self::YEAR, self::MONTH);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET invoice_type = "proforma", status = "paid", tax_date = NULL WHERE id IN (?, ?)'
+        )->execute([$proformaId, $nativeId]);
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+             VALUES (?, ?, ?, 12100, "CZK", ?, ?, ?)'
+        );
+        $insert->execute([$this->supplierId, $proformaId, $paidOn, IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001', 'bank', $this->userId]);
+        $insert->execute([$this->supplierId, $nativeId, $paidOn, null, 'manual', $this->userId]);
+
+        $finding = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'draft_advance_tax_documents',
+        );
+        $ids = $finding === null ? [] : array_column($finding['documents'], 'invoice_id');
+        self::assertNotContains($proformaId, $ids);
+        self::assertContains($nativeId, $ids);
     }
 
     /** Finál s DUZP v jiném období nesmí skrýt povinnost z dřívější přijaté zálohy. */

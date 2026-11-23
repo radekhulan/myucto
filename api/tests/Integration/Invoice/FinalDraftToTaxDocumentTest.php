@@ -11,6 +11,7 @@ use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentNotApplicableException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -199,6 +200,35 @@ final class FinalDraftToTaxDocumentTest extends TestCase
         $converted = $this->converter->convert($draftId, 0);
         self::assertCount(1, $converted['tax_document_ids']);
         self::assertNull($this->payments->findPayment($prior)['tax_document_invoice_id']);
+    }
+
+    /**
+     * Platba zálohy převzatá z Money S3: daň z ní přiznala Money. Daňový doklad k ní nevznikne
+     * ručně ani převodem konceptu, ten zdaní jen platbu z MyÚčta.
+     */
+    public function testMoneyS3PaymentGetsNoTaxDocument(): void
+    {
+        $proformaId = $this->proforma(70000.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source) VALUES (?, ?, ?, 24200, ?, ?, ?)')
+            ->execute([$this->supplierId, $proformaId, '2098-03-31', 'CZK', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP98001', 'bank']);
+        $money = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE invoices SET paid_total = 24200 WHERE id = ?')->execute([$proformaId]);
+        $creator = Bootstrap::buildContainer()->get(PaymentTaxDocumentCreator::class);
+        try {
+            $creator->createForPayment($money);
+            self::fail('K platbě zálohy převzaté z Money S3 nesmí vzniknout daňový doklad.');
+        } catch (PaymentTaxDocumentNotApplicableException $e) {
+            self::assertStringContainsString('Money S3', $e->getMessage());
+        }
+
+        $result = $this->payments->recordPayment($proformaId, 60500.0, self::PAID_ON);
+        $draftId = (int) ($result['final_draft_id'] ?? 0);
+        self::assertGreaterThan(0, $draftId);
+        self::assertSame([(int) $result['payment_id']], array_column($this->converter->pendingPayments($proformaId), 'id'));
+        $converted = $this->converter->convert($draftId, 0);
+        self::assertCount(1, $converted['tax_document_ids']);
+        self::assertNull($this->payments->findPayment($money)['tax_document_invoice_id']);
     }
 
     /** Koncept faktury bez zálohové faktury (běžná faktura) se nemění. */

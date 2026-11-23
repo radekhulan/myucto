@@ -26279,7 +26279,7 @@
         "credit_note": "Zápočet dobropisu"
       },
       "taken_over": "Převzato",
-      "locked_taken_over": "Úhrada převzatá z POHODY se nemaže - nese uhrazenou část z doby před převodem. Opravte ji opakovaným převodem.",
+      "locked_taken_over": "Úhrada převzatá z původního programu se nemaže - nese uhrazenou část, ke které v MyÚčtu není doklad úhrady. Opravte ji opakovaným převodem.",
       "vs": "VS platby",
       "reference": "Reference",
       "note": "Poznámka",
