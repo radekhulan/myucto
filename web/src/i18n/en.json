@@ -32616,7 +32616,9 @@
     "salesAi": {
       "import_title": "AI import of issued invoices",
       "import_subtitle": "Upload a PDF / photo / ISDOC — AI extracts the data and creates an issued-invoice draft.",
-      "go_to_invoice": "Open issued invoice"
+      "go_to_invoice": "Open issued invoice",
+      "warnings_title": "Review the draft before issuing",
+      "warnings_badge": "warnings: {n}"
     }
   },
   "aiGateway": {

@@ -237,10 +237,19 @@ onMounted(() => {
               'bg-neutral-100 text-neutral-500']">
               {{ item.status === 'processing' ? '…' : item.status }}
             </span>
+            <span v-if="item.result?.warnings?.length" :title="item.result.warnings.join('\n')"
+              class="px-2 py-0.5 rounded text-[10px] font-medium bg-warning-50 text-warning-600 border border-warning-500/40 whitespace-nowrap">
+              {{ t('integrations.salesAi.warnings_badge', { n: item.result.warnings.length }) }}
+            </span>
             <RouterLink v-if="item.status === 'ok' && item.result?.invoice_id"
               :to="`/invoices/${item.result.invoice_id}/edit`"
               class="text-primary-600 hover:underline text-[10px]">→</RouterLink>
           </div>
+          <ul v-for="(item, idx) in aiBatchQueue.filter(x => x.result?.warnings?.length)" :key="'w' + idx"
+              class="mt-1 rounded-md bg-warning-50 border border-warning-500/40 px-2 py-1 text-warning-700 list-disc list-inside">
+            <li class="font-mono list-none">{{ item.file.name }}</li>
+            <li v-for="(w, wi) in item.result!.warnings" :key="wi">{{ w }}</li>
+          </ul>
         </div>
         <button type="button" @click="runAiBatch" :disabled="aiBatchRunning"
                 class="mt-3 cursor-pointer w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
@@ -274,6 +283,13 @@ onMounted(() => {
           <div v-if="aiResult.usage" class="text-xs mt-1 font-mono">
             Tokens: in={{ aiResult.usage.input_tokens }}, out={{ aiResult.usage.output_tokens }}
           </div>
+        </div>
+        <div v-if="aiResult.ok && aiResult.warnings?.length"
+             class="mt-2 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+          <strong>{{ t('integrations.salesAi.warnings_title') }}</strong>
+          <ul class="mt-1 list-disc list-inside text-xs space-y-0.5">
+            <li v-for="(w, wi) in aiResult.warnings" :key="wi">{{ w }}</li>
+          </ul>
         </div>
         <div v-else class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           <strong>✗ {{ aiResult.error }}</strong>

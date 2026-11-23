@@ -32616,7 +32616,9 @@
     "salesAi": {
       "import_title": "AI import vydané faktury",
       "import_subtitle": "Nahrajte PDF / fotku / ISDOC - AI vytěží data a založí draft vydané faktury.",
-      "go_to_invoice": "Otevřít vydanou fakturu"
+      "go_to_invoice": "Otevřít vydanou fakturu",
+      "warnings_title": "Koncept zkontrolujte před vystavením",
+      "warnings_badge": "upozornění: {n}"
     }
   },
   "aiGateway": {

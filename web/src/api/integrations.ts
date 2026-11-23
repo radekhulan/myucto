@@ -287,6 +287,8 @@ export interface AiIssuedExtractResult {
   usage?: { input_tokens?: number; output_tokens?: number }
   ai_data?: Record<string, unknown>
   error?: string
+  // Upozornění k založenému konceptu (odpočet zálohy, nesedící součet, OSS) — texty serveru.
+  warnings?: string[]
 }
 
 export const integrationsApi = {
