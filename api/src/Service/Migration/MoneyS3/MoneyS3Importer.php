@@ -28,7 +28,8 @@ use PDO;
  * faktury → pokladna a banka → vazby dokladů na deník a úhrady → mzdové závazky otevřené
  * ke konci posledního roku jako ostatní závazky → pozastavené šablony
  * pravidelných faktur z historie → uzávěrka historických
- * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace. Automatika účtování je po celou dobu vypnutá
+ * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace → kontrolní
+ * sestava saldokonta proti počátečním stavům dalšího roku ({@see SaldoOpeningCheck}). Automatika účtování je po celou dobu vypnutá
  * ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí —
@@ -72,6 +73,7 @@ final class MoneyS3Importer
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly InvoicePdfRenderer $pdf,
         private readonly PayrollLiabilityImporter $payrollLiabilities,
+        private readonly SaldoOpeningCheck $saldoCheck,
     ) {}
 
     /**
@@ -120,6 +122,7 @@ final class MoneyS3Importer
             HistoricalYearCloser::STEP,
             PayrollImporter::STEP,
             MoneyS3Reconciler::STEP,
+            SaldoOpeningCheck::STEP,
         ];
     }
 
@@ -977,6 +980,7 @@ final class MoneyS3Importer
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
             PayrollImporter::STEP => fn () => $this->payroll->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
+            SaldoOpeningCheck::STEP => fn () => $this->saldoCheck->run($ctx),
         ];
     }
 
