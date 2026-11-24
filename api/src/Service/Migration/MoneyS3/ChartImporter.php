@@ -10,7 +10,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 
 /**
- * Účtová osnova: z Money se přenáší jen to, na co se v deníku účtovalo.
+ * Účtová osnova: z Money se přenášejí používané účty a vybrané analytiky pro předkontace záloh.
  *
  * Firma má osnovu ze standardní šablony MyÚčta; analytiky z Money se pod ni doplní
  * (`042000` → `042.000` pod syntetikou `042`) s názvem z `UcOsnova.DAT`. Existující účet
@@ -60,6 +60,14 @@ final class ChartImporter
                 $code = trim((string) ($r[$k] ?? ''));
                 if ($code !== '') {
                     $used[$code] = true;
+                }
+            }
+        }
+        foreach ($ctx->advanceAccounts as $evidence) {
+            if ($evidence['source'] === 'documents' && $evidence['account'] !== null) {
+                $raw = str_replace('.', '', $evidence['account']);
+                if (isset($names[$raw])) {
+                    $used[$raw] = true;
                 }
             }
         }

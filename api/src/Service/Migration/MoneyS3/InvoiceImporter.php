@@ -642,6 +642,11 @@ final class InvoiceImporter
         $this->stats->recomputeMany($ctx->statsClients);
     }
 
+    public static function isAdvance(string $kind): bool
+    {
+        return in_array(strtoupper(trim($kind)), self::ADVANCE_KINDS, true);
+    }
+
     /**
      * Daňová povaha dokladu z Money. Vrací důvody, proč doklad NEJDE převzít bez ruční
      * kontroly (prázdné = jde), druh dokladu v MyÚčtu, nárok na odpočet a kód zařazení
@@ -667,7 +672,7 @@ final class InvoiceImporter
         $asset = false;
         $kind = 'invoice';
         $druh = strtoupper(trim((string) ($r['Druh'] ?? '')));
-        $advance = in_array($druh, self::ADVANCE_KINDS, true);
+        $advance = self::isAdvance($druh);
         if ($druh === 'D') {
             $kind = 'tax_document';
         } elseif ($advance) {

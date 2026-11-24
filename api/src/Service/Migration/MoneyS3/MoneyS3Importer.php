@@ -1046,7 +1046,12 @@ final class MoneyS3Importer
         $first = $plan[0];
         $seedDate = $this->periods->findByYear($ctx->supplierId, $first['year'])['starts_on'] ?? $first['starts_on'];
         return [
-            ChartImporter::STEP => fn () => $this->chart->run($ctx, $seedDate),
+            ChartImporter::STEP => function () use ($ctx, $seedDate, $plan): void {
+                if (!$ctx->options->relinkOnly) {
+                    $ctx->advanceAccounts = MoneyS3AdvanceAccounts::detect($ctx->backup, array_column($plan, 'dir'));
+                }
+                $this->chart->run($ctx, $seedDate);
+            },
             JournalImporter::STEP => function () use ($ctx): void {
                 // Forma zápisu nové firmy dřív, než do deníku přijde první převzatý zápis.
                 $this->unit->applyEntryFormDefault($ctx->supplierId);

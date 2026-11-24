@@ -936,6 +936,51 @@ final class SyntheticAgenda
         return $files;
     }
 
+    /** @param list<string> $receivedAccounts účet z předkontace každé vydané zálohové faktury */
+    public static function filesWithAdvanceAccounts(array $receivedAccounts = ['324700']): array
+    {
+        $files = self::files();
+        $dir = 'ROK.002/';
+        $chartPath = $dir . 'UcOsnova.DAT';
+        $chart = iterator_to_array(Ms3Table::fromString($files[$chartPath], 'UcOsnova')->rows(), false);
+        foreach (array_unique(['324000', '324800', '314300', ...$receivedAccounts]) as $code) {
+            $chart[] = ['Ucet' => $code, 'Nazev' => 'Vzorová analytika zálohy ' . $code];
+        }
+        $files[$chartPath] = Ms3FixtureWriter::table(self::CHART_FIELDS, $chart);
+
+        $rulesPath = $dir . 'UcPrKont.DAT';
+        $rules = iterator_to_array(Ms3Table::fromString($files[$rulesPath], 'UcPrKont')->rows(), false);
+        foreach (array_unique(['324800', ...$receivedAccounts]) as $code) {
+            $rules[] = ['Zkrat' => $code, 'Popis' => 'Vzorová předkontace zálohy', 'UcMD' => '221001', 'UcD' => $code];
+        }
+        $files[$rulesPath] = Ms3FixtureWriter::table(self::RULE_FIELDS, $rules);
+
+        $invoicesPath = $dir . 'VFaktury.DAT';
+        [$advance, $final] = iterator_to_array(Ms3Table::fromString($files[$invoicesPath], 'VFaktury')->rows(), false);
+        $advance += ['Cislo' => 2];
+        $final += ['Cislo' => 1];
+        $issued = $receivedAccounts === [] ? [$final, $advance] : [$final + ['PredKontac' => '324800']];
+        foreach ($receivedAccounts as $n => $code) {
+            $issued[] = array_replace($advance, ['Cislo' => $n + 2, 'Doklad' => 'ZV2500' . ($n + 1), 'VarSymbol' => (string) (2025101 + $n),
+                'PredKontac' => $code, 'Druh' => ['Z', 'L', 'F'][$n % 3]]);
+        }
+        $files[$invoicesPath] = Ms3FixtureWriter::table([...self::ISSUED_FIELDS, ['Cislo', 'L', 4], ['PredKontac', 'C', 6]], $issued);
+
+        $date = '2025-05-08';
+        $receipt = ['Zdroj' => 'BK', 'Doklad' => 'BP25011', 'Datum' => $date, 'Popis' => 'Úhrada zálohové faktury', 'Castka' => 1210.0];
+        $files = self::patch($files, $dir . 'UcDenik.DAT', null, [
+            $receipt + ['Cislo' => 801, 'UcMD' => '221001', 'UcD' => '324000'],
+            $receipt + ['Cislo' => 802, 'UcMD' => '311000', 'UcD' => '324800'],
+            ['Cislo' => 803, 'Zdroj' => 'BK', 'Doklad' => 'BV25011', 'Datum' => $date,
+                'Popis' => 'Poskytnutá záloha', 'UcMD' => '314300', 'UcD' => '221001', 'Castka' => 1210.0],
+        ]);
+        $bank = ['Ucet' => 'BU', 'DatUcPr' => $date, 'DatPlat' => $date, 'Celkem' => 1210.0];
+        return self::patch($files, $dir . 'BankKnih.DAT', null, [
+            $bank + ['Doklad' => 'BP25011', 'VarSym' => '2025101', 'Popis' => 'Přijatá záloha'],
+            $bank + ['Doklad' => 'BV25011', 'Vydej' => 1, 'VarSym' => '2025101', 'Popis' => 'Poskytnutá záloha'],
+        ]);
+    }
+
     public static function filesWithInvoiceItemDescriptions(): array
     {
         $files = self::files();

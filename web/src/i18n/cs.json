@@ -36768,6 +36768,7 @@
       "lines": "řádků",
       "bank_accounts": "bankovních spojení",
       "created_from_documents": "partnerů z dokladů",
+      "advance_accounts": "doplněných předkontací záloh",
       "related_marked": "partnerů označeno jako spojená osoba",
       "registers": "pokladen",
       "statements": "výpisů",
@@ -36880,6 +36881,11 @@
       "failure": "Převod skončil v kroku: {step}",
       "steps_title": "Kroky převodu",
       "messages": "Zprávy",
+      "advance_accounts": {
+        "advance_accounts_ambiguous_documents": "Předkontace záloh na účtu {root} nebyly doplněny. V předkontacích zálohových faktur se používají různé analytiky ({accounts}) a žádná jasně nepřevažuje.",
+        "advance_accounts_ambiguous_journal": "Předkontace záloh na účtu {root} nebyly doplněny. Platby v deníku používají více analytik ({accounts}).",
+        "advance_accounts_unavailable": "Předkontace záloh na účtu {root} nebyly doplněny. Účet {account} chybí v účtové osnově firmy nebo je neaktivní."
+      },
       "reconciliation_title": "Rekonciliace",
       "tax_records_title": "Peněžní deník proti Money",
       "tax_records_hint": "Daňové příjmy a výdaje podle peněžního deníku, který MyÚčto spočítá z převzatých dokladů, banky a pokladny, a podle peněžního deníku Money.",

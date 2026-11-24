@@ -15,6 +15,9 @@ final class ImportContext
     /** @var array<string,int> kód účtu v MyÚčtu (`221.001`) => chart_of_accounts.id */
     public array $accountIds = [];
 
+    /** @var array<int,array{account:?string,candidates:list<string>,source:string}> */
+    public array $advanceAccounts = [];
+
     /** @var array<string,int> adresář ROK.nnn => účetní rok */
     public array $dirYears = [];
 

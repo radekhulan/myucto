@@ -62,6 +62,24 @@ final class PostingRuleRepository
         return $map;
     }
 
+    /** @return array<string,list<array<string,mixed>>> Vlastní předkontace včetně vypnutých, podle klíče. */
+    public function listOverrides(int $supplierId, string $prefix): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, rule_key, description, debit_account_code, credit_account_code,
+                    priority, is_active
+               FROM posting_rules
+              WHERE supplier_id = ? AND rule_key LIKE ?
+              ORDER BY rule_key, priority DESC'
+        );
+        $stmt->execute([$supplierId, $prefix . '%']);
+        $rules = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rules[$row['rule_key']][] = $this->cast($row);
+        }
+        return $rules;
+    }
+
     /**
      * Priorita per-tenant override — vyšší než globální seed (0), takže resolve()
      * (ORDER BY (supplier_id IS NULL) ASC, priority DESC) ho vybere přednostně.
