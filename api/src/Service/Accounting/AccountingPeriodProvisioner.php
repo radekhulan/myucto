@@ -220,7 +220,7 @@ final class AccountingPeriodProvisioner
      * samostatný přepínač („Vést účetnictví") — vypnutá nadstavba znamená, že
      * uživatel deník nechce, takže mu ho automat nezaloží ani nepřímo.
      */
-    private function hasActiveDoubleEntry(int $supplierId): bool
+    public function hasActiveDoubleEntry(int $supplierId): bool
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1 FROM supplier

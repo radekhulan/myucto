@@ -10,6 +10,7 @@ use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\RevenueClassificationRuleRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
+use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\Accounting\Revenue\RevenueRuleMatcher;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
@@ -46,8 +47,8 @@ use ZipArchive;
  *     opravované faktury), jde o kolizi, ne o duplicitu — symbol se odvodí z čísla dokladu
  *     a náhrada jde do reportu ({@see processOne()}).
  *   - Doklad bez jediné položky se NEZAKLÁDÁ (odmítne se) — vznikl by doklad na nulu.
- *   - Status: pokud je due_date starší než 30 dní od dnešního data → 'paid'
- *     (paid_at = tax_date|issue_date), jinak 'issued' (paid_at = NULL).
+ *   - V podvojném účetnictví rozhoduje o úhradě skutečná platba. Mimo účetní období
+ *     firmy se stav starších dokladů odhaduje podle splatnosti.
  *   - Snapshoty: vyrobí čerstvé z aktuálního supplier/client/bank.
  *
  * ── Sazba, klasifikace a OSS na řádku ───────────────────────────────────────────────
@@ -177,6 +178,8 @@ final class InvoiceImportService
         private readonly StatsRecomputer $stats,
         private readonly AccountingPeriodProvisioner $periodProvisioner,
         private readonly PurchaseInvoiceReceiver $purchaseReceiver,
+        private readonly ImportedIssuedAccounting $issuedAccounting,
+        private readonly DocumentAutoPoster $autoPoster,
     ) {}
 
     /**
@@ -356,19 +359,8 @@ final class InvoiceImportService
         //    první doklad — jinak by se odmítl každý řádek se sazbou vyšší než 0 %.
         $this->assertRateCodebookAvailable($parsed, $supplierId, $tenantIc, $kind);
 
-        // 3b. Účetní období musí pokrývat data importovaných dokladů.
-        //
-        // Import sám do deníku NEÚČTUJE — doklady vznikají nezaúčtované a na chybějící
-        // období narazí uživatel až ve chvíli, kdy u dokladu klikne „Zaúčtovat". U migrace
-        // z jiného systému to znamená narazit na to měsíce po importu, u jednoho dokladu
-        // z tisíce a bez souvislosti s tím, co dělal: doklady jsou roky staré, kdežto
-        // účetnictví má firma aktivované od letoška. Rozsah dávky je jediné místo, kde se
-        // to dá vyřešit dopředu a JEDNOU za běh místo u každého dokladu zvlášť.
-        //
-        // Zakládá se jen období, které NEEXISTUJE, a jen v podvojném účetnictví — obojí
-        // hlídá provisioner, který je společný s účtováním a údržbovým CLI. Neúspěch
-        // jednoho roku běh nezastaví; na ten zbytek narazí uživatel u „Zaúčtovat"
-        // s hláškou, která ho pošle na Uzávěrku.
+        // 3b. Účetní období se doplní jednou pro celý rozsah dávky. Podmínka
+        // pro automatické zaúčtování vydaného dokladu zohledňuje i začátek účetnictví.
         $span = ImportDateSpan::of($parsed);
         if ($span !== null) {
             $this->periodProvisioner->ensureOpenPeriodsForRange(
@@ -379,6 +371,8 @@ final class InvoiceImportService
                 $userId ?: null,
             );
         }
+
+        $issuedPeriod = null;
 
         // 4. Cross-batch analýza emailů (jen pro issued cesta).
         $emailMap = $this->buildEmailMap($parsed);
@@ -485,7 +479,8 @@ final class InvoiceImportService
                     $route = $this->detectRoute($inv, $tenantIc, $kind);
 
                     if ($route === 'issued') {
-                        $r = $this->processOne($inv, $supplierId, $userId, $emailMap);
+                        $issuedPeriod ??= $this->issuedAccounting->periodLookup($supplierId);
+                        $r = $this->processOne($inv, $supplierId, $userId, $emailMap, $issuedPeriod);
                     } elseif ($route === 'purchase') {
                         // Zdrojový artefakt: úsek JEN tohoto dokladu, má-li ho parser
                         // (Pohoda export nese celou agendu v jednom souboru). Teprve
@@ -1116,10 +1111,12 @@ final class InvoiceImportService
     /**
      * @param array<string,mixed> $inv
      * @param array<string, array<string,bool>> $emailMap
+     * @param (\Closure(string): ?array<string,mixed>)|null $issuedPeriod null = dohledá se pro firmu
      * @return array<string,mixed>
      */
-    private function processOne(array $inv, int $supplierId, int $userId, array $emailMap): array
+    private function processOne(array $inv, int $supplierId, int $userId, array $emailMap, ?\Closure $issuedPeriod = null): array
     {
+        $issuedPeriod ??= $this->issuedAccounting->periodLookup($supplierId);
         $varsymbol = (string) $inv['varsymbol'];
 
         // Charset whitelist — varsymbol importovaný z ISDOC/Pohoda XML protéká do
@@ -1383,20 +1380,15 @@ final class InvoiceImportService
         // Currency
         $currencyId = $this->currencyId($supplierId, (string) ($inv['currency'] ?? 'CZK'));
 
-        // Status: due_date starší než 30 dní → paid, jinak sent.
-        // Logika: importované doklady už klient prokazatelně dostal (jinak by je
-        // nezaznamenali v původním systému), takže status='sent' je správnější
-        // než 'issued'. Staré splatné → 'paid' (předpoklad zaplaceno).
-        // sent_at = issue_date — nemáme přesnější údaj z původního systému,
-        // den vystavení je nejlepší aproximace okamžiku odeslání.
+        // Splatnost slouží k odhadu úhrady jen mimo účetnictví firmy. Importovaný
+        // doklad už klient dostal, takže výchozí stav je 'sent' k datu vystavení.
         //
         // Daňový doklad k přijaté platbě dokumentuje úplatu, která už přišla. Je proto
         // zaplacený bez ohledu na splatnost a paid_at = den přijetí úplaty (DUZP), stejně
         // jako když ho aplikace vystaví k platbě zálohy. Podle splatnosti by čerstvý DDPP
         // skončil jako `sent` a visel v pohledávkách a po splatnosti.
-        $threshold = (new \DateTimeImmutable('today'))->modify('-30 days');
-        $isPaid = ImportedIssuedDocumentPolicy::isPaidByNature($invoiceType)
-            || new \DateTimeImmutable($dueDate) < $threshold;
+        $inAccounting = $issuedPeriod($taxDate ?? $issueDate) !== null;
+        $isPaid = ImportedIssuedDocumentPolicy::isInitiallyPaid($invoiceType, $dueDate, $inAccounting);
         $status = $isPaid ? 'paid' : 'sent';
         $paidAt = $isPaid ? ($taxDate ?? $issueDate) : null;
         $sentAt = $issueDate . ' 12:00:00';
@@ -1529,6 +1521,18 @@ final class InvoiceImportService
             $paidAt,
             $invoiceId,
         ]);
+
+        if ($inAccounting && $status !== 'draft') {
+            try {
+                $postingError = $this->autoPoster->maybeAutoPost($supplierId, 'invoice', $invoiceId, $userId ?: null);
+            } catch (\Throwable $e) {
+                error_log('InvoiceImportService: automatické zaúčtování selhalo: ' . $e->getMessage());
+                $postingError = 'Při automatickém zaúčtování došlo k interní chybě.';
+            }
+            if ($postingError !== null) {
+                $warnings[] = 'Doklad se nepodařilo automaticky zaúčtovat. ' . $postingError;
+            }
+        }
 
         return [
             'status' => 'created',

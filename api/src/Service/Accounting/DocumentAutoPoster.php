@@ -126,6 +126,7 @@ final class DocumentAutoPoster
      * zaloguje (accounting.auto_post_failed) a spolkne — NESMÍ zablokovat volající tok.
      *
      * @param 'invoice'|'purchase_invoice' $sourceType
+     * @return ?string Důvod selhání pro výsledek dávky.
      */
     public function maybeAutoPost(
         int $supplierId,
@@ -134,16 +135,16 @@ final class DocumentAutoPoster
         ?int $userId = null,
         ?string $ip = null,
         ?string $userAgent = null,
-    ): void {
+    ): ?string {
         if (!$this->commercialFeatures->isAvailable() || !$this->isEnabled($supplierId, $sourceType)) {
-            return;
+            return null;
         }
         // Zálohová PF, proforma a interní storno se jako předpis neúčtují ZÁMĚRNĚ (účtuje
         // se úhrada zálohy). Pokus o zaúčtování by v historii dokladu skončil jako
         // accounting.auto_post_failed a účetní by v tom četla chybu, která není. Totéž
         // faktura krytá ostatní pohledávkou, kterou účtuje zápis pohledávky.
         if (!$this->isPostableKind($supplierId, $sourceType, $docId)) {
-            return;
+            return null;
         }
         // Přijetí konceptu z převodu nesmí znovu klasifikovat ani přepisovat
         // předpis, který již existuje v převzatém deníku (základ + samostatná DPH).
@@ -152,7 +153,7 @@ final class DocumentAutoPoster
         try {
             $group = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $docId);
             if (DocumentPostingGroup::hasOwnedEntries($group)) {
-                return;
+                return null;
             }
         } catch (\Throwable $e) {
             $this->activity->log(
@@ -165,14 +166,14 @@ final class DocumentAutoPoster
                 $userAgent,
                 $supplierId,
             );
-            return;
+            return 'Nepodařilo se ověřit existující účetní zápis. Podrobnosti jsou v historii dokladu.';
         }
 
         if ($this->deferred !== null) {
             $this->deferred[] = ['source_type' => $sourceType, 'id' => $docId];
             $this->activity->log('accounting.auto_post_deferred', $userId, $sourceType, $docId,
                 ['reason' => 'api_token'], $ip, $userAgent, $supplierId);
-            return;
+            return null;
         }
 
         // Před zaúčtováním doplnit JISTOU klasifikaci nákladu na položky, které ji nemají.
@@ -230,6 +231,7 @@ final class DocumentAutoPoster
                 $userAgent,
                 $supplierId,
             );
+            return $e->getMessage();
         } catch (\Throwable $e) {
             // Infrastrukturní selhání (DB deadlock, ztráta spojení apod.) — invariant
             // „auto-post NIKDY nezablokuje vystavení/přijetí" platí i tady (adversariální
@@ -245,7 +247,10 @@ final class DocumentAutoPoster
                 $userAgent,
                 $supplierId,
             );
+            return 'Při zápisu do účetního deníku došlo k interní chybě. Podrobnosti jsou v historii dokladu.';
         }
+
+        return null;
     }
 
     /**

@@ -237,6 +237,12 @@ final class ImportedIssuedDocumentPolicy
         return $invoiceType === 'tax_document';
     }
 
+    public static function isInitiallyPaid(string $invoiceType, string $dueDate, bool $inAccounting): bool
+    {
+        return self::isPaidByNature($invoiceType)
+            || (!$inAccounting && new \DateTimeImmutable($dueDate) < (new \DateTimeImmutable('today'))->modify('-30 days'));
+    }
+
     /**
      * Převzatý daňový doklad k přijaté platbě: přijatá úplata kryje doklad celý, takže
      * `amount_to_pay` = 0 stejně jako u dokladu, který aplikace založí k platbě zálohy.

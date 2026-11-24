@@ -74,10 +74,9 @@ Netrefili jste se s exportem? Tlačítkem **Zahodit tuto dávku** smažete práv
 naimportované doklady a můžete nahrát opravený soubor. Zaúčtované, zamčené nebo
 uhrazené doklady se hromadně nemažou, otevřete je jednotlivě.
 
-> [!WARNING]
-> Naimportované doklady nejsou zaúčtované, ani když máte zapnutou plnou
-> automatiku účtování. Do deníku je dostanete v `Účetnictví → Doúčtovat doklady`
-> (viz [§ 21.9.2](#2192-naimportovane-doklady-nejsou-zauctovane)).
+V podvojném účetnictví se vydané faktury s datem účetního případu v období firmy
+při zapnutém automatickém zaúčtování ihned zapíšou do deníku. Pokud zaúčtování
+selže, faktura zůstane uložená a důvod najdete ve varování u dokladu.
 
 ## 21.4 Krok za krokem: import přijatých faktur ze souboru
 
@@ -267,7 +266,7 @@ zkoušku.
 | Pokus o druhý import se stejnými parametry skončí odkazem na běžící úlohu | Stejný import nelze spustit dvakrát souběžně | Počkejte na dokončení nebo běžící úlohu zrušte |
 | Faktury z iDokladu nebo Fakturoidu nemají DPH klasifikaci | Zdrojový systém ji u položek nevyplnil | Aplikace dosadí výchozí podle sazby, nulovou sazbu vystaveného řádku musíte zařadit sami (viz [§ 21.9.13](#21913-importy-z-api-prubeh-a-pravidla-klasifikace-dph)) |
 | Kontakty nemají e-mail | Zdrojový systém je nemá vyplněné | Doplňte v `Prodej → Klienti`, jinak nepůjdou upomínky |
-| Doklady se nezobrazují v účetním deníku | Vydané faktury import neúčtuje, přijaté jen se zapnutou automatikou | `Účetnictví → Doúčtovat doklady` (viz [§ 21.9.2](#2192-naimportovane-doklady-nejsou-zauctovane)) |
+| Doklady se nezobrazují v účetním deníku | Vypnuté automatické zaúčtování, doklad před začátkem účetnictví nebo varování u dokladu | Zkontrolujte datum, nastavení a report importu (viz [§ 21.9.2](#2192-naimportovane-doklady-nejsou-zauctovane)) |
 | Stereo NX: "Chybí databázová migrace Stereo NX" | Správce nespustil migrace | Správce spustí `php api/bin/migrate.php`, pak zkoušku zopakujte |
 | Stereo NX: "IČO se neshoduje" nebo "Tento převod vyžaduje plátce DPH" | Zdrojová a cílová firma si neodpovídají | Zvolte správnou firmu v záloze i v MyÚčtu |
 | Stereo NX: převod zastaven pro cizoměnové doklady, odpočty záloh nebo nepodporované druhy dokladů | Nepodporovaný rozsah převodu | Řiďte se vysvětlením v protokolu, majetek, mzdy a sklad vyžadují samostatný převod |
@@ -304,10 +303,12 @@ Stránku můžete zavřít, import doběhne i bez ní. Report se zobrazí po dok
 
 ### 21.9.2 Naimportované doklady nejsou zaúčtované
 
-**Vydané faktury import do deníku neúčtuje.** Vznikají nezaúčtované, a to i když
-máte zapnutou plnou automatiku účtování: automatika je háček na **vznik** dokladu
-(vystavení faktury, přijetí přijaté faktury, opakovaná fakturace), ne zametač
-dokladů, které už v systému leží.
+**Vydané faktury** se při zapnutém automatickém zaúčtování zaúčtují podle DUZP,
+případně data vystavení, pokud DUZP chybí. Datum musí patřit do účetního období
+firmy od začátku jejího podvojného účetnictví v MyÚčtu. Starší doklady zůstávají
+mimo automatické zaúčtování kvůli počátečním stavům. Při chybě zaúčtování zůstane
+doklad uložený a report ukáže důvod. Koncepty, zálohové výzvy a duplicity se při
+importu neúčtují.
 
 **Přijaté faktury založené jako přijaté** projdou stejnými kroky jako při ručním
 přijetí, takže se při zapnuté automatice zaúčtují. Doklad, který zaúčtovat nejde
@@ -319,6 +320,13 @@ nezaúčtované faktury najednou, běží na pozadí a jde zastavit; každý dok
 účtuje samostatně, takže jeden vadný dávku nezastaví. Hromadné zaúčtování
 z výběru v seznamu faktur zůstává pro menší zásahy, má strop 500 dokladů na
 dávku.
+
+Správce může pro kontrolu nezaúčtovaných vydaných faktur z importu spustit
+`php api/bin/repair-imported-issued-unposted.php --supplier=ID`. Výběr omezí
+přepínačem `--batch=ID`. Výchozí běh vypíše stav nanečisto. Přepínač `--commit`
+zaúčtuje doklady mimo zamčená nebo podaná období. Přepínač `--reset-paid`
+spolu s `--commit` u zaúčtované faktury bez úhrady obnoví stav podle evidovaných
+plateb.
 
 ### 21.9.3 Co se založí
 
@@ -332,14 +340,13 @@ Pro každou fakturu v souboru:
 
 ### 21.9.4 Stav vydaných faktur: pravidlo 30 dní
 
-Aby se nemusel po importu řešit starý stav:
-
-- **Datum splatnosti starší než 30 dní** - faktura se uloží jako **Zaplacená**
-  (datum úhrady = DUZP nebo datum vystavení). Předpoklad: starý doklad už dávno
-  zaplacený.
-- **Datum splatnosti v posledních 30 dnech nebo v budoucnu** - faktura se uloží
-  jako **Vystavená**. Platbu spárujete standardně přes bankovní výpis, nebo
-  fakturu ručně označíte jako zaplacenou.
+- **V období podvojného účetnictví** se běžná faktura bez úhrady uloží jako
+  **Odeslaná** i po splatnosti. Úhradu spárujete například z bankovního výpisu
+  nebo pokladny.
+- **Před začátkem účetnictví a u firem bez podvojného účetnictví** se při
+  splatnosti starší než 30 dní předpokládá úhrada. Doklad se uloží jako
+  **Zaplacený** k DUZP nebo k datu vystavení. Při mladší nebo budoucí splatnosti
+  se uloží jako **Odeslaný**.
 - **Daňový doklad k přijaté platbě** je vždy **Zaplacený** (ke dni přijetí
   platby) a nic se na něm nedoplácí. Dokumentuje platbu, která už přišla.
 - **Faktura, která odečítá zálohy**, nebo jejíž součet položek se od celkové
@@ -617,9 +624,8 @@ existujících). Import je čistě aditivní.
 
 #### 21.9.11.3 Platební stav
 
-API import přebírá **skutečný platební stav ze zdrojového systému**, na rozdíl
-od souborového importu ([§ 21.9.4](#2194-stav-vydanych-faktur-pravidlo-30-dni)),
-kde se stáří jen odhaduje pravidlem 30 dní:
+API import přebírá **skutečný platební stav ze zdrojového systému**. Pro stav
+při souborovém importu platí [§ 21.9.4](#2194-stav-vydanych-faktur-pravidlo-30-dni).
 
 - Doklad v iDokladu **Uhrazeno / Přeplaceno** se importuje jako **Zaplacená**
   (datum úhrady z iDokladu; nepošle se na ni upomínka).

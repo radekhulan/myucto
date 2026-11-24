@@ -32894,7 +32894,7 @@
     "supplier_required_title": "Supplier must already exist",
     "supplier_required_hint": "A document is imported only when the currently selected company holds the right role on it — supplier on an issued invoice, customer on a received one. A document issued to another company is rejected.",
     "status_rule_title": "Status of imported invoice",
-    "status_rule_hint": "If the due date is more than 30 days old (we assume it's already paid), the invoice is stored as Paid. Otherwise as Issued — payment is then matched via the standard bank-statement flow or manually.",
+    "status_rule_hint": "For invoices within a double-entry accounting period, payment status reflects actual payments. When automatic posting is enabled, the import posts the invoice. For documents predating the start of accounting and for companies without double-entry accounting, invoices more than 30 days past due are assumed to be paid.",
     "imported_as_paid": "stored as paid",
     "imported_as_issued": "stored as issued",
     "drop_or_click": "Drop files here or click to choose",

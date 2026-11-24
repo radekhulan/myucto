@@ -19,6 +19,16 @@ final class ImportedIssuedDocumentPolicyTest extends TestCase
         return ['invoice_type' => $type, 'monetary' => $monetary, 'taxed_deposits' => $taxedDeposits];
     }
 
+    public function testOnlyOutsideAccountingIsOverdueInvoiceAssumedPaid(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $overdue = $today->modify('-31 days')->format('Y-m-d');
+        self::assertFalse(ImportedIssuedDocumentPolicy::isInitiallyPaid('invoice', $overdue, true));
+        self::assertTrue(ImportedIssuedDocumentPolicy::isInitiallyPaid('invoice', $overdue, false));
+        self::assertFalse(ImportedIssuedDocumentPolicy::isInitiallyPaid('invoice', $today->modify('-30 days')->format('Y-m-d'), false));
+        self::assertTrue(ImportedIssuedDocumentPolicy::isInitiallyPaid('tax_document', $today->format('Y-m-d'), true));
+    }
+
     public function testMatchingDocumentPasses(): void
     {
         $out = ImportedIssuedDocumentPolicy::assess(self::inv('invoice', ['total' => 1009.0, 'payable' => 1009.0, 'paid_deposits' => 0.0]), 1009.0);
