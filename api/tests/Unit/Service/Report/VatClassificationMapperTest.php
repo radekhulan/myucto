@@ -276,6 +276,52 @@ final class VatClassificationMapperTest extends TestCase
         self::assertSame(63.0, $lines['1']['vat']);
     }
 
+    public function testZeroRateRoundingRowStaysOffDomesticRateLines(): void
+    {
+        // Kód 40: 21% položka + zaokrouhlení 0 %; ř. 40 nese jen 21% základ, jako KH.
+        $common = [
+            'invoice_id' => 7,
+            'source' => 'purchase',
+            'document_kind' => 'invoice',
+            'code' => '40',
+            'dphdp3_line' => '40',
+            'dphdp3_line_secondary' => null,
+            'label' => 'Přijaté 21 %',
+            'vat_deduction_none' => false,
+            'is_fixed_asset' => false,
+        ];
+
+        $lines = $this->mapper->projectDphLines([
+            array_replace($common, ['vat_rate' => 21.0, 'base_czk' => 1000.0, 'vat_czk' => 210.0]),
+            array_replace($common, ['vat_rate' => 0.0, 'base_czk' => -0.42, 'vat_czk' => 0.0]),
+        ]);
+
+        self::assertSame(1000.0, $lines['40']['base']);
+        self::assertSame(210.0, $lines['40']['vat']);
+        self::assertSame(1, $lines['40']['count']);
+    }
+
+    public function testZeroRateRowOnExemptLineIsKept(): void
+    {
+        // Řádek 0 % mimo sazbové řádky (osvobozené ř. 50) zůstává.
+        $lines = $this->mapper->projectDphLines([[
+            'invoice_id' => 8,
+            'source' => 'sale',
+            'document_kind' => 'invoice',
+            'code' => '50',
+            'dphdp3_line' => '50',
+            'dphdp3_line_secondary' => null,
+            'vat_rate' => 0.0,
+            'base_czk' => 500.0,
+            'vat_czk' => 0.0,
+            'label' => 'Osvobozené',
+            'vat_deduction_none' => false,
+            'is_fixed_asset' => false,
+        ]]);
+
+        self::assertSame(500.0, $lines['50']['base']);
+    }
+
     public function testMissingExchangeRatesKeepInvoiceAndCashDocumentWithSameNumericIdDistinct(): void
     {
         $common = [
