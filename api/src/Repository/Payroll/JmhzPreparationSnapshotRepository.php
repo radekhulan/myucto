@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use PDO;
 use PDOException;
 
@@ -145,13 +146,18 @@ final class JmhzPreparationSnapshotRepository
              VALUES (?, ?, ?, ?, ?)'
         );
         try {
-            $statement->execute([
-                $supplierId,
-                $environment,
-                $idempotencyHash,
-                $sourceRevisionId,
-                $createdBy,
-            ]);
+            // Souběžný dvojklik je očekávaný: kolize nároku se ošetří níž
+            // a do logu nemá jít jako ERROR.
+            DbErrorLogger::expectingDuplicates(
+                ['uq_payroll_jmhz_preparation_claim_scope'],
+                static fn (): bool => $statement->execute([
+                    $supplierId,
+                    $environment,
+                    $idempotencyHash,
+                    $sourceRevisionId,
+                    $createdBy,
+                ]),
+            );
             return true;
         } catch (PDOException $exception) {
             if ((int) ($exception->errorInfo[1] ?? 0) !== 1062) {

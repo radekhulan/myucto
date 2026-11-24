@@ -423,6 +423,13 @@ Chyba jednoho vztahu ostatní nezastaví.
 **Jak poznáte, že je hotovo:** Sekce ukáže uložené hodnoty jen jako masku
 a v souhrnu chybějících údajů zmizí „Doplnit OIČ" a „Doplnit ID PPV".
 
+Jedno ID PPV patří jedinému pracovnímu vztahu a jedno OIČ jediné osobě. Nese-li
+zadané číslo už jiný vztah nebo jiná osoba, aplikace ho nezapíše a v hlášce
+vztah či osobu jmenuje. Typicky je tentýž vztah veden dvakrát (například dvě
+dohody téže osoby): sloučte ho přes **Další akce vztahu → Sloučit do jiného
+vztahu**, u osoby vedené dvakrát ponechte jen jednu kartu. Importy takový řádek
+označí a ostatní řádky zapíší, nález z protokolu ČSSZ se ukáže u podání.
+
 Identifikátory z protokolu ČSSZ zapisuje aplikace sama, jakmile přijde
 protokol k registraci odeslané z MyÚčta. Pro víc lidí najednou použijte import
 **OIČ z POHODY** nebo import registrací (viz [Nastavení mezd](90_Nastaveni_mezd.md#9010-krok-za-krokem-import-zamestnancu-z-jmhz-a-registraci)).

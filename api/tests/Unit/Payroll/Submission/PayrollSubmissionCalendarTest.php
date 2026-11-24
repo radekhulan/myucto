@@ -47,6 +47,27 @@ final class PayrollSubmissionCalendarTest extends TestCase
         self::assertSame('2026-10-08T00:30:00+02:00', PayrollSubmissionCalendar::filledAt($utc));
     }
 
+    /**
+     * `payroll_submissions.submitted_at` je v UTC. Podání odeslané po české
+     * půlnoci patří dalšímu dni, i když je v UTC ještě předchozí den.
+     */
+    public function testStoredUtcSubmissionReadsAsCzechDayAcrossMidnight(): void
+    {
+        $original = date_default_timezone_get();
+        date_default_timezone_set('Europe/Prague');
+        try {
+            self::assertSame('2026-08-21', PayrollSubmissionCalendar::dayOfUtc('2026-08-20 22:30:00'));
+            self::assertSame('2026-08-20', PayrollSubmissionCalendar::dayOfUtc('2026-08-20 21:59:59'));
+            self::assertSame('2026-01-21', PayrollSubmissionCalendar::dayOfUtc('2026-01-20 23:30:00'));
+            self::assertSame('2026-01-20', PayrollSubmissionCalendar::dayOfUtc('2026-01-20 22:59:59'));
+            self::assertNull(PayrollSubmissionCalendar::dayOfUtc(null));
+            self::assertNull(PayrollSubmissionCalendar::dayOfUtc(''));
+            self::assertNull(PayrollSubmissionCalendar::dayOfUtc('nesmysl'));
+        } finally {
+            date_default_timezone_set($original);
+        }
+    }
+
     public function testEveryCzechCalendarDayReadsFromTheZoneNotFromTheServerDefault(): void
     {
         $original = date_default_timezone_get();

@@ -138,6 +138,19 @@ export function formatUtcDateTime(date: string | null | undefined): string {
 }
 
 /**
+ * Den okamžiku, který API vrací v UTC bez zóny (například `submitted_at`
+ * mzdových podání). `formatDate` by ho četl jako místní čas, takže podání
+ * odeslané krátce po půlnoci by se ukázalo o den dřív.
+ */
+export function formatUtcDate(date: string | null | undefined): string {
+  if (!date) return '—'
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date)) return formatDate(date)
+  const d = new Date(`${date.replace(' ', 'T')}Z`)
+  if (Number.isNaN(d.getTime())) return date
+  return new Intl.DateTimeFormat(activeLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d)
+}
+
+/**
  * Období „YYYY-MM" jako „srpen 2026" / „August 2026".
  *
  * Strojové `2026-08` je pro člověka horší než zbytečné — v sestavě plné dat

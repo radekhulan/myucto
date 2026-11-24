@@ -58,6 +58,8 @@ const SUBMISSION_ISSUE_CODES = new Set([
   'manual_acceptance_contradicted',
   'registration_receipt_oic_invalid',
   'registration_receipt_id_ppv_invalid',
+  'registration_receipt_oic_conflict',
+  'registration_receipt_id_ppv_conflict',
 ])
 /**
  * Nálezy s vlastním návodem. Obecná rada podle fáze („zkontrolujte protokol
@@ -66,6 +68,8 @@ const SUBMISSION_ISSUE_CODES = new Set([
 const SUBMISSION_ISSUE_CODE_REMEDIATIONS = new Set([
   'registration_receipt_oic_invalid',
   'registration_receipt_id_ppv_invalid',
+  'registration_receipt_oic_conflict',
+  'registration_receipt_id_ppv_conflict',
 ])
 
 /**

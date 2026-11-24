@@ -76,6 +76,74 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         }
     }
 
+    /**
+     * Souběžný dvojklik na přípravu: druhý nárok narazí na
+     * `uq_payroll_jmhz_preparation_claim_scope` a repository ho ošetří. Logovací
+     * PDO ho přitom dřív zapsalo jako ERROR, takže v produkčním logu stála chyba
+     * nad situací, kterou nemá kdo řešit.
+     */
+    public function testConcurrentClaimCollisionIsNotLoggedAsError(): void
+    {
+        $logger = new class extends \Psr\Log\AbstractLogger {
+            /** @var list<array{0:mixed,1:string}> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = [$level, (string) $message];
+            }
+        };
+        $config = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Infrastructure\Config\Config::class);
+        self::assertInstanceOf(\MyInvoice\Infrastructure\Config\Config::class, $config);
+        $own = Connection::withoutSharedTestConnection(
+            static fn (): Connection => new Connection($config, $logger),
+        );
+        $pdo = $own->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->supplierId = $this->createIsolatedSupplier(
+                $pdo,
+                (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn(),
+            );
+            [, $revisionId] = $this->createRevision($pdo);
+            $repository = new JmhzPreparationSnapshotRepository($own);
+            $hash = hash('sha256', 'souběžný dvojklik', true);
+
+            self::assertTrue($repository->insertIdempotencyClaim(
+                $this->supplierId,
+                'test',
+                $hash,
+                $revisionId,
+                null,
+            ));
+            self::assertFalse($repository->insertIdempotencyClaim(
+                $this->supplierId,
+                'test',
+                $hash,
+                $revisionId,
+                null,
+            ));
+        } finally {
+            $pdo->rollBack();
+            $own->close();
+        }
+
+        $errors = array_filter(
+            $logger->records,
+            static fn (array $record): bool => $record[0] === \Psr\Log\LogLevel::ERROR,
+        );
+        self::assertSame([], array_values($errors));
+        self::assertNotSame(
+            [],
+            array_filter(
+                $logger->records,
+                static fn (array $record): bool => str_contains($record[1], 'DB duplicate'),
+            ),
+            'Kolize nároku se má zapsat jako očekávaná duplicita.',
+        );
+    }
+
     public function testCurrentApprovedPreparationIsInsertedAndImmutable(): void
     {
         $id = $this->repository->insert($this->record());

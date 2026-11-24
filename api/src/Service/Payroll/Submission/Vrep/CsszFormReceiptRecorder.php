@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolPartKind;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolReport;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojException;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
@@ -311,18 +312,7 @@ final readonly class CsszFormReceiptRecorder
     /** Den odeslání v pražském čase; `submitted_at` je v UTC. */
     private static function deliveryDate(?string $submittedAt): ?string
     {
-        if ($submittedAt === null || trim($submittedAt) === '') {
-            return null;
-        }
-        $moment = \DateTimeImmutable::createFromFormat(
-            'Y-m-d H:i:s',
-            substr(trim($submittedAt), 0, 19),
-            new \DateTimeZone('UTC'),
-        );
-
-        return $moment === false
-            ? null
-            : $moment->setTimezone(new \DateTimeZone('Europe/Prague'))->format('Y-m-d');
+        return PayrollSubmissionCalendar::dayOfUtc($submittedAt);
     }
 
     private static function rejectionReason(JmhzProtocolReport $report): string

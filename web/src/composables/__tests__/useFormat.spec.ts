@@ -4,6 +4,7 @@ import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
 import { overdueDays } from '@/utils/date'
 import {
   formatCompactNumber,
+  formatDate,
   formatDateTime,
   formatMoney,
   formatMoneyMinor,
@@ -12,6 +13,7 @@ import {
   formatPercent,
   formatPeriod,
   formatPeriodNumeric,
+  formatUtcDate,
   formatUtcDateTime,
   isOverdue,
 } from '@/composables/useFormat'
@@ -138,6 +140,19 @@ describe('formatUtcDateTime', () => {
   it('interpretuje databázový timestamp jako UTC okamžik', () => {
     expect(formatUtcDateTime('2026-08-26 22:06:48'))
       .toBe(formatDateTime('2026-08-26T22:06:48Z'))
+  })
+})
+
+describe('formatUtcDate', () => {
+  it('podání odeslané po české půlnoci ukáže dnem v Praze, ne dnem v UTC', () => {
+    vi.stubEnv('TZ', 'Europe/Prague')
+    i18n.global.locale.value = 'cs'
+    // 22:30 UTC v létě = 00:30 dalšího dne v Praze.
+    expect(formatUtcDate('2026-08-20 22:30:00')).toBe(formatDate('2026-08-21'))
+    // V zimě je posun hodinový: 23:30 UTC = 00:30 dalšího dne.
+    expect(formatUtcDate('2026-01-20 23:30:00')).toBe(formatDate('2026-01-21'))
+    expect(formatUtcDate('2026-01-20 22:59:59')).toBe(formatDate('2026-01-20'))
+    expect(formatUtcDate(null)).toBe('—')
   })
 })
 

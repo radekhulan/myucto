@@ -262,6 +262,58 @@ final class PayrollJmhzReceiptIdentityTest extends TestCase
         self::assertCount(1, $this->personExternalIds());
     }
 
+    /**
+     * OIČ z protokolu už v evidenci nese JINÁ osoba (tatáž osoba vedená
+     * dvakrát). Dřív zápis spadl na unikátním klíči hodnoty (1062) a vrátil
+     * celý import protokolu; teď se protokol uloží a vznikne úkol ke
+     * ztotožnění bez rozepsaného řádku v evidenci.
+     */
+    public function testIdentifierHeldByAnotherPersonOpensFindingInsteadOfFailing(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Jana Novotná", "employee", "hpp",
+                     1, 1, 0, 30000, 0, 1)'
+        )->execute([$this->supplierId]);
+        $duplicatePerson = (int) $pdo->lastInsertId();
+        $this->identities->assignPersonExternalId(
+            $this->supplierId,
+            $duplicatePerson,
+            'production',
+            self::PROTOCOL_OIC,
+            '2026-06-01',
+            'verified_manual_import',
+            'ruční opis z portálu ČSSZ',
+            null,
+            null,
+        );
+
+        $submission = $this->submitted('duplicate-person');
+        $this->import($submission, $this->signedProtocol());
+
+        self::assertSame([], $this->personExternalIds());
+        $tasks = $this->resolutionTasks();
+        self::assertCount(1, $tasks);
+        self::assertSame('person_identity', $tasks[0]['task_kind']);
+        self::assertSame(
+            'jmhz_protocol_person_identifier_mismatch',
+            $tasks[0]['reason_code'],
+        );
+        self::assertSame(0, (int) $pdo->query(
+            'SELECT COUNT(*) FROM payroll_person_external_ids
+              WHERE supplier_id = ' . $this->supplierId . '
+                AND value_ciphertext = "enc:v2:pending"'
+        )->fetchColumn());
+        self::assertNotSame(
+            'submitted',
+            $this->submissions->get($this->supplierId, $submission['id'])['status'],
+        );
+    }
+
     /** @param array{id:int,row_version:int,correlation:string} $submission */
     private function import(
         array $submission,

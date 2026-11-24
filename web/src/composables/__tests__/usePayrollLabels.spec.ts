@@ -42,7 +42,12 @@ describe('usePayrollLabels', () => {
   it('u identifikátoru nepřevzatého z protokolu ČSSZ dá vlastní návod místo obecné rady', () => {
     const labels = usePayrollLabels()
 
-    for (const code of ['registration_receipt_oic_invalid', 'registration_receipt_id_ppv_invalid']) {
+    for (const code of [
+      'registration_receipt_oic_invalid',
+      'registration_receipt_id_ppv_invalid',
+      'registration_receipt_oic_conflict',
+      'registration_receipt_id_ppv_conflict',
+    ]) {
       expect(labels.submissionIssueMessage(code))
         .toBe(`payroll.submissions.overview.issue_message.${code}`)
       expect(labels.submissionIssueRemediation('remote', code))

@@ -38,7 +38,7 @@ import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
 import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatPeriod, formatUtcDate } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { healthOverviewRemediation } from './payrollRemediation'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -1043,7 +1043,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                     <path :d="ICONS.check" />
                   </svg>
                   {{ healthFiling(overview)!.submittedAt
-                    ? t('payroll.submissions.overview.health_filed_on', { date: formatDate(healthFiling(overview)!.submittedAt!) })
+                    ? t('payroll.submissions.overview.health_filed_on', { date: formatUtcDate(healthFiling(overview)!.submittedAt!) })
                     : t('payroll.submissions.overview.health_filed') }}
                 </span>
                 <button

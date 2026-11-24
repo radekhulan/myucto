@@ -11,6 +11,51 @@ use PDO;
 
 final class PayrollComponentJmhzMappingRepository
 {
+    /**
+     * Zařazení ze staršího balíku, která se převezmou do balíku `?` (viz
+     * {@see self::adoptLegacy()}). Parametry: firma, balík, balík, balík.
+     * Sdílí ho předběžná kontrola i samotný zápis, ať se nerozejdou.
+     */
+    private const ADOPTABLE_LEGACY = '
+                   FROM (
+                         SELECT mapping.supplier_id, mapping.component_definition_id,
+                                mapping.target_attribute_id, mapping.is_active, mapping.disabled_at,
+                                mapping.created_by, mapping.updated_by,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY mapping.supplier_id, mapping.component_definition_id
+                                  ORDER BY mapping.is_active DESC, mapping.spec_package_id DESC
+                                ) AS pick
+                           FROM payroll_component_jmhz_mappings mapping
+                          WHERE mapping.supplier_id = ? AND mapping.spec_package_id <> ?
+                        ) legacy
+                   JOIN payroll_component_definitions definition
+                     ON definition.supplier_id = legacy.supplier_id
+                    AND definition.id = legacy.component_definition_id
+                    AND definition.jmhz_treatment = \'included\'
+                   JOIN payroll_jmhz_dictionary_attributes attribute
+                     ON attribute.package_id = ?
+                    AND attribute.attribute_id = legacy.target_attribute_id
+                  WHERE legacy.pick = 1
+                    AND NOT EXISTS (
+                          SELECT 1
+                            FROM payroll_component_jmhz_mappings existing
+                           WHERE existing.supplier_id = legacy.supplier_id
+                             AND existing.component_definition_id = legacy.component_definition_id
+                             AND existing.spec_package_id = ?
+                        )';
+
+    /**
+     * Aktivní zařazení ze staršího balíku, které už má záznam v balíku `?`
+     * a má se deaktivovat. Parametry: balík, firma, balík.
+     */
+    private const SUPERSEDED_LEGACY_JOIN = 'payroll_component_jmhz_mappings legacy
+                   JOIN payroll_component_jmhz_mappings current_mapping
+                     ON current_mapping.supplier_id = legacy.supplier_id
+                    AND current_mapping.component_definition_id = legacy.component_definition_id
+                    AND current_mapping.spec_package_id = ?';
+    private const SUPERSEDED_LEGACY_WHERE = 'legacy.supplier_id = ? AND legacy.spec_package_id <> ?
+                    AND legacy.is_active = 1';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentJmhzTargetCatalog $targets,
@@ -150,7 +195,23 @@ final class PayrollComponentJmhzMappingRepository
      *    mapování ze staršího balíku") i změnu zacházení složky (trigger
      *    z migrace 1344 hlídá aktivní zařazení v jakémkoli balíku).
      *
-     * Opakované volání nic nemění. V ustáleném stavu stojí dva příkazy.
+     * Opakované volání nic nemění.
+     *
+     * ── Zámky ───────────────────────────────────────────────────────────────
+     * Volá se při KAŽDÉM čtení číselníku složek
+     * ({@see PayrollComponentRepository::ensureDefaults()}) a při přípravě
+     * hlášení, často uvnitř cizí transakce. Dřív tu pokaždé běžel
+     * INSERT … SELECT (sdílené zámky na všech zařazeních firmy) a po něm
+     * UPDATE se spojením (výhradní zámky na týchž řádcích). Dva souběžné
+     * požadavky téže firmy tak držely sdílený zámek a čekaly jeden na druhého
+     * na výhradní: deadlock 1213 za běžného provozu, i když nebylo co převést.
+     * Proto:
+     *  - nejdřív se BEZ ZÁMKŮ (konzistentní čtení) zjistí, jestli je co
+     *    převzít nebo deaktivovat; v ustáleném stavu tím volání končí a stojí
+     *    jediný dotaz,
+     *  - jinak se zařazení firmy zamknou výhradně a v pořadí podle `id` dřív,
+     *    než se cokoli čte se sdíleným zámkem. Druhý souběžný požadavek pak
+     *    počká a po uvolnění už nemá co dělat.
      *
      * @param int|null $packageId balík, do kterého se převádí; `null` = ten, který aplikace čte
      * @return int počet převzatých zařazení
@@ -158,59 +219,48 @@ final class PayrollComponentJmhzMappingRepository
     public function adoptLegacy(int $supplierId, ?int $packageId = null): int
     {
         $packageId ??= $this->currentPackageId();
+        $adoptParams = [$supplierId, $packageId, $packageId, $packageId];
+        $supersededParams = [$packageId, $supplierId, $packageId];
         $pdo = $this->db->pdo();
+        $pending = $pdo->prepare(
+            'SELECT EXISTS (SELECT 1 ' . self::ADOPTABLE_LEGACY . ')
+                 OR EXISTS (SELECT 1 FROM ' . self::SUPERSEDED_LEGACY_JOIN
+                . ' WHERE ' . self::SUPERSEDED_LEGACY_WHERE . ')',
+        );
+        $pending->execute([...$adoptParams, ...$supersededParams]);
+        if ((int) $pending->fetchColumn() === 0) {
+            return 0;
+        }
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
             $pdo->beginTransaction();
         }
         try {
+            $lock = $pdo->prepare(
+                'SELECT id FROM payroll_component_jmhz_mappings
+                  WHERE supplier_id = ?
+                  ORDER BY id
+                  FOR UPDATE',
+            );
+            $lock->execute([$supplierId]);
+            $lock->fetchAll();
             $adopt = $pdo->prepare(
                 'INSERT INTO payroll_component_jmhz_mappings
                     (supplier_id, component_definition_id, spec_package_id, target_attribute_id,
                      is_active, disabled_at, created_by, updated_by)
                  SELECT legacy.supplier_id, legacy.component_definition_id, attribute.package_id,
                         attribute.attribute_id, legacy.is_active, legacy.disabled_at,
-                        legacy.created_by, legacy.updated_by
-                   FROM (
-                         SELECT mapping.supplier_id, mapping.component_definition_id,
-                                mapping.target_attribute_id, mapping.is_active, mapping.disabled_at,
-                                mapping.created_by, mapping.updated_by,
-                                ROW_NUMBER() OVER (
-                                  PARTITION BY mapping.supplier_id, mapping.component_definition_id
-                                  ORDER BY mapping.is_active DESC, mapping.spec_package_id DESC
-                                ) AS pick
-                           FROM payroll_component_jmhz_mappings mapping
-                          WHERE mapping.supplier_id = ? AND mapping.spec_package_id <> ?
-                        ) legacy
-                   JOIN payroll_component_definitions definition
-                     ON definition.supplier_id = legacy.supplier_id
-                    AND definition.id = legacy.component_definition_id
-                    AND definition.jmhz_treatment = \'included\'
-                   JOIN payroll_jmhz_dictionary_attributes attribute
-                     ON attribute.package_id = ?
-                    AND attribute.attribute_id = legacy.target_attribute_id
-                  WHERE legacy.pick = 1
-                    AND NOT EXISTS (
-                          SELECT 1
-                            FROM payroll_component_jmhz_mappings existing
-                           WHERE existing.supplier_id = legacy.supplier_id
-                             AND existing.component_definition_id = legacy.component_definition_id
-                             AND existing.spec_package_id = ?
-                        )',
+                        legacy.created_by, legacy.updated_by '
+                . self::ADOPTABLE_LEGACY,
             );
-            $adopt->execute([$supplierId, $packageId, $packageId, $packageId]);
+            $adopt->execute($adoptParams);
             $adopted = $adopt->rowCount();
             $pdo->prepare(
-                'UPDATE payroll_component_jmhz_mappings legacy
-                   JOIN payroll_component_jmhz_mappings current_mapping
-                     ON current_mapping.supplier_id = legacy.supplier_id
-                    AND current_mapping.component_definition_id = legacy.component_definition_id
-                    AND current_mapping.spec_package_id = ?
+                'UPDATE ' . self::SUPERSEDED_LEGACY_JOIN . '
                     SET legacy.is_active = 0, legacy.disabled_at = CURRENT_TIMESTAMP,
                         legacy.updated_by = NULL, legacy.row_version = legacy.row_version + 1
-                  WHERE legacy.supplier_id = ? AND legacy.spec_package_id <> ?
-                    AND legacy.is_active = 1',
-            )->execute([$packageId, $supplierId, $packageId]);
+                  WHERE ' . self::SUPERSEDED_LEGACY_WHERE,
+            )->execute($supersededParams);
             if ($ownsTransaction) {
                 $pdo->commit();
             }
