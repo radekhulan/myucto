@@ -60,7 +60,11 @@ final class PayrollPostingImportAction
             [$bytes] = $this->upload($request);
             $preview = $this->service->preview($this->currentSupplierId($request), $bytes);
         } catch (PamicaPostingException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+            $context = $e->context;
+            if ($e->errorCode === 'unmapped_accounting_codes') {
+                $context['can_write'] = $this->canWrite($request, false);
+            }
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $context);
         }
         $preview['can_write'] = $this->canWrite($request, false);
         $preview['can_create_accounts'] = $this->canWrite($request, true);

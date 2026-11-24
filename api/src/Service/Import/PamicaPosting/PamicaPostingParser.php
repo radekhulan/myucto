@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import\PamicaPosting;
 
 use MyInvoice\Http\IsoDate;
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 
 /**
  * Čtení zaúčtování mezd z PAMICY (STORMWARE dataPack verze 2.0, kódování podle hlavičky
@@ -22,7 +23,7 @@ use MyInvoice\Http\IsoDate;
  * je PAMICA nastavená na zkratky. Zkratku přeloží na dvojici účtů mapování firmy
  * (`$codeMap`, {@see PamicaPostingCodeMap}); zkratky bez mapování parser posbírá i se
  * vzorovými řádky a vrátí chybou `unmapped_accounting_codes`, aby je účetní mohla
- * přiřadit. Jiný tvar předkontace parser odmítne, protože by ji nebylo podle čeho zaúčtovat.
+ * přiřadit. Stejně se přiřazuje chybějící předkontace, samostatně podle druhu dokladu.
  */
 final class PamicaPostingParser
 {
@@ -35,7 +36,7 @@ final class PamicaPostingParser
     private const MAX_LINES = 50;
     private const MAX_SAMPLES = 3;
 
-    /** @var array<string,array{code:string,usage:array<string,true>,count:int,samples:list<array{document:string,text:string,amount:float}>}> */
+    /** @var array<string,array{code:string,usage:array<string,true>,count:int,deduction:bool,samples:list<array{document:string,text:string,amount:float}>}> */
     private array $unmapped = [];
     /** @var array<string,array{debit:string,credit:string}> */
     private array $codeMap = [];
@@ -132,23 +133,28 @@ final class PamicaPostingParser
         }
         if (count($symPars) !== 1 || array_key_first($symPars) === '') {
             throw new PamicaPostingException('sym_par_mismatch',
-                'Doklady v souboru nemají jeden společný párovací symbol měsíce (např. MZ202603). Vyvezte z PAMICY zaúčtování jednoho měsíce.');
+                'Doklady v souboru nemají jeden společný párovací symbol měsíce (např. MZ202603). Vyvezte z PAMICY každý měsíc do samostatného XML.');
         }
         $symPar = (string) array_key_first($symPars);
         $accountingDate = max($accountingDates);
         if (substr(min($accountingDates), 0, 7) !== substr($accountingDate, 0, 7)) {
-            throw new PamicaPostingException('period_mismatch', 'Doklady v souboru mají datum účetního případu v různých měsících.');
+            throw new PamicaPostingException('period_mismatch',
+                'Doklady v souboru mají datum účetního případu v různých měsících. Vyvezte z PAMICY každý měsíc do samostatného XML.');
         }
         if ($this->unmapped !== []) {
             $unmapped = array_values(array_map(static fn (array $u): array => [
                 'code' => $u['code'],
                 'usage' => array_keys($u['usage']),
                 'count' => $u['count'],
+                'suggested_accounts' => $u['deduction'] ? [
+                    'debit' => PayrollAccountingDefaults::ACCOUNTS['employment_gross_credit']['code'],
+                    'credit' => PayrollAccountingDefaults::ACCOUNTS['other_deductions_credit']['code'],
+                ] : null,
                 'samples' => $u['samples'],
             ], $this->unmapped));
             throw new PamicaPostingException('unmapped_accounting_codes',
-                'Soubor používá zkratky předkontací ' . implode(', ', array_column($unmapped, 'code'))
-                . ', ke kterým firma nemá přiřazené účty MD a Dal. Přiřaďte je a načtení zopakujte.',
+                'Přiřaďte účty MD a Dal k těmto předkontacím a načtěte náhled znovu: '
+                . implode(', ', array_map(PamicaPostingCodeMap::label(...), array_column($unmapped, 'code'))) . '.',
                 422, ['unmapped_codes' => $unmapped]);
         }
 
@@ -237,23 +243,23 @@ final class PamicaPostingParser
         $company = $address ? $this->text($xp, 'typ:company', $address) : '';
         $name = $address ? $this->text($xp, 'typ:name', $address) : '';
         $partner = null;
-        if ($company !== '' || $name !== '') {
+        if ($address !== null && ($company !== '' || $name !== '')) {
             $isPerson = $company === '';
             $partner = [
                 'name' => self::clip($company !== '' ? $company : $name, 190),
                 'is_person' => $isPerson,
                 // Zaměstnanec: na kartu jde jen jméno, adresu bydliště import nepřebírá.
-                'street' => $isPerson || !$address ? null : self::nullable($this->text($xp, 'typ:street', $address)),
-                'city' => $isPerson || !$address ? null : self::nullable($this->text($xp, 'typ:city', $address)),
-                'zip' => $isPerson || !$address ? null : self::nullable($this->text($xp, 'typ:zip', $address)),
-                'ic' => $isPerson || !$address ? null : self::nullable(preg_replace('/\D+/', '', $this->text($xp, 'typ:ico', $address)) ?? ''),
+                'street' => $isPerson ? null : self::nullable(self::clip($this->text($xp, 'typ:street', $address), 190)),
+                'city' => $isPerson ? null : self::nullable(self::clip($this->text($xp, 'typ:city', $address), 120)),
+                'zip' => $isPerson ? null : self::nullable(self::clip($this->text($xp, 'typ:zip', $address), 10)),
+                'ic' => $isPerson ? null : self::nullable(preg_replace('/\D+/', '', $this->text($xp, 'typ:ico', $address)) ?? ''),
             ];
         }
 
         $lines = [];
         foreach ($xp->query('inv:invoiceDetail/inv:invoiceItem', $doc) ?: [] as $row) {
             if (!$row instanceof \DOMElement) continue;
-            $lines[] = $this->line($xp, $row, 'inv', $headerAccounting, $label);
+            $lines[] = $this->line($xp, $row, 'inv', $headerAccounting, $label, $title);
         }
         if ($lines === []) {
             $amount = $this->summaryAmount($xp, $doc, 'inv:invoiceSummary')
@@ -269,7 +275,9 @@ final class PamicaPostingParser
         }
         foreach ($lines as $i => $line) {
             if ($line['amount'] < 0) {
-                throw new PamicaPostingException('negative_amount', "{$label}, položka " . ($i + 1) . ': záporná částka ostatního závazku není podporovaná.');
+                throw new PamicaPostingException('negative_amount',
+                    "{$label}, položka " . ($i + 1) . ' má zápornou částku. Opravu zpracujte samostatně v MyÚčtu, '
+                    . 'například interním dokladem, a z PAMICY vyvezte zbytek zaúčtování bez této opravy.');
             }
         }
         // Řádky s nemapovanou zkratkou účty nemají; kontroly účtů proběhnou až s mapováním
@@ -279,12 +287,13 @@ final class PamicaPostingParser
         if ($unmapped !== []) {
             $withoutPosting = [false];
         } elseif (count($withoutPosting) !== 1) {
-            throw new PamicaPostingException('invalid_accounting', "{$label} míchá položky se zaúčtováním a bez zaúčtování.");
+            throw new PamicaPostingException('invalid_accounting',
+                "{$label} míchá položky se zaúčtováním a bez zaúčtování (BEZ). V PAMICE je rozdělte do samostatných závazků a export zopakujte.");
         }
         $credits = array_values(array_unique(array_map(static fn (array $l): string => (string) $l['credit'], $lines)));
         if ($unmapped !== []) {
             $credits = [''];
-        } elseif (count($credits) !== 1) {
+        } elseif (count($credits) !== 1 && !self::couldShareCreditAccount($credits, in_array(null, array_column($lines, 'code'), true))) {
             // Ke každému účtu Dal zkratky, ze kterých vzešel: chyba je typicky v přiřazení
             // zkratek (331 u jedné, 331.000 u druhé) a účetní ji opraví v editoru přiřazení.
             $sources = [];
@@ -298,7 +307,8 @@ final class PamicaPostingParser
                 $lineCodes = array_map('strval', array_keys($lineCodes));
                 array_push($codes, ...$lineCodes);
                 $parts[] = $lineCodes === [] ? (string) $credit
-                    : $credit . (count($lineCodes) === 1 ? ' ze zkratky ' : ' ze zkratek ') . implode(', ', $lineCodes);
+                    : $credit . (count($lineCodes) === 1 ? ' ze zkratky ' : ' ze zkratek ')
+                    . implode(', ', array_map(PamicaPostingCodeMap::label(...), $lineCodes));
             }
             $codes = array_values(array_unique($codes));
             throw new PamicaPostingException('invalid_accounting',
@@ -308,6 +318,7 @@ final class PamicaPostingParser
         }
 
         $vs = $this->text($xp, 'inv:symVar', $header);
+        $validVs = preg_match('/^[0-9]{1,10}$/D', $vs) === 1;
         $ks = $this->text($xp, 'inv:symConst', $header);
         $paymentType = $this->text($xp, 'inv:paymentType/typ:paymentType', $header);
         $accountNo = $this->text($xp, 'inv:paymentAccount/typ:accountNo', $header);
@@ -321,7 +332,8 @@ final class PamicaPostingParser
             'accounting_date' => $accountingDate,
             'due_on' => $dueOn,
             'partner' => $partner,
-            'variable_symbol' => $vs !== '' ? $vs : null,
+            'variable_symbol' => $validVs ? $vs : null,
+            'source_variable_symbol' => $vs !== '' && !$validVs ? $vs : null,
             'constant_symbol' => $ks !== '' ? $ks : null,
             'payment_type' => $paymentType !== '' ? $paymentType : null,
             'account_number' => $accountNo !== '' ? $accountNo : null,
@@ -331,6 +343,21 @@ final class PamicaPostingParser
             'lines' => $lines,
             'amount' => self::sum($lines),
         ];
+    }
+
+    /** @param list<string> $credits */
+    private static function couldShareCreditAccount(array $credits, bool $hasPamicaAccount): bool
+    {
+        // Účet PAMICY s analytikou 000 může odpovídat syntetice, pokud na ni
+        // v osnově skutečně vede. Tečka může oddělovat analytiku účtu v MyÚčtu.
+        $normalized = array_map(static function (string $credit) use ($hasPamicaAccount): string {
+            if (preg_match('/^\d{3}(?:\.?\d{1,6})?$/D', $credit) !== 1) {
+                return $credit;
+            }
+            $compact = str_replace('.', '', $credit);
+            return $hasPamicaAccount && trim(substr($compact, 3), '0') === '' ? substr($compact, 0, 3) : $compact;
+        }, $credits);
+        return count(array_unique($normalized)) === 1;
     }
 
     /** @return array{0:string,1:string,2:string} symPar, datum dokladu, datum účetního případu */
@@ -351,7 +378,7 @@ final class PamicaPostingParser
     }
 
     /** @return array<string,mixed> */
-    private function line(\DOMXPath $xp, \DOMElement $row, string $ns, string $headerAccounting, string $label): array
+    private function line(\DOMXPath $xp, \DOMElement $row, string $ns, string $headerAccounting, string $label, string $title = ''): array
     {
         $quantity = $this->text($xp, $ns . ':quantity', $row);
         $qty = $quantity === '' ? 1.0 : self::number($quantity, $label);
@@ -363,7 +390,7 @@ final class PamicaPostingParser
         $accounting = $this->text($xp, $ns . ':accounting/typ:ids', $row);
         return $this->accountLine($accounting !== '' ? $accounting : $headerAccounting, $amount,
             $this->text($xp, $ns . ':text', $row), $this->text($xp, $ns . ':note', $row), $label,
-            $ns === 'int' ? 'internal' : 'commitment');
+            $ns === 'int' ? 'internal' : 'commitment', $title);
     }
 
     /**
@@ -372,38 +399,47 @@ final class PamicaPostingParser
      *
      * @return array<string,mixed>
      */
-    private function accountLine(string $accounting, float $amount, string $text, ?string $note, string $label, string $usage): array
+    private function accountLine(string $accounting, float $amount, string $text, ?string $note, string $label, string $usage, string $title = ''): array
     {
         $base = ['text' => self::clip($text, 255), 'note' => self::nullable(self::clip((string) $note, 255)), 'code' => null];
+        $amount = round($amount, 2);
+        if ($amount === 0.0) {
+            return $base + ['debit' => null, 'credit' => null, 'without_posting' => false, 'amount' => $amount];
+        }
         $ids = strtoupper(str_replace(' ', '', $accounting));
         if (preg_match('/^BEZ(\d{3,9})$/', $ids, $m) === 1) {
-            return $base + ['debit' => null, 'credit' => $m[1], 'without_posting' => true, 'amount' => round($amount, 2)];
+            return $base + ['debit' => null, 'credit' => $m[1], 'without_posting' => true, 'amount' => $amount];
         }
         if (preg_match('/^(\d{3,9})\/(\d{3,9})$/', $ids, $m) === 1) {
             if ($m[1] === $m[2]) {
                 throw new PamicaPostingException('invalid_accounting', "{$label}: předkontace {$accounting} má stejný účet na obou stranách.");
             }
-            return $base + ['debit' => $m[1], 'credit' => $m[2], 'without_posting' => false, 'amount' => round($amount, 2)];
+            return $base + ['debit' => $m[1], 'credit' => $m[2], 'without_posting' => false, 'amount' => $amount];
         }
-        $code = trim($accounting);
-        if (!PamicaPostingCodeMap::isCode($code)) {
+        if ($accounting === '') {
+            $code = $usage === 'internal' ? PamicaPostingCodeMap::EMPTY_INTERNAL : PamicaPostingCodeMap::EMPTY_COMMITMENT;
+        } elseif (PamicaPostingCodeMap::isCode($accounting)) {
+            $code = $accounting;
+        } else {
             throw new PamicaPostingException('invalid_accounting',
-                "{$label}: předkontace „{$accounting}\" není dvojice účtů MD/Dal ani zkratka předkontace.");
+                "{$label}: předkontace „{$accounting}\" není dvojice účtů MD/Dal ani zkratka předkontace. Opravte ji v PAMICE a export zopakujte.");
         }
         $key = PamicaPostingCodeMap::key($code);
         $base['code'] = $code;
         $pair = $this->codeMap[$key] ?? null;
         if ($pair !== null) {
-            return $base + ['debit' => $pair['debit'], 'credit' => $pair['credit'], 'without_posting' => false, 'amount' => round($amount, 2)];
+            return $base + ['debit' => $pair['debit'], 'credit' => $pair['credit'], 'without_posting' => false, 'amount' => $amount];
         }
-        $entry = $this->unmapped[$key] ?? ['code' => $code, 'usage' => [], 'count' => 0, 'samples' => []];
+        $entry = $this->unmapped[$key] ?? ['code' => $code, 'usage' => [], 'count' => 0, 'deduction' => true, 'samples' => []];
         $entry['usage'][$usage] = true;
         $entry['count']++;
+        $entry['deduction'] = $entry['deduction'] && $key === PamicaPostingCodeMap::EMPTY_COMMITMENT
+            && preg_match('/\bsráž(?:ka|ky|ku|kou|ek)\b/iu', $text . ' ' . $title) === 1;
         if (count($entry['samples']) < self::MAX_SAMPLES) {
-            $entry['samples'][] = ['document' => $label, 'text' => $base['text'], 'amount' => round($amount, 2)];
+            $entry['samples'][] = ['document' => $label, 'text' => $base['text'] !== '' ? $base['text'] : self::clip($title, 255), 'amount' => $amount];
         }
         $this->unmapped[$key] = $entry;
-        return $base + ['debit' => null, 'credit' => null, 'without_posting' => false, 'amount' => round($amount, 2)];
+        return $base + ['debit' => null, 'credit' => null, 'without_posting' => false, 'amount' => $amount];
     }
 
     private function summaryAmount(\DOMXPath $xp, \DOMElement $doc, string $summaryPath): ?float

@@ -1054,9 +1054,20 @@ přiřadit nejde: vyberte jeho analytiku (např. `331.000`). Po kliknutí
 znovu. Příští měsíc se uložené zkratky použijí samy a tabulka se ukáže jen
 pro nové zkratky. U řádků se zkratkou náhled zkratku zobrazí vedle účtů.
 
+**Doklady a položky bez předkontace.** Vlastní předkontace položky má
+přednost. Když chybí, položka převezme předkontaci z hlavičky. Pokud
+předkontace chybí na obou místech, průvodce nabídne v záložce **Bez
+předkontace** samostatné přiřazení pro interní doklady a pro závazky.
+Přiřazení se vztahuje na všechny nenulové řádky daného druhu bez
+předkontace, proto před uložením zkontrolujte vzorové řádky. Potřebují-li
+různé řádky různé účty, nastavte jim předkontace v PAMICE a export zopakujte.
+U rozpoznané srážky průvodce nabídne MD 331 / Dal 379 nebo příslušnou
+analytiku z osnovy. Uložení přiřazení pouze obnoví náhled. Import potvrdíte
+samostatně tlačítkem **Načíst zaúčtování**.
+
 **Úprava přiřazení zkratek.** Tlačítko **Upravit přiřazení zkratek** je
-pod náhledem vždy, když je nahraný soubor. Z hotového náhledu otevře
-zkratky použité v souboru, a když se náhled sestavit nepodaří (například
+pod náhledem. Z hotového náhledu otevře přiřazení použitá v souboru,
+a když se náhled sestavit nepodaří (například
 závazek má položky na různých účtech Dal, protože jedna zkratka míří na
 `331` a druhá na `331.000`), otevře všechna uložená přiřazení firmy. Chybová
 hláška jmenuje zkratky, ze kterých účty vzešly. Po uložení se náhled načte
@@ -1072,13 +1083,14 @@ nimi jsou kontroly:
 | Kontrola | Co znamená |
 |---|---|
 | IČO | IČO v souboru se musí shodovat s IČO firmy. Soubor jiné firmy se nenačte. |
-| Měsíc | Pro datum účetního případu musí existovat účetní období a měsíc nesmí být uzamčený ani v uzavřeném období. |
+| Měsíc | Každý měsíc vyvezte do samostatného XML s jedním párovacím symbolem. Pro datum účetního případu musí existovat otevřené účetní období a měsíc nesmí být uzamčený. |
 | Načtení | Stejný měsíc (IČO a párovací symbol) ještě nebyl načten (§ 108.10.4). |
 | Převod z Money S3 | Mzdy měsíce nepřevzal převod z Money S3 (převedený zápis s předpisem na Dal 331). Takový měsíc už deník i mzdové závazky má a načtení se zastaví. |
 | Účty | Každý účet PAMICY musí mít účet v účtové osnově (pravidla níže). |
 | Účet 331 | Co interní doklad zaúčtuje na Dal účtu zaměstnanců, musí ostatní závazky srazit na MD nebo převzít jako závazky bez zaúčtování. Rozdíl náhled ukáže jako upozornění. |
 | Závazek na účtu hrubých mezd | Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy (typicky 331). Obvykle jde o prohozené účty MD a Dal u zkratky (daň správně `331 / 342`, pojistné `331 / 336`). Načtení zastaví; čisté mzdy bez zaúčtování se netýká. |
 | Účet protistrany | Neplatné číslo účtu náhled ohlásí; závazek se načte bez něj a účet doplníte v jeho detailu. |
+| Variabilní symbol | Symbol pro platbu smí mít 1 až 10 číslic. Jinou hodnotu import uloží do poznámky závazku a náhled upozorní, že je třeba před úhradou doplnit správný symbol. |
 
 **Účty.** PAMICA uvádí účty šestimístně. MyÚčto hledá v účtové osnově
 nejdřív stejný kód, potom analytiku s tečkou (`336001` → `336.001`)
@@ -1088,6 +1100,15 @@ a po zaškrtnutí **Založit chybějící analytické účty** ji načtení zalo
 stejným typem jako syntetika. Chybějící syntetický účet načtení zastaví,
 založte ho v `Účetnictví → Účtová osnova`. Účty přiřazené zkratkám jsou už
 účty osnovy MyÚčta a používají se tak, jak jsou.
+
+Předkontace `BEZ331` a `BEZ331000` lze v jednom závazku kombinovat, pokud
+v osnově vedou na stejný účet. Pokud se účet 331 člení na analytiky, uveďte
+v PAMICE konkrétní účet. Položky se zaúčtováním a položky `BEZ` patří do
+samostatných závazků.
+
+Záporná částka interního dokladu se zaúčtuje s prohozenými stranami MD a Dal.
+Záporné závazky zpracujte jako samostatnou opravu v MyÚčtu. Pro zbytek
+zaúčtování vytvořte v PAMICE samostatný export bez této opravy.
 
 ### 108.10.3 Co vznikne
 
@@ -1109,7 +1130,8 @@ vrátí vše zpět):
 
 Protistranu dohledá MyÚčto v adresáři podle názvu, jinak založí novou kartu.
 U zaměstnance se na kartu zapíše jen jméno; adresa ani jiné osobní údaje
-z PAMICY se nepřebírají. Výplata v hotovosti je závazek bez protistrany.
+z PAMICY se nepřebírají. Když v exportu chybí název i jméno, závazek se
+načte bez protistrany a karta v adresáři nevznikne.
 
 Závazky pak platíte jako ostatní závazky: jdou do platebního příkazu
 a úhrada se spáruje z bankovního výpisu.
