@@ -400,6 +400,106 @@ final class PamicaPostingImportTest extends TestCase
         self::assertSame(['7Int', '2Oz'], array_column($this->unmappedCodes($xml), 'code'));
     }
 
+    public function testMissingAccountingCanBeSavedByDocumentKindAndReused(): void
+    {
+        $deduction = iconv('UTF-8', 'Windows-1250', <<<'XML'
+            <dat:dataPackItem version="2.0" id="008">
+                <inv:invoice version="2.0">
+                    <inv:invoiceHeader>
+                        <inv:invoiceType>commitment</inv:invoiceType>
+                        <inv:symVar>123456789012345678901</inv:symVar>
+                        <inv:symPar>MZ209903</inv:symPar>
+                        <inv:date>2099-04-15</inv:date>
+                        <inv:dateAccounting>2099-03-31</inv:dateAccounting>
+                        <inv:text>Srážka ze mzdy, testovací karta</inv:text>
+                        <inv:partnerIdentity><typ:address/></inv:partnerIdentity>
+                    </inv:invoiceHeader>
+                    <inv:invoiceSummary><inv:homeCurrency><typ:priceNone>580</typ:priceNone></inv:homeCurrency></inv:invoiceSummary>
+                </inv:invoice>
+            </dat:dataPackItem>
+            XML);
+        self::assertIsString($deduction);
+        $xml = str_replace('</dat:dataPack>', $deduction . '</dat:dataPack>',
+            (string) preg_replace('~<int:accounting>.*?</int:accounting>~s', '', $this->xml));
+        $internal = PamicaPostingCodeMap::EMPTY_INTERNAL;
+        $commitment = PamicaPostingCodeMap::EMPTY_COMMITMENT;
+        $all = ['accounting' => 2, 'other_items' => 2, 'accounting.journal.write' => 2, 'accounting.journal.post' => 2];
+        $action = $this->container->get(PayrollPostingImportAction::class);
+        $blocked = $action->preview($this->request(['other_items' => 1] + $all, 'mzdy.xml', $xml), new Response());
+        self::assertSame(422, $blocked->getStatusCode());
+        $error = $this->data($blocked)['error'];
+        self::assertSame('unmapped_accounting_codes', $error['code']);
+        self::assertFalse($error['can_write']);
+        self::assertSame([$internal, $commitment], array_column($error['unmapped_codes'], 'code'));
+        self::assertSame(['debit' => '331', 'credit' => '379.100'], $error['unmapped_codes'][1]['suggested_accounts']);
+        $this->expectApplyErrorKeepingDataFor($xml, 'unmapped_accounting_codes');
+
+        $saved = $action->saveCodeMap($this->jsonRequest($all, ['codes' => [
+            ['code' => strtolower($commitment), 'debit_account_code' => '331', 'credit_account_code' => '379.100'],
+            ['code' => $internal, 'debit_account_code' => '521', 'credit_account_code' => '331'],
+        ]]), new Response());
+        self::assertSame(200, $saved->getStatusCode());
+        self::assertEqualsCanonicalizing([$commitment, $internal], array_column($this->data($saved)['code_map'], 'code'));
+
+        $response = $action->preview($this->request($all, 'mzdy.xml', $xml), new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $preview = $this->data($response);
+        self::assertEqualsCanonicalizing([$commitment, $internal], array_column($preview['code_map'], 'code'));
+        $last = array_column($preview['commitments'], null, 'item_id')['008'];
+        self::assertSame('none', $last['partner_kind']);
+        self::assertNull($last['variable_symbol']);
+        self::assertSame('warning', array_column($preview['checks'], 'level', 'code')['variable_symbol_invalid']);
+        self::assertSame(0, $this->rowCount('internal_documents'));
+        self::assertSame(0, $this->rowCount('other_items'));
+
+        $this->service->apply($this->supplierId, $xml, 'mzdy.xml', true, $this->audit());
+        $items = $this->items();
+        $item = end($items);
+        self::assertNull($item['partner_id']);
+        self::assertNull($item['variable_symbol']);
+        self::assertStringContainsString('Původní VS: 123456789012345678901', $item['note']);
+        self::assertSame(['331:debit:580.00', '379.100:credit:580.00'], $this->entryLines((int) $item['journal_entry_id']));
+        self::assertSame('error', array_column($this->service->preview($this->supplierId, $xml)['checks'], 'level', 'code')['already_imported']);
+        try {
+            $this->service->apply($this->supplierId, $xml, 'mzdy.xml', true, $this->audit());
+            self::fail('Stejný soubor se nesmí načíst dvakrát.');
+        } catch (PamicaPostingException $e) {
+            self::assertSame('already_imported', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+        self::assertSame(count($items), $this->rowCount('other_items'));
+        self::assertSame(1, $this->rowCount('internal_documents'));
+
+        $this->supplierId = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
+        self::assertSame([$internal, $commitment], array_column($this->unmappedCodes($xml), 'code'));
+    }
+
+    public function testBezSpellingCanShareOneAccountOnlyWhenChartResolutionAgrees(): void
+    {
+        $xml = (string) preg_replace('~<inv:invoiceSummary>\s*<inv:homeCurrency>\s*<typ:priceNone>12000</typ:priceNone>\s*</inv:homeCurrency>\s*</inv:invoiceSummary>~',
+            <<<'XML'
+            <inv:invoiceDetail>
+                <inv:invoiceItem><inv:homeCurrency><typ:unitPrice>8000</typ:unitPrice></inv:homeCurrency>
+                    <inv:accounting><typ:ids>BEZ331</typ:ids></inv:accounting></inv:invoiceItem>
+                <inv:invoiceItem><inv:homeCurrency><typ:unitPrice>4000</typ:unitPrice></inv:homeCurrency></inv:invoiceItem>
+            </inv:invoiceDetail>
+            XML, $this->xml, 1);
+        $preview = $this->service->preview($this->supplierId, $xml);
+        $wage = $preview['commitments'][3];
+        self::assertSame('without_posting', $wage['posting']);
+        self::assertSame(['331', '331000'], array_column($wage['lines'], 'credit'));
+        self::assertSame(12000.0, $wage['amount']);
+        $targets = array_column($preview['accounts'], 'target', 'source');
+        self::assertSame(['331', '331'], [$targets['331'], $targets['331000']]);
+        self::assertArrayNotHasKey('multiple_credit_accounts', array_column($preview['checks'], 'level', 'code'));
+
+        $this->analytic('331.000');
+        $preview = $this->service->preview($this->supplierId, $xml);
+        self::assertSame('error', array_column($preview['checks'], 'level', 'code')['multiple_credit_accounts']);
+        self::assertFalse($preview['can_apply']);
+        self::assertFalse($preview['can_apply_with_new_accounts']);
+    }
+
     /**
      * Zkratky předkontací ve všech dokladech fixture: OSSZ (003) má dvě položky se dvěma
      * zkratkami (aOz za firmu, 8Oz za zaměstnance), zdravotní pojištění zůstává dvojicí účtů.

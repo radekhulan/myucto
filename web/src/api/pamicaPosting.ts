@@ -39,6 +39,7 @@ export interface PayrollPostingUnmappedCode {
   code: string
   usage: ('internal' | 'commitment')[]
   count: number
+  suggested_accounts?: { debit: string; credit: string } | null
   samples: { document: string; text: string; amount: number }[]
 }
 
