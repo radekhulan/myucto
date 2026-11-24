@@ -590,6 +590,57 @@ final class PayrollRunCommandService
     }
 
     /**
+     * „Zahodit opravu" — otevřená opravná revize se zahodí a běh se vrátí na
+     * schválenou revizi i do stavu, ze kterého se o opravu žádalo. Schválená
+     * revize, zaúčtování, platby ani podání se nemění. „Zrušit běh" tak
+     * zůstává jen pro skutečné zrušení.
+     */
+    public function discardCorrection(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+        string $reason = '',
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::DISCARD_CORRECTION,
+            $idempotencyKey,
+            $actorUserId,
+            $reason === '' ? null : $reason,
+        );
+    }
+
+    /**
+     * Schválená revize, na kterou se dá vrátit zahozením opravy, nebo `null`.
+     *
+     * Jen když je aktuální revize otevřená OPRAVNÁ revize a pod ní leží
+     * revize ve stavu `approved` (odsunutá `superseded` platit nemůže).
+     *
+     * @param array<string,mixed>|null $current
+     * @return array<string,mixed>|null
+     */
+    private function discardBaseline(int $supplierId, int $runId, ?array $current): ?array
+    {
+        if ($current === null
+            || ($current['revision_kind'] ?? null) !== 'correction'
+            || !in_array($current['status'] ?? null, ['snapshot', 'calculated', 'reviewed'], true)
+        ) {
+            return null;
+        }
+        $approved = $this->runs->latestApprovedRevision($supplierId, $runId);
+
+        return $approved !== null
+            && $approved['status'] === 'approved'
+            && (int) $approved['revision_no'] < (int) $current['revision_no']
+                ? $approved
+                : null;
+    }
+
+    /**
      * Opraví datum výplaty běhu, který ještě není schválený. Dřív šlo datum
      * zadat jen při založení: po zamknutí vstupů nešlo změnit, zrušený běh se
      * smazat nedal a nový běh skončil hláškou „existuje s jiným datem výplaty".
@@ -871,9 +922,13 @@ final class PayrollRunCommandService
                 throw new PayrollRunConflictException($currentVersion);
             }
             $from = PayrollRunStatus::from((string) $run['status']);
+            $revision = $this->runs->currentRevision($supplierId, $runId);
+            $discardBaseline = $command === PayrollRunCommand::DISCARD_CORRECTION
+                ? $this->discardBaseline($supplierId, $runId, $revision)
+                : null;
             $commandAvailable = in_array(
                 $command,
-                $this->workflow->availableCommands($from),
+                $this->workflow->availableCommands($from, $discardBaseline !== null),
                 true,
             );
             $approvedBaseline = $command === PayrollRunCommand::REOPEN
@@ -883,7 +938,6 @@ final class PayrollRunCommandService
             $reopenAsCorrection = $command === PayrollRunCommand::REOPEN
                 && ($from === PayrollRunStatus::CORRECTION_PENDING
                     || $approvedBaseline !== null);
-            $revision = $this->runs->currentRevision($supplierId, $runId);
             /*
              * Příkazy, které otevřenou revizi nahradí novou ze stejných podkladů:
              * obnova podkladů, vyřazení a vrácení osoby a změna data výplaty
@@ -1083,11 +1137,16 @@ final class PayrollRunCommandService
                     PayrollRunCommand::CHANGE_PAYMENT_DATE,
                 ], true)
                     && $this->runs->latestApprovedRevision($supplierId, $runId) !== null,
-                correctionRequestedFrom: $command === PayrollRunCommand::WITHDRAW_CORRECTION
-                    ? PayrollRunStatus::tryFrom(
+                correctionRequestedFrom: match ($command) {
+                    PayrollRunCommand::WITHDRAW_CORRECTION => PayrollRunStatus::tryFrom(
                         (string) $this->runs->correctionRequestedFrom($supplierId, $runId),
-                    )
-                    : null,
+                    ),
+                    PayrollRunCommand::DISCARD_CORRECTION => PayrollRunStatus::tryFrom(
+                        (string) $this->runs->correctionDiscardTarget($supplierId, $runId),
+                    ),
+                    default => null,
+                },
+                openCorrectionRevision: $discardBaseline !== null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
             if ($inputsUnchanged) {
@@ -1124,7 +1183,9 @@ final class PayrollRunCommandService
                 if ($snapshot === null) {
                     throw new \LogicException('Nová revize mzdového běhu nemá snímek vstupů.');
                 }
-                $revisionNo = (int) $run['current_revision_no'] + 1;
+                // Po zahození opravy ukazatel míří na schválenou revizi a nad ní
+                // leží zahozené; nové číslo proto navazuje na nejvyšší revizi.
+                $revisionNo = $this->runs->nextRevisionNo($supplierId, $runId);
                 if ($rebuildsRevision) {
                     $replacedRevisionId = $revision === null ? null : (int) $revision['id'];
                     // Opravná revize se dál vztahuje ke schválenému základu,
@@ -1436,6 +1497,68 @@ final class PayrollRunCommandService
                     $transition->to->value,
                     null,
                     $actorUserId,
+                );
+            } elseif ($command === PayrollRunCommand::DISCARD_CORRECTION) {
+                /*
+                 * Zahození opravy vrací běh na schválenou revizi. Pořadí je
+                 * dané triggery: nejdřív se rozpracované revize nad schválenou
+                 * zahodí (nástupcem je schválená), teprve pak smí ukazatel
+                 * revize klesnout na schválenou (migrace 2338 to dovolí jen
+                 * tehdy, když je všechno nad ní zahozené).
+                 */
+                if ($discardBaseline === null) {
+                    throw new \LogicException('Zahození opravy nemá schválenou revizi.');
+                }
+                $discarded = $this->runs->abandonRevisionsAboveApproved(
+                    $supplierId,
+                    $runId,
+                    (int) $discardBaseline['id'],
+                    (int) $discardBaseline['revision_no'],
+                );
+                $relocked = $this->runs->relockRevisionInputs(
+                    $supplierId,
+                    (string) $run['period_start'],
+                    self::snapshotObject($discardBaseline['input_snapshot'] ?? null, 'vstupní'),
+                );
+                $lifted = $this->runs->liftExclusions(
+                    $supplierId,
+                    $runId,
+                    null,
+                    $actorUserId,
+                    'correction_discarded',
+                );
+                $run = $this->runs->updateRun(
+                    $supplierId,
+                    $runId,
+                    $expectedVersion,
+                    $transition->to->value,
+                    (int) $discardBaseline['revision_no'],
+                    $actorUserId,
+                );
+                $this->runs->restoreRevisionSummary($supplierId, $runId, $discardBaseline);
+                $revision = $this->runs->revision($supplierId, (int) $discardBaseline['id']);
+                /*
+                 * Co se od schválené revize v podkladech změnilo (vstup zadaný
+                 * nebo upravený během opravy), běh po zahození neukazuje —
+                 * u schváleného běhu se podklady nesledují. Výsledek to řekne
+                 * hned, ať účetní ví, že to do mzdy vejde jen další opravou.
+                 */
+                $drift = $this->sourceDrift->detect(
+                    $supplierId,
+                    self::snapshotObject($discardBaseline['input_snapshot'] ?? null, 'vstupní'),
+                    $this->runs->excludedEmploymentIds($supplierId, $runId),
+                );
+                $eventMetadata['discarded_revision_ids'] = $discarded;
+                $eventMetadata['restored_revision_id'] = (int) $discardBaseline['id'];
+                $outcome = new PayrollRunCommandOutcome(
+                    PayrollRunCommandOutcome::CORRECTION_DISCARDED,
+                    [
+                        'restored_revision_no' => (int) $discardBaseline['revision_no'],
+                        'discarded_revision_count' => count($discarded),
+                        'relocked_input_count' => $relocked,
+                        'lifted_exclusion_count' => $lifted,
+                        'source_changes_since_approval' => $drift->total(),
+                    ],
                 );
             } elseif ($command === PayrollRunCommand::PREPARE_PAYMENTS) {
                 if ($revision === null) {

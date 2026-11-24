@@ -4984,9 +4984,10 @@
       "reason_prompt": "Uveďte důvod změny:",
       "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
-      "cancel_correction_hint": "Zahodí se rozpracovaná opravná revize. Schválená revize, zaúčtování, platby i podání platí dál, ale běh zůstane ve stavu Zrušeno a měsíc dokončíte až další opravou („Začít z opravených vstupů“). Mzdové vstupy změněné kvůli opravě se tím nevrátí. Pokud jste jen zadali něco špatně, dialog zavřete, vstup opravte a klikněte na „Obnovit podklady“. Uveďte důvod, zapíše se do historie běhu.",
+      "cancel_correction_hint": "Zruší se celý běh. Schválená revize, zaúčtování, platby i podání platí dál, ale běh zůstane ve stavu Zrušeno a měsíc dokončíte až další opravou. Chcete-li se jen vrátit ke schválené revizi, použijte „Zahodit opravu“. Uveďte důvod, zapíše se do historie běhu.",
+      "discard_correction_hint": "Opravná revize se zahodí a běh se vrátí na schválenou revizi a do stavu před žádostí o opravu. Schválená revize, zaúčtování, platby ani podání se nemění. Mzdové vstupy zadané nebo změněné během opravy zůstanou, jak jsou; do mzdy se dostanou až další opravou.",
       "correction_back": {
-        "open": "Zadali jste v opravě něco špatně? Vstup opravte nebo smažte a klikněte na „Obnovit podklady“; když se podklady nezmění, nová revize nevznikne. „Zahodit opravu“ vstupy nevrací.",
+        "open": "Zadali jste v opravě něco špatně? Vstup opravte nebo smažte a klikněte na „Obnovit podklady“; když se podklady nezmění, nová revize nevznikne. Opravu nechcete vůbec? „Zahodit opravu“ vrátí běh na schválenou revizi.",
         "pending": "Opravu jste vyžádali omylem? „Vzít žádost o opravu zpět“ vrátí běh do stavu před žádostí; schválená revize, zaúčtování ani platby se nemění."
       },
       "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
@@ -5084,6 +5085,7 @@
           "validation_override_revoked": "Výjimka kontroly odvolána",
           "unknown": "Další auditní krok",
           "withdraw_correction": "Žádost o opravu vzata zpět",
+          "discard_correction": "Oprava zahozena, platí schválená revize",
           "change_payment_date": "Změněno datum výplaty",
           "exclude_employee": "Osoba vyřazena z běhu",
           "include_employee": "Osoba vrácena do běhu",
@@ -5440,7 +5442,7 @@
         "reopen": "Otevřít opravu",
         "reopen_cancelled": "Začít z opravených vstupů",
         "cancel": "Zrušit běh",
-        "cancel_correction": "Zahodit opravu",
+        "discard_correction": "Zahodit opravu",
         "close": "Uzavřít",
         "lock_and_calculate": "Spočítat mzdy",
         "refresh_inputs": "Obnovit podklady",
@@ -5456,7 +5458,8 @@
         "payments_prepared": "Platební závazky jsou připravené.",
         "payments_not_applicable": "Není co platit - celá čistá mzda je vypořádaná zápočtem. Běh postoupil dál.",
         "payments_settled": "Všechny závazky běhu jsou pokryté platbami.",
-        "inputs_unchanged": "Podklady se od posledního snímku nezměnily. Revize zůstává, nová nevznikla."
+        "inputs_unchanged": "Podklady se od posledního snímku nezměnily. Revize zůstává, nová nevznikla.",
+        "correction_discarded": "Oprava je zahozená, běh se vrátil na schválenou revizi."
       },
       "coverage": {
         "settled": "Úhrady doložené výpisem: všech {count} závazků.",

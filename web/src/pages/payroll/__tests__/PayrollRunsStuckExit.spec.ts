@@ -346,24 +346,34 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     wrapper.unmount()
   })
 
-  it('v otevřené opravě nabídne zahození opravy a radí opravit vstup a obnovit podklady', async () => {
+  it('v otevřené opravě nabídne zahození opravy a „Zrušit běh“ nechá jen jako zrušení', async () => {
     m.runs.mockResolvedValue([run({
       status: 'reopened',
       revision_kind: 'correction',
-      available_commands: ['calculate', 'refresh_inputs', 'cancel'],
+      available_commands: ['calculate', 'refresh_inputs', 'cancel', 'discard_correction'],
     })])
+    m.commandRun.mockResolvedValue({ outcome: { outcome: 'correction_discarded', details: {} }, to_status: 'approved' })
 
     const wrapper = mount(PayrollRuns, { attachTo: document.body })
     await flushPromises()
     const cancel = wrapper.get('[data-testid="payroll-run-15-cancel"]')
-    expect(cancel.text()).toContain('payroll.runs.commands.cancel_correction')
+    expect(cancel.text()).toContain('payroll.runs.commands.cancel')
+    const discard = wrapper.get('[data-testid="payroll-run-15-discard_correction"]')
+    expect(discard.text()).toContain('payroll.runs.commands.discard_correction')
     expect(wrapper.get('[data-testid="payroll-run-15-correction-back"]').text()).toBe('payroll.runs.correction_back.open')
-    // Zahození opravy zůstává až za ostatními akcemi.
-    const row = Array.from(cancel.element.parentElement!.querySelectorAll('button'))
-    expect(row.at(0)!.getAttribute('data-testid')).toBe('payroll-run-15-calculate')
-    expect(row.at(-1)!.getAttribute('data-testid')).toBe('payroll-run-15-cancel')
-    await cancel.trigger('click')
-    expect(document.body.querySelector('[data-test="run-cancel-hint"]')!.textContent).toContain('payroll.runs.cancel_correction_hint')
+    // Primární akce vlevo, zrušení běhu až za zahozením opravy.
+    const row = Array.from(cancel.element.parentElement!.querySelectorAll('button')).map(b => b.getAttribute('data-testid'))
+    expect(row[0]).toBe('payroll-run-15-calculate')
+    expect(row.indexOf('payroll-run-15-discard_correction')).toBeLessThan(row.indexOf('payroll-run-15-cancel'))
+    expect(row.at(-1)).toBe('payroll-run-15-cancel')
+
+    await discard.trigger('click')
+    expect(document.body.querySelector('[data-test="run-discard-hint"]')).not.toBeNull()
+    submitDialog()
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'discard_correction', { row_version: 3 }, expect.any(String))
+    expect(m.commandRun).toHaveBeenCalledTimes(1)
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.outcome.correction_discarded')
     wrapper.unmount()
   })
 
@@ -373,7 +383,7 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     const wrapper = mount(PayrollRuns, { attachTo: document.body })
     await flushPromises()
     expect(wrapper.get('[data-testid="payroll-run-15-cancel"]').text()).toContain('payroll.runs.commands.cancel')
-    expect(wrapper.get('[data-testid="payroll-run-15-cancel"]').text()).not.toContain('cancel_correction')
+    expect(wrapper.find('[data-testid="payroll-run-15-discard_correction"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="payroll-run-15-correction-back"]').exists()).toBe(false)
     wrapper.unmount()
   })

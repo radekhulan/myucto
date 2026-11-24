@@ -732,6 +732,7 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'prepare_payments',
   'request_correction',
   'withdraw_correction',
+  'discard_correction',
   'change_payment_date',
   'reopen',
   'cancel',
@@ -741,11 +742,6 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
 function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
   if (command === 'reopen' && run?.status === 'cancelled') {
     return t('payroll.runs.commands.reopen_cancelled')
-  }
-  // V opravě schváleného běhu zrušení zahodí jen opravnou revizi; „Zrušit běh"
-  // sváděl k tomu, aby se jím vracelo zpět po špatně zadaném vstupu.
-  if (command === 'cancel' && run?.revision_kind === 'correction') {
-    return t('payroll.runs.commands.cancel_correction')
   }
   return t(`payroll.runs.commands.${command}`)
 }
@@ -760,7 +756,7 @@ function correctionBackHint(run: PayrollRun): string {
   if (run.status === 'correction_pending' && commands.includes('withdraw_correction')) {
     return t('payroll.runs.correction_back.pending')
   }
-  if (run.revision_kind === 'correction' && run.status !== 'cancelled' && commands.includes('refresh_inputs')) {
+  if (commands.includes('discard_correction')) {
     return t('payroll.runs.correction_back.open')
   }
   return ''
@@ -855,7 +851,8 @@ function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
     return btnFilled(command === 'approve' ? 'success' : 'primary')
   }
   if (command === 'cancel') return btnOutline('danger')
-  if (command === 'request_correction' || command === 'reopen' || command === 'exclude_employee') {
+  if (command === 'request_correction' || command === 'reopen' || command === 'exclude_employee'
+    || command === 'discard_correction') {
     return btnOutline('warning')
   }
   return btnOutline('neutral')
@@ -954,6 +951,7 @@ const COMMAND_PERMISSIONS: Partial<Record<PayrollRunCommand, PermissionKey[]>> =
   review: ['payroll.review'],
   request_correction: ['payroll.review'],
   withdraw_correction: ['payroll.review'],
+  discard_correction: ['payroll.review'],
   approve: ['payroll.approve'],
   close: ['payroll.approve'],
   reopen: ['payroll.reopen'],
@@ -1374,7 +1372,7 @@ function commandNeedsReason(run: PayrollRun, command: PayrollRunCommand): boolea
 
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
   averageCorrectionRunId.value = null
-  if (['request_correction', 'cancel', 'withdraw_correction', 'change_payment_date'].includes(command)) {
+  if (['request_correction', 'cancel', 'withdraw_correction', 'discard_correction', 'change_payment_date'].includes(command)) {
     pendingCommand.value = { run, command }
     commandReason.value = ''
     commandError.value = ''
@@ -3905,6 +3903,13 @@ onMounted(() => { void load() })
           data-test="run-withdraw-hint"
         >
           {{ t('payroll.runs.withdraw_correction_hint') }}
+        </p>
+        <p
+          v-if="pendingCommand.command === 'discard_correction'"
+          class="text-sm text-neutral-700"
+          data-test="run-discard-hint"
+        >
+          {{ t('payroll.runs.discard_correction_hint') }}
         </p>
         <p
           v-if="pendingCommand.command === 'exclude_employee'"

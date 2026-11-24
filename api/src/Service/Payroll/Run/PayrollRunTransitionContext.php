@@ -50,6 +50,11 @@ final readonly class PayrollRunTransitionContext
          * `request_correction`). Vzetí žádosti zpět vrací běh přesně sem.
          */
         public ?PayrollRunStatus $correctionRequestedFrom = null,
+        /*
+         * Je aktuální revize otevřená OPRAVNÁ revize nad schválenou? Jen tehdy
+         * jde opravu zahodit a vrátit schválenou revizi.
+         */
+        public bool $openCorrectionRevision = false,
     ) {
         if ($actorUserId <= 0) {
             throw new \InvalidArgumentException('Uživatel přechodu musí být platný.');

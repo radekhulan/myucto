@@ -22,6 +22,8 @@ final readonly class PayrollRunCommandOutcome
     public const PAYMENTS_SETTLED = 'payments_settled';
     /** Obnova podkladů nenašla žádnou změnu: revize zůstává, nová nevznikla. */
     public const INPUTS_UNCHANGED = 'inputs_unchanged';
+    /** Opravná revize zahozena, běh se vrátil na schválenou revizi. */
+    public const CORRECTION_DISCARDED = 'correction_discarded';
 
     /** @param array<string,mixed> $details */
     public function __construct(

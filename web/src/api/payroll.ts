@@ -7775,6 +7775,7 @@ export type PayrollRunCommand =
   | 'mark_paid'
   | 'request_correction'
   | 'withdraw_correction'
+  | 'discard_correction'
   | 'change_payment_date'
   | 'exclude_employee'
   | 'include_employee'
@@ -7799,6 +7800,7 @@ export type PayrollRunOutcomeCode =
   | 'payments_not_applicable'
   | 'payments_settled'
   | 'inputs_unchanged'
+  | 'correction_discarded'
 
 export interface PayrollRunOutcome {
   outcome: PayrollRunOutcomeCode

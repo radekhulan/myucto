@@ -452,6 +452,10 @@ final class PayrollRunsAction
                     static fn ($command): string => $command->value,
                     $this->workflow->availableCommands(
                         PayrollRunStatus::from($status),
+                        // Opravná revize vzniká jen nad schválenou, takže
+                        // otevřená opravná revize = je kam se vrátit.
+                        ($item['revision_kind'] ?? null) === 'correction'
+                            && in_array($item['revision_status'] ?? null, ['snapshot', 'calculated', 'reviewed'], true),
                     ),
                 )),
             );
@@ -1062,7 +1066,9 @@ final class PayrollRunsAction
             // Změna data výplaty u běhu se snímkem založí novou revizi stejnou
             // cestou jako obnova podkladů, proto tytéž dvě brány.
             'change_payment_date' => 'payroll.calculate',
-            'review', 'request_correction', 'withdraw_correction' => 'payroll.review',
+            // Zahození opravy je protějšek vyžádání opravy: vrací běh na
+            // schválenou revizi, nic nového neschvaluje ani neruší.
+            'review', 'request_correction', 'withdraw_correction', 'discard_correction' => 'payroll.review',
             // Vyřazení osoby je rozhodnutí „tuhle osobu teď nevyplácím" — stejná
             // váha jako výjimka u kontroly, kterou smí schválit jen `payroll.approve`.
             // Nová revize navíc zamyká vstupy, takže i `payroll.inputs.write`.
@@ -1282,6 +1288,9 @@ final class PayrollRunsAction
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
             'withdraw_correction' => $this->commands->withdrawCorrection(
+                $supplierId, $runId, $version, $idempotencyKey, $userId, $reason,
+            ),
+            'discard_correction' => $this->commands->discardCorrection(
                 $supplierId, $runId, $version, $idempotencyKey, $userId, $reason,
             ),
             'change_payment_date' => $this->commands->changePaymentDate(

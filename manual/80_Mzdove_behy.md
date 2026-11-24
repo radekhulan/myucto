@@ -659,11 +659,20 @@ Obnovit podklady smí uživatel s právem počítat mzdy a zapisovat mzdové vst
 
 Zadali jste v otevřené opravě něco špatně, třeba zápornou nebo chybnou
 částku? Vstup opravte nebo smažte a klikněte na **Obnovit podklady**.
-**Zahodit opravu** (v opravě schváleného běhu místo **Zrušit běh**) zahodí
-jen rozpracovanou opravnou revizi; mzdové vstupy nevrací. Schválená revize,
-zaúčtování, platby i podání platí dál, běh ale zůstane ve stavu **Zrušeno**
-a měsíc dokončíte až další opravou. Opravu vyžádanou omylem, kterou jste
-ještě neotevřeli, vezměte zpět tlačítkem **Vzít žádost o opravu zpět**.
+
+Opravu nakonec nechcete vůbec? **Zahodit opravu** zahodí rozpracovanou
+opravnou revizi a vrátí běh na schválenou revizi a do stavu, ve kterém byl
+před žádostí o opravu (Schváleno, Zaúčtováno, Platby připraveny, Uhrazeno
+nebo Uzavřeno). Schválená revize, zaúčtování, platby i podání platí dál
+a měsíční hlášení se připravuje zase z ní. Vstupy, se kterými schválená
+revize počítala, se znovu zamknou. Vstup zadaný nebo upravený během opravy
+zůstane, jak je; aplikace po zahození řekne, kolik takových změn podkladů je,
+a do mzdy se dostanou až další opravou. Akci smí uživatel s právem kontrolovat
+mzdy, stejně jako vyžádání opravy.
+
+**Zrušit běh** je skutečné zrušení: běh zůstane ve stavu **Zrušeno** a měsíc
+dokončíte až další opravou. Opravu vyžádanou omylem, kterou jste ještě
+neotevřeli, vezměte zpět tlačítkem **Vzít žádost o opravu zpět**.
 
 Schválení revize, ke které existují novější podklady, aplikace odmítne. Nejde
 o varování s výjimkou: schválený vstup, který by revize vynechala, by zůstal
