@@ -5,36 +5,38 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Accrual;
 
 use MyInvoice\Http\IsoDate;
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
-use PDO;
+use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\FiscalCalendar;
+use MyInvoice\Service\Accounting\PostingException;
 
 /**
  * Položky spravované uzávěrkou (`managed_by = closing`): řádky dokladů s obdobím od-do, které
- * se účtují celé do nákladu či výnosu a na 381/384 je odkládá krok uzávěrky. Agenda je jen
- * zobrazuje, nic se neukládá ani neúčtuje.
+ * se účtují celé do nákladu či výnosu a na 381/384 je odkládá až krok uzávěrky. Během roku
+ * proto na 381/384 nejsou vidět; přehled ukazuje, co uzávěrka účetního období zaúčtuje.
+ * Nic se neukládá ani neúčtuje.
  *
- * Výběr jde jedním dotazem pro všechny doklady (bez dotazů po dokladech). Vyřazuje tytéž
- * doklady jako krok uzávěrky: doklady, které nesou odklad samy
- * ({@see AccrualDeferralService::deferredOnDocumentFilter()}), a řádky spravované agendou.
- * Jen řádky, jejichž období přesahuje konec účetního období dne `as_of`: období celé uvnitř
- * roku uzávěrka nerozlišuje. Zůstatek je část připadající po konci období (co uzávěrka odloží),
- * tedy základ řádku v Kč (kurz dokladu) rozpuštěný poměrem dnů
- * ({@see AccrualScheduleCalculator}); u přijatých faktur s neuplatněným DPH počítá krok
- * uzávěrky z nákladu včetně DPH, přesná částka je proto v kroku Časové rozlišení.
+ * Výběr řádků, částky i výsledkové účty počítá {@see AccrualDeferralService} stejně jako krok
+ * uzávěrky a průběžné časové rozlišení ve výkazech ({@see \MyInvoice\Service\Accounting\Reports\InterimAccrualAdjustment}):
+ * doklady s nákladem či výnosem v účetním období dne `as_of`, jejichž období přesahuje jeho
+ * konec, bez dokladů, které odklad nesou samy, a bez řádků spravovaných agendou. Období celé
+ * uvnitř účetního období uzávěrka nerozlišuje, proto v přehledu nejsou.
+ *
+ * U každého řádku je část, která zůstane v nákladech či výnosech účetního období, část
+ * odložená na 381/384 a její rozpuštění po dalších účetních obdobích (poměrem dnů,
+ * {@see AccrualScheduleCalculator}). Náklady (381) a výnosy (384) jsou oddělené.
  */
 final class AccrualClosingProjection
 {
     private const LIMIT = 500;
 
     public function __construct(
-        private readonly Connection $db,
         private readonly AccrualDeferralService $accruals,
         private readonly AccountingPeriodRepository $periods,
     ) {}
 
-    /** @return array{as_of:string, year_end:string, items: list<array<string,mixed>>, totals: array<string,float>, truncated: bool} */
+    /** @return array<string,mixed> */
     public function list(int $supplierId, ?string $asOf = null): array
     {
         $asOf = $asOf === null || $asOf === '' ? date('Y-m-d') : substr($asOf, 0, 10);
@@ -42,66 +44,126 @@ final class AccrualClosingProjection
             throw new AccrualException('invalid_date', 'Neplatné datum.', 422, 'as_of');
         }
         $calendar = $this->periods->fiscalCalendar($supplierId);
-        $yearEnd = $calendar->periodEnd($calendar->fiscalYearOfDate($asOf));
-        [$piOwn, $piParams] = $this->accruals->deferredOnDocumentFilter($supplierId, 'purchase_invoice', 'd.supplier_id', 'd.id');
-        [$inOwn, $inParams] = $this->accruals->deferredOnDocumentFilter($supplierId, 'invoice', 'd.supplier_id', 'd.id');
-        $agenda = static fn (string $type, string $docSql, ?string $lineSql): string => "NOT EXISTS (SELECT 1 FROM accrual_items ai
-                    WHERE ai.supplier_id = d.supplier_id AND ai.managed_by = 'agenda' AND ai.status IN ('active', 'completed', 'terminated')
-                      AND ai.source_type = '{$type}' AND ai.source_id = {$docSql}"
-            . ($lineSql === null ? '' : " AND ai.source_item_id = {$lineSql}") . ')';
-        $sql = "SELECT * FROM (
-                  SELECT 'prepaid_expense' AS kind, 'purchase_invoice' AS source_type, d.id AS source_id, it.id AS source_item_id,
-                         COALESCE(NULLIF(d.vendor_invoice_number, ''), d.varsymbol) AS document_no, it.description AS title,
-                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, d.exchange_rate), 1), 2) AS net
-                    FROM purchase_invoices d
-                    JOIN purchase_invoice_items it ON it.purchase_invoice_id = d.id
-                    JOIN currencies cur ON cur.id = d.currency_id
-                   WHERE d.supplier_id = ? AND d.status NOT IN ('draft', 'cancelled')
-                     AND it.accrual_from IS NOT NULL AND it.accrual_to > ? AND d.effective_cost_date <= ?
-                     AND NOT {$piOwn} AND " . $agenda('purchase_invoice', 'd.id', 'it.id') . "
-                  UNION ALL
-                  SELECT 'deferred_revenue', 'invoice', d.id, it.id, d.varsymbol, it.description,
-                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, d.exchange_rate), 1), 2)
-                    FROM invoices d
-                    JOIN invoice_items it ON it.invoice_id = d.id
-                    JOIN currencies cur ON cur.id = d.currency_id
-                   WHERE d.supplier_id = ? AND d.status NOT IN ('draft', 'cancelled')
-                     AND it.accrual_from IS NOT NULL AND it.accrual_to > ? AND d.effective_tax_date <= ?
-                     AND NOT {$inOwn} AND " . $agenda('invoice', 'd.id', 'it.id') . "
-                  UNION ALL
-                  SELECT CASE WHEN d.side = 'payable' THEN 'prepaid_expense' ELSE 'deferred_revenue' END, 'other_item', d.id, NULL,
-                         d.document_no, d.title, d.accrual_from, d.accrual_to, COALESCE(d.amount_czk, d.amount)
-                    FROM other_items d
-                   WHERE d.supplier_id = ? AND d.deleted_at IS NULL AND d.status = 'posted'
-                     AND d.accrual_from IS NOT NULL AND d.accrual_to > ? AND COALESCE(d.accounting_on, d.issued_on) <= ?
-                     AND " . $agenda('other_item', 'd.id', null) . "
-                ) x ORDER BY x.accrual_to, x.document_no LIMIT " . (self::LIMIT * 4);
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $yearEnd, $asOf, ...$piParams, $supplierId, $yearEnd, $asOf, ...$inParams, $supplierId, $yearEnd, $asOf]);
-        $items = [];
-        $totals = ['prepaid_expense' => 0.0, 'deferred_revenue' => 0.0];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $from = substr((string) $r['accrual_from'], 0, 10);
-            $to = substr((string) $r['accrual_to'], 0, 10);
-            $balance = AccrualScheduleCalculator::deferredAmount((float) $r['net'], $from, $to, $yearEnd);
-            if ((int) round($balance * 100) === 0) {
-                continue;
+        $year = $calendar->fiscalYearOfDate($asOf);
+        $yearStart = $calendar->periodStart($year);
+        $yearEnd = $calendar->periodEnd($year);
+
+        try {
+            $prepaid = [];
+            $costs = [];
+            $accountsByInvoice = [];
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->prepaidExpenseRows($supplierId, $yearEnd, $yearStart, $yearEnd)) as $row) {
+                $amount = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costs);
+                $accounts = $this->accruals->prepaidExpenseAccounts($supplierId, $row, $accountsByInvoice);
+                $prepaid[] = $this->item($row, $amount, array_keys($accounts), $calendar, $year, $yearEnd, true);
             }
-            $items[] = [
-                'managed_by' => 'closing',
-                'kind' => (string) $r['kind'],
-                'source_type' => (string) $r['source_type'],
-                'source_id' => (int) $r['source_id'],
-                'source_item_id' => $r['source_item_id'] === null ? null : (int) $r['source_item_id'],
-                'document_no' => (string) ($r['document_no'] ?? ''),
-                'title' => (string) ($r['title'] ?? ''),
-                'period_from' => $from,
-                'period_to' => $to,
-                'basis_amount' => round((float) $r['net'], 2),
-                'balance' => $balance,
+            $revenue = [];
+            $contexts = [];
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->deferredRevenueRows($supplierId, $yearEnd, $yearStart, $yearEnd)) as $row) {
+                [$amount, $accounts] = $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
+                $revenue[] = $this->item($row, $amount, array_keys($accounts), $calendar, $year, $yearEnd, false);
+            }
+            $kinds = [
+                'prepaid_expense' => $this->kind($prepaid, $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_PREPAID_EXPENSE)),
+                'deferred_revenue' => $this->kind($revenue, $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE)),
             ];
-            $totals[(string) $r['kind']] = round($totals[(string) $r['kind']] + $balance, 2);
+        } catch (ClosingException | PostingException $e) {
+            throw new AccrualException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
-        return ['as_of' => $asOf, 'year_end' => $yearEnd, 'items' => array_slice($items, 0, self::LIMIT), 'totals' => $totals, 'truncated' => count($items) > self::LIMIT];
+
+        $years = [];
+        foreach ($kinds as $kind) {
+            $years = [...$years, ...array_keys($kind['totals']['years'])];
+        }
+        $years = array_values(array_unique($years));
+        sort($years);
+
+        return [
+            'as_of' => $asOf,
+            'fiscal_year' => $year,
+            'year_start' => $yearStart,
+            'year_end' => $yearEnd,
+            'future_years' => $years,
+            'kinds' => $kinds,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param list<int|string> $accounts
+     * @return array<string,mixed>|null
+     */
+    private function item(array $row, float $amount, array $accounts, FiscalCalendar $calendar, int $year, string $yearEnd, bool $expense): ?array
+    {
+        $from = substr((string) $row['accrual_from'], 0, 10);
+        $to = substr((string) $row['accrual_to'], 0, 10);
+        $amount = round($amount, 2);
+        $deferred = AccrualScheduleCalculator::deferredAmount($amount, $from, $to, $yearEnd);
+        if ((int) round($deferred * 100) === 0) {
+            return null;
+        }
+        $years = [];
+        $rest = $deferred;
+        for ($fy = $year + 1; $calendar->periodStart($fy) <= $to; $fy++) {
+            $part = $calendar->periodEnd($fy) >= $to
+                ? $rest
+                : AccrualScheduleCalculator::recognizedBetween($amount, $from, $to, $calendar->periodEnd($fy - 1), $calendar->periodEnd($fy));
+            $part = round($part, 2);
+            if ((int) round($part * 100) !== 0) {
+                $years[$fy] = $part;
+            }
+            $rest = round($rest - $part, 2);
+        }
+        [$sourceType, $sourceId, $documentNo] = match ($row['source'] ?? null) {
+            'other_item' => ['other_item', (int) $row['other_item_id'], $expense ? $row['vendor_invoice_number'] : $row['varsymbol']],
+            'nonprofit_membership' => ['nonprofit_membership', (int) $row['membership_case_id'], $row['varsymbol']],
+            'purchase_invoice' => ['purchase_invoice', (int) $row['purchase_invoice_id'], $row['vendor_invoice_number']],
+            default => ['invoice', (int) $row['invoice_id'], $row['varsymbol']],
+        };
+        $accounts = array_values(array_map('strval', $accounts));
+        sort($accounts);
+
+        return [
+            'source_type' => $sourceType,
+            'source_id' => $sourceId,
+            'source_item_id' => isset($row['item_id']) ? (int) $row['item_id'] : null,
+            'document_no' => (string) ($documentNo ?? ''),
+            'title' => (string) ($row['description'] ?? ''),
+            'period_from' => $from,
+            'period_to' => $to,
+            'accounts' => $accounts,
+            'amount' => $amount,
+            'current_year' => round($amount - $deferred, 2),
+            'deferred' => $deferred,
+            'years' => $years,
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>|null> $items
+     * @return array<string,mixed>
+     */
+    private function kind(array $items, string $account): array
+    {
+        $items = array_values(array_filter($items));
+        usort($items, static fn (array $a, array $b): int => [$a['period_to'], $a['document_no']] <=> [$b['period_to'], $b['document_no']]);
+        $totals = ['amount' => 0.0, 'current_year' => 0.0, 'deferred' => 0.0, 'years' => []];
+        foreach ($items as $item) {
+            foreach (['amount', 'current_year', 'deferred'] as $key) {
+                $totals[$key] = round($totals[$key] + $item[$key], 2);
+            }
+            foreach ($item['years'] as $fy => $part) {
+                $totals['years'][$fy] = round(($totals['years'][$fy] ?? 0.0) + $part, 2);
+            }
+        }
+        ksort($totals['years']);
+
+        return [
+            'account' => $account,
+            'count' => count($items),
+            'items' => array_slice($items, 0, self::LIMIT),
+            'totals' => $totals,
+            'truncated' => count($items) > self::LIMIT,
+        ];
     }
 }

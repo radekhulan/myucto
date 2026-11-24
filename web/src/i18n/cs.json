@@ -958,7 +958,9 @@
       "difference": "Rozdíl",
       "total": "Celkem",
       "items_count": "bez položek | 1 položka | {count} položky | {count} položek",
-      "filter_hint": "Filtrovat položky podle účtu"
+      "filter_hint": "Filtrovat položky podle účtu",
+      "projected": "Odloží uzávěrka {year}",
+      "projected_hint": "Částka, kterou uzávěrka účetního období přeúčtuje z nákladů či výnosů dokladů s obdobím přesahujícím konec roku. Podrobně v záložce Spravuje uzávěrka."
     },
     "unallocated": {
       "toggle": "Řádky {account} bez položky",
@@ -975,11 +977,29 @@
       "amount": "Přiřazená částka"
     },
     "projection": {
-      "hint": "Řádky dokladů s obdobím přesahujícím konec účetního období {date}. Zůstatek je část připadající po tomto dni, kterou uzávěrka odloží na 381/384 a v dalším roce rozpustí. Období celé uvnitř roku se časově nerozlišuje, proto tu není.",
-      "empty": "Žádný řádek dokladu nemá období přesahující konec účetního období.",
+      "kind_prepaid_expense": "Náklady příštích období",
+      "kind_deferred_revenue": "Výnosy příštích období",
+      "hint_prepaid_expense": "Přijaté faktury a ostatní závazky s obdobím přesahujícím {date} se během roku účtují celé do nákladů, proto je na účtu {account} zatím nevidíte. Uzávěrka roku {year} přeúčtuje část připadající na další roky na náklady příštích období ({account}) a v dalších letech ji rozpustí zpět do nákladů. Výkaz zisku a ztráty s volbou Průběžné časové rozlišení a odpisy s tím počítá už během roku.",
+      "hint_deferred_revenue": "Vydané faktury a ostatní pohledávky s obdobím přesahujícím {date} se během roku účtují celé do výnosů, proto je na účtu {account} zatím nevidíte. Uzávěrka roku {year} přeúčtuje část připadající na další roky na výnosy příštích období ({account}) a v dalších letech ji rozpustí zpět do výnosů. Výkaz zisku a ztráty s volbou Průběžné časové rozlišení a odpisy s tím počítá už během roku.",
+      "empty_prepaid_expense": "Žádný náklad s obdobím přesahujícím {date}.",
+      "empty_deferred_revenue": "Žádný výnos s obdobím přesahujícím {date}.",
       "document": "Doklad",
-      "totals": "Náklady příštích období {prepaid} · výnosy příštích období {deferred}",
-      "truncated": "Zobrazeny jsou jen první řádky."
+      "description": "Popis",
+      "account_prepaid_expense": "Nákladový účet",
+      "account_deferred_revenue": "Výnosový účet",
+      "amount": "Celkem",
+      "current_year": "Zůstane v roce {year}",
+      "deferred": "Odloží se na {account}",
+      "release_year": "Rozpuštění {year}",
+      "source_other_prepaid_expense": "Ostatní závazek",
+      "source_other_deferred_revenue": "Ostatní pohledávka",
+      "source_membership": "Členský příspěvek",
+      "truncated": "Zobrazeny jsou jen první řádky.",
+      "summary_current_prepaid_expense": "Zůstane v nákladech {year}",
+      "summary_current_deferred_revenue": "Zůstane ve výnosech {year}",
+      "summary_deferred": "Uzávěrka {year} odloží na {account}",
+      "summary_release_prepaid_expense": "Rozpustí se do nákladů {year}",
+      "summary_release_deferred_revenue": "Rozpustí se do výnosů {year}"
     },
     "detail": {
       "not_found": "Položka časového rozlišení neexistuje.",

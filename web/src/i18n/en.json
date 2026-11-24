@@ -958,7 +958,9 @@
       "difference": "Difference",
       "total": "Total",
       "items_count": "no items | 1 item | {count} items",
-      "filter_hint": "Filter items by account"
+      "filter_hint": "Filter items by account",
+      "projected": "Closing {year} defers",
+      "projected_hint": "Amount the accounting period closing moves from expenses or revenue of documents whose period extends beyond the year end. Details in the Managed by closing tab."
     },
     "unallocated": {
       "toggle": "Lines {account} without item",
@@ -975,11 +977,29 @@
       "amount": "Assigned amount"
     },
     "projection": {
-      "hint": "Document lines whose period extends beyond the end of the accounting period {date}. The balance is the part falling after that day, which the closing defers to 381/384 and releases next year. Periods entirely within the year are not deferred, so they are not listed.",
-      "empty": "No document line has a period extending beyond the end of the accounting period.",
+      "kind_prepaid_expense": "Prepaid expenses",
+      "kind_deferred_revenue": "Deferred revenue",
+      "hint_prepaid_expense": "Received invoices and other payables with a period extending beyond {date} are posted to expenses in full during the year, so they do not appear on account {account} yet. The {year} closing moves the part belonging to later years to prepaid expenses ({account}) and releases it back to expenses in the following years. The profit and loss statement with the Interim accruals and depreciation option already accounts for it during the year.",
+      "hint_deferred_revenue": "Issued invoices and other receivables with a period extending beyond {date} are posted to revenue in full during the year, so they do not appear on account {account} yet. The {year} closing moves the part belonging to later years to deferred revenue ({account}) and releases it back to revenue in the following years. The profit and loss statement with the Interim accruals and depreciation option already accounts for it during the year.",
+      "empty_prepaid_expense": "No expense with a period extending beyond {date}.",
+      "empty_deferred_revenue": "No revenue with a period extending beyond {date}.",
       "document": "Document",
-      "totals": "Prepaid expenses {prepaid} · deferred revenue {deferred}",
-      "truncated": "Only the first lines are shown."
+      "description": "Description",
+      "account_prepaid_expense": "Expense account",
+      "account_deferred_revenue": "Revenue account",
+      "amount": "Total",
+      "current_year": "Stays in {year}",
+      "deferred": "Deferred to {account}",
+      "release_year": "Release {year}",
+      "source_other_prepaid_expense": "Other payable",
+      "source_other_deferred_revenue": "Other receivable",
+      "source_membership": "Membership fee",
+      "truncated": "Only the first rows are shown.",
+      "summary_current_prepaid_expense": "Stays in {year} expenses",
+      "summary_current_deferred_revenue": "Stays in {year} revenue",
+      "summary_deferred": "Closing {year} defers to {account}",
+      "summary_release_prepaid_expense": "Released to expenses in {year}",
+      "summary_release_deferred_revenue": "Released to revenue in {year}"
     },
     "detail": {
       "not_found": "The accrual item does not exist.",

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import {
   accrualsApi, ACCRUAL_AGENDA_KINDS, ACCRUAL_METHODS, ACCRUAL_SOURCE_TYPES, ACCRUAL_STATUSES,
-  type AccrualItem, type AccrualListFilter, type AccrualProjection, type AccrualReconciliation, type AccrualUnallocated,
+  type AccrualItem, type AccrualListFilter, type AccrualProjection, type AccrualProjectionItem, type AccrualProjectionKindKey, type AccrualReconciliation, type AccrualUnallocated,
   type AccrualUnallocatedRow,
 } from '@/api/accruals'
 import { useAuthStore } from '@/stores/auth'
@@ -88,7 +88,9 @@ function csvOf(value: string, allowed: readonly string[]): string {
   return value.split(',').filter(part => allowed.includes(part)).join(',')
 }
 function readQuery(q: LocationQuery) {
-  tab.value = str(q.tab) === 'closing' ? 'closing' : 'items'
+  // Filtry položek v adrese (odkaz z dokladu, uložený filtr) otevřou Položky agendy.
+  const itemFilters = Object.keys(q).some(key => key !== 'tab' && key !== 'as_of')
+  tab.value = str(q.tab) === 'items' || (!q.tab && itemFilters) ? 'items' : 'closing'
   status.value = csvOf(str(q.status), ACCRUAL_STATUSES)
   kind.value = csvOf(str(q.kind), ACCRUAL_AGENDA_KINDS)
   method.value = csvOf(str(q.method), ACCRUAL_METHODS)
@@ -116,7 +118,9 @@ function buildQuery(): Record<string, string> {
   return q
 }
 function urlQuery(): Record<string, string> {
-  return tab.value === 'closing' ? { ...buildQuery(), tab: 'closing' } : buildQuery()
+  const query = buildQuery()
+  if (tab.value === 'items') return { ...query, tab: 'items' }
+  return Object.keys(query).some(key => key !== 'as_of') ? { ...query, tab: 'closing' } : query
 }
 function stringQuery(query: LocationQuery): string {
   return JSON.stringify(Object.fromEntries(Object.entries(query).filter(([, value]) => typeof value === 'string')))
@@ -303,7 +307,7 @@ function hasDifference(value: number): boolean {
   return Math.abs(Number(value)) >= 0.005
 }
 // Agenda bez jediné položky: zůstatek 381–385 z převodu je „k převzetí“, ne chyba odsouhlasení.
-const agendaUnused = computed(() => !!reconciliation.value && reconciliation.value.accounts.length > 0
+const agendaUnused = computed(() => !!reconciliation.value && !!reconciliation.value.takeover_available && reconciliation.value.accounts.length > 0
   && reconciliation.value.accounts.every(row => Number(row.items_count) === 0 && !hasDifference(row.items_balance)))
 function filterByAccount(code: string) {
   account.value = code
@@ -394,10 +398,46 @@ async function confirmAssign() {
 // ─── Spravuje uzávěrka (jen zobrazení) ───
 const projection = ref<AccrualProjection | null>(null)
 const projectionLoading = ref(false)
+const PROJECTION_KINDS = ['prepaid_expense', 'deferred_revenue'] as const
+const projectionKind = ref<AccrualProjectionKindKey>('prepaid_expense')
+let projectionKindChosen = false
+function chooseProjectionKind(kind: AccrualProjectionKindKey) {
+  projectionKind.value = kind
+  projectionKindChosen = true
+}
+function showProjectionFor(accountCode: string) {
+  const kind = PROJECTION_KINDS.find(k => projection.value?.kinds[k].account === accountCode)
+  if (kind) chooseProjectionKind(kind)
+  tab.value = 'closing'
+}
+const projectionCurrent = computed(() => projection.value?.kinds[projectionKind.value] ?? null)
+// Roky, ve kterých se odklad rozpustí (sloupce tabulky i souhrn).
+const projectionYears = computed(() => Object.keys(projectionCurrent.value?.totals.years ?? {}).sort())
+function projectionYearAmount(item: { years: Record<string, number> | [] }, year: string): number | null {
+  const value = (item.years as Record<string, number>)[year]
+  return value === undefined ? null : value
+}
+function projectionSourceLabel(row: AccrualProjectionItem): string {
+  if (row.source_type === 'other_item') return t(`accruals.projection.source_other_${projectionKind.value}`)
+  if (row.source_type === 'nonprofit_membership') return t('accruals.projection.source_membership')
+  return t(`accruals.source.${row.source_type}`)
+}
+function projectedFor(accountCode: string): number | null {
+  const kinds = projection.value?.kinds
+  if (!kinds) return null
+  const hit = PROJECTION_KINDS.find(k => kinds[k].account === accountCode)
+  return hit ? kinds[hit].totals.deferred : null
+}
+const projectedTotal = computed(() => {
+  const kinds = projection.value?.kinds
+  return kinds ? Math.round((kinds.prepaid_expense.totals.deferred + kinds.deferred_revenue.totals.deferred) * 100) / 100 : 0
+})
 async function loadProjection() {
   projectionLoading.value = true
   try {
     projection.value = await accrualsApi.projection(asOf.value || undefined)
+    const kinds = projection.value.kinds
+    if (!projectionKindChosen && !kinds.prepaid_expense.count && kinds.deferred_revenue.count) projectionKind.value = 'deferred_revenue'
   } catch (error: any) {
     projection.value = null
     toast.error(error?.response?.data?.error?.message || t('common.error'))
@@ -416,7 +456,7 @@ function reloadAll() {
   void load()
   void loadReconciliation()
   if (unallocatedAccount.value) void loadUnallocated()
-  if (tab.value === 'closing') void loadProjection()
+  void loadProjection()
 }
 
 function kindLabel(value: string): string {
@@ -453,7 +493,7 @@ watch(search, () => {
 watch(tab, value => {
   if (applyingQuery) return
   writeUrl()
-  if (value === 'closing' && !projection.value) void loadProjection()
+  if (value === 'closing' && !projection.value && !projectionLoading.value) void loadProjection()
 })
 watch(() => route.query, query => {
   if (route.name !== 'accounting-accruals') return
@@ -515,7 +555,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
           fallback-filename="rozpis-casoveho-rozliseni"
           class="max-md:-order-1"
         />
-        <RouterLink v-if="canWrite" :to="{ name: 'accounting-accruals-takeover' }" data-test="accruals-takeover"
+        <RouterLink v-if="canWrite && reconciliation?.takeover_available" :to="{ name: 'accounting-accruals-takeover' }" data-test="accruals-takeover"
           :class="[btnOutline('neutral'), 'whitespace-nowrap']">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('accruals.takeover.open') }}
@@ -557,6 +597,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
               <th class="px-3 py-2 text-right font-medium">{{ t('accruals.reconciliation.items') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('accruals.reconciliation.closing') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('accruals.reconciliation.difference') }}</th>
+              <th class="px-3 py-2 text-right font-medium" :title="t('accruals.reconciliation.projected_hint')">{{ t('accruals.reconciliation.projected', { year: projection?.fiscal_year ?? '' }) }}</th>
               <th class="px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
@@ -573,6 +614,11 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.closing_balance) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="!hasDifference(row.difference) ? 'text-neutral-500' : agendaUnused ? 'font-semibold text-neutral-700' : 'font-semibold text-danger-600'"
                   :title="agendaUnused && hasDifference(row.difference) ? t('accruals.unused.difference_title') : undefined">{{ formatMoney(row.difference) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :data-test="`reconciliation-projected-${row.account_code}`">
+                  <button v-if="projectedFor(row.account_code) !== null" type="button" class="cursor-pointer text-primary-600 hover:underline"
+                    @click="showProjectionFor(row.account_code)">{{ formatMoney(projectedFor(row.account_code)!) }}</button>
+                  <span v-else class="text-neutral-400">–</span>
+                </td>
                 <td class="px-3 py-2 text-right">
                   <button v-if="hasDifference(row.difference)" type="button" :data-test="`unallocated-toggle-${row.account_code}`"
                     :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :aria-expanded="unallocatedAccount === row.account_code"
@@ -583,7 +629,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
                 </td>
               </tr>
               <tr v-if="unallocatedAccount === row.account_code">
-                <td colspan="6" class="bg-neutral-50 px-3 py-3" data-test="unallocated-panel">
+                <td colspan="7" class="bg-neutral-50 px-3 py-3" data-test="unallocated-panel">
                   <p v-if="unallocatedLoading && !unallocated" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
                   <p v-else-if="!unallocated || !unallocated.rows.length" class="text-sm text-neutral-500">{{ t('accruals.unallocated.empty') }}</p>
                   <template v-else>
@@ -624,6 +670,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.items_balance) }}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.closing_balance) }}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="hasDifference(reconciliation.totals.difference) && !agendaUnused ? 'text-danger-600' : ''" data-test="reconciliation-difference">{{ formatMoney(reconciliation.totals.difference) }}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ projection ? formatMoney(projectedTotal) : '' }}</td>
               <td></td>
             </tr>
           </tfoot>
@@ -781,49 +828,87 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
       </template>
     </template>
 
-    <!-- Položky spravované uzávěrkou (období na řádku dokladu): jen zobrazení. -->
+    <!-- Doklady s obdobím přesahujícím konec roku: co uzávěrka odloží na 381/384 (jen zobrazení). -->
     <section v-else data-test="projection">
-      <p class="mb-3 text-sm text-neutral-500">{{ t('accruals.projection.hint', { date: projection?.year_end ? formatDate(projection.year_end) : '' }) }}</p>
+      <div role="tablist" class="mb-3 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('accruals.tab_closing')">
+        <button v-for="k in PROJECTION_KINDS" :key="k" type="button" role="tab" :aria-selected="projectionKind === k" :data-test="`projection-kind-${k}`"
+          class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-1.5 text-sm transition"
+          :class="projectionKind === k ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+          @click="chooseProjectionKind(k)">
+          {{ t(`accruals.projection.kind_${k}`) }}
+          <span v-if="projection" class="font-mono text-xs text-neutral-500">{{ projection.kinds[k].account }}</span>
+          <span v-if="projection" class="rounded-full bg-neutral-100 px-1.5 text-xs text-neutral-600">{{ projection.kinds[k].count }}</span>
+        </button>
+      </div>
+      <p v-if="projection" class="mb-3 text-sm text-neutral-500" data-test="projection-hint">
+        {{ t(`accruals.projection.hint_${projectionKind}`, { date: formatDate(projection.year_end), year: projection.fiscal_year, account: projectionCurrent?.account ?? '' }) }}
+      </p>
       <div v-if="projectionLoading && !projection" class="py-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-      <EmptyState v-else-if="!projection || !projection.items.length" boxed dense accent="neutral" icon="doc" :title="t('accruals.projection.empty')" />
-      <div v-else class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
+      <EmptyState v-else-if="!projectionCurrent || !projectionCurrent.items.length" boxed dense accent="neutral" icon="doc"
+        :title="t(`accruals.projection.empty_${projectionKind}`, { date: projection ? formatDate(projection.year_end) : '' })" />
+      <template v-else>
+      <dl class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5" data-test="projection-summary">
+        <div class="rounded-lg border border-neutral-200 bg-surface px-3 py-2">
+          <dt class="text-xs text-neutral-500">{{ t(`accruals.projection.summary_current_${projectionKind}`, { year: projection!.fiscal_year }) }}</dt>
+          <dd class="mt-0.5 font-mono text-base font-semibold">{{ formatMoney(projectionCurrent.totals.current_year) }}</dd>
+        </div>
+        <div class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2">
+          <dt class="text-xs text-primary-800">{{ t('accruals.projection.summary_deferred', { year: projection!.fiscal_year, account: projectionCurrent.account }) }}</dt>
+          <dd class="mt-0.5 font-mono text-base font-semibold text-primary-900" data-test="projection-summary-deferred">{{ formatMoney(projectionCurrent.totals.deferred) }}</dd>
+        </div>
+        <div v-for="y in projectionYears" :key="y" class="rounded-lg border border-neutral-200 bg-surface px-3 py-2">
+          <dt class="text-xs text-neutral-500">{{ t(`accruals.projection.summary_release_${projectionKind}`, { year: y }) }}</dt>
+          <dd class="mt-0.5 font-mono text-base font-semibold">{{ formatMoney(projectionYearAmount(projectionCurrent.totals, y) ?? 0) }}</dd>
+        </div>
+      </dl>
+      <div class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
               <tr>
                 <th class="px-3 py-2 text-left font-medium">{{ t('accruals.projection.document') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('accruals.title_label') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('accruals.kind_label') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('accruals.projection.description') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('accruals.period') }}</th>
-                <th class="px-3 py-2 text-right font-medium">{{ t('accruals.basis_amount') }}</th>
-                <th class="px-3 py-2 text-right font-medium">{{ t('accruals.balance') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t(`accruals.projection.account_${projectionKind}`) }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('accruals.projection.amount') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('accruals.projection.current_year', { year: projection!.fiscal_year }) }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('accruals.projection.deferred', { account: projectionCurrent.account }) }}</th>
+                <th v-for="y in projectionYears" :key="y" class="px-3 py-2 text-right font-medium">{{ t('accruals.projection.release_year', { year: y }) }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="row in projection.items" :key="`${row.source_type}-${row.source_id}-${row.source_item_id}`" data-test="projection-row">
+              <tr v-for="row in projectionCurrent.items" :key="`${row.source_type}-${row.source_id}-${row.source_item_id}`" data-test="projection-row">
                 <td class="whitespace-nowrap px-3 py-2">
-                  <span class="text-xs text-neutral-500">{{ t(`accruals.source.${row.source_type}`) }}</span>
+                  <span class="text-xs text-neutral-500">{{ projectionSourceLabel(row) }}</span>
                   <RouterLink v-if="accrualSourceRoute(row.source_type, row.source_id)" :to="accrualSourceRoute(row.source_type, row.source_id)!"
                     class="ml-1 font-mono text-primary-600 hover:underline">{{ row.document_no || `#${row.source_id}` }}</RouterLink>
+                  <span v-else class="ml-1 font-mono">{{ row.document_no || `#${row.source_id}` }}</span>
                 </td>
                 <td class="px-3 py-2">{{ row.title }}</td>
-                <td class="whitespace-nowrap px-3 py-2 text-xs">{{ kindLabel(row.kind) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-xs text-neutral-600">{{ periodText(row) }}</td>
-                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.basis_amount) }}</td>
-                <td class="whitespace-nowrap px-3 py-2 text-right font-mono font-semibold">{{ formatMoney(row.balance) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 font-mono text-xs">{{ row.accounts.join(', ') }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.amount) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.current_year) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono font-semibold">{{ formatMoney(row.deferred) }}</td>
+                <td v-for="y in projectionYears" :key="y" class="whitespace-nowrap px-3 py-2 text-right font-mono text-neutral-600">
+                  {{ projectionYearAmount(row, y) === null ? '–' : formatMoney(projectionYearAmount(row, y)!) }}
+                </td>
               </tr>
             </tbody>
-            <tfoot class="border-t-2 border-neutral-300 bg-neutral-50 text-xs font-semibold">
+            <tfoot class="border-t-2 border-neutral-300 bg-neutral-50 font-semibold" data-test="projection-totals">
               <tr>
-                <td colspan="6" class="px-3 py-2 text-right">
-                  {{ t('accruals.projection.totals', { prepaid: formatMoney(projection.totals.prepaid_expense), deferred: formatMoney(projection.totals.deferred_revenue) }) }}
-                </td>
+                <td colspan="4" class="px-3 py-2">{{ t('accruals.reconciliation.total') }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(projectionCurrent.totals.amount) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(projectionCurrent.totals.current_year) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(projectionCurrent.totals.deferred) }}</td>
+                <td v-for="y in projectionYears" :key="y" class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(projectionYearAmount(projectionCurrent.totals, y) ?? 0) }}</td>
               </tr>
             </tfoot>
           </table>
         </div>
-        <p v-if="projection.truncated" class="border-t border-neutral-200 px-3 py-2 text-xs text-neutral-500">{{ t('accruals.projection.truncated') }}</p>
+        <p v-if="projectionCurrent.truncated" class="border-t border-neutral-200 px-3 py-2 text-xs text-neutral-500">{{ t('accruals.projection.truncated') }}</p>
       </div>
+      </template>
     </section>
 
     <ListLoadingSpinner :show="loadingMore || (loading && items.length > 0)" />
