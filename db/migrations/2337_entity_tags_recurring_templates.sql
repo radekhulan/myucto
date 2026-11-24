@@ -14,4 +14,4 @@ CREATE TABLE IF NOT EXISTS recurring_template_tags (
   KEY idx_recurring_tag_entity (tag_id, entity_id),
   CONSTRAINT fk_recurring_tag_template FOREIGN KEY (entity_id) REFERENCES recurring_invoice_templates(id) ON DELETE CASCADE,
   CONSTRAINT fk_recurring_tag_tag FOREIGN KEY (tag_id) REFERENCES entity_tags(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
