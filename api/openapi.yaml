@@ -9568,6 +9568,8 @@ paths:
         se souhrnem po kontrolách podle zdroje převodu. Kontrola foreign_issued_in_czk ukáže vydané
         doklady, které převod z POHODY uložil v Kč. Opravu těchto dokladů spouští správce příkazem
         repair-pohoda-foreign-issued.php s původním exportem.
+        Kontrola asset_activation_missing hlásí karty z prvního účetního období bez zápisu o zařazení
+        s otevřeným zůstatkem na účtu pořízení.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -52259,7 +52261,7 @@ components:
       type: object
       required: [key, title, fixable, manual, status, count, fixable_count, locked_count, review_count, amount_czk, fixable_amount_czk, notes]
       properties:
-        key: { type: string, description: 'Klíč kontroly, např. settled_without_payment, foreign_issued_in_czk, tax_document_advance_link.' }
+        key: { type: string, description: 'Klíč kontroly, např. settled_without_payment, foreign_issued_in_czk nebo asset_activation_missing.' }
         title: { type: string }
         fixable: { type: boolean, description: Kontrola má jednoznačnou opravu. }
         manual: { type: string, description: 'Kapitola manuálu s postupem (126_Kontrola_dat_po_prevodu#…).' }
@@ -52291,7 +52293,17 @@ components:
         currency: { type: [string, 'null'] }
         state: { type: string, enum: [fixable, locked, review] }
         reason: { type: string }
-        details: { type: object, additionalProperties: true }
+        details:
+          type: object
+          description: >-
+            Nález asset_activation_missing obsahuje účet pořízení a jeho zůstatek.
+            Nález asset_account_undetermined může obsahovat původní a navržený účet oprávek.
+          properties:
+            acquisition_account_code: { type: string }
+            acquisition_balance: { type: number }
+            old_accumulated_account: { type: [string, 'null'] }
+            new_accumulated_account: { type: [string, 'null'] }
+          additionalProperties: true
     MigrationDataCheckDetail:
       allOf:
         - $ref: '#/components/schemas/MigrationDataCheckSummary'

@@ -28,6 +28,25 @@ final class PohodaAssetAccountResolver
     }
 
     /**
+     * @param array<string,float> $opening zůstatky ve směru účtu (MD u majetku, Dal u oprávek)
+     * @param list<string> $journalAccounts účty ze zápisů přiřazených ke kartě
+     */
+    public static function resolveAnalytic(string $synthetic, array $opening, array $journalAccounts): ?string
+    {
+        $prefix = $synthetic . '.';
+        if ($journalAccounts !== []) {
+            $candidates = array_values(array_unique($journalAccounts));
+            return count($candidates) === 1 && str_starts_with($candidates[0], $prefix) ? $candidates[0] : null;
+        }
+        if (($opening[$synthetic] ?? 0.0) != 0.0) {
+            return null;
+        }
+        $candidates = array_keys(array_filter($opening, static fn (float $balance, string $code): bool =>
+            $balance != 0.0 && str_starts_with($code, $prefix), ARRAY_FILTER_USE_BOTH));
+        return count($candidates) === 1 && $opening[$candidates[0]] > 0.0 ? $candidates[0] : null;
+    }
+
+    /**
      * Účet s počátečním stavem ve výši vstupní ceny; null = víc kandidátů, false = žádný.
      *
      * @param array<string,float> $opening

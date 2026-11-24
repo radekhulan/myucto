@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Migration\Check\CheckItem;
 use MyInvoice\Service\Migration\Check\Checks\AssetAccountUndeterminedCheck;
+use MyInvoice\Service\Migration\Check\Checks\AssetActivationMissingCheck;
 use MyInvoice\Service\Migration\Check\Checks\FinalInvoiceAdvanceVatCheck;
 use MyInvoice\Service\Migration\Check\Checks\ForeignBankInCzkCheck;
 use MyInvoice\Service\Migration\Check\Checks\ImportedStatementBalanceCheck;
@@ -95,6 +96,7 @@ final class MigrationDataCheckTest extends TestCase
         $keys = array_column($this->service->summary($this->supplierId)['checks'], 'key');
         self::assertContains(SettledWithoutPaymentCheck::KEY, $keys);
         self::assertContains(AssetAccountUndeterminedCheck::KEY, $keys);
+        self::assertContains(AssetActivationMissingCheck::KEY, $keys);
         self::assertContains(TaxDocumentAdvanceLinkCheck::KEY, $keys);
         self::assertSame(['pohoda'], $this->service->summary($this->supplierId)['sources']);
 
@@ -182,7 +184,7 @@ final class MigrationDataCheckTest extends TestCase
         $repair = $this->c->get(PohodaAssetAccountRepair::class);
         self::assertContains($this->supplierId, $repair->convertedSuppliers());
         $dryRun = $repair->run([$this->supplierId], false)[0]['cards'];
-        self::assertSame([$building => '021.000', $capacity => null, $machine => '022.000', $missing => null], array_column($dryRun, 'new_account', 'id'));
+        self::assertSame([$building => '021.000', $capacity => null, $machine => '022.000', $missing => null, $booked => null], array_column($dryRun, 'new_account', 'id'));
         self::assertStringContainsString('počáteční stav', $dryRun[1]['reason']);
         self::assertStringContainsString('1 001,00 Kč', $dryRun[1]['reason']);
         self::assertSame(1, $this->rows('assets', "id = {$building} AND asset_account_code = '022'"));
@@ -217,7 +219,7 @@ final class MigrationDataCheckTest extends TestCase
         }
         self::assertSame(3, $this->rows('journal_entries', '1=1'));
         $this->assertNothingToFix($key);
-        self::assertSame([$capacity => null, $missing => null], array_column($repair->run([$this->supplierId], true)[0]['cards'], 'new_account', 'id'));
+        self::assertSame([$capacity => null, $missing => null, $booked => null], array_column($repair->run([$this->supplierId], true)[0]['cards'], 'new_account', 'id'));
         self::assertSame(2, $this->rows('activity_log', "action = '" . PohodaAssetAccountRepair::AUDIT_ACTION . "'"));
     }
 
@@ -240,6 +242,109 @@ final class MigrationDataCheckTest extends TestCase
         $plan = $this->c->get(PohodaAssetAccountRepair::class)->run([$this->supplierId], true)[0];
         self::assertSame([$asset => '021.000'], array_column($plan['cards'], 'new_account', 'id'));
         self::assertSame(1, $this->rows('assets', "id = {$asset} AND asset_account_code = '021.000'"));
+    }
+
+    public function testPohodaAssetAccountRepairRefinesBothAccountsWhenJournalAgrees(): void
+    {
+        foreach (['021.011', '022', '022.007', '042', '081.001', '081.002', '082', '082.007', '082.008'] as $account) {
+            $this->account($account, 'asset');
+        }
+        $this->account('551', 'expense');
+        $this->account('701.000', 'equity');
+        $opening = $this->post('2025-01-01', '021.011', '701.000', 500.0, 'opening', $this->periodId);
+        $lines = $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount, line_no)
+            VALUES (?, ?, ?, ?, ?, ?)');
+        foreach (['081.001' => 40.0, '081.002' => 30.0, '082.007' => 20.0] as $code => $amount) {
+            $lines->execute([$this->supplierId, $opening, $this->accounts[$code], 'credit', $amount, ++$this->seq]);
+            $lines->execute([$this->supplierId, $opening, $this->accounts['701.000'], 'debit', $amount, ++$this->seq]);
+        }
+        $this->map('journal_entry', '2025|PS', $opening);
+
+        $unique = $this->assetCard(100.0, '082', account: '022.007', imported: true);
+        $openingAsset = $this->assetCard(200.0, '081.001', account: '021', imported: true);
+        $ambiguous = $this->assetCard(100.0, '081', account: '021.011', imported: true);
+        $byNumber = $this->assetCard(100.0, '081', account: '021.011', imported: true);
+        $number = 'MAJ-' . $this->seq;
+        $imported = $this->post('2025-03-01', '551', '081.002', 25.0, documentNo: $number);
+        $this->map('journal_entry', '2025|Dlouhodobý majetek|' . $number . '|2025-03-01', $imported);
+        $this->pdo->prepare("UPDATE assets SET inventory_number = 'MAJ-PREJMENOVANA' WHERE supplier_id = ? AND id = ?")
+            ->execute([$this->supplierId, $byNumber]);
+
+        $booked = $this->assetCard(500.0, '082', status: 'in_use', date: '2025-02-10', imported: true);
+        $this->post('2025-02-20', '022.007', '042', 500.0, 'asset', $booked);
+        $wrongAsset = $this->assetCard(600.0, '082', status: 'in_use', date: '2025-02-10', imported: true);
+        $this->post('2025-02-20', '022', '042', 600.0, 'asset', $wrongAsset);
+        $wrongDepreciation = $this->assetCard(700.0, '082', status: 'in_use', date: '2025-02-10', imported: true);
+        $this->post('2025-02-20', '022.007', '042', 700.0, 'asset', $wrongDepreciation);
+        $this->assetCard(400.0, '082', account: '022.007');
+        $depreciation = $this->pdo->prepare("INSERT INTO depreciation_entries
+            (supplier_id, asset_id, kind, fiscal_year, amount, full_amount, residual_value_end, status)
+            VALUES (?, ?, 'accounting', 2025, 10, 10, 490, 'posted')");
+        foreach ([$booked => '082.007', $wrongAsset => '082.007', $wrongDepreciation => '082'] as $id => $code) {
+            $depreciation->execute([$this->supplierId, $id]);
+            $this->post('2025-03-31', '551', $code, 10.0, 'depreciation', (int) $this->pdo->lastInsertId());
+        }
+
+        $ledger = "SELECT entry_id, account_id, side, signed_amount FROM journal_entry_lines
+                    WHERE supplier_id = {$this->supplierId} ORDER BY id";
+        $ledgerBefore = $this->pdo->query($ledger)->fetchAll(PDO::FETCH_ASSOC);
+        $key = AssetAccountUndeterminedCheck::KEY;
+        $preview = $this->service->preview($this->supplierId, $key);
+        self::assertSame([$unique, $openingAsset, $byNumber, $booked], array_column($preview['changes'], 'entity_id'));
+        self::assertSame([$ambiguous, $wrongAsset, $wrongDepreciation], array_column($preview['skipped'], 'entity_id'));
+        $result = $this->service->fix($this->supplierId, $key, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(4, $result['fixed_count']);
+        self::assertSame(1, $this->rows('assets', "id = {$unique} AND accumulated_account_code = '082.007'"));
+        self::assertSame(1, $this->rows('assets', "id = {$openingAsset} AND asset_account_code = '021.011'"));
+        self::assertSame(1, $this->rows('assets', "id = {$ambiguous} AND accumulated_account_code = '081'"));
+        self::assertSame(1, $this->rows('assets', "id = {$byNumber} AND accumulated_account_code = '081.002'"));
+        self::assertSame(1, $this->rows('assets', "id = {$booked} AND asset_account_code = '022.007' AND accumulated_account_code = '082.007' AND status = 'in_use'"));
+        self::assertSame(2, $this->rows('assets', "id IN ({$wrongAsset}, {$wrongDepreciation}) AND asset_account_code = '022' AND accumulated_account_code = '082'"));
+        self::assertSame($ledgerBefore, $this->pdo->query($ledger)->fetchAll(PDO::FETCH_ASSOC));
+        $this->assertNothingToFix($key);
+    }
+
+    public function testMissingAssetActivationReportsOpenAcquisitionInFirstAccountingPeriod(): void
+    {
+        foreach (['022.007', '041', '042.007'] as $account) {
+            $this->account($account, 'asset');
+        }
+        $this->account('321', 'liability');
+        $this->c->get(AccountingPeriodRepository::class)->create($this->supplierId, 2024, '2024-01-01', '2024-12-31');
+        $this->pdo->prepare("UPDATE supplier SET accounting_starts_on = '2025-02-01' WHERE id = ?")->execute([$this->supplierId]);
+        $open = $this->assetCard(500.0, '082', status: 'in_use', date: '2025-02-01');
+        $draft = $this->assetCard(500.0, '082', date: '2025-02-01');
+        $activated = $this->assetCard(500.0, '082', status: 'in_use', date: '2025-02-01');
+        $this->post('2025-02-03', '022.007', '042.007', 500.0, 'asset', $activated);
+        $improved = $this->assetCard(200.0, '082', status: 'in_use', date: '2025-02-01');
+        $this->pdo->prepare("INSERT INTO asset_improvements (supplier_id, asset_id, completed_on, amount) VALUES (?, ?, '2025-02-03', 50)")
+            ->execute([$this->supplierId, $improved]);
+        $this->post('2025-02-03', '022.007', '042.007', 250.0, 'asset', $improved);
+        $prior = $this->assetCard(500.0, '082', status: 'in_use', date: '2025-01-31');
+        $later = $this->assetCard(500.0, '082', date: '2026-01-01');
+        $imported = $this->assetCard(600.0, '082', status: 'in_use', date: '2025-02-01');
+        $this->post('2025-02-03', '022.007', '042.007', 600.0, documentNo: 'MAJ-' . $this->seq);
+        $noBalance = $this->assetCard(100.0, '073', account: '013', date: '2025-02-01');
+        $this->pdo->prepare("UPDATE assets SET acquisition_account_code = '041' WHERE supplier_id = ? AND id = ?")
+            ->execute([$this->supplierId, $noBalance]);
+        $this->post('2025-02-01', '042.007', '321', 2350.0);
+        $this->post('2025-02-01', '041', '321', 100.0);
+        $this->post('2025-02-03', '321', '041', 100.0);
+
+        $result = $this->service->detail($this->supplierId, AssetActivationMissingCheck::KEY);
+        self::assertFalse($result['fixable']);
+        $ids = array_column($result['items'], 'entity_id');
+        self::assertContains($open, $ids);
+        self::assertContains($draft, $ids);
+        self::assertNotContains($activated, $ids);
+        self::assertNotContains($improved, $ids);
+        self::assertNotContains($prior, $ids);
+        self::assertNotContains($later, $ids);
+        self::assertNotContains($imported, $ids);
+        self::assertNotContains($noBalance, $ids);
+        self::assertSame([$open, $draft], $ids);
+        self::assertSame(CheckItem::REVIEW, $result['items'][0]['state']);
+        self::assertSame(['acquisition_account_code' => '042', 'acquisition_balance' => 1000.0], $result['items'][0]['details']);
     }
 
     /**
@@ -711,13 +816,19 @@ final class MigrationDataCheckTest extends TestCase
         return $id;
     }
 
-    private function assetCard(float $price, string $accumulated, ?string $description = null, string $status = 'draft', string $account = '022'): int
+    private function assetCard(float $price, string $accumulated, ?string $description = null, string $status = 'draft',
+        string $account = '022', string $date = '2024-10-01', bool $imported = false): int
     {
+        $number = 'MAJ-' . (++$this->seq);
         $this->pdo->prepare("INSERT INTO assets (supplier_id, inventory_number, name, asset_account_code, accumulated_account_code,
                    description, status, input_price, acquisition_date, put_into_use_date, tax_method)
-            VALUES (?, ?, 'Syntetická karta', ?, ?, ?, ?, ?, '2024-10-01', '2024-10-01', 'none')")
-            ->execute([$this->supplierId, 'MAJ-' . (++$this->seq), $account, $accumulated, $description, $status, $price]);
-        return (int) $this->pdo->lastInsertId();
+            VALUES (?, ?, 'Syntetická karta', ?, ?, ?, ?, ?, ?, ?, 'none')")
+            ->execute([$this->supplierId, $number, $account, $accumulated, $description, $status, $price, $date, $date]);
+        $id = (int) $this->pdo->lastInsertId();
+        if ($imported) {
+            $this->map('asset', 'asset|' . $number, $id);
+        }
+        return $id;
     }
 
     private function account(string $code, string $type): void
@@ -727,10 +838,11 @@ final class MigrationDataCheckTest extends TestCase
         $this->accounts[$code] = (int) $this->pdo->lastInsertId();
     }
 
-    private function post(string $date, string $debit, string $credit, float $amount, string $source = 'manual'): int
+    private function post(string $date, string $debit, string $credit, float $amount, string $source = 'manual',
+        ?int $sourceId = null, ?string $documentNo = null): int
     {
-        $this->pdo->prepare('INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type) VALUES (?, ?, ?, ?)')
-            ->execute([$this->supplierId, $this->periodId, $date, $source]);
+        $this->pdo->prepare('INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, document_no) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $this->periodId, $date, $source, $sourceId, $documentNo]);
         $entry = (int) $this->pdo->lastInsertId();
         foreach (['debit' => $debit, 'credit' => $credit] as $side => $code) {
             $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (?, ?, ?, ?, ?)')

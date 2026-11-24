@@ -253,15 +253,18 @@ kontroly nástrojem `migration_data_checks` (přehled, nebo nálezy jedné kontr
 ## 126.14 Neurčený majetkový účet karty z POHODY
 
 Kontrola hledá koncepty a zařazené karty s poznámkou z převodu o neurčeném majetkovém účtu.
-U zařazených karet kontroluje jen karty bez evidovaných odpisů a bez zápisu o zařazení v deníku.
+Kontroluje také karty převzaté z POHODY, na nichž je účet majetku nebo účet oprávek uložený
+na syntetice, ke které má firma v osnově analytiky.
 
-Oprava určí účet podle počátečních stavů převzatých z POHODY, vstupní ceny
-včetně dřívějších technických zhodnocení a účtu oprávek. Součet cen všech přiřazených karet smí přesáhnout
-počáteční stav účtu nejvýše o 1 Kč. Náhled ukáže původní a navržený účet. Potvrzením změníte
-účet na kartě a z jejího popisu odstraníte pouze poznámku o neurčeném účtu.
+Oprava hledá používané účty v deníku podle vazby na kartu nebo inventárního čísla. U převzatého
+historického majetku používá také počáteční stavy. Při doplnění neurčeného majetkového účtu
+podle počátečních stavů zohlední vstupní cenu s dřívějšími technickými zhodnoceními a účet oprávek.
+Součet cen přiřazených karet smí počáteční stav majetkového účtu přesáhnout nejvýše o 1 Kč.
+Náhled ukáže původní a navržené účty. Potvrzením opravíte účty na kartě a odstraníte vyřešenou
+poznámku o neurčeném účtu. Existující zápisy o zařazení a odpisech musí odpovídat účtům na kartě po opravě.
 
-Pokud účet nelze jednoznačně určit nebo jeho počáteční stav nestačí, otevřete kartu
-a ověřte její účet proti původní evidenci POHODY.
+Pokud nelze účet jednoznačně určit, jeho počáteční stav nestačí nebo zápisy používají jiné účty,
+otevřete kartu a ověřte její účty proti původní evidenci POHODY.
 
 ## 126.15 Vydané doklady v cizí měně převzaté v Kč
 
@@ -305,7 +308,17 @@ Původní export musí doložit vazbu daňového dokladu k přijaté platbě na 
 chybí, částky překračují toleranci, vznikl by nový návrh kurzového rozdílu nebo by se v účetních
 výstupech změnil byť jen haléř v Kč, oprava vrátí převod celé skupiny.
 
-## 126.16 Související kapitoly
+## 126.16 Majetek pořízený v roce převodu bez zařazení na účet majetku
+
+Kontrola hledá koncepty a zařazené karty majetku pořízeného od začátku účetnictví v MyÚčtu
+do konce prvního účetního období. Kartu ohlásí, pokud v deníku chybí zápis s její pořizovací cenou
+na účtu majetku (01x nebo 02x) a účet pořízení (04x) má otevřený zůstatek.
+
+V detailu nálezu otevřete kartu a ověřte, která část zůstatku na účtu pořízení jí patří. Pokud je karta
+zařazená, použijte akci **Vrátit do konceptu**. Poté kartu zařaďte a vyberte **Zaúčtovat zařazení (02x / 04x)**.
+Kontrola zobrazuje nález a zůstatek účtu k ručnímu ověření.
+
+## 126.17 Související kapitoly
 
 - [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)

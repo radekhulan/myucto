@@ -136,6 +136,34 @@ function amountOf(i: MigrationCheckItem): string {
   return i.currency && i.currency !== 'CZK' && i.amount !== null ? `${formatMoney(i.amount, i.currency)} (${czk})` : czk
 }
 
+function reasonOf(i: MigrationCheckItem): string {
+  const data = i.details
+  if (detail.value?.key === 'asset_activation_missing') {
+    return t('migrationChecks.checks.asset_activation_missing.reason', {
+      account: data.acquisition_account_code,
+      balance: formatMoney(Number(data.acquisition_balance)),
+    })
+  }
+  if (detail.value?.key !== 'asset_account_undetermined') return i.reason
+  if (data.reason_key) {
+    return t(`migrationChecks.checks.asset_account_undetermined.reasons.${data.reason_key}`, {
+      account: data.account,
+      total: formatMoney(Number(data.total_price ?? 0)),
+      balance: formatMoney(Number(data.opening_balance ?? 0)),
+    })
+  }
+  const changes: string[] = []
+  if (data.new_account) {
+    changes.push(t('migrationChecks.checks.asset_account_undetermined.reasons.asset_changed', { old: data.old_account, new: data.new_account }))
+  }
+  if (data.new_accumulated_account) {
+    changes.push(t('migrationChecks.checks.asset_account_undetermined.reasons.accumulated_changed', {
+      old: data.old_accumulated_account, new: data.new_accumulated_account,
+    }))
+  }
+  return changes.length ? changes.join(' ') : i.reason
+}
+
 function filterCount(value: MigrationCheckItemState | ''): number | null {
   const d = detail.value
   if (!d) return null
@@ -215,7 +243,7 @@ const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
                 <td class="px-3 py-2 whitespace-nowrap">{{ i.date ? formatDate(i.date) : '' }}</td>
                 <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{{ amountOf(i) }}</td>
                 <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="stateClass(i.state)">{{ t(`migrationChecks.state.${i.state}`) }}</span></td>
-                <td class="px-3 py-2 text-xs text-neutral-600 max-w-xl">{{ i.reason }}</td>
+                <td class="px-3 py-2 text-xs text-neutral-600 max-w-xl">{{ reasonOf(i) }}</td>
               </tr>
             </tbody>
           </table>
@@ -231,7 +259,7 @@ const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
               <span v-if="i.date">{{ formatDate(i.date) }}</span>
               <span>{{ amountOf(i) }}</span>
             </div>
-            <p class="mt-1 text-xs text-neutral-600">{{ i.reason }}</p>
+            <p class="mt-1 text-xs text-neutral-600">{{ reasonOf(i) }}</p>
           </div>
         </div>
         <PaginationBar v-model:page="page" :per-page="detail.pagination.per_page" :total="detail.pagination.total" />
@@ -269,7 +297,7 @@ const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
                   <td class="px-2 py-1.5 font-medium">{{ c.label }}</td>
                   <td class="px-2 py-1.5 whitespace-nowrap">{{ c.date ? formatDate(c.date) : '' }}</td>
                   <td class="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{{ amountOf(c) }}</td>
-                  <td class="px-2 py-1.5 text-neutral-600">{{ c.reason }}</td>
+                  <td class="px-2 py-1.5 text-neutral-600">{{ reasonOf(c) }}</td>
                 </tr>
               </tbody>
             </table>
