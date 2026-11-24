@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
   licenseApi,
+  type LicenseStatus,
   type ManagedPerformanceInfo,
   type PerformanceQuote,
   type StorageQuote,
@@ -29,6 +30,7 @@ import {
   storageUpgradeOptionsGb,
 } from '@/api/instanceHealth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import PayAgainNotice from './PayAgainNotice.vue'
 
 /**
@@ -109,7 +111,7 @@ async function load(): Promise<void> {
   try {
     const result = await licenseApi.status()
     serverDevelopment.value = result.development === true
-    publishInstanceStatus(result)
+    receiveStorageStatus(result)
     syncPreviewFromRoute()
   } catch (e: unknown) {
     serverDevelopment.value = false
@@ -150,11 +152,10 @@ async function refreshEntitlement(): Promise<void> {
 onMounted(async () => {
   await load()
   if (!auth.isSuperadmin) return
-  const settled = await licenseApi.resumePendingChanges()
-  if (settled.some(change => change.applied)) {
+  await licenseApi.resumePendingChanges(async () => {
     await load()
     await auth.refresh()
-  }
+  })
 })
 
 // ─── Formátování ───────────────────────────────────────────────────────────
@@ -193,14 +194,15 @@ function fmtPeriodEnd(value: number | string | null): string | null {
  * jediná nabídka, která dává smysl — opakovat nákup se stejnou kartou dopadne
  * stejně.
  */
-function apiError(e: unknown, fallbackKey: string): { code: string | null; message: string; payUrl: string | null } {
-  const err = e as { response?: { data?: { error?: { code?: string; message?: string; pay_url?: string } } } }
+function apiError(e: unknown, fallbackKey: string) {
+  const err = e as { response?: { data?: { error?: { code?: string; message?: string; pay_url?: string; order_id?: string } } } }
   const error = err.response?.data?.error
 
   return {
     code: error?.code ?? null,
     message: error?.message ?? t(fallbackKey),
     payUrl: error?.pay_url ?? null,
+    orderId: error?.order_id ?? null,
   }
 }
 
@@ -544,6 +546,16 @@ const quotingStorage = ref(false)
 const buyingStorage = ref(false)
 const storageError = ref<string | null>(null)
 const storageDone = ref<string | null>(null)
+const awaitingStorageQuota = ref<number | null>(null)
+
+function receiveStorageStatus(result: LicenseStatus): void {
+  publishInstanceStatus(result)
+  const received = result.instance?.storage
+  const expected = awaitingStorageQuota.value
+  if (expected !== null && received?.change_pending === false && (received.quota_bytes ?? 0) >= expected * 1024 ** 3) {
+    awaitingStorageQuota.value = null
+  }
+}
 
 /**
  * Nabídka se po objednávce zavře natvrdo.
@@ -555,7 +567,21 @@ const storageDone = ref<string | null>(null)
 const offerClosed = ref(false)
 
 /** Zaplacené rozšíření, které se právě zavádí — nabízet znovu se NESMÍ. */
-const changePending = computed(() => storage.value?.change_pending === true)
+const changePending = computed(() => awaitingStorageQuota.value !== null || storage.value?.change_pending === true)
+const pollStorageChange = computed(() => auth.isSuperadmin && !previewing.value && !loading.value && !refreshing.value && !buyingStorage.value && changePending.value)
+
+useSessionAwarePolling(async signal => {
+  await licenseApi.refresh(signal)
+  const updated = await licenseApi.status(signal)
+  if (signal.aborted) return
+  receiveStorageStatus(updated)
+  errorMsg.value = null
+  if (!changePending.value && updated.instance?.storage.change_pending === false) {
+    const quota = currentQuotaGb(updated.instance.storage)
+    if (storageDone.value && quota !== null) storageDone.value = t('hosting.storage_done', { gb: quota })
+    await auth.refresh()
+  }
+}, 15_000, pollStorageChange)
 
 const offerVisible = computed(() =>
   isManaged.value && !changePending.value && !offerClosed.value && sizeOptions.value.length > 0,
@@ -607,23 +633,35 @@ async function buyStorage(): Promise<void> {
     offerClosed.value = true
     storageQuote.value = null
     selectedGb.value = null
+    if (!res.scheduled && !res.pending) awaitingStorageQuota.value = res.new_quota_gb
+    await load()
     storageDone.value = res.scheduled
       ? t('license.change_scheduled', { date: fmtPeriodEnd(res.effective_at) ?? '—' })
       : res.pending
         ? t('license.change_pending')
-        : res.provisioning_pending
+        : changePending.value
       ? t('hosting.storage_pending', { gb: res.new_quota_gb })
       : t('hosting.storage_done', { gb: res.new_quota_gb })
-    publishInstanceStatus(res.state)
-    // Backend si po nákupu sám vynutí obnovu licence, takže nová kvóta přijde
-    // hned; bez tohohle by zákazník po zaplacení viděl starý objem.
-    await load()
     await auth.refresh()
   } catch (e: unknown) {
     const failure = apiError(e, 'hosting.storage_order_failed')
     storageError.value = failure.message
     showPayLink(failure)
     if (failure.code === 'result_unknown') offerClosed.value = true
+    if (failure.payUrl && failure.orderId) {
+      void licenseApi.waitForCheckout(failure.orderId).then(async result => {
+        if (!result.applied || storageQuote.value !== quote) return
+        offerClosed.value = true
+        storageQuote.value = null
+        selectedGb.value = null
+        storageError.value = null
+        if (payUrl.value === failure.payUrl) payUrl.value = null
+        awaitingStorageQuota.value = quote.new_quota_gb
+        await load()
+        storageDone.value = t(changePending.value ? 'hosting.storage_pending' : 'hosting.storage_done', { gb: quote.new_quota_gb })
+        await auth.refresh()
+      }).catch(() => undefined)
+    }
   } finally {
     buyingStorage.value = false
   }
@@ -1131,8 +1169,8 @@ watch(previewScenario, (scenario) => {
         >
           <p class="font-medium">{{ t('hosting.storage_provisioning_title') }}</p>
           <p class="mt-1">
-            {{ storage?.quota_gb_ordered
-              ? t('hosting.storage_provisioning_desc', { gb: storage.quota_gb_ordered })
+            {{ (awaitingStorageQuota ?? storage?.quota_gb_ordered)
+              ? t('hosting.storage_provisioning_desc', { gb: awaitingStorageQuota ?? storage?.quota_gb_ordered })
               : t('hosting.storage_provisioning_desc_nogb') }}
           </p>
         </div>

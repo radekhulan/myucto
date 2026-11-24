@@ -197,6 +197,7 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
             '/api/license/payroll',
             '/api/license/performance/quote',
             '/api/license/performance',
+            '/api/license/refresh',
             '/api/license/activate',
         ];
         foreach ($paths as $path) {

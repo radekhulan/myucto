@@ -383,7 +383,8 @@ final class LicenseService
         if ($this->keyOf($row) === null) {
             return;
         }
-        if (!$this->billingWatchActive($row)) {
+        $quotaPending = ($this->entitlement?->deliveredRaw()['quota_change_pending'] ?? false) === true;
+        if (!$quotaPending && !$this->billingWatchActive($row)) {
             $this->renewIfDue();
             return;
         }
@@ -415,15 +416,15 @@ final class LicenseService
      * Denní obnova tokenu. Atomický UPDATE mutex zajistí, že renew provede jen
      * první request dne; ostatní se vrátí bez akce. Síťovou chybu jen zaloguje.
      */
-    public function renewIfDue(): void
+    public function renewIfDue(): bool
     {
         if (!$this->db->hasTable('license')) {
-            return;
+            return false;
         }
         $row = $this->loadRow();
         $key = $this->keyOf($row);
         if ($key === null) {
-            return; // trial → není co obnovovat
+            return false; // trial → není co obnovovat
         }
 
         // Předfiltr nad už načteným řádkem: mutex níž je zápis a bere zámek na
@@ -438,7 +439,7 @@ final class LicenseService
         // kdyby se přesto rozešly, dopad je nanejvýš o request odložená obnova.
         $lastCheck = $row['last_check_at'] ?? null;
         if (is_string($lastCheck) && $lastCheck !== '' && str_starts_with($lastCheck, date('Y-m-d'))) {
-            return;
+            return false;
         }
 
         $pdo = $this->db->pdo();
@@ -449,7 +450,7 @@ final class LicenseService
         $mutex->execute();
         $this->rowCache = null; // mutex právě přepsal last_check_at
         if ($mutex->rowCount() === 0) {
-            return; // dnes už proběhlo (jiný request / cron)
+            return false; // dnes už proběhlo (jiný request / cron)
         }
 
         $counter = (int) $row['counter'] + 1;
@@ -475,7 +476,7 @@ final class LicenseService
         } catch (LicenseNetworkException $e) {
             $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
             $this->logger->info('license.renew.network_error', ['error' => $e->getMessage()]);
-            return;
+            return false;
         }
 
         if (($resp['ok'] ?? false) === true && !empty($resp['token'])) {
@@ -484,7 +485,7 @@ final class LicenseService
             if ($payload === null) {
                 $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
                 $this->logger->warning('license.renew.bad_signature');
-                return;
+                return false;
             }
             $this->writeLicense(
                 'UPDATE license
@@ -495,7 +496,7 @@ final class LicenseService
             );
             $this->storeSubscription($resp);
             $this->storeInstanceInfo($resp);
-            return;
+            return true;
         }
 
         // ⚠️ Odmítnutí kvůli PŘETÍŽENÍ není odpověď na otázku, jestli licence platí.
@@ -513,7 +514,7 @@ final class LicenseService
                 [$counter],
             );
             $this->logger->info('license.renew.rate_limited');
-            return;
+            return false;
         }
 
         // Server odmítl (not_bound / clone_suspected / subscription_expired / overage_expired) —
@@ -531,6 +532,7 @@ final class LicenseService
         // a přepsat rozsah na prázdno by instalaci uvrhlo do read-only.
         $this->storeSubscription($resp);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+        return false;
     }
 
     /** @param array<string,mixed> $row */
@@ -813,7 +815,7 @@ final class LicenseService
      * „zkuste to prosím znovu", což s mrtvou kartou nevyjde nikdy.
      *
      * @param  array<string,mixed> $resp
-     * @return array{ok:false,error:string,pay_url?:string}
+     * @return array{ok:false,error:string,pay_url?:string,order_id?:string}
      */
     private function rejection(array $resp, string $fallback): array
     {
@@ -821,6 +823,9 @@ final class LicenseService
         $payUrl = isset($resp['pay_url']) ? (string) $resp['pay_url'] : '';
         if ($payUrl !== '') {
             $out['pay_url'] = $payUrl;
+            if (isset($resp['order_id'])) {
+                $out['order_id'] = (string) $resp['order_id'];
+            }
         }
 
         return $out;
@@ -1094,8 +1099,10 @@ final class LicenseService
             return ['ok' => false, 'error' => 'server_unreachable'];
         }
         if (($resp['ok'] ?? false) === true && ($resp['applied'] ?? false) === true) {
-            $this->forceRenew();
-            $resp['state_local'] = $this->current();
+            $resp['applied'] = $this->forceRenew();
+            if ($resp['applied']) {
+                $resp['state_local'] = $this->current();
+            }
         }
         return $resp;
     }
@@ -1105,13 +1112,13 @@ final class LicenseService
      * a spustí `renewIfDue()`. Používá se po in-place upgradu, ať se nový limit
      * promítne hned, ne až při další denní kontrole.
      */
-    public function forceRenew(): void
+    public function forceRenew(): bool
     {
         if (!$this->db->hasTable('license')) {
-            return;
+            return false;
         }
         $this->writeLicense('UPDATE license SET last_check_at = NULL WHERE id = 1');
-        $this->renewIfDue();
+        return $this->renewIfDue();
     }
 
     /**

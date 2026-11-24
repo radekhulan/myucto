@@ -29,6 +29,9 @@ const api = {
   upgrade: vi.fn(),
   tierQuote: vi.fn(),
   changeTier: vi.fn(),
+  payrollQuote: vi.fn(),
+  changePayroll: vi.fn(),
+  waitForCheckout: vi.fn(),
 }
 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
@@ -231,5 +234,33 @@ describe('zrušené, ale zaplacené předplatné', () => {
 
     const notice = wrapper.get('#upgrade [data-change-card-payment="declined"]')
     expect(notice.get('[data-change-card-payment-cta]').text()).toContain('license.pay_other_card_cta')
+  })
+
+  it('po doplacení mezd přes platební odkaz zobrazí druhé místo bez obnovení stránky', async () => {
+    const initial = { ...status(invoicePaid()), payroll_enabled: true, payroll_users_active: 1 }
+    api.status.mockResolvedValue(initial)
+    api.payrollQuote.mockResolvedValue({ new_enabled: true, amount: 278.1, currency: 'CZK', quote_token: 'q-payroll' })
+    api.changePayroll.mockRejectedValue({
+      response: { data: { error: { code: 'charge_failed', message: 'Karta neprošla.', pay_url: PAY_URL, order_id: '232' } } },
+    })
+    const { promise, resolve } = Promise.withResolvers<unknown>()
+    api.waitForCheckout.mockReturnValue(promise)
+
+    const wrapper = await mountPage()
+    const payroll = wrapper.get('#payroll-addon')
+    await payroll.findAll('input[type="number"]')[1]!.setValue('2')
+    await payroll.get('button').trigger('click')
+    await flushPromises()
+    await payroll.findAll('button').find(button => button.text() === 'license.upgrade_pay_cta')!.trigger('click')
+    await flushPromises()
+
+    expect(payroll.get('[data-change-card-payment-cta]').attributes('href')).toBe(PAY_URL)
+    expect(api.waitForCheckout).toHaveBeenCalledWith('232')
+    resolve({ applied: true, license: { ...initial, payroll_users_licensed: 2 } })
+    await flushPromises()
+    expect(payroll.find('[data-change-card-payment-cta]').exists()).toBe(false)
+    expect(payroll.text()).toContain('1 / 2')
+    expect(payroll.text()).toContain('license.payroll_change_success')
+    expect(api.changePayroll).toHaveBeenCalledTimes(1)
   })
 })

@@ -62,7 +62,15 @@ final class StorageUpgradeAction
     {
         $payUrl = isset($result['pay_url']) ? (string) $result['pay_url'] : '';
 
-        return $payUrl === '' ? [] : ['pay_url' => $payUrl];
+        if ($payUrl === '') {
+            return [];
+        }
+
+        $out = ['pay_url' => $payUrl];
+        if (isset($result['order_id'])) {
+            $out['order_id'] = (string) $result['order_id'];
+        }
+        return $out;
     }
 
     public static function message(string $error): string

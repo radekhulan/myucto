@@ -499,21 +499,33 @@ export interface PurchaseStartResult {
 }
 
 const PENDING_CHANGE_STORAGE_KEY = 'myucto.license.pending_change_orders'
+const CHECKOUT_WAIT_MS = 10 * 60_000
 
-function pendingOrderIds(): string[] {
+interface PendingChangeOrder { id: string; checkoutUntil?: number }
+
+function pendingOrders(): PendingChangeOrder[] {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PENDING_CHANGE_STORAGE_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string' && id !== '') : []
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(PENDING_CHANGE_STORAGE_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    const orders: PendingChangeOrder[] = []
+    for (const item of parsed) {
+      if (typeof item === 'string' && item !== '') orders.push({ id: item })
+      else if (Number.isSafeInteger(item) && item > 0) orders.push({ id: String(item) })
+      else if (typeof item?.id === 'string' && item.id !== '' && Number.isFinite(item.checkoutUntil) && item.checkoutUntil > Date.now()) {
+        orders.push({ id: item.id, checkoutUntil: item.checkoutUntil })
+      }
+    }
+    return orders
   } catch {
     return []
   }
 }
 
-function rememberPendingOrder(orderId: string): void {
+function rememberPendingOrder(order: PendingChangeOrder): void {
   try {
-    const ids = new Set(pendingOrderIds())
-    ids.add(orderId)
-    window.localStorage.setItem(PENDING_CHANGE_STORAGE_KEY, JSON.stringify([...ids]))
+    const orders = pendingOrders().filter(item => item.id !== order.id)
+    orders.push(order)
+    window.localStorage.setItem(PENDING_CHANGE_STORAGE_KEY, JSON.stringify(orders.map(item => item.checkoutUntil ? item : item.id)))
   } catch { /* Polling v otevřené stránce funguje i bez localStorage. */ }
 }
 
@@ -521,9 +533,42 @@ function forgetPendingOrder(orderId: string): void {
   try {
     window.localStorage.setItem(
       PENDING_CHANGE_STORAGE_KEY,
-      JSON.stringify(pendingOrderIds().filter(id => id !== orderId)),
+      JSON.stringify(pendingOrders().filter(item => item.id !== orderId).map(item => item.checkoutUntil ? item : item.id)),
     )
   } catch { /* Bezpečně ignorovat nedostupné perzistentní úložiště. */ }
+}
+
+const changeChecks = new Map<string, Promise<ChangeStatusResult>>()
+
+function waitForOrder(order: PendingChangeOrder, attempts = 30): Promise<ChangeStatusResult> {
+  const existing = changeChecks.get(order.id)
+  if (existing) return existing
+  rememberPendingOrder(order)
+  const check = (async () => {
+    let last: ChangeStatusResult = { order_id: order.id, state: 'pending', applied: false }
+    const interval = order.checkoutUntil ? 5_000 : 2_000
+    for (let i = 0; i < attempts; i += 1) {
+      if (i > 0) await new Promise(resolve => window.setTimeout(resolve, interval))
+      if (order.checkoutUntil && Date.now() >= order.checkoutUntil) {
+        forgetPendingOrder(order.id)
+        break
+      }
+      try {
+        last = await licenseApi.changeStatus(order.id)
+      } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } })?.response?.status
+        if (status === undefined || status === 429 || status >= 500) continue
+        throw error
+      }
+      if (last.applied || (last.state === 'failed' && !order.checkoutUntil)) {
+        forgetPendingOrder(order.id)
+        break
+      }
+    }
+    return last
+  })().finally(() => changeChecks.delete(order.id))
+  changeChecks.set(order.id, check)
+  return check
 }
 
 /**
@@ -537,7 +582,7 @@ export interface SupportLink {
 
 export const licenseApi = {
   /** Admin — kompletní stav licence + počty. */
-  status: () => api.get<LicenseStatus>('/license/status').then((r) => r.data),
+  status: (signal?: AbortSignal) => api.get<LicenseStatus>('/license/status', { signal }).then((r) => r.data),
 
   /**
    * Dunning stav — dostupný i BĚŽNÉMU adminovi, ne jen superadminovi.
@@ -564,7 +609,7 @@ export const licenseApi = {
    * (odkaz z e-mailu, ruční potvrzení obsluhou), by zákazník do té doby koukal
    * na staré počty.
    */
-  refresh: () => api.post<{ refreshed: boolean }>('/license/refresh').then((r) => r.data),
+  refresh: (signal?: AbortSignal) => api.post<{ refreshed: boolean }>('/license/refresh', undefined, { signal }).then((r) => r.data),
 
   /** Admin — vypnutí automatického prodlužování. NENÍ deaktivace: licence běží
    *  do konce zaplaceného období, jen se nestrhne další platba. Idempotentní. */
@@ -658,28 +703,19 @@ export const licenseApi = {
 
   /** Aktivní krátký polling po asynchronní platbě; po `applied` backend
    * vynutí renew tokenu, takže vrácená licence už obsahuje nový rozsah. */
-  waitForChange: async (order_id: string, attempts = 30): Promise<ChangeStatusResult> => {
-    rememberPendingOrder(order_id)
-    let last: ChangeStatusResult = { order_id, state: 'pending', applied: false }
-    for (let i = 0; i < attempts; i += 1) {
-      if (i > 0) await new Promise(resolve => window.setTimeout(resolve, 2000))
-      last = await licenseApi.changeStatus(order_id)
-      if (last.applied || last.state === 'failed') {
-        forgetPendingOrder(order_id)
-        return last
-      }
-    }
-    return last
-  },
+  waitForChange: (order_id: string, attempts = 30) => waitForOrder({ id: String(order_id) }, attempts),
+
+  waitForCheckout: (orderId: string) => waitForOrder({ id: orderId, checkoutUntil: Date.now() + CHECKOUT_WAIT_MS }, Infinity),
 
   /** Naváže na polling i po reloadu/zavření stránky. Ukládá se jen
    * neškodné ID objednávky, nikdy licenční klíč ani platební údaje. */
-  resumePendingChanges: async (): Promise<ChangeStatusResult[]> => {
-    const results: ChangeStatusResult[] = []
-    for (const orderId of pendingOrderIds()) {
-      results.push(await licenseApi.waitForChange(orderId))
-    }
-    return results
+  resumePendingChanges: async (onApplied?: () => void | Promise<void>): Promise<ChangeStatusResult[]> => {
+    const results = await Promise.allSettled(pendingOrders().map(async order => {
+      const result = await waitForOrder(order, order.checkoutUntil ? Infinity : 30)
+      if (result.applied) await onApplied?.()
+      return result
+    }))
+    return results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
   },
 
   /** Admin — přihlášený přechod na portál podpory (jednorázový token v URL). */
