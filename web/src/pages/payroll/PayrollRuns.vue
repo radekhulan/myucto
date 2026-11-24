@@ -742,7 +742,28 @@ function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
   if (command === 'reopen' && run?.status === 'cancelled') {
     return t('payroll.runs.commands.reopen_cancelled')
   }
+  // V opravě schváleného běhu zrušení zahodí jen opravnou revizi; „Zrušit běh"
+  // sváděl k tomu, aby se jím vracelo zpět po špatně zadaném vstupu.
+  if (command === 'cancel' && run?.revision_kind === 'correction') {
+    return t('payroll.runs.commands.cancel_correction')
+  }
   return t(`payroll.runs.commands.${command}`)
+}
+
+/**
+ * Cesta zpět v rozpracované opravě a v žádosti o opravu. Špatně zadaný vstup se
+ * neopravuje zrušením běhu (vstupy zůstávají), ale opravou vstupu a obnovou
+ * podkladů; omylem vyžádaná oprava se bere zpět.
+ */
+function correctionBackHint(run: PayrollRun): string {
+  const commands = visibleCommands(run)
+  if (run.status === 'correction_pending' && commands.includes('withdraw_correction')) {
+    return t('payroll.runs.correction_back.pending')
+  }
+  if (run.revision_kind === 'correction' && run.status !== 'cancelled' && commands.includes('refresh_inputs')) {
+    return t('payroll.runs.correction_back.open')
+  }
+  return ''
 }
 
 /**
@@ -1600,7 +1621,11 @@ async function submitCommand(
     )
     const outcome = response.outcome?.outcome ?? null
     const doneMessage = commandDoneMessage(command, extra, label)
-    const recalculates = ['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)
+    // Obnova bez změny podkladů revizi nezaloží a spočítaný výsledek dál platí;
+    // přepočítává se jen tam, kde výsledek ještě není.
+    const keepsResult = outcome === 'inputs_unchanged' && ['calculated', 'reviewed'].includes(response.to_status)
+    const recalculates = !keepsResult
+      && ['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)
     if (donePrefix !== undefined && command === 'calculate') {
       toast.success(t('payroll.runs.command_toast.recalculated', {
         done: donePrefix,
@@ -2598,6 +2623,13 @@ onMounted(() => { void load() })
           class="mt-3 max-w-3xl text-sm text-neutral-600"
         >
           {{ commandHint(run) }}
+        </p>
+        <p
+          v-if="correctionBackHint(run)"
+          :data-testid="`payroll-run-${run.id}-correction-back`"
+          class="mt-2 max-w-3xl text-sm text-neutral-600"
+        >
+          {{ correctionBackHint(run) }}
         </p>
         <p
           v-if="forbiddenCommandHint(run)"

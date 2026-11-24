@@ -7798,6 +7798,7 @@ export type PayrollRunOutcomeCode =
   | 'payments_prepared'
   | 'payments_not_applicable'
   | 'payments_settled'
+  | 'inputs_unchanged'
 
 export interface PayrollRunOutcome {
   outcome: PayrollRunOutcomeCode

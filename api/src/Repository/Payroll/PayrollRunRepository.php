@@ -1617,6 +1617,86 @@ final class PayrollRunRepository
     }
 
     /**
+     * Mají kontroly snímku revize přesně tytéž nálezy jako nově sestavený snímek?
+     *
+     * Otisk vstupů (`input_snapshot_hash`) kontroly snímku nezahrnuje: nález jako
+     * „neschválená docházka" nebo blokátor hodinové mzdy se může změnit, i když
+     * data osob zůstala stejná. Obnova podkladů je beze změny jen tehdy, když
+     * sedí otisk i nálezy; jinak by v revizi zůstal starý blokátor a cesta ven
+     * by nevedla. Nálezy, které zapisuje až výpočet (exekuce, zákonný výpočet),
+     * se neporovnávají: přepočet je nahradí sám.
+     *
+     * @param list<\MyInvoice\Service\Payroll\Run\PayrollRunValidation> $validations
+     */
+    public function snapshotValidationsMatch(int $supplierId, int $revisionId, array $validations): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT severity, code, entity_type, entity_id, message, remediation_path,
+                    requires_override, subject_ids_json
+               FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code NOT IN ("enforcement_manual_review", "statutory_calculation_manual_review")'
+        );
+        $stmt->execute([$supplierId, $revisionId]);
+        $stored = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $subjects = $row['subject_ids_json'] === null
+                ? []
+                : json_decode((string) $row['subject_ids_json'], true, flags: JSON_THROW_ON_ERROR);
+            $stored[] = self::validationFingerprint(
+                (string) $row['severity'],
+                (string) $row['code'],
+                (string) $row['entity_type'],
+                $row['entity_id'] === null ? null : (int) $row['entity_id'],
+                (string) $row['message'],
+                $row['remediation_path'] === null ? null : (string) $row['remediation_path'],
+                (int) $row['requires_override'] === 1,
+                is_array($subjects) ? array_map('intval', $subjects) : [],
+            );
+        }
+        $fresh = array_map(
+            static fn ($validation): string => self::validationFingerprint(
+                $validation->severity,
+                $validation->code,
+                $validation->entityType,
+                $validation->entityId,
+                $validation->message,
+                $validation->remediationPath,
+                $validation->requiresOverride,
+                $validation->subjectIds,
+            ),
+            $validations,
+        );
+        sort($stored);
+        sort($fresh);
+
+        return $stored === $fresh;
+    }
+
+    /** @param list<int> $subjectIds */
+    private static function validationFingerprint(
+        string $severity,
+        string $code,
+        string $entityType,
+        ?int $entityId,
+        string $message,
+        ?string $remediationPath,
+        bool $requiresOverride,
+        array $subjectIds,
+    ): string {
+        return CanonicalJson::encode([
+            'code' => $code,
+            'entity_id' => $entityId,
+            'entity_type' => $entityType,
+            'message' => $message,
+            'remediation_path' => $remediationPath,
+            'requires_override' => $requiresOverride,
+            'severity' => $severity,
+            'subject_ids' => array_values($subjectIds),
+        ]);
+    }
+
+    /**
      * @param array<string,mixed> $result
      */
     public function replaceEnforcementValidations(

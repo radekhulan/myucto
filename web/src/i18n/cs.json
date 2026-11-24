@@ -4984,7 +4984,11 @@
       "reason_prompt": "Uveďte důvod změny:",
       "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
-      "cancel_correction_hint": "Zruší se rozpracovaná opravná revize. Schválený výsledek běhu zůstává platný a opravu kdykoli otevřete znovu tlačítkem „Začít znovu“. Uveďte důvod, zapíše se do historie běhu.",
+      "cancel_correction_hint": "Zahodí se rozpracovaná opravná revize. Schválená revize, zaúčtování, platby i podání platí dál, ale běh zůstane ve stavu Zrušeno a měsíc dokončíte až další opravou („Začít z opravených vstupů“). Mzdové vstupy změněné kvůli opravě se tím nevrátí. Pokud jste jen zadali něco špatně, dialog zavřete, vstup opravte a klikněte na „Obnovit podklady“. Uveďte důvod, zapíše se do historie běhu.",
+      "correction_back": {
+        "open": "Zadali jste v opravě něco špatně? Vstup opravte nebo smažte a klikněte na „Obnovit podklady“; když se podklady nezmění, nová revize nevznikne. „Zahodit opravu“ vstupy nevrací.",
+        "pending": "Opravu jste vyžádali omylem? „Vzít žádost o opravu zpět“ vrátí běh do stavu před žádostí; schválená revize, zaúčtování ani platby se nemění."
+      },
       "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
       "continue_steps": {
         "title": "Jak pokračovat",
@@ -5436,6 +5440,7 @@
         "reopen": "Otevřít opravu",
         "reopen_cancelled": "Začít z opravených vstupů",
         "cancel": "Zrušit běh",
+        "cancel_correction": "Zahodit opravu",
         "close": "Uzavřít",
         "lock_and_calculate": "Spočítat mzdy",
         "refresh_inputs": "Obnovit podklady",
@@ -5450,7 +5455,8 @@
         "posting_not_applicable": "Firma vede daňovou evidenci, účetní zápis proto nevznikl. Běh postoupil dál.",
         "payments_prepared": "Platební závazky jsou připravené.",
         "payments_not_applicable": "Není co platit - celá čistá mzda je vypořádaná zápočtem. Běh postoupil dál.",
-        "payments_settled": "Všechny závazky běhu jsou pokryté platbami."
+        "payments_settled": "Všechny závazky běhu jsou pokryté platbami.",
+        "inputs_unchanged": "Podklady se od posledního snímku nezměnily. Revize zůstává, nová nevznikla."
       },
       "coverage": {
         "settled": "Úhrady doložené výpisem: všech {count} závazků.",
@@ -5503,7 +5509,7 @@
         "mark_paid": "Označí odvody i výplaty za uhrazené. Jde to až tehdy, když jsou všechny závazky pokryté spárovanou platbou.",
         "close": "Uzavře běh za období. Uzavřený běh jde otevřít jen vyžádáním opravy.",
         "reopen": "Otevře novou revizi nad opravenými vstupy. Původní revize zůstává v historii i s vydanými doklady.",
-        "refresh_inputs": "Založí nový snímek z aktuálních schválených vstupů, nepřítomností i zákonné evidence a vrátí běh k přepočtu. Rozpracovaná revize zůstane v historii jako zahozená; schválené revize se to netýká."
+        "refresh_inputs": "Založí nový snímek z aktuálních schválených vstupů, nepřítomností i zákonné evidence a vrátí běh k přepočtu. Rozpracovaná revize zůstane v historii jako zahozená; schválené revize se to netýká. Když se podklady nezměnily, nová revize nevznikne."
       },
       "source_drift": {
         "worked_time_changed": "Vztahy se změněným zdrojem pracovní doby: {count}",

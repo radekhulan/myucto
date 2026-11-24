@@ -337,6 +337,66 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     wrapper.unmount()
   })
 
+  it('v žádosti o opravu ukáže cestu zpět', async () => {
+    m.runs.mockResolvedValue([run({ status: 'correction_pending', available_commands: ['reopen', 'withdraw_correction'] })])
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="payroll-run-15-correction-back"]').text()).toBe('payroll.runs.correction_back.pending')
+    wrapper.unmount()
+  })
+
+  it('v otevřené opravě nabídne zahození opravy a radí opravit vstup a obnovit podklady', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'reopened',
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'refresh_inputs', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    const cancel = wrapper.get('[data-testid="payroll-run-15-cancel"]')
+    expect(cancel.text()).toContain('payroll.runs.commands.cancel_correction')
+    expect(wrapper.get('[data-testid="payroll-run-15-correction-back"]').text()).toBe('payroll.runs.correction_back.open')
+    // Zahození opravy zůstává až za ostatními akcemi.
+    const row = Array.from(cancel.element.parentElement!.querySelectorAll('button'))
+    expect(row.at(0)!.getAttribute('data-testid')).toBe('payroll-run-15-calculate')
+    expect(row.at(-1)!.getAttribute('data-testid')).toBe('payroll-run-15-cancel')
+    await cancel.trigger('click')
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')!.textContent).toContain('payroll.runs.cancel_correction_hint')
+    wrapper.unmount()
+  })
+
+  it('řádný běh ruší jako běh a radu k opravě neukazuje', async () => {
+    m.runs.mockResolvedValue([run({ available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'] })])
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="payroll-run-15-cancel"]').text()).toContain('payroll.runs.commands.cancel')
+    expect(wrapper.get('[data-testid="payroll-run-15-cancel"]').text()).not.toContain('cancel_correction')
+    expect(wrapper.find('[data-testid="payroll-run-15-correction-back"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('obnova podkladů beze změny spočítaný běh nepřepočítává', async () => {
+    m.runs.mockResolvedValue([run({ available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'] })])
+    m.commandRun.mockResolvedValue({
+      outcome: { outcome: 'inputs_unchanged', details: { revision_no: 1 } },
+      to_status: 'calculated',
+      run: run(),
+    })
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-refresh_inputs"]').trigger('click')
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledTimes(1)
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'refresh_inputs', { row_version: 3 }, expect.any(String))
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.outcome.inputs_unchanged')
+    wrapper.unmount()
+  })
+
   it('chybu s místem opravy nechá u běhu i s odkazem', async () => {
     m.runs.mockResolvedValue([run({ status: 'correction_pending', available_commands: ['reopen'] })])
     m.commandRun.mockRejectedValue({ response: { status: 422, data: { error: {

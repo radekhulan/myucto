@@ -651,7 +651,19 @@ revize“. Změněné varování vyžaduje výjimku znovu. Totéž platí pro op
 schváleného běhu a pro nový start zrušeného běhu. Vstupy vztahů, které nová
 revize už nezná (nenastoupil, ukončený vztah), obnova odemkne, takže je jde
 zrušit nebo přesunout.
+Pokud se podklady od zmrazení nezměnily (stejné vstupy i stejné nálezy
+kontrol), nová revize nevznikne: běh zůstane ve stejném stavu i se spočítaným
+výsledkem a aplikace ohlásí, že se nic nezměnilo. Opakované kliknutí tak
+historii běhu nezaplní prázdnými revizemi.
 Obnovit podklady smí uživatel s právem počítat mzdy a zapisovat mzdové vstupy.
+
+Zadali jste v otevřené opravě něco špatně, třeba zápornou nebo chybnou
+částku? Vstup opravte nebo smažte a klikněte na **Obnovit podklady**.
+**Zahodit opravu** (v opravě schváleného běhu místo **Zrušit běh**) zahodí
+jen rozpracovanou opravnou revizi; mzdové vstupy nevrací. Schválená revize,
+zaúčtování, platby i podání platí dál, běh ale zůstane ve stavu **Zrušeno**
+a měsíc dokončíte až další opravou. Opravu vyžádanou omylem, kterou jste
+ještě neotevřeli, vezměte zpět tlačítkem **Vzít žádost o opravu zpět**.
 
 Schválení revize, ke které existují novější podklady, aplikace odmítne. Nejde
 o varování s výjimkou: schválený vstup, který by revize vynechala, by zůstal

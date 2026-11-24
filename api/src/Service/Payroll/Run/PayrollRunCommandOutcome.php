@@ -20,6 +20,8 @@ final readonly class PayrollRunCommandOutcome
     public const PAYMENTS_PREPARED = 'payments_prepared';
     public const PAYMENTS_NOT_APPLICABLE = 'payments_not_applicable';
     public const PAYMENTS_SETTLED = 'payments_settled';
+    /** Obnova podkladů nenašla žádnou změnu: revize zůstává, nová nevznikla. */
+    public const INPUTS_UNCHANGED = 'inputs_unchanged';
 
     /** @param array<string,mixed> $details */
     public function __construct(

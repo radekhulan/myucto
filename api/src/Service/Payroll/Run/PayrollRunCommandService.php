@@ -384,6 +384,10 @@ final class PayrollRunCommandService
      * (`supersedeAbandonedRevisions()`) a běh vrátí k přepočtu. Stejné
      * záruky jako ostatní příkazy: `row_version`, Idempotency-Key, auditní
      * událost i potvrzenka.
+     *
+     * Když se podklady od zmrazení nezměnily (stejný otisk vstupů i nálezy
+     * snímku), revize zůstává, stav běhu i `row_version` se nemění a výsledek
+     * nese `inputs_unchanged`.
      */
     public function refreshInputs(
         int $supplierId,
@@ -979,6 +983,27 @@ final class PayrollRunCommandService
                     }
                 }
             }
+            /*
+             * Obnova podkladů, která nic nového nepřinesla, revizi nezakládá.
+             * Dřív vznikla nová revize při KAŽDÉM kliknutí, i se stejným otiskem
+             * vstupů jako ta, kterou nahradila: dvojklik, obnova hned po
+             * znovuotevření nebo obnova „pro jistotu" přidaly zahozenou revizi
+             * a s ní nový výpočet, aniž se cokoli změnilo. Stejné musí být
+             * otisk vstupů i nálezy snímku; výsledek výpočtu dál platí, takže se
+             * nemění ani stav běhu. Příkaz se zapíše do historie i s potvrzenkou,
+             * jen s výsledkem „beze změny".
+             */
+            $inputsUnchanged = $command === PayrollRunCommand::REFRESH_INPUTS
+                && $commandAvailable
+                && $snapshot !== null
+                && $revision !== null
+                && in_array($revision['status'] ?? null, ['snapshot', 'calculated', 'reviewed'], true)
+                && hash_equals((string) $revision['input_snapshot_hash'], $snapshot->hash)
+                && $this->runs->snapshotValidationsMatch(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $snapshot->validations,
+                );
             $counts = $revision === null
                 ? ['blockers' => 0, 'unresolved_overrides' => 0]
                 : $this->runs->validationCounts(
@@ -1065,8 +1090,17 @@ final class PayrollRunCommandService
                     : null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
+            if ($inputsUnchanged) {
+                $transition = new PayrollRunTransition($from, $from, $command);
+            }
 
             $eventMetadata = [];
+            if ($inputsUnchanged) {
+                $eventMetadata = [
+                    'inputs_unchanged' => true,
+                    'input_snapshot_hash' => $snapshot->hash,
+                ];
+            }
             if ($command === PayrollRunCommand::CHANGE_PAYMENT_DATE) {
                 $this->runs->setPaymentDate($supplierId, $runId, $expectedVersion, $snapshotPaymentDate);
                 $eventMetadata = [
@@ -1078,7 +1112,12 @@ final class PayrollRunCommandService
                 $eventMetadata['employee_id'] = $employeeId;
             }
             $replacedRevisionId = null;
-            if ($command === PayrollRunCommand::LOCK_INPUTS
+            if ($inputsUnchanged) {
+                $outcome = new PayrollRunCommandOutcome(
+                    PayrollRunCommandOutcome::INPUTS_UNCHANGED,
+                    ['revision_no' => (int) $revision['revision_no']],
+                );
+            } elseif ($command === PayrollRunCommand::LOCK_INPUTS
                 || $command === PayrollRunCommand::REOPEN
                 || $rebuildsRevision
             ) {
