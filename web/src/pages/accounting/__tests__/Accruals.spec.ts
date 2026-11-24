@@ -100,7 +100,7 @@ describe('Accruals', () => {
     vi.clearAllMocks()
     m.prefs = ref({})
     m.canWrite.mockReturnValue(true)
-    m.list.mockResolvedValue({ items: [item()], total: 1, totals: { basis_amount: 1200, balance: 600 }, page: 1, per_page: 50, as_of: '2099-06-30' })
+    m.list.mockResolvedValue({ items: [item()], total: 1, totals: { basis_amount: 1200, balance: 600 }, totals_by_kind: { prepaid_expense: { count: 1, basis_amount: 1200, balance: 600 } }, page: 1, per_page: 50, as_of: '2099-06-30' })
     m.reconciliation.mockResolvedValue(reconciliation())
     m.replace.mockImplementation(({ query }: { query: Record<string, string> }) => { m.route.query = query })
   })
@@ -129,7 +129,7 @@ describe('Accruals', () => {
     })
     const wrapper = mountList()
     await flushPromises()
-    expect(wrapper.get('[data-test="reconciliation-difference"]').text()).toBe('250 Kč')
+    expect(wrapper.get('[data-test="reconciliation-difference-381"]').text()).toBe('250 Kč')
     await wrapper.get('[data-test="unallocated-toggle-381"]').trigger('click')
     await flushPromises()
     expect(m.unallocated).toHaveBeenCalledWith({ account: '381' })
@@ -170,16 +170,30 @@ describe('Accruals', () => {
     expect(wrapper.find('[data-test="accruals-takeover"]').exists()).toBe(false)
   })
 
-  it('záložka Spravuje uzávěrka načte projekci a zapíše se do adresy', async () => {
-    m.projection.mockResolvedValue({ as_of: '2099-06-30', truncated: false, totals: { prepaid_expense: 300, deferred_revenue: 0 },
-      items: [{ managed_by: 'closing', kind: 'prepaid_expense', source_type: 'purchase_invoice', source_id: 12, source_item_id: 1,
-        document_no: 'PF-1', title: 'Syntetická licence', period_from: '2099-01-01', period_to: '2099-12-31', basis_amount: 600, balance: 300 }] })
+  it('výchozí záložka Spravuje uzávěrka načte projekci, Položky agendy se zapíší do adresy', async () => {
+    const empty = { account: '384', count: 0, items: [], totals: { amount: 0, current_year: 0, deferred: 0, years: [] }, truncated: false }
+    m.projection.mockResolvedValue({ as_of: '2099-06-30', fiscal_year: 2099, year_start: '2099-01-01', year_end: '2099-12-31', future_years: [2100, 2101],
+      kinds: {
+        prepaid_expense: { account: '381', count: 1, truncated: false,
+          totals: { amount: 900, current_year: 300, deferred: 600, years: { 2100: 400, 2101: 200 } },
+          items: [{ source_type: 'purchase_invoice', source_id: 12, source_item_id: 1, document_no: 'PF-1', title: 'Syntetická licence',
+            period_from: '2099-09-01', period_to: '2101-08-31', accounts: ['518'], amount: 900, current_year: 300, deferred: 600, years: { 2100: 400, 2101: 200 } }] },
+        deferred_revenue: empty,
+      } })
     const wrapper = mountList()
     await flushPromises()
+    expect(m.projection).toHaveBeenCalled()
+    await wrapper.get('[data-test="tab-items"]').trigger('click')
+    await flushPromises()
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { tab: 'items' } })
     await wrapper.get('[data-test="tab-closing"]').trigger('click')
     await flushPromises()
-    expect(m.projection).toHaveBeenCalled()
-    expect(m.replace).toHaveBeenLastCalledWith({ query: { tab: 'closing' } })
     expect(wrapper.findAll('[data-test="projection-row"]')).toHaveLength(1)
+    const summary = wrapper.get('[data-test="projection-summary"]').text()
+    expect(summary).toContain('2100')
+    expect(summary).toContain('2101')
+    expect(wrapper.get('[data-test="projection-summary-deferred"]').text()).toContain('600')
+    await wrapper.get('[data-test="projection-kind-deferred_revenue"]').trigger('click')
+    expect(wrapper.findAll('[data-test="projection-row"]')).toHaveLength(0)
   })
 })

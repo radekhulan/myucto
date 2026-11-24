@@ -23,7 +23,7 @@ final class ClientTaxSubmissionPolicy
         $patterns = match ($method) {
             'GET' => [
                 '#^/api/reports/submissions(?:/(?:settings|isds-routes|epo-credentials))?$#D',
-                '#^/api/reports/submissions/[0-9]+(?:/(?:xml|payment)|/artifacts/[0-9]+/download)?$#D',
+                '#^/api/reports/submissions/[0-9]+(?:/(?:xml|pdf|payment)|/artifacts/[0-9]+/download)?$#D',
             ],
             'POST' => [
                 '#^/api/reports/submissions/epo-credentials$#D',

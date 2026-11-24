@@ -62,10 +62,11 @@ function setState(value: MigrationCheckItemState | '') {
 const title = computed(() => detail.value
   ? (te(`migrationChecks.checks.${detail.value.key}.title`) ? t(`migrationChecks.checks.${detail.value.key}.title`) : detail.value.title)
   : t('migrationChecks.title'))
-const manualTo = computed(() => {
-  if (!detail.value) return null
+// Manuál je samostatná stránka mimo SPA (manual/index.php), router by ho nenašel.
+const manualHref = computed(() => {
+  if (!detail.value?.manual) return null
   const [chapter, anchor] = detail.value.manual.split('#')
-  return { path: '/manual', query: { ch: chapter }, ...(anchor ? { hash: `#${anchor}` } : {}) }
+  return `/manual?ch=${encodeURIComponent(chapter)}${anchor ? `#${anchor}` : ''}`
 })
 const canFix = computed(() => !!detail.value && detail.value.fixable && detail.value.can_fix && detail.value.fixable_count > 0)
 
@@ -117,7 +118,7 @@ const actions = computed<ActionItem[]>(() => [
     disabledReason: t('migrationChecks.fix_nothing'), run: () => { void openPreview() },
   },
   { key: 'refresh', label: t('migrationChecks.refresh'), icon: 'cycle', tier: 'secondary', variant: 'neutral', loading: loading.value, run: () => { void load() } },
-  { key: 'manual', label: t('migrationChecks.manual'), icon: 'help', tier: 'secondary', variant: 'neutral', show: !!manualTo.value, to: manualTo.value ?? undefined },
+  { key: 'manual', label: t('migrationChecks.manual'), icon: 'help', tier: 'secondary', variant: 'neutral', show: !!manualHref.value, href: manualHref.value ?? undefined },
   { key: 'back', label: t('migrationChecks.back'), icon: 'chevronLeft', tier: 'overflow', variant: 'neutral', to: { name: 'imports-checks' } },
 ])
 
@@ -135,6 +136,11 @@ function amountOf(i: MigrationCheckItem): string {
   return i.currency && i.currency !== 'CZK' && i.amount !== null ? `${formatMoney(i.amount, i.currency)} (${czk})` : czk
 }
 
+function filterCount(value: MigrationCheckItemState | ''): number | null {
+  const d = detail.value
+  if (!d) return null
+  return value === '' ? d.count : value === 'fixable' ? d.fixable_count : value === 'locked' ? d.locked_count : value === 'review' ? d.review_count : null
+}
 const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
   { value: '', label: 'migrationChecks.filter_all' },
   { value: 'fixable', label: 'migrationChecks.filter_fixable' },
@@ -175,10 +181,14 @@ const filters: { value: MigrationCheckItemState | ''; label: string }[] = [
         </ul>
       </div>
 
-      <div class="flex flex-wrap gap-2 mb-3">
-        <button v-for="f in filters" :key="f.value" type="button" class="whitespace-nowrap"
-          :class="state === f.value ? btnFilled('primary') : btnOutline('neutral')" :data-testid="`filter-${f.value || 'all'}`" @click="setState(f.value)">
+      <div role="tablist" class="mb-3 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('migrationChecks.col_count')">
+        <button v-for="f in filters" :key="f.value" type="button" role="tab" :aria-selected="state === f.value"
+          :data-active="state === f.value || undefined" :data-testid="`filter-${f.value || 'all'}`"
+          class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition"
+          :class="state === f.value ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+          @click="setState(f.value)">
           {{ t(f.label) }}
+          <span v-if="detail && filterCount(f.value) !== null" class="inline-flex items-center rounded-full bg-neutral-100 px-1.5 text-xs text-neutral-600">{{ filterCount(f.value) }}</span>
         </button>
       </div>
 

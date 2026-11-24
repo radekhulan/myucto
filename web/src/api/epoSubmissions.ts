@@ -141,6 +141,19 @@ export interface EpoArtifact {
   created_at: string
 }
 
+/** Výkazy, u kterých server umí PDF podání (TaxSubmissionPrintout::FORM_CODES). */
+export const PRINTABLE_SUBMISSION_FORMS = ['dphdp3', 'dphkh1', 'dphshv'] as const
+
+/** Uložené doklady o podání, nebo proč chybí (TaxSubmissionReceiptEvidence). */
+export interface TaxSubmissionReceiptEvidence {
+  available: boolean
+  reason: 'not_submitted' | 'isds_receipt_pending' | 'submitted_outside' | null
+  reason_label: string | null
+  reference: string | null
+  submitted_at: string | null
+  items: Array<{ artifact_id: number; kind: string; label: string; name: string }>
+}
+
 export interface TaxSubmission {
   id: number
   form_code: string
@@ -160,6 +173,8 @@ export interface TaxSubmission {
   notes: string | null
   attempts: EpoAttempt[]
   artifacts: EpoArtifact[]
+  /** Vrací seznam a detail podání; odpovědi akcí ho nést nemusí. */
+  receipt_evidence?: TaxSubmissionReceiptEvidence
   /** Smazatelnost počítá backend — UI jen zrcadlí to, co brána skutečně udělá. */
   deletable: boolean
   delete_blocker: SubmissionDeleteBlocker | null
@@ -669,6 +684,14 @@ export const epoSubmissionsApi = {
     if (supplierId) params.set('supplier_id', supplierId)
     const query = params.toString()
     return `/api/reports/submissions/${id}/xml${query ? `?${query}` : ''}`
+  },
+
+  pdfUrl: (id: number) => {
+    const params = new URLSearchParams()
+    const supplierId = sid()
+    if (supplierId) params.set('supplier_id', supplierId)
+    const query = params.toString()
+    return `/api/reports/submissions/${id}/pdf${query ? `?${query}` : ''}`
   },
 
   artifactDownloadUrl: (submissionId: number, artifactId: number) => {

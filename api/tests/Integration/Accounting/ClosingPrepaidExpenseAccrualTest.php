@@ -744,6 +744,31 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertEqualsWithDelta(-18200.00, $interim['deltas']['518'] ?? 0.0, 0.001);
     }
 
+    public function testClosingProjectionSplitsCurrentYearAndNextYears(): void
+    {
+        // 1. 7. 2091 – 30. 6. 2093 = 184 + 366 + 181 = 731 dnů po 100 Kč.
+        $pi = $this->purchase('PF-2091-PROJ', 73100.00, self::YEAR . '-11-15');
+        $this->item($pi, 73100.00, '2091-07-01', '2093-06-30', '518');
+        $inside = $this->purchase('PF-2091-INSIDE', 1000.00, self::YEAR . '-03-01');
+        $this->item($inside, 1000.00, '2091-03-01', '2091-11-30', '518');
+
+        $result = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Accrual\AccrualClosingProjection::class)
+            ->list($this->supplierId, self::YEAR . '-11-20');
+
+        self::assertSame(self::ENDS_ON, $result['year_end']);
+        self::assertSame([2092, 2093], $result['future_years']);
+        $prepaid = $result['kinds']['prepaid_expense'];
+        self::assertSame('381', $prepaid['account']);
+        self::assertCount(1, $prepaid['items'], 'Období celé uvnitř roku uzávěrka nerozlišuje.');
+        $row = $prepaid['items'][0];
+        self::assertSame(['518'], $row['accounts']);
+        self::assertEqualsWithDelta(18400.00, $row['current_year'], 0.001);
+        self::assertEqualsWithDelta(54700.00, $row['deferred'], 0.001);
+        self::assertEqualsWithDelta(36600.00, $row['years'][2092], 0.001);
+        self::assertEqualsWithDelta(18100.00, $row['years'][2093], 0.001);
+        self::assertSame(0, $result['kinds']['deferred_revenue']['count']);
+    }
+
     // ── agenda Časové rozlišení: žádné dvojí odložení ani rozpuštění ──────────
 
     /**

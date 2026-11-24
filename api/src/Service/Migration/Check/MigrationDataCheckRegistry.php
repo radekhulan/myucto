@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Check;
 
 use MyInvoice\Service\Migration\Check\Checks\FinalInvoiceAdvanceVatCheck;
 use MyInvoice\Service\Migration\Check\Checks\ForeignBankInCzkCheck;
+use MyInvoice\Service\Migration\Check\Checks\ForeignPurchaseInCzkCheck;
 use MyInvoice\Service\Migration\Check\Checks\ImportedStatementBalanceCheck;
 use MyInvoice\Service\Migration\Check\Checks\PayrollLiabilitiesCheck;
 use MyInvoice\Service\Migration\Check\Checks\PurchaseSettledUncoveredCheck;
@@ -32,6 +33,7 @@ final class MigrationDataCheckRegistry
         PurchaseSettledUncoveredCheck $purchaseSettled,
         TaxDocumentAdvanceLinkCheck $taxDocumentLink,
         FinalInvoiceAdvanceVatCheck $finalInvoiceVat,
+        ForeignPurchaseInCzkCheck $foreignPurchase,
     ) {
         foreach (func_get_args() as $check) {
             $this->checks[$check->key()] = $check;

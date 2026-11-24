@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
@@ -17,6 +18,8 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\OwnedSandboxDatabase;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -31,6 +34,8 @@ use Slim\Psr7\Response as Psr7Response;
  */
 abstract class BankPostingTestCase extends TestCase
 {
+    use IsolatedSupplierTrait;
+    use OwnedSandboxDatabase;
     protected const YEAR = 2099;
     protected const ACCOUNT = '1700000006'; // currencies řádek supplieru 1 (tenant resolution)
     protected const BANK_CODE = '2250';
@@ -59,8 +64,13 @@ abstract class BankPostingTestCase extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
+        $ownsTransactions = in_array('fulltext-transactions', $this->groups(), true);
         try {
             $container            = Bootstrap::buildContainer();
+            if ($ownsTransactions) {
+                $container->set(Config::class, self::sandboxConfig('accounting_fts'));
+                $container->set(Connection::class, self::sandboxConnection('accounting_fts'));
+            }
             $this->container      = $container;
             $this->db             = $container->get(Connection::class);
             $this->service        = $container->get(BankPostingService::class);
@@ -84,8 +94,19 @@ abstract class BankPostingTestCase extends TestCase
         if ($this->supplierId === 0 || $this->currencyId === 0 || $this->userId === 0 || $this->czId === 0) {
             $this->markTestSkipped('Chybí základní data (supplier double_entry/currency/user/country).');
         }
-        $pdo->beginTransaction();
-        $this->inTx = true;
+        if ($ownsTransactions) {
+            $this->supplierId = $this->createIsolatedSupplier($pdo, $this->supplierId);
+            $pdo->prepare(
+                'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+                 SELECT ?, code, label, symbol, name_cs, name_en, decimals, 1, 1 FROM currencies WHERE id = ?'
+            )->execute([$this->supplierId, $this->currencyId]);
+            $this->currencyId = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
+                ->execute([$this->currencyId, $this->supplierId]);
+        } else {
+            $pdo->beginTransaction();
+            $this->inTx = true;
+        }
         $this->ensureAccountOwnership($pdo);
         $seeder->seedForSupplier($this->supplierId);
         $this->periodId = $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
@@ -136,7 +157,7 @@ abstract class BankPostingTestCase extends TestCase
 
     protected function tearDown(): void
     {
-        if (isset($this->db) && $this->inTx) {
+        if (isset($this->db)) {
             $pdo = $this->db->pdo();
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

@@ -130,10 +130,10 @@ final class MoneyS3BatchImporter
 
             $dryRun = $options->isDryRun();
             $pdo = $this->db->pdo();
-            $savepoint = $dryRun && $pdo->inTransaction();
-            if ($savepoint) {
-                $pdo->exec('SAVEPOINT money_s3_batch_dry_run');
-            } elseif ($dryRun) {
+            if ($dryRun) {
+                if ($pdo->inTransaction()) {
+                    throw new \LogicException('Dávková zkouška Money S3 vyžaduje vlastní transakci.');
+                }
                 $pdo->beginTransaction();
             }
             try {
@@ -162,6 +162,7 @@ final class MoneyS3BatchImporter
                     false,
                     $relink,
                     is_int($options->toYear) ? $options->toYear : null,
+                    $options->openingOnlyNext,
                 );
                 [$protocol, $runId] = $this->runImport($targetId, $actor->userId, $backup, $lzPath, $agenda, $importOptions, $jobId, $progress, $cancel);
                 $result = $protocol->toArray();
@@ -201,9 +202,7 @@ final class MoneyS3BatchImporter
                 return self::result($status, $dryRun && $action === 'created' ? null : $targetId, $action, $fromYear,
                     $dryRun ? null : $runId, $summary, $error);
             } finally {
-                if ($savepoint) {
-                    $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_batch_dry_run');
-                } elseif ($dryRun && $pdo->inTransaction()) {
+                if ($dryRun && $pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
             }
@@ -234,7 +233,10 @@ final class MoneyS3BatchImporter
                 'backup_sha256' => (string) hash_file('sha256', $lzPath),
             ], $userId > 0 ? $userId : null);
             try {
-                $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel, $agenda);
+                $protocol = $this->importer->run(
+                    $supplierId, $userId, $backup, $options, $runId, $progress, $cancel, $agenda,
+                    callerRollsBackPreview: $options->isDryRun(),
+                );
             } catch (\Throwable $e) {
                 $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $options->mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => 'Převod selhal na neočekávané chybě.', 'steps' => []]);
                 throw $e;
@@ -256,6 +258,15 @@ final class MoneyS3BatchImporter
             // firma už účtuje v MyÚčtu) volbu „od roku" neposune.
             $toYear = is_int($options->toYear) ? $options->toYear
                 : ($targetId !== null ? $this->importer->effectiveToYear($targetId, $backup, new ImportOptions(relinkOnly: $relink)) : null);
+            if ($toYear === null && $options->openingOnlyNext && !$relink) {
+                // Rok jen s počátečními stavy do navazování nepatří: při rozdílu proti předchozímu
+                // roku by na něj padlo „od roku" a převod by ho převzal celý. Bez dvou roků zálohy
+                // zastaví převod kontrola před převodem (opening_only_empty).
+                $toYear = MoneyS3Importer::openingOnlyToYear($this->journal->plan($backup, new ImportOptions(), $calendar));
+                if ($toYear === null) {
+                    return null;
+                }
+            }
             return JournalImporter::suggestedFromYear($this->journal->chainBreaks($backup, new ImportOptions(toYear: $toYear), $calendar));
         }
         return is_int($options->fromYear) ? $options->fromYear : null;

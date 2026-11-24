@@ -27,7 +27,7 @@ final class MigratedDocumentItemAccountsTest extends TestCase
         $pdo->exec('CREATE TABLE purchase_invoice_items (purchase_invoice_id INT, description TEXT,
             quantity NUMERIC, unit TEXT, unit_price_without_vat NUMERIC, vat_rate_id INT, vat_rate_snapshot NUMERIC,
             total_without_vat NUMERIC, total_vat NUMERIC, total_with_vat NUMERIC, order_index INT,
-            vat_classification_code TEXT, is_fixed_asset INT, expense_kind TEXT, expense_account_code TEXT)');
+            vat_classification_code TEXT, is_fixed_asset INT, expense_kind TEXT, expense_account_code TEXT, import_tax_base_czk NUMERIC)');
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $pdo);
         $writer = new MigratedDocumentWriter($db);

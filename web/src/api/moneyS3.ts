@@ -211,6 +211,8 @@ export interface MoneyS3StartParams {
    * (poslední rok, za kterým už firma v MyÚčtu účtuje rok s vlastními zápisy).
    */
   to_year?: number | null
+  /** Z roku po posledním převáděném jen počáteční stavy; poslední převáděný rok se proti nim uzavře. */
+  opening_only_next?: boolean
   /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
   accept_differences?: boolean
 }

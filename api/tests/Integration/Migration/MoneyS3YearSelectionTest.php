@@ -10,6 +10,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Tests\Fixtures\MoneyS3\Ms3FixtureWriter;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -23,6 +24,7 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
 {
+    #[Group('fulltext-transactions')]
     public function testAgendaYearOnlyKeepsNextYearRunningInMyUcto(): void
     {
         $supplierId = $this->companyRunning2025();
@@ -55,6 +57,7 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
      * nepoužije a převod ohlásí vlastní zápisy jako dřív. Uzavřený rok zvolený výslovně
      * v „Převést do roku" je chyba.
      */
+    #[Group('fulltext-transactions')]
     public function testClosedYearsWithOwnJournalAfterThemStopImport(): void
     {
         $supplierId = $this->supplier();
@@ -171,8 +174,9 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         $protocol = $this->import($supplierId);
 
         self::assertTrue($protocol->failed(), $this->explain($protocol));
-        $steps = array_column($protocol->toArray()['steps'], null, 'key');
-        self::assertContains('bank_foreign_movements_used', array_column($steps['bank']['messages'], 'code'), $this->explain($protocol));
+        // Kontrola před převodem: převod se zastaví dřív, než cokoli zapíše.
+        self::assertContains('bank_foreign_movements_used', array_column($protocol->get('preflight'), 'code'), $this->explain($protocol));
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId), 'Deník se nezapsal.');
         self::assertSame(1, $this->movements($supplierId, '2024-03-20', '24200.00'), 'Spárovaný pohyb převod nemaže.');
     }
 
@@ -247,6 +251,74 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         self::assertSame('Vlastní tržba', $this->db->pdo()->query("SELECT description FROM journal_entries WHERE id = {$ownEntry}")->fetchColumn());
         // Převzaté zápisy roku 2024 popis s číslem dokladu a protistranou dostaly.
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "document_no = 'FV24001' AND description LIKE '%Odběratel Beta%'"));
+    }
+
+    /** Adresář zálohy s doklady, ale bez deníku (čerstvě založený rok) kontrola ohlásí. */
+    #[Group('fulltext-transactions')]
+    public function testDirectoryWithDocumentsWithoutJournalIsReported(): void
+    {
+        $files = SyntheticAgenda::patch(SyntheticAgenda::files(), 'ROK.003/VFaktury.DAT', null, [$this->issued('FV26001', '2026-01-10', 1000.0, 210.0)]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $files);
+        $supplierId = $this->supplier();
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN));
+
+        $found = array_values(array_filter($protocol->get('preflight'), static fn (array $m): bool => $m['code'] === 'dir_without_journal'));
+        self::assertCount(1, $found, $this->explain($protocol));
+        self::assertSame('ROK.003', $found[0]['context']['dir']);
+        self::assertSame(['vydané faktury' => 1], $found[0]['context']['documents']);
+    }
+
+    /**
+     * Adresář bez deníku jen s evidencí dokladů mimo faktury, banku a pokladnu (mzdový
+     * závazek, ostatní pohledávka, interní doklad) kontrola ohlásí také: převod ho vynechá
+     * celý stejně jako adresář s fakturami.
+     */
+    #[Group('fulltext-transactions')]
+    public function testDirectoryWithOtherDocumentsWithoutJournalIsReported(): void
+    {
+        $fields = [['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['Celkem', 'E', 10]];
+        $files = SyntheticAgenda::files();
+        $files['ROK.003/KnihZav.DAT'] = Ms3FixtureWriter::table($fields, [['Cislo' => 1, 'Doklad' => 'ZA260101', 'Popis' => 'Sociální pojištění - Leden 2026', 'Celkem' => 9570.0]]);
+        $files['ROK.003/KnihPohl.DAT'] = Ms3FixtureWriter::table($fields, [['Cislo' => 1, 'Doklad' => 'OP260001', 'Popis' => 'Pohledávka za společníkem', 'Celkem' => 500.0]]);
+        $files['ROK.003/IntDokl.DAT'] = Ms3FixtureWriter::table($fields, [
+            ['Cislo' => 1, 'Doklad' => 'ID260001', 'Popis' => 'Mzdy - Leden 2026', 'Celkem' => 30000.0],
+            ['Cislo' => 2, 'Doklad' => 'ID260002', 'Popis' => 'Přeúčtování', 'Celkem' => 100.0],
+        ]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $files);
+        $supplierId = $this->supplier();
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN));
+
+        $found = array_values(array_filter($protocol->get('preflight'), static fn (array $m): bool => $m['code'] === 'dir_without_journal'));
+        self::assertCount(1, $found, $this->explain($protocol));
+        self::assertSame('ROK.003', $found[0]['context']['dir']);
+        self::assertSame(['ostatní závazky' => 1, 'ostatní pohledávky' => 1, 'interní doklady' => 2], $found[0]['context']['documents']);
+    }
+
+    /**
+     * Doplnění staršího roku k firmě převedené od roku 2025, která rok 2025 dál zpracovává:
+     * převod doplní rok 2024, uzavře ho proti převzatým počátečním stavům 2025 a rok 2025
+     * nezmění.
+     */
+    public function testOlderYearAddedWhileNextYearInProgress(): void
+    {
+        $supplierId = $this->supplier();
+        $first = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2025));
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "entry_date < '2025-01-01'"));
+        $before = $this->entries2025($supplierId);
+        $invoices2025 = $this->rowCount('invoices', $supplierId, "issue_date >= '2025-01-01'");
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2024));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertGreaterThan(0, $this->rowCount('journal_entries', $supplierId, "entry_date < '2025-01-01'"));
+        $periods = $this->container(AccountingPeriodRepository::class);
+        self::assertSame('closed', (string) $periods->findByYear($supplierId, 2024)['status'], $this->explain($protocol));
+        self::assertSame('open', (string) $periods->findByYear($supplierId, 2025)['status']);
+        self::assertSame($before, $this->entries2025($supplierId), 'Rok 2025 se doplněním staršího roku nemění.');
+        self::assertSame($invoices2025, $this->rowCount('invoices', $supplierId, "issue_date >= '2025-01-01'"));
     }
 
     // ── pomocníci ─────────────────────────────────────────────────────────────

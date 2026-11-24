@@ -516,13 +516,17 @@ final class PohodaMdbAccounting
                 if ($agenda !== 0 && !isset(self::LINKS[$agenda])) {
                     throw new PohodaException('mdb_payment_source', 'MDB obsahuje nepodporovaný zdroj úhrady ' . $agenda . '.');
                 }
-                $d['liquidations']['liquidation'][] = [
+                $liquidation = [
                     'id' => $u['ID'],
                     'date' => $this->date($u, 'DatumU'),
                     'sourceAgenda' => self::LINKS[$agenda] ?? '',
                     'sourceDocument' => $this->paymentSource($u, $agenda),
                     'amount' => $u['KcU'] ?? '0',
                 ];
+                if (in_array($source, [43, 44], true) && (int) ($u['RefDD'] ?? 0) > 0) {
+                    $liquidation['taxDocumentRef'] = $u['RefDD'];
+                }
+                $d['liquidations']['liquidation'][] = $liquidation;
             }
         }
         if (isset($d['linkedDocuments']['link'])) {
@@ -533,6 +537,34 @@ final class PohodaMdbAccounting
             $d['linkedDocuments']['link'] = array_values($unique);
         }
         return $d;
+    }
+
+    /**
+     * DDKP, které POHODA váže k úhradě zálohy (`Uhrady.RefDD`), ze všech řádků úhrad bez ohledu
+     * na rok úhrady a na to, zda je záloha v exportu. Číslo zálohy je z `FA`, chybí-li tam,
+     * z opisu v úhradě (`CisloH`).
+     *
+     * @return array<string,list<array{doc:string,advance:string,number:string}>> id DDKP (`pINT.ID`) => zálohy
+     */
+    public function taxDocumentPaymentRefs(): array
+    {
+        $out = [];
+        foreach ($this->group('Uhrady', 'RelIDH') as $advanceId => $rows) {
+            foreach ($rows as $u) {
+                $agenda = (int) ($u['RelAgH'] ?? 0);
+                $ref = (string) ($u['RefDD'] ?? '');
+                if (!in_array($agenda, [43, 44], true) || (int) $ref <= 0) {
+                    continue;
+                }
+                $advance = $this->lookup('FA', (string) $advanceId);
+                $out[$ref][] = [
+                    'doc' => $agenda === 43 ? 'invoice' : 'purchase_invoice',
+                    'advance' => (string) $advanceId,
+                    'number' => (string) ($advance['Cislo'] ?? $u['CisloH'] ?? ''),
+                ];
+            }
+        }
+        return $out;
     }
 
     /**

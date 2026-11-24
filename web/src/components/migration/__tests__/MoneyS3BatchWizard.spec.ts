@@ -80,7 +80,7 @@ describe('MoneyS3BatchWizard', () => {
     await dry.trigger('click')
     await flushPromises()
 
-    expect(m.start).toHaveBeenCalledWith(expect.objectContaining({ tokens: ['a'.repeat(16)], mode: 'dry_run', from_year: 'auto', existing: 'skip' }))
+    expect(m.start).toHaveBeenCalledWith(expect.objectContaining({ tokens: ['a'.repeat(16)], mode: 'dry_run', from_year: 'auto', existing: 'skip', to_year: 'auto', opening_only_next: false }))
     const protocol = w.get('[data-testid="batch-protocol"]')
     expect(protocol.text()).toContain('Alfa s.r.o.')
     expect(protocol.text()).toContain('money_s3.batch.action.created')
@@ -97,5 +97,18 @@ describe('MoneyS3BatchWizard', () => {
     expect(live().attributes('disabled')).toBeDefined()
     await w.get('[data-testid="batch-confirm"]').setValue(true)
     expect(live().attributes('disabled')).toBeUndefined()
+  })
+
+  it('sends the last converted year and opening balances of the next year', async () => {
+    const w = mount(MoneyS3BatchWizard, { global })
+    await flushPromises()
+    const options = w.get('[data-testid="batch-to-year"]').findAll('option').map(o => o.attributes('value'))
+    expect(options).toEqual(['auto', '2024', '2025'])
+    await w.get('[data-testid="batch-to-year"]').setValue('2024')
+    await w.get('[data-testid="batch-opening-only-next"]').setValue(true)
+    const dry = w.findAll('button').find(b => b.text().includes('money_s3.batch.dry_run_start'))!
+    await dry.trigger('click')
+    await flushPromises()
+    expect(m.start).toHaveBeenCalledWith(expect.objectContaining({ to_year: 2024, opening_only_next: true }))
   })
 })

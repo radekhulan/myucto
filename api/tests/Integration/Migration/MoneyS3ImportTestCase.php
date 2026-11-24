@@ -28,6 +28,7 @@ use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
+use MyInvoice\Tests\Support\OwnedSandboxDatabase;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -42,6 +43,7 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 abstract class MoneyS3ImportTestCase extends TestCase
 {
+    use OwnedSandboxDatabase;
     protected \Psr\Container\ContainerInterface $container;
     protected Connection $db;
     protected MoneyS3Importer $importer;
@@ -52,15 +54,19 @@ abstract class MoneyS3ImportTestCase extends TestCase
     protected int $anyCurrencyId = 0;
     protected int $vatRateId = 0;
     protected int $czId = 0;
-    protected bool $inTx = false;
 
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
+        $ownsTransactions = in_array('fulltext-transactions', $this->groups(), true);
         try {
             $container = Bootstrap::buildContainer();
+            if ($ownsTransactions) {
+                $container->set(Config::class, self::sandboxConfig('money_preview'));
+                $container->set(Connection::class, self::sandboxConnection('money_preview'));
+            }
             $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(MoneyS3Importer::class);
@@ -83,13 +89,14 @@ abstract class MoneyS3ImportTestCase extends TestCase
         SyntheticAgenda::writeLz($this->tmp . '/agenda.lz');
         file_put_contents($this->tmp . '/predvaha-2024.csv', SyntheticAgenda::trialBalanceCsv2024());
 
-        $pdo->beginTransaction();
-        $this->inTx = true;
+        if (!$ownsTransactions) {
+            $pdo->beginTransaction();
+        }
     }
 
     protected function tearDown(): void
     {
-        if (isset($this->db) && $this->inTx) {
+        if (isset($this->db)) {
             $pdo = $this->db->pdo();
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

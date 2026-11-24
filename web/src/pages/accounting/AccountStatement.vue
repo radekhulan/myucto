@@ -23,6 +23,9 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import { appIsoDate, appYear } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { useDimensions } from '@/composables/useDimensions'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -31,6 +34,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
+const dims = useDimensions()
 
 const accountId = computed(() => Number(route.params.accountId))
 const canWrite = computed(() => auth.canWrite('accounting'))
@@ -83,14 +87,28 @@ function scopeFromQuery(): LedgerScope {
   return out
 }
 const ledgerScope = ref<LedgerScope>(scopeFromQuery())
+const dimensionValueIds = computed(() => parseDimensionValueIds(ledgerScope.value.dimension_value_id))
+const dimensionDescendants = computed(() => ledgerScope.value.dimension_descendants !== '0')
+const groupByDimension = ref(Number(route.query.group_by_dimension_type) || null)
+const dimensionBreakdown = computed(() => report.value?.dimension_breakdown)
+const dimensionColumns = [
+  { key: 'opening_balance_signed', label: 'opening' },
+  { key: 'turnover_md', label: 'turnover_md' },
+  { key: 'turnover_d', label: 'turnover_d' },
+  { key: 'closing_balance_signed', label: 'closing' },
+] as const
 
-/** Filtry knihy (ne jen pravidlo PS) — s nimi nejde filtr protiúčtu ani export. */
+/** Filtry knihy (ne jen pravidlo PS) — s nimi nejde filtr protiúčtu. */
 const hasLedgerFilters = computed(() => {
   const s = ledgerScope.value
   return !!(s.vendor || s.client || s.item || s.dimension_value_id)
 })
-/** Export zná jen stav po uzávěrce; zúžený opis by se v exportu vydával za celý účet. */
-const exportBlocked = computed(() => hasLedgerFilters.value || !!ledgerScope.value.opening_date || ledgerScope.value.include_analytics === '0')
+const exportBlocked = computed(() => !groupByDimension.value
+  && (hasLedgerFilters.value || !!ledgerScope.value.opening_date || ledgerScope.value.include_analytics === '0'))
+
+const groupingParams = computed(() => mode.value === 'movements' && groupByDimension.value
+  ? { group_by_dimension_type: groupByDimension.value }
+  : {})
 
 function scopeParams(): Omit<AccountStatementParams, 'from' | 'to'> {
   const s = ledgerScope.value
@@ -126,9 +144,33 @@ function setLedgerScope(next: LedgerScope) {
   ledgerScope.value = next
   const query: Record<string, unknown> = { ...route.query }
   for (const k of SCOPE_KEYS) delete query[k]
+  if (hasLedgerFilters.value) {
+    counterAccountId.value = null
+    delete query.counter
+  }
   router.replace({ query: { ...query, ...next } })
   page.value = 1
   load()
+}
+
+function setDimensionFilter(ids: number[], descendants: boolean) {
+  const next = { ...ledgerScope.value }
+  const valueIds = dimensionValueIdsParam(ids)
+  if (valueIds) {
+    next.dimension_value_id = valueIds
+    next.dimension_descendants = descendants ? '1' : '0'
+  } else {
+    delete next.dimension_value_id
+    delete next.dimension_descendants
+  }
+  setLedgerScope(next)
+}
+
+function setDimensionGrouping(value: string) {
+  groupByDimension.value = Number(value) || null
+  void router.replace({ query: { ...route.query, group_by_dimension_type: value || undefined } })
+  page.value = 1
+  void load()
 }
 
 function removeScopeChip(keys: ScopeKey[]) {
@@ -142,27 +184,33 @@ const filters = reactive({
   to: typeof route.query.to === 'string' && route.query.to ? route.query.to : defaultRange().to,
 })
 
+let loadSequence = 0
 async function load() {
   if (!accountId.value) return
+  const sequence = ++loadSequence
   loading.value = true
   try {
-    report.value = await accountingApi.getAccountStatement(accountId.value, {
+    const data = await accountingApi.getAccountStatement(accountId.value, {
       from: filters.from,
       to: filters.to,
       page: page.value,
       per_page: perPage.value,
       ...scopeParams(),
+      ...groupingParams.value,
       ...(counterAccountId.value && !hasLedgerFilters.value ? { counter_account_id: counterAccountId.value } : {}),
     })
-    if (report.value.counter_totals !== null) {
-      counterTotals.value = report.value.counter_totals
-      counterFilterInfo.value = report.value.counter_filter
+    if (sequence !== loadSequence) return
+    report.value = data
+    if (page.value === 1) {
+      counterTotals.value = data.counter_totals ?? []
+      counterFilterInfo.value = data.counter_filter
     }
   } catch (e: any) {
+    if (sequence !== loadSequence) return
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -230,15 +278,16 @@ const headerAccount = computed(() => (mode.value === 'open' ? openReport.value?.
 
 const exporting = ref(false)
 async function exportFile(format: 'pdf' | 'xlsx') {
-  if (!report.value) return
+  if (!report.value || exportBlocked.value) return
   exporting.value = true
   try {
     const r = await accountingApi.exportReport(`/accounting/reports/account-statement/${accountId.value}/export`, {
       from: filters.from,
       to: filters.to,
       format,
-      ...(ledgerScope.value.after_closing === '1' ? { after_closing: 1 } : {}),
-      ...(counterAccountId.value ? { counter_account_id: counterAccountId.value } : {}),
+      ...scopeParams(),
+      ...groupingParams.value,
+      ...(counterAccountId.value && !hasLedgerFilters.value ? { counter_account_id: counterAccountId.value } : {}),
     })
     downloadBlob(r.data as unknown as Blob, `opis-uctu-${report.value.account.code}-${filters.from}-${filters.to}.${format}`)
   } catch (e: any) {
@@ -644,11 +693,24 @@ onMounted(reload)
             <option v-for="o in counterOptions" :key="o.account_id ?? 0" :value="o.account_id ?? ''">{{ o.account_code }} {{ o.name }}</option>
           </select>
         </div>
+        <label v-if="mode === 'movements' && dims.enabled.value && dims.types.value.length" class="block">
+          <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.group_by_dimension') }}</span>
+          <select :value="groupByDimension ?? ''" data-testid="group-by-dimension"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+            @change="setDimensionGrouping(($event.target as HTMLSelectElement).value)">
+            <option value="">{{ t('accounting.account_statement.no_dimension_breakdown') }}</option>
+            <option v-for="type in dims.types.value" :key="type.id" :value="type.id">{{ type.name }}</option>
+          </select>
+        </label>
         <label v-if="mode === 'open'" class="inline-flex items-center gap-2 h-9 text-sm text-neutral-700 cursor-pointer">
           <input v-model="onlyOpen" type="checkbox" class="rounded border-neutral-300" @change="toggleOnlyOpen" />
           {{ t('accounting.account_statement.open.only_open') }}
         </label>
       </div>
+      <DimensionReportFilters v-if="mode === 'movements' && dims.enabled.value" class="mt-3"
+        :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+        @update:value-ids="setDimensionFilter($event, dimensionDescendants)"
+        @update:descendants="setDimensionFilter(dimensionValueIds, $event)" />
       <div v-if="mode === 'movements' && scopeChips.length" class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-neutral-100" data-testid="ledger-scope">
         <span class="text-xs font-medium text-neutral-500">{{ t('accounting.account_statement.scope_title') }}</span>
         <span v-for="c in scopeChips" :key="c.keys[0]" data-testid="ledger-scope-chip"
@@ -688,7 +750,54 @@ onMounted(reload)
 
     <!-- ═══ Pohyby ═══ -->
     <template v-if="mode === 'movements'">
-      <div v-if="report && counterTotals.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 overflow-hidden" data-testid="counter-totals">
+      <div v-if="!loading && dimensionBreakdown && dimensionBreakdown.type_id === groupByDimension"
+        class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 overflow-hidden" data-testid="dimension-breakdown">
+        <h2 class="px-3 py-2 border-b border-neutral-100 text-sm font-medium">
+          {{ t('accounting.account_statement.dimension_breakdown_title', { type: dimensionBreakdown.type_name }) }}
+        </h2>
+        <p v-if="!dimensionBreakdown.matches" role="alert" class="px-3 py-2 text-sm bg-warning-50 text-warning-700">
+          {{ t('accounting.account_statement.dimension_breakdown_mismatch') }}
+        </p>
+        <div class="overflow-x-auto max-h-72">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th scope="col" class="px-3 py-2 text-left font-medium">{{ t('dimensions.filter_value') }}</th>
+                <th v-for="col in dimensionColumns" :key="col.key" scope="col" class="px-3 py-2 text-right font-medium whitespace-nowrap">
+                  {{ t(`accounting.account_statement.${col.label}`) }}
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="row in dimensionBreakdown.rows" :key="row.value_id ?? 0" class="hover:bg-neutral-50">
+                <th scope="row" class="px-3 py-1.5 text-left font-normal">
+                  <button v-if="row.value_id !== null" type="button" :class="btnOutline('primary')"
+                    @click="setDimensionFilter([row.value_id], false)">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.funnel" />
+                    </svg>
+                    {{ dims.valueById.value.has(row.value_id) ? dims.valueLabel(row.value_id) : [row.code, row.name].filter(Boolean).join(' ') }}
+                  </button>
+                  <span v-else>{{ t('accounting.account_statement.dimension_unassigned') }}</span>
+                </th>
+                <td v-for="col in dimensionColumns" :key="col.key" class="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                  {{ formatMoney(row[col.key]) }}
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="font-semibold border-t border-neutral-300 bg-neutral-50">
+                <th scope="row" class="px-3 py-1.5 text-left">{{ t('accounting.account_statement.dimension_breakdown_total') }}</th>
+                <td v-for="col in dimensionColumns" :key="col.key" class="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                  {{ formatMoney(dimensionBreakdown.totals[col.key]) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div v-if="report && !hasLedgerFilters && counterTotals.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 overflow-hidden" data-testid="counter-totals">
         <div class="px-3 py-2 border-b border-neutral-100 text-sm font-medium">
           {{ t('accounting.account_statement.counter_totals_title') }}
           <span class="ml-2 text-xs font-normal text-neutral-500">{{ t('accounting.account_statement.counter_totals_hint') }}</span>
@@ -724,7 +833,7 @@ onMounted(reload)
         </div>
       </div>
 
-      <div v-if="counterFilterInfo" class="mb-4 px-3 py-2 rounded-md bg-primary-50 border border-primary-200 text-primary-800 text-sm" data-testid="counter-filter-note">
+      <div v-if="!hasLedgerFilters && counterFilterInfo" class="mb-4 px-3 py-2 rounded-md bg-primary-50 border border-primary-200 text-primary-800 text-sm" data-testid="counter-filter-note">
         {{ t('accounting.account_statement.counter_filter_note', {
           account: `${counterFilterInfo.account_code} ${counterFilterInfo.name}`,
           md: formatMoney(counterFilterInfo.md),

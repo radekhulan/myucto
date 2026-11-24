@@ -195,7 +195,7 @@ final class MoneyS3BatchAction extends AbstractMigrationAction
                 'group_id' => $groupMode === 'current' ? $this->currentGroupId($supplierId) : null,
                 'group_name' => $groupMode === 'new' ? (string) ($body['group_name'] ?? '') : null,
                 'related_party_icos' => [],
-            ] + array_intersect_key($body, array_flip(['mode', 'from_year', 'existing', 'close_history', 'disposal_year_tax', 'related_parties', 'use_registry', 'take_over_filings'])));
+            ] + array_intersect_key($body, array_flip(['mode', 'from_year', 'to_year', 'opening_only_next', 'existing', 'close_history', 'disposal_year_tax', 'related_parties', 'use_registry', 'take_over_filings'])));
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 422);
         }

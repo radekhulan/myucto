@@ -12,14 +12,17 @@ use MyInvoice\Repository\AccountingBulkItemRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\Bulk\BulkActionService;
+use MyInvoice\Service\Accounting\Bulk\BulkContext;
 use MyInvoice\Service\Accounting\Bulk\BulkOperations;
 use MyInvoice\Service\Accounting\Bulk\BulkSelection;
+use MyInvoice\Service\Accounting\Bulk\DocumentItemEditor;
 use MyInvoice\Service\Accounting\Bulk\DocumentItemSearch;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
+use MyInvoice\Tests\Support\SavepointStatus;
 use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
@@ -209,6 +212,45 @@ final class BulkVatClassificationTest extends BankPostingTestCase
 
     // ── členění DPH na položkách ─────────────────────────────────────────────
 
+    #[Group('fulltext-transactions')]
+    public function testItemPreviewRequiresOwnTransactionAndCanBeRepeated(): void
+    {
+        $pdo = $this->db->pdo();
+        $docId = $this->postedIssued(['Služba' => 100.0], post: false);
+        $pdo->prepare("UPDATE invoices SET status = 'draft' WHERE id = ?")->execute([$docId]);
+        $before = $this->itemsOf('invoice_items', 'invoice_id', $docId);
+        $counters = SavepointStatus::read($pdo);
+        $ctx = new BulkContext(0, $this->supplierId, $this->userId, 'invoice_item', [],
+            $this->request('PUT', '/api/invoices/' . $docId, ['invoices' => 2]));
+        $editor = $this->container->get(DocumentItemEditor::class);
+        $changes = [0 => ['vat_classification_code' => 'mimo', 'vat_rate_id' => $this->rate0]];
+
+        $pdo->beginTransaction();
+        try {
+            self::assertSame($before, $this->itemsOf('invoice_items', 'invoice_id', $docId));
+            try {
+                $editor->save($ctx, 'invoice', $docId, $changes, true);
+                self::fail('Vnořený náhled položky musí být odmítnut.');
+            } catch (\LogicException $e) {
+                self::assertSame('Zápis položek hromadné akce vyžaduje vlastní transakci.', $e->getMessage());
+            }
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame($counters, SavepointStatus::read($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $result = $editor->save($ctx, 'invoice', $docId, $changes, true);
+            self::assertTrue($result['ok'], json_encode($result, JSON_UNESCAPED_UNICODE));
+            self::assertSame('mimo', $result['after']['items'][0]['vat_classification_code']);
+            self::assertFalse($pdo->inTransaction());
+            self::assertSame($before, $this->itemsOf('invoice_items', 'invoice_id', $docId));
+        }
+        self::assertSame($counters, SavepointStatus::read($pdo));
+    }
+
+    #[Group('fulltext-transactions')]
     public function testItemOutsideVatChangesOnlySelectedItemRecalculatesRepostsAndRollsBackExactly(): void
     {
         $docId = $this->postedIssued(['Ubytování v apartmánu' => 2000.0, 'Parkování' => 300.0, 'Místní poplatek z pobytu' => 100.0]);
@@ -253,6 +295,7 @@ final class BulkVatClassificationTest extends BankPostingTestCase
         self::assertSame(504.0, $this->journalAmount('invoice', $docId, '343'));
     }
 
+    #[Group('fulltext-transactions')]
     public function testPurchaseItemClassificationUsesVatTreatmentAndRollsBack(): void
     {
         $docId = $this->postedPurchase(['Kancelářské potřeby' => 1000.0, 'Správní poplatek' => 200.0]);
@@ -274,6 +317,7 @@ final class BulkVatClassificationTest extends BankPostingTestCase
         self::assertSame($before, $this->itemsOf('purchase_invoice_items', 'purchase_invoice_id', $docId));
     }
 
+    #[Group('fulltext-transactions')]
     public function testPurchaseItemRateChangeGoesThroughDocumentUpdate(): void
     {
         $docId = $this->postedPurchase(['Kancelářské potřeby' => 1000.0, 'Správní poplatek' => 200.0]);
@@ -293,6 +337,7 @@ final class BulkVatClassificationTest extends BankPostingTestCase
         self::assertSame($before, $this->itemsOf('purchase_invoice_items', 'purchase_invoice_id', $docId));
     }
 
+    #[Group('fulltext-transactions')]
     public function testDocumentTargetChangesAllStandardItems(): void
     {
         $docId = $this->postedIssued(['Služba A' => 100.0, 'Služba B' => 200.0], post: false);

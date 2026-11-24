@@ -39,7 +39,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST /api/admin/imports/money-s3/uploads/{token}/complete
  *   GET  /api/admin/imports/money-s3/uploads/{token}
  *   POST /api/admin/imports/money-s3/uploads/{token}/reports        multipart `report` + `year`
- *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, to_year, disposal_year_tax}
+ *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, to_year, opening_only_next, disposal_year_tax}
  *   GET  /api/admin/imports/money-s3/runs
  *   GET  /api/admin/imports/money-s3/runs/{id}
  *   DELETE /api/admin/imports/money-s3/runs/{id}                    jen zkouška nanečisto
@@ -263,6 +263,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
                 (string) ($body['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
                 $acceptDifferences,
                 toYear: $toYear > 0 ? $toYear : null,
+                openingOnlyNext: filter_var($body['opening_only_next'] ?? false, FILTER_VALIDATE_BOOL),
             );
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 422);
@@ -294,6 +295,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             'confirm_ico' => $options->confirmedIco,
             'from_year' => $options->fromYear,
             'to_year' => $options->toYear,
+            'opening_only_next' => $options->openingOnlyNext,
             'disposal_year_tax' => $options->disposalYearTax,
             // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
             'accept_differences' => $options->acceptDifferences,

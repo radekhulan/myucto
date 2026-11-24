@@ -220,6 +220,7 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
      * daňové části úhrad dokladu rekonciliace ukáže u konkrétního dokladu jako rozdíl
      * k přijetí. Bez přijetí převod skončí chybou, s přijetím projde s upozorněním.
      */
+    #[Group('fulltext-transactions')]
     public function testAdvanceVatReclassIsAcceptableDifference(): void
     {
         $supplierId = $this->supplier();
@@ -253,6 +254,7 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
      * Úhradu FP25006 po zápočtu dobropisu FP25007 dělí peněžní deník MyÚčta stejně jako
      * Money, rozdílem proto není.
      */
+    #[Group('fulltext-transactions')]
     public function testPaymentSplitDifferencesAreItemized(): void
     {
         $supplierId = $this->supplier();
@@ -281,6 +283,7 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
     }
 
     /** Zkouška nanečisto projde stejnými kroky a v databázi nic nenechá. */
+    #[Group('fulltext-transactions')]
     public function testTaxRecordsDryRunWritesNothing(): void
     {
         $supplierId = $this->supplier();

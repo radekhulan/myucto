@@ -71,25 +71,35 @@ final class DimensionSplitAllocation
                                               WHERE r.dimension_type_id = ? AND r.dimension_value_id IN ({$marks}))";
             array_push($params, $typeId, ...$valueIds);
         }
-        $sql = "SELECT a.line_id, a.value_id,
+        $source = "SELECT s.line_id, s.dimension_value_id AS value_id, sl.amount, s.share AS weight
+                     FROM journal_entry_line_dimension_splits s
+                     JOIN journal_entry_lines sl ON sl.id = s.line_id{$entryJoin}
+                    WHERE s.dimension_type_id = ?{$restrict}";
+        $allocated = self::distributeSql($source);
+        return ["SELECT p.line_id, p.value_id, p.allocated_amount AS amount FROM ({$allocated}) p", $params];
+    }
+
+    /**
+     * Ke zdroji (line_id, value_id, amount, weight) přidá díl v haléřích jako
+     * allocated_amount. Zdroj smí nést i další sloupce a nulové váhy.
+     */
+    public static function distributeSql(string $source): string
+    {
+        return "SELECT a.*,
                        a.part + CASE WHEN a.residual > 0 AND a.rn = 1 THEN a.residual
                                      WHEN a.residual < 0
                                      THEN -LEAST(a.part, GREATEST(-a.residual - a.prior_part, 0))
-                                     ELSE 0 END AS amount
+                                     ELSE 0 END AS allocated_amount
                   FROM (SELECT q.*,
                                q.amount - SUM(q.part) OVER (PARTITION BY q.line_id) AS residual,
                                COALESCE(SUM(q.part) OVER (
                                    PARTITION BY q.line_id ORDER BY q.rn
                                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
                                ), 0) AS prior_part
-                          FROM (SELECT s.line_id, s.dimension_value_id AS value_id, sl.amount,
-                                       ROUND(sl.amount * s.share / SUM(s.share) OVER (PARTITION BY s.line_id), 2) AS part,
-                                       ROW_NUMBER() OVER (PARTITION BY s.line_id
-                                                          ORDER BY s.share DESC, s.dimension_value_id) AS rn
-                                  FROM journal_entry_line_dimension_splits s
-                                  JOIN journal_entry_lines sl ON sl.id = s.line_id{$entryJoin}
-                                 WHERE s.dimension_type_id = ?{$restrict}) q) a";
-        return [$sql, $params];
+                          FROM (SELECT s.*,
+                                       COALESCE(ROUND(s.amount * s.weight / NULLIF(SUM(s.weight) OVER (PARTITION BY s.line_id), 0), 2), 0) AS part,
+                                       ROW_NUMBER() OVER (PARTITION BY s.line_id ORDER BY s.weight DESC, s.value_id) AS rn
+                                  FROM ({$source}) s) q) a";
     }
 
     /**

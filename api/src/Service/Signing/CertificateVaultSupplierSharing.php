@@ -437,9 +437,14 @@ final class CertificateVaultSupplierSharing
     }
 
     /** @return list<array{supplier_id:int,name:string}> */
-    public function permittedSuppliers(Request $request, int $ownerUserId, AccessLevel $level): array
+    /**
+     * @param bool $allForSuperadmin superadmin dostane všechny firmy instalace i tehdy, když je
+     *        členem jen některých (správa sdílených přístupů k datovým schránkám). Certifikáty
+     *        v trezoru zůstávají záměrně omezené na členství.
+     */
+    public function permittedSuppliers(Request $request, int $ownerUserId, AccessLevel $level, bool $allForSuperadmin = false): array
     {
-        $candidates = $this->candidateSuppliers($request, $ownerUserId);
+        $candidates = $this->candidateSuppliers($request, $ownerUserId, $allForSuperadmin);
         $this->supplierAccess->preloadSupplierIds(array_column($candidates, 'supplier_id'));
 
         return array_values(array_filter(
@@ -449,11 +454,11 @@ final class CertificateVaultSupplierSharing
     }
 
     /** @return list<array{supplier_id:int,name:string}> */
-    private function candidateSuppliers(Request $request, int $ownerUserId): array
+    private function candidateSuppliers(Request $request, int $ownerUserId, bool $allForSuperadmin = false): array
     {
         $memberships = $this->memberships->listForUser($ownerUserId);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if ($memberships !== [] || ($user['is_superadmin'] ?? false) !== true) {
+        if (($memberships !== [] && !$allForSuperadmin) || ($user['is_superadmin'] ?? false) !== true) {
             return $memberships;
         }
 

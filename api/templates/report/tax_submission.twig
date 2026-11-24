@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>{{ r.form_code }} {{ r.period_label }}</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .kicker { font-size: 7pt; color: #6753AE; font-weight: bold; letter-spacing: 0.5pt; }
+    .title { font-size: 13.5pt; font-weight: bold; color: #211A4B; margin-top: 1mm; }
+    .subtitle { font-size: 8.5pt; color: #5A5470; margin-top: 1mm; }
+    table.meta { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+    table.meta td { font-size: 7.5pt; padding: 1mm 2mm 1mm 0; vertical-align: top; }
+    .meta-label { color: #7A748C; }
+    .meta-value { color: #15131D; }
+    .h2 { font-size: 10.5pt; font-weight: bold; color: #3B2D83; margin-top: 6mm; margin-bottom: 1.5mm; padding-bottom: 1mm; border-bottom: 0.4mm solid #C9C0E9; }
+    table.grid { width: 100%; border-collapse: collapse; }
+    table.grid th { font-size: 7pt; font-weight: normal; color: #7A748C; text-align: left; padding: 1mm 1.5mm; border-bottom: 0.3mm solid #C9C0E9; vertical-align: bottom; }
+    table.grid th.r { text-align: right; }
+    table.grid td { padding: 0.9mm 1.5mm; font-size: 7.8pt; border-bottom: 0.2mm solid #E7E3EE; vertical-align: top; }
+    td.code { width: 9mm; color: #5A5470; white-space: nowrap; }
+    td.num { text-align: right; white-space: nowrap; font-family: geistmono, monospace; }
+    table.kv { width: 100%; border-collapse: collapse; }
+    table.kv td { padding: 0.8mm 1.5mm; font-size: 7.8pt; border-bottom: 0.2mm solid #E7E3EE; vertical-align: top; }
+    table.kv td.k { width: 40%; color: #7A748C; }
+    table.ok { width: 100%; border-collapse: collapse; margin-top: 1mm; }
+    table.ok td { background-color: #ECF6F0; border-left: 1mm solid #4CAF7A; padding: 1.5mm 2.5mm; font-size: 8pt; color: #403B52; }
+    table.warn { width: 100%; border-collapse: collapse; margin-top: 1mm; }
+    table.warn td { background-color: #FDF6E9; border-left: 1mm solid #C68A30; padding: 1.5mm 2.5mm; font-size: 8pt; color: #403B52; }
+</style>
+</head>
+<body>
+<div class="kicker">MYÚČTO · ODESLANÉ PODÁNÍ</div>
+<div class="title">{{ r.title }} ({{ r.form_code }})</div>
+<div class="subtitle">za období {{ r.period_label }}{% if r.variant_label %} · {{ r.variant_label }}{% endif %}</div>
+
+<table class="meta">
+    <tr>
+        <td style="width: 25%;"><span class="meta-label">Stav v aplikaci</span><br><span class="meta-value">{{ r.status_label }}</span></td>
+        <td style="width: 25%;"><span class="meta-label">Snapshot</span><br><span class="meta-value">#{{ r.submission_id }}{% if r.version %} · verze {{ r.version }}{% endif %}</span></td>
+        <td style="width: 25%;"><span class="meta-label">XML vygenerováno</span><br><span class="meta-value">{{ r.generated_at|cz_date }}</span></td>
+        <td style="width: 25%;"><span class="meta-label">Otisk XML (SHA-256)</span><br><span class="meta-value">{{ r.xml_sha256|slice(0, 16) }}…</span></td>
+    </tr>
+</table>
+<table class="warn">
+    <tr><td>Tisk je sestavený z uloženého XML, které bylo podáno. Neodráží pozdější změny dokladů v aplikaci.</td></tr>
+</table>
+
+<div class="h2">Potvrzení o podání</div>
+{% set rc = r.receipt %}
+{% if rc.available %}
+<table class="ok"><tr><td>
+    {% if rc.reference %}Podací číslo / identifikátor: <b>{{ rc.reference }}</b><br>{% endif %}
+    {% if rc.submitted_at %}Podáno: <b>{{ rc.submitted_at }}</b><br>{% endif %}
+    Uložené doklady o podání (originály ke stažení v MyÚčtu, Podání a archiv):
+    {% for item in rc.items %}<br>· {{ item.label }}: {{ item.name }}{% endfor %}
+</td></tr></table>
+{% else %}
+<table class="warn"><tr><td>
+    Doručenka ani potvrzení o podání nejsou v MyÚčtu uložené. {{ rc.reason_label }}
+    {% if rc.reference %}<br>Číslo jednací / identifikátor zapsaný u podání: <b>{{ rc.reference }}</b>{% endif %}
+    {% if rc.submitted_at %}<br>Datum podání zapsané u podání: <b>{{ rc.submitted_at }}</b>{% endif %}
+</td></tr></table>
+{% endif %}
+
+{% if r.identity %}
+<div class="h2">Identifikační údaje</div>
+<table class="kv">
+    {% for row in r.identity %}
+    <tr><td class="k">{{ row.label }}</td><td>{{ row.value }}</td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% for group in r.line_groups %}
+<div class="h2">{{ group.title }}</div>
+<table class="grid">
+    <tr>
+        <th style="width: 7%;">Ř.</th>
+        <th style="width: 48%;">Text</th>
+        <th class="r" style="width: 15%;">Základ / hodnota</th>
+        <th class="r" style="width: 15%;">Daň / v plné výši</th>
+        <th class="r" style="width: 15%;">Krácený odpočet</th>
+    </tr>
+    {% for row in group.rows %}
+    <tr>
+        <td class="code">{{ row.line }}</td>
+        <td>{{ row.label }}</td>
+        <td class="num">{{ row.base is null ? '' : row.base|cz_money }}</td>
+        <td class="num">{{ row.full is null ? '' : row.full|cz_money }}</td>
+        <td class="num">{{ row.reduced is null ? '' : row.reduced|cz_money }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endfor %}
+
+{% for table in r.tables %}
+<div class="h2">{{ table.title }}</div>
+{% if table.rows|length == 1 %}
+<table class="kv">
+    {% for col in table.columns %}
+    <tr><td class="k">{{ col.label }}</td><td{% if col.num %} class="num"{% endif %}>{{ col.num and table.rows[0][col.key] is defined ? table.rows[0][col.key]|cz_money : table.rows[0][col.key]|default('') }}</td></tr>
+    {% endfor %}
+</table>
+{% else %}
+<table class="grid">
+    <tr>
+        {% for col in table.columns %}<th{% if col.num %} class="r"{% endif %}>{{ col.label }}</th>{% endfor %}
+    </tr>
+    {% for row in table.rows %}
+    <tr>
+        {% for col in table.columns %}
+        <td{% if col.num %} class="num"{% endif %}>{% if row[col.key] is defined %}{{ col.num ? row[col.key]|cz_money : row[col.key] }}{% endif %}</td>
+        {% endfor %}
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+{% endfor %}
+</body>
+</html>

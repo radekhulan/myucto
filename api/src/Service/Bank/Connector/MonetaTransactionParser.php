@@ -175,7 +175,8 @@ final class MonetaTransactionParser
     }
 
     /**
-     * `VS:123,KS:0308,SS:1`, případně pole takových položek (formát ČOBS).
+     * `VS:123,KS:0308,SS:1` nebo `VS:123 KS:0308 SS:1` (zápis z OpenAPI MONETA), případně pole
+     * takových položek (formát ČOBS).
      *
      * @return array{VS:?string,KS:?string,SS:?string}
      */
@@ -190,7 +191,7 @@ final class MonetaTransactionParser
             if (!is_string($item)) {
                 throw $this->invalid();
             }
-            array_push($parts, ...explode(',', $item));
+            array_push($parts, ...preg_split('/\s*,\s*|\s+(?=(?:VS|KS|SS)\s*:)/', $item));
         }
         foreach ($parts as $part) {
             if (preg_match('/^\s*(VS|KS|SS)\s*:\s*(\d{1,10})\s*$/D', $part, $m) !== 1) {

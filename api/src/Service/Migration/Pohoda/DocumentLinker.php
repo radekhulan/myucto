@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -46,6 +48,8 @@ final class DocumentLinker
         private readonly PohodaImportRepository $map,
         private readonly OtherItemService $otherItems,
         private readonly PohodaPriorYearPayments $priorYear,
+        private readonly DocumentLockService $locks,
+        private readonly FiledVatPeriodLookup $filed,
     ) {
         $this->entries = new JournalEntryLinker($db, 'Pohody');
     }
@@ -269,32 +273,81 @@ final class DocumentLinker
      * doklad: dostane rodiče (`parent_purchase_invoice_id`, u vydaných `parent_invoice_id`).
      * DDKP čerpá DPH zálohy ze zálohového účtu; bez vazby ho saldokonto bere jako
      * samostatný a záloha zůstává otevřená o daň.
+     *
+     * Rozhoduje úhrada zálohy, ke které POHODA DDKP vystavila (`Uhrady.RefDD`,
+     * {@see linkTaxDocumentByPayment()}). Text DDKP s číslem zálohy je jen záložní cesta pro
+     * DDKP, ke kterému žádná úhrada nevede; POHODA ho u přečíslovaných záloh a splátek nechává
+     * zastaralý.
      */
     private function linkTaxDocumentsToAdvances(PohodaContext $ctx): void
     {
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
+        $this->locks->reset();
+        $hasRefDD = $ctx->export->hasTaxDocumentPaymentRefs();
+        $byText = 0;
+        $seen = 0;
+        $unlinked = 0;
+        // Úhrady s DDKP ze všech řádků `Uhrady`, i odfiltrovaných rokem a k zálohám mimo export:
+        // takový DDKP se podle textu nenaváže nikdy, ani na jinou zálohu se stejným číslem.
+        $refTargets = $ctx->export->taxDocumentPaymentRefs();
+        $byRefDD = [];
+        $paymentSources = [];
+        foreach ($ctx->liquidations as $l) {
+            if (($l['tax_document_ref'] ?? '') !== '') {
+                $byRefDD[$l['tax_document_ref']][] = $l;
+            }
+            if ($l['doc'] === 'invoice' && ($l['source_id'] ?? '') !== '') {
+                $source = $l['agenda'] . '|' . $l['source_id'];
+                $paymentSources[$l['id']][$source] = ($paymentSources[$l['id']][$source] ?? 0) + 1;
+            }
+        }
         foreach ([
-            [PohodaImportRepository::KIND_PURCHASE_INVOICE, 'receivedAdvanceInvoice', ['received_advance', 'received_proforma'], 'purchase_invoices', 'parent_purchase_invoice_id', 'document_kind'],
-            [PohodaImportRepository::KIND_INVOICE, 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type'],
-        ] as [$kind, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn]) {
+            [PohodaImportRepository::KIND_PURCHASE_INVOICE, 'purchase_invoice', 'receivedAdvanceInvoice', ['received_advance', 'received_proforma'], 'purchase_invoices', 'parent_purchase_invoice_id', 'document_kind', 'vendor_id', 'advance'],
+            [PohodaImportRepository::KIND_INVOICE, 'invoice', 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type', 'client_id', 'proforma'],
+        ] as [$kind, $docType, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn, $partner, $advanceKind]) {
             $advances = [];
+            $advanceNumbers = [];
             $taxDocuments = $this->map->all($ctx->supplierId, $kind);
             foreach ($taxDocuments as $key => $id) {
                 [$agenda, $number, $date] = array_pad(explode('|', (string) $key, 3), 3, '');
-                if (in_array($agenda, $advanceAgendas, true) && !$ctx->skipsDate($date)) {
-                    $advances[$number][] = (int) $id;
+                if (in_array($agenda, $advanceAgendas, true)) {
+                    $advanceNumbers[(int) $id] = $number;
+                    if (!$ctx->skipsDate($date)) {
+                        $advances[$number][] = (int) $id;
+                    }
                 }
             }
-            if ($advances === [] || $taxDocuments === []) {
+            if ($taxDocuments === [] || ($advances === [] && $refTargets === [])) {
                 continue;
             }
-            $set = $pdo->prepare("UPDATE {$table} SET {$column} = ? WHERE id = ? AND supplier_id = ? AND {$column} IS NULL AND {$kindColumn} = 'tax_document'");
-            $partner = $table === 'purchase_invoices' ? 'vendor_id' : 'client_id';
+            $claimed = [];
+            foreach ($refTargets as $targets) {
+                foreach ($targets as $target) {
+                    if ($target['doc'] === $docType) {
+                        $claimed += array_fill_keys($advances[$target['number']] ?? [], true);
+                    }
+                }
+            }
+            foreach ($byRefDD as $payments) {
+                foreach ($payments as $l) {
+                    if ($l['doc'] === $docType) {
+                        $claimed[(int) $l['id']] = true;
+                    }
+                }
+            }
+            $c = ['doc' => $docType, 'table' => $table, 'column' => $column, 'kind' => $kindColumn, 'partner' => $partner, 'advance_kind' => $advanceKind];
+            $set = $pdo->prepare(
+                "UPDATE {$table} t JOIN {$table} a ON a.supplier_id = t.supplier_id AND a.id = ?
+                    SET t.{$column} = a.id
+                  WHERE t.id = ? AND t.supplier_id = ? AND t.{$column} IS NULL AND t.{$kindColumn} = 'tax_document'
+                    AND t.status <> 'cancelled' AND a.status <> 'cancelled'"
+            );
             $same = $pdo->prepare(
                 "SELECT 1 FROM {$table} t JOIN {$table} a ON a.supplier_id = t.supplier_id AND a.id = ?
                   WHERE t.id = ? AND t.supplier_id = ? AND t.{$partner} = a.{$partner} AND ABS(t.total_with_vat - a.total_with_vat) < 0.01"
             );
+            $seenIds = [];
             foreach ($ctx->export->records('internal', 'intDoc') as $record) {
                 $header = PohodaXml::get($record, 'intDocHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
@@ -304,6 +357,13 @@ final class DocumentLinker
                 if ($taxDocumentId === null || $ctx->skipsDate($accounting ?? $issue)) {
                     continue;
                 }
+                $seen++;
+                $seenIds[] = (int) $taxDocumentId;
+                $pohodaId = PohodaXml::text($header, 'id');
+                if (isset($refTargets[$pohodaId])) {
+                    $this->linkTaxDocumentByPayment($ctx, $c, (int) $taxDocumentId, $number, $refTargets[$pohodaId], $byRefDD[$pohodaId] ?? [], $advanceNumbers, $paymentSources);
+                    continue;
+                }
                 $refs = [];
                 foreach (PohodaXml::all($record, 'linkedDocuments/link') as $link) {
                     $ref = PohodaXml::text($link, 'sourceDocument/number');
@@ -311,11 +371,12 @@ final class DocumentLinker
                         $refs[$ref] = $advances[$ref][0];
                     }
                 }
-                // Export z datového souboru vazbu DDKP na zálohu nenese; POHODA ale DDKP
-                // pojmenuje číslem zálohy ({@see self::advanceNumberFromText()}). Takovou
-                // vazbu převod přijme jen u téhož partnera a téže částky jako záloha.
+                // DDKP bez úhrady s RefDD (ruční, k záloze jiného roku, starší export): číslo zálohy
+                // z textu, který POHODA generuje ({@see self::advanceNumberFromText()}), jen u téhož
+                // partnera a téže částky. Text lze přepsat, proto má RefDD přednost: záloha, ke které
+                // už DDKP váže úhrada, další DDKP podle textu nedostane.
                 $textRef = $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
-                if ($textRef !== null && count($advances[$textRef] ?? []) === 1) {
+                if ($textRef !== null && count($advances[$textRef] ?? []) === 1 && !isset($claimed[$advances[$textRef][0]])) {
                     $candidate = $advances[$textRef][0];
                     $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
                     if ($same->fetchColumn() !== false) {
@@ -328,9 +389,161 @@ final class DocumentLinker
                 $set->execute([reset($refs), $taxDocumentId, $ctx->supplierId]);
                 if ($set->rowCount() > 0) {
                     $p->count(self::STEP_LINK, 'tax_document_advance_linked');
+                    if ($textRef !== null) {
+                        $byText++;
+                    }
+                }
+            }
+            if (!$hasRefDD && $seenIds !== []) {
+                foreach (array_chunk($seenIds, 1000) as $chunk) {
+                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ") AND {$column} IS NULL");
+                    $stmt->execute([$ctx->supplierId, ...$chunk]);
+                    $unlinked += (int) $stmt->fetchColumn();
                 }
             }
         }
+        if (!$hasRefDD && $seen > 0 && $ctx->export->hasMdbAccounting()) {
+            $p->warn(self::STEP_LINK, 'tax_document_refs_missing', 'Export POHODY je z dřívější verze exportního skriptu a nenese vazbu daňových dokladů k platbě (DDKP) na úhradu zálohy. '
+                . "Z {$seen} DDKP se v tomto převodu podle textu navázalo {$byText}, bez vazby na zálohu zůstává {$unlinked}. "
+                . 'Pro přesné párování (i u záloh placených po částech) vyexportujte data aktuálním skriptem z průvodce převodu a převod spusťte znovu.',
+                ['count' => $seen, 'by_text' => $byText, 'unlinked' => $unlinked]);
+        }
+    }
+
+    /**
+     * DDKP, ke kterému vede úhrada zálohy v POHODĚ (`Uhrady.RefDD`): rodičem je záloha té
+     * úhrady, u vydané zálohy si DDKP zapamatuje i úhradu pro vazbu platby
+     * ({@see linkIssuedPaymentTaxDocument()}). Co převod jednoznačně navázat nemůže (záloha
+     * mimo převod, víc záloh či plateb, jiný partner, storno), ohlásí a nechá být.
+     *
+     * Vazbu na jinou zálohu (starší převod podle zastaralého textu) přepíše jen tehdy, když
+     * DDKP i obě zálohy vytvořil převod a DDKP neleží v podaném ani uzavřeném období.
+     *
+     * @param array{doc:string,table:string,column:string,kind:string,partner:string,advance_kind:string} $c
+     * @param list<array{doc:string,advance:string,number:string}> $targets zálohy úhrad s tímto DDKP podle POHODY
+     * @param list<array<string,mixed>> $payments úhrady převedených záloh s tímto DDKP
+     * @param array<int,string> $advanceNumbers zálohy z převodu: id => číslo
+     * @param array<int,array<string,int>> $paymentSources id vydané zálohy => agenda|id dokladu úhrady => počet úhrad
+     */
+    private function linkTaxDocumentByPayment(PohodaContext $ctx, array $c, int $taxDocumentId, string $number, array $targets, array $payments, array $advanceNumbers, array $paymentSources): void
+    {
+        $p = $ctx->protocol;
+        $pdo = $this->db->pdo();
+        $targetNumbers = array_values(array_unique(array_column($targets, 'number')));
+        if (count(array_unique(array_column($targets, 'advance'))) > 1 || count(array_unique(array_column($payments, 'id'))) > 1) {
+            $p->warn(self::STEP_LINK, 'tax_document_multiple_advances', "DDKP {$number} patří podle úhrad v POHODĚ k více zálohám (" . implode(', ', $targetNumbers) . '). '
+                . 'MyÚčto váže DDKP jen k jedné záloze, vazbu na zálohu ani na platby převod nevytvořil; doplňte ji ručně.',
+                ['document_no' => $number, 'advances' => $targetNumbers]);
+            return;
+        }
+        $payments = array_values(array_filter($payments, static fn (array $l): bool => $l['doc'] === $c['doc']));
+        if ($targets[0]['doc'] !== $c['doc'] || $payments === []) {
+            $p->warn(self::STEP_LINK, 'tax_document_advance_missing', "DDKP {$number} patří podle úhrady v POHODĚ k záloze {$targetNumbers[0]}, která v převodu není "
+                . '(chybí v exportu, je z jiného roku nebo jiného druhu). DDKP zůstal bez vazby na zálohu.',
+                ['document_no' => $number, 'advance_no' => $targetNumbers[0]]);
+            return;
+        }
+        $advanceId = (int) $payments[0]['id'];
+        $advanceNumber = (string) $payments[0]['number'];
+        ['table' => $table, 'column' => $column, 'kind' => $kind, 'partner' => $partner] = $c;
+        $state = $pdo->prepare(
+            "SELECT t.{$column} AS parent, cp.varsymbol AS parent_number, t.status AS td_status, a.status AS advance_status,
+                    t.{$kind} AS td_kind, a.{$kind} AS advance_kind, t.{$partner} = a.{$partner} AS same_partner,
+                    t.issue_date, t.tax_date
+               FROM {$table} t
+               JOIN {$table} a ON a.supplier_id = t.supplier_id AND a.id = ?
+               LEFT JOIN {$table} cp ON cp.supplier_id = t.supplier_id AND cp.id = t.{$column}
+              WHERE t.supplier_id = ? AND t.id = ?"
+        );
+        $state->execute([$advanceId, $ctx->supplierId, $taxDocumentId]);
+        $row = $state->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return;
+        }
+        if ($row['td_kind'] !== 'tax_document' || $row['advance_kind'] !== $c['advance_kind'] || (int) $row['same_partner'] !== 1) {
+            $p->warn(self::STEP_LINK, 'tax_document_advance_mismatch', "DDKP {$number} patří podle úhrady v POHODĚ k záloze {$advanceNumber}, doklady se ale v MyÚčtu liší partnerem nebo druhem dokladu. "
+                . 'DDKP zůstal bez vazby na zálohu.', ['document_no' => $number, 'advance_no' => $advanceNumber]);
+            return;
+        }
+        if ($row['td_status'] === 'cancelled' || $row['advance_status'] === 'cancelled') {
+            $p->warn(self::STEP_LINK, 'tax_document_advance_cancelled', "DDKP {$number} nebo jeho záloha {$advanceNumber} je stornovaná, vazbu DDKP na zálohu převod nevytvořil.",
+                ['document_no' => $number, 'advance_no' => $advanceNumber]);
+            return;
+        }
+        $parent = $row['parent'] === null ? null : (int) $row['parent'];
+        if ($parent === null) {
+            $set = $pdo->prepare("UPDATE {$table} SET {$column} = ? WHERE id = ? AND supplier_id = ? AND {$column} IS NULL");
+            $set->execute([$advanceId, $taxDocumentId, $ctx->supplierId]);
+            if ($set->rowCount() > 0) {
+                $p->count(self::STEP_LINK, 'tax_document_advance_linked');
+            }
+        } elseif ($parent !== $advanceId) {
+            $current = $advanceNumbers[$parent] ?? (string) ($row['parent_number'] ?? '');
+            $reason = !isset($advanceNumbers[$parent], $advanceNumbers[$advanceId]) ? 'současnou vazbu nevytvořil převod' : $this->periodLockReason($ctx->supplierId, $c['doc'], $row);
+            if ($reason !== null) {
+                $p->warn(self::STEP_LINK, 'tax_document_advance_conflict', "DDKP {$number} je navázaný na zálohu {$current}, podle úhrady v POHODĚ ale patří k záloze {$advanceNumber}. "
+                    . "Vazbu převod nezměnil ({$reason}); zkontrolujte ji ručně.", ['document_no' => $number, 'advance_no' => $advanceNumber, 'linked_advance_no' => $current]);
+                return;
+            }
+            $move = $pdo->prepare("UPDATE {$table} SET {$column} = ? WHERE id = ? AND supplier_id = ? AND {$column} = ?");
+            $move->execute([$advanceId, $taxDocumentId, $ctx->supplierId, $parent]);
+            if ($move->rowCount() === 0) {
+                return;
+            }
+            if ($c['doc'] === 'invoice') {
+                $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = NULL WHERE supplier_id = ? AND tax_document_invoice_id = ? AND invoice_id = ?')
+                    ->execute([$ctx->supplierId, $taxDocumentId, $parent]);
+            }
+            $p->count(self::STEP_LINK, 'tax_document_advance_relinked');
+            $p->info(self::STEP_LINK, 'tax_document_advance_relinked', "DDKP {$number} převod přenesl ze zálohy {$current} na zálohu {$advanceNumber} podle úhrady v POHODĚ.",
+                ['document_no' => $number, 'advance_no' => $advanceNumber, 'previous_advance_no' => $current]);
+        }
+        if ($c['doc'] !== 'invoice') {
+            return;
+        }
+        if (count($payments) > 1) {
+            $sources = array_values(array_unique(array_map(static fn (array $l): string => (string) $l['source'], $payments)));
+            $p->warn(self::STEP_PAYMENTS, 'tax_document_multiple_payments', "DDKP {$number} patří k více úhradám zálohy {$advanceNumber} (" . implode(', ', $sources) . '). '
+                . 'K DDKP se váže jen jedna platba, převod proto platby k DDKP nenavázal; doplňte vazbu ručně.',
+                ['document_no' => $number, 'advance_no' => $advanceNumber, 'sources' => $sources]);
+            return;
+        }
+        $payment = $payments[0];
+        $date = $payment['date'] ?? null;
+        if ($ctx->skipsDate($date) || ($date !== null && $date < $ctx->periodStart())) {
+            return;
+        }
+        $source = $payment['agenda'] . '|' . ($payment['source_id'] ?? '');
+        if (($payment['source_id'] ?? '') === '' || ($paymentSources[$advanceId][$source] ?? 0) !== 1) {
+            $p->warn(self::STEP_PAYMENTS, 'tax_document_payment_uncertain', "Platbu zálohy {$advanceNumber} úhradou {$payment['source']} nelze podle dokladu POHODY určit jednoznačně, "
+                . "k DDKP {$number} ji převod nenavázal.", ['document_no' => $number, 'advance_no' => $advanceNumber]);
+            return;
+        }
+        $ctx->taxDocumentsByLiquidation[$advanceId][$payment['liq']] = $taxDocumentId;
+        $ctx->taxDocumentPaymentPending[$taxDocumentId] = ['tax_document' => $number, 'advance' => $advanceNumber, 'source' => (string) $payment['source']];
+    }
+
+    /**
+     * Proč převod nesmí měnit vazbu DDKP: podané přiznání nebo KH za jeho období, uzavřené
+     * účetní období nebo zámek k datu; `null` = smí.
+     *
+     * @param array<string,mixed> $doc issue_date, tax_date
+     */
+    private function periodLockReason(int $supplierId, string $docType, array $doc): ?string
+    {
+        $date = $docType === 'invoice' ? DocumentLockService::invoiceRefDate($doc) : DocumentLockService::purchaseRefDate($doc);
+        if ($date === null) {
+            return null;
+        }
+        $filed = $this->filed->describe($supplierId, $date, false);
+        if ($filed !== null) {
+            return 'podané ' . $filed;
+        }
+        $lock = $this->locks->forDate($supplierId, $date);
+        if ($lock->inClosedPeriod || $lock->inClosingPeriod) {
+            return 'uzavřené účetní období';
+        }
+        return $lock->dateLocked ? 'období zamčené k ' . $date : null;
     }
 
     /**
@@ -500,6 +713,12 @@ final class DocumentLinker
         if ($recorded['inserted'] > 0) {
             $p->count(self::STEP_PAYMENTS, 'previous_period_paid', $recorded['inserted']);
         }
+        if ($ctx->taxDocumentPaymentPending !== []) {
+            $pending = array_values(array_map(static fn (array $d): string => "{$d['tax_document']} (záloha {$d['advance']}, úhrada {$d['source']})", $ctx->taxDocumentPaymentPending));
+            $p->warn(self::STEP_PAYMENTS, 'tax_document_payment_missing', count($pending) . ' DDKP zůstalo bez vazby na platbu zálohy, převod platbu k úhradě v POHODĚ nezaložil ani nenašel: '
+                . implode(', ', array_slice($pending, 0, 20)) . '. Vazbu doplňte ručně.', ['documents' => array_slice($pending, 0, 50)]);
+            $ctx->taxDocumentPaymentPending = [];
+        }
         $this->settleByInternalDocuments($ctx, $internal);
         $this->restoreOtherItemSettlements($ctx);
         $this->inferAdvanceSettlements($ctx);
@@ -600,13 +819,15 @@ final class DocumentLinker
         }
         $note = 'Převzato z POHODY, úhrada ' . $l['source'];
         if ($kind === 'bank') {
-            $dup = $pdo->prepare('SELECT 1 FROM invoice_payments WHERE bank_transaction_id = ? AND invoice_id = ?');
+            $dup = $pdo->prepare('SELECT id FROM invoice_payments WHERE bank_transaction_id = ? AND invoice_id = ?');
             $dup->execute([$txId, $l['id']]);
         } else {
-            $dup = $pdo->prepare("SELECT 1 FROM invoice_payments WHERE invoice_id = ? AND source = 'cash' AND note = ?");
+            $dup = $pdo->prepare("SELECT id FROM invoice_payments WHERE invoice_id = ? AND source = 'cash' AND note = ?");
             $dup->execute([$l['id'], $note]);
         }
-        if ($dup->fetchColumn() !== false) {
+        $existingId = $dup->fetchColumn();
+        if ($existingId !== false) {
+            $this->linkIssuedPaymentTaxDocument($ctx, $l, (int) $existingId, $kind, $txId, $cashId);
             return;
         }
         $rate = $row['exchange_rate'] !== null && (float) $row['exchange_rate'] > 0 ? (float) $row['exchange_rate'] : null;
@@ -637,11 +858,86 @@ final class DocumentLinker
             $ctx->supplierId, $l['id'], $date, number_format($amount, 2, '.', ''), (string) $row['currency'],
             $note, $kind, $kind === 'bank' ? $txId : null, $ctx->userOrNull(),
         ]);
+        $paymentId = (int) $pdo->lastInsertId();
         if ($kind === 'cash') {
             $pdo->prepare('UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ? AND supplier_id = ? AND invoice_id = ? AND invoice_payment_id IS NULL')
-                ->execute([(int) $pdo->lastInsertId(), $cashId, $ctx->supplierId, $l['id']]);
+                ->execute([$paymentId, $cashId, $ctx->supplierId, $l['id']]);
         }
+        $this->linkIssuedPaymentTaxDocument($ctx, $l, $paymentId, $kind, $txId, $cashId);
         $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payments_recorded');
+    }
+
+    /**
+     * Platba vydané zálohy zdaněná DDKP (`invoice_payments.tax_document_invoice_id`), podle
+     * úhrady, ke které POHODA DDKP vystavila ({@see linkTaxDocumentByPayment()}). Platba musí
+     * být ta, kterou převod pro tutéž úhradu založil nebo našel přes id dokladu POHODY
+     * (`Uhrady.RelIDU`): pohyb nalezený jen podle čísla nebo platba podle poznámky může patřit
+     * jiné úhradě. DDKP v konceptu ani stornovaný platbu nedaní. Kolizi s unikátní vazbou DDKP
+     * převod ohlásí a pokračuje.
+     *
+     * @param array<string,mixed> $l
+     */
+    private function linkIssuedPaymentTaxDocument(PohodaContext $ctx, array $l, int $paymentId, string $kind, ?int $txId, ?int $cashId): void
+    {
+        $taxDocumentId = $ctx->taxDocumentsByLiquidation[$l['id']][$l['liq']] ?? null;
+        if ($taxDocumentId === null || !isset($ctx->taxDocumentPaymentPending[$taxDocumentId])) {
+            return;
+        }
+        $p = $ctx->protocol;
+        $info = $ctx->taxDocumentPaymentPending[$taxDocumentId];
+        unset($ctx->taxDocumentPaymentPending[$taxDocumentId]);
+        $context = ['document_no' => $info['tax_document'], 'advance_no' => $info['advance']];
+        $sourceId = (string) ($l['source_id'] ?? '');
+        $sourceDoc = $kind === 'bank' ? ($ctx->bankByPohodaId[$sourceId] ?? null) : ($ctx->cashByPohodaId[$sourceId] ?? null);
+        $sourceDoc = $sourceDoc === null ? null : (int) $sourceDoc;
+        if ($sourceId === '' || $sourceDoc === null || $sourceDoc !== ($kind === 'bank' ? $txId : $cashId)) {
+            $p->warn(self::STEP_PAYMENTS, 'tax_document_payment_uncertain', "Platba zálohy {$info['advance']} úhradou {$info['source']}: převod ji nenašel podle id dokladu POHODY, "
+                . "jen podle čísla, k DDKP {$info['tax_document']} ji proto nenavázal.", $context);
+            return;
+        }
+        $own = $kind === 'bank'
+            ? 'p.bank_transaction_id = ?'
+            : 'EXISTS (SELECT 1 FROM cash_documents cd WHERE cd.id = ? AND cd.supplier_id = p.supplier_id AND cd.invoice_payment_id = p.id)';
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            "UPDATE invoice_payments p
+               JOIN invoices td ON td.id = ? AND td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.invoice_id
+               JOIN invoices a ON a.id = p.invoice_id AND a.supplier_id = p.supplier_id AND a.client_id = td.client_id
+                SET p.tax_document_invoice_id = td.id
+              WHERE p.supplier_id = ? AND p.id = ? AND p.source = ? AND {$own} AND p.tax_document_invoice_id IS NULL
+                AND a.invoice_type = 'proforma' AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')"
+        );
+        try {
+            $stmt->execute([$taxDocumentId, $ctx->supplierId, $paymentId, $kind, $sourceDoc]);
+        } catch (\PDOException $e) {
+            if ((int) ($e->errorInfo[1] ?? 0) !== 1062) {
+                throw $e;
+            }
+            $p->warn(self::STEP_PAYMENTS, 'tax_document_payment_taken', "DDKP {$info['tax_document']} je už navázaný na jinou platbu, platbu zálohy {$info['advance']} úhradou {$info['source']} "
+                . 'k němu převod nenavázal; zkontrolujte vazbu ručně.', $context);
+            return;
+        }
+        if ($stmt->rowCount() > 0) {
+            $p->count(self::STEP_PAYMENTS, 'tax_document_payment_linked');
+            return;
+        }
+        $state = $pdo->prepare(
+            'SELECT p.tax_document_invoice_id, td.status, td.parent_invoice_id = p.invoice_id AS same_advance
+               FROM invoice_payments p JOIN invoices td ON td.id = ? AND td.supplier_id = p.supplier_id
+              WHERE p.supplier_id = ? AND p.id = ?'
+        );
+        $state->execute([$taxDocumentId, $ctx->supplierId, $paymentId]);
+        $row = $state->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || (int) $row['tax_document_invoice_id'] === $taxDocumentId) {
+            return;
+        }
+        $reason = match (true) {
+            in_array($row['status'], ['draft', 'cancelled'], true) => 'DDKP je koncept nebo stornovaný',
+            $row['tax_document_invoice_id'] !== null => 'platba je navázaná na jiný DDKP',
+            (int) $row['same_advance'] !== 1 => 'DDKP není navázaný na tuto zálohu',
+            default => 'platba neodpovídá úhradě v POHODĚ',
+        };
+        $p->warn(self::STEP_PAYMENTS, 'tax_document_payment_not_linked', "Platbu zálohy {$info['advance']} úhradou {$info['source']} převod k DDKP {$info['tax_document']} nenavázal: {$reason}.", $context);
     }
 
     /**

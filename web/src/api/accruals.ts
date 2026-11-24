@@ -133,6 +133,8 @@ export interface AccrualList {
   items: AccrualItem[]
   total: number
   totals: { basis_amount: number; balance: number }
+  /** Součty po druzích (náklady a výnosy příštích období se nesčítají dohromady). */
+  totals_by_kind?: Record<string, { count: number; basis_amount: number; balance: number }>
   page: number
   per_page: number
   as_of: string
@@ -250,6 +252,8 @@ export interface AccrualReconciliation {
   period_starts_on: string | null
   accounts: AccrualReconciliationAccount[]
   totals: { ledger_balance: number; items_balance: number; closing_balance: number; difference: number }
+  /** Firma převzala data z POHODY: nabídnout převzetí časového rozlišení. */
+  takeover_available?: boolean
 }
 
 export interface AccrualUnallocatedRow {
@@ -276,24 +280,38 @@ export interface AccrualUnallocated {
 }
 
 export interface AccrualProjectionItem {
-  managed_by: 'closing'
-  kind: string
-  source_type: 'invoice' | 'purchase_invoice' | 'other_item'
+  source_type: 'invoice' | 'purchase_invoice' | 'other_item' | 'nonprofit_membership'
   source_id: number
   source_item_id: number | null
-  document_no: string | null
+  document_no: string
   title: string
   period_from: string
   period_to: string
-  basis_amount: number
-  balance: number
+  accounts: string[]
+  amount: number
+  current_year: number
+  deferred: number
+  /** Rozpuštění odkladu po dalších účetních obdobích (rok => částka); prázdné jako []. */
+  years: Record<string, number> | []
+}
+
+export type AccrualProjectionKindKey = 'prepaid_expense' | 'deferred_revenue'
+
+export interface AccrualProjectionKind {
+  account: string
+  count: number
+  items: AccrualProjectionItem[]
+  totals: { amount: number; current_year: number; deferred: number; years: Record<string, number> | [] }
+  truncated: boolean
 }
 
 export interface AccrualProjection {
   as_of: string
-  items: AccrualProjectionItem[]
-  totals: { prepaid_expense: number; deferred_revenue: number }
-  truncated: boolean
+  fiscal_year: number
+  year_start: string
+  year_end: string
+  future_years: number[]
+  kinds: Record<AccrualProjectionKindKey, AccrualProjectionKind>
 }
 
 export type AccrualDocumentSourceType = 'invoice' | 'purchase_invoice' | 'other_item' | 'internal_document'

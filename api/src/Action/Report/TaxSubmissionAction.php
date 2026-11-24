@@ -18,8 +18,11 @@ use MyInvoice\Security\ClientTaxSubmissionPolicy;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
+use MyInvoice\Service\Pdf\TaxSubmissionPdfRenderer;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Report\TaxSubmissionFilename;
+use MyInvoice\Service\Report\TaxSubmissionPrintout;
+use MyInvoice\Service\Report\TaxSubmissionReceiptEvidence;
 use MyInvoice\Service\Tax\VatPaymentInstruction;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -30,6 +33,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/reports/submissions             → list (`scope=payroll|tax` odliší mzdová vyúčtování)
  *   GET    /api/reports/submissions/{id}        → detail (s XML obsahem)
  *   GET    /api/reports/submissions/{id}/xml    → XML download
+ *   GET    /api/reports/submissions/{id}/pdf    → PDF podaného výkazu z uloženého XML + potvrzení o podání
  *   GET    /api/reports/submissions/{id}/payment → platební údaje přiznání k DPH
  *   POST   /api/reports/submissions/{id}/submit → označit jako prokazatelně PODANÉ (§2.4)
  *   DELETE /api/reports/submissions/{id}        → smazat archiv (admin)
@@ -50,6 +54,7 @@ final class TaxSubmissionAction
         private readonly RetentionHoldRepository $holds,
         private readonly CommercialFeatureAccess $commercial,
         private readonly VatPaymentInstruction $vatPayment,
+        private readonly TaxSubmissionPdfRenderer $pdf,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -123,7 +128,9 @@ final class TaxSubmissionAction
         }
 
         // Obohacení běží až nad stránkou, ne nad celým archivem.
-        $rows = $this->epo->enrich($this->repo->list($supplierId, $filters, $limit, $offset), $supplierId);
+        $rows = self::withReceiptEvidence(
+            $this->epo->enrich($this->repo->list($supplierId, $filters, $limit, $offset), $supplierId),
+        );
 
         return Json::ok($response, [
             'data' => $rows,
@@ -189,7 +196,7 @@ final class TaxSubmissionAction
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
-        $row = $this->epo->enrich([$row], $supplierId)[0];
+        $row = self::withReceiptEvidence($this->epo->enrich([$row], $supplierId))[0];
         // Celé XML je totéž, co stažení, které vyžaduje `reports.export`.
         if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
             unset($row['xml_content']);
@@ -238,6 +245,59 @@ final class TaxSubmissionAction
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * PDF odeslaného přiznání k DPH, kontrolního nebo souhrnného hlášení. Obsah se tiskne
+     * z uloženého XML snapshotu (ne z aktuálních dat) a na začátku nese, čím je podání
+     * doložené: podací číslo, čas podání a uložené doručenky, nebo proč doklad chybí.
+     */
+    public function downloadPdf(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::canExportTaxSubmission($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
+        if ($row === null || self::hiddenPayrollForm($row, $request)) {
+            return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $row)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
+        if (!in_array(strtolower((string) ($row['form_code'] ?? '')), TaxSubmissionPrintout::FORM_CODES, true)) {
+            return Json::error(
+                $response,
+                'pdf_unsupported_form',
+                'PDF je k dispozici pro přiznání k DPH, kontrolní a souhrnné hlášení.',
+                422,
+            );
+        }
+
+        try {
+            $data = TaxSubmissionPrintout::build($this->epo->enrich([$row], $supplierId)[0]);
+        } catch (\RuntimeException $e) {
+            return Json::error($response, 'pdf_xml_unreadable', $e->getMessage(), 422);
+        }
+        $response->getBody()->write($this->pdf->render($data));
+        return $response
+            ->withHeader('Content-Type', 'application/pdf')
+            ->withHeader('Content-Disposition', 'attachment; filename="' . TaxSubmissionFilename::forSnapshot($row, 'pdf') . '"')
+            ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows obohacené snapshoty
+     * @return list<array<string,mixed>>
+     */
+    private static function withReceiptEvidence(array $rows): array
+    {
+        foreach ($rows as &$row) {
+            $row['receipt_evidence'] = TaxSubmissionReceiptEvidence::summarize($row);
+        }
+        unset($row);
+        return $rows;
     }
 
     /**

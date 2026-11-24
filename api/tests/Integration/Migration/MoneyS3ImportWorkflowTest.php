@@ -214,6 +214,7 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         self::assertSame('full', $protocol->get('automation')['after']);
     }
 
+    #[Group('fulltext-transactions')]
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();
@@ -234,6 +235,7 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
      * automatiku zápisem do řádku firmy, držela by na něm zámek a běžná práce firmy
      * (každý nový doklad kontroluje cizí klíč na firmu) by čekala na konec zkoušky.
      */
+    #[Group('fulltext-transactions')]
     public function testDryRunDoesNotWriteCompanyAutomationWhileRunning(): void
     {
         $supplierId = $this->supplier(SyntheticAgenda::ICO, 'double_entry');
@@ -299,6 +301,7 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
      * Bez IČO na jedné ze stran nejde ověřit, že záloha patří téhle firmě. Zkouška
      * nanečisto jen upozorní, ostrý převod potřebuje výslovné potvrzení.
      */
+    #[Group('fulltext-transactions')]
     public function testLiveImportWithoutVerifiableIcoNeedsExplicitConfirmation(): void
     {
         $supplierId = $this->supplier('');

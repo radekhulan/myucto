@@ -1074,6 +1074,7 @@ nimi jsou kontroly:
 | IČO | IČO v souboru se musí shodovat s IČO firmy. Soubor jiné firmy se nenačte. |
 | Měsíc | Pro datum účetního případu musí existovat účetní období a měsíc nesmí být uzamčený ani v uzavřeném období. |
 | Načtení | Stejný měsíc (IČO a párovací symbol) ještě nebyl načten (§ 108.10.4). |
+| Převod z Money S3 | Mzdy měsíce nepřevzal převod z Money S3 (převedený zápis s předpisem na Dal 331). Takový měsíc už deník i mzdové závazky má a načtení se zastaví. |
 | Účty | Každý účet PAMICY musí mít účet v účtové osnově (pravidla níže). |
 | Účet 331 | Co interní doklad zaúčtuje na Dal účtu zaměstnanců, musí ostatní závazky srazit na MD nebo převzít jako závazky bez zaúčtování. Rozdíl náhled ukáže jako upozornění. |
 | Závazek na účtu hrubých mezd | Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy (typicky 331). Obvykle jde o prohozené účty MD a Dal u zkratky (daň správně `331 / 342`, pojistné `331 / 336`). Načtení zastaví; čisté mzdy bez zaúčtování se netýká. |
@@ -1119,6 +1120,10 @@ Načtení se pamatuje podle IČO a párovacího symbolu měsíce. Druhé nahrán
 téhož měsíce, i z nového exportu s jiným číslem, MyÚčto odmítne se zprávou,
 kdy byl měsíc načten. Opravu načtete znovu až po stornu interního dokladu
 a všech ostatních závazků z prvního načtení.
+
+Stejně se odmítne měsíc, jehož mzdy převzal převod z Money S3: deník
+převedeného měsíce už nese interní doklad mezd i mzdové závazky. Opačně
+převod z Money nezaloží mzdové závazky za měsíc, který je načtený z PAMICY.
 
 ### 108.10.5 Oprávnění
 

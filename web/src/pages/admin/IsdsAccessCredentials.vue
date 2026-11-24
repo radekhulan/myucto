@@ -159,6 +159,20 @@ function setGrant(supplierId: number, operation: GrantOperation, enabled: boolea
   grants.value[supplierId] = { ...current, [operation]: enabled }
 }
 
+const bulkOperations = ['send', 'receipts'] as const
+function allGranted(operation: 'send' | 'receipts'): boolean {
+  const companies = overview.value?.companies ?? []
+  return companies.length > 0 && companies.every(company => grants.value[company.id]?.[operation] === true)
+}
+function someGranted(operation: 'send' | 'receipts'): boolean {
+  return (overview.value?.companies ?? []).some(company => grants.value[company.id]?.[operation] === true)
+}
+function setAllGrants(operation: 'send' | 'receipts', enabled: boolean) {
+  for (const company of overview.value?.companies ?? []) {
+    setGrant(company.id, operation, enabled)
+  }
+}
+
 async function verifyPasskey() {
   if (passkeyBusy.value || !passkeySupported) return
   const target = dialog.value
@@ -336,7 +350,15 @@ function grantDescription(grant: Grant) {
             <legend class="font-semibold">{{ t('isdsAccess.admin.companies') }}</legend>
             <p class="text-sm text-neutral-500">{{ t('isdsAccess.admin.companiesHint') }}</p>
             <p v-if="!overview?.companies.length" class="text-sm text-neutral-500">{{ t('isdsAccess.admin.noCompanies') }}</p>
-            <ul v-else class="max-h-64 divide-y divide-neutral-200 overflow-auto rounded-md border border-neutral-200">
+            <div v-if="overview?.companies.length" class="flex flex-wrap gap-x-4 gap-y-2" data-testid="isds-access-bulk">
+              <label v-for="operation in bulkOperations" :key="operation" class="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" :checked="allGranted(operation)" :indeterminate="!allGranted(operation) && someGranted(operation)"
+                  :data-testid="`isds-access-all-${operation}`"
+                  @change="setAllGrants(operation, ($event.target as HTMLInputElement).checked)" />
+                <span>{{ t(`isdsAccess.admin.allCompanies.${operation}`) }}</span>
+              </label>
+            </div>
+            <ul v-if="overview?.companies.length" class="max-h-96 divide-y divide-neutral-200 overflow-auto rounded-md border border-neutral-200">
               <li v-for="company in overview.companies" :key="company.id" class="space-y-2 p-3">
                 <p class="font-medium text-neutral-900">{{ company.name }}</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-2">

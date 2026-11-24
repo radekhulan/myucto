@@ -1270,6 +1270,152 @@ final class SyntheticAgenda
     }
 
     /**
+     * K agendě {@see filesWithSettledWithoutPaymentDocument()} zápisy interních dokladů ze dne
+     * úhrady dokladů bez čísla úhrady:
+     *   - ID25099 15. 12. přeúčtovává pohledávku jiného odběratele (Zeta) 605 Kč z 311 na 395
+     *     (pochybná pohledávka), týž den Money vede jako uhrazenou vydanou FV25045 Odběratele
+     *     Beta na 605 Kč bez čísla úhrady,
+     *   - vydané FV25043 a FV25044 (Beta, každá 605) Money vede jako uhrazené 12. 12. bez čísla
+     *     úhrady a týž den zápočty ID25043 a ID25044 na 605 (MD 325 / D 311) pod vlastními
+     *     symboly, každý s číslem své faktury v popisu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSettlementProposals(): array
+    {
+        $files = self::filesWithSettledWithoutPaymentDocument();
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $n = 800;
+        $line = static function (string $zdroj, string $doklad, string $datum, string $popis, string $md, string $d, float $castka, string $sym, string $ico = '') use (&$n): array {
+            $row = ['Cislo' => $n++, 'Zdroj' => $zdroj, 'Doklad' => $doklad, 'Datum' => $datum, 'Popis' => $popis, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $castka, 'ParSym' => $sym];
+            if ($zdroj === 'FV') {
+                $row['DatPlnDPH'] = $datum;
+            }
+            return $ico === '' ? $row : $row + ['ParICO' => $ico];
+        };
+        $rows = [];
+        foreach (['FV25043' => '2025643', 'FV25044' => '2025644', 'FV25045' => '2025645'] as $doc => $sym) {
+            $rows[] = $line('FV', $doc, '2025-12-02', 'Prodej', '311000', '602000', 500.0, $sym);
+            $rows[] = $line('FV', $doc, '2025-12-02', 'Prodej', '311000', '343200', 105.0, $sym);
+        }
+        $rows[] = $line('ID', 'ID25043', '2025-12-12', 'Zápočet FV25043', '325000', '311000', 605.0, '9999043');
+        $rows[] = $line('ID', 'ID25044', '2025-12-12', 'Zápočet FV25044', '325000', '311000', 605.0, '9999044');
+        $rows[] = $line('ID', 'ID25099', '2025-12-15', 'Pochybná pohledávka', '395000', '311000', 605.0, '2025699', self::ADVANCE_CUSTOMER_ICO);
+        $append('ROK.002/UcDenik.DAT', $journalFields, $rows);
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '395000', 'Nazev' => 'Vnitřní zúčtování']]);
+        $customer = [
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Beta a.s.',
+            'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+            'Vystaveno' => '2025-12-02', 'DatUcPr' => '2025-12-02', 'PlnenoDPH' => '2025-12-02', 'Splatno' => '2025-12-16',
+        ];
+        $invoices = [];
+        foreach (['FV25043' => ['2025643', '2025-12-12'], 'FV25044' => ['2025644', '2025-12-12'], 'FV25045' => ['2025645', '2025-12-15']] as $doc => [$sym, $paid]) {
+            $invoices[] = ['Cislo' => (int) substr($doc, -3), 'Doklad' => $doc, 'VarSymbol' => $sym, 'Zaklad_2' => 500.0, 'DPH_2' => 105.0,
+                'CelkemSDPH' => 605.0, 'Uhrazeno' => $paid, 'Popis' => 'Prodej'] + $customer;
+        }
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), $invoices);
+        return $files;
+    }
+
+    /**
+     * K agendě {@see filesWithSettledWithoutPaymentDocument()} záloha ZV25053 (1 210 Kč), kterou
+     * Money vede jako uhrazenou interním dokladem ID25053 bez zápisu (číslo úhrady nevede na
+     * pohyb), a týž den bankovní příjem BP25053 na 324 se symbolem zálohy, který Money s dokladem
+     * nespárovalo. DDKP DD25053 (1 000 + 210 DPH). Symbol a protistranu příjmu lze změnit
+     * (`$symbol`, `$name`), `$secondAdvance` přidá druhou zálohu ZV25054 téhož odběratele na
+     * stejnou částku uhrazenou týž den interním dokladem ID25054.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAdvanceBankReceiptUnlinked(string $symbol = '25053', string $name = 'Odběratel Zeta s.r.o.', bool $secondAdvance = false): array
+    {
+        $files = self::filesWithSettledWithoutPaymentDocument();
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcDenik.DAT', $journalFields, [
+            ['Cislo' => 700, 'Zdroj' => 'BK', 'Doklad' => 'BP25053', 'Datum' => '2025-09-20', 'Popis' => 'Příjem zálohy', 'UcMD' => '221001', 'UcD' => '324000', 'Castka' => 1210.0, 'ParSym' => ''],
+            ['Cislo' => 701, 'Zdroj' => 'FV', 'Doklad' => 'DD25053', 'Datum' => '2025-09-20', 'DatPlnDPH' => '2025-09-20', 'Popis' => 'DPH ze zálohy', 'UcMD' => '324000', 'UcD' => '343200', 'Castka' => 210.0, 'ParSym' => ''],
+        ]);
+        $zeta = [
+            'O_ICO' => self::ADVANCE_CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::ADVANCE_CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Zeta s.r.o.',
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), array_merge([
+            ['Cislo' => 660, 'Druh' => 'L', 'Doklad' => 'ZV25053', 'VarSymbol' => '25053', 'Zaklad_0' => 1210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-20', 'UDoklad' => 'ID25053', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-15'),
+            ['Cislo' => 661, 'Druh' => 'D', 'Doklad' => 'DD25053', 'VarSymbol' => '25053', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
+                'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25053)'] + $zeta + $dates('2025-09-20'),
+        ], $secondAdvance ? [
+            ['Cislo' => 662, 'Druh' => 'L', 'Doklad' => 'ZV25054', 'VarSymbol' => '25054', 'Zaklad_0' => 1210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-20', 'UDoklad' => 'ID25054', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-16'),
+        ] : []));
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
+            'Doklad' => 'BP25053', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2025-09-20', 'DatPlat' => '2025-09-20', 'Celkem' => 1210.0,
+            'VarSym' => $symbol, 'AdNazev' => $name, 'Popis' => 'Příjem zálohy', 'Vypis' => 31,
+        ]]);
+        return $files;
+    }
+
+    /**
+     * K agendě {@see filesWithAdvanceBankReceiptUnlinked()} devizový účet BE (221003, EUR) a záloha
+     * ZV25055 v eurech (`$advanceEur` kurzem 25) Odběratele Zeta, kterou Money vede jako uhrazenou
+     * 22. 9. 2025 interním dokladem ID25055 bez zápisu. Týž den příjem BE25055 1 000 EUR
+     * (25 000 Kč) se symbolem zálohy, ze kterého jde na 324 jen 100 EUR (2 500 Kč) a zbytek
+     * na 311. Řádky deníku Money nesou valutu (`Mena`, `Kurz`, `CastkaCM`) jen s `$valuta`;
+     * `$symbol` = variabilní symbol příjmu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAdvanceForeignReceiptSplit(bool $valuta, float $advanceEur = 1000.0, string $symbol = '25055'): array
+    {
+        $files = self::filesWithAdvanceBankReceiptUnlinked();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '221003', 'Nazev' => 'Devizový účet EUR']]);
+            $append($dir . '/SzUcPokl.DAT', self::REGISTER_FIELDS, [[
+                'Zkrat' => 'BE', 'Popis' => 'Devizový účet', 'UcPokl' => 'U', 'PrimUcet' => '221003',
+                'Ucet' => '5000000003', 'BKod' => '0100', 'Mena' => 'EUR', 'PSKurz' => 25.0,
+            ]]);
+        }
+        $fx = static fn (float $eur): array => $valuta ? ['Mena' => 'EUR', 'Kurz' => 25.0, 'CastkaCM' => $eur] : [];
+        $append('ROK.002/UcDenik.DAT', array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20], ['Mena', 'C', 3], ['Kurz', 'E', 10], ['CastkaCM', 'E', 10]]), [
+            ['Cislo' => 710, 'Zdroj' => 'BK', 'Doklad' => 'BE25055', 'Datum' => '2025-09-22', 'Popis' => 'Příjem zálohy', 'UcMD' => '221003', 'UcD' => '324000',
+                'Castka' => 2500.0, 'ParSym' => $symbol] + $fx(100.0),
+            ['Cislo' => 711, 'Zdroj' => 'BK', 'Doklad' => 'BE25055', 'Datum' => '2025-09-22', 'Popis' => 'Příjem úhrady', 'UcMD' => '221003', 'UcD' => '311000',
+                'Castka' => 22500.0, 'ParSym' => $symbol] + $fx(900.0),
+        ]);
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10], ['ValutyZak0', 'E', 10]]), [[
+            'Cislo' => 670, 'Druh' => 'L', 'Doklad' => 'ZV25055', 'VarSymbol' => '25055', 'Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0,
+            'Zaklad_0' => $advanceEur * 25.0, 'ValutyZak0' => $advanceEur, 'CelkemSDPH' => $advanceEur * 25.0, 'Uhrazeno' => '2025-09-22', 'UDoklad' => 'ID25055',
+            'Popis' => 'Záloha', 'O_ICO' => self::ADVANCE_CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::ADVANCE_CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Zeta s.r.o.',
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00', 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0,
+            'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+            'Vystaveno' => '2025-09-18', 'DatUcPr' => '2025-09-18', 'PlnenoDPH' => '2025-09-18', 'Splatno' => '2025-09-18',
+        ]]);
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
+            'Doklad' => 'BE25055', 'Ucet' => 'BE', 'Vydej' => 0, 'DatUcPr' => '2025-09-22', 'DatPlat' => '2025-09-22', 'Celkem' => 25000.0,
+            'VarSym' => $symbol, 'AdNazev' => 'Odběratel Zeta s.r.o.', 'Popis' => 'Příjem zálohy', 'Vypis' => 1, 'Mena' => 'EUR', 'Kurs' => 25.0, 'ValutyKUhr' => 1000.0,
+        ]]);
+        return $files;
+    }
+
+    /**
      * Agenda s čerpáním poskytnutých záloh, které Money vede bez odkazu na zálohu (řádek
      * konečné faktury na 314 se symbolem a IČO faktury). Převádí se od roku 2025, počáteční
      * stav 314 Money vede bez IČO:
@@ -1859,6 +2005,176 @@ final class SyntheticAgenda
             ['OsCislo' => '1', 'Rok' => 2020, 'Mesic' => 10, 'HRUBA' => 25000.0],
         ]);
         return $files;
+    }
+
+    /**
+     * Agenda se starším rokem 2023 (adresář ROK.003) před prvním převáděným rokem 2024
+     * („Převést od roku" 2024). Doklady 2023 otevřené k 1. 1. 2024: FV23001 (1 210 Kč)
+     * uhrazená pohybem BP24010 v březnu 2024 a FP23001 (2 420 Kč) uhrazená pohybem BV24010
+     * v únoru 2024. FV23002 (605 Kč) Money vede bez data úhrady se zbytkem k úhradě (k ověření),
+     * FV23003 je uhrazená ještě v roce 2023. Počáteční stavy 2024 nesou 311 = 1 210 Kč
+     * a 321 = 2 420 Kč, počáteční stav 221 roku 2025 je o úhrady nižší (roky navazují).
+     *
+     * @param float $receivables počáteční stav 311 roku 2024 (pojistka proti počátečnímu stavu)
+     * @return array<string,string>
+     */
+    public static function filesWithDocumentsBeforeFirstYear(float $receivables = 1210.0): array
+    {
+        $files = self::files();
+        $issuedFields = array_merge(self::ISSUED_FIELDS, [['Proplatit', 'E', 10]]);
+        $purchaseFields = array_merge(self::PURCHASE_FIELDS, [['Proplatit', 'E', 10]]);
+        $customer = [
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO,
+            'O_Nazev' => 'Odběratel Beta a.s.', 'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $vendor = [
+            'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
+            'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'převodem',
+        ];
+        $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
+        $files['ROK.003/UcOsnova.DAT'] = $files['ROK.001/UcOsnova.DAT'];
+        $files['ROK.003/SzUcPokl.DAT'] = $files['ROK.001/SzUcPokl.DAT'];
+        $files['ROK.003/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, [
+            ['Cislo' => 1, 'Zdroj' => 'FV', 'Doklad' => 'FV23001', 'Datum' => '2023-11-10', 'DatPlnDPH' => '2023-11-10', 'Popis' => 'Služby', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+            ['Cislo' => 2, 'Zdroj' => 'FV', 'Doklad' => 'FV23001', 'Datum' => '2023-11-10', 'DatPlnDPH' => '2023-11-10', 'Popis' => 'Služby', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => 210.0],
+            ['Cislo' => 3, 'Zdroj' => 'FP', 'Doklad' => 'FP23001', 'Datum' => '2023-12-01', 'DatPlnDPH' => '2023-12-01', 'Popis' => 'Nájem', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 2000.0],
+            ['Cislo' => 4, 'Zdroj' => 'FP', 'Doklad' => 'FP23001', 'Datum' => '2023-12-01', 'DatPlnDPH' => '2023-12-01', 'Popis' => 'Nájem', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 420.0],
+        ]);
+        $files['ROK.003/VFaktury.DAT'] = Ms3FixtureWriter::table($issuedFields, [
+            ['Doklad' => 'FV23001', 'VarSymbol' => '2023001', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0,
+                'Uhrazeno' => '2024-03-10', 'UDoklad' => 'BP24010', 'Popis' => 'Služby'] + $dates('2023-11-10') + $customer,
+            ['Doklad' => 'FV23002', 'VarSymbol' => '2023002', 'Zaklad_2' => 500.0, 'DPH_2' => 105.0, 'CelkemSDPH' => 605.0,
+                'Proplatit' => 605.0, 'Popis' => 'Služby bez úhrady'] + $dates('2023-06-15') + $customer,
+            ['Doklad' => 'FV23003', 'VarSymbol' => '2023003', 'Zaklad_2' => 100.0, 'DPH_2' => 21.0, 'CelkemSDPH' => 121.0,
+                'Uhrazeno' => '2023-12-20', 'UDoklad' => 'BP23099', 'Popis' => 'Uhrazeno v roce 2023'] + $dates('2023-12-01') + $customer,
+        ]);
+        $files['ROK.003/PFaktury.DAT'] = Ms3FixtureWriter::table($purchaseFields, [
+            ['Doklad' => 'FP23001', 'PrijatDokl' => 'NJ-2023-012', 'VarSymbol' => '2023012', 'Zaklad_2' => 2000.0, 'DPH_2' => 420.0, 'CelkemSDPH' => 2420.0,
+                'Uhrazeno' => '2024-02-05', 'UDoklad' => 'BV24010', 'Popis' => 'Nájem', 'Doruceno' => '2023-12-01'] + $dates('2023-12-01') + $vendor,
+        ]);
+        $files = self::patch($files, 'ROK.001/UcDenik.DAT', null, [
+            ['Cislo' => -11, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '311000', 'UcD' => '701000', 'Castka' => $receivables],
+            ['Cislo' => -12, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '321000', 'Castka' => 2420.0],
+            ['Cislo' => -13, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '411000', 'Castka' => $receivables - 2420.0],
+            ['Cislo' => 301, 'Zdroj' => 'BK', 'Doklad' => 'BV24010', 'Datum' => '2024-02-05', 'Popis' => 'Úhrada FP23001', 'UcMD' => '321000', 'UcD' => '221001', 'Castka' => 2420.0],
+            ['Cislo' => 302, 'Zdroj' => 'BK', 'Doklad' => 'BP24010', 'Datum' => '2024-03-10', 'Popis' => 'Úhrada FV23001', 'UcMD' => '221001', 'UcD' => '311000', 'Castka' => 1210.0],
+        ]);
+        $files = self::patch($files, 'ROK.001/BankKnih.DAT', null, [
+            ['Doklad' => 'BV24010', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2024-02-05', 'DatPlat' => '2024-02-05', 'Celkem' => 2420.0, 'VarSym' => '2023012', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP23001', 'Vypis' => 11],
+            ['Doklad' => 'BP24010', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-03-10', 'DatPlat' => '2024-03-10', 'Celkem' => 1210.0, 'VarSym' => '2023001', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV23001', 'Vypis' => 12],
+        ]);
+        // Rok 2025 navazuje: 221 je o úhrady roku 2024 nižší, 311 a 321 se vyrovnaly, 411 nese rozdíl počátečních stavů.
+        return self::patch($files, 'ROK.002/UcDenik.DAT', static function (array $r) use ($receivables): array {
+            if ($r['Zdroj'] === 'XP' && (string) $r['UcMD'] === '221001') {
+                return ['Castka' => 62150.0 - 1210.0] + $r;
+            }
+            if ($r['Zdroj'] === 'XP' && (string) $r['UcD'] === '411000') {
+                return ['Castka' => 60000.0 + $receivables - 2420.0] + $r;
+            }
+            return $r;
+        });
+    }
+
+    /**
+     * Mzdy za prosinec 2024, jak je vede mzdový modul Money: interní doklad hrubých mezd
+     * (521/331 30 000 Kč) a závazky `KnihZav` s příznakem mzdového dokladu za 12/2024 - sociální
+     * pojištění (331 a 524/336200, 9 570 Kč), zdravotní pojištění (331 a 524/336100, 4 050 Kč),
+     * záloha na daň (331/342100, 3 810 Kč), čistá mzda na témž účtu 331/331 (22 710 Kč) a exekuce
+     * (331/379000, 500 Kč). Pojistné a mzdu Money uhradilo až v lednu 2025 (`UhDatum`), daň
+     * zůstává neuhrazená (`UhZbyva`), zdravotní pojištění 2023 je uhrazené ještě v prosinci 2024.
+     * `$extra` přidá další neuhrazené závazky 100 Kč s vlastním zápisem KZ 524/336200 (objem dat).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayrollLiabilities(int $extra = 0): array
+    {
+        $files = self::files();
+        $chart = iterator_to_array(Ms3Table::fromString($files['ROK.001/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
+        $files['ROK.001/UcOsnova.DAT'] = Ms3FixtureWriter::table(self::CHART_FIELDS, array_merge($chart, [
+            ['Ucet' => '331000', 'Nazev' => 'Zaměstnanci'],
+            ['Ucet' => '336100', 'Nazev' => 'Zúčtování s institucemi 1'],
+            ['Ucet' => '336200', 'Nazev' => 'Zúčtování s institucemi 2'],
+            ['Ucet' => '342100', 'Nazev' => 'Záloha na daň ze závislé činnosti'],
+            ['Ucet' => '379000', 'Nazev' => 'Jiné závazky'],
+            ['Ucet' => '521000', 'Nazev' => 'Mzdové náklady'],
+            ['Ucet' => '524100', 'Nazev' => 'Zákonné sociální pojištění'],
+            ['Ucet' => '524200', 'Nazev' => 'Zákonné zdravotní pojištění'],
+        ]));
+        $date = '2024-12-31';
+        $kz = static fn (int $no, string $doc, string $text, string $md, string $d, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'KZ', 'Doklad' => $doc, 'Datum' => $date, 'Popis' => $text, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+        $files = self::patch($files, 'ROK.001/UcDenik.DAT', null, [
+            ['Cislo' => 501, 'Zdroj' => 'ID', 'Doklad' => 'IDM2412', 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 30000.0],
+            $kz(502, 'ZA241201', 'Sociální pojištění', '331000', '336200', 2130.0),
+            $kz(503, 'ZA241201', 'Sociální pojištění', '524100', '336200', 7440.0),
+            $kz(504, 'ZA241202', 'Zdravotní pojištění', '331000', '336100', 1350.0),
+            $kz(505, 'ZA241202', 'Zdravotní pojištění', '524200', '336100', 2700.0),
+            $kz(506, 'ZA241203', 'Daň z příjmů zálohová', '331000', '342100', 3810.0),
+            $kz(507, 'ZA241204', 'Vyúčtování mzdy', '331000', '331000', 22210.0),
+            $kz(508, 'ZA241205', 'Exekuce', '331000', '379000', 500.0),
+            ...array_map(static fn (int $i): array => $kz(600 + $i, sprintf('ZP24%04d', $i), 'Pojištění dohody', '524100', '336200', 100.0), $extra > 0 ? range(1, $extra) : []),
+        ]);
+        $mz = static fn (int $code): array => ['MZTyp' => 1, 'MZRok' => 2024, 'MZMesic' => 12, 'MZDI_Zauct' => $code];
+        $row = static fn (int $no, string $doc, string $text, float $total, float $left, ?string $paid, string $partner, string $vs, int $code, string $paidBy = ''): array =>
+            ['Cislo' => $no, 'Doklad' => $doc, 'Popis' => $text, 'AdNazev' => $partner, 'DatUcPr' => $date, 'DatVyst' => $date, 'DatSpl' => '2025-01-20',
+             'Celkem' => $total, 'UhZbyva' => $left, 'UhDatum' => $paid, 'UDoklad' => $paidBy, 'VarSym' => $vs] + $mz($code);
+        $files['ROK.001/KnihZav.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['AdCislo', 'L', 4], ['AdNazev', 'C', 60], ['DatUcPr', 'D', 2], ['DatVyst', 'D', 2],
+            ['DatSpl', 'D', 2], ['Celkem', 'E', 10], ['UhZbyva', 'E', 10], ['UhDatum', 'D', 2], ['UDoklad', 'C', 10], ['VarSym', 'C', 20], ['Storno', 'B', 1],
+            ['MZTyp', 'V', 1], ['MZRok', 'W', 2], ['MZMesic', 'V', 1], ['MZDI_Zauct', 'V', 1],
+        ], [
+            $row(1, 'ZA241201', 'Sociální pojištění - Prosinec 2024', 9570.0, 0.0, '2025-01-12', 'Správa sociálního zabezpečení', '1000000005', 7, 'BV25011'),
+            $row(2, 'ZA241202', 'Zdravotní pojištění - Prosinec 2024', 4050.0, 0.0, '2025-01-12', 'Zdravotní pojišťovna', '12345679', 10, 'BV25012'),
+            $row(3, 'ZA241203', 'Daň z příjmů zálohová - Prosinec 2024', 3810.0, 3810.0, null, 'Finanční úřad', '12345679', 5),
+            $row(4, 'ZA241204', 'Vyúčtování mzdy - Prosinec 2024', 22210.0, 0.0, '2025-01-12', 'Zaměstnanec Vzorový', '1212', 1, 'BV25013'),
+            $row(5, 'ZA241205', 'Exekuce - Prosinec 2024', 500.0, 0.0, '2025-01-12', 'Exekutorský úřad', '555', 14, 'BV25014'),
+            // Zdravotní pojištění za listopad uhrazené ještě v prosinci: ke konci roku otevřené není.
+            $row(6, 'ZA241101', 'Zdravotní pojištění - Listopad 2024', 4050.0, 0.0, '2024-12-12', 'Zdravotní pojišťovna', '12345679', 10, 'BV24011'),
+            ...array_map(static fn (int $i): array => $row(100 + $i, sprintf('ZP24%04d', $i), 'Pojištění dohody - Prosinec 2024', 100.0, 100.0, null,
+                'Správa sociálního zabezpečení', '1000000005', 7), $extra > 0 ? range(1, $extra) : []),
+        ]);
+        return $files;
+    }
+
+    /**
+     * Mzdové závazky za 12/2024 ({@see filesWithPayrollLiabilities()}) s rokem 2025: počáteční
+     * stavy 2025 nesou zůstatky mzdových účtů (VH 2024 snížený o mzdové náklady) a v lednu
+     * Money uhradilo bankou sociální pojištění (BV25011, 336.200) a čistou mzdu (BV25013, 331).
+     * Úhrada zdravotního pojištění (BV25012) v bance není.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayrollLiabilitiesPaidNextYear(): array
+    {
+        $files = self::filesWithPayrollLiabilities();
+        $chart = iterator_to_array(Ms3Table::fromString($files['ROK.002/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
+        $payrollChart = array_values(array_filter(
+            iterator_to_array(Ms3Table::fromString($files['ROK.001/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false),
+            static fn (array $r): bool => in_array(substr((string) $r['Ucet'], 0, 3), ['331', '336', '342', '379', '521', '524'], true),
+        ));
+        $files['ROK.002/UcOsnova.DAT'] = Ms3FixtureWriter::table(self::CHART_FIELDS, array_merge($chart, $payrollChart));
+        $xp = static fn (int $no, string $md, string $d, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+        $bk = static fn (int $no, string $doc, string $text, string $md, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'BK', 'Doklad' => $doc, 'Datum' => '2025-01-12', 'Popis' => $text, 'UcMD' => $md, 'UcD' => '221001', 'Castka' => $amount];
+        $files = self::patch($files, 'ROK.002/UcDenik.DAT', null, [
+            $xp(-201, '701000', '331000', 22210.0),
+            $xp(-202, '701000', '336100', 4050.0),
+            $xp(-203, '701000', '336200', 9570.0),
+            $xp(-204, '701000', '342100', 3810.0),
+            $xp(-205, '701000', '379000', 500.0),
+            $xp(-206, '431000', '701000', 40140.0),
+            $bk(501, 'BV25011', 'Sociální pojištění 12/2024', '336200', 9570.0),
+            $bk(502, 'BV25013', 'Mzda 12/2024', '331000', 22210.0),
+        ]);
+        return self::patch($files, 'ROK.002/BankKnih.DAT', null, [
+            ['Doklad' => 'BV25011', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-01-12', 'DatPlat' => '2025-01-12', 'Celkem' => 9570.0, 'VarSym' => '1000000005',
+                'AdNazev' => 'Správa sociálního zabezpečení', 'Popis' => 'Sociální pojištění 12/2024', 'Vypis' => 11],
+            ['Doklad' => 'BV25013', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-01-12', 'DatPlat' => '2025-01-12', 'Celkem' => 22210.0, 'VarSym' => '1212',
+                'AdNazev' => 'Zaměstnanec Vzorový', 'Popis' => 'Mzda 12/2024', 'Vypis' => 11],
+        ]);
     }
 
     /**

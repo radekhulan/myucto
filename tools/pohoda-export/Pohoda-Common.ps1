@@ -49,7 +49,7 @@ $PohodaAccountingTables = [ordered]@{
     HOpol    = $PohodaItemColumns
     pINT     = $PohodaDocumentColumns
     pINTpol  = $PohodaItemColumns
-    Uhrady   = @('ID', 'RelIDH', 'RelAgH', 'RelAgU', 'DatumU', 'RelIDU', 'CisloU', 'KcU', 'CisloH', 'VarSymH')
+    Uhrady   = @('ID', 'RelIDH', 'RelAgH', 'RelAgU', 'DatumU', 'RelIDU', 'CisloU', 'KcU', 'CisloH', 'VarSymH', 'RefDD')
     sKonfig  = @('ICO', 'Rok', 'RelRokTp', 'DatRokOd', 'DatRokDo', 'RelUTyp')
     Verze    = @('ID', 'Verze')
     # Objednávky (RelTpObj 1 = přijatá, 2 = vydaná) a jejich položky. Převod bere jen

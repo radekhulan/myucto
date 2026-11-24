@@ -744,6 +744,38 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "source_type = 'opening' AND period_id = {$period2025}"));
     }
 
+    /**
+     * Knihy roku 2024 uzavřela účetní v MyÚčtu (bez příznaku uzávěrky převodu) a otevření
+     * roku 2025 nechala na později. Opakovaný převod její uzávěrku nedokončuje a ohlásí ji.
+     */
+    public function testClosedYearWithPendingOpenNextFromMyUctoIsLeftToUser(): void
+    {
+        $supplierId = $this->supplier();
+        $this->import($supplierId);
+        $period2024 = $this->periodId($supplierId, 2024);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "UPDATE accounting_closing_steps SET status = 'pending', done_at = NULL
+              WHERE supplier_id = ? AND period_id = ? AND step_key = 'open_next'"
+        )->execute([$supplierId, $period2024]);
+        $pdo->prepare(
+            "UPDATE accounting_closing_steps SET payload = JSON_REMOVE(payload, '$.money_s3_conversion')
+              WHERE supplier_id = ? AND period_id = ? AND step_key = 'precheck'"
+        )->execute([$supplierId, $period2024]);
+
+        $protocol = $this->import($supplierId);
+
+        $closing = array_column($protocol->get('closing'), null, 'year');
+        self::assertSame('open_next_pending', $closing[2024]['status'], $this->explain($protocol));
+        $step = $pdo->prepare(
+            "SELECT status FROM accounting_closing_steps WHERE supplier_id = ? AND period_id = ? AND step_key = 'open_next'"
+        );
+        $step->execute([$supplierId, $period2024]);
+        self::assertSame('pending', $step->fetchColumn());
+        $codes = array_column(array_column($protocol->toArray()['steps'], null, 'key')['closing']['messages'], 'code');
+        self::assertContains('open_next_left_to_user', $codes);
+    }
+
     /** Pozdější záznam daňové evidence v historii režimů nesmí převedené roky vrátit do DE. */
     public function testLaterTaxEvidenceRecordDoesNotOverrideConvertedYears(): void
     {
@@ -768,6 +800,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         self::assertSame('double_entry', $h->fetchColumn());
     }
 
+    #[Group('fulltext-transactions')]
     public function testDifferenceAgainstMoneyReportIsReported(): void
     {
         $supplierId = $this->supplier();
@@ -783,6 +816,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     }
 
     /** Rozdíl předvahy do koruny včetně je zaokrouhlení: upozornění se seznamem účtů, K1 sedí. */
+    #[Group('fulltext-transactions')]
     public function testRoundingAgainstMoneyReportIsAWarning(): void
     {
         $supplierId = $this->supplier();

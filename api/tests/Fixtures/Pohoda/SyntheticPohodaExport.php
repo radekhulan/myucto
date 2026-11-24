@@ -1125,6 +1125,53 @@ final class SyntheticPohodaExport
             . '<typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city></typ:address></adb:identity></adb:addressbookHeader></lAdb:addressbook>');
     }
 
+    /** Dodavatel přejmenovaný po transformaci na dvou kartách adresáře ({@see withRenamedVendor()}). */
+    public const RENAMED_ICO = '55667788';
+    public const RENAMED_OLD_NAME = 'Alfa Test Logistik s.r.o.';
+    public const RENAMED_NEW_NAME = 'Beta Test Solution a.s.';
+    public const RENAMED_OTHER_NAME = 'Gama Test s.r.o.';
+    public const RENAMED_OLD_CARD = '501';
+    public const RENAMED_NEW_CARD = '502';
+    public const RENAMED_BY_CARD = '26PF0071';
+    public const RENAMED_BY_NAME = '26PF0072';
+    public const RENAMED_FOREIGN_CARD = '26PF0073';
+    public const RENAMED_AMBIGUOUS = '26PF0074';
+
+    /**
+     * Agenda z {@see write()}, jejíž adresář vede tentýž subjekt (stejné IČO) na dvou kartách:
+     * starší 501 s původním názvem a novější 502 s názvem po přejmenování. Přijaté faktury
+     * s IČO subjektu:
+     *  - 26PF0071 s vazbou na kartu 502 a novým názvem,
+     *  - 26PF0072 bez vazby na adresář s novým názvem,
+     *  - 26PF0073 s vazbou na kartu jiného dodavatele (jiné IČO) a novým názvem, patří ke kartě vazby,
+     *  - 26PF0074 bez vazby s názvem, který nemá žádná karta.
+     */
+    public static function withRenamedVendor(string $agendaDir): void
+    {
+        $cards = '';
+        foreach ([[self::RENAMED_OLD_CARD, self::RENAMED_OLD_NAME], [self::RENAMED_NEW_CARD, self::RENAMED_NEW_NAME]] as [$id, $name]) {
+            $cards .= '<lAdb:addressbook version="2.0"><adb:addressbookHeader><adb:id>' . $id . '</adb:id><adb:identity><typ:address><typ:company>' . $name . '</typ:company>'
+                . '<typ:city>Brno</typ:city><typ:street>Testovací 1</typ:street><typ:zip>60200</typ:zip><typ:ico>' . self::RENAMED_ICO . '</typ:ico><typ:dic>CZ' . self::RENAMED_ICO . '</typ:dic></typ:address></adb:identity>'
+                . '</adb:addressbookHeader></lAdb:addressbook>';
+        }
+        self::append($agendaDir . '/30_adresar.xml', '</lAdb:listAddressBook>', $cards);
+        $vendor = self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO);
+        $invoices = '';
+        $journal = '';
+        foreach ([[self::RENAMED_BY_CARD, self::RENAMED_NEW_CARD, self::RENAMED_NEW_NAME, '2026-01-14'], [self::RENAMED_BY_NAME, '', self::RENAMED_NEW_NAME, '2026-03-16'],
+            [self::RENAMED_FOREIGN_CARD, '2', self::RENAMED_NEW_NAME, '2026-03-20'], [self::RENAMED_AMBIGUOUS, '', self::RENAMED_OTHER_NAME, '2026-04-02']] as $n => [$number, $card, $name, $date]) {
+            $partner = self::partner('inv', $name, self::RENAMED_ICO, 'CZ' . self::RENAMED_ICO);
+            if ($card !== '') {
+                $partner = str_replace('<inv:partnerIdentity>', '<inv:partnerIdentity><typ:id>' . $card . '</typ:id>', $partner);
+            }
+            $invoices .= str_replace($vendor, $partner, self::invoice('receivedInvoice', $number, '202607' . $n, $date, 1000, 210));
+            $journal .= self::entry('Přijaté faktury', $number, 'Služby', 1000, '518000', '321001', $date)
+                . self::entry('Přijaté faktury', $number, 'DPH', 210, '343011', '321001', $date);
+        }
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>', $invoices);
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>', $journal);
+    }
+
     /** Faktury se samovyměřením jen na interních dokladech ({@see withSelfAssessmentByInternalDocuments()}). */
     public const PAIR_SERVICE = '26PF0030';
     public const PAIR_MIXED = '26PF0031';

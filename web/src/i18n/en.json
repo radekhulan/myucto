@@ -827,6 +827,12 @@
     "totals": "Basis total {basis} · balance {balance} as of {date}",
     "empty": "No item matches the filter.",
     "empty_title": "No accrual items yet",
+    "unused": {
+      "title": "The agenda has no items yet",
+      "hint": "The balance of the accrual accounts comes from the conversion and is waiting to be taken over. Take over the POHODA items with Take over from POHODA and create or assign the other entries from the rows without an item. The reconciliation difference then drops to zero.",
+      "difference_title": "Balance to take over into the agenda",
+      "empty_hint": "Take over the accrual account balance from the conversion with Take over from POHODA. Create or assign entries the takeover does not cover from the rows without an item in the reconciliation above."
+    },
     "empty_hint": "Create an item manually, from a document or from an account 381/384 line without an item. The agenda releases the balance to expenses or revenue according to the schedule.",
     "book": "Breakdown as of date",
     "book_failed": "The accruals breakdown could not be downloaded.",
@@ -952,7 +958,9 @@
       "difference": "Difference",
       "total": "Total",
       "items_count": "no items | 1 item | {count} items",
-      "filter_hint": "Filter items by account"
+      "filter_hint": "Filter items by account",
+      "projected": "Closing {year} defers",
+      "projected_hint": "Amount the accounting period closing moves from expenses or revenue of documents whose period extends beyond the year end. Details in the Managed by closing tab."
     },
     "unallocated": {
       "toggle": "Lines {account} without item",
@@ -969,11 +977,29 @@
       "amount": "Assigned amount"
     },
     "projection": {
-      "hint": "Period entered directly on the document line. Closing posts the deferral and release, this is an overview only.",
-      "empty": "Closing manages no document lines with a period.",
+      "kind_prepaid_expense": "Prepaid expenses",
+      "kind_deferred_revenue": "Deferred revenue",
+      "hint_prepaid_expense": "Received invoices and other payables with a period extending beyond {date} are posted to expenses in full during the year, so they do not appear on account {account} yet. The {year} closing moves the part belonging to later years to prepaid expenses ({account}) and releases it back to expenses in the following years. The profit and loss statement with the Interim accruals and depreciation option already accounts for it during the year.",
+      "hint_deferred_revenue": "Issued invoices and other receivables with a period extending beyond {date} are posted to revenue in full during the year, so they do not appear on account {account} yet. The {year} closing moves the part belonging to later years to deferred revenue ({account}) and releases it back to revenue in the following years. The profit and loss statement with the Interim accruals and depreciation option already accounts for it during the year.",
+      "empty_prepaid_expense": "No expense with a period extending beyond {date}.",
+      "empty_deferred_revenue": "No revenue with a period extending beyond {date}.",
       "document": "Document",
-      "totals": "Prepaid expenses {prepaid} · deferred revenue {deferred}",
-      "truncated": "Only the first lines are shown."
+      "description": "Description",
+      "account_prepaid_expense": "Expense account",
+      "account_deferred_revenue": "Revenue account",
+      "amount": "Total",
+      "current_year": "Stays in {year}",
+      "deferred": "Deferred to {account}",
+      "release_year": "Release {year}",
+      "source_other_prepaid_expense": "Other payable",
+      "source_other_deferred_revenue": "Other receivable",
+      "source_membership": "Membership fee",
+      "truncated": "Only the first rows are shown.",
+      "summary_current_prepaid_expense": "Stays in {year} expenses",
+      "summary_current_deferred_revenue": "Stays in {year} revenue",
+      "summary_deferred": "Closing {year} defers to {account}",
+      "summary_release_prepaid_expense": "Released to expenses in {year}",
+      "summary_release_deferred_revenue": "Released to revenue in {year}"
     },
     "detail": {
       "not_found": "The accrual item does not exist.",
@@ -21186,6 +21212,12 @@
         "empty": "No open items at this date."
       },
       "mode_inventory": "Account inventory",
+      "group_by_dimension": "Group by",
+      "no_dimension_breakdown": "No breakdown",
+      "dimension_breakdown_title": "Breakdown by {type}",
+      "dimension_breakdown_total": "Total",
+      "dimension_breakdown_mismatch": "The breakdown totals do not match the account statement totals.",
+      "dimension_unassigned": "No dimension",
       "filter_counter": "Counter account",
       "counter_all": "All counter accounts",
       "counter_none": "no counter account",
@@ -21201,10 +21233,10 @@
         "no_rows": "The account has no movement in the period.",
         "no_period": "No accounting period exists for this date."
       },
-      "scope_title": "Narrowed as in the general ledger:",
+      "scope_title": "Active filters",
       "scope_own_only": "Account's own entries only, without analytics",
       "scope_remove": "Remove filter",
-      "scope_export_blocked": "A narrowed statement cannot be exported. Clear the general ledger filters to export."
+      "scope_export_blocked": "Select a dimension breakdown or clear the filters to export."
     },
     "section18": {
       "title": "Cash flows and changes in equity",
@@ -28735,6 +28767,10 @@
     "balances_load_failed": "Failed to load account balances.",
     "balances_title": "Current account balances",
     "balances_subtitle": "Latest balance from a statement, bank API, e-mail notice or accounting migration.",
+    "api_badge": "Online · {provider}",
+    "api_badge_never": "not synchronised yet",
+    "api_badge_title": "The account is connected online to the bank ({provider}). Last synchronisation: {last}.",
+    "api_badge_error_title": "The account is connected online to the bank ({provider}); the last synchronisation failed. Last attempt: {last}.",
     "balances_source_api": "from API",
     "balances_source_api_hint": "Balance as of the latest API statement, calculated from a bank balance and subsequent transactions when needed.",
     "balances_source_import": "migrated",
@@ -29666,7 +29702,9 @@
     "email_profile_transport_global": "Global cfg.php",
     "email_profile_transport_smtp": "Custom SMTP",
     "email_profile_transport_sendmail": "Local sendmail",
-    "email_profile_transport_managed": "In a managed installation the operator sends the e-mail. A custom SMTP server or envelope address cannot be set here; you can still change the sender (From, Reply-To).",
+    "email_profile_transport_managed": "In a managed installation the operator sends the e-mail. A custom SMTP server or envelope address cannot be set here.",
+    "email_profile_managed_sender_title": "The sender address cannot be changed in a managed installation",
+    "email_profile_managed_sender_warning": "E-mails are sent from the installation operator’s address (for example noreply@myucto.online). Your address is added as the reply address (Reply-To), so replies from your customers reach you. You cannot set your own sender address (From) on your domain yourself: it needs DKIM signing and SPF records for your domain on the operator’s side, otherwise the e-mails would end up in spam or be rejected. If you need it, please order it from support.",
     "email_profile_smtp_host": "SMTP server",
     "email_profile_smtp_port": "Port",
     "email_profile_smtp_encryption": "Encryption",
@@ -30979,6 +31017,12 @@
       "status_failed": "Errors",
       "status_skipped": "No schema",
       "download_xml": "Download XML",
+      "download_pdf": "Download PDF",
+      "filing_proof_title": "Proof of filing",
+      "filing_proof_available": "A delivery receipt or filing confirmation is stored. Download the originals from the file list below; the PDF of the filing includes a summary.",
+      "filing_proof_not_submitted": "No receipt yet: the filing has not been marked as submitted.",
+      "filing_proof_isds_receipt_pending": "The data box message was sent, but the delivery receipt has not been attached yet.",
+      "filing_proof_submitted_outside": "No delivery receipt or filing confirmation is stored in MyÚčto. The filing was marked as submitted manually, typically because it was filed outside MyÚčto (for example directly in the EPO portal). You can add the EPO confirmation via \"Upload EPO outputs\".",
       "delete_confirm": "Delete this XML snapshot? Proof of an actually filed submission cannot be deleted.",
       "records": "records",
       "form_ossei1": "OSS return",
@@ -35225,6 +35269,10 @@
       "verifyNew": "When you save, MyÚčto validates the sign-in details with ISDS and finds the data box ID.",
       "companies": "Company access",
       "companiesHint": "You can give several companies permission to send messages and check delivery receipts. Incoming messages from each data box in a given environment go to a single company.",
+      "allCompanies": {
+        "send": "Sending in all companies",
+        "receipts": "Delivery receipts in all companies"
+      },
       "noCompanies": "No companies are available.",
       "noGrants": "No companies can use this access yet.",
       "companyFallback": "Company no. {id}",
@@ -36595,6 +36643,8 @@
     "to_year_auto": "Automatic (all years in the backup)",
     "to_year_auto_year": "Automatic (up to {year})",
     "to_year_hint": "Later years in the backup are not transferred. Useful when you already keep the next year in MyÚčto and transfer the previous year from Money again (for example 2026 after year-end closing in Money while 2027 runs in MyÚčto). The automatic choice transfers years up to the last year without its own entries in MyÚčto and skips later years you already keep in MyÚčto.",
+    "opening_only_next": "Take only opening balances from the next year",
+    "opening_only_next_hint": "Only Money opening balances are taken from the year after the last converted one. The last converted year is checked against them and closed; closing steps done in Money (depreciation, accruals, deferrals, provisions, tax) are not offered again by the closing wizard. Useful for the final conversion when 2027 already runs in MyÚčto and Money has it created with opening balances.",
     "reports_title": "Reports from Money for checking (optional)",
     "reports_hint": "Trial balance exported from Money to CSV: account in the first column, then opening debit, opening credit, debit turnover, credit turnover, closing debit, closing credit. Reconciliation compares it with the MyÚčto trial balance to the cent.",
     "report_upload": "Upload trial balance {year}",
@@ -36673,6 +36723,7 @@
       "link": "Documents linked to the journal",
       "dimensions": "Cost centres and projects",
       "payments": "Invoice payments",
+      "payroll_liabilities": "Payroll liabilities",
       "recurring": "Recurring invoices from history",
       "assets": "Fixed assets",
       "small_assets": "Small assets",
@@ -36680,6 +36731,7 @@
       "closing": "Closing of historical years",
       "payroll": "Payroll",
       "reconciliation": "Reconciliation",
+      "saldo_check": "Subledger check",
       "tax_records_plan": "Cash book check",
       "vat_status": "VAT registration",
       "tax_records_payments": "Payments from the cash book",
@@ -36791,7 +36843,12 @@
       "blocked": "Not closed because of the previous year",
       "mismatch": "Does not match opening balances",
       "no_opening": "Next year has no opening balances",
-      "failed": "Closing failed"
+      "failed": "Closing failed",
+      "opening_only": "Opening balances from Money only",
+      "closing_started": "Closing in progress, finish it in Closing",
+      "closing_in_progress": "Closing in progress by the accountant, left unchanged",
+      "open_next_pending": "Books closed, opening of the next year left to the accountant",
+      "opening_differs": "Opening entry does not match Money"
     },
     "doc_type": {
       "purchase_invoice": "Received invoice",
@@ -36903,6 +36960,8 @@
       "take_over_filings_hint": "An existing draft return is not overwritten and a final one is never changed. A dry run only shows which returns would be taken over.",
       "from_year_auto": "Automatic (from the year balances in Money carry over)",
       "from_year_hint": "A year whose closing balances in Money do not carry over to the opening balances of the next year cannot be closed. The automatic choice starts each company with the first year from which balances carry over; older years stay in the Money archive.",
+      "to_year_auto": "Automatic (for each company the last year without own entries in MyÚčto)",
+      "to_year_hint": "Later years of the backup are not converted. Applies to all companies of the batch.",
       "existing": "Company already in MyÚčto",
       "existing_skip": "Skip",
       "existing_update": "Convert again (adds only what is missing)",
@@ -37130,6 +37189,11 @@
     "dry_run_title": "Dry run",
     "dry_run_hint": "The whole transfer of the selected years ({years}) runs, including reconciliation, and then everything is rolled back. Nothing stays in MyÚčto.",
     "dry_run_locks_hint": "The dry run runs in a single database transaction. Run it outside normal work in the company: entries it touches wait until it ends.",
+    "relink": {
+      "option": "Repair links of an already converted company (new export into ongoing accounting)",
+      "hint": "For a company already converted from POHODA that keeps its accounting in MyÚčto. Entries made in MyÚčto stay unchanged and no new documents from POHODA are added. The conversion only completes links: tax documents for advances and payments, document payments and offsets. Stock and payroll are not converted.",
+      "mode_note": "Link repair conversion: entries made in MyÚčto stay, no new documents are added, only links are completed (tax documents for advances and payments, payments, offsets)."
+    },
     "dry_run_background_hint": "The dry run is one transaction, so it does not report individual steps while running — the full protocol with every step appears when it ends. It usually takes up to a minute; you can close this page.",
     "dry_run_start": "Start dry run",
     "dry_run_again": "Repeat dry run",
@@ -37299,6 +37363,10 @@
       "matched": "matched to existing",
       "skipped": "skipped",
       "created_from_documents": "partners from documents",
+      "split_by_name": "company IDs with several names in the address book (separate contacts)",
+      "partner_name_ambiguous": "documents with an ambiguous partner name",
+      "remapped_by_name": "address book cards redirected to the contact by name",
+      "partner_mapping_name_mismatch": "address book cards linked to a contact with another name (to reassign manually)",
       "duplicate_code": "duplicate codes",
       "kept": "kept",
       "previous_period": "from the previous period",
@@ -46441,6 +46509,11 @@
         "title": "Final invoice with advance VAT counted twice",
         "hint": "Advance with a tax document deducted only in the header without deduction lines.",
         "description": "The final invoice deducts an advance with a tax document only in the header, so the advance VAT is in the return twice. The fix is done in the app by deducting the advance with a line, see the manual."
+      },
+      "foreign_purchase_in_czk": {
+        "title": "Foreign-currency purchase invoices taken over in CZK",
+        "hint": "Invoices from foreign suppliers with self-assessed VAT in CZK instead of the document currency.",
+        "description": "The POHODA migration used to take over purchase invoices in EUR or another currency with self-assessed VAT in CZK. VAT, the control statement and the journal are correct; the currency, rate and foreign amount are missing, so a payment in the currency cannot be matched and no exchange difference is calculated. The repair reads the currency and rate from the original POHODA export and is run by the installation administrator, see the manual."
       }
     }
   },

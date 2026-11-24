@@ -31,7 +31,7 @@ const detailActions = computed<ActionItem[]>(() => {
     action('request', 'bank.document_request.action', 'doc', 'secondary', 'warning'),
     action('ignore', 'bank.ignore', 'x', 'overflow', 'neutral'),
     action('unmatch', tx.match_status === 'ignored' ? 'bank.unignore' : 'bank.unmatch', 'uturn', 'overflow', 'neutral'),
-    action('payout', 'bank.payout.action', 'link', 'advanced', 'neutral'),
+    action('payout', 'bank.payout.action', 'link', 'overflow', 'neutral'),
   ]
 })
 

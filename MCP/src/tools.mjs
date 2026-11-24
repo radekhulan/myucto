@@ -3526,7 +3526,8 @@ export const TOOLS = [
       + 'Starší složený zápis 1 : N je rozložený na pohyby po dílech (`pair_piece` = pořadí dílu), zápis M : N zůstává v původním tvaru. '
       + '`pair_status` řádku je `paired` (nese `pair_no`), `derived` (rozložený za běhu) nebo `composite_mn`; u firmy s jednoduchým zápisem '
       + 'je odpověď označená `layout: "pairs"`. '
-      + 'Podle protiúčtu jde filtrovat a součty protiúčtů přicházejí s první stránkou (`counter_totals`).',
+      + 'Podle protiúčtu jde filtrovat a součty protiúčtů přicházejí s první stránkou (`counter_totals`). '
+      + '`group_by_dimension_type` přidá `dimension_breakdown` s počátečním a konečným stavem, obraty a kontrolním součtem.',
     inputSchema: schema({
       account_id: int('ID účtu — viz `chart_of_accounts`.'),
       from: date('Počátek rozsahu.'),
@@ -3538,6 +3539,7 @@ export const TOOLS = [
       item: str('Filtr na text položky; zúží řádky i počáteční stav.'),
       opening_date: date('Den, jehož otevírací zápis patří do počátečního stavu (začátek rozsahu hlavní knihy).'),
       include_analytics: bool('false = jen účet sám, bez analytik.'),
+      group_by_dimension_type: int('ID typu dimenze pro rozpad výpisu, viz list_dimensions.', { minimum: 1 }),
       ...DIMENSION_FILTER,
       ...PAGING,
     }, ['account_id', 'from', 'to']),
@@ -3551,6 +3553,7 @@ export const TOOLS = [
       item: a.item,
       opening_date: a.opening_date,
       include_analytics: a.include_analytics === false ? 0 : undefined,
+      group_by_dimension_type: a.group_by_dimension_type,
       ...dimensionQuery(a),
     }, tool),
   },

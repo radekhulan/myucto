@@ -121,6 +121,10 @@ export interface PohodaUpload {
   preflight: Record<string, PohodaMessage[]>
   /** Kontrola před převodem mezd po letech (klíč = rok), jen agendy se mzdami. */
   payroll_preflight?: Record<string, PohodaMessage[]>
+  /** Firma už má převod účetnictví z POHODY: průvodce nabídne opravný převod vazeb. */
+  pohoda_converted?: boolean
+  /** Kontrola před opravným převodem vazeb po letech, jen u firmy převedené z POHODY. */
+  relink_preflight?: Record<string, PohodaMessage[]>
 }
 
 /** Export se ještě nahrává po částech nebo ho server na pozadí rozbaluje a čte. */
@@ -172,7 +176,7 @@ export interface PohodaProtocolData {
   /** Převod selhal JEN na rozdílech k přijetí. */
   acceptable_only?: boolean
   accepted_differences?: AcceptedDifference[]
-  agenda?: { ico: string; year: number; program: string; exported_at: string | null; dir: string; skipped_years?: number[] }
+  agenda?: { ico: string; year: number; program: string; exported_at: string | null; dir: string; skipped_years?: number[]; relink_only?: boolean }
   /** Job víc roků: roky jobu vzestupně a pořadí tohoto roku. */
   job_years?: { years: number[]; index: number; dry_run_isolated: boolean }
   preflight?: PohodaMessage[]
@@ -217,6 +221,8 @@ export interface PohodaStartParams {
   accept_differences?: boolean
   /** Převod skladu z nejnovější agendy: volba po skladech (kód skladu => volba). Bez ní se sklad nepřevádí. */
   stock?: { warehouses: Record<string, PohodaStockChoice> }
+  /** Opravný převod vazeb už převedené firmy: zápisy z MyÚčtu zůstanou, nové doklady se nepřidají. Jen účetnictví. */
+  relink_only?: boolean
 }
 
 export interface PohodaToolFile {

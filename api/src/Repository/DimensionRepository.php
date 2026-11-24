@@ -427,11 +427,8 @@ final class DimensionRepository
         }
         $marks = implode(',', array_fill(0, count($valueIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT v.id, cc.code
-               FROM dimension_values v
-               JOIN dimension_types t ON t.id = v.type_id AND t.kind = 'cost_center'
-               JOIN cost_centers cc ON cc.id = v.cost_center_id AND cc.supplier_id = ?
-              WHERE v.id IN ({$marks})"
+            'SELECT cc.id, cc.code FROM (' . self::costCenterLinksSql() . ") cc
+              WHERE cc.supplier_id = ? AND cc.id IN ({$marks})"
         );
         $stmt->execute([$supplierId, ...$valueIds]);
         $out = [];
@@ -439,6 +436,14 @@ final class DimensionRepository
             $out[(int) $r['id']] = (string) $r['code'];
         }
         return $out;
+    }
+
+    public static function costCenterLinksSql(): string
+    {
+        return "SELECT v.id, v.type_id, cc.supplier_id, cc.code
+                  FROM dimension_values v
+                  JOIN dimension_types t ON t.id = v.type_id AND t.kind = 'cost_center'
+                  JOIN cost_centers cc ON cc.id = v.cost_center_id";
     }
 
     // ── skupiny firem ────────────────────────────────────────────────────────

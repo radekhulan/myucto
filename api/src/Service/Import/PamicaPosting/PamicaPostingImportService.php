@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import\PamicaPosting;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\PayrollPostingImportRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\InternalDocumentException;
@@ -53,6 +54,7 @@ final class PamicaPostingImportService
         private readonly ClientResolver $clients,
         private readonly PayrollPostingImportRepository $imports,
         private readonly PamicaPostingCodeMap $codeMap,
+        private readonly MoneyS3ImportRepository $moneyS3,
     ) {}
 
     /**
@@ -224,6 +226,13 @@ final class PamicaPostingImportService
                 ['internal_document_ids' => $previous['internal_document_ids'], 'other_item_ids' => $previous['other_item_ids']]);
         } else {
             $checks[] = self::check('not_imported_yet', 'ok', 'Zaúčtování ' . $parsed['sym_par'] . ' ještě nebylo načteno.');
+        }
+        // Tentýž měsíc převzatý převodem z Money S3: mzdy i mzdové závazky už jsou v deníku.
+        $monthStart = $parsed['period'] . '-01';
+        if ($this->moneyS3->payrollMonthConverted($supplierId, $monthStart, (new \DateTimeImmutable($monthStart))->modify('+1 month')->format('Y-m-d'))) {
+            $checks[] = self::check('converted_month', 'error',
+                'Zaúčtování mezd za ' . self::monthLabel($parsed['period']) . ' převzal převod z Money S3 (předpis mezd i mzdové závazky jsou v deníku). '
+                . 'Načtení z PAMICY by je zdvojilo.');
         }
 
         // Účty: PAMICA → osnova firmy.

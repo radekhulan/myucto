@@ -57,6 +57,14 @@ final class MoneyS3RepairPlan
                     'Úhrada je spárovaná s pohybem převedené banky bez evidované platby. Doplní ji opakovaný převod z Money S3.',
                     (float) $i['amount'], (string) $i['currency'], ['source' => MigrationSources::MONEY_S3]);
             }
+            // Zápočet nalezený jen podle dne a částky oprava nezapisuje (doklad dostal výplň);
+            // kontrola ho ukáže jako návrh k posouzení účetní, nikdy ho sama nepotvrdí.
+            foreach ($row['proposals'] ?? [] as $p) {
+                $review[] = new CheckItem((string) $p['doc_type'], (int) $p['id'], (string) $p['document_no'], (string) $p['date'], (float) $p['amount_czk'], CheckItem::REVIEW,
+                    sprintf('Možný zápočet interním dokladem %s ze dne úhrady na stejnou částku. Oprava ho nezapsala (%s); posuďte ho a případně zápočet zadejte ručně.',
+                        (string) $p['entry_no'], (string) $p['reason']),
+                    null, (string) $p['currency'], ['source' => MigrationSources::MONEY_S3, 'settlement_proposal' => ['entry_id' => (int) $p['entry_id'], 'entry_no' => (string) $p['entry_no']]]);
+            }
             return $review;
         });
     }

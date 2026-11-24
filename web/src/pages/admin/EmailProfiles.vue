@@ -772,6 +772,14 @@ function certificateCommonName(subject: string | null | undefined): string | nul
           <span class="sr-only">{{ t('common.required') }}</span>
           <input v-model="draft.code" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
+        <div v-if="transportLocked" role="note" data-testid="managed-sender-warning"
+          class="flex gap-2 rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800 md:col-span-2">
+          <svg class="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+          <div>
+            <p class="font-semibold">{{ t('settings.email_profile_managed_sender_title') }}</p>
+            <p class="mt-1">{{ t('settings.email_profile_managed_sender_warning') }}</p>
+          </div>
+        </div>
         <label class="block text-xs font-medium text-neutral-600">
           {{ t('settings.email_profile_from_email') }}
           <span class="ml-0.5 text-danger-600" :title="t('common.required')" aria-hidden="true">*</span>

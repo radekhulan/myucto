@@ -3974,6 +3974,7 @@ final class Routes
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/isds-inbox/{messageId:[0-9]+}', [\MyInvoice\Action\Report\TaxSubmissionIsdsAction::class, 'linkInbox']);
         $app->get    ('/api/reports/submissions/{id:[0-9]+}',     [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'detail']);
         $app->get    ('/api/reports/submissions/{id:[0-9]+}/xml', [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'downloadXml']);
+        $app->get    ('/api/reports/submissions/{id:[0-9]+}/pdf', [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'downloadPdf']);
         $app->get    ('/api/reports/submissions/{id:[0-9]+}/payment', [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'payment']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-handoff', [\MyInvoice\Action\Report\TaxSubmissionEpoAction::class, 'handoff']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-test', [\MyInvoice\Action\Report\EpoDirectSubmissionAction::class, 'test']);

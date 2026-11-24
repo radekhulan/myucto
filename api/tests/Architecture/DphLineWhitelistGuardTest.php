@@ -9,11 +9,9 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * `DphPriznaniBuilder::USER_SELECTABLE_LINES` (whitelist pro validaci klasifikací DPH)
- * se nesmí rozejít s `$lineMap` uvnitř `build()`.
- *
- * Mapa je lokální proměnná, takže se čte ze zdrojáku — guard je statický a při
- * reformátování degraduje, ale drift whitelistu je jinak neviditelný až do chvíle,
- * kdy uživateli zmizí částka z přiznání.
+ * se nesmí rozejít s mapou řádků `DphPriznaniBuilder::LINE_MAP`, podle které `build()`
+ * skládá XML. Drift whitelistu je jinak neviditelný až do chvíle, kdy uživateli zmizí
+ * částka z přiznání.
  *
  * Hlídá dvě věci:
  *   1. každý povolený řádek MUSÍ v mapě být (jinak by validace pustila hodnotu,
@@ -61,15 +59,6 @@ final class DphLineWhitelistGuardTest extends TestCase
      */
     private function lineMapKeys(): array
     {
-        $src = (string) file_get_contents(dirname(__DIR__, 2) . '/src/Service/Report/DphPriznaniBuilder.php');
-        $start = strpos($src, '$lineMap = [');
-        if ($start === false) {
-            return [];
-        }
-        $end = strpos($src, "\n        ];", $start);
-        $block = substr($src, $start, $end === false ? 4000 : $end - $start);
-
-        preg_match_all("/'([0-9]+[a-z]?)'\s*=>\s*\['veta'/", $block, $m);
-        return array_values(array_unique($m[1]));
+        return array_map('strval', array_keys(DphPriznaniBuilder::LINE_MAP));
     }
 }

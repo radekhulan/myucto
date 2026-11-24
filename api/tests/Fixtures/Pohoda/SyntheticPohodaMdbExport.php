@@ -14,6 +14,30 @@ final class SyntheticPohodaMdbExport
 {
     /** Popis nezaúčtovaného pohybu ve výpisu {@see writeSharedBankNumber()}. */
     public const UNBOOKED_TEXT = 'Výdaj bez zaúčtování';
+    public const ISSUED_ADVANCE = 'TEST-ZFV1';
+    public const RECEIVED_ADVANCE = 'TEST-ZFP1';
+    public const ISSUED_TAX_DOCUMENTS = ['TEST-DDV1', 'TEST-DDV2'];
+    public const RECEIVED_TAX_DOCUMENT = 'TEST-DDP1';
+    public const OTHER_PARTNER_TAX_DOCUMENT = 'TEST-DDP2';
+    public const TEXT_ONLY_TAX_DOCUMENT = 'TEST-DDP3';
+    public const TEXT_ADVANCE = 'TEST-ZFP2';
+    public const TEXT_FALLBACK_TAX_DOCUMENT = 'TEST-DDP4';
+
+    /** Scénáře {@see writeTaxDocumentPayments()}: DDKP s textem zálohy A, úhrada s RefDD u zálohy B. */
+    public const SCENARIO_RELINK = 'relink';
+    public const RELINK_TEXT_ADVANCE = 'TEST-ZFV2';
+    public const RELINK_PAID_ADVANCE = 'TEST-ZFV3';
+    public const RELINK_TAX_DOCUMENT = 'TEST-DDV3';
+    /** Úhrady s id pohybu, který v exportu není: pohyb i pokladní doklad jsou k nalezení jen podle čísla. */
+    public const SCENARIO_NUMBER_ONLY = 'number_only';
+    public const NUMBER_ONLY_ADVANCE = 'TEST-ZFV4';
+    public const NUMBER_ONLY_TAX_DOCUMENTS = ['TEST-DDV4', 'TEST-DDV5'];
+    /** DDKP s RefDD k záloze mimo export; v exportu je jiná záloha se stejným číslem a textem DDKP. */
+    public const SCENARIO_MISSING_ADVANCE = 'missing_advance';
+    public const SAME_NUMBER_ADVANCE = 'TEST-ZFP5';
+    public const MISSING_ADVANCE_TAX_DOCUMENT = 'TEST-DDP5';
+    /** {@see RECEIVED_TAX_DOCUMENT} váže úhrada i u zálohy {@see TEXT_ADVANCE}. */
+    public const SCENARIO_TWO_ADVANCES = 'two_advances';
 
     /** Tabulky, které převod z MDB vyžaduje (mohou být prázdné). */
     private const TABLES = ['pUD', 'pOS', 'sDPH', 'sDPHTp', 'pPK', 'FA', 'FApol', 'AD', 'sUcet', 'sZeme', 'sCMeny', 'sFormUh', 'BV', 'BVpol', 'HO', 'HOpol', 'pINT', 'pINTpol', 'Uhrady'];
@@ -185,6 +209,138 @@ final class SyntheticPohodaMdbExport
                 $item('7', '4', '103', 'Šroub', '100', '0', '50'),
             ],
         ]);
+    }
+
+    /**
+     * @param string $scenario jeden ze `SCENARIO_*` navíc k základním dokladům
+     * @param array<string,string> $refDD id řádku `Uhrady` => jiný RefDD
+     */
+    public static function writeTaxDocumentPayments(string $root, bool $withRefDD = true, string $scenario = '', array $refDD = []): string
+    {
+        $date = '2026-02-01';
+        $bankDate = '2026-02-10';
+        $cashDate = '2026-02-11';
+        $customer = ['Firma' => 'Odběratel Test s.r.o.', 'ICO' => SyntheticPohodaExport::CUSTOMER_ICO, 'DIC' => 'CZ' . SyntheticPohodaExport::CUSTOMER_ICO];
+        $vendor = ['Firma' => 'Dodavatel Test s.r.o.', 'ICO' => SyntheticPohodaExport::VENDOR_ICO, 'DIC' => 'CZ' . SyntheticPohodaExport::VENDOR_ICO];
+        $text = 'Daňový doklad k přijaté platbě';
+        $journal = static fn (string $id, string $agenda, string $source, string $number, string $day, string $amount, string $md, string $d): array =>
+            ['ID' => $id, 'RelUdAg' => $agenda, 'RelAgID' => $source, 'Cislo' => $number, 'Datum' => $day, 'Kc' => $amount,
+                'UMD' => $md, 'UD' => $d, 'SText' => 'Řádek'];
+        $taxDocument = static fn (string $id, string $number, string $day, string $vatClass, string $base, string $vat, string $text): array =>
+            ['ID' => $id, 'Cislo' => $number, 'Datum' => $day, 'DatUcP' => $day, 'DatZdPln' => $day, 'RelTpDPH' => $vatClass,
+                'Kc2' => $base, 'KcDPH2' => $vat, 'SText' => $text];
+        $payment = static fn (string $id, string $advanceId, string $agenda, string $number, string $sourceAgenda, string $sourceId, string $sourceNumber, string $day, string $amount, string $ref): array =>
+            ['ID' => $id, 'RelIDH' => $advanceId, 'RelAgH' => $agenda, 'CisloH' => $number, 'RelAgU' => $sourceAgenda, 'RelIDU' => $sourceId,
+                'CisloU' => $sourceNumber, 'DatumU' => $day, 'KcU' => $amount] + ($withRefDD ? ['RefDD' => $ref] : []);
+
+        $tables = [
+            'pOS' => array_map(static fn (string $code): array => ['Ucet' => $code, 'Nazev' => 'Účet ' . $code],
+                ['211001', '221001', '314001', '324001', '343011', '343021', '411000', '701000']),
+            'sDPHTp' => [['ID' => '1', 'Radky' => '1, 2'], ['ID' => '2', 'Radky' => '40, 41']],
+            'sDPH' => [
+                ['ID' => '1', 'IDS' => 'UD', 'RefTpDph' => '1', 'RelVlivKHDPH' => '6'],
+                ['ID' => '2', 'IDS' => 'PD', 'RefTpDph' => '2', 'RelVlivKHDPH' => '10'],
+            ],
+            'sUcet' => [
+                ['ID' => '1', 'RelJeUcet' => '2', 'IDS' => 'BAN', 'SText' => '1000000005', 'KodBanky' => '0100', 'AUcet' => '221001'],
+                ['ID' => '2', 'RelJeUcet' => '1', 'IDS' => 'POK', 'SText' => 'Testovací pokladna', 'AUcet' => '211001'],
+            ],
+            'pUD' => [
+                $journal('1', '63', '0', '', '2026-01-01', '100000', '221001', '701000'),
+                $journal('2', '63', '0', '', '2026-01-01', '100000', '701000', '411000'),
+                $journal('3', '28', '21', 'TEST-B1', $bankDate, '605', '221001', '324001'),
+                $journal('4', '27', '22', 'TEST-K1', $cashDate, '363', '211001', '324001'),
+                $journal('5', '28', '23', 'TEST-B2', $bankDate, '1210', '314001', '221001'),
+                $journal('6', '29', '101', self::ISSUED_TAX_DOCUMENTS[0], $bankDate, '105', '324001', '343021'),
+                $journal('7', '29', '102', self::ISSUED_TAX_DOCUMENTS[1], $cashDate, '63', '324001', '343021'),
+                $journal('8', '29', '103', self::RECEIVED_TAX_DOCUMENT, $bankDate, '210', '343011', '314001'),
+                $journal('9', '29', '104', self::OTHER_PARTNER_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
+                $journal('10', '29', '105', self::TEXT_ONLY_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
+                $journal('11', '29', '106', self::TEXT_FALLBACK_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
+            ],
+            'FA' => [
+                ['ID' => '11', 'Cislo' => self::ISSUED_ADVANCE, 'RelTpFak' => '4', 'Datum' => $date, 'RelPk' => '3',
+                    'Kc0' => '968', 'KcLikv' => '0', 'DatLikv' => $cashDate] + $customer,
+                ['ID' => '12', 'Cislo' => self::RECEIVED_ADVANCE, 'RelTpFak' => '14', 'Datum' => $date, 'RelPk' => '3',
+                    'Kc0' => '1210', 'KcLikv' => '0', 'DatLikv' => $bankDate] + $vendor,
+                ['ID' => '13', 'Cislo' => self::TEXT_ADVANCE, 'RelTpFak' => '14', 'Datum' => $date, 'RelPk' => '3',
+                    'Kc0' => '1210'] + $vendor,
+            ],
+            'BV' => [
+                ['ID' => '21', 'RelTpBV' => '1', 'Cislo' => 'TEST-B1', 'Datum' => $bankDate, 'RefUcet' => '1', 'Kc0' => '605'] + $customer,
+                ['ID' => '23', 'RelTpBV' => '2', 'Cislo' => 'TEST-B2', 'Datum' => $bankDate, 'RefUcet' => '1', 'Kc0' => '1210'] + $vendor,
+            ],
+            'HO' => [['ID' => '22', 'RelTpHO' => '1', 'Cislo' => 'TEST-K1', 'Datum' => $cashDate, 'RefUcet' => '2', 'Kc0' => '363'] + $customer],
+            'pINT' => [
+                $taxDocument('101', self::ISSUED_TAX_DOCUMENTS[0], $bankDate, '1', '500', '105', $text . ' (zálohová faktura č. ' . self::ISSUED_ADVANCE . ')') + $customer,
+                $taxDocument('102', self::ISSUED_TAX_DOCUMENTS[1], $cashDate, '1', '300', '63', $text) + $customer,
+                $taxDocument('103', self::RECEIVED_TAX_DOCUMENT, $bankDate, '2', '1000', '210', $text) + ['KcZaokr' => '-0.01'] + $vendor,
+                $taxDocument('104', self::OTHER_PARTNER_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text) + $customer,
+                $taxDocument('105', self::TEXT_ONLY_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text . ' (zálohová faktura č. ' . self::RECEIVED_ADVANCE . ')') + $vendor,
+                $taxDocument('106', self::TEXT_FALLBACK_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text . ' (zálohová faktura č. ' . self::TEXT_ADVANCE . ')') + $vendor,
+            ],
+            'Uhrady' => [
+                $payment('1', '11', '43', 'TEST-STARÝ-OPIS', '28', '21', 'TEST-B1', $bankDate, '605', '101'),
+                $payment('2', '11', '43', self::ISSUED_ADVANCE, '27', '22', 'TEST-K1', $cashDate, '363', '102'),
+                $payment('3', '12', '44', self::RECEIVED_ADVANCE, '28', '23', 'TEST-B2', $bankDate, '1210', '103'),
+                $payment('4', '12', '44', self::RECEIVED_ADVANCE, '28', '23', 'TEST-B2', $cashDate, '0', '104'),
+            ],
+        ];
+        $add = match ($scenario) {
+            '' => [],
+            self::SCENARIO_RELINK => [
+                'pUD' => [
+                    $journal('21', '28', '31', 'TEST-B3', $bankDate, '605', '221001', '324001'),
+                    $journal('22', '29', '201', self::RELINK_TAX_DOCUMENT, $bankDate, '105', '324001', '343021'),
+                ],
+                'FA' => [
+                    ['ID' => '14', 'Cislo' => self::RELINK_TEXT_ADVANCE, 'RelTpFak' => '4', 'Datum' => $date, 'RelPk' => '3', 'Kc0' => '605'] + $customer,
+                    ['ID' => '15', 'Cislo' => self::RELINK_PAID_ADVANCE, 'RelTpFak' => '4', 'Datum' => $date, 'RelPk' => '3',
+                        'Kc0' => '605', 'KcLikv' => '0', 'DatLikv' => $bankDate] + $customer,
+                ],
+                'BV' => [['ID' => '31', 'RelTpBV' => '1', 'Cislo' => 'TEST-B3', 'Datum' => $bankDate, 'RefUcet' => '1', 'Kc0' => '605'] + $customer],
+                'pINT' => [$taxDocument('201', self::RELINK_TAX_DOCUMENT, $bankDate, '1', '500', '105', $text . ' (zálohová faktura č. ' . self::RELINK_TEXT_ADVANCE . ')') + $customer],
+                'Uhrady' => [$payment('11', '15', '43', self::RELINK_PAID_ADVANCE, '28', '31', 'TEST-B3', $bankDate, '605', '201')],
+            ],
+            self::SCENARIO_NUMBER_ONLY => [
+                'pUD' => [
+                    $journal('31', '28', '41', 'TEST-B4', $bankDate, '605', '221001', '324001'),
+                    $journal('32', '27', '42', 'TEST-K4', $cashDate, '363', '211001', '324001'),
+                    $journal('33', '29', '301', self::NUMBER_ONLY_TAX_DOCUMENTS[0], $bankDate, '105', '324001', '343021'),
+                    $journal('34', '29', '302', self::NUMBER_ONLY_TAX_DOCUMENTS[1], $cashDate, '63', '324001', '343021'),
+                ],
+                'FA' => [['ID' => '16', 'Cislo' => self::NUMBER_ONLY_ADVANCE, 'RelTpFak' => '4', 'Datum' => $date, 'RelPk' => '3',
+                    'Kc0' => '968', 'KcLikv' => '0', 'DatLikv' => $cashDate] + $customer],
+                'BV' => [['ID' => '41', 'RelTpBV' => '1', 'Cislo' => 'TEST-B4', 'Datum' => $bankDate, 'RefUcet' => '1', 'Kc0' => '605'] + $customer],
+                'HO' => [['ID' => '42', 'RelTpHO' => '1', 'Cislo' => 'TEST-K4', 'Datum' => $cashDate, 'RefUcet' => '2', 'Kc0' => '363'] + $customer],
+                'pINT' => [
+                    $taxDocument('301', self::NUMBER_ONLY_TAX_DOCUMENTS[0], $bankDate, '1', '500', '105', $text) + $customer,
+                    $taxDocument('302', self::NUMBER_ONLY_TAX_DOCUMENTS[1], $cashDate, '1', '300', '63', $text) + $customer,
+                ],
+                'Uhrady' => [
+                    $payment('21', '16', '43', self::NUMBER_ONLY_ADVANCE, '28', '98', 'TEST-B4', $bankDate, '605', '301'),
+                    $payment('22', '16', '43', self::NUMBER_ONLY_ADVANCE, '27', '99', 'TEST-K4', $cashDate, '363', '302'),
+                ],
+            ],
+            self::SCENARIO_MISSING_ADVANCE => [
+                'pUD' => [$journal('41', '29', '401', self::MISSING_ADVANCE_TAX_DOCUMENT, $bankDate, '210', '343011', '314001')],
+                'FA' => [['ID' => '17', 'Cislo' => self::SAME_NUMBER_ADVANCE, 'RelTpFak' => '14', 'Datum' => $date, 'RelPk' => '3', 'Kc0' => '1210'] + $vendor],
+                'pINT' => [$taxDocument('401', self::MISSING_ADVANCE_TAX_DOCUMENT, $bankDate, '2', '1000', '210', $text . ' (zálohová faktura č. ' . self::SAME_NUMBER_ADVANCE . ')') + $vendor],
+                'Uhrady' => [$payment('31', '77', '44', self::SAME_NUMBER_ADVANCE, '28', '23', 'TEST-B2', $bankDate, '1210', '401')],
+            ],
+            self::SCENARIO_TWO_ADVANCES => [
+                'Uhrady' => [$payment('5', '13', '44', self::TEXT_ADVANCE, '28', '23', 'TEST-B2', $bankDate, '0', '103')],
+            ],
+        };
+        foreach ($add as $table => $rows) {
+            $tables[$table] = [...$tables[$table] ?? [], ...$rows];
+        }
+        foreach ($tables['Uhrady'] as $i => $row) {
+            if ($withRefDD && isset($refDD[$row['ID']])) {
+                $tables['Uhrady'][$i]['RefDD'] = $refDD[$row['ID']];
+            }
+        }
+        return self::write($root, $tables);
     }
 
     /**

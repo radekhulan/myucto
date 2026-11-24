@@ -213,7 +213,19 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
    provedete v `Nástroje → Uzávěrka`.
 8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
 9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
-   zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
+   zálohovou fakturu. Aktuální exportní nástroj pro MDB a POHODA SQL přenáší vazbu z úhrady
+   zálohy v POHODĚ (tabulka úhrad nese odkaz na daňový doklad). Převod podle ní naváže daňový
+   doklad na správnou zálohu i na konkrétní platbu, i když je záloha placená po částech nebo když
+   text dokladu uvádí jiné číslo zálohy. Text dokladu („…zálohové faktuře č. …") se použije jen
+   u dokladů, které vazbu z úhrady nemají. Export pořízený starší verzí nástroje vazbu nenese:
+   protokol převodu to ohlásí a doporučí data vyexportovat znovu aktuálním nástrojem z průvodce.
+   Čistě XML export POHODY tuto vazbu nenese nikdy. Opakovaný převod z nového exportu opraví
+   vazbu, kterou dřívější převod vytvořil podle textu, pokud daňový doklad neleží v období
+   s podaným přiznáním nebo kontrolním hlášením ani v uzavřeném či zamčeném období. Platbu
+   naváže jen tehdy, když ji převod našel podle dokladu POHODY, ne jen podle čísla. Co převod
+   navázat nemohl (záloha mimo export, víc záloh nebo plateb k jednomu dokladu, storno, koncept,
+   ruční vazba), vypíše protokol s čísly dokladů.
+   Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
    podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
    Daňové doklady bez vazby na zálohu najde [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md#1269-ddkp-bez-vazby-na-zalohu)
    a jednoznačné vazby doplní. Ostatní navažte ručně: otevřete doklad, klikněte na **Navázat na zálohu**
@@ -513,7 +525,7 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | účtová osnova (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy |
 | účetní rok | účetní období 1. 1. až 31. 12. |
 | účetní deník včetně počátečních stavů | účetní zápisy, počáteční stavy jako otevírací zápis k 1. dni období |
-| adresář | klienti, párování podle IČO |
+| adresář | klienti, párování podle IČO; vede-li adresář totéž IČO na více kartách s různými názvy (přejmenování firmy), je každý název samostatný klient; doklad patří ke kartě podle vazby na adresář, doklad bez vazby ke klientovi se stejným IČO a názvem; bez shody názvu k první kartě s upozorněním v protokolu |
 | předkontace | pravidla zaúčtování se zkratkou z POHODY |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
 | ostatní pohledávky a závazky bez DPH | otevřené položky s jednoznačným již převedeným účetním zápisem na 315 nebo 325 |
@@ -825,10 +837,16 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
 - **Cizí měny.** Doklad v cizí měně se převezme v měně a kurzu dokladu, když
   částky položek v měně přepočtené kurzem dávají na haléř koruny z POHODY
   (DPH, kontrolní hlášení i deník tak zůstávají v Kč přesně stejné). Jinak se
-  převezme v Kč a poznámka dokladu i protokol uvedou důvod: samovyměření,
-  odpočet nedaňové zálohy, částečná úhrada vydaného dokladu, položky jen
-  z rekapitulace nebo nesedící přepočet. Měnu, kterou firma v číselníku měn
-  nemá, převod založí a protokol to uvede.
+  převezme v Kč a poznámka dokladu i protokol uvedou důvod: odpočet nedaňové
+  zálohy, částečná úhrada vydaného dokladu, položky jen z rekapitulace,
+  smíšené samovyměření nebo nesedící přepočet. Měnu, kterou firma v číselníku
+  měn nemá, převod založí a protokol to uvede.
+- **Samovyměření v cizí měně.** Přijatá faktura v cizí měně se samovyměřením
+  DPH (interní doklad POHODY) se převezme v měně dokladu jednou položkou.
+  Vyměřila-li POHODA daň jiným kurzem (ke dni plnění), nese položka základ
+  samovyměření v Kč z POHODY a přiznání i kontrolní hlášení zůstanou stejné.
+  Doklady, které dřívější převod takto převzal v Kč, ukáže Kontrola dat po
+  převodu ([§ 126.11](126_Kontrola_dat_po_prevodu.md#12611-prijate-doklady-v-cizi-mene-prevzate-v-kc)).
 
 ### 107.9.4 Postup
 
@@ -1032,6 +1050,36 @@ a nic nezapíše. Opakovaný převod do roku s vlastními zápisy tedy nejde; da
 převádějte dřív, než v něm začnete účtovat ručně. Výjimkou je opravný převod vazeb
 už převedené firmy: vlastní zápisy v MyÚčtu nechá beze změny a nové doklady
 z POHODY nepřidá.
+
+**Opravný převod vazeb.** Firma převedená z POHODY se dál účtuje v MyÚčtu a vám chybí
+vazby, které starší export nenesl nebo které převod tehdy nenavázal. Typicky jde
+o daňové doklady k přijatým platbám navázané na zálohu. Požádejte klienta o nový
+export aktuální verzí exportního nástroje ([§ 107.9.1.1](#107911-exportni-nastroj))
+a nahrajte ho do průvodce. Ve 2. kroku zaškrtněte **Opravit vazby už převedené firmy
+(nový export do vedeného účetnictví)**. Volba se nabízí jen firmě, která už převod
+účetnictví z POHODY má.
+
+Co opravný převod dělá:
+
+- doplní vazby převzatých dokladů: daňové doklady k zálohám a k přijatým platbám,
+  úhrady dokladů z banky a pokladny a zápočty,
+- vlastní zápisy zadané v MyÚčtu ponechá; kontrola před převodem je u něj jen
+  informace, ne chyba, která převod zastaví.
+
+Co nedělá:
+
+- nezaloží nové doklady, zápisy deníku, pohyby ani partnery z novějšího exportu,
+  protokol je u kroku uvede jako přeskočené,
+- nepřepíná režim účetnictví, nemění předkontace, nepřevádí majetek, sklad, objednávky
+  ani mzdy a nespouští rekonciliaci proti exportu,
+- neúčtuje dopočtené úhrady novými zápisy.
+
+Průvodce i tady běží přes zkoušku nanečisto a teprve po ní spustíte ostrý převod.
+Správce instalace může opravný převod spustit i příkazem
+`php api/bin/pohoda-relink.php --supplier=<id firmy> --zip=<ZIP exportu nebo složka agendy>`.
+Bez dalších parametrů běží nanečisto a vypíše protokol kroků s počty a upozorněními,
+zápis provede až s `--commit`. Parametrem `--year=<rok>` se omezí na jednu agendu.
+Běh se zapíše do historie převodů a při chybě příkaz skončí nenulovým kódem.
 
 **Dorovnání novější zálohou.** Když už se v MyÚčtu účtuje a v POHODĚ mezitím přibyly
 starší záznamy, převod s volbou dorovnání vlastní zápisy nechá a převezme jen záznamy

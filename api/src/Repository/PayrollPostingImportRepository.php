@@ -61,6 +61,35 @@ final class PayrollPostingImportRepository
         return false;
     }
 
+    /**
+     * Měsíce (`YYYY-MM`), jejichž zaúčtování mezd je načtené z mzdového programu a některý
+     * jeho doklad platí. Převod z jiného účetního programu za ně mzdové závazky nezakládá.
+     *
+     * @param list<string> $periods
+     * @return array<string,true>
+     */
+    public function activePeriods(int $supplierId, array $periods): array
+    {
+        $periods = array_values(array_unique($periods));
+        if ($periods === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT period, internal_document_ids, other_item_ids FROM payroll_posting_imports
+              WHERE supplier_id = ? AND period IN (' . implode(',', array_fill(0, count($periods), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$periods]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['internal_document_ids'] = self::ids($row['internal_document_ids']);
+            $row['other_item_ids'] = self::ids($row['other_item_ids']);
+            if (!isset($out[(string) $row['period']]) && $this->hasActiveDocuments($supplierId, $row)) {
+                $out[(string) $row['period']] = true;
+            }
+        }
+        return $out;
+    }
+
     public function delete(int $supplierId, int $id): void
     {
         $this->db->pdo()->prepare('DELETE FROM payroll_posting_imports WHERE id = ? AND supplier_id = ?')

@@ -177,7 +177,7 @@ final class DocumentItemEditor
     {
         $pdo = $this->db->pdo();
         try {
-            return TransactionFailure::retrying($pdo, fn (): array => BulkTransaction::run($pdo, function () use ($ctx, $type, $docId, $changes, $dryRun, $verify): array {
+            return TransactionFailure::retrying($pdo, fn (): array => BulkTransaction::runOwned($pdo, function () use ($ctx, $type, $docId, $changes, $dryRun, $verify): array {
                 $doc = $this->document($ctx->supplierId, $type, $docId);
                 if ($doc === null) {
                     throw new DocumentItemEditRejected('not_found', 'Doklad nenalezen.');

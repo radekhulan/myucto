@@ -325,7 +325,7 @@ describe('actions opened from bank transaction detail', () => {
     expect(actions.canRunDetailAction(tx, 'payout')).toBe(false)
   })
 
-  it('uses the advanced tier, keeps the payout dialog after rejection and refreshes after success', async () => {
+  it('uses the overflow tier, keeps the payout dialog after rejection and refreshes after success', async () => {
     const refresh = vi.fn(), actions = setup(refresh), tx = payoutRow()
     const allocations = [{ invoice_id: 21, amount_cents: 33600 }, { invoice_id: 22, amount_cents: 22400 }]
     actions.textDetail.value = tx
@@ -335,7 +335,7 @@ describe('actions opened from bank transaction detail', () => {
     } } })
     wrappers.push(wrapper)
     const action = wrapper.getComponent(ActionBar).props('actions').find(a => a.key === 'payout')
-    expect(action).toMatchObject({ tier: 'advanced', show: true })
+    expect(action).toMatchObject({ tier: 'overflow', show: true })
     action?.run?.()
     await flushPromises()
     expect(actions.textDetail.value).toBeNull()

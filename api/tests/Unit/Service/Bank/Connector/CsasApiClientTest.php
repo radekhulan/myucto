@@ -395,7 +395,7 @@ final class CsasApiClientTest extends TestCase
         self::assertSame(['sign_id' => '164298331754922', 'hash' => 'synthetic-batch-hash'],
             $client->createBatch($this->credentials(), 'MUabcdef12345678', ['111', '222']));
         self::assertSame('https://www.csas.cz/webapi/api/v1/payments/my/batchpayments', (string) $history[0]['request']->getUri());
-        self::assertSame(['exchangeIdentification' => 'MUabcdef12345678', 'payments' => [['signId' => '111'], ['signId' => '222']]],
+        self::assertSame(['exchangeIdentification' => 'MUabcdef12345678', 'payments' => ['111', '222']],
             json_decode((string) $history[0]['request']->getBody(), true));
     }
 

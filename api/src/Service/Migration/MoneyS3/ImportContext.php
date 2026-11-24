@@ -21,6 +21,52 @@ final class ImportContext
     /** @var array<int,array{id:int,starts_on:string,ends_on:string,status:string,locked:bool}> rok => období */
     public array $periods = [];
 
+    /**
+     * Rok po posledním převáděném, ze kterého se převezmou jen počáteční stavy (volba
+     * {@see ImportOptions::$openingOnlyNext}): položka rozvrhu deníku a období, které pro
+     * něj krok deníku zajistil. Do převáděných období (`$periods`) nepatří: doklady, banka
+     * ani úhrady z něj do MyÚčta nepřijdou, uzávěrka ho bere jen jako další rok.
+     *
+     * @var array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool}|null
+     */
+    public ?array $openingOnly = null;
+
+    /** @var array{id:int,starts_on:string,ends_on:string,status:string,locked:bool}|null */
+    public ?array $openingOnlyPeriod = null;
+
+    /**
+     * Počáteční stavy roku jen s počátečními stavy (XP) z AKTUÁLNÍ zálohy: kód účtu => MD − D,
+     * bez účtů třídy 7. Uzávěrka posledního převáděného roku je porovná s otevíracím zápisem
+     * roku v MyÚčtu, který převod ponechal (převzatý dřív z Money nebo založený v MyÚčtu).
+     * Null = adresář roku počáteční stavy nemá.
+     *
+     * @var array<string,float>|null
+     */
+    public ?array $openingOnlyBalances = null;
+
+    /**
+     * Adresáře zálohy z let před prvním převáděným rokem (volba „Převést od roku"): adresář
+     * => účetní rok. Převod z nich bere jen doklady otevřené k začátku prvního převáděného
+     * období ({@see OpeningDocuments}), jako doklady počátečního stavu.
+     *
+     * @var array<string,int>
+     */
+    public array $openingDocumentDirs = [];
+
+    /**
+     * Doklady počátečního stavu ({@see OpeningDocuments}) vybrané k převodu: 'issued'|'purchase'
+     * => "adresář|číslo dokladu" => rok. Plní je krok dokladů po ověření proti počátečním stavům.
+     *
+     * @var array{issued:array<string,int>,purchase:array<string,int>}|null
+     */
+    public ?array $openingCandidates = null;
+
+    /** @var array<string,int> doklady počátečního stavu: "rok|číslo dokladu" => invoices.id */
+    public array $openingIssued = [];
+
+    /** @var array<string,int> doklady počátečního stavu: "rok|číslo dokladu" => purchase_invoices.id */
+    public array $openingPurchases = [];
+
     /** @var array<string,int> "rok|číslo dokladu" => id */
     public array $purchaseInvoices = [];
 
