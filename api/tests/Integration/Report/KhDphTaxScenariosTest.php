@@ -2160,6 +2160,38 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame('', (string) $dp->Veta4['pln_osv']);
     }
 
+    public function testZeroRateRowsOnRateCodesStayOutOfReturnKhAndBook(): void
+    {
+        // Položka 0 % bez daně na dokladu s kódem 1 / 40 (vratné obaly, poplatek) nepatří
+        // do základu ř. 1 / 40. Přiznání, oddíl C KH i kniha DPH se musí shodovat.
+        $d = sprintf('%04d-%02d-16', self::YEAR, self::MONTH);
+        $customer = $this->client('Odběratel nula', $this->czId, 'CZ45454545', customer: true);
+        $vendor = $this->client('Dodavatel obaly', $this->czId, 'CZ34343434', vendor: true);
+        $this->sale('ZERO-SALE', $customer, '1', false, $d, $d, [[2000, 420, 21], [300, 0, 0]]);
+        $this->purchase('ZERO-PURCH', $vendor, '40', false, 'invoice', $d, $d, [[1000, 210, 21], [-640, 0, 0]]);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $dp = (new \SimpleXMLElement($result['xml']))->DPHDP3;
+        $this->assertSame('2000', (string) $dp->Veta1['obrat23'], 'ř. 1 bez položky 0 %');
+        $this->assertSame('1000', (string) $dp->Veta4['pln23'], 'ř. 40 bez vratných obalů');
+        $this->assertStringContainsString('Doklad ZERO-SALE obsahuje položky se sazbou 0 %', implode(' | ', $result['warnings']));
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertSame('2000.00', (string) $kh->VetaC['obrat23']);
+        $this->assertSame('1000.00', (string) $kh->VetaC['pln23']);
+
+        $book = $this->book->build($this->supplierId, self::YEAR, self::MONTH);
+        $bases = [];
+        foreach ($book['sections'] as $section) {
+            $line = (string) ($section['dphdp3_line'] ?? '');
+            foreach ($section['rows'] as $row) {
+                $bases[$line] = ($bases[$line] ?? 0.0) + (float) ($row['base'] ?? $row['base_czk'] ?? 0.0);
+            }
+        }
+        $this->assertEqualsWithDelta(2000.0, $bases['1'] ?? 0.0, 0.001, 'kniha DPH ř. 1');
+        $this->assertEqualsWithDelta(1000.0, $bases['40'] ?? 0.0, 0.001, 'kniha DPH ř. 40');
+    }
+
     public function testKhSpecialAttributesComeFromVatClassification(): void
     {
         $this->insertVatClassification('T90', 'sale', '1', 'A.4', 21.0, '2', 'P');

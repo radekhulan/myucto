@@ -27,6 +27,7 @@ final class VatClassificationMapperTest extends TestCase
 {
     private PDO $pdo;
     private VatClassificationMapper $mapper;
+    private VatLedgerService $ledger;
 
     protected function setUp(): void
     {
@@ -44,7 +45,8 @@ final class VatClassificationMapperTest extends TestCase
         $prop = $ref->getProperty('pdo');
         $prop->setValue($conn, $this->pdo);
 
-        $this->mapper = new VatClassificationMapper($conn, new VatLedgerService($conn, new TaxConstantsRepository($conn)));
+        $this->ledger = new VatLedgerService($conn, new TaxConstantsRepository($conn));
+        $this->mapper = new VatClassificationMapper($conn, $this->ledger);
     }
 
     public function testEuAcquisitionInEurAppliesExchangeRate(): void
@@ -276,50 +278,49 @@ final class VatClassificationMapperTest extends TestCase
         self::assertSame(63.0, $lines['1']['vat']);
     }
 
-    public function testZeroRateRoundingRowStaysOffDomesticRateLines(): void
+    public function testZeroRateRowOnRateCodeStaysOffReturnThroughLedger(): void
     {
-        // Kód 40: 21% položka + zaokrouhlení 0 %; ř. 40 nese jen 21% základ, jako KH.
-        $common = [
-            'invoice_id' => 7,
-            'source' => 'purchase',
-            'document_kind' => 'invoice',
-            'code' => '40',
-            'dphdp3_line' => '40',
-            'dphdp3_line_secondary' => null,
-            'label' => 'Přijaté 21 %',
-            'vat_deduction_none' => false,
-            'is_fixed_asset' => false,
-        ];
+        // Kód 40: 21% položka + vratné obaly 0 % bez daně. Ř. 40 nese jen 21% základ,
+        // stejně jako KH (VetaC pln23). Pravidlo žije v evidenci, ne v projekci.
+        $this->insertPurchaseInvoice(
+            id: 7, supplierId: 1, vendorId: 100,
+            issueDate: '2026-05-10', taxDate: '2026-05-10',
+            currencyCode: 'CZK', exchangeRate: 1.0, reverseCharge: 0,
+            classCode: '40', isFixedAsset: 0,
+        );
+        $this->insertPurchaseInvoiceItem(id: 71, invoiceId: 7, base: 1000.0, vat: 210.0, vatRate: 21.0, classCode: null, isFixedAsset: 0);
+        $this->insertPurchaseInvoiceItem(id: 72, invoiceId: 7, base: -640.0, vat: 0.0, vatRate: 0.0, classCode: null, isFixedAsset: 0);
 
-        $lines = $this->mapper->projectDphLines([
-            array_replace($common, ['vat_rate' => 21.0, 'base_czk' => 1000.0, 'vat_czk' => 210.0]),
-            array_replace($common, ['vat_rate' => 0.0, 'base_czk' => -0.42, 'vat_czk' => 0.0]),
-        ]);
+        $lines = $this->mapper->aggregateForDphPriznani(1, 2026, 5, 'monthly');
 
         self::assertSame(1000.0, $lines['40']['base']);
         self::assertSame(210.0, $lines['40']['vat']);
         self::assertSame(1, $lines['40']['count']);
+
+        $zero = array_values(array_filter(
+            $this->ledgerRows('2026-05-01', '2026-05-31'),
+            static fn (array $r): bool => (float) $r['vat_rate'] === 0.0,
+        ));
+        self::assertCount(1, $zero);
+        self::assertSame('40', $zero[0]['code'], 'kód zůstává pro dohledání');
+        self::assertNull($zero[0]['dphdp3_line']);
+        self::assertNull($zero[0]['kh_section']);
+        self::assertTrue($zero[0]['zero_rate_outside_return']);
+        self::assertFalse(VatLedgerService::isSelfAssessedRow($zero[0] + ['is_reverse_charge' => true]));
     }
 
-    public function testZeroRateRowOnExemptLineIsKept(): void
+    public function testZeroRateRuleCoversOnlyDomesticRateLines(): void
     {
-        // Řádek 0 % mimo sazbové řádky (osvobozené ř. 50) zůstává.
-        $lines = $this->mapper->projectDphLines([[
-            'invoice_id' => 8,
-            'source' => 'sale',
-            'document_kind' => 'invoice',
-            'code' => '50',
-            'dphdp3_line' => '50',
-            'dphdp3_line_secondary' => null,
-            'vat_rate' => 0.0,
-            'base_czk' => 500.0,
-            'vat_czk' => 0.0,
-            'label' => 'Osvobozené',
-            'vat_deduction_none' => false,
-            'is_fixed_asset' => false,
-        ]]);
-
-        self::assertSame(500.0, $lines['50']['base']);
+        foreach (['1', '2', '40', '41', '40k', '41k'] as $line) {
+            self::assertTrue(VatLedgerService::isZeroRateOnRateLine($line, 0.0, 0.0, false), "ř. {$line}");
+        }
+        // Osvobozené ř. 50, vývoz, samovyměření a řádky s daní zůstávají.
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine('50', 0.0, 0.0, false));
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine('22', 0.0, 0.0, false));
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine(null, 0.0, 0.0, false));
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine('40', 21.0, 0.0, false));
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine('40', 0.0, 1.0, false));
+        self::assertFalse(VatLedgerService::isZeroRateOnRateLine('40', 0.0, 0.0, true));
     }
 
     public function testMissingExchangeRatesKeepInvoiceAndCashDocumentWithSameNumericIdDistinct(): void
@@ -493,6 +494,12 @@ final class VatClassificationMapperTest extends TestCase
             vat_deduction_percent REAL NOT NULL DEFAULT 100,
             is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function ledgerRows(string $start, string $end): array
+    {
+        return iterator_to_array($this->ledger->iterateRows(1, $start, $end), false);
     }
 
     private function seedClassifications(): void

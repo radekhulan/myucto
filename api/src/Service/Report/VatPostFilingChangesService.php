@@ -272,6 +272,14 @@ final class VatPostFilingChangesService
      */
     private static function sameVatLines(array $filed, array $current): bool
     {
+        // Otisk z doby, kdy řádek 0 % bez daně na sazbovém kódu ještě šel do ř. 1/2, 40/41.
+        // Dnes do přiznání nepatří ({@see VatLedgerService::isZeroRateOnRateLine()}), doklad
+        // se tím nezměnil.
+        $filed = array_filter($filed, static function (mixed $line, string|int $key): bool {
+            $parts = explode('|', (string) $key);
+            return count($parts) !== 3 || !is_array($line)
+                || !VatLedgerService::isZeroRateOnRateLine($parts[1], (float) $parts[2], (float) ($line['vat'] ?? 0.0), false);
+        }, ARRAY_FILTER_USE_BOTH);
         if (array_diff_key($filed, $current) !== [] || array_diff_key($current, $filed) !== []) {
             return false;
         }

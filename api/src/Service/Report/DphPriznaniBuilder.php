@@ -280,14 +280,33 @@ final class DphPriznaniBuilder
         // Sbírají se v témž průchodu řádků jako součty (řádky se čtou proudem).
         $missingByDoc = [];
         $documentRefs = [];
-        $vatRows = (function () use ($supplierId, $vatStart, $vatEnd, &$missingByDoc, &$documentRefs): \Generator {
+        $zeroRateSales = [];
+        $vatRows = (function () use ($supplierId, $vatStart, $vatEnd, &$missingByDoc, &$documentRefs, &$zeroRateSales): \Generator {
             foreach ($this->ledger->iterateReturnRows($supplierId, $vatStart, $vatEnd, includeDrafts: false) as $r) {
                 VatLedgerService::collectMissingExchangeRate($missingByDoc, $r);
                 self::collectDocumentRef($documentRefs, $r);
+                if (!empty($r['zero_rate_outside_return']) && $r['source'] === 'sale') {
+                    $number = (string) ($r['doc_number'] ?? ('#' . $r['invoice_id']));
+                    $zeroRateSales[$number] = ($zeroRateSales[$number] ?? 0.0) + (float) $r['base_czk'];
+                }
                 yield $r;
             }
         })();
         $lines = $this->mapper->projectDphLines($vatRows);
+        // Položka 0 % na vydaném dokladu s kódem 1/2 do přiznání ani KH nevstupuje
+        // ({@see VatLedgerService::isZeroRateOnRateLine()}). Haléřové zaokrouhlení je v pořádku,
+        // větší částka bývá osvobozené plnění (ř. 50) se špatně zvoleným kódem.
+        foreach ($zeroRateSales as $number => $base) {
+            if (abs($base) >= 1.0) {
+                $warnings[] = sprintf(
+                    'Doklad %s obsahuje položky se sazbou 0 %% s kódem pro základní nebo sníženou sazbu (základ %s Kč). '
+                        . 'Do ř. 1/2 ani do KH nevstupují. Jde-li o osvobozené plnění, zvolte kód 3 (ř. 50), '
+                        . 'jinak „mimo" (mimo předmět daně).',
+                    $number,
+                    number_format($base, 2, ',', ' '),
+                );
+            }
+        }
         $missingRates = array_values($missingByDoc);
         if ($missingRates !== []) {
             $warnings[] = 'Chybí kurz u dokladů v cizí měně: '

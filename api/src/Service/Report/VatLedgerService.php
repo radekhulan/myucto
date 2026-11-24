@@ -1577,6 +1577,12 @@ final class VatLedgerService
             }
         }
 
+        $zeroRateOutside = self::isZeroRateOnRateLine($primaryLine, $vatRate, $vatCzk, $codeIsRc);
+        if ($zeroRateOutside) {
+            $primaryLine = null;
+            $secondaryLine = null;
+        }
+
         return [
             'source'                => $source,
             'invoice_id'            => (int) $r['invoice_id'],
@@ -1610,7 +1616,10 @@ final class VatLedgerService
             'code'                  => $code,
             'dphdp3_line'           => $primaryLine,
             'dphdp3_line_secondary' => $secondaryLine,
-            'kh_section'            => $clsf['kh_section'] ?? null,
+            'kh_section'            => $zeroRateOutside ? null : ($clsf['kh_section'] ?? null),
+            // Řádek 0 % bez daně na tuzemském sazbovém kódu ({@see isZeroRateOnRateLine()}):
+            // kód zůstává pro dohledání, do přiznání, KH ani knihy DPH nevstupuje.
+            'zero_rate_outside_return' => $zeroRateOutside,
             'kod_pred_pl'           => $clsf['kod_pred_pl'] ?? null,
             'kh_regime_code'         => $clsf['kh_regime_code'] ?? null,
             'kh_bad_debt'            => $clsf['kh_bad_debt'] ?? null,
@@ -1657,7 +1666,34 @@ final class VatLedgerService
     public static function isSelfAssessedRow(array $row): bool
     {
         return !empty($row['is_reverse_charge'])
-            && (!empty($row['classification_reverse_charge']) || ($row['dphdp3_line'] ?? null) === null);
+            && (!empty($row['classification_reverse_charge'])
+                || (($row['dphdp3_line'] ?? null) === null && empty($row['zero_rate_outside_return'])));
+    }
+
+    /** Tuzemské sazbové řádky přiznání: ř. 1/2 na výstupu, 40/41 na vstupu včetně kráceného 40k/41k. */
+    private const DOMESTIC_RATE_LINES = ['1' => true, '2' => true, '40' => true, '41' => true, '40k' => true, '41k' => true];
+
+    /**
+     * Patří řádek evidence s tuzemským sazbovým kódem (1/2, 40/41) mimo přiznání i KH?
+     *
+     * Ano, když nese sazbu 0 % a žádnou daň: zaokrouhlení, vratné obaly, poplatky nebo
+     * osvobozená část dokladu, který je jinak v základní či snížené sazbě. Ř. 1/2 a 40/41
+     * jsou základ v dané sazbě (a z ř. 40/41 nárok na odpočet), plnění bez daně tam
+     * nepatří; KH je do VetaC (obrat23/5, pln23/5) nepočítá stejně. Kdyby se počítalo do
+     * přiznání a ne do KH, oddíl C by s přiznáním nesouhlasil.
+     *
+     * Jediné místo pravidla: {@see normalize()} takovému řádku vyprázdní řádek přiznání
+     * i oddíl KH a nastaví `zero_rate_outside_return`, takže přiznání, KH, kniha DPH,
+     * křížové kontroly i sestava podle dimenzí ho vynechají bez vlastní podmínky.
+     * Řádky samovyměření (kód s přenesením) se netýká: ty sazbu doplňují z klasifikace.
+     */
+    public static function isZeroRateOnRateLine(?string $primaryLine, float $vatRate, float $vatCzk, bool $classificationReverseCharge): bool
+    {
+        return $primaryLine !== null
+            && isset(self::DOMESTIC_RATE_LINES[$primaryLine])
+            && !$classificationReverseCharge
+            && $vatRate == 0.0
+            && abs($vatCzk) < 0.005;
     }
 
     /**

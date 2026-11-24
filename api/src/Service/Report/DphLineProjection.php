@@ -33,14 +33,6 @@ final class DphLineProjection
         $baseCzk = (float) $r['base_czk'];
         $vatCzk  = (float) $r['vat_czk'];
         $label   = (string) $r['label'];
-
-        // Řádek 0 % bez daně (např. zaokrouhlení) do sazbového ř. 1/2, 40/41 nepatří,
-        // stejně jako v KH (VetaC).
-        if (isset(self::DOMESTIC_RATE_LINES[$primary])
-            && ($r['vat_rate'] ?? null) !== null && (float) $r['vat_rate'] == 0.0
-            && abs($vatCzk) < 0.005) {
-            return;
-        }
         // Count distinct dokladů per řádek včetně odděleného namespace pokladny.
         $documentKey = VatLedgerService::documentIdentity($r);
 
@@ -117,9 +109,6 @@ final class DphLineProjection
      * {@see lines()} skládá ze zaokrouhlených podílů primárních ř. 3–13.
      */
     private const SELF_ASSESSMENT_MIRROR_LINES = ['43' => true, '44' => true, '43k' => true, '44k' => true];
-
-    /** Tuzemské sazbové řádky, kam nepatří řádek 0 % ({@see add()}). */
-    private const DOMESTIC_RATE_LINES = ['1' => true, '2' => true, '40' => true, '41' => true, '40k' => true, '41k' => true];
 
     /** Zrcadlový odpočet ze samovyměření (ř. 43/44 v plné i krácené výši)? */
     public static function isSelfAssessmentMirror(string $line): bool

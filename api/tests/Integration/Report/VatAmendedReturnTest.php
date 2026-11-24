@@ -406,6 +406,12 @@ class VatAmendedReturnTest extends TestCase
         $this->assertTrue($check(['status' => 'cancelled'] + $row, '2026-10-13 10:21:49', $filed, $line), 'storno');
         $this->assertTrue($check($row, '2026-10-13 09:00:00', null), 'doklad v podání nebyl a přibyl po něm');
         $this->assertFalse($check($row, '2026-10-13 11:00:00', null), 'doklad v podání nebyl, ale je starší');
+
+        // Otisk ještě s položkou 0 % na ř. 1; dnes do přiznání nepatří, doklad se nezměnil.
+        $withZero = ['vat_lines' => $line + ['1|1|0' => ['base' => 300.0, 'vat' => 0.0]]] + $filed;
+        $this->assertFalse($check($row, '2026-10-13 10:21:49', $withZero, $line), 'řádek 0 % na sazbovém kódu');
+        $withExempt = ['vat_lines' => $line + ['3|50|0' => ['base' => 300.0, 'vat' => 0.0]]] + $filed;
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $withExempt, $line), 'osvobozený ř. 50 dál porovnáváme');
     }
 
     /** M42: storno po podání nesmí doklad odstranit z fronty změn. */
