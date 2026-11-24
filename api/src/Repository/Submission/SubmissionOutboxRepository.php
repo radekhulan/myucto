@@ -29,7 +29,8 @@ use MyInvoice\Support\PeriodFilter;
  * hodinu před založením, den podání daňového tvrzení
  * ({@see \MyInvoice\Service\Epo\Isds\TaxSubmissionDispatchProjection}) četl
  * UTC jako místní čas a odeslání krátce po půlnoci posledního dne lhůty
- * vypadalo jako podané včas.
+ * vypadalo jako podané včas. Řádky z té doby převedla migrace 2339; značka
+ * `time_basis` (výchozí `app`) říká, že řádek už je v čase aplikace.
  */
 final class SubmissionOutboxRepository
 {
