@@ -204,8 +204,9 @@ final class PohodaIssuedPaymentConversion
         if ($paidCzk === $dueCzk && $paid !== $dueForeign) {
             $bankPaid = round($sign * array_sum(array_intersect_key($changed, $bankAmounts)), 2);
             $currency = $doc['currency'];
-            $reason = sprintf('Plná úhrada v Kč a částka bankovní úhrady v měně dokladu se rozcházejí. Celkem k úhradě %s %s, bankovní úhrada %s %s.',
-                number_format($dueForeign, 2, ',', ' '), $currency, number_format($bankPaid, 2, ',', ' '), $currency);
+            $reason = sprintf('Plná úhrada v Kč a úhrady v měně dokladu se rozcházejí. Celkem k úhradě %s %s, úhrady v měně celkem %s %s (z toho bankovní %s %s).',
+                number_format($dueForeign, 2, ',', ' '), $currency, number_format($paid, 2, ',', ' '), $currency,
+                number_format($bankPaid, 2, ',', ' '), $currency);
             if ($amounts['total'] !== $dueForeign) {
                 $reason .= sprintf(' Celkem dokladu %s %s.', number_format($amounts['total'], 2, ',', ' '), $currency);
             }
