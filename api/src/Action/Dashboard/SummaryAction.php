@@ -233,9 +233,8 @@ final class SummaryAction
      */
     private function revenueBreakdown12m(\PDO $pdo, int $sid, bool $isVatPayer): array
     {
-        $rev = $this->revenueCol($isVatPayer);
         $sql = "SELECT i.revenue_category_id, rc.code, rc.label,
-                       SUM(" . CzkAmountExpr::amount($rev, 'i') . ") AS total,
+                       SUM(" . CzkAmountExpr::issuedRevenue($isVatPayer) . ") AS total,
                        COUNT(*) AS cnt
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
@@ -364,7 +363,7 @@ final class SummaryAction
             $current = round((float) ($journal['totals']['prijem_danovy'] ?? 0) + (float) ($journal['totals']['prijem_osvobozeny'] ?? 0), 2);
         } else {
             $stmt = $pdo->prepare(
-            "SELECT COALESCE(SUM(" . CzkAmountExpr::amount('i.total_with_vat', 'i') . "), 0) AS sum_czk
+            "SELECT COALESCE(SUM(" . CzkAmountExpr::issuedRevenue(false) . "), 0) AS sum_czk
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -444,7 +443,7 @@ final class SummaryAction
         $rev = $this->revenueCol($isVatPayer);
         // Tentýž obrat ještě jednou, přepočtený na CZK — z něj se sečte `total_czk` (viz níže).
         // Jde o DALŠÍ SLOUPCE téhož dotazu, ne druhý průchod tabulkou.
-        $revCzk = CzkAmountExpr::amount($rev, 'i');
+        $revCzk = CzkAmountExpr::issuedRevenue($isVatPayer);
         // Obrat per měna pro YTD (letošní vs. minulý rok)
         // Záměrně počítáme i NEZAPLACENÉ faktury, pokud jsou vystavené (status: issued / sent / paid).
         // Dobropisy (credit_note) ZAHRNUJEME — mají záporné total_with_vat (viz CancelInvoiceAction),
@@ -830,11 +829,9 @@ final class SummaryAction
 
     private function topClients(\PDO $pdo, int $year, int $sid, bool $isVatPayer): array
     {
-        $rev = $this->revenueCol($isVatPayer);
-        // Přepočet na CZK přes i.exchange_rate (CNB k DUZP). CZK řádky multiplier 1.
         // Grupujeme jen po klientovi (ne per currency) — multi-currency klient se neroztrhne
         // a ranking je správný (1000 EUR > 20 000 CZK).
-        $revCzk = CzkAmountExpr::amount($rev, 'i');
+        $revCzk = CzkAmountExpr::issuedRevenue($isVatPayer);
         $sql = "SELECT c.id, c.company_name,
                        SUM($revCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
@@ -944,10 +941,9 @@ final class SummaryAction
      */
     private function topClientsRolling12m(\PDO $pdo, int $sid, bool $isVatPayer): array
     {
-        $rev = $this->revenueCol($isVatPayer);
         // Stejné jako topClients() — CZK přepočet + grupování po klientovi pro správný ranking
         // napříč měnami (1000 EUR > 20 000 CZK).
-        $revCzk = CzkAmountExpr::amount($rev, 'i');
+        $revCzk = CzkAmountExpr::issuedRevenue($isVatPayer);
         $sql = "SELECT c.id, c.company_name,
                        SUM($revCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
@@ -1413,10 +1409,9 @@ final class SummaryAction
      */
     private function invoiceSizeHistogram(\PDO $pdo, int $sid, bool $isVatPayer): array
     {
-        $rev = $isVatPayer ? 'total_without_vat' : 'total_with_vat';
         // CZK pojistka jako ve zbytku kódu: bez ní by se korunová faktura se zbloudilým
         // `exchange_rate` vynásobila kurzem. Ostatních ~45 kurzových výrazů ji má.
-        $sql = "SELECT " . CzkAmountExpr::amount($rev, 'i') . " AS size_czk
+        $sql = "SELECT " . CzkAmountExpr::issuedRevenue($isVatPayer) . " AS size_czk
                   FROM invoices i
              LEFT JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?

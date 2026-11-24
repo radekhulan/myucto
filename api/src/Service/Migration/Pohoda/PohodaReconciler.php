@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
@@ -299,11 +300,10 @@ final class PohodaReconciler
                               AND " . ($onAccount ? '' : 'NOT ') . $oneSided('k.entry_id', $prefix) . ")
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
 
-        // Doklad převzatý v cizí měně se s deníkem v Kč porovná přepočtený kurzem dokladu.
         $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $spec = [
             ['purchase_invoices', 'purchase_invoices', $total, 'purchase_invoice', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
-            ['issued_invoices', 'invoices', $total, 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', IssuedCzkAmounts::grossSql('d', $total), 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];
@@ -556,6 +556,10 @@ final class PohodaReconciler
     private function entryDifferences(int $supplierId, array $periodIds, array $table): array
     {
         [$docTable, $kind, $docType, $prefix, $creditPositive] = $table;
+        $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        if ($docTable === 'invoices') {
+            $total = IssuedCzkAmounts::grossSql('d', $total);
+        }
         $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END" : "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
         $linked = "FROM journal_entry_document_links k
                      JOIN {$docTable} d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
@@ -563,7 +567,7 @@ final class PohodaReconciler
                       AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.document_no,
-                    (SELECT COALESCE(SUM(" . ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate') . "), 0) {$linked}) AS docs,
+                    (SELECT COALESCE(SUM({$total}), 0) {$linked}) AS docs,
                     (SELECT COALESCE(SUM({$sign}), 0)
                        FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
                       WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '{$prefix}%') AS journal

@@ -11,6 +11,7 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\PayrollMonthlyRecordRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Payroll\Report\PayrollAnnualReportService;
 use MyInvoice\Service\Tax\DpfoCalculator;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
@@ -501,21 +502,22 @@ final class DpfoReturnDataProvider
     private function expenseModeTransitionWarning(int $supplierId, int $year, bool $useActual): string
     {
         $asOf = sprintf('%04d-12-31', $year - 1);
+        $remaining = IssuedCzkAmounts::remainingSql('i', 'COALESCE(p.paid, 0)',
+            "GREATEST(i.amount_to_pay - COALESCE(p.paid, 0), 0) * CASE WHEN c.code = 'CZK' THEN 1 ELSE COALESCE(i.exchange_rate, 1) END");
         $receivables = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(GREATEST(i.amount_to_pay - COALESCE(p.paid, 0), 0) *
-                    CASE WHEN c.code = 'CZK' THEN 1 ELSE COALESCE(i.exchange_rate, 1) END), 0)
+            "SELECT COALESCE(SUM({$remaining}), 0)
                FROM invoices i
           LEFT JOIN currencies c ON c.id = i.currency_id
           LEFT JOIN (
                 SELECT ip.invoice_id, SUM(ip.amount) AS paid
                   FROM invoice_payments ip
-                 WHERE ip.paid_on <= ?
+                 WHERE ip.supplier_id = ? AND ip.paid_on <= ?
               GROUP BY ip.invoice_id
           ) p ON p.invoice_id = i.id
               WHERE i.supplier_id = ? AND i.issue_date <= ?
                 AND i.invoice_type NOT IN ('proforma','tax_document','rent_calendar','advance_calendar') AND i.status <> 'cancelled'"
         );
-        $receivables->execute([$asOf, $supplierId, $asOf]);
+        $receivables->execute([$supplierId, $asOf, $supplierId, $asOf]);
         $receivableTotal = round((float) $receivables->fetchColumn(), 2);
 
         $payables = $this->db->pdo()->prepare(

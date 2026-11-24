@@ -58,13 +58,19 @@ final class CreditNoteOffsetRemainderExpr
     public static function joinSql(string $docType, int $supplierId, string $docAlias, string $asOfSql, string $alias): string
     {
         [$type, $table] = self::document($docType);
+        $homeWindow = $type === 'invoice' ? ',
+                           SUM(d.gross_czk) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS gross_czk,
+                           SUM(d.vat_czk) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS vat_czk' : '';
+        $homeSums = $type === 'invoice'
+            ? ', SUM(' . self::offsetGrossCzkSql() . ') AS gross_czk, SUM(' . self::offsetVatCzkSql() . ') AS vat_czk'
+            : '';
         return "LEFT JOIN (
                     SELECT d.invoice_id, d.offset_on,
                            LEAD(d.offset_on) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS until_on,
                            SUM(d.gross) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS gross,
-                           SUM(d.vat) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS vat
+                           SUM(d.vat) OVER (PARTITION BY d.invoice_id ORDER BY d.offset_on) AS vat{$homeWindow}
                       FROM (SELECT cnr_o.invoice_id, cnr_o.offset_on, SUM(cnr_o.amount) AS gross,
-                                   SUM(" . self::offsetVatSql() . ") AS vat
+                                   SUM(" . self::offsetVatSql() . ") AS vat{$homeSums}
                               FROM credit_note_offsets cnr_o
                               LEFT JOIN {$table} cnr_d ON cnr_d.id = cnr_o.credit_note_id AND cnr_d.supplier_id = cnr_o.supplier_id
                              WHERE cnr_o.supplier_id = {$supplierId} AND cnr_o.doc_type = '{$type}'
@@ -97,6 +103,17 @@ final class CreditNoteOffsetRemainderExpr
                       THEN {$docAlias}.total_vat - COALESCE({$alias}.vat, 0) ELSE {$docAlias}.total_vat END)";
     }
 
+    /** Základ poměru pro peněžní deník v Kč, má-li vydaný doklad částky ze zdroje. */
+    public static function issuedGrossSql(string $docAlias, string $alias): string
+    {
+        return self::importedPart($docAlias, 'total_with_vat', "{$alias}.gross_czk", "{$alias}.gross_czk", self::grossSql($docAlias, $alias));
+    }
+
+    public static function issuedVatSql(string $docAlias, string $alias): string
+    {
+        return self::importedPart($docAlias, 'total_vat', "{$alias}.gross_czk", "{$alias}.vat_czk", self::vatSql($docAlias, $alias));
+    }
+
     /**
      * Brutto k úhradě penězi se zápočty do daného zápočtu (opravný řádek srovnává zbytek
      * před zápočtem a po něm). Korelovaný poddotaz, běží jednou na zápočet, ne na úhradu.
@@ -109,7 +126,12 @@ final class CreditNoteOffsetRemainderExpr
     public static function grossAsOfOffsetSql(string $docType, string $alias, string $asOfSql, string $throughIdSql): string
     {
         $remaining = self::remainingGrossSql($docType, $alias, $asOfSql, $throughIdSql);
-        return "(CASE WHEN {$remaining} > 0.005 THEN {$remaining} ELSE {$alias}.total_with_vat END)";
+        $fallback = "(CASE WHEN {$remaining} > 0.005 THEN {$remaining} ELSE {$alias}.total_with_vat END)";
+        if ($docType !== 'invoice') {
+            return $fallback;
+        }
+        $gross = self::issuedOffsetSumSql($alias, $asOfSql, $throughIdSql, self::offsetGrossCzkSql());
+        return self::importedPart($alias, 'total_with_vat', $gross, $gross, $fallback);
     }
 
     /**
@@ -117,8 +139,14 @@ final class CreditNoteOffsetRemainderExpr
      */
     public static function vatAsOfOffsetSql(string $docType, string $alias, string $asOfSql, string $throughIdSql): string
     {
-        return '(CASE WHEN ' . self::remainingGrossSql($docType, $alias, $asOfSql, $throughIdSql) . ' > 0.005
+        $fallback = '(CASE WHEN ' . self::remainingGrossSql($docType, $alias, $asOfSql, $throughIdSql) . ' > 0.005
                       THEN ' . self::remainingVatSql($docType, $alias, $asOfSql, $throughIdSql) . " ELSE {$alias}.total_vat END)";
+        if ($docType !== 'invoice') {
+            return $fallback;
+        }
+        $gross = self::issuedOffsetSumSql($alias, $asOfSql, $throughIdSql, self::offsetGrossCzkSql());
+        $vat = self::issuedOffsetSumSql($alias, $asOfSql, $throughIdSql, self::offsetVatCzkSql());
+        return self::importedPart($alias, 'total_vat', $gross, $vat, $fallback);
     }
 
     /** Brutto dokladu minus částky zápočtů dobropisů proti němu. */
@@ -154,6 +182,34 @@ final class CreditNoteOffsetRemainderExpr
         return 'CASE WHEN cnr_o.amount = ABS(cnr_d.total_with_vat)
                      THEN SIGN(cnr_d.total_with_vat) * cnr_d.total_vat
                      ELSE cnr_o.amount * cnr_d.total_vat / NULLIF(cnr_d.total_with_vat, 0) END';
+    }
+
+    private static function importedPart(string $alias, string $field, string $offsetGross, string $offsetValue, string $fallback): string
+    {
+        return "CASE WHEN {$alias}.import_total_with_vat_czk IS NULL THEN {$fallback}
+                     WHEN {$alias}.import_total_with_vat_czk - COALESCE({$offsetGross}, 0) > 0.005
+                          THEN {$alias}.import_{$field}_czk - COALESCE({$offsetValue}, 0)
+                     ELSE {$alias}.import_{$field}_czk END";
+    }
+
+    private static function issuedOffsetSumSql(string $alias, string $asOfSql, string $throughIdSql, string $value): string
+    {
+        return "(SELECT SUM({$value}) FROM credit_note_offsets cnr_o
+                   JOIN invoices cnr_d ON cnr_d.id = cnr_o.credit_note_id AND cnr_d.supplier_id = cnr_o.supplier_id
+                  WHERE cnr_o.supplier_id = {$alias}.supplier_id AND cnr_o.invoice_id = {$alias}.id AND cnr_o.doc_type = 'invoice'
+                    AND " . self::throughOffset($asOfSql, $throughIdSql) . ')';
+    }
+
+    private static function offsetGrossCzkSql(): string
+    {
+        return 'COALESCE(ROUND(cnr_o.amount * ABS(cnr_d.import_total_with_vat_czk) / NULLIF(ABS(cnr_d.total_with_vat), 0), 2),
+                         ROUND(cnr_o.amount * COALESCE(cnr_d.exchange_rate, 1), 2))';
+    }
+
+    private static function offsetVatCzkSql(): string
+    {
+        return 'COALESCE(ROUND(cnr_o.amount * cnr_d.import_total_vat_czk / NULLIF(cnr_d.total_with_vat, 0), 2),
+                         ROUND((' . self::offsetVatSql() . ') * COALESCE(cnr_d.exchange_rate, 1), 2))';
     }
 
     /** Zápočty do daného zápočtu: dřívější dny a téhož dne jen do daného id. */

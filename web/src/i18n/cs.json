@@ -46534,6 +46534,11 @@
         "hint": "Záloha s DDKP odečtená jen v hlavičce bez odpočtových řádků.",
         "description": "Konečná faktura odečítá zálohu s DDKP jen v hlavičce, takže DPH zálohy je v přiznání dvakrát. Oprava se dělá v aplikaci odpočtem zálohy řádkem podle manuálu."
       },
+      "foreign_issued_in_czk": {
+        "title": "Vydané doklady v cizí měně převzaté v Kč",
+        "hint": "Faktury, zálohové faktury a dobropisy z POHODY, které čekají na kontrolu původní měny.",
+        "description": "Převod z POHODY u některých vydaných dokladů uložil Kč, protože částky v měně nebo jejich přepočet neodpovídaly zdroji. Oprava potřebuje původní export z POHODY. Před zápisem porovnává evidenci DPH, kontrolní hlášení, saldokonto v Kč a peněžní deník. Postup pro správce instalace je v manuálu."
+      },
       "foreign_purchase_in_czk": {
         "title": "Přijaté doklady v cizí měně převzaté v Kč",
         "hint": "Faktury od zahraničních dodavatelů se samovyměřením DPH v Kč místo v měně dokladu.",

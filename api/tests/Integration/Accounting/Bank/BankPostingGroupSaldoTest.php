@@ -118,7 +118,7 @@ final class BankPostingGroupSaldoTest extends BankPostingTestCase
         ]);
 
         $method = new \ReflectionMethod($this->service, 'incomingFxSaldo');
-        [$account, $rate] = $method->invoke($this->service, $this->supplierId, $inv, '311', 'EUR', 25.0);
+        [$account, $rate] = $method->invoke($this->service, $this->supplierId, $inv, '311', 'EUR', 50.0, 25.0, null);
 
         self::assertSame('311', $account);
         self::assertSame(24.5, $rate);

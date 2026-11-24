@@ -658,8 +658,8 @@ final class PremierImportTest extends TestCase
     }
 
     /**
-     * Doklad v EUR se převezme v měně a kurzu z PREMIER, jen když částky položek v EUR kurzem
-     * dají přesně Kč ze zaúčtování. Firma bez eura v číselníku měn převezme tentýž export
+     * Doklad v EUR se převezme v měně a kurzu z PREMIER a uloží korunové částky ze zdroje.
+     * Firma bez eura v číselníku měn převezme tentýž export
      * v Kč (jak to bylo dřív) - přiznání DPH, KH, OSS podání i deník obou firem se shodují.
      */
     public function testForeignCurrencyDocumentsAreTakenOverInTheirCurrencyWithIdenticalReturns(): void
@@ -687,6 +687,9 @@ final class PremierImportTest extends TestCase
 
         $header = 'SELECT c.code, d.exchange_rate, d.total_without_vat, d.total_vat, d.total_with_vat FROM %s d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.varsymbol = ?';
         self::assertSame([['EUR', '25.120000', '140.00', '29.40', '169.40']], $this->fetch(sprintf($header, 'invoices'), $foreign, false, [SyntheticPremierBackup::EUR_DOCUMENT]));
+        self::assertSame([['3516.80', '738.53', '4255.33']], $this->fetch(
+            'SELECT import_total_without_vat_czk, import_total_vat_czk, import_total_with_vat_czk FROM invoices WHERE supplier_id = ? AND varsymbol = ?',
+            $foreign, false, [SyntheticPremierBackup::EUR_DOCUMENT]));
         self::assertSame([['EUR', '25.000000', '40.00', '9.20', '49.20']], $this->fetch(sprintf($header, 'invoices'), $foreign, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
         self::assertSame([['40.00', '9.20']], $this->fetch('SELECT it.oss_taxable_amount_return, it.oss_vat_amount_return FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id WHERE i.supplier_id = ? AND i.varsymbol = ?', $foreign, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
         // PF 250004: haléřový rozdíl kurzu dorovnaný na položku - kurzem nevyjde, zůstává v Kč.

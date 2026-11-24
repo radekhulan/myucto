@@ -61,6 +61,7 @@ final class IntrastatRepository implements IntrastatDataSource
                     COALESCE(ii.description, pii.description, l.source_description, si.name) AS item_description,
                     COALESCE(" . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('ii.quantity', 'ii_pk') . ", " . \MyInvoice\Service\Stock\StockUnitConverter::sqlToBase('pii.quantity', 'pii_pk') . ") AS invoice_item_quantity,
                     COALESCE(ii.total_without_vat, pii.total_without_vat) AS invoice_item_value,
+                    ii.import_tax_base_czk AS invoice_item_source_czk,
                     CASE WHEN i.id IS NOT NULL THEN i.total_without_vat ELSE pi.total_without_vat END AS invoice_total_value,
                     CASE WHEN i.id IS NOT NULL THEN (
                         SELECT SUM(ii_all.total_without_vat)

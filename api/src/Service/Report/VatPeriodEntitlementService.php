@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 
 /**
  * Nárok na čtvrtletní zdaňovací období — § 99 a § 99a ZDPH.
@@ -144,21 +145,17 @@ final class VatPeriodEntitlementService
      */
     private function turnoverForYear(int $supplierId, int $year): float
     {
+        $netCzk = CzkAmountExpr::issuedRevenue(isVatPayer: true);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(
-                        CASE WHEN i.invoice_type = 'credit_note'
-                             THEN -ABS(i.total_without_vat)
-                             ELSE i.total_without_vat END
-                        * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)
-                    ), 0)
+            "SELECT COALESCE(SUM(CASE WHEN i.invoice_type = 'credit_note' THEN -ABS({$netCzk}) ELSE {$netCzk} END), 0)
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
-                AND YEAR(COALESCE(i.effective_tax_date, i.tax_date, i.issue_date)) = ?
+                AND i.effective_tax_date >= ? AND i.effective_tax_date < ?
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')"
         );
-        $stmt->execute([$supplierId, $year]);
+        $stmt->execute([$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
 
         return (float) $stmt->fetchColumn();
     }

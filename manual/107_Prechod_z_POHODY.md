@@ -834,13 +834,20 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
   v `Dokumenty → Skeny k dokladům`.
 - **Číselné řady a podaná přiznání.** Přiznání k DPH a kontrolní hlášení za
   převáděný rok zůstávají v POHODĚ.
-- **Cizí měny.** Doklad v cizí měně se převezme v měně a kurzu dokladu, když
-  částky položek v měně přepočtené kurzem dávají na haléř koruny z POHODY
-  (DPH, kontrolní hlášení i deník tak zůstávají v Kč přesně stejné). Jinak se
-  převezme v Kč a poznámka dokladu i protokol uvedou důvod: odpočet nedaňové
-  zálohy, částečná úhrada vydaného dokladu, položky jen z rekapitulace,
-  smíšené samovyměření nebo nesedící přepočet. Měnu, kterou firma v číselníku
-  měn nemá, převod založí a protokol to uvede.
+- **Cizí měny.** Vydané faktury, zálohové faktury a dobropisy se přebírají v měně
+  a kurzu dokladu. Převod k nim ukládá i částky položek v Kč z POHODY, ze kterých
+  vychází DPH, kontrolní hlášení a ocenění pohledávky v Kč. Pojistka dovoluje rozdíl
+  z přepočtu do 1 Kč na položku a nejvýše 5 Kč na doklad podle počtu položek.
+  Odpočet nedaňové zálohy lze převzít spolu s dokladem, pokud export uvádí
+  odpovídající částku odpočtu v jeho měně. Při ostrém převodu se po spárování
+  úhrad ověří také doklady placené bankovním pohybem ve stejné měně a úhrady
+  z minulých let. Doklad zůstane v Kč, pokud částky ze zdroje nesouhlasí,
+  úhradu v měně nelze doložit nebo by se změnilo saldo v Kč, evidence DPH,
+  kontrolní hlášení či peněžní deník. Protokol uvádí důvod.
+  Takové vydané doklady ukáže Kontrola dat po převodu
+  ([§ 126.15](126_Kontrola_dat_po_prevodu.md#12615-vydane-doklady-v-cizi-mene-prevzate-v-kc)).
+  Běžné přijaté doklady se přebírají v měně, když přepočet odpovídá částkám v Kč na haléř.
+  Chybějící měnu převod založí v číselníku firmy.
 - **Samovyměření v cizí měně.** Přijatá faktura v cizí měně se samovyměřením
   DPH (interní doklad POHODY) se převezme v měně dokladu jednou položkou.
   Vyměřila-li POHODA daň jiným kurzem (ke dni plnění), nese položka základ

@@ -127,6 +127,35 @@ final class PohodaExporterSchemaTest extends TestCase
         self::assertNull($this->xpathOne($xml, '//inv:foreignCurrency/typ:priceHigh'), 'foreignCurrency nesmí nést buckety');
     }
 
+    public function testIssuedForeignImportExportsBothSourceCurrenciesOnEachLine(): void
+    {
+        $invoice = $this->issuedInvoice([
+            'currency' => 'EUR',
+            'exchange_rate' => 25.12,
+            'items' => [$this->item([
+                'quantity' => 1.0,
+                'unit_price_without_vat' => 10.0,
+                'total_without_vat' => 10.0,
+                'total_vat' => 2.10,
+                'total_with_vat' => 12.10,
+                'import_tax_base_czk' => 251.21,
+                'import_tax_vat_czk' => 52.76,
+            ])],
+            'totals' => ['without_vat' => 10.0, 'vat' => 2.10, 'with_vat' => 12.10, 'rounding' => 0.0],
+            'import_total_without_vat_czk' => 251.21,
+            'import_total_vat_czk' => 52.76,
+            'import_total_with_vat_czk' => 304.0,
+            'czk_recap' => ['breakdown' => [['rate' => 21.0, 'base_czk' => 251.21, 'vat_czk' => 52.76, 'with_vat_czk' => 303.97]]],
+        ]);
+        $xml = $this->exporter->buildXml([$invoice], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('52.76', $this->xpathOne($xml, '//inv:invoiceItem/inv:homeCurrency/typ:priceVAT'));
+        self::assertSame('2.10', $this->xpathOne($xml, '//inv:invoiceItem/inv:foreignCurrency/typ:priceVAT'));
+        self::assertSame('52.76', $this->xpathOne($xml, '//inv:invoiceSummary/inv:homeCurrency/typ:priceHighVAT'));
+        self::assertSame('0.03', $this->xpathOne($xml, '//inv:invoiceSummary/inv:homeCurrency/typ:round/typ:priceRound'));
+    }
+
     public function testMinuteDurationKeepsHourlyUnitAndPreciseRate(): void
     {
         $invoice = $this->issuedInvoice([

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use PDO;
 
 /**
@@ -65,7 +66,7 @@ final class InvoiceAssetSaleService
 
         $warnings = [];
         foreach ($this->linkedItems($invoiceId) as $item) {
-            $price = round((float) $item['total_without_vat'] * $header['czk_rate'], 2);
+            $price = IssuedCzkAmounts::itemBase($item, $header['czk_rate']);
             try {
                 if ($item['small_asset_id'] !== null) {
                     $this->sellSmallAsset($supplierId, (int) $item['small_asset_id'], $invoiceId, $header['sale_date'], $price, $meta);
@@ -270,11 +271,11 @@ final class InvoiceAssetSaleService
         ];
     }
 
-    /** @return list<array{small_asset_id:?string, asset_id:?string, total_without_vat:string}> */
+    /** @return list<array{small_asset_id:?string, asset_id:?string, total_without_vat:string, import_tax_base_czk:?string}> */
     private function linkedItems(int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT small_asset_id, asset_id, total_without_vat
+            'SELECT small_asset_id, asset_id, total_without_vat, import_tax_base_czk
                FROM invoice_items
               WHERE invoice_id = ? AND (small_asset_id IS NOT NULL OR asset_id IS NOT NULL)
               ORDER BY order_index, id'

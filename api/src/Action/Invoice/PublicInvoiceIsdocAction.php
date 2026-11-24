@@ -40,7 +40,7 @@ final class PublicInvoiceIsdocAction
         if (!ApprovalTokenValidator::isValidFormat($token)) {
             return Json::error($response, 'invalid_token', 'Neplatný odkaz.', 404);
         }
-        $invoice = $this->repo->findByPublicToken($token);
+        $invoice = $this->repo->findByPublicToken($token, includeImportedCzk: true);
         if ($invoice === null) {
             return Json::error($response, 'token_invalid_or_expired', 'Tento odkaz není platný nebo byl zneplatněn.', 404);
         }

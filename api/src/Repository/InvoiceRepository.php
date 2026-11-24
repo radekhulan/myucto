@@ -246,7 +246,7 @@ final class InvoiceRepository
      * dodavatele nad sdílený řádek měny. Rozpad vazby má zhasnout bankovní údaje,
      * ne celý doklad.
      */
-    public function find(int $id): ?array
+    public function find(int $id, bool $includeImportedCzk = false): ?array
     {
         $pdo = $this->db->pdo();
 
@@ -292,7 +292,8 @@ final class InvoiceRepository
         // nevychází. Zákazník ho dostane e-mailem, volající request-approval
         // v odpovědi; připomínky si ho čtou vlastním dotazem.
         unset($row['approval_token'], $row['approval_receipt_hash']);
-        $row['items'] = $this->itemsFor($id);
+        $hasImportedCzk = isset($row['import_total_with_vat_czk']);
+        $row['items'] = $this->itemsFor($id, $includeImportedCzk || $hasImportedCzk);
 
         // Fakturační emaily projektu (jen popisky, používané v UI hlavičce)
         if (!empty($row['project_id'])) {
@@ -342,6 +343,8 @@ final class InvoiceRepository
                 (float) $row['exchange_rate'],
                 $rateDate,
                 $fallback,
+                $row['items'],
+                isset($row['import_total_with_vat_czk']) ? (float) $row['import_total_with_vat_czk'] : null,
             );
         } else {
             $row['czk_recap'] = null;
@@ -436,6 +439,17 @@ final class InvoiceRepository
             );
             $fcand->execute([(int) $row['supplier_id'], (int) $row['client_id'], $id]);
             $row['has_final_candidates'] = (bool) $fcand->fetchColumn();
+        }
+
+        if (!$includeImportedCzk) {
+            unset($row['import_total_without_vat_czk'], $row['import_total_vat_czk'], $row['import_total_with_vat_czk'],
+                $row['import_amount_to_pay_czk'], $row['import_advance_paid_czk']);
+            if ($hasImportedCzk) {
+                foreach ($row['items'] as &$item) {
+                    unset($item['import_tax_base_czk'], $item['import_tax_vat_czk']);
+                }
+                unset($item);
+            }
         }
 
         return $row;
@@ -555,12 +569,15 @@ final class InvoiceRepository
 
     private function linkAdvanceLocked(int $finalId, int $advanceId, int $supplierId): void
     {
-        $final   = $this->find($finalId);
+        $final   = $this->find($finalId, includeImportedCzk: true);
         $advance = $this->find($advanceId);
         if ($final === null || $advance === null
             || (int) ($final['supplier_id'] ?? 0) !== $supplierId
             || (int) ($advance['supplier_id'] ?? 0) !== $supplierId) {
             throw new \RuntimeException('Doklad nenalezen.');
+        }
+        if ($final['import_total_with_vat_czk'] !== null) {
+            throw new \RuntimeException('Na převzatém dokladu s částkami ze zdroje nelze změnit vazbu na zálohu.');
         }
         if (($advance['invoice_type'] ?? '') !== 'proforma') {
             throw new \RuntimeException('Propojit lze jen se zálohovou fakturou (proforma).');
@@ -638,10 +655,13 @@ final class InvoiceRepository
     public function unlinkAdvance(int $finalId, int $supplierId): void
     {
         $type = $this->db->pdo()->prepare(
-            'SELECT invoice_type, parent_invoice_id FROM invoices WHERE id = ? AND supplier_id = ?'
+            'SELECT invoice_type, parent_invoice_id, import_total_with_vat_czk FROM invoices WHERE id = ? AND supplier_id = ?'
         );
         $type->execute([$finalId, $supplierId]);
         $row = $type->fetch(PDO::FETCH_ASSOC);
+        if (($row['import_total_with_vat_czk'] ?? null) !== null) {
+            throw new \RuntimeException('Na převzatém dokladu s částkami ze zdroje nelze změnit vazbu na zálohu.');
+        }
         if (($row['invoice_type'] ?? null) === 'tax_document') {
             throw new \RuntimeException(
                 'Daňový doklad k přijaté platbě je vázaný na platbu zálohové faktury — propojení nelze zrušit. '
@@ -676,6 +696,7 @@ final class InvoiceRepository
                 JOIN invoices p ON p.id = f.parent_invoice_id
                 SET f.parent_invoice_id = NULL
               WHERE f.id = ? AND f.supplier_id = ? AND f.invoice_type = 'invoice'
+                AND f.import_total_with_vat_czk IS NULL
                 AND p.invoice_type = 'proforma'"
         )->execute([$finalId, $supplierId]);
     }
@@ -738,7 +759,7 @@ final class InvoiceRepository
         return $stmt->fetchColumn() === false ? null : $this->itemsFor($invoiceId);
     }
 
-    public function itemsFor(int $invoiceId): array
+    public function itemsFor(int $invoiceId, bool $includeImportedCzk = false): array
     {
         $ossSelect = $this->supportsOssItemColumns()
             ? ', ii.oss_applicable, ii.oss_consumer_country, ii.oss_rate_type, ii.oss_supply_type,
@@ -770,6 +791,9 @@ final class InvoiceRepository
         // Záloha odpočtového řádku: editor ji posílá zpět, replaceItems() ji jinak zahodí.
         if ($this->supportsAdvanceDraw()) {
             $ossSelect .= ', ii.advance_invoice_id';
+        }
+        if ($includeImportedCzk && $this->db->hasColumn('invoice_items', 'import_tax_base_czk')) {
+            $ossSelect .= ', ii.import_tax_base_czk, ii.import_tax_vat_czk';
         }
         $stmt = $this->db->pdo()->prepare(
              'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.duration_minutes, ii.unit,
@@ -3370,10 +3394,10 @@ final class InvoiceRepository
     }
 
     /** Najde veřejně viditelnou fakturu podle public_token (web faktura), nebo null. */
-    public function findByPublicToken(string $token): ?array
+    public function findByPublicToken(string $token, bool $includeImportedCzk = false): ?array
     {
         $ref = $this->publicInvoiceRefByToken($token);
-        return $ref === null ? null : $this->find($ref['id']);
+        return $ref === null ? null : $this->find($ref['id'], $includeImportedCzk);
     }
 
     /** Zaznamená zobrazení web faktury klientem (poslední anonymní přístup). */

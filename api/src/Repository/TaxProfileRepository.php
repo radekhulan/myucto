@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -176,7 +177,12 @@ final class TaxProfileRepository
      */
     private static function paidInvoiceBaseSql(string $alias, bool $isVatPayer): string
     {
-        return self::paidBaseFromSql("{$alias}.total_with_vat", "{$alias}.total_vat", $isVatPayer);
+        $rate = "COALESCE(IF(cur.code = 'CZK', 1, {$alias}.exchange_rate), 1)";
+        return self::paidBaseFromSql(
+            IssuedCzkAmounts::grossSql($alias, "{$alias}.total_with_vat * {$rate}"),
+            IssuedCzkAmounts::vatSql($alias, "{$alias}.total_vat * {$rate}"),
+            $isVatPayer,
+        );
     }
 
     /** Tentýž rozpad nad výrazy brutto a DPH (přijatý doklad bez odpočtu zálohy, {@see PurchaseCostSql}). */
@@ -196,7 +202,7 @@ final class TaxProfileRepository
     {
         $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
+            "SELECT COALESCE(SUM({$col}), 0)
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -220,7 +226,7 @@ final class TaxProfileRepository
     {
         $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
+            "SELECT COALESCE(SUM({$col}), 0)
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -243,7 +249,7 @@ final class TaxProfileRepository
         $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT MONTH(i.paid_at) AS m,
-                    COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0) AS total
+                    COALESCE(SUM({$col}), 0) AS total
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -270,7 +276,7 @@ final class TaxProfileRepository
     {
         $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
+            "SELECT COALESCE(SUM({$col}), 0)
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?

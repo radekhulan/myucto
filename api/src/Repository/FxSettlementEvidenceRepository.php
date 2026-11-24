@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Support\Sql\CreditNoteRefundExpr;
 use MyInvoice\Support\Sql\LinkedManualSettlementSql;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
@@ -98,8 +99,9 @@ final class FxSettlementEvidenceRepository
                     $member['document_amount'] = null;
                 } else {
                     $amount = (float) $member['amount'];
-                    $full = FxPaymentSettlement::isFullCzkSettlement($amount, abs((float) $document['amount_to_pay']), $documentCurrency, (float) $document['exchange_rate'], $currency);
-                    $member['document_amount'] = JournalLineAmount::decimal(FxPaymentSettlement::amountInInvoiceCurrency($amount, $documentCurrency, (float) $document['exchange_rate'], $currency, abs((float) $document['amount_to_pay']), $full));
+                    $rate = IssuedCzkAmounts::settlementRate($document);
+                    $full = FxPaymentSettlement::isFullCzkSettlement($amount, abs((float) $document['amount_to_pay']), $documentCurrency, $rate, $currency);
+                    $member['document_amount'] = JournalLineAmount::decimal(FxPaymentSettlement::amountInInvoiceCurrency($amount, $documentCurrency, $rate, $currency, abs((float) $document['amount_to_pay']), $full));
                 }
                 if ($type === 'invoice' && $member['document_amount'] !== null && bccomp((string) $member['bank_amount'], '0', 2) < 0) $member['document_amount'] = bcsub('0', $member['document_amount'], 2);
                 if ($bankId > 0) $legacyByBank[$bankId][] = $member;

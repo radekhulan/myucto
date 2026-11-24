@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Support\Sql\PurchaseCostSql;
 use PDO;
 
@@ -194,8 +195,8 @@ final class ProjectProfitService
     {
         $isVatPayer = $this->isVatPayer($supplierId);
         $amount = static fn (string $alias): string => $isVatPayer
-            ? "{$alias}.total_without_vat * COALESCE({$alias}.exchange_rate, 1)"
-            : "{$alias}.total_with_vat * COALESCE({$alias}.exchange_rate, 1)";
+            ? IssuedCzkAmounts::netSql($alias, "{$alias}.total_without_vat * COALESCE({$alias}.exchange_rate, 1)")
+            : IssuedCzkAmounts::grossSql($alias, "{$alias}.total_with_vat * COALESCE({$alias}.exchange_rate, 1)");
 
         $out = [];
         $add = static function (array $rows, string $bucket) use (&$out): void {
@@ -321,6 +322,7 @@ final class ProjectProfitService
         $stmt = $pdo->prepare(
             'SELECT i.id, i.varsymbol AS number, COALESCE(i.tax_date, i.issue_date) AS doc_date,
                     i.total_without_vat, i.total_with_vat, i.exchange_rate, i.status, i.booked_at,
+                    i.import_total_without_vat_czk, i.import_total_with_vat_czk,
                     cur.code AS currency, c.company_name AS partner_name
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -399,7 +401,9 @@ final class ProjectProfitService
             'partner_name' => $r['partner_name'],
             'currency'     => $r['currency'],
             'amount'       => round((float) $r['total_with_vat'], 2),
-            'amount_czk'   => round($base * $rate, 2),
+            'amount_czk'   => $kind === 'invoice'
+                ? ($isVatPayer ? IssuedCzkAmounts::net($r, $rate) : IssuedCzkAmounts::gross($r, $rate))
+                : round($base * $rate, 2),
             'status'       => $r['status'],
             'booked'       => $r['booked_at'] !== null,
         ];

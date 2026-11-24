@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
@@ -158,11 +159,10 @@ final class PremierReconciler
                               AND " . ($onAccount ? '' : 'NOT ') . str_replace('l.supplier_id', 'k.supplier_id', $oneSided('k.entry_id', $prefix)) . ')
                 AND ' . $mapped('d', $kinds);
 
-        // Doklad převzatý v cizí měně se s deníkem v Kč porovná přepočtený kurzem dokladu.
         $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $spec = [
             ['purchase_invoices', 'purchase_invoices', $total, "'purchase_invoice'", 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
-            ['issued_invoices', 'invoices', $total, "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', IssuedCzkAmounts::grossSql('d', $total), "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", "'cash_document'", 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];

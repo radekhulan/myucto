@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use PDO;
@@ -212,7 +213,7 @@ final class IssuedPaymentRecorder
     {
         if (!array_key_exists($invoiceId, $this->invoices)) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT i.status, i.invoice_type, i.paid_total, i.amount_to_pay, i.exchange_rate, cur.code AS currency,
+                "SELECT i.status, i.invoice_type, i.paid_total, i.amount_to_pay, i.import_amount_to_pay_czk, i.exchange_rate, cur.code AS currency,
                         (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = i.id AND NOT " . MoneyS3SettledPayments::fillerSql('ip') . ") AS recorded
                    FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.id = ? AND i.supplier_id = ?"
@@ -224,7 +225,7 @@ final class IssuedPaymentRecorder
                 'type' => (string) $r['invoice_type'],
                 'paid_total' => (float) $r['paid_total'],
                 'to_pay' => (float) $r['amount_to_pay'],
-                'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                'rate' => IssuedCzkAmounts::settlementRate($r) ?: null,
                 'currency' => (string) $r['currency'],
                 'recorded' => (float) $r['recorded'],
             ];

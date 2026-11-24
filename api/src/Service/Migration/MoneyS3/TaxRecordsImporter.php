@@ -486,6 +486,22 @@ final class TaxRecordsImporter
         return $out;
     }
 
+    /** @return array<string,true> Zdrojové klíče vydaných dokladů s vazbou na peněžní deník. */
+    public static function issuedPaymentKeys(ImportContext $ctx): array
+    {
+        $out = [];
+        foreach ($ctx->cashBooks as $book) {
+            foreach ($book->movements as $movement) {
+                foreach (self::linkedAmounts($movement) as $key => $amount) {
+                    if (str_starts_with($key, 'FV|') && abs($amount) >= 0.005) {
+                        $out[$key] = true;
+                    }
+                }
+            }
+        }
+        return $out;
+    }
+
     /**
      * Zařazení pohybu podle jeho částí (bez DPH, které jde mimo základ): převažující
      * zařazení podle částky a seznam zařazení, má-li jich pohyb víc. Pohyb jen s DPH (odvod,

@@ -12,6 +12,8 @@ use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\JournalLineComparison;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\LinkedManualSettlementSql;
 use PDO;
 
@@ -1027,9 +1029,14 @@ final class ClosingRepository
      *                    account_id:int, account_code:string, currency_code:string, fx_rate:float,
      *                    amount_foreign:float, total_with_vat:float, paid_at:?string, status:string}>
      */
-    public function openFxItems(int $supplierId, string $asOf, bool $currentRead = false): array
+    public function openFxItems(int $supplierId, string $asOf, bool $currentRead = false, ?array $issuedIds = null): array
     {
+        if ($issuedIds === []) {
+            return [];
+        }
         $lock = $currentRead ? ' FOR UPDATE' : '';
+        $issuedScope = $issuedIds === null ? '' : ' AND i.id IN (' . implode(',', array_map('intval', $issuedIds)) . ')';
+        $purchaseScope = $issuedIds === null ? '' : ' AND 1 = 0';
         if ($currentRead) (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
         $stmt = $this->db->pdo()->prepare(
             "(SELECT 'invoice' AS doc_type, i.id AS doc_id, i.varsymbol,
@@ -1047,7 +1054,7 @@ final class ClosingRepository
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                 AND e.entry_date <= ?
                 AND i.status <> 'draft'
-                AND (i.status <> 'cancelled' OR i.cancelled_at IS NULL OR DATE(i.cancelled_at) > ?){$lock})
+                AND (i.status <> 'cancelled' OR i.cancelled_at IS NULL OR DATE(i.cancelled_at) > ?){$issuedScope}{$lock})
              UNION ALL
              (SELECT 'purchase_invoice' AS doc_type, pi.id AS doc_id, pi.varsymbol,
                     pi.issue_date AS doc_date, vn.company_name AS partner_name,
@@ -1064,7 +1071,7 @@ final class ClosingRepository
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                 AND e.entry_date <= ?
                 AND pi.status <> 'draft'
-                AND (pi.status <> 'cancelled' OR pi.cancelled_at IS NULL OR DATE(pi.cancelled_at) > ?){$lock})
+                AND (pi.status <> 'cancelled' OR pi.cancelled_at IS NULL OR DATE(pi.cancelled_at) > ?){$purchaseScope}{$lock})
               ORDER BY doc_type, doc_id"
         );
         $stmt->execute([$supplierId, $asOf, $asOf, $asOf, $supplierId, $asOf, $asOf, $asOf]);
@@ -2151,20 +2158,17 @@ final class ClosingRepository
     private static function advanceDrawSql(int $supplierId): string
     {
         $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
-        $deduction = \MyInvoice\Support\Sql\AdvanceDrawSql::deductionLine('pii');
-        $lines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
-                   WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
-                     AND {$deduction}";
+        $deduction = AdvanceDrawSql::deductionLine('pii');
+        $parentCzk = AdvanceDrawSql::parentDrawCzk('f', $rate);
         return "SELECT d.final_id, d.proforma_id, SUM(d.drawn) AS drawn
                   FROM (SELECT f.id AS final_id, f.parent_invoice_id AS proforma_id,
-                               CASE WHEN COALESCE(({$lines}), 0) > 0.005
-                                    THEN ROUND((f.advance_paid_amount + ({$lines})) * {$rate}, 2) ELSE 0 END AS drawn
+                               {$parentCzk} AS drawn
                           FROM advance_311 a3
                           JOIN invoices f ON f.supplier_id = {$supplierId} AND f.parent_invoice_id = a3.proforma_id
                                          AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
                           JOIN currencies fcur ON fcur.id = f.currency_id
                         UNION ALL
-                        SELECT f.id, pii.advance_invoice_id, ROUND(-SUM(pii.total_without_vat) * {$rate}, 2)
+                        SELECT f.id, pii.advance_invoice_id, ROUND(-SUM(COALESCE(pii.import_tax_base_czk, pii.total_without_vat * {$rate})), 2)
                           FROM advance_311 a3
                           JOIN invoice_items pii ON pii.advance_invoice_id = a3.proforma_id
                           JOIN invoices f ON f.id = pii.invoice_id AND f.supplier_id = {$supplierId}
@@ -2198,9 +2202,13 @@ final class ClosingRepository
                               AND sip.source = 'settlement'"]
             : ['purchase_invoices', ''];
         $amount = $docType === 'invoice' ? 'sip.amount' : 'stl.amount';
+        $foreign = "ROUND({$amount} * sd.exchange_rate, 2)";
+        if ($docType === 'invoice') {
+            $foreign = IssuedCzkAmounts::allocationSql('sd', $amount, $foreign);
+        }
         return "SELECT stl.doc_id,
                        SUM(CASE WHEN scur.code = 'CZK' OR sd.exchange_rate IS NULL OR sd.exchange_rate <= 0 THEN {$amount}
-                                ELSE ROUND({$amount} * sd.exchange_rate, 2) END) AS settled
+                                ELSE {$foreign} END) AS settled
                   FROM invoice_settlements stl
                   JOIN {$table} sd ON sd.id = stl.doc_id AND sd.supplier_id = stl.supplier_id
                   JOIN currencies scur ON scur.id = sd.currency_id{$paymentJoin}
@@ -2597,14 +2605,15 @@ final class ClosingRepository
 
     public function paidProformasWithoutAdvance(int $supplierId, string $asOf): array
     {
+        $gross = IssuedCzkAmounts::grossSql('i', 'ROUND(i.total_with_vat, 2)');
         $sql =
             "SELECT i.id,
                     COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS doc_no,
                     i.issue_date AS doc_date,
                     cl.company_name AS partner_name,
-                    ROUND(i.total_with_vat, 2) AS booked,
+                    {$gross} AS booked,
                     0 AS settled,
-                    ROUND(i.total_with_vat, 2) AS saldo
+                    {$gross} AS saldo
                FROM invoices i
                JOIN clients cl ON cl.id = i.client_id
               WHERE i.supplier_id = ? AND i.invoice_type = 'proforma' AND i.status = 'paid'

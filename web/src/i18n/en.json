@@ -46534,6 +46534,11 @@
         "hint": "Advance with a tax document deducted only in the header without deduction lines.",
         "description": "The final invoice deducts an advance with a tax document only in the header, so the advance VAT is in the return twice. The fix is done in the app by deducting the advance with a line, see the manual."
       },
+      "foreign_issued_in_czk": {
+        "title": "Foreign-currency sales documents taken over in CZK",
+        "hint": "POHODA sales invoices, advance invoices and credit notes awaiting a check of their original currency.",
+        "description": "The POHODA migration stored some sales documents in CZK when the foreign amounts or conversions differed from the source. The repair requires the original POHODA export and compares the VAT ledger, control statement, CZK open items and cash journal before committing. The installation administrator can follow the procedure in the manual."
+      },
       "foreign_purchase_in_czk": {
         "title": "Foreign-currency purchase invoices taken over in CZK",
         "hint": "Invoices from foreign suppliers with self-assessed VAT in CZK instead of the document currency.",
