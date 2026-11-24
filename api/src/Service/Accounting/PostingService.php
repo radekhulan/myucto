@@ -55,11 +55,10 @@ use PDO;
  *   {@see UnbalancedEntryException}.
  * - Období: zápis se zařadí do období obsahujícího entry_date. Období MUSÍ být
  *   'open' — 'closing'/'closed' → {@see PostingException} (§35 ZoÚ: uzavřené období
- *   je neměnné). Chybí-li období ÚPLNĚ, založí se otevřené
- *   ({@see AccountingPeriodProvisioner}) — a to i do minulosti, protože přesně tak
- *   vypadá migrace historických dokladů z jiného systému do instalace, která má
- *   účetnictví aktivované od letoška. Existujícím obdobím se automat nedotkne, takže
- *   §35 ZoÚ platí dál: nad uzavřeným obdobím zápis skončí na 'period_not_open'.
+ *   je neměnné). Při účtování lze automaticky založit první období a období po
+ *   konci řady ({@see AccountingPeriodProvisioner}). Chybějící starší období
+ *   a mezery v řadě vyžadují ruční založení. Existující uzavřené období zápis
+ *   odmítne s 'period_not_open'.
  *   Neotevře se rok mimo rozsah 2000–2200 a rok, jehož dopočtené hranice by se
  *   překryly s existující (nepravidelnou) řadou — tam skončí zápis na
  *   'no_accounting_period' a rozhodne účetní.
@@ -483,6 +482,7 @@ final class PostingService
             if ($stmt->fetchColumn() !== false) throw new \LogicException('Property issuance batch source already has an active journal entry.');
         }
         $periods = [];
+        ksort($dates, SORT_STRING);
         foreach (array_keys($dates) as $entryDate) {
             $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
@@ -623,12 +623,8 @@ final class PostingService
             }
             $period = $batchDocument['period'] ?? $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
-                // Chybějící období (zapomenutý přelom roku, naimportovaná historie) se
-                // založí otevřené — jediné pravidlo pro to má
-                // {@see AccountingPeriodProvisioner}, sdílené s importem. Nedotýká se
-                // ničeho existujícího, takže §35 ZoÚ zůstává v platnosti: pokrývá-li
-                // datum UZAVŘENÉ období, provisioner ho jen vrátí a kontrola stavu níž
-                // zápis odmítne. Znovu pod zámkem, ať se souběh serializuje jako dřív.
+                // Provisioner ověří, zda je možné období při účtování doplnit.
+                // Stav období dál čteme pod zámkem kvůli souběhu s uzávěrkou.
                 $this->provisioner()->ensureOpenPeriodForDate(
                     $supplierId,
                     $entryDate,

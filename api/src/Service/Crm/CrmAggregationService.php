@@ -1616,9 +1616,8 @@ final class CrmAggregationService
         //   - `current_missing`   … zapomenutý přelom roku → jedno kliknutí na Uzávěrku
         //                           (období navíc vznikne samo při prvním zaúčtování,
         //                           viz AccountingPeriodProvisioner),
-        //   - `documents_outside` … naimportovaná historie mimo účetnictví → období pro
-        //                           ně vznikne při zaúčtování, ale účetní má vědět, že
-        //                           jí do knih přibude rok, se kterým nepočítala.
+        //   - `documents_outside` … doklady mimo založená období → zkontrolovat data
+        //                           dokladů a rozsah účetnictví.
         // Vysoká závažnost u prvních dvou je záměr: není to fronta práce, je to
         // zablokované účtování.
         if ($isDoubleEntry && !$this->isFullyDismissed($dismissals, 'accounting_period_missing')) {
@@ -1647,7 +1646,7 @@ final class CrmAggregationService
                 } else {
                     $title = 'Doklady mimo účetní období';
                     $hint = sprintf(
-                        '%d %s k zaúčtování má datum mimo založená období (%s–%s) — zaúčtování je otevře, zkontroluj rozsah účetnictví.',
+                        '%d %s k zaúčtování má datum mimo založená období (%s–%s). Zkontroluj data dokladů a rozsah účetnictví.',
                         $health['outside_count'],
                         $health['outside_count'] === 1 ? 'doklad' : ($health['outside_count'] < 5 ? 'doklady' : 'dokladů'),
                         (string) $health['outside_min_date'],

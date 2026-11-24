@@ -174,7 +174,7 @@ final class OpeningBalanceService
             throw new PostingException($blocker['code'], $blocker['message'], $blocker['status']);
         }
 
-        $period = $this->periods->ensureOpenPeriodFor($supplierId, $startsOn);
+        $period = $this->periods->ensureOpenPeriodFor($supplierId, $startsOn, forPosting: false);
         // Pojistka proti souběhu: mezi postBlocker() a tímhle řádkem mohla uzávěrka
         // období zavřít. Kontrola nad již načteným řádkem, takže stojí nula dotazů.
         if ((string) $period['status'] !== 'open') {

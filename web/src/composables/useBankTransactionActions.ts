@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { hasFrameworkScope } from '@/security/frameworkScope'
 import { formatMoney, formatDate } from '@/composables/useFormat'
-import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage, POSTING_PERIOD_ERROR_KEYS, postingPeriodErrorKey } from '@/api/errors'
 import {
   bankApi,
   type BankTransaction,
@@ -27,6 +27,7 @@ import { gopayApi, type GoPayPayoutCandidate } from '@/api/gopay'
 import type { Client } from '@/api/clients'
 
 export const POSTING_REASON_KEYS: Record<string, string> = {
+  ...POSTING_PERIOD_ERROR_KEYS,
   fx_not_supported: 'bank.posting.reason_fx_not_supported',
   document_not_posted: 'bank.posting.reason_document_not_posted',
   posting_group_saldo_ambiguous: 'bank.posting.reason_posting_group_saldo_ambiguous',
@@ -187,7 +188,7 @@ export function useBankTransactionActions(opts: {
   function toastPosting(posting?: MatchPostingResult | { action: string; reason?: string } | null) {
     if (!posting) return
     if (posting.action === 'posted') toast.success(t('bank.posting.matched_and_posted'))
-    else if (posting.action === 'suggested') toast.info(t('bank.posting.matched_suggested'))
+    else if (posting.action === 'suggested' && !postingPeriodErrorKey(posting.reason ?? '')) toast.info(t('bank.posting.matched_suggested'))
     else if (posting.reason) {
       const key = POSTING_REASON_KEYS[posting.reason]
       toast.info(t('bank.posting.matched_not_posted', { reason: key ? t(key) : posting.reason }))

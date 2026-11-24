@@ -71,6 +71,7 @@ Zámek použijte po doloženém podání daní.
 | Starší uzavřené období není ve výběru | Stránka uzavřená období nenabízí | Použijte otevřené období; uzavřená období kontroluje [Uzávěrka](72_Uzaverka.md). |
 | Měsíční běh upozorní na problém mimo vybraný měsíc | Celoroční invarianty (návaznost předchozího období, deník celého období, inventarizace, roční odpisy) jsou svázané s celým obdobím | Nález řešte, i když netýká zobrazeného měsíce. |
 | Předchozí období není uzavřené | Bezprostředně předchozí období musí být uzavřené nebo schválené | Dokončete nebo vědomě znovu otevřete předchozí období. |
+| Otevřená období bez zápisů před začátkem účetnictví | Období předchází datu aktivace nebo prvnímu období vytvořenému při založení firmy a v deníku k němu není žádný zápis | Na stránce **Účetní období** ověřte, proč období vzniklo. Kontrola období jen zobrazí. |
 | Deník není vyrovnaný | Součet MD a Dal celého období se neshoduje | Dohledejte zápis a neopravujte ho nepodloženým dorovnáním. |
 | Odchylka kurzu proti ČNB | Upozornění, ne automatická oprava | Pevný, celní nebo jiný doložený kurz může odchylku vysvětlit. Kurz nepřepisujte jen kvůli zelené kontrole. |
 | Zámek nejde uložit | Chybí právo ke změně zámku, zdůvodnění má méně než 5 znaků nebo návrat zasahuje do chráněného období | Ověřte konkrétní oprávnění a ochranu období, doplňte zdůvodnění. |

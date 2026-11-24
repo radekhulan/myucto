@@ -15,6 +15,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
@@ -92,23 +93,6 @@ final class JournalTransferAction
         $description = $this->nullableString($body['description'] ?? null)
             ?? "Převod mezi účty {$accountFrom} → {$accountTo} (261)";
 
-        // Řada `transfer` se čísluje podle roku odchozí nohy (R14). Chybí-li období,
-        // doplní ho tentýž provisioner jako u účtování dokladu — jinak by převod končil
-        // na `no_accounting_period` DŘÍV, než se vůbec dostane k PostingService, který
-        // by si období otevřel sám. Uzavřeného období se to nedotkne (vrátí ho beze změny).
-        $period = (new AccountingPeriodProvisioner($this->db, $this->periods, $this->logger))
-            ->ensureOpenPeriodForDate(
-                $supplierId,
-                $dateOut,
-                AccountingPeriodProvisioner::REASON_POSTING,
-                $this->userId($request),
-            );
-        if ($period === null) {
-            return Json::error($response, 'no_accounting_period', "Pro datum {$dateOut} neexistuje účetní období.", 422,
-                ['fiscal_year' => (int) substr($dateOut, 0, 4)]);
-        }
-        $fiscalYear = (int) $period['fiscal_year'];
-
         // Kontace Peníze na cestě (seed 1015); fallback 261.
         $rule = $this->rules->resolve($supplierId, 'transfer.money_in_transit');
         $transit = trim((string) ($rule['debit_account_code'] ?? ''));
@@ -133,8 +117,17 @@ final class JournalTransferAction
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            // Řada `transfer` se čísluje podle účetního období odchozí nohy (R14).
+            $period = (new AccountingPeriodProvisioner($this->db, $this->periods, $this->logger))
+                ->ensureOpenPeriodForDate($supplierId, $dateOut, AccountingPeriodProvisioner::REASON_POSTING, $this->userId($request));
+            if ($period === null) {
+                throw new PostingException('no_accounting_period', "Pro datum {$dateOut} neexistuje účetní období.", 422,
+                    ['fiscal_year' => (int) substr($dateOut, 0, 4)]);
+            }
+
             // Výdej čísla drží FOR UPDATE zámek do commitu — obě nohy + řada atomicky.
-            $documentNo = $this->series->next($supplierId, 'transfer', $fiscalYear);
+            $documentNo = $this->series->next($supplierId, 'transfer', (int) $period['fiscal_year']);
 
             $outId = $this->posting->postDocument($supplierId, 'manual', null, [
                 ['account_code' => $transit,     'side' => 'debit',  'amount' => $amount],

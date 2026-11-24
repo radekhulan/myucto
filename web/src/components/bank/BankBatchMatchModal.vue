@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { bankApi, type BankBatchMatchPreview, type BankBatchMatchResult, type BankBatchMatchTarget, type MatchCandidate } from '@/api/bank'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorMessage, postingPeriodErrorKey } from '@/api/errors'
 import { POSTING_REASON_KEYS } from '@/composables/useBankTransactionActions'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { useSupplierStore } from '@/stores/supplier'
@@ -120,9 +120,9 @@ async function confirm() {
 function postingLabel(id: number): string {
   const posting = resultById.value.get(id)
   if (posting?.action === 'posted') return t('bank.posting.matched_and_posted')
-  if (posting?.action === 'suggested') return t('bank.posting.matched_suggested')
   if (!posting || posting.reason === 'not_double_entry') return t('bank.batch_match.matched')
   const key = posting.reason && POSTING_REASON_KEYS[posting.reason]
+  if (posting.action === 'suggested' && !postingPeriodErrorKey(posting.reason ?? '')) return t('bank.posting.matched_suggested')
   return key ? t('bank.posting.matched_not_posted', { reason: t(key) }) : t('bank.batch_match.posting_pending')
 }
 

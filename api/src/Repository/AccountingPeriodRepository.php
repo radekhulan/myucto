@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\FiscalCalendar;
+use MyInvoice\Service\Accounting\PostingException;
 use PDO;
 
 /**
@@ -430,17 +432,30 @@ final class AccountingPeriodRepository
      * — otevřenost řeší PostingService), jinak založí období podle kalendáře účetního
      * roku firmy ({@see fiscalCalendar()}) jako open.
      *
+     * @param bool $forPosting běžné zaúčtování, mimo vědomé založení při aktivaci a seedování
      * @return array<string,mixed> období obsahující $date
      */
-    public function ensureOpenPeriodFor(int $supplierId, string $date): array
+    public function ensureOpenPeriodFor(int $supplierId, string $date, bool $forPosting = true): array
     {
-        $existing = $this->findForDate($supplierId, $date);
+        $currentRead = $forPosting && $this->db->pdo()->inTransaction();
+        $existing = $currentRead
+            ? $this->findForDateForUpdate($supplierId, $date)
+            : $this->findForDate($supplierId, $date);
         if ($existing !== null) {
             return $existing;
         }
+        if ($forPosting) {
+            $this->assertCanAutomaticallyOpenForPosting($supplierId, $date);
+        }
         $calendar = $this->fiscalCalendar($supplierId);
         $year = $calendar->fiscalYearOfDate($date);
-        $this->create($supplierId, $year, $calendar->periodStart($year), $calendar->periodEnd($year));
+        $this->create(
+            $supplierId,
+            $year,
+            $calendar->periodStart($year),
+            $calendar->periodEnd($year),
+            $forPosting ? AccountingPeriodProvisioner::REASON_POSTING : null,
+        );
         // create() může narazit na UNIQUE (supplier, year) jen když už rok existuje
         // s jinými hranicemi — pak findForDate výše vrátil null a tady dočteme znovu.
         $period = $this->findForDate($supplierId, $date);
@@ -448,6 +463,65 @@ final class AccountingPeriodRepository
             throw new \RuntimeException('Nepodařilo se zajistit účetní období pro ' . $date . '.');
         }
         return $period;
+    }
+
+    /**
+     * Kontrola před automatickým založením chybějícího období při účtování.
+     * První období a pokračování po konci řady se mohou založit automaticky.
+     * Mezeru uvnitř řady musí doplnit účetní, protože může být záměrná a nemusí
+     * odpovídat běžným hranicím účetního roku firmy.
+     */
+    public function assertCanAutomaticallyOpenForPosting(int $supplierId, string $date): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT MIN(starts_on) AS first_start, MAX(ends_on) AS last_end
+               FROM accounting_periods WHERE supplier_id = ?' . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$supplierId]);
+        $bounds = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($bounds['first_start'] === null || $date > $bounds['last_end']) {
+            return;
+        }
+        if ($date < $bounds['first_start']) {
+            throw new PostingException(
+                'period_before_start',
+                'Datum je před začátkem účetnictví firmy v MyÚčtu. Zkontrolujte, zda nejde o překlep v roce. '
+                . 'Pokud jde opravdu o starší rok, založte období ručně v Nástroje → Uzávěrka.',
+            );
+        }
+        throw new PostingException(
+            'period_gap',
+            'Datum spadá do mezery mezi účetními obdobími. Zkontrolujte datum, nebo chybějící období založte ručně v Nástroje → Uzávěrka.',
+        );
+    }
+
+    /**
+     * Otevřená období bez zápisu v deníku, která celá předcházejí známému začátku
+     * účetnictví. U starších instalací bez data aktivace lze použít období ze setupu.
+     * Bez těchto údajů se začátek z obsahu deníku neodhaduje.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function emptyBeforeAccountingStart(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT ap.id, ap.fiscal_year, ap.starts_on, ap.ends_on
+               FROM accounting_periods ap
+               JOIN supplier s ON s.id = ap.supplier_id
+              WHERE ap.supplier_id = ? AND ap.status = 'open' AND ap.approved_at IS NULL
+                AND (ap.created_reason IS NULL OR ap.created_reason = 'posting')
+                AND ap.ends_on < COALESCE(s.accounting_starts_on, (
+                    SELECT MIN(setup.starts_on) FROM accounting_periods setup
+                     WHERE setup.supplier_id = ap.supplier_id AND setup.created_reason = 'setup'
+                ))
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_entries je WHERE je.supplier_id = ap.supplier_id AND je.period_id = ap.id
+                )
+              ORDER BY ap.starts_on, ap.id"
+        );
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**

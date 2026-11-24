@@ -510,7 +510,7 @@ final class AssetService
             }
         }
         if ($bookEntry) {
-            $this->assertActivationBookable($supplierId, $asset, $date);
+            $this->assertActivationBookable($asset);
         }
 
         $pdo = $this->db->pdo();
@@ -519,9 +519,8 @@ final class AssetService
             $pdo->beginTransaction();
         }
         try {
-            $this->assets->update($supplierId, $id, ['status' => 'in_use', 'put_into_use_date' => $date]);
-
             if ($bookEntry) {
+                (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
                 $period = $this->periods->ensureOpenPeriodFor($supplierId, $date);
                 if ($period['status'] !== 'open') {
                     throw new AssetException(
@@ -529,6 +528,10 @@ final class AssetService
                         'Účetní období ' . $period['fiscal_year'] . ' je "' . $period['status'] . '" — zařazení nelze zaúčtovat.',
                     );
                 }
+            }
+            $this->assets->update($supplierId, $id, ['status' => 'in_use', 'put_into_use_date' => $date]);
+
+            if ($bookEntry) {
                 $amount = (float) $asset['input_price'];
                 foreach ($this->assets->improvements($id) as $imp) {
                     if ((string) $imp['completed_on'] <= $date) {
@@ -558,6 +561,13 @@ final class AssetService
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            if ($e instanceof PostingException && $e->errorCode === 'period_before_start') {
+                throw new AssetException(
+                    $e->errorCode,
+                    $e->getMessage() . ' Majetek převzatý v počátečních stavech zařaďte bez zápisu o zařazení.',
+                    $e->httpStatus,
+                );
+            }
             throw $this->translate($e);
         }
 
@@ -568,11 +578,10 @@ final class AssetService
      * Zápis o zařazení (MD 02x / D 042) jen u majetku pořízeného v účetnictví vedeném
      * v MyÚčtu. Karta s počátečními oprávkami (převod z jiného programu, historický
      * majetek) má cenu na 02x už v počátečních stavech, zápis by ji zaúčtoval podruhé.
-     * Datum před prvním účetním obdobím firmy by navíc založilo dávno minulé období.
      *
      * @param array<string,mixed> $asset
      */
-    private function assertActivationBookable(int $supplierId, array $asset, string $date): void
+    private function assertActivationBookable(array $asset): void
     {
         if ((int) $asset['opening_tax_years'] > 0 || (float) $asset['opening_tax_amount'] > 0.0
             || (int) $asset['opening_acc_months'] > 0 || (float) $asset['opening_acc_amount'] > 0.0) {
@@ -580,17 +589,6 @@ final class AssetService
                 'opening_state_entry',
                 'Karta má počáteční oprávky, majetek je tedy už v počátečních stavech účtu '
                     . $asset['asset_account_code'] . '. Zařaďte ji bez zápisu o zařazení, jinak by se pořizovací cena zaúčtovala podruhé.',
-            );
-        }
-        if ($this->periods->findForDate($supplierId, $date) !== null) {
-            return;
-        }
-        $later = $this->db->pdo()->prepare('SELECT 1 FROM accounting_periods WHERE supplier_id = ? AND starts_on > ? LIMIT 1');
-        $later->execute([$supplierId, $date]);
-        if ($later->fetchColumn() !== false) {
-            throw new AssetException(
-                'period_before_start',
-                'Datum zařazení je před prvním účetním obdobím firmy. Majetek pořízený před začátkem účetnictví v MyÚčtu patří do počátečních stavů, zařaďte ho bez zápisu o zařazení.',
             );
         }
     }
@@ -784,15 +782,6 @@ final class AssetService
             return $this->disposeTaxEvidence($supplierId, $id, $date, $type, $price, $saleInvoiceId);
         }
 
-        $period = $this->periods->ensureOpenPeriodFor($supplierId, $date);
-        if ($period['status'] !== 'open') {
-            throw new AssetException(
-                'period_not_open',
-                'Účetní období ' . $period['fiscal_year'] . ' je "' . $period['status'] . '" — vyřazení nelze zaúčtovat.',
-            );
-        }
-
-        $year = (int) $period['fiscal_year']; // label období vyřazení (hospodářský rok)
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
@@ -800,6 +789,14 @@ final class AssetService
         }
         try {
             (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            $period = $this->periods->ensureOpenPeriodFor($supplierId, $date);
+            if ($period['status'] !== 'open') {
+                throw new AssetException(
+                    'period_not_open',
+                    'Účetní období ' . $period['fiscal_year'] . ' je "' . $period['status'] . '". Vyřazení nelze zaúčtovat.',
+                );
+            }
+            $year = (int) $period['fiscal_year'];
             $lockedAsset = $this->assets->findForUpdate($supplierId, $id);
             if ($lockedAsset === null) {
                 throw new AssetException('not_found', 'Majetek nenalezen.', 404);

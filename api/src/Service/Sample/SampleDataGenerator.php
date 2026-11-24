@@ -921,7 +921,7 @@ final class SampleDataGenerator
 
         $currentYear = (int) $today->format('Y');
         for ($year = $currentYear - 2; $year <= $currentYear; $year++) {
-            $period = $this->periods->ensureOpenPeriodFor($supplierId, $year . '-06-30');
+            $period = $this->periods->ensureOpenPeriodFor($supplierId, $year . '-06-30', forPosting: false);
             if (($period['status'] ?? null) !== 'open') {
                 throw new \RuntimeException("Ukázková data nelze zaúčtovat: období {$year} není otevřené.");
             }
@@ -1249,7 +1249,7 @@ final class SampleDataGenerator
         }
 
         foreach (array_keys($years) as $year) {
-            $this->periods->ensureOpenPeriodFor($supplierId, $year . '-12-31');
+            $this->periods->ensureOpenPeriodFor($supplierId, $year . '-12-31', forPosting: false);
             $result = $this->depreciation->bookYear(
                 $supplierId,
                 (int) $year,
