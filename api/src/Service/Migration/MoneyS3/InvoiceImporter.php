@@ -109,7 +109,7 @@ final class InvoiceImporter
             }
         }
 
-        foreach ($ctx->backup->rowsAcrossYears('PFaktury') as $r) {
+        foreach (self::sourceInvoices($ctx->backup, false, onlyDirs: $ctx->dirYears + $ctx->openingDocumentDirs) as [$r, $sourceItems]) {
             $year = $ctx->yearOf($r);
             // Doklad z let před prvním převáděným rokem, otevřený k jeho začátku ({@see OpeningDocuments}).
             $opening = $year === null && ($year = OpeningDocuments::yearOf($ctx, $r, false)) !== null;
@@ -117,7 +117,7 @@ final class InvoiceImporter
             if ($year === null || $docNo === '') {
                 continue;
             }
-            $key = $year . '|' . $docNo;
+            $key = self::documentKey($year, $docNo);
             if (isset($existing[$key]) && $opening) {
                 $ctx->openingPurchases[$key] = $existing[$key];
                 $p->count(self::STEP_PURCHASE, 'opening_existing');
@@ -126,7 +126,7 @@ final class InvoiceImporter
             if (isset($existing[$key])) {
                 $ctx->purchaseInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_PURCHASE, 'existing');
-                $this->refreshExisting($ctx, false, $refresh, $key, $existing[$key], $docNo, $year, $r);
+                $this->refreshExisting($ctx, false, $refresh, $key, $existing[$key], $docNo, $year, $r, $sourceItems);
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_PURCHASE)) {
@@ -271,7 +271,7 @@ final class InvoiceImporter
                 $p->warn(self::STEP_PURCHASE, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
-            $items = self::purchaseItems($r, $amounts, $class, $assets);
+            $items = self::purchaseItems($r, $amounts, $class, $assets, self::lineDescriptions($sourceItems));
             $this->writer->insertPurchaseItems($id, $items);
             $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint(DocumentRefresh::sourceHash($r),
                 DocumentRefresh::stateHash($issue, $taxDate, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
@@ -317,13 +317,6 @@ final class InvoiceImporter
         $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
         $refresh = $this->refreshState($ctx, true, $existing);
-        $itemCodes = [];
-        foreach ($ctx->backup->rowsAcrossYears('VFaktPol', ['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) as $item) {
-            if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
-                $itemCodes[$item['__dir'] . '|' . (int) ($item['Cislo'] ?? 0)][] = $item;
-            }
-        }
-
         if (!$ctx->taxRecords) {
             foreach (OpeningDocuments::plan($ctx, $this->db->pdo(), true, self::STEP_ISSUED, $existing) as $key => $id) {
                 $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
@@ -331,7 +324,7 @@ final class InvoiceImporter
             }
         }
         $clients = [];
-        foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
+        foreach (self::sourceInvoices($ctx->backup, true, onlyDirs: $ctx->dirYears + $ctx->openingDocumentDirs) as [$r, $sourceItems]) {
             $year = $ctx->yearOf($r);
             // Doklad z let před prvním převáděným rokem, otevřený k jeho začátku ({@see OpeningDocuments}).
             $opening = $year === null && ($year = OpeningDocuments::yearOf($ctx, $r, true)) !== null;
@@ -339,7 +332,7 @@ final class InvoiceImporter
             if ($year === null || $docNo === '') {
                 continue;
             }
-            $key = $year . '|' . $docNo;
+            $key = self::documentKey($year, $docNo);
             if (isset($existing[$key]) && $opening) {
                 $ctx->openingIssued[$key] = $existing[$key];
                 $p->count(self::STEP_ISSUED, 'opening_existing');
@@ -348,8 +341,7 @@ final class InvoiceImporter
             if (isset($existing[$key])) {
                 $ctx->issuedInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_ISSUED, 'existing');
-                $this->refreshExisting($ctx, true, $refresh, $key, $existing[$key], $docNo, $year, $r,
-                    self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
+                $this->refreshExisting($ctx, true, $refresh, $key, $existing[$key], $docNo, $year, $r, $sourceItems);
                 continue;
             }
             if ($ctx->skipsNew(self::STEP_ISSUED)) {
@@ -385,7 +377,7 @@ final class InvoiceImporter
                 $this->skipUnknownRate($ctx, self::STEP_ISSUED, $docNo, $year, $e);
                 continue;
             }
-            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems));
             // Ř. 26 (`19Ř26`) u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
             $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
             foreach ($amounts['items'] as $i => $item) {
@@ -453,7 +445,7 @@ final class InvoiceImporter
                 continue;
             }
             $clients[$clientId] = $clientId;
-            $items = self::issuedItems($r, $amounts, $class);
+            $items = self::issuedItems($r, $amounts, $class, self::lineDescriptions($sourceItems));
             $this->writer->insertIssuedItems($id, $items);
             $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint(DocumentRefresh::sourceHash($r),
                 DocumentRefresh::stateHash($issue, self::date($r, ['PlnenoDPH']) ?? $issue, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
@@ -584,7 +576,7 @@ final class InvoiceImporter
             foreach ($items as $i => $item) {
                 $this->writer->insertIssuedItem(
                     $id,
-                    self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $resolved['code']),
+                    self::issuedItem(self::headerDescription($r), $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $resolved['code']),
                     $i,
                 );
             }
@@ -734,6 +726,9 @@ final class InvoiceImporter
         $header = trim((string) ($r['KodDPH'] ?? ''));
         $byRate = [];
         foreach ($items as $item) {
+            if (round((float) ($item['Cena'] ?? 0), 2) === 0.0) {
+                continue;
+            }
             $code = trim((string) ($item['KodDPH'] ?? '')) ?: $header;
             $byRate[self::rateKey((float) ($item['SazbaDPH'] ?? 0))][$code] = true;
         }
@@ -782,9 +777,63 @@ final class InvoiceImporter
         return [$header, $amounts];
     }
 
-    private static function rateKey(float $rate): string
+    public static function rateKey(float $rate): string
     {
         return rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
+    }
+
+    public static function documentKey(int $year, string $docNo): string
+    {
+        return $year . '|' . $docNo;
+    }
+
+    /**
+     * @param array<string,int> $onlyDirs rok podle adresáře
+     * @param list<string>|null $fields pole hlavičky
+     * @return \Generator<int,array{array<string,mixed>,list<array<string,mixed>>}>
+     */
+    public static function sourceInvoices(Ms3Backup $backup, bool $issued, array $onlyDirs, ?array $fields = null): \Generator
+    {
+        $itemFields = ['Cislo', 'Popis', 'SazbaDPH', 'Poradi', 'CisloPoloz', 'KodDPH', 'Cena'];
+        foreach ($backup->yearDirs() as $path) {
+            $dir = basename($path);
+            if (!isset($onlyDirs[$dir])) {
+                continue;
+            }
+            $sourceItems = [];
+            foreach ($backup->table($issued ? 'VFaktPol' : 'PFaktPol', $path)?->rows($itemFields) ?? [] as $item) {
+                $sourceItems[(int) ($item['Cislo'] ?? 0)][] = $item;
+            }
+            foreach ($backup->table($issued ? 'VFaktury' : 'PFaktury', $path)?->rows($fields) ?? [] as $r) {
+                $r['__dir'] = $dir;
+                yield [$r, $sourceItems[(int) ($r['Cislo'] ?? 0)] ?? []];
+            }
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @return array<int|string,string> sazba => popis z položek Money
+     */
+    public static function lineDescriptions(array $items): array
+    {
+        usort($items, static fn (array $a, array $b): int =>
+            [(int) ($a['Poradi'] ?? $a['CisloPoloz'] ?? 0), (int) ($a['CisloPoloz'] ?? 0)]
+            <=> [(int) ($b['Poradi'] ?? $b['CisloPoloz'] ?? 0), (int) ($b['CisloPoloz'] ?? 0)]);
+        $byRate = [];
+        foreach ($items as $item) {
+            $description = trim((string) ($item['Popis'] ?? ''));
+            if ($description !== '') {
+                $byRate[self::rateKey((float) ($item['SazbaDPH'] ?? 0))][$description] = $description;
+            }
+        }
+        return array_map(static fn (array $descriptions): string => mb_strcut(implode('; ', $descriptions), 0, 65535, 'UTF-8'), $byRate);
+    }
+
+    /** @param array<string,mixed> $r */
+    private static function headerDescription(array $r): string
+    {
+        return trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3';
     }
 
     /**
@@ -1141,9 +1190,9 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $refresh {@see refreshState()}
      * @param array<string,mixed> $r
-     * @param list<array<string,mixed>> $lineCodes členění řádků vydané faktury ({@see lineCodes()})
+     * @param list<array<string,mixed>> $sourceItems položky faktury Money
      */
-    private function refreshExisting(ImportContext $ctx, bool $issued, array &$refresh, string $key, int $id, string $docNo, int $year, array $r, array $lineCodes = []): void
+    private function refreshExisting(ImportContext $ctx, bool $issued, array &$refresh, string $key, int $id, string $docNo, int $year, array $r, array $sourceItems): void
     {
         $step = $issued ? self::STEP_ISSUED : self::STEP_PURCHASE;
         $table = $issued ? 'invoices' : 'purchase_invoices';
@@ -1169,7 +1218,7 @@ final class InvoiceImporter
         // aktualizace nepřenese - doklad se ponechá a ohlásí.
         $updated = !DocumentRefresh::otherFieldsChanged($stored, $source)
             && substr($stored, 32) === $current['state'] && !isset($refresh['touched'][$id])
-            && $this->updateDocument($ctx, $issued, $id, $r, $current, $lineCodes);
+            && $this->updateDocument($ctx, $issued, $id, $r, $current, $sourceItems);
         if (!$updated) {
             $refresh['kept'][] = $label;
             $ctx->protocol->count($step, 'changed');
@@ -1185,11 +1234,11 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $r
      * @param array<string,mixed> $current {@see DocumentRefresh::states()}
-     * @param list<array<string,mixed>> $lineCodes
+     * @param list<array<string,mixed>> $sourceItems
      */
-    private function updateDocument(ImportContext $ctx, bool $issued, int $id, array $r, array $current, array $lineCodes): bool
+    private function updateDocument(ImportContext $ctx, bool $issued, int $id, array $r, array $current, array $sourceItems): bool
     {
-        $prepared = $this->prepareUpdate($ctx, $issued, $r, $current, $lineCodes);
+        $prepared = $this->prepareUpdate($ctx, $issued, $r, $current, $sourceItems);
         if ($prepared === null) {
             return false;
         }
@@ -1208,10 +1257,10 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $r
      * @param array<string,mixed> $current {@see DocumentRefresh::states()}
-     * @param list<array<string,mixed>> $lineCodes
+     * @param list<array<string,mixed>> $sourceItems
      * @return array{header:array{issue_date:string,tax_date:string,due_date:string,base:float,vat:float,total:float,rounding:float},items:list<MigratedDocumentItem>}|null
      */
-    private function prepareUpdate(ImportContext $ctx, bool $issued, array $r, array $current, array $lineCodes, bool $quiet = false): ?array
+    private function prepareUpdate(ImportContext $ctx, bool $issued, array $r, array $current, array $sourceItems, bool $quiet = false): ?array
     {
         $issue = self::date($r, ['Vystaveno', 'DatUcPr']);
         if ($issue === null || !in_array($current['status'], $issued ? ['issued', 'sent', 'reminded', 'paid'] : ['received', 'booked', 'paid'], true)
@@ -1234,7 +1283,7 @@ final class InvoiceImporter
             return null;
         }
         if ($issued) {
-            [$class, $amounts] = self::classifyLines($r, true, $amounts, $lineCodes);
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems));
             if ($current['client_id'] !== null) {
                 $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $current['client_id']);
                 foreach ($amounts['items'] as $i => $item) {
@@ -1246,7 +1295,7 @@ final class InvoiceImporter
             if ($class['reasons'] !== [] || $class['kind'] !== $current['invoice_type'] || $class['code'] !== $current['vat_classification_code']) {
                 return null;
             }
-            $items = self::issuedItems($r, $amounts, $class);
+            $items = self::issuedItems($r, $amounts, $class, self::lineDescriptions($sourceItems));
         } else {
             $class = self::classify($r, false, $amounts['vat']);
             if ($class['reasons'] !== [] || (int) ($r['RevCH'] ?? 0) === 1 || $class['kind'] !== $current['document_kind'] || $class['code'] !== $current['vat_classification_code']) {
@@ -1254,7 +1303,7 @@ final class InvoiceImporter
             }
             $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'],
                 ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
-            $items = self::purchaseItems($r, $amounts, $class, $assets);
+            $items = self::purchaseItems($r, $amounts, $class, $assets, self::lineDescriptions($sourceItems));
         }
         return ['header' => [
             'issue_date' => $issue, 'tax_date' => $taxDate, 'due_date' => self::date($r, ['Splatno']) ?? $issue,
@@ -1296,7 +1345,7 @@ final class InvoiceImporter
         return !DocumentRefresh::otherFieldsChanged($stored, $hash)
             && substr($stored, 32) === $current['state']
             && $this->documentRefresh->touched($ctx->supplierId, $issued, [$docId], $ctx->keptEntries) === []
-            && $this->prepareUpdate($ctx, $issued, $r, $current, $issued ? self::lineCodes($r, $source['codes'][$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []) : [], true) !== null;
+            && $this->prepareUpdate($ctx, $issued, $r, $current, $source['codes'][$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? [], true) !== null;
     }
 
     /**
@@ -1341,7 +1390,7 @@ final class InvoiceImporter
             foreach ($ctx->backup->table($issued ? 'VFaktury' : 'PFaktury', $path)?->rows() ?? [] as $r) {
                 $docNo = trim((string) ($r['Doklad'] ?? ''));
                 if ($docNo !== '') {
-                    $rows[$year . '|' . $docNo] = ['__dir' => (string) $dir] + $r;
+                    $rows[self::documentKey($year, $docNo)] = ['__dir' => (string) $dir] + $r;
                 }
             }
             if ($issued) {
@@ -1388,14 +1437,15 @@ final class InvoiceImporter
      * @param array{items:list<array<string,mixed>>} $amounts
      * @param array<string,mixed> $class
      * @param array<int,bool> $assets
+     * @param array<int|string,string> $descriptions
      * @return list<MigratedDocumentItem>
      */
-    private static function purchaseItems(array $r, array $amounts, array $class, array $assets): array
+    private static function purchaseItems(array $r, array $amounts, array $class, array $assets, array $descriptions): array
     {
         $items = [];
         foreach ($amounts['items'] as $i => $item) {
             $items[$i] = MigratedDocumentItem::purchase(
-                trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
+                $descriptions[self::rateKey($item['rate'])] ?? self::headerDescription($r),
                 1.0, 'ks', $item['base'], $item['rate_id'], $item['rate'],
                 $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['code'] ?? $class['code'],
@@ -1410,13 +1460,15 @@ final class InvoiceImporter
      *
      * @param array{items:list<array<string,mixed>>} $amounts
      * @param array<string,mixed> $class
+     * @param array<int|string,string> $descriptions
      * @return list<MigratedDocumentItem>
      */
-    private static function issuedItems(array $r, array $amounts, array $class): array
+    private static function issuedItems(array $r, array $amounts, array $class, array $descriptions): array
     {
         $items = [];
         foreach ($amounts['items'] as $i => $item) {
-            $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
+            $items[$i] = self::issuedItem($descriptions[self::rateKey($item['rate'])] ?? self::headerDescription($r),
+                $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
         }
         return $items;
     }
@@ -1624,13 +1676,11 @@ final class InvoiceImporter
      * {@see OssMigrationPolicy} - Pohoda na rozdíl od Money nese na položce sazbu státu
      * spotřeby i měrnou jednotku, takže je z čeho rozhodovat. Sjednotit to jde teprve
      * tehdy, až půjde z Money zjistit totéž.
-     *
-     * @param array<string,mixed> $r
      */
-    private static function issuedItem(array $r, float $base, float $vat, int $rateId, float $rate, ?string $code): MigratedDocumentItem
+    private static function issuedItem(string $description, float $base, float $vat, int $rateId, float $rate, ?string $code): MigratedDocumentItem
     {
         return MigratedDocumentItem::issued(
-            trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
+            $description,
             1.0, 'ks', $base, $rateId, $rate,
             $base, $vat, round($base + $vat, 2),
             $code,
