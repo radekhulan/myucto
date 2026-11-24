@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Submission;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
@@ -107,6 +109,10 @@ final readonly class PayrollMonthlyChecklistService
         // Závora přípravy měsíčního hlášení (období neskončilo, ročník nejde
         // sestavit). Volitelná jako ostatní rozšíření: bez ní se nic nezhasíná.
         private ?JmhzPreparationGate $jmhzGate = null,
+        // Vypořádání povinností mimo vlastní podání (předchozí program,
+        // hromadné oznámení pojišťovně) — tatáž pravidla jako hlídač termínů.
+        private ?PayrollHistoricalPeriodService $historicalPeriods = null,
+        private ?HealthInsuranceSubmissionService $healthNotifications = null,
     ) {}
 
     /**
@@ -171,7 +177,13 @@ final readonly class PayrollMonthlyChecklistService
 
         $items = [
             ...$this->withUnfiledJmhzPreparation(
-                $this->submissionRows($registered, $transport, $outboxes, $environment, $signingReady),
+                $this->submissionRows(
+                    $this->withoutSettledElsewhere($supplierId, $environment, $registered),
+                    $transport,
+                    $outboxes,
+                    $environment,
+                    $signingReady,
+                ),
             ),
             ...array_map(
                 static fn (array $row): array => $row + ['outside_period' => true],
@@ -220,6 +232,39 @@ final readonly class PayrollMonthlyChecklistService
             'summary' => $summary,
             'items' => $items,
         ];
+    }
+
+    /**
+     * Povinnosti z evidence, které splnil někdo jiný než vlastní podání:
+     * událost vyřízená předchozím programem
+     * ({@see PayrollPredecessorObligationScope::storedObligationHandledByPredecessor()})
+     * a oznámení pojišťovně pokryté odeslaným hromadným oznámením
+     * ({@see HealthInsuranceSubmissionService::bulkNotifiedAmong()}). Tatáž
+     * pravidla jako hlídač termínů; kdyby je tady přehled neznal, hlásil by
+     * jako nesplněné to, o čem Termíny mlčí. Doplněk k evidenci (agendové
+     * povinnosti) dál vychází z CELÉ evidence, filtr se týká jen výpisu.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withoutSettledElsewhere(int $supplierId, string $environment, array $rows): array
+    {
+        $startPeriod = $this->historicalPeriods?->startPeriod($supplierId);
+        $bulkNotified = $this->healthNotifications?->bulkNotifiedAmong($supplierId, $environment, $rows) ?? [];
+
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => !PayrollPredecessorObligationScope::storedObligationHandledByPredecessor(
+                $startPeriod,
+                (string) ($row['source_event_type'] ?? ''),
+                (string) $row['period_start'],
+                (string) $row['due_on'],
+                $row['latest_submission']['status'] ?? null,
+            ) && !(
+                ($row['source_event_type'] ?? null) === HealthInsuranceSubmissionService::SOURCE_EVENT_NOTIFICATION
+                && isset($bulkNotified[(string) ($row['source_event_reference'] ?? '')])
+            ),
+        ));
     }
 
     /**

@@ -8,10 +8,14 @@ use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
@@ -42,7 +46,9 @@ use Psr\Clock\ClockInterface;
  * 1. **podání** — `payroll_obligations` + `payroll_submission_deadlines`,
  *    tedy tatáž evidence, ze které žije obrazovka podání; stav se posuzuje
  *    {@see PayrollDeadlineAssessmentService}, aby přehled a detail povinnosti
- *    neříkaly o jednom termínu dvě různé věci,
+ *    neříkaly o jednom termínu dvě různé věci; měsíční hlášení, které ještě
+ *    v evidenci není, doplní tytéž prameny jako Měsíční přehled (schválený
+ *    běh, převzatý měsíc, měsíc čekající na běh),
  * 2. **odvody** — nezaplacené závazky ze splatnosti podle
  *    {@see PayrollLevyDeadlinePolicy} (pojistné, zálohová a srážková daň),
  * 3. **lhůty u lidí** — nevyřízené položky nástupního a výstupního checklistu
@@ -201,6 +207,9 @@ final readonly class PayrollDeadlineOverviewService
         private ClockInterface $clock,
         private ?JmhzPredecessorGapService $predecessorGaps = null,
         private ?PayrollAwaitingRunDutyService $awaitingRuns = null,
+        private ?PayrollMonthlyAgendaDutyService $agendaDuties = null,
+        private ?PayrollHistoricalPeriodService $historicalPeriods = null,
+        private ?HealthInsuranceSubmissionService $healthNotifications = null,
     ) {}
 
     /**
@@ -469,6 +478,7 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->submissionItems($supplierId, $environment, $from, $to),
             ...$this->predecessorJmhzItems($supplierId, $environment, $from, $to),
             ...$this->awaitingRunItems($supplierId, $from, $to),
+            ...$this->agendaDutyItems($supplierId, $environment, $from, $to),
             ...$this->levyItems($supplierId, $from, $to),
             ...$this->checklistItems($supplierId, $from, $to),
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
@@ -669,27 +679,67 @@ final readonly class PayrollDeadlineOverviewService
         ]);
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Podání z evidence povinností.
+     *
+     * Dvě povinnosti z evidence hlídač vědomě nepřipomíná, i když nejsou
+     * splněné:
+     *
+     * - **událost vyřízenou předchozím programem** (přihláška či odhláška
+     *   ČSSZ, oznámení pojišťovně za událost před prvním mzdovým obdobím
+     *   v MyÚčtu, {@see PayrollPredecessorObligationScope::storedObligationHandledByPredecessor()}),
+     *   dokud k ní z MyÚčta nic neodešlo. Odeslané podání má vlastní průběh
+     *   (čeká na výsledek, odmítnutí) a ten se hlídá dál.
+     * - **oznámení pojišťovně pokryté hromadným oznámením**, které už odešlo
+     *   ({@see HealthInsuranceSubmissionService::bulkNotifiedDutyReferences()}).
+     *   Hromadné oznámení samo zůstává v přehledu, dokud ho pojišťovna
+     *   nevyřídí; hlásit vedle něj i každou zahrnutou událost zvlášť by
+     *   tvrdilo, že je nesplněná.
+     *
+     * Odeslané podání čekající na výsledek nese `submitted_late` (odešlo po
+     * lhůtě) a `dispatched_via_isds` (odpověď úřadu přijde do datové
+     * schránky a je třeba ji tam vyzvednout).
+     *
+     * @return list<array<string,mixed>>
+     */
     private function submissionItems(
         int $supplierId,
         string $environment,
         string $from,
         string $to,
     ): array {
-        $items = [];
-        foreach ($this->repository->submissionDeadlines(
+        $startPeriod = $this->historicalPeriods?->startPeriod($supplierId);
+        $rows = $this->repository->submissionDeadlines(
             $supplierId,
             $environment,
             $from,
             $to,
-        ) as $row) {
+        );
+        $bulkNotified = $this->healthNotifications?->bulkNotifiedAmong($supplierId, $environment, $rows) ?? [];
+        $items = [];
+        foreach ($rows as $row) {
+            $submissionStatus = $row['submission_status'] === null
+                ? null
+                : (string) $row['submission_status'];
+            if (PayrollPredecessorObligationScope::storedObligationHandledByPredecessor(
+                $startPeriod,
+                (string) $row['source_event_type'],
+                (string) $row['period_start'],
+                (string) $row['due_on'],
+                $submissionStatus,
+            )) {
+                continue;
+            }
+            if (isset($bulkNotified[(string) $row['source_event_reference']])
+                && (string) $row['source_event_type'] === HealthInsuranceSubmissionService::SOURCE_EVENT_NOTIFICATION
+            ) {
+                continue;
+            }
             $assessment = $this->assessments->assess(
                 (string) $row['earliest_submission_on'],
                 (string) $row['due_on'],
                 (string) $row['status'],
-                $row['submission_status'] === null
-                    ? null
-                    : (string) $row['submission_status'],
+                $submissionStatus,
             );
             // `not_open` a `fulfilled` do hlídače nepatří: první ještě nejde
             // podat, druhý je hotový. Kdyby se ukazovaly, tvořily by většinu
@@ -701,6 +751,7 @@ final readonly class PayrollDeadlineOverviewService
             )) {
                 continue;
             }
+            $submittedAt = $row['submission_submitted_at'] ?? null;
             $items[] = [
                 'source' => 'submission',
                 'reference' => 'payroll_obligation:' . (int) $row['obligation_id'],
@@ -721,8 +772,86 @@ final readonly class PayrollDeadlineOverviewService
                 'is_overdue' => $assessment->isOverdue,
                 'status' => (string) $row['status'],
                 'submission_status' => $row['submission_status'],
+                'submitted_at' => $submittedAt === null ? null : (string) $submittedAt,
+                // Den odeslání v pražském čase proti poslednímu dni lhůty.
+                'submitted_late' => $submittedAt !== null
+                    && self::pragueDate((string) $submittedAt) > (string) $row['due_on'],
+                'dispatched_via_isds' => (bool) ($row['dispatched_via_isds'] ?? false),
                 'ruleset_id' => (string) $row['ruleset_id'],
                 'path' => '/payroll/submissions',
+            ];
+        }
+
+        return $items;
+    }
+
+    private static function pragueDate(string $dateTime): string
+    {
+        return (new \DateTimeImmutable($dateTime, new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('Europe/Prague'))
+            ->format('Y-m-d');
+    }
+
+    /**
+     * Měsíční hlášení JMHZ ze SCHVÁLENÉHO běhu, ke kterému v evidenci není
+     * povinnost ({@see PayrollMonthlyAgendaDutyService::unpreparedInWindow()}).
+     *
+     * Dřív přehled skládal měsíční hlášení jen z evidence, z převzatých měsíců
+     * a z měsíců BEZ schváleného běhu. Měsíc, ve kterém účetní běh schválila
+     * a hlášení nepřipravila, tak z hlídače zmizel přesně ve chvíli, kdy na
+     * ní byla řada — Měsíční přehled ho přitom hlásil jako „Nepřipraveno".
+     * Pramen je tentýž jako v Měsíčním přehledu, takže obě obrazovky mluví
+     * o téže povinnosti stejně, a disjunktní s ostatními: evidovanou
+     * povinnost vynechá doplněk k evidenci, převzatý měsíc ani měsíc bez
+     * schváleného běhu schválený vlastní běh nemají.
+     *
+     * Přehledy o platbě pojistného z téhož pramene se sem vědomě neberou.
+     * Hlídač se dívá 400 dnů zpět a přehled o platbě, který firma podává
+     * mimo aplikaci (portál pojišťovny), v MyÚčtu nejde označit jako podaný
+     * jinde. Každý měsíc by tak přidal po termínu jeden řádek za každou
+     * pojišťovnu, který nejde vyřídit, a mezi nimi by zaniklo to podstatné.
+     * Měsíční přehled je dál ukazuje za zvolený měsíc.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function agendaDutyItems(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
+        if ($this->agendaDuties === null) {
+            return [];
+        }
+        $items = [];
+        foreach ($this->agendaDuties->unpreparedInWindow(
+            $supplierId,
+            $environment,
+            $from,
+            $to,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
+        ) as $duty) {
+            if ($duty['phase'] === 'not_open') {
+                continue;
+            }
+            $items[] = [
+                'source' => 'submission',
+                'reference' => (string) $duty['key'],
+                'title' => (string) $duty['agenda_code'],
+                'subject' => 'schválený mzdový běh – hlášení není připravené',
+                'period' => (string) $duty['period'],
+                'due_on' => (string) $duty['due_on'],
+                'phase' => (string) $duty['phase'],
+                'days_to_due' => (int) $duty['days_to_due'],
+                'is_overdue' => (bool) $duty['is_overdue'],
+                'status' => 'not_prepared',
+                'submission_status' => null,
+                'submitted_at' => null,
+                'submitted_late' => false,
+                'dispatched_via_isds' => false,
+                'ruleset_id' => (string) $duty['deadline_ruleset_id'],
+                'run_id' => (int) $duty['run_id'],
+                'path' => '/payroll/submissions/jmhz',
             ];
         }
 

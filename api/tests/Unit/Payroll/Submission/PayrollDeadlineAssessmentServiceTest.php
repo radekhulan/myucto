@@ -93,16 +93,45 @@ final class PayrollDeadlineAssessmentServiceTest extends TestCase
                 'is_overdue' => false,
             ],
         ];
-        yield 'overdue without effective receipt' => [
+        yield 'overdue when nothing was sent' => [
             '2026-08-01',
             '2026-08-14',
-            'submitted',
-            'submitted',
+            'prepared',
+            'ready',
             [
                 'phase' => 'overdue',
                 'days_to_due' => -1,
                 'is_action_required' => true,
                 'is_overdue' => true,
+            ],
+        ];
+        /*
+         * Odeslané podání po lhůtě čeká na výsledek, ne „po termínu":
+         * přijetí úřadu jen v aplikaci ještě není. Dřív tu svítilo overdue
+         * a obsluha odeslané podání brala jako nesplněné.
+         */
+        yield 'submitted after due awaits result' => [
+            '2026-08-01',
+            '2026-08-14',
+            'submitted',
+            'submitted',
+            [
+                'phase' => 'awaiting_result',
+                'days_to_due' => -1,
+                'is_action_required' => false,
+                'is_overdue' => false,
+            ],
+        ];
+        yield 'submitted obligation without submission row awaits result' => [
+            '2026-08-01',
+            '2026-08-10',
+            'submitted',
+            null,
+            [
+                'phase' => 'awaiting_result',
+                'days_to_due' => -5,
+                'is_action_required' => false,
+                'is_overdue' => false,
             ],
         ];
         yield 'submitted awaits result before due' => [

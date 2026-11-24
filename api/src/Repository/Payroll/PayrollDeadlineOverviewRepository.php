@@ -43,11 +43,20 @@ final readonly class PayrollDeadlineOverviewRepository
     /**
      * Nesplněné povinnosti podání s termínem v okně.
      *
+     * Vedle stavu posledního podání nese i to, KDY a KUDY odešlo: odeslané
+     * podání čeká na výsledek ({@see \MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService})
+     * a přehled u něj potřebuje říct, jestli šlo po lhůtě a jestli odpověď
+     * leží v datové schránce. `dispatched_via_isds` se čte z odchozí fronty
+     * schránky, ne z kanálu podání: kanál podání popisuje přípravu, fronta
+     * skutečné odeslání (stejné pravidlo jako Měsíční přehled).
+     *
      * @return list<array{
      *   obligation_id:int,agenda_code:string,subject_type:string,
      *   subject_reference:string,period_start:string,period_end:string,
-     *   status:string,earliest_submission_on:string,due_on:string,
-     *   ruleset_id:string,submission_status:?string
+     *   status:string,source_event_type:string,source_event_reference:string,
+     *   earliest_submission_on:string,
+     *   due_on:string,ruleset_id:string,submission_status:?string,
+     *   submission_submitted_at:?string,dispatched_via_isds:int
      * }>
      */
     public function submissionDeadlines(
@@ -64,22 +73,44 @@ final readonly class PayrollDeadlineOverviewRepository
                     obligation.period_start,
                     obligation.period_end,
                     obligation.status,
+                    obligation.source_event_type,
+                    obligation.source_event_reference,
                     deadline.earliest_submission_on,
                     deadline.due_on,
                     deadline.ruleset_id,
-                    (SELECT submission.status
-                       FROM payroll_submissions submission
-                      WHERE submission.supplier_id = obligation.supplier_id
-                        AND submission.environment = obligation.environment
-                        AND submission.obligation_id = obligation.id
-                      ORDER BY submission.created_at DESC, submission.id DESC
-                      LIMIT 1) AS submission_status
+                    latest.status AS submission_status,
+                    latest.submitted_at AS submission_submitted_at,
+                    CASE WHEN latest.id IS NULL THEN 0 ELSE EXISTS (
+                        SELECT 1
+                          FROM payroll_submission_artifacts artifact
+                          JOIN submission_outbox outbox
+                            ON outbox.supplier_id = artifact.supplier_id
+                           AND outbox.artifact_kind = \'payroll_submission\'
+                           AND outbox.artifact_id = artifact.id
+                         WHERE artifact.supplier_id = latest.supplier_id
+                           AND artifact.environment = latest.environment
+                           AND artifact.submission_id = latest.id
+                           AND outbox.environment = latest.environment
+                           AND outbox.channel = \'isds\'
+                    ) END AS dispatched_via_isds
                FROM payroll_obligations obligation
                JOIN payroll_submission_deadlines deadline
                  ON deadline.supplier_id = obligation.supplier_id
                 AND deadline.environment = obligation.environment
                 AND deadline.obligation_id = obligation.id
                 AND deadline.deadline_kind = \'regular\'
+          LEFT JOIN payroll_submissions latest
+                 ON latest.supplier_id = obligation.supplier_id
+                AND latest.environment = obligation.environment
+                AND latest.id = (
+                    SELECT submission.id
+                      FROM payroll_submissions submission
+                     WHERE submission.supplier_id = obligation.supplier_id
+                       AND submission.environment = obligation.environment
+                       AND submission.obligation_id = obligation.id
+                     ORDER BY submission.created_at DESC, submission.id DESC
+                     LIMIT 1
+                )
               WHERE obligation.supplier_id = ?
                 AND obligation.environment = ?
                 AND obligation.status NOT IN (\'fulfilled\', \'cancelled\')

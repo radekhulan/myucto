@@ -70,6 +70,11 @@ final readonly class PayrollMonthlyAgendaDutyService
      * vrací {@see \MyInvoice\Repository\Payroll\PayrollSubmissionRepository::listOverview()}
      * — tedy přesně to, co si volající o období z evidence přečetl.
      *
+     * Měsíční hlášení, které za období podal předchozí program nebo portál
+     * ČSSZ mimo MyÚčto (převzatý doklad i potvrzení účetní), povinnost
+     * splnilo: druhé řádné hlášení příprava stejně odmítne, takže nabízet ho
+     * jako nepřipravené by vedlo jen k chybě.
+     *
      * @param string $period RRRR-MM
      * @param list<array{agenda_code:string,subject_reference:string}> $registered
      * @return list<array{
@@ -85,11 +90,78 @@ final readonly class PayrollMonthlyAgendaDutyService
         array $registered,
     ): array {
         $duties = [];
+        $filedElsewhere = null;
         foreach ($this->all($supplierId, $period) as $duty) {
             if (self::isRegistered($duty, $registered)) {
                 continue;
             }
+            if ($duty['agenda_code'] === JmhzSubmissionBridgeService::AGENDA_CODE) {
+                $filedElsewhere ??= $this->repository->externallyFiledMonthlyPeriods($supplierId, [$period]);
+                if (in_array($period, $filedElsewhere, true)) {
+                    continue;
+                }
+            }
             $duties[] = $duty;
+        }
+
+        return $duties;
+    }
+
+    /**
+     * Agendové povinnosti bez evidovaného podání, jejichž lhůta padne do okna
+     * `[$fromDue, $toDue]` — pro hlídač termínů, který se neptá na jeden měsíc,
+     * ale na „co je po termínu a co hoří".
+     *
+     * Tatáž pravidla jako {@see self::unprepared()} pro jeden měsíc (stejná
+     * povinnost z {@see self::all()}, stejný doplněk k evidenci, stejné
+     * vyřazení hlášení podaného mimo MyÚčto), takže Termíny a Měsíční
+     * přehled o téže povinnosti nemůžou mluvit jinak. Evidence se čte JEDNÍM
+     * dotazem za celé okno; snímky běhů jen u měsíců, které schválený běh
+     * opravdu mají.
+     *
+     * @param list<string> $agendaCodes které agendy volajícího zajímají
+     * @return list<array<string,mixed>>
+     */
+    public function unpreparedInWindow(
+        int $supplierId,
+        string $environment,
+        string $fromDue,
+        string $toDue,
+        array $agendaCodes,
+    ): array {
+        // Lhůta měsíčního hlášení i přehledu o platbě padne do měsíce po
+        // období; dva měsíce rezervy pokryjí i posun lhůty přes svátky.
+        $fromPeriod = (new \DateTimeImmutable(substr($fromDue, 0, 7) . '-01'))
+            ->modify('-2 months')
+            ->format('Y-m-d');
+        $toPeriod = substr($toDue, 0, 7) . '-01';
+        $periods = $this->repository->approvedRunPeriods($supplierId, $fromPeriod, $toPeriod);
+        if ($periods === []) {
+            return [];
+        }
+        $registered = $this->repository->registeredObligations(
+            $supplierId,
+            $environment,
+            $agendaCodes,
+            $fromPeriod,
+            (new \DateTimeImmutable($toPeriod))->format('Y-m-t'),
+        );
+        $filedElsewhere = $this->repository->externallyFiledMonthlyPeriods($supplierId, $periods);
+
+        $duties = [];
+        foreach ($periods as $period) {
+            foreach ($this->all($supplierId, $period) as $duty) {
+                if (!in_array($duty['agenda_code'], $agendaCodes, true)
+                    || $duty['due_on'] < $fromDue
+                    || $duty['due_on'] > $toDue
+                    || self::isRegistered($duty, $registered)
+                    || ($duty['agenda_code'] === JmhzSubmissionBridgeService::AGENDA_CODE
+                        && in_array($period, $filedElsewhere, true))
+                ) {
+                    continue;
+                }
+                $duties[] = $duty;
+            }
         }
 
         return $duties;

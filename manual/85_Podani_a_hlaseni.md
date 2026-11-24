@@ -888,6 +888,23 @@ Podání a odvody jsou za firmu. Jednotlivá povinnost je rovnou odkaz na
 obrazovku, kde se řeší, a víc povinností stejného druhu (třeba odvody více
 pojišťovnám) se rozbalí do řádků pod skupinou.
 
+Měsíční hlášení JMHZ panel ukazuje i za měsíc, ve kterém je mzdový běh
+schválený a hlášení ještě není připravené, stejně jako Měsíční přehled
+(**Nepřipraveno**). Hlášení podané mimo MyÚčto, které je v historii podání
+předchozím programem nebo je ručně potvrzené, se nepřipomíná.
+
+Odeslané podání, ke kterému aplikace ještě nemá výsledek (protokol nebo
+doručenku), je ve fázi **Čeká na výsledek**, i když lhůta mezitím uplynula.
+U podání odeslaného po lhůtě to řádek uvádí textem **odesláno po termínu**.
+Pokud podání odešlo datovou schránkou, řádek navede na stažení zpráv na
+stránce **Datová schránka**. Zprávy se stahují ručně, protože vyzvednutím je
+zpráva doručená a od doručení běží lhůty.
+
+Oznámení zdravotní pojišťovně o jednotlivé události (nástup, skončení) se
+podává hromadným oznámením za měsíc. Jakmile hromadné oznámení, které událost
+obsahuje, odejde, panel ani Měsíční přehled ji už samostatně nepřipomínají;
+připomíná se jen hromadné oznámení, dokud pojišťovna nevyřídí.
+
 Skupina lhůt u lidí se po rozbalení zobrazí jako seznam osob po stránkách
 s hledáním podle jména nebo osobního čísla (na velikosti písmen ani
 diakritice nezáleží). U každé osoby je termín, počet dnů po termínu a odkaz na
@@ -910,7 +927,10 @@ předchozí program. Import ani převod mezd je nezakládá, a pokud už na vzta
 jsou, karta vztahu je ukazuje jako **Vyřízeno předchozím programem**.
 V přehledu termínů, ve varováních mzdového běhu ani mezi nesplněnými
 povinnostmi se neobjeví. Změní-li se začátek vedení mezd, pravidlo se
-přepočítá samo.
+přepočítá samo. Totéž platí pro přihlášku či odhlášku ČSSZ a oznámení
+pojišťovně, které si za takovou událost v MyÚčtu připravíte: dokud z MyÚčta
+neodejde, panel ani Měsíční přehled ji jako zmeškanou nehlásí. Když ji přesto
+odešlete, hlídá se její výsledek jako u ostatních podání.
 
 #### Hromadné označení jako splněné
 

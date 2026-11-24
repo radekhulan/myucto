@@ -138,25 +138,32 @@ final class PayrollDeadlineAssessmentService
         ) {
             return $this->result('fulfilled', $daysToDue, false, false);
         }
-        if ($today < $earliest) {
-            return $this->result('not_open', $daysToDue, false, false);
-        }
-        if ($due < $today) {
-            return $this->result('overdue', $daysToDue, true, true);
-        }
-        if ($latestSubmissionStatus !== null
-            && in_array(
-                $latestSubmissionStatus,
-                self::PENDING_SUBMISSION_STATUSES,
-                true,
-            )
-        ) {
+        /*
+         * Odeslané podání čeká na výsledek i PO lhůtě. Dřív se lhůta
+         * posuzovala dřív než odeslání, takže podání odeslané po termínu
+         * (nebo odeslané včas, jen s protokolem, který do aplikace ještě
+         * nedorazil) zůstalo navždy „po termínu". Obsluha ho pak brala jako
+         * nesplněné a připravovala druhé. Co se dá ještě udělat, je
+         * vyzvednout odpověď úřadu; zda šlo podání po lhůtě, je fakt
+         * o odeslání (`submitted_at`), ne fáze povinnosti.
+         */
+        if (in_array(
+            $latestSubmissionStatus,
+            self::PENDING_SUBMISSION_STATUSES,
+            true,
+        ) || ($latestSubmissionStatus === null && $obligationStatus === 'submitted')) {
             return $this->result(
                 'awaiting_result',
                 $daysToDue,
                 false,
                 false,
             );
+        }
+        if ($today < $earliest) {
+            return $this->result('not_open', $daysToDue, false, false);
+        }
+        if ($due < $today) {
+            return $this->result('overdue', $daysToDue, true, true);
         }
         if ($daysToDue === 0) {
             return $this->result('due_today', 0, true, false);

@@ -4284,6 +4284,12 @@ export interface PayrollDeadlineItem {
   path: string
   status?: string
   submission_status?: string | null
+  /** Podání: kdy odešlo (UTC), u neodeslaného `null`. */
+  submitted_at?: string | null
+  /** Podání odešlo až po lhůtě — u fáze `awaiting_result` místo „po termínu". */
+  submitted_late?: boolean
+  /** Podání odešlo datovou schránkou; odpověď úřadu se tam vyzvedává ručně. */
+  dispatched_via_isds?: boolean
   remaining_minor?: number
   employee_id?: number
   employment_id?: number
