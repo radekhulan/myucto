@@ -159,6 +159,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-bank-email-notices` | každých 30 minut (jen když je zapnutá aspoň jedna IMAP schránka) | `*/30 * * * *` |
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-payment-thanks` | každou minutu | `* * * * *` |
+| `cron-invoice-webhooks` | každou minutu, pokud webhooky nedoručuje trvalý worker s `--watch` | `* * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
 | `cron-scheduled-pohoda-export` | 1× denně; jen po zapnutí `export.scheduled_pohoda` | 06:30 |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
@@ -260,6 +261,7 @@ schtasks /create /tn "MyUcto OdometerSource" /tr "C:\inetpub\wwwroot\myucto.cz\c
 schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
 schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto PaymentThanks" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payment-thanks.cmd" /sc minute /mo 1 /ru SYSTEM
+schtasks /create /tn "MyUcto InvoiceWebhooks" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-invoice-webhooks.cmd" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
 schtasks /create /tn "MyUcto PohodaExport" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scheduled-pohoda-export.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
@@ -337,6 +339,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-email-notices.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payment-thanks.sh
+ *  *  *   *   *    /var/www/myucto.cz/cmd/cron-invoice-webhooks.sh
  0  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-scheduled-pohoda-export.sh
  15  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
