@@ -20719,6 +20719,11 @@
       "global": "Globální",
       "edit_title": "Úprava předkontace",
       "at_least_one": "Zadejte alespoň MD nebo Dal účet.",
+      "vat_rates_title": "Účty DPH podle sazby",
+      "vat_common": "Společný účet {account}",
+      "vat_use_common": "Použít společný účet",
+      "vat_output": "Daň na výstupu",
+      "vat_input": "Daň na vstupu",
       "alignment": {
         "button": "Doplnit podle osnovy",
         "title": "Doplnit předkontace podle osnovy",
@@ -31957,6 +31962,7 @@
           "manual": "ruční spuštění",
           "cron": "automatická úloha"
         },
+        "stale_accounts_hint": "Celková částka sedí, zaúčtovaný rozpis po účtech se liší od aktuálního obratu.",
         "stale_hint": "Doklad byl zaúčtovaný na {posted}, ale z dnešních dat vychází {fresh} - do období po zúčtování přibyl nebo se změnil doklad. Přepočítejte, ať hlavní kniha ukazuje skutečnou daň.",
         "missing_hint": "Za období zůstává na účtech daně nepřevedený zůstatek - zúčtovací doklad chybí.",
         "last_run": "Naposledy přepočteno: {trigger}, {at}",

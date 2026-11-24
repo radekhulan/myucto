@@ -28,7 +28,7 @@ use PDO;
  *     MD 343.200 / D 343.900     … daň na VÝSTUPU za období
  *     MD 343.900 / D 343.100     … daň na VSTUPU za období
  *
- * Po tomhle dokladu jsou 343.100 i 343.200 za období nulové a na 343.900 leží přesně
+ * Po dokladu jsou účty daně za období nulové a na 343.900 leží přesně
  * částka, která se odvádí (nebo se má vrátit) — tu pak vynuluje bankovní úhrada
  * (kontace `vat.payment`, {@see \MyInvoice\Service\Accounting\Bank\Detect\TaxRemittanceDetector}).
  * Zůstatek zúčtovacího účtu je tím pádem přímo srovnatelný se saldem u správce daně,
@@ -47,9 +47,8 @@ use PDO;
  *   - vlastní zúčtovací doklady ('vat_clearing') — viz idempotence výše,
  *   - koncepty (posted_at IS NULL) — nezaúčtovaný doklad ještě není v knihách.
  *
- * BEZPEČNOST ZÁPISU. Doklad se nikdy nepostne nevyvážený: skládá se ze dvou
- * self-balanced párů, každý pár se přidá jen když je jeho částka nenulová. Když jsou
- * nulové obě, doklad se NEZAKLÁDÁ vůbec (status `skipped_zero`) — a pokud z dřívějška
+ * BEZPEČNOST ZÁPISU. Doklad se skládá z vyváženého páru pro každý účet
+ * s nenulovou daní. Pokud je daň na všech účtech nulová, doklad se NEZAKLÁDÁ vůbec (status `skipped_zero`) — a pokud z dřívějška
  * existuje, SMAŽE se ({@see STATUS_DELETED_ZERO}).
  *
  * ── CO DOKLAD SPOUŠTÍ (migrace 1332) ──────────────────────────────────────────
@@ -304,6 +303,7 @@ final class VatClearingService
      *   supplier_id:int, period_type:string, period_start:string, period_end:string,
      *   period_label:string, source_id:int, input_vat:float, output_vat:float,
      *   settlement:float, accounts:array{input:string, output:string, settlement:string},
+     *   accounts_detail:list<array{account_code:string,direction:string,amount:float}>,
      *   status:?string, entry_id:?int, taken_over:bool
      * }
      */
@@ -313,9 +313,24 @@ final class VatClearingService
         [$start, $end] = self::periodBounds($year, $month, $periodType);
         $sourceId = self::sourceIdFor($year, $month, $periodType);
 
-        $inputAcc      = $this->ruleCode($supplierId, 'vat.clearing.input', 'credit', PostingService::INPUT_VAT_ACCOUNT);
-        $outputAcc     = $this->ruleCode($supplierId, 'vat.clearing.output', 'debit', PostingService::OUTPUT_VAT_ACCOUNT);
-        $settlementAcc = $this->ruleCode($supplierId, 'vat.clearing.output', 'credit', PostingService::VAT_SETTLEMENT_ACCOUNT);
+        $rules = $this->rules->effectiveMap($supplierId, 'invoice.vat.')
+            + $this->rules->effectiveMap($supplierId, 'vat.clearing.');
+        $rates = VatPostingAccounts::byRate($rules);
+        $common = $codes = [];
+        $settlementAcc = VatPostingAccounts::settlement($rules);
+        foreach (VatPostingAccounts::SIDES as $direction => $side) {
+            $common[$direction] = VatPostingAccounts::common($rules, $direction);
+            $legacyKey = 'vat.clearing.' . $direction;
+            $legacy = ($rules[$legacyKey]['supplier_id'] ?? null) !== null
+                ? VatPostingAccounts::ruleCode($rules, $legacyKey, $side === 'debit' ? 'credit' : 'debit')
+                : null;
+            $codes[$direction] = array_values(array_unique(array_filter([$common[$direction], ...array_values($rates[$direction]), $legacy])));
+            $codes[$direction] = array_values(array_unique(array_map(
+                fn (string $code): string => $this->posting->redirectedAccountCode($supplierId, $code, $end),
+                $codes[$direction],
+            )));
+        }
+        $settlementAcc = $this->posting->redirectedAccountCode($supplierId, $settlementAcc, $end);
 
         $existing = $this->journal->findBySource($supplierId, self::SOURCE_TYPE, $sourceId);
 
@@ -329,36 +344,41 @@ final class VatClearingService
             'input_vat'    => 0.0,
             'output_vat'   => 0.0,
             'settlement'   => 0.0,
-            'accounts'     => ['input' => $inputAcc, 'output' => $outputAcc, 'settlement' => $settlementAcc],
+            'accounts'     => $common + ['settlement' => $settlementAcc],
+            'accounts_detail' => [],
             'status'       => null,
             'entry_id'     => $existing !== null ? (int) $existing['id'] : null,
             'taken_over'   => $this->hasTakenOverEntries($supplierId, $start, $end),
         ];
 
-        // Tenant, který si analytiky vypnul (obě nohy míří na týž účet), nemá co
-        // převádět — doklad by byl 343/343 v obou párech, tedy prázdné gesto.
-        if ($inputAcc === $outputAcc || $inputAcc === $settlementAcc || $outputAcc === $settlementAcc) {
+        $taxCodes = [...$codes['output'], ...$codes['input']];
+        if (array_intersect($codes['input'], $codes['output']) !== [] || in_array($settlementAcc, $taxCodes, true)) {
             $base['status'] = self::STATUS_FLAT_VAT_ACCOUNT;
             return $base;
         }
-        foreach ([$inputAcc, $outputAcc, $settlementAcc] as $code) {
-            $account = $this->accounts->findByCode($supplierId, $code);
-            if ($account === null || empty($account['is_active'])) {
+        $active = $this->accounts->codeToIdMap($supplierId, $end);
+        foreach ([...$taxCodes, $settlementAcc] as $code) {
+            if (empty($active[$code]['is_active'])) {
                 $base['status'] = self::STATUS_MISSING_ACCOUNTS;
                 return $base;
             }
         }
 
-        $turnover = $this->turnover($supplierId, $start, $end, [$inputAcc, $outputAcc]);
-        // Vstup má přirozeně debetní zůstatek, výstup kreditní — počítáme je tak, aby
-        // kladné číslo znamenalo „normální" směr a záporné obrácený (dobropisy).
-        $inputVat  = round($turnover[$inputAcc]['debit'] - $turnover[$inputAcc]['credit'], 2);
-        $outputVat = round($turnover[$outputAcc]['credit'] - $turnover[$outputAcc]['debit'], 2);
-
-        $base['input_vat']  = $inputVat;
-        $base['output_vat'] = $outputVat;
-        $base['settlement'] = round($outputVat - $inputVat, 2);
-        if (self::cents($inputVat) === 0 && self::cents($outputVat) === 0) {
+        $turnover = $this->turnover($supplierId, $start, $end, $taxCodes);
+        $hasTurnover = false;
+        foreach (['output', 'input'] as $direction) {
+            foreach ($codes[$direction] as $code) {
+                $debit = $turnover[$code]['debit'];
+                $credit = $turnover[$code]['credit'];
+                $amount = round($direction === 'output' ? $credit - $debit : $debit - $credit, 2);
+                $base['accounts_detail'][] = ['account_code' => $code, 'direction' => $direction, 'amount' => $amount];
+                $base[$direction . '_vat'] += $amount;
+                $hasTurnover = $hasTurnover || self::cents($amount) !== 0;
+            }
+            $base[$direction . '_vat'] = round($base[$direction . '_vat'], 2);
+        }
+        $base['settlement'] = round($base['output_vat'] - $base['input_vat'], 2);
+        if (!$hasTurnover) {
             $base['status'] = self::STATUS_ZERO;
         }
 
@@ -415,13 +435,7 @@ final class VatClearingService
             return $result;
         }
 
-        $lines = self::buildLines(
-            $result['input_vat'],
-            $result['output_vat'],
-            $result['accounts']['input'],
-            $result['accounts']['output'],
-            $result['accounts']['settlement'],
-        );
+        $lines = self::buildLines($result['accounts_detail'], $result['accounts']['settlement']);
         if ($lines === []) {
             $result['status'] = self::STATUS_ZERO;
             return $result;
@@ -620,30 +634,32 @@ final class VatClearingService
         );
 
         $posted = $result['entry_id'] !== null
-            ? $this->postedAmounts(
-                $supplierId,
-                (int) $result['entry_id'],
-                (string) $result['accounts']['input'],
-                (string) $result['accounts']['output'],
-            )
+            ? $this->postedAmounts($supplierId, (int) $result['entry_id'], $result['accounts_detail'], $result['accounts']['settlement'])
             : null;
         $result['posted'] = $posted;
 
         if ($notApplicable) {
             $result['freshness'] = self::FRESHNESS_NOT_APPLICABLE;
-        } elseif ($posted === null) {
-            // Bez dokladu je období v pořádku, dokud v něm nezůstává NEPŘEVEDENÁ daň
-            // nad práh materiality (nulové období nemá co převádět; haléřový zbytek po
-            // ručním vyrovnání taky ne — viz MATERIALITY).
-            $result['freshness'] = self::immaterial((float) $result['input_vat'], (float) $result['output_vat'])
-                ? self::FRESHNESS_OK
-                : self::FRESHNESS_MISSING;
         } else {
-            $matches = self::immaterial(
-                (float) $result['input_vat'] - $posted['input_vat'],
-                (float) $result['output_vat'] - $posted['output_vat'],
-            );
-            $result['freshness'] = $matches ? self::FRESHNESS_OK : self::FRESHNESS_STALE;
+            $remaining = $posted['account_balances'] ?? [];
+            $matches = true;
+            foreach ($result['accounts_detail'] as $detail) {
+                $code = $detail['account_code'];
+                $expected = $detail['direction'] === 'output' ? $detail['amount'] : -$detail['amount'];
+                $matches = $matches && self::immaterial($expected - ($remaining[$code] ?? 0.0));
+                unset($remaining[$code]);
+            }
+            unset($remaining[$result['accounts']['settlement']]);
+            $matches = $matches
+                && self::immaterial($result['input_vat'] - ($posted['input_vat'] ?? 0.0))
+                && self::immaterial($result['output_vat'] - ($posted['output_vat'] ?? 0.0))
+                && self::immaterial($result['settlement'] - ($posted['settlement'] ?? 0.0));
+            foreach ($remaining as $amount) {
+                $matches = $matches && self::immaterial($amount);
+            }
+            $result['freshness'] = $matches
+                ? self::FRESHNESS_OK
+                : ($posted === null ? self::FRESHNESS_MISSING : self::FRESHNESS_STALE);
         }
 
         try {
@@ -747,13 +763,16 @@ final class VatClearingService
      */
     private static function finding(array $status): array
     {
-        $note = $status['freshness'] === self::FRESHNESS_MISSING
-            ? 'Za období zůstává nepřevedená daň — zúčtovací doklad chybí.'
-            : sprintf(
+        $note = match (true) {
+            $status['freshness'] === self::FRESHNESS_MISSING => 'Za období zůstává nepřevedená daň. Zúčtovací doklad chybí.',
+            self::cents((float) $status['settlement']) === self::cents((float) ($status['posted']['settlement'] ?? 0)) =>
+                'Částka k zúčtování sedí, na účtech daně se obrat liší od zaúčtovaného rozpisu.',
+            default => sprintf(
                 'Zaúčtováno %s, z dnešních dat vychází %s.',
                 number_format((float) ($status['posted']['settlement'] ?? 0), 2, ',', ' '),
                 number_format((float) $status['settlement'], 2, ',', ' '),
-            );
+            ),
+        };
         if (!$status['writable']) {
             $note .= $status['writable_reason'] === 'date_locked'
                 ? ' Období je uzamčené — přepočet až po posunutí zámku (smí správce nebo role s právem posunout zámek).'
@@ -788,34 +807,28 @@ final class VatClearingService
      * z řádku na účtu daně na výstupu se čte kladně strana MD, z účtu daně na vstupu
      * kladně strana D (obrácené strany = převaha dobropisů, tedy záporná daň).
      *
-     * @return array{input_vat:float, output_vat:float, settlement:float}
+     * @return array{input_vat:float, output_vat:float, settlement:float, account_balances:array<string,float>}
      */
-    private function postedAmounts(int $supplierId, int $entryId, string $inputAccount, string $outputAccount): array
+    private function postedAmounts(int $supplierId, int $entryId, array $details, string $settlementAccount): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.account_code,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS d,
-                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS c
+            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
                FROM journal_entry_lines l
                JOIN chart_of_accounts a ON a.id = l.account_id
-              WHERE l.entry_id = ? AND l.supplier_id = ? AND a.account_code IN (?, ?)
+              WHERE l.entry_id = ? AND l.supplier_id = ?
               GROUP BY a.account_code"
         );
-        $stmt->execute([$entryId, $supplierId, $inputAccount, $outputAccount]);
-        $rows = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $rows[(string) $row['account_code']] = [(float) $row['d'], (float) $row['c']];
+        $stmt->execute([$entryId, $supplierId]);
+        $balances = array_map('floatval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+        $totals = ['input_vat' => 0.0, 'output_vat' => 0.0];
+        foreach ($details as $detail) {
+            $direction = $detail['direction'];
+            $net = $balances[$detail['account_code']] ?? 0.0;
+            $totals[$direction . '_vat'] += $direction === 'output' ? $net : -$net;
         }
-        [$outDebit, $outCredit] = $rows[$outputAccount] ?? [0.0, 0.0];
-        [$inDebit, $inCredit] = $rows[$inputAccount] ?? [0.0, 0.0];
-
-        $outputVat = round($outDebit - $outCredit, 2);
-        $inputVat = round($inCredit - $inDebit, 2);
-
-        return [
-            'input_vat'  => $inputVat,
-            'output_vat' => $outputVat,
-            'settlement' => round($outputVat - $inputVat, 2),
+        return array_map(static fn (float $amount): float => round($amount, 2), $totals) + [
+            'settlement' => 0.0 - ($balances[$settlementAccount] ?? 0.0),
+            'account_balances' => $balances,
         ];
     }
 
@@ -846,40 +859,26 @@ final class VatClearingService
     }
 
     /**
-     * Řádky dokladu — dva self-balanced páry, každý jen když je nenulový.
-     * Kladná částka = obvyklý směr; záporná (převaha dobropisů) obrací strany, aby
-     * se nikdy neúčtovala záporná částka (`chk_jel_amount_positive`).
+     * Každý nenulový účet tvoří vlastní vyvážený pár se zúčtovacím účtem.
+     * Záporná daň obrací strany.
      *
+     * @param list<array{account_code:string, direction:string, amount:float}> $details
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    public static function buildLines(
-        float $inputVat,
-        float $outputVat,
-        string $inputAccount,
-        string $outputAccount,
-        string $settlementAccount,
-    ): array {
+    public static function buildLines(array $details, string $settlementAccount): array
+    {
         $lines = [];
-        // MD 343.200 / D 343.900 — daň na výstupu období na zúčtovací účet.
-        if (self::cents($outputVat) !== 0) {
-            $amount = round(abs($outputVat), 2);
-            $outSide = $outputVat > 0 ? 'debit' : 'credit';
-            $lines[] = ['account_code' => $outputAccount, 'side' => $outSide, 'amount' => $amount];
+        foreach ($details as $detail) {
+            $amount = $detail['amount'];
+            if (self::cents($amount) === 0) {
+                continue;
+            }
+            $side = ($detail['direction'] === 'output') === ($amount > 0) ? 'debit' : 'credit';
+            $lines[] = ['account_code' => $detail['account_code'], 'side' => $side, 'amount' => round(abs($amount), 2)];
             $lines[] = [
                 'account_code' => $settlementAccount,
-                'side'         => $outSide === 'debit' ? 'credit' : 'debit',
-                'amount'       => $amount,
-            ];
-        }
-        // MD 343.900 / D 343.100 — daň na vstupu období na zúčtovací účet.
-        if (self::cents($inputVat) !== 0) {
-            $amount = round(abs($inputVat), 2);
-            $inSide = $inputVat > 0 ? 'credit' : 'debit';
-            $lines[] = ['account_code' => $inputAccount, 'side' => $inSide, 'amount' => $amount];
-            $lines[] = [
-                'account_code' => $settlementAccount,
-                'side'         => $inSide === 'credit' ? 'debit' : 'credit',
-                'amount'       => $amount,
+                'side' => $side === 'debit' ? 'credit' : 'debit',
+                'amount' => round(abs($amount), 2),
             ];
         }
 
@@ -930,25 +929,14 @@ final class VatClearingService
         return $out;
     }
 
-    private function ruleCode(int $supplierId, string $ruleKey, string $side, string $fallback): string
-    {
-        $rule = $this->rules->resolve($supplierId, $ruleKey);
-        $code = $rule[$side . '_account_code'] ?? null;
-
-        return is_string($code) && $code !== '' ? $code : $fallback;
-    }
-
     /** Peníze se porovnávají v haléřích (int), nikdy přes float == (viz PostingService). */
     private static function cents(float $amount): int
     {
         return (int) round($amount * 100);
     }
 
-    /** Jsou obě nohy pod prahem {@see MATERIALITY}? (porovnání v haléřích, ne přes float) */
-    private static function immaterial(float $input, float $output): bool
+    private static function immaterial(float $amount): bool
     {
-        $limit = self::cents(self::MATERIALITY);
-
-        return abs(self::cents($input)) <= $limit && abs(self::cents($output)) <= $limit;
+        return abs(self::cents($amount)) <= self::cents(self::MATERIALITY);
     }
 }

@@ -51,7 +51,10 @@ final class AutomaticEntryPairsTest extends TestCase
     public function testVatClearingIsTwoPairs(): void
     {
         foreach ([[2100.00, 2100.00], [5000.00, 1200.00], [-300.00, 800.00]] as [$input, $output]) {
-            $lines = VatClearingService::buildLines($input, $output, '343.100', '343.200', '343.900');
+            $lines = VatClearingService::buildLines([
+                ['account_code' => '343.200', 'direction' => 'output', 'amount' => $output],
+                ['account_code' => '343.100', 'direction' => 'input', 'amount' => $input],
+            ], '343.900');
             $paired = $this->assertPairedTotals(PairGroups::consecutive($lines, 'vat_clearing'), $lines);
             self::assertCount(4, $paired);
         }

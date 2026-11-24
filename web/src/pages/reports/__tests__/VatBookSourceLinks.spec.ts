@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
   dphPreview: vi.fn(), khPreview: vi.fn(), dphSettings: vi.fn(), openBeside: vi.fn(),
   canRead: vi.fn(), toastError: vi.fn(),
+  clearingStatus: vi.fn(),
 }))
 vi.mock('vue-router', async (original) => ({ ...await original<typeof import('vue-router')>(), useRoute: () => m.route }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
@@ -15,8 +16,8 @@ vi.mock('@/api/reports', () => ({ reportsApi: {
   dphSettings: m.dphSettings, dphPreview: m.dphPreview, khPreview: m.khPreview,
   dphTrend: vi.fn().mockResolvedValue([]), dphDraftsPrediction: vi.fn().mockResolvedValue(null),
 } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 11 }, canRead: m.canRead }) }))
-vi.mock('@/api/vatClearing', () => ({ vatClearingApi: { status: vi.fn().mockResolvedValue(null) } }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 11 }, canRead: m.canRead, canWrite: () => false }) }))
+vi.mock('@/api/vatClearing', () => ({ vatClearingApi: { status: m.clearingStatus } }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 7 }) }))
 vi.mock('@/composables/useYearOptions', () => ({ useYearOptions: () => [2026, 2025] }))
 vi.mock('vue-i18n', async (original) => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
@@ -63,6 +64,28 @@ beforeEach(() => {
   m.dphSettings.mockResolvedValue({ vat_period: 'quarterly', taxpayer_type: 'fo' })
   m.dphPreview.mockResolvedValue(dphResult())
   m.khPreview.mockResolvedValue(khResult())
+  m.clearingStatus.mockResolvedValue(null)
+})
+
+it('rozepíše výstupní a vstupní DPH zúčtování po účtech', async () => {
+  m.canRead.mockReturnValue(true)
+  m.clearingStatus.mockResolvedValue({
+    freshness: 'ok', output_vat: 330, input_vat: 100, settlement: 230,
+    accounts: { input: '343.100', output: '343.200', settlement: '343.900' },
+    accounts_detail: [
+      { account_code: '343.310', direction: 'output', amount: 210 },
+      { account_code: '343.320', direction: 'output', amount: 120 },
+      { account_code: '343.110', direction: 'input', amount: 100 },
+    ],
+    writable: true,
+  })
+  const wrapper = mount(DphReport, options)
+  await flushPromises()
+  const breakdown = wrapper.findAll('dl').filter(list => list.findAll('dt')[0]?.text().startsWith('343.'))
+  expect(breakdown.map(list => list.findAll('dt').map(code => code.text()))).toEqual([['343.310', '343.320'], ['343.110']])
+  expect(breakdown[0]!.text()).toContain('210')
+  expect(breakdown[0]!.text()).toContain('120')
+  wrapper.unmount()
 })
 
 describe('rozdíly proti podanému KH', () => {

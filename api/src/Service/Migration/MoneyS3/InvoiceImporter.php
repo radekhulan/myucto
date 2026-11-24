@@ -18,6 +18,7 @@ use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Service\Vat\VatRateResolver;
 
 /**
  * Přijaté (`PFaktury`) a vydané (`VFaktury`) faktury.
@@ -779,7 +780,7 @@ final class InvoiceImporter
 
     public static function rateKey(float $rate): string
     {
-        return rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
+        return VatRateResolver::rateKey($rate);
     }
 
     public static function documentKey(int $year, string $docNo): string

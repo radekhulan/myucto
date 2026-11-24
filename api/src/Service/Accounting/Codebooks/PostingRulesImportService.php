@@ -7,13 +7,14 @@ namespace MyInvoice\Service\Accounting\Codebooks;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\Vat\VatPostingAccounts;
 
 /**
  * Import kontačních pravidel z XLSX/CSV (Epic F5 §4.4, R11). Identita = rule_key →
  * firemní override s fixní priority = OVERRIDE_PRIORITY (100). Sémantika 1:1
  * s PostingRuleRepository::upsertOverride. `priorita`/`zdroj` jsou export-only,
- * na importu se ignorují. Neznámý klíč (mimo globální seed) = error; nové typy
- * kontací nelze zakládat. Skip, když efektivní hodnoty odpovídají řádku (re-import
+ * na importu se ignorují. Nové klíče jsou přípustné pro účty DPH podle sazby.
+ * Skip, když efektivní hodnoty odpovídají řádku (re-import
  * exportu s globálními řádky NEvytváří overridy).
  */
 final class PostingRulesImportService extends AbstractCodebookImportService
@@ -28,7 +29,7 @@ final class PostingRulesImportService extends AbstractCodebookImportService
     {
         return [
             'key'         => ['header' => 'klic', 'aliases' => ['rule_key', 'klíč', 'key'],
-                              'required' => 'ano', 'note' => '^[A-Za-z0-9._-]{1,64}$; musí existovat v globálním seedu'],
+                              'required' => 'ano', 'note' => 'Existující klíč předkontace nebo klíč DPH podle sazby.'],
             'description' => ['header' => 'popis', 'aliases' => ['description'],
                               'required' => 'ne', 'note' => 'max 255; prázdné = převezme se z efektivního pravidla'],
             'debit'       => ['header' => 'md_ucet', 'aliases' => ['debit_account_code', 'debit', 'md'],
@@ -56,8 +57,9 @@ final class PostingRulesImportService extends AbstractCodebookImportService
         $effective = $this->rules->effectiveMap($supplierId);
 
         $activeCodes = [];
-        foreach ($this->accounts->listForTenant($supplierId, false) as $acc) {
-            $activeCodes[(string) $acc['account_code']] = true;
+        $chart = $this->accounts->listForTenant($supplierId, true);
+        foreach ($chart as $acc) {
+            $activeCodes[(string) $acc['account_code']] = (bool) $acc['is_active'];
         }
 
         $overrideKeys = [];
@@ -90,7 +92,8 @@ final class PostingRulesImportService extends AbstractCodebookImportService
             }
             $seen[$key] = true;
 
-            if (!isset($effective[$key])) {
+            $rateRule = VatPostingAccounts::parseRateRule($key);
+            if (!isset($effective[$key]) && $rateRule === null) {
                 $reportRows[$line] = $this->err($row, 'Neznámý klíč kontace „' . $key . '" — nové typy kontací nelze zakládat.');
                 continue;
             }
@@ -99,9 +102,9 @@ final class PostingRulesImportService extends AbstractCodebookImportService
             $dcr = $this->col($cols, $map, 'credit');
             $desc = $this->col($cols, $map, 'description');
 
-            $eff = $effective[$key];
-            $effDebit = $eff['debit_account_code'] !== null ? (string) $eff['debit_account_code'] : null;
-            $effCredit = $eff['credit_account_code'] !== null ? (string) $eff['credit_account_code'] : null;
+            $eff = $effective[$key] ?? [];
+            $effDebit = $eff['debit_account_code'] ?? null;
+            $effCredit = $eff['credit_account_code'] ?? null;
 
             // Chybějící sloupec = strana beze změny; prázdná buňka ve sloupci = NULL.
             $desiredDebit = isset($map['debit']) ? ($md === '' ? null : $md) : $effDebit;
@@ -117,12 +120,18 @@ final class PostingRulesImportService extends AbstractCodebookImportService
                 continue;
             }
 
-            if ($desiredDebit === null && $desiredCredit === null) {
+            if ($rateRule !== null) {
+                $error = VatPostingAccounts::validationError($chart, $effective, $rateRule[0], $desiredDebit, $desiredCredit);
+                if ($error !== null) {
+                    $reportRows[$line] = $this->err($row, $error);
+                    continue;
+                }
+            } elseif ($desiredDebit === null && $desiredCredit === null) {
                 $reportRows[$line] = $this->err($row, 'Zadej alespoň MD nebo D účet.');
                 continue;
             }
             foreach (['MD' => $desiredDebit, 'D' => $desiredCredit] as $label => $code) {
-                if ($code !== null && !isset($activeCodes[$code])) {
+                if ($code !== null && empty($activeCodes[$code])) {
                     $reportRows[$line] = $this->err($row, 'Účet ' . $code . ' (' . $label . ') není v aktivní osnově firmy.');
                     continue 2;
                 }

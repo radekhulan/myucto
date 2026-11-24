@@ -91,7 +91,7 @@ final class VatClearingLinesTest extends TestCase
      */
     public function testBuildLinesFollowsAccountantsDirections(): void
     {
-        $lines = VatClearingService::buildLines(4000.0, 10000.0, '343.100', '343.200', '343.900');
+        $lines = self::buildLines(4000.0, 10000.0);
 
         self::assertSame([
             ['account_code' => '343.200', 'side' => 'debit',  'amount' => 10000.0],
@@ -114,7 +114,7 @@ final class VatClearingLinesTest extends TestCase
     public function testBuildLinesAreBalancedInEveryCombination(): void
     {
         foreach ([[4000.0, 10000.0], [-500.0, 250.0], [0.0, 900.0], [900.0, 0.0], [-100.0, -200.0]] as [$in, $out]) {
-            $lines = VatClearingService::buildLines($in, $out, '343.100', '343.200', '343.900');
+            $lines = self::buildLines($in, $out);
             $debit = 0;
             $credit = 0;
             foreach ($lines as $l) {
@@ -132,7 +132,7 @@ final class VatClearingLinesTest extends TestCase
     /** Převaha dobropisů obrací strany, ale nikdy neúčtuje zápornou částku. */
     public function testNegativeTurnoverFlipsSides(): void
     {
-        $lines = VatClearingService::buildLines(-300.0, -1200.0, '343.100', '343.200', '343.900');
+        $lines = self::buildLines(-300.0, -1200.0);
 
         self::assertSame([
             ['account_code' => '343.200', 'side' => 'credit', 'amount' => 1200.0],
@@ -144,16 +144,36 @@ final class VatClearingLinesTest extends TestCase
 
     public function testZeroTurnoverProducesNoDocument(): void
     {
-        self::assertSame([], VatClearingService::buildLines(0.0, 0.0, '343.100', '343.200', '343.900'));
+        self::assertSame([], self::buildLines(0.0, 0.0));
         // Haléřová nula je taky nula (peníze se porovnávají v haléřích, ne přes float).
-        self::assertSame([], VatClearingService::buildLines(0.001, -0.002, '343.100', '343.200', '343.900'));
+        self::assertSame([], self::buildLines(0.001, -0.002));
     }
 
     public function testOnlyOneSideStillBalances(): void
     {
-        $lines = VatClearingService::buildLines(0.0, 2100.0, '343.100', '343.200', '343.900');
+        $lines = self::buildLines(0.0, 2100.0);
         self::assertCount(2, $lines, 'Nulová strana se nezakládá — žádný řádek na 0 Kč.');
         self::assertSame('343.200', $lines[0]['account_code']);
         self::assertSame('343.900', $lines[1]['account_code']);
+    }
+
+    public function testOppositeAmountsOnDifferentAccountsStillClearBothAccounts(): void
+    {
+        $lines = VatClearingService::buildLines([
+            ['account_code' => '343.310', 'direction' => 'output', 'amount' => 120.0],
+            ['account_code' => '343.320', 'direction' => 'output', 'amount' => -120.0],
+        ], '343.900');
+
+        self::assertSame(['343.310', '343.900', '343.320', '343.900'], array_column($lines, 'account_code'));
+        self::assertSame(['debit', 'credit', 'credit', 'debit'], array_column($lines, 'side'));
+        self::assertSame([120.0, 120.0, 120.0, 120.0], array_column($lines, 'amount'));
+    }
+
+    private static function buildLines(float $input, float $output): array
+    {
+        return VatClearingService::buildLines([
+            ['account_code' => '343.200', 'direction' => 'output', 'amount' => $output],
+            ['account_code' => '343.100', 'direction' => 'input', 'amount' => $input],
+        ], '343.900');
     }
 }
