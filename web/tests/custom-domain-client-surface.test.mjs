@@ -12,6 +12,7 @@ const domainLogin = await readFile(new URL('security/domainLogin.ts', src), 'utf
 const profile = await readFile(new URL('pages/PasswordChange.vue', src), 'utf8')
 const lock = await readFile(new URL('components/SessionLockOverlay.vue', src), 'utf8')
 const client = await readFile(new URL('api/client.ts', src), 'utf8')
+const manualChapters = await readFile(new URL('config/manualChapters.ts', src), 'utf8')
 
 test('shared manifest persists the audited client surface and legacy aliases', () => {
   // Přesný počet je brána proti nechtěnému rozšíření klientské plochy, ne
@@ -72,8 +73,11 @@ test('navigation switches to the client experience for every locked custom domai
   assert.match(layout, /if \(canExtractPurchase\.value\) \{[\s\S]*?const aiImport = \{ to: '\/purchase-invoices\/ai-import'/)
   // Podpora je jen v desktopové patičce; na mobilu je v menu a v patičce je místo ní Přidat.
   assert.equal((layout.match(/v-if="!clientExperience" to="\/admin\/support"/g) || []).length, 1)
-  assert.match(layout, /if \(!auth\.domainContext\?\.locked \|\| !canonicalBaseUrl\) return path/)
-  assert.match(layout, /new URL\(canonicalBaseUrl\)\.origin/)
+  // Odkaz na manuál skládá sdílený manualHelpHref; kanonickou adresu dostane
+  // jen zamčená vlastní doména, jinak zůstane relativní cesta.
+  assert.match(layout, /manualHelpHref\([\s\S]*?auth\.domainContext\?\.locked \? auth\.domainContext\.canonical_base_url : null/)
+  assert.match(manualChapters, /if \(!canonicalBaseUrl\) return href/)
+  assert.match(manualChapters, /new URL\(canonicalBaseUrl\)\.origin/)
 })
 
 test('router and every login return carrier use the shared route policy', () => {
