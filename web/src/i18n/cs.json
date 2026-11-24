@@ -33485,6 +33485,7 @@
     "sickness": "Nemocenské",
     "download_insurance_pdf": "Stáhnout PDF přehledů",
     "cssz_xml": "Stáhnout XML ČSSZ",
+    "cssz_xml_unsupported": "Pro rok {year} vyplňte přehled ve formuláři na ePortálu ČSSZ. Výpočet si můžete stáhnout v PDF.",
     "health_pdf": "Přehled pro ZP",
     "advances_title": "Zálohy na daň a pojistné",
     "advances_widget_title": "Nadcházející zálohy na daň a pojistné",

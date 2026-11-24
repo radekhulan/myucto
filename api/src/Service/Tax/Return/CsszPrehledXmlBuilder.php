@@ -26,6 +26,21 @@ final class CsszPrehledXmlBuilder
 {
     private const NS = 'http://schemas.cssz.cz/OSVC2025';
 
+    public static function supportsYear(int $year): bool
+    {
+        return $year === 2025;
+    }
+
+    public static function assertSupportedYear(int $year): void
+    {
+        if (!self::supportsYear($year)) {
+            throw new TaxReturnException(
+                'cssz_xml_year_unsupported',
+                sprintf('XML přehledu pro ČSSZ za rok %d není v MyÚčtu dostupné. Použijte formulář pro příslušný rok na ePortálu ČSSZ.', $year),
+            );
+        }
+    }
+
     /**
      * @param array<string,mixed> $supplier row ze supplier (loadSupplierCssz v service)
      * @param array<string,mixed> $summary  výstup InsuranceSummaryService::build()
@@ -35,6 +50,7 @@ final class CsszPrehledXmlBuilder
      */
     public function build(array $supplier, int $year, array $summary, array $meta = []): array
     {
+        self::assertSupportedYear($year);
         $warnings = [];
         $social = (array) ($summary['social'] ?? []);
         $monthsInfo = $this->monthsInfo($summary);

@@ -33485,6 +33485,7 @@
     "sickness": "Sickness",
     "download_insurance_pdf": "Download overviews PDF",
     "cssz_xml": "Download ČSSZ XML",
+    "cssz_xml_unsupported": "For {year}, complete the overview using the form on the ČSSZ ePortal. You can download the calculation as a PDF.",
     "health_pdf": "Health insurer overview",
     "advances_title": "Tax and insurance advances",
     "advances_widget_title": "Upcoming tax and insurance advances",

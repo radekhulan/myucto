@@ -1746,7 +1746,8 @@ final class TaxReturnService
         if ($type !== 'fo') {
             throw new TaxReturnException('invalid_type', 'Přehledy pojistného jsou jen pro fyzické osoby (OSVČ).', 400);
         }
-        return $this->insurance->build($supplierId, $year);
+        return $this->insurance->build($supplierId, $year)
+            + ['cssz_xml_available' => CsszPrehledXmlBuilder::supportsYear($year)];
     }
 
     /** PDF Přehledů pojistného OSVČ. @return array{pdf:string,filename:string} */
@@ -1827,6 +1828,7 @@ final class TaxReturnService
         if ($type !== 'fo') {
             throw new TaxReturnException('invalid_type', 'Přehled ČSSZ je jen pro fyzické osoby (OSVČ).', 400);
         }
+        CsszPrehledXmlBuilder::assertSupportedYear($year);
         $summary = $this->insurance->build($supplierId, $year);
         $supplier = $this->loadSupplierCssz($supplierId);
         $meta = [

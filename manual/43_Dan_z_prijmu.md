@@ -104,7 +104,7 @@ Pravidla výpočtu poslední známé daně jsou v [§ 43.11.13](#431113-opravne-
 1. V `Daně → Daň z příjmů` zvolte **DPFO** a rok.
 2. Otevřete kartu **Export** a v části **Pojistné OSVČ (Přehledy)** klikněte na **Spočítat** (po změně podkladů na **Přepočítat**).
 3. Zkontrolujte u sociálního (ČSSZ) a zdravotního pojištění vyměřovací základ, pojistné, doplatek po zálohách, **novou měsíční zálohu** a případně nemocenské.
-4. Stáhněte výstup: **Stáhnout PDF přehledů** (souhrnná pomůcka), **Stáhnout XML ČSSZ** (validovaná datová věta) nebo **Přehled pro ZP** (PDF ve struktuře oficiálního formuláře). Pojišťovnu podle kódu a číslo pojištěnce aplikace bere z **Nastavení firmy**.
+4. Stáhněte výstup: **Stáhnout PDF přehledů** (souhrnná pomůcka), **Stáhnout XML ČSSZ** (validovaná datová věta za rok 2025) nebo **Přehled pro ZP** (PDF ve struktuře oficiálního formuláře). Pojišťovnu podle kódu a číslo pojištěnce aplikace bere z **Nastavení firmy**.
 5. XML nahrajte na ePortál ČSSZ nebo do datové schránky. Přehled pro zdravotní pojišťovnu přepište do formuláře pojišťovny.
 
 **Jak poznáte, že je hotovo:** Máte odeslaný přehled pro ČSSZ i pro zdravotní pojišťovnu a v bance nastavenou novou měsíční zálohu.
@@ -681,7 +681,10 @@ orientačním výpočtu minim. Sociální vyměřovací základ vychází z 55 %
 zdravotní z 50 %, oba s příslušnými minimy a maximem; vyměřovací základ i pojistné se
 zaokrouhlují nahoru na celé Kč.
 
-Současné XML ČSSZ však umí pouze jeden režim hlavní/vedlejší činnosti pro celý rok.
+Export do XML pro ČSSZ je k dispozici pro rok 2025. Pro ostatní roky použijte výpočet
+z MyÚčta jako podklad pro odpovídající formulář na ePortálu ČSSZ.
+
+Exportované XML umí plně vyčíslit pouze jeden režim hlavní/vedlejší činnosti za rok.
 Neodesílejte je bez ručního dokončení, pokud činnost začala, skončila či byla přerušena,
 střídala hlavní a vedlejší režim, existovalo zaměstnání ovlivňující maximální základ,
 nebo jde o novou OSVČ či jiný zvláštní režim. Údaje **Státní pojištěnec**, **Zaměstnání**,

@@ -1698,17 +1698,24 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </div>
             </div>
             <div class="md:col-span-2 text-xs text-neutral-500">{{ insurance.deadlines.note }}</div>
-            <div class="md:col-span-2 flex gap-2">
-              <button type="button" @click="downloadInsurancePdf" class="inline-flex items-center gap-2 h-9 px-4 rounded-md border border-neutral-300 text-sm">
+            <div class="md:col-span-2 flex flex-wrap gap-2">
+              <button type="button" @click="downloadInsurancePdf" :class="btnOutline()">
+                <svg aria-hidden="true" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path :d="ICONS.download" /></svg>
                 {{ t('taxReturn.download_insurance_pdf') }}
               </button>
-              <button type="button" @click="downloadCsszXml" class="inline-flex items-center gap-2 h-9 px-4 rounded-md border border-neutral-300 text-sm">
+              <button v-if="insurance.year === year && insurance.cssz_xml_available" type="button"
+                @click="downloadCsszXml" :class="btnOutline()">
+                <svg aria-hidden="true" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path :d="ICONS.download" /></svg>
                 {{ t('taxReturn.cssz_xml') }}
               </button>
-              <button type="button" @click="downloadHealthPdf" class="inline-flex items-center gap-2 h-9 px-4 rounded-md border border-neutral-300 text-sm">
+              <button type="button" @click="downloadHealthPdf" :class="btnOutline()">
+                <svg aria-hidden="true" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path :d="ICONS.download" /></svg>
                 {{ t('taxReturn.health_pdf') }}
               </button>
             </div>
+            <p v-if="insurance.year === year && !insurance.cssz_xml_available" class="md:col-span-2 text-xs text-neutral-600">
+              {{ t('taxReturn.cssz_xml_unsupported', { year }) }}
+            </p>
           </div>
         </div>
 

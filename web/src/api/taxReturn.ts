@@ -301,6 +301,7 @@ export interface FiledImportResult {
 
 export interface InsuranceSummary {
   year: number
+  cssz_xml_available: boolean
   tax_base_7: number
   is_secondary: boolean
   social: InsuranceBranch
