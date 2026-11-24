@@ -313,6 +313,11 @@ final class Bootstrap
                     'checklistCoverage',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage::class),
                 ),
+            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage(
+                    $c->get(\MyInvoice\Infrastructure\Database\Connection::class),
+                    static fn () => $c->get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService::class),
+                ),
             // Karta vztahu: oznámení pojišťovně pokryté hromadným oznámením.
             \MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class =>
                 \DI\autowire()->constructorParameter(

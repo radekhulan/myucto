@@ -1432,7 +1432,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             $clock,
             checklistCoverage: new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage(
                 $this->db,
-                $this->service,
+                fn () => $this->service,
             ),
         );
         $overviewItem = fn (): array => array_values(array_filter(

@@ -228,11 +228,14 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // Začíná vstupy období, jeden dotaz na běh.
         // Kontrola pracovní doby mladistvých (PayrollJuvenileWorkTimeService)
         // čte záznamy mladistvých za období jednou dávkou (prepare + execute).
+        // 11/2026 přibyla dávka pravidelných základních mezd proti podmínkám
+        // vztahu (PayrollRunSnapshotBatchLoader::recurringBaseWageTerms,
+        // prepare + execute). Jeden dotaz na běh.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            96,
+            98,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 96 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 98 round-tripů.',
         );
     }
 
@@ -268,9 +271,10 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // První načtení sdílené cache public_holidays může přidat jeden dotaz.
         // Dotaz na vstupy vztahů mimo běh (`inputs_on_unstarted_employment`)
         // stojí dva round-tripy (příprava a provedení), nezávisle na počtu osob.
-        // Stejně tak dávka kontroly pracovní doby mladistvých.
+        // Stejně tak dávka kontroly pracovní doby mladistvých a dávka
+        // pravidelných základních mezd proti podmínkám vztahu.
         self::assertLessThanOrEqual(2, abs($counts[24] - $counts[1]));
-        self::assertLessThanOrEqual(124, $counts[24]);
+        self::assertLessThanOrEqual(126, $counts[24]);
     }
 
     /** Dvakrát postavený snapshot téhož vstupu musí být bajtově týž. */

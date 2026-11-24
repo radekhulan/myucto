@@ -35,9 +35,17 @@ final readonly class HealthBulkNotificationChecklistCoverage
         'health_insurance_deregistration' => 'employment_end',
     ];
 
+    /**
+     * Služba hromadných oznámení se získává až při prvním použití. Třída visí
+     * na repozitáři vztahů, který se sestavuje skoro v každém požadavku; přímá
+     * závislost by s ním pokaždé sestavila celou platformu podání (a s ní
+     * hodiny podání dřív, než je kdo stihne nahradit).
+     *
+     * @param \Closure():HealthInsuranceSubmissionService $notifications
+     */
     public function __construct(
         private Connection $db,
-        private HealthInsuranceSubmissionService $notifications,
+        private \Closure $notifications,
     ) {}
 
     /**
@@ -65,11 +73,11 @@ final readonly class HealthBulkNotificationChecklistCoverage
             'SELECT obligation.source_event_type, obligation.source_event_reference, obligation.period_start
                FROM payroll_obligations obligation
               WHERE obligation.supplier_id = ?
-                AND obligation.subject_type = "employment"
+                AND obligation.subject_type = \'employment\'
                 AND obligation.subject_reference IN (' . implode(',', array_fill(0, count($subjects), '?')) . ')
-                AND obligation.environment = "production"
+                AND obligation.environment = \'production\'
                 AND obligation.source_event_type = ?
-                AND obligation.status <> "cancelled"',
+                AND obligation.status <> \'cancelled\'',
         );
         $statement->execute([
             $supplierId,
@@ -77,7 +85,10 @@ final readonly class HealthBulkNotificationChecklistCoverage
             HealthInsuranceSubmissionService::SOURCE_EVENT_NOTIFICATION,
         ]);
         $obligations = $statement->fetchAll(PDO::FETCH_ASSOC);
-        $notified = $this->notifications->bulkNotifiedAmong($supplierId, 'production', $obligations);
+        if ($obligations === []) {
+            return [];
+        }
+        $notified = ($this->notifications)()->bulkNotifiedAmong($supplierId, 'production', $obligations);
 
         $covered = [];
         foreach (array_keys($notified) as $reference) {

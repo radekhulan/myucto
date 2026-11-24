@@ -603,8 +603,9 @@ final class PayrollRegistrationActionTest extends TestCase
 
     /**
      * Pojistka rozhodnutí bodu 8: ručně potvrzené ID PPV nesmí nést jiný
-     * vztah — odhláška by ukončila cizí vztah téže osoby. Hlídá to unikátní
-     * index nad otiskem hodnoty; druhý zápis téhož čísla neprojde.
+     * vztah — odhláška by ukončila cizí vztah téže osoby. Druhý zápis téhož
+     * čísla odmítne služba čitelnou chybou dřív, než narazí na unikátní index,
+     * a po sobě nenechá rozepsaný řádek.
      */
     public function testSameIdPpvCannotBeRecordedForAnotherEmployment(): void
     {
@@ -624,9 +625,12 @@ final class PayrollRegistrationActionTest extends TestCase
                 $this->userId,
             );
             self::fail('Stejné ID PPV se zapsalo k druhému vztahu.');
-        } catch (\PDOException $exception) {
-            self::assertSame('23000', $exception->getCode());
+        } catch (\MyInvoice\Service\Payroll\Submission\Registration\PayrollExternalIdentifierConflict $exception) {
+            self::assertStringContainsString('ID PPV', $exception->getMessage());
         }
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM payroll_employment_external_ids WHERE value_ciphertext = 'enc:v2:pending'",
+        )->fetchColumn());
     }
 
     /**
