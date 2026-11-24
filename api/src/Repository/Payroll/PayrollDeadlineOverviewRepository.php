@@ -197,6 +197,10 @@ final readonly class PayrollDeadlineOverviewRepository
      * `$itemKey` zúží výběr na jeden druh položky — seskupený přehled pak
      * nemusí kvůli jedné skupině tahat celou firmu.
      *
+     * Položka, jejíž lhůta uplynula dřív, než firma mzdy v MyÚčtu aktivovala
+     * ({@see self::lapsedBeforeActivation()}), sem nepatří: patří do sekce
+     * bez termínu.
+     *
      * @return list<array{
      *   item_id:int,employment_id:int,employee_id:int,full_name:string,
      *   employment_code:?string,employment_end_date:?string,phase:string,item_key:string,due_date:string,
@@ -234,6 +238,7 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND item.due_date <= ?
                 AND (? IS NULL OR item.item_key = ?)
                 AND ' . self::openChecklistItem() . '
+                AND NOT (' . self::lapsedBeforeActivation() . ')
               ORDER BY item.due_date ASC, item.id ASC'
         );
         $statement->execute([$supplierId, $from, $to, $itemKey, $itemKey]);
@@ -252,12 +257,14 @@ final readonly class PayrollDeadlineOverviewRepository
      * po importu znamenalo 225 ručních odškrtnutí.
      *
      * Výběr je TENTÝŽ jako u položek s termínem ({@see self::openChecklistItem()}),
-     * liší se jen podmínkou na `due_date`.
+     * liší se jen podmínkou na `due_date`. Patří sem i položka, jejíž lhůta
+     * uplynula před aktivací mezd ({@see self::lapsedBeforeActivation()});
+     * nese ji `lapsed_before_activation = 1` a původní `due_date`.
      *
      * @return list<array{
      *   item_id:int,employment_id:int,employee_id:int,full_name:string,
-     *   employment_code:?string,employment_end_date:?string,phase:string,item_key:string,due_date:null,
-     *   deadline_source:?string,deadline_source_status:?string
+     *   employment_code:?string,employment_end_date:?string,phase:string,item_key:string,due_date:?string,
+     *   deadline_source:?string,deadline_source_status:?string,lapsed_before_activation:int
      * }>
      */
     public function checklistWithoutDeadline(int $supplierId, ?string $itemKey = null): array
@@ -273,7 +280,8 @@ final readonly class PayrollDeadlineOverviewRepository
                     item.item_key,
                     item.due_date,
                     item.deadline_source,
-                    item.deadline_source_status
+                    item.deadline_source_status,
+                    item.due_date IS NOT NULL AS lapsed_before_activation
                FROM payroll_employment_checklist_items item
                JOIN payroll_employments employment
                  ON employment.supplier_id = item.supplier_id
@@ -282,7 +290,7 @@ final readonly class PayrollDeadlineOverviewRepository
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE item.supplier_id = ?
-                AND item.due_date IS NULL
+                AND (item.due_date IS NULL OR ' . self::lapsedBeforeActivation() . ')
                 AND (? IS NULL OR item.item_key = ?)
                 AND ' . self::openChecklistItem() . '
               ORDER BY item.id ASC'
@@ -307,7 +315,7 @@ final readonly class PayrollDeadlineOverviewRepository
                  ON employment.supplier_id = item.supplier_id
                 AND employment.id = item.employment_id
               WHERE item.supplier_id = ?
-                AND item.due_date IS NULL
+                AND (item.due_date IS NULL OR ' . self::lapsedBeforeActivation() . ')
                 AND ' . self::openChecklistItem() . '
               GROUP BY item.item_key'
         );
@@ -339,6 +347,36 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND employment.status NOT IN ('no_show', 'archived')
                 AND NOT (" . PayrollChecklistEvidenceSql::evidencePresent() . ')
                 AND NOT (' . PayrollPredecessorObligationScope::sql('item') . ')';
+    }
+
+    /**
+     * Lhůta položky uplynula dřív, než firma mzdy v MyÚčtu aktivovala
+     * (`payroll_module_state.activated_at`).
+     *
+     * Firma, která modul zapne v říjnu a mzdy vede zpětně od ledna, si lidi
+     * doplní importem registrací nebo exportu zaměstnanců z ePortálu ČSSZ.
+     * Začátek vedení mezd ({@see PayrollPredecessorObligationScope}) je pak
+     * leden, takže nástupy z jara se za „vyřízené předchozím programem"
+     * nepovažují, a hlídač termínů hlásil stovky smluv, prohlášení
+     * a oznámení pojišťovně „po termínu o 200 dnů". Tu lhůtu ale nemohl
+     * nikdo v MyÚčtu zmeškat, protože tehdy aplikaci nepoužíval.
+     *
+     * Položka se proto neschová, jen se přesune mezi položky bez termínu: tam
+     * jde vyřízené mimo aplikaci hromadně odškrtnout a skutečný nedodělek
+     * zůstane vidět. Lhůta, která uplynula až po aktivaci, zůstává po termínu.
+     * Modul ve stavu nastavení (`activated_at IS NULL`) se neposuzuje.
+     *
+     * Předpokládá alias `item`.
+     */
+    private static function lapsedBeforeActivation(): string
+    {
+        return 'EXISTS (
+                    SELECT 1
+                      FROM payroll_module_state activation_state
+                     WHERE activation_state.supplier_id = item.supplier_id
+                       AND activation_state.activated_at IS NOT NULL
+                       AND item.due_date < DATE(activation_state.activated_at)
+                )';
     }
 
     /**

@@ -674,4 +674,25 @@ describe('PayrollDeadlinesPanel', () => {
     expect(wrapper.get('[data-test="payroll-deadlines-bulk-notice"]').text())
       .toBe('payroll.dashboard.deadlines.bulk_done:2')
   })
+
+  /** Lhůta uplynula dřív, než firma mzdy aktivovala: bez termínu, ale s původním datem. */
+  it('shows the original deadline of an item that lapsed before payroll activation', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([undatedGroup()]))
+    m.deadlineGroupItems.mockResolvedValue(page([
+      { ...undatedPerson(1), lapsed_due_on: '2026-03-10' },
+      undatedPerson(2),
+    ]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-deadline-group-toggle-undated:checklist:social_jmhz_registration"]')
+      .trigger('click')
+    await flushPromises()
+
+    const lapsed = wrapper.get('[data-test="payroll-deadline-person-payroll_checklist_item:1"]')
+    expect(lapsed.text()).toContain('payroll.dashboard.deadlines.lapsed_before_activation_label:')
+    expect(lapsed.text()).not.toContain('payroll.dashboard.deadlines.overdue_by')
+    expect(wrapper.get('[data-test="payroll-deadline-person-payroll_checklist_item:2"]').text())
+      .toContain('payroll.dashboard.deadlines.undated_label')
+  })
 })

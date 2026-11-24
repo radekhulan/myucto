@@ -1,4 +1,4 @@
-import type { PayrollEmployment, PayrollEmploymentStatus } from '@/api/payroll'
+import type { PayrollBulkClosurePreview, PayrollEmployment, PayrollEmploymentStatus } from '@/api/payroll'
 import { appIsoDate } from '@/utils/date'
 
 export interface EmploymentTransitionPresentation {
@@ -285,4 +285,30 @@ export function openingBalancesHostId(employments: readonly OpeningBalancesCandi
   const latest = [...candidates].sort((left, right) => rank(right).localeCompare(rank(left)))[0]
 
   return latest?.id ?? null
+}
+
+/**
+ * Počty na tlačítku „Ukončit skončené dohody": kolik vztahů akce ukončí
+ * a kolik jich ukončit nejde (práce nebo zúčtovaná mzda po sjednaném konci).
+ *
+ * Zablokovanou dohodu nechá aktivní i noční úloha, takže jediné místo, kde
+ * se o ní účetní dozví, je tohle tlačítko a dialog za ním. Dřív se do počtu
+ * nepočítala a tlačítko se s ní schovalo do „Další funkce". S obdobím běhu
+ * se počítá totéž, co hlásí kontrola před během (konec před obdobím).
+ */
+export function bulkClosureButtonCounts(
+  preview: Pick<PayrollBulkClosurePreview, 'summary' | 'items'>,
+  period: string | null,
+): { ready: number, blocked: number } {
+  if (period === null) {
+    return {
+      ready: preview.summary.expired + preview.summary.inactive - preview.summary.blocked,
+      blocked: preview.summary.blocked,
+    }
+  }
+  const beforePeriod = preview.items.filter(item => item.before_period === true)
+  return {
+    ready: beforePeriod.filter(item => item.blocked_reason === null).length,
+    blocked: beforePeriod.filter(item => item.blocked_reason !== null).length,
+  }
 }

@@ -4749,6 +4749,8 @@
     "bulk_closure": {
       "open": "End finished agreements",
       "open_count": "End finished agreements ({count})",
+      "open_count_review": "End finished agreements ({count}, to review {blocked})",
+      "open_employment": "Open relationship card",
       "title": "End finished agreements",
       "intro": "Preview of relationships that are no longer running according to their agreed end or to payroll. Each selected relationship is ended exactly as with the button on its card, including the exit checklist (deregistration, exit documents). Nothing changes until you confirm the selection.",
       "period_note": "Opened from the payroll run check for {period}: no agreement has its agreed end before this period, so nothing is preselected. | Opened from the payroll run check for {period}: {count} agreement with an agreed end before this period is preselected, the one the check reports. | Opened from the payroll run check for {period}: {count} agreements with an agreed end before this period are preselected, the ones the check reports.",
@@ -4785,8 +4787,8 @@
         "archive": "Ended {date}"
       },
       "blocked": {
-        "activity_after_end": "Has payroll input or attendance after the end date ({period}). Check the end date.",
-        "settled_after_end": "Has settled payroll after the end date ({period}). Check the end date."
+        "activity_after_end": "Has payroll input or attendance after the end date ({period}), so neither the bulk action nor the nightly agreement closure ends it. On the relationship card, decide when it actually ended or correct the agreed end.",
+        "settled_after_end": "Has settled payroll after the end date ({period}), so neither the bulk action nor the nightly agreement closure ends it. On the relationship card, decide when it actually ended or correct the agreed end."
       },
       "select_all": "Select all",
       "end_on": "End as of",
@@ -12004,7 +12006,8 @@
         "oldest": "{label} (oldest)",
         "bulk_done": "Marked as done: {n}.",
         "undated_label": "no statutory deadline",
-        "undated_hint": "Open per-person items with no statutory deadline, or one the app does not derive (for example the ČSSZ registration for a start before 1 July 2026). Expand a group to mark items handled outside the app as done in bulk.",
+        "lapsed_before_activation_label": "deadline {date} passed before payroll was activated",
+        "undated_hint": "Open per-person items with no statutory deadline, or one the app does not derive (for example the ČSSZ registration for a start before 1 July 2026), and items whose deadline passed before you activated payroll in the app (people added by import or retroactively). Expand a group to mark items handled outside the app as done in bulk.",
         "group": {
           "search": "Search name or personal number",
           "col_name": "Name",

@@ -4295,6 +4295,11 @@ export interface PayrollDeadlineItem {
   deadline_source?: string | null
   deadline_source_status?: string | null
   deadline_ruleset_id?: string
+  /**
+   * Položka checklistu, jejíž lhůta uplynula dřív, než firma aktivovala mzdy
+   * v aplikaci: původní lhůta. Položka je ve fázi `undated`, po termínu není.
+   */
+  lapsed_due_on?: string | null
   /** Roční vyúčtování: `dpzvd6` (zálohová daň) nebo `dpsvd2` (srážková). */
   form_code?: string
   /** Zdaňovací období, ZA které se vyúčtování podává. */

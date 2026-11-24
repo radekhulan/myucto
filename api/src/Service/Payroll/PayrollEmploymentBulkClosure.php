@@ -110,7 +110,16 @@ final class PayrollEmploymentBulkClosure
      * Konec, který ještě nenastal, se nepočítá ani u běhu za budoucí měsíc:
      * takový vztah ukončit nejde a dialog ho nenabídne.
      *
-     * @return list<array{employment_id:int,full_name:string,agreed_end_on:string}>
+     * Vztah s mzdovým vstupem, docházkou nebo zúčtovanou mzdou po sjednaném
+     * konci nese `blocked_reason` a `blocked_period` ({@see self::blocker()}):
+     * hromadná akce ho nepředvybere a noční úloha ho neukončí, takže o něm
+     * musí rozhodnout člověk na kartě vztahu. Bez téhle stopy kontrola radila
+     * „ukončete hromadně" i u vztahu, který hromadně ukončit nejde.
+     *
+     * @return list<array{
+     *   employment_id:int,employee_id:int,full_name:string,agreed_end_on:string,
+     *   blocked_reason:?string,blocked_period:?string
+     * }>
      */
     public function expiredBeforePeriod(int $supplierId, string $periodStart, ?string $today = null): array
     {
@@ -119,9 +128,9 @@ final class PayrollEmploymentBulkClosure
             throw new \InvalidArgumentException('Mzdové období není platné.');
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT dated.id, dated.full_name, dated.agreed_end_on
+            'SELECT dated.id, dated.employee_id, dated.full_name, dated.agreed_end_on
                FROM (
-                    SELECT employment.id, employee.full_name,
+                    SELECT employment.id, employment.employee_id, employee.full_name,
                            ' . self::agreedEndSql('employment') . ' AS agreed_end_on
                       FROM payroll_employments employment
                       JOIN payroll_employees employee
@@ -137,12 +146,25 @@ final class PayrollEmploymentBulkClosure
         );
         $stmt->execute([$supplierId, $periodStart, $today]);
 
+        /** @var list<array<string,mixed>> $found */
+        $found = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $activity = $this->activityFor(
+            $supplierId,
+            array_map(static fn (array $row): int => (int) $row['id'], $found),
+        );
         $rows = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($found as $row) {
+            $agreedEndOn = (string) $row['agreed_end_on'];
+            $blocked = isset($activity[(int) $row['id']])
+                ? $this->blocker($activity[(int) $row['id']], $agreedEndOn)
+                : null;
             $rows[] = [
                 'employment_id' => (int) $row['id'],
+                'employee_id' => (int) $row['employee_id'],
                 'full_name' => (string) $row['full_name'],
-                'agreed_end_on' => (string) $row['agreed_end_on'],
+                'agreed_end_on' => $agreedEndOn,
+                'blocked_reason' => $blocked['reason'] ?? null,
+                'blocked_period' => $blocked['period'] ?? null,
             ];
         }
 

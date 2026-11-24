@@ -54,7 +54,7 @@ import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.v
 import PersonDataGapBadge from './PersonDataGapBadge.vue'
 import DppAnnualHoursBadge from './DppAnnualHoursBadge.vue'
 import PersonDataGapSummary from './PersonDataGapSummary.vue'
-import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
+import { bulkClosureButtonCounts, employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import {
   payrollAgendaLabelKey,
   payrollAgendas,
@@ -255,6 +255,9 @@ const bulkClosureOpen = ref(false)
 const bulkClosurePeriod = ref<string | null>(null)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
+// Dohody, které akce ani noční úloha neukončí (práce nebo mzda po konci);
+// čekají na rozhodnutí účetní, takže tlačítko se kvůli nim neschovává.
+const bulkClosureBlocked = ref(0)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
 const healthInsurerBulkOpen = ref(false)
 // Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
@@ -708,11 +711,13 @@ async function removePerson() {
 const peopleBulkActions = computed<ActionItem[]>(() => [
   {
     key: 'bulk-closure',
-    label: bulkClosureCount.value
-      ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount.value })
-      : t('payroll.bulk_closure.open'),
+    label: bulkClosureBlocked.value
+      ? t('payroll.bulk_closure.open_count_review', { count: bulkClosureCount.value ?? 0, blocked: bulkClosureBlocked.value })
+      : bulkClosureCount.value
+        ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount.value })
+        : t('payroll.bulk_closure.open'),
     icon: 'archive',
-    tier: bulkClosureCount.value ? 'secondary' : 'overflow',
+    tier: bulkClosureCount.value || bulkClosureBlocked.value ? 'secondary' : 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
     run: () => openWithBulkPeriod(() => {
@@ -1820,17 +1825,31 @@ async function loadBulkClosureCount() {
     const preview = await payrollApi.bulkClosurePreview(period === null ? {} : { period })
     // S obdobím běhu tlačítko slibuje totéž, co hlásí kontrola před během
     // a co dialog předvybere: dohody skončené před tímto měsícem.
-    bulkClosureCount.value = period === null
-      ? preview.summary.expired + preview.summary.inactive - preview.summary.blocked
-      : preview.items.filter(item => item.before_period === true && item.blocked_reason === null).length
+    const counts = bulkClosureButtonCounts(preview, period)
+    bulkClosureCount.value = counts.ready
+    bulkClosureBlocked.value = counts.blocked
   } catch {
     bulkClosureCount.value = null
+    bulkClosureBlocked.value = 0
   }
 }
 
 function onBulkClosureApplied() {
   void load()
   void loadBulkClosureCount()
+}
+
+/*
+ * Z dialogu na kartu vztahu, který hromadně ukončit nejde. Návrat do běhu
+ * (`?back=`) se tu nedělá: účetní jde rozhodnout o konci dohody, ne zpět.
+ */
+async function openBlockedClosureEmployment(target: { employee_id: number; employment_id: number }) {
+  bulkBackPath.value = null
+  await router.push({
+    path: '/payroll/people',
+    query: { person: String(target.employee_id), employment: String(target.employment_id) },
+  })
+  bulkClosureOpen.value = false
 }
 
 onMounted(async () => {
@@ -2194,6 +2213,7 @@ onMounted(async () => {
       :period="bulkClosurePeriod"
       @close="bulkClosureOpen = false"
       @applied="onBulkClosureApplied"
+      @open-employment="openBlockedClosureEmployment"
     />
 
     <div v-if="editing && loadingDetailId !== null" class="h-24 animate-pulse rounded-lg bg-neutral-100" />

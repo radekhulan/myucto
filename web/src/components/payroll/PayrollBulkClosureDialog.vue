@@ -12,7 +12,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
-import { btnFilled, btnOutline, BTN_DISABLED_NOTE, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, BTN_DISABLED_NOTE, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
 
@@ -34,6 +34,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'applied', result: PayrollBulkClosureResult): void
+  /*
+   * Vztah, který hromadně ukončit nejde (práce nebo mzda po sjednaném konci).
+   * Noční úloha ho nechá aktivní, takže o datu konce rozhoduje člověk na kartě.
+   */
+  (e: 'open-employment', target: { employee_id: number; employment_id: number }): void
 }>()
 
 const { t } = useI18n()
@@ -313,9 +318,22 @@ onMounted(loadPreview)
                   <span v-if="personalNumberLabel(t, item.employment_code)" class="font-normal text-neutral-500"> · {{ personalNumberLabel(t, item.employment_code) }}</span>
                 </p>
                 <p class="text-xs text-neutral-500">{{ itemDetail(item) }}</p>
-                <p v-if="item.blocked_reason" class="mt-0.5 text-xs text-warning-700" :data-test="`bulk-closure-blocked-${item.employment_id}`">
-                  {{ t(`payroll.bulk_closure.blocked.${item.blocked_reason}`, { period: item.blocked_period ?? '' }) }}
-                </p>
+                <div v-if="item.blocked_reason" class="mt-0.5 flex flex-wrap items-center gap-2">
+                  <p class="text-xs text-warning-700" :data-test="`bulk-closure-blocked-${item.employment_id}`">
+                    {{ t(`payroll.bulk_closure.blocked.${item.blocked_reason}`, { period: item.blocked_period ?? '' }) }}
+                  </p>
+                  <button
+                    type="button"
+                    class="whitespace-nowrap"
+                    :class="btnOutlineSm('warning')"
+                    :disabled="applying"
+                    :data-test="`bulk-closure-open-${item.employment_id}`"
+                    @click="emit('open-employment', { employee_id: item.employee_id, employment_id: item.employment_id })"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+                    {{ t('payroll.bulk_closure.open_employment') }}
+                  </button>
+                </div>
               </div>
               <label v-if="item.action === 'end'" class="text-xs text-neutral-600">
                 <span class="mb-0.5 block">{{ t('payroll.bulk_closure.end_on') }}</span>

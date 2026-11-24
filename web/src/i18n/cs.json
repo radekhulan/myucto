@@ -4749,6 +4749,8 @@
     "bulk_closure": {
       "open": "Ukončit skončené dohody",
       "open_count": "Ukončit skončené dohody ({count})",
+      "open_count_review": "Ukončit skončené dohody ({count}, k posouzení {blocked})",
+      "open_employment": "Otevřít kartu vztahu",
       "title": "Ukončit skončené dohody",
       "intro": "Náhled vztahů, které už podle sjednaného konce nebo podle mezd neběží. Každý vybraný vztah se ukončí stejně jako tlačítkem na jeho kartě, včetně kontrolního seznamu odchodu (odhláška, výstupní doklady). Nic se nemění, dokud výběr nepotvrdíte.",
       "period_note": "Otevřeno z kontroly mzdového běhu za {period}: žádná dohoda nemá sjednaný konec před tímto obdobím, proto není nic předvybráno. | Otevřeno z kontroly mzdového běhu za {period}: předvybrána je {count} dohoda se sjednaným koncem před tímto obdobím, tedy ta, kterou hlásí kontrola. | Otevřeno z kontroly mzdového běhu za {period}: předvybrány jsou {count} dohody se sjednaným koncem před tímto obdobím, tedy ty, které hlásí kontrola. | Otevřeno z kontroly mzdového běhu za {period}: předvybráno je {count} dohod se sjednaným koncem před tímto obdobím, tedy ty, které hlásí kontrola.",
@@ -4785,8 +4787,8 @@
         "archive": "Ukončeno {date}"
       },
       "blocked": {
-        "activity_after_end": "Po datu konce má mzdový vstup nebo docházku ({period}). Zkontrolujte datum konce.",
-        "settled_after_end": "Po datu konce má zúčtovanou mzdu ({period}). Zkontrolujte datum konce."
+        "activity_after_end": "Po datu konce má mzdový vstup nebo docházku ({period}), proto ji neukončí hromadná akce ani noční ukončení dohod. Na kartě vztahu posuďte, kdy skutečně skončila, nebo opravte sjednaný konec.",
+        "settled_after_end": "Po datu konce má zúčtovanou mzdu ({period}), proto ji neukončí hromadná akce ani noční ukončení dohod. Na kartě vztahu posuďte, kdy skutečně skončila, nebo opravte sjednaný konec."
       },
       "select_all": "Vybrat vše",
       "end_on": "Ukončit k",
@@ -12004,7 +12006,8 @@
         "oldest": "{label} (nejstarší)",
         "bulk_done": "Označeno jako splněné: {n}.",
         "undated_label": "bez zákonné lhůty",
-        "undated_hint": "Nevyřízené položky u lidí, u kterých zákon lhůtu neukládá nebo ji aplikace neodvozuje (třeba přihláška ČSSZ u nástupu před 1. 7. 2026). Co bylo vyřízeno mimo aplikaci, označte po rozbalení skupiny hromadně.",
+        "lapsed_before_activation_label": "lhůta {date} uplynula před aktivací mezd",
+        "undated_hint": "Nevyřízené položky u lidí, u kterých zákon lhůtu neukládá nebo ji aplikace neodvozuje (třeba přihláška ČSSZ u nástupu před 1. 7. 2026), a položky, jejichž lhůta uplynula dřív, než jste mzdy v aplikaci aktivovali (lidé doplnění importem nebo zpětně). Co bylo vyřízeno mimo aplikaci, označte po rozbalení skupiny hromadně.",
         "group": {
           "search": "Hledat jméno nebo osobní číslo",
           "col_name": "Jméno",

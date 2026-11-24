@@ -904,6 +904,16 @@ exekucí a insolvence. Tyto položky se nezapočítávají do fáze **Po termín
 ani do ostatních počtů termínů; skupiny jsou seřazené od největší
 a rozbalují se stejně jako ostatní.
 
+Do sekce **Bez termínu** patří i položky checklistu, jejichž lhůta uplynula
+dřív, než jste mzdy v MyÚčtu aktivovali. Typicky firma, která modul zapne
+v říjnu, mzdy vede od ledna a lidi doplní importem registrací nebo exportu
+zaměstnanců z ePortálu ČSSZ: smlouvy, prohlášení a oznámení pojišťovně
+u jarních nástupů a odchodů tehdy v aplikaci nikdo hlídat nemohl. U osoby je
+místo počtu dnů po termínu uvedeno **lhůta … uplynula před aktivací mezd**.
+Co vyřídil předchozí program nebo jste vyřídili mimo aplikaci, označte po
+rozbalení skupiny hromadně. Lhůta, která uplynula až po aktivaci mezd,
+zůstává ve fázi **Po termínu**.
+
 Povinnosti z doby **před začátkem vedení mezd v MyÚčtu** (nástup, změna nebo
 skončení vztahu před prvním mzdovým obdobím v nastavení mezd) vyřídil
 předchozí program. Import ani převod mezd je nezakládá, a pokud už na vztahu
