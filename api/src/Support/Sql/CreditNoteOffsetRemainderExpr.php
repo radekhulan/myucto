@@ -73,6 +73,7 @@ final class CreditNoteOffsetRemainderExpr
                                    SUM(" . self::offsetVatSql() . ") AS vat{$homeSums}
                               FROM credit_note_offsets cnr_o
                               LEFT JOIN {$table} cnr_d ON cnr_d.id = cnr_o.credit_note_id AND cnr_d.supplier_id = cnr_o.supplier_id
+                              LEFT JOIN currencies cnr_cur ON cnr_cur.id = cnr_d.currency_id
                              WHERE cnr_o.supplier_id = {$supplierId} AND cnr_o.doc_type = '{$type}'
                              GROUP BY cnr_o.invoice_id, cnr_o.offset_on) d
                 ) {$alias} ON {$alias}.invoice_id = {$docAlias}.id AND {$alias}.offset_on <= {$asOfSql}
@@ -196,6 +197,7 @@ final class CreditNoteOffsetRemainderExpr
     {
         return "(SELECT SUM({$value}) FROM credit_note_offsets cnr_o
                    JOIN invoices cnr_d ON cnr_d.id = cnr_o.credit_note_id AND cnr_d.supplier_id = cnr_o.supplier_id
+                   LEFT JOIN currencies cnr_cur ON cnr_cur.id = cnr_d.currency_id
                   WHERE cnr_o.supplier_id = {$alias}.supplier_id AND cnr_o.invoice_id = {$alias}.id AND cnr_o.doc_type = 'invoice'
                     AND " . self::throughOffset($asOfSql, $throughIdSql) . ')';
     }
@@ -203,13 +205,13 @@ final class CreditNoteOffsetRemainderExpr
     private static function offsetGrossCzkSql(): string
     {
         return 'COALESCE(ROUND(cnr_o.amount * ABS(cnr_d.import_total_with_vat_czk) / NULLIF(ABS(cnr_d.total_with_vat), 0), 2),
-                         ROUND(cnr_o.amount * COALESCE(cnr_d.exchange_rate, 1), 2))';
+                         ROUND(cnr_o.amount * ' . CzkAmountExpr::rate('cnr_d', 'cnr_cur') . ', 2))';
     }
 
     private static function offsetVatCzkSql(): string
     {
         return 'COALESCE(ROUND(cnr_o.amount * cnr_d.import_total_vat_czk / NULLIF(cnr_d.total_with_vat, 0), 2),
-                         ROUND((' . self::offsetVatSql() . ') * COALESCE(cnr_d.exchange_rate, 1), 2))';
+                         ROUND((' . self::offsetVatSql() . ') * ' . CzkAmountExpr::rate('cnr_d', 'cnr_cur') . ', 2))';
     }
 
     /** Zápočty do daného zápočtu: dřívější dny a téhož dne jen do daného id. */

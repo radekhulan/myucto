@@ -22,8 +22,8 @@ final class BankAdvanceFxTest extends TestCase
         $pdo->exec("CREATE TABLE currencies (id INT, code TEXT);
             INSERT INTO currencies VALUES (1, 'EUR');
             CREATE TABLE invoices (id INT, supplier_id INT, invoice_type TEXT, status TEXT, exchange_rate DECIMAL,
-                amount_to_pay DECIMAL, paid_total DECIMAL, currency_id INT);
-            INSERT INTO invoices VALUES (10, 1, 'proforma', 'paid', 24, 100, 100, 1);
+                amount_to_pay DECIMAL, paid_total DECIMAL, currency_id INT, parent_invoice_id INT, import_amount_to_pay_czk DECIMAL);
+            INSERT INTO invoices VALUES (10, 1, 'proforma', 'paid', 24, 100, 100, 1, NULL, NULL);
             CREATE TABLE purchase_invoices (id INT, supplier_id INT, document_kind TEXT, status TEXT, exchange_rate DECIMAL,
                 amount_to_pay DECIMAL, parent_purchase_invoice_id INT, currency_id INT);
             INSERT INTO purchase_invoices VALUES (10, 1, 'advance', 'paid', 24, 100, NULL, 1);
@@ -38,7 +38,10 @@ final class BankAdvanceFxTest extends TestCase
         (new \ReflectionProperty($bank, 'db'))->setValue($bank, $db);
         (new \ReflectionProperty($bank, 'postingRules'))->setValue($bank, new PostingRuleRepository($db));
 
-        self::assertSame([$advance, 26.0, true], (new \ReflectionMethod($bank, $method))->invoke($bank, 1, 10, $saldo, 'EUR', 26.0));
+        $result = $method === 'incomingFxSaldo'
+            ? (new \ReflectionMethod($bank, $method))->invoke($bank, 1, 10, $saldo, 'EUR', 100.0, 26.0, null)
+            : (new \ReflectionMethod($bank, $method))->invoke($bank, 1, 10, $saldo, 'EUR', 26.0);
+        self::assertSame($method === 'incomingFxSaldo' ? [$advance, 26.0, 2600.0, true] : [$advance, 26.0, true], $result);
     }
 
     public function testReadsHistoricalCzkOnlyForTheRequestedPostedAllocation(): void

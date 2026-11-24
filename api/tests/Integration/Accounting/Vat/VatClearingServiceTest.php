@@ -173,6 +173,33 @@ final class VatClearingServiceTest extends TestCase
     }
 
     /**
+     * Daň dokladů na analytice 343 mimo nastavené účty (343.000 převzatý z POHODY pro vstup
+     * i výstup) se převede čistým obratem. Bankovní úhrada daně na témže účtu se nepřevádí.
+     */
+    public function testClearsOtherVatAnalyticFromDocumentsButNotBankPayments(): void
+    {
+        $this->accounts->insert($this->supplierId, [
+            'account_code' => '343.000', 'name' => 'DPH z převodu', 'account_type' => 'liability', 'normal_side' => null,
+            'parent_id' => $this->accounts->findByCode($this->supplierId, '343')['id'],
+        ]);
+        $this->bookOutputVat(10000.00, self::YEAR . '-06-10', 900101, '343.000');
+        $this->bookInputVat(3000.00, self::YEAR . '-06-12', 900102, '343.000');
+        $this->bookInputVat(1000.00, self::YEAR . '-06-15', 900103);
+        $this->posting->postDocument($this->supplierId, 'bank', 900104, [
+            ['account_code' => '343.000', 'side' => 'debit', 'amount' => 5000.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 5000.00],
+        ], ['entry_date' => self::YEAR . '-06-25', 'description' => 'Úhrada DPH']);
+
+        $result = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 6);
+
+        self::assertSame(VatClearingService::STATUS_POSTED, $result['status']);
+        self::assertEqualsWithDelta(6000.00, $result['settlement'], 0.001, 'Výstup 10 000 - vstup 3 000 - vstup 1 000.');
+        $byCode = $this->linesByCode((int) $result['entry_id']);
+        self::assertEqualsWithDelta(7000.00, $byCode['343.000']['debit'], 0.001, 'Čistý obrat dokladů na 343.000 bez bankovní úhrady.');
+        self::assertSame('ok', $this->clearing->status($this->supplierId, self::YEAR, 6)['freshness']);
+    }
+
+    /**
      * Období s deníkem převzatým z jiného programu: DPH vyrovnal (nebo nevyrovnal) zdroj.
      * Cron ani obnova konceptu přiznání do něj nic nezapíšou; ruční zúčtování projde,
      * náhled ale nese `taken_over`, aby to bylo vědomé.

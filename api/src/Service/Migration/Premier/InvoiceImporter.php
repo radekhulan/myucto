@@ -644,8 +644,8 @@ final class InvoiceImporter
     {
         // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
         $home = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
-        $total = $table === 'invoices' ? IssuedCzkAmounts::grossSql('d', $home) : $home;
-        $stmt = $this->stmt('changed_' . $table, "SELECT {$total} FROM {$table} d WHERE id = ? AND supplier_id = ?");
+        $storedSql = $table === 'invoices' ? IssuedCzkAmounts::grossSql('d', $home) : $home;
+        $stmt = $this->stmt('changed_' . $table, "SELECT {$storedSql} FROM {$table} d WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $total) < 0.005) {

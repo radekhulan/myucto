@@ -377,6 +377,19 @@ final class VatClearingService
             }
             $base[$direction . '_vat'] = round($base[$direction . '_vat'], 2);
         }
+        // Daň dokladů na dalších analytikách 343 mimo nastavené účty (typicky 343.000
+        // převzatý z POHODY nebo Money pro vstup i výstup): převede se čistý obrat účtu,
+        // kladný jako výstup, záporný jako vstup. Úhrady daně bankou se nepřevádějí.
+        foreach ($this->otherVatTurnover($supplierId, $start, $end, [...$taxCodes, $settlementAcc]) as $code => $net) {
+            if (self::cents($net) === 0) {
+                continue;
+            }
+            $direction = $net > 0 ? 'output' : 'input';
+            $amount = round(abs($net), 2);
+            $base['accounts_detail'][] = ['account_code' => $code, 'direction' => $direction, 'amount' => $amount];
+            $base[$direction . '_vat'] = round($base[$direction . '_vat'] + $amount, 2);
+            $hasTurnover = true;
+        }
         $base['settlement'] = round($base['output_vat'] - $base['input_vat'], 2);
         if (!$hasTurnover) {
             $base['status'] = self::STATUS_ZERO;
@@ -894,6 +907,40 @@ final class VatClearingService
      * @param list<string> $codes
      * @return array<string, array{debit:float, credit:float}>
      */
+    /**
+     * Čistý obrat (Dal - MD) analytik daně 343 mimo nastavené účty zúčtování za období,
+     * jen ze zápisů dokladů (faktury, přijaté faktury, pokladna, interní doklady). Bankovní
+     * úhrady a vratky daně, počáteční stavy, uzávěrka a zúčtování samo se vynechají.
+     *
+     * @param list<string> $exclude
+     * @return array<string,float>
+     */
+    private function otherVatTurnover(int $supplierId, string $start, string $end, array $exclude): array
+    {
+        $placeholders = implode(', ', array_fill(0, max(1, count($exclude)), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.account_code,
+                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS net
+               FROM journal_entry_lines l
+               JOIN journal_entries e    ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+               JOIN chart_of_accounts a  ON a.id = l.account_id
+              WHERE l.supplier_id = ?
+                AND a.account_code LIKE ?
+                AND a.account_code NOT IN ({$placeholders})
+                AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND e.source_type NOT IN ('closing', 'opening', 'bank', '" . self::SOURCE_TYPE . "')
+              GROUP BY a.account_code
+              ORDER BY a.account_code"
+        );
+        $stmt->execute([$supplierId, PostingService::VAT_SYNTHETIC . '%', ...($exclude ?: ['']), $start, $end]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_KEY_PAIR) as $code => $net) {
+            $out[(string) $code] = round((float) $net, 2);
+        }
+        return $out;
+    }
+
     private function turnover(int $supplierId, string $start, string $end, array $codes): array
     {
         $out = [];

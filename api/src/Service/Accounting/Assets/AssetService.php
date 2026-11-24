@@ -510,7 +510,7 @@ final class AssetService
             }
         }
         if ($bookEntry) {
-            $this->assertActivationBookable($asset);
+            $this->assertActivationBookable($supplierId, $asset, $date);
         }
 
         $pdo = $this->db->pdo();
@@ -575,20 +575,53 @@ final class AssetService
     }
 
     /**
-     * Zápis o zařazení (MD 02x / D 042) jen u majetku pořízeného v účetnictví vedeném
-     * v MyÚčtu. Karta s počátečními oprávkami (převod z jiného programu, historický
-     * majetek) má cenu na 02x už v počátečních stavech, zápis by ji zaúčtoval podruhé.
+     * Zápis o zařazení (MD 02x / D 042) jen tam, kde cena ještě na 02x není.
+     *
+     * Karta pořízená před prvním účetním obdobím firmy s počátečními oprávkami (převod
+     * z jiného programu, historický majetek) má cenu v počátečních stavech 02x, zápis by
+     * ji zaúčtoval podruhé. Karta pořízená až v účetnictví vedeném v MyÚčtu zápis
+     * potřebuje (cena leží na 04x), i když převod do jejích počátečních oprávek uložil
+     * odpis běžného roku. Odmítne se ale, když převedený deník už zápis MD 02x / D 04x
+     * se stejnou částkou obsahuje (POHODA zařazení zaúčtovala sama).
      *
      * @param array<string,mixed> $asset
      */
-    private function assertActivationBookable(array $asset): void
+    private function assertActivationBookable(int $supplierId, array $asset, string $date): void
     {
-        if ((int) $asset['opening_tax_years'] > 0 || (float) $asset['opening_tax_amount'] > 0.0
-            || (int) $asset['opening_acc_months'] > 0 || (float) $asset['opening_acc_amount'] > 0.0) {
+        $hasOpening = (int) $asset['opening_tax_years'] > 0 || (float) $asset['opening_tax_amount'] > 0.0
+            || (int) $asset['opening_acc_months'] > 0 || (float) $asset['opening_acc_amount'] > 0.0;
+        $first = $this->db->pdo()->prepare('SELECT MIN(starts_on) FROM accounting_periods WHERE supplier_id = ?');
+        $first->execute([$supplierId]);
+        $firstStart = $first->fetchColumn();
+        $acquired = (string) ($asset['acquisition_date'] ?? $date);
+        if ($hasOpening && ($firstStart === false || $firstStart === null || $acquired < (string) $firstStart)) {
             throw new AssetException(
                 'opening_state_entry',
-                'Karta má počáteční oprávky, majetek je tedy už v počátečních stavech účtu '
+                'Karta má počáteční oprávky a majetek byl pořízen před začátkem účetnictví v MyÚčtu, je tedy už v počátečních stavech účtu '
                     . $asset['asset_account_code'] . '. Zařaďte ji bez zápisu o zařazení, jinak by se pořizovací cena zaúčtovala podruhé.',
+            );
+        }
+        $existing = $this->db->pdo()->prepare(
+            "SELECT e.id, e.document_no FROM chart_of_accounts da
+               JOIN journal_entry_lines d ON d.supplier_id = da.supplier_id AND d.account_id = da.id AND d.side = 'debit'
+               JOIN journal_entries e ON e.id = d.entry_id AND e.supplier_id = d.supplier_id
+               JOIN journal_entry_lines c ON c.supplier_id = e.supplier_id AND c.entry_id = e.id AND c.side = 'credit'
+               JOIN chart_of_accounts ca ON ca.id = c.account_id AND ca.supplier_id = c.supplier_id
+              WHERE da.supplier_id = ? AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND NOT (e.source_type = 'asset' AND e.source_id = ?)
+                AND e.entry_date >= ? AND e.source_type <> 'opening'
+                AND da.account_code LIKE ? AND ca.account_code LIKE '04%'
+                AND ABS(d.amount - ?) < 0.005 AND ABS(c.amount - ?) < 0.005
+              LIMIT 1"
+        );
+        $price = round((float) $asset['input_price'], 2);
+        $existing->execute([$supplierId, (int) $asset['id'], (string) ($firstStart ?: $acquired),
+            substr((string) $asset['asset_account_code'], 0, 3) . '%', $price, $price]);
+        if (($row = $existing->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            throw new AssetException(
+                'activation_already_posted',
+                sprintf('Zařazení s touto pořizovací cenou už je v deníku (zápis %s%s). Zařaďte kartu bez zápisu o zařazení, jinak by se cena zaúčtovala podruhé.',
+                    $row['id'], $row['document_no'] !== null && $row['document_no'] !== '' ? ', doklad ' . $row['document_no'] : ''),
             );
         }
     }
