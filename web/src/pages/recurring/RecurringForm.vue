@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import TagInput from '@/components/documents/TagInput.vue'
 import { ICONS } from '@/components/ui/buttonStyles'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -59,6 +60,7 @@ const isEdit = computed(() => route.params.id !== undefined && route.params.id !
 const tplId = computed(() => (isEdit.value ? Number(route.params.id) : null))
 
 const loading = ref(false)
+const tagNames = ref<string[]>([])
 const submitting = ref(false)
 const error = ref('')
 
@@ -894,6 +896,7 @@ onMounted(async () => {
           revenue_account_code: it.revenue_account_code ?? null,
         })),
       })
+      tagNames.value = (tpl.tags ?? []).map(tag => tag.name)
       loadedCategoryLabel.value = tpl.revenue_category_label ?? null
       openFilledItemDetails()
       await docDims.load(tpl.id, form.value.items)
@@ -958,6 +961,7 @@ async function submit() {
       client_id: form.value.client_id!,
       project_id: form.value.project_id,
       branding_profile_id: form.value.branding_profile_id,
+      ...(!auth.isClientRole ? { tags: tagNames.value } : {}),
       name: form.value.name.trim(),
       frequency: form.value.frequency,
       day_of_month: form.value.end_of_month ? null : form.value.day_of_month,
@@ -1054,6 +1058,10 @@ async function submit() {
           <input v-model="form.name" type="text" maxlength="200"
             :placeholder="t('recurring.name_placeholder')"
             class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+        </div>
+        <div v-if="!auth.isClientRole">
+          <label :for="`${pageId}-tags`" class="block text-sm font-medium mb-1">{{ t('entity_tags.label') }}</label>
+          <TagInput v-model="tagNames" resource="recurring" :input-id="`${pageId}-tags`" />
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>

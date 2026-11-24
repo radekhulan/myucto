@@ -927,6 +927,7 @@ final class Routes
 
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);
+        $app->get    ('/api/recurring/tags',                  \MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
         $app->post   ('/api/recurring',                       [RecurringTemplateAction::class, 'create']);
         $app->get    ('/api/recurring/{id:[0-9]+}',           [RecurringTemplateAction::class, 'get']);
         $app->get    ('/api/recurring/{id:[0-9]+}/invoices',  [RecurringTemplateAction::class, 'invoices']);

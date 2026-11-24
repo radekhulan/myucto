@@ -89,6 +89,35 @@ final class PartialRecurringTemplateUpdateTest extends TestCase
         $this->db->close();
     }
 
+    public function testTagIntersectionEmptySelectionAndPartialUpdates(): void
+    {
+        $prefix = 'PHPUnit-' . bin2hex(random_bytes(6));
+        $names = ["$prefix hosting", "$prefix roční"];
+        try {
+            $created = $this->call('create', ['tags' => [...$names, strtoupper($names[0])]] + $this->payload());
+            self::assertSame(201, $created['status']);
+            $this->templateId = (int) $created['body']['id'];
+            $tags = $created['body']['tags'];
+            self::assertCount(2, $tags);
+
+            $repo = new \MyInvoice\Repository\RecurringTemplateRepository($this->db);
+            $filters = ['supplier_id' => $this->supplierId, 'client_id' => $this->clientId];
+            $intersection = implode(',', array_column($tags, 'id'));
+            self::assertSame(1, $repo->list($filters + ['tag_ids' => $intersection])['meta']['total']);
+            self::assertSame(0, $repo->list($filters + ['tag_ids' => 'none'])['meta']['total']);
+            self::assertSame($tags, $this->call('update', ['name' => 'Paušál'])['body']['tags']);
+            self::assertSame(400, $this->call('update', ['tags' => [null]])['status']);
+            self::assertSame(403, $this->call('update', ['tags' => []], 'client')['status']);
+            self::assertSame(200, $this->call('update', ['tags' => [$names[0]]])['status']);
+            self::assertSame(0, $repo->list($filters + ['tag_ids' => $intersection])['meta']['total']);
+            self::assertSame([], $this->call('update', ['tags' => []])['body']['tags']);
+            self::assertSame(1, $repo->list($filters + ['tag_ids' => 'none'])['meta']['total']);
+        } finally {
+            $this->pdo->prepare('DELETE FROM entity_tags WHERE supplier_id = ? AND name IN (?, ?)')
+                ->execute([$this->supplierId, ...$names]);
+        }
+    }
+
     /** BEZ OPRAVY PADÁ: tělo jen s názvem bylo odmítnuto (client_id, items … povinné). */
     public function testOmittedKeysKeepStoredValues(): void
     {
@@ -190,12 +219,12 @@ final class PartialRecurringTemplateUpdateTest extends TestCase
      * @param  array<string,mixed> $body
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function call(string $method, array $body): array
+    private function call(string $method, array $body, string $role = 'admin'): array
     {
         $request = (new ServerRequestFactory())
             ->createServerRequest($method === 'create' ? 'POST' : 'PUT', '/api/recurring')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role])
             ->withParsedBody($body);
         $response = $method === 'create'
             ? $this->action->create($request, new Psr7Response())

@@ -14297,6 +14297,22 @@ paths:
         '200': { description: ok }
 
   # ─────────────────────────── Pravidelné fakturace ────────────────────────
+  /api/v1/recurring/tags:
+    get:
+      tags: [Recurring]
+      summary: Našeptávání interních štítků firmy (nejvýše 50 shod)
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: q, schema: { type: string, maxLength: 64 }, description: "Začátek názvu" }
+      responses:
+        '200':
+          description: Firemní štítky podle názvu
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/EntityTag' } }
+        '403': { description: Klientské roli nejsou interní štítky dostupné. }
+        '422': { description: Neplatný dotaz. }
+
   /api/v1/recurring:
     get:
       tags: [Recurring]
@@ -14308,6 +14324,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: client_id, schema: { type: integer } }
         - { in: query, name: status, schema: { type: string, enum: [active, paused, expired] } }
+        - { in: query, name: tag_ids, schema: { type: string }, description: "ID požadovaných štítků oddělená čárkou (průnik), nebo none pro šablony bez štítku." }
         - { in: query, name: q, description: "Hledání v názvu šablony, klientovi (název, e-mail), textu položek a VS", schema: { type: string, maxLength: 100 } }
         - { in: query, name: sort, schema: { type: string, enum: [client, next_run, amount_czk] } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
@@ -57688,10 +57705,18 @@ components:
           default: false
           description: "Round-trip příznaku „místo plnění systém neurčil\". Klient ho má poslat zpět v té podobě, v jaké ho dostal z detailu dokladu — uložení položek je DELETE + INSERT, takže co se nepošle, to se ztratí. Se sazbou nesouvisí a needituje se: server ho ignoruje (zapíše 0) u řádku s `oss_applicable: false`, protože vypnutí OSS je rozhodnutí člověka a nejistota tím končí."
 
+    EntityTag:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string, maxLength: 64 }
+
     RecurringTemplate:
       type: object
       description: "Šablona pravidelné fakturace. Cron `bin/cron-generate-recurring-invoices.php` generuje faktury dle periodicity."
       properties:
+        tags: { type: array, items: { $ref: '#/components/schemas/EntityTag' }, description: Interní štítky pro pracovníky firmy. }
         id: { type: integer }
         supplier_id: { type: integer }
         client_id: { type: integer }
@@ -57792,6 +57817,7 @@ components:
       type: object
       required: [client_id, name, frequency, anchor_date, currency_id, items]
       properties:
+        tags: { type: array, maxItems: 64, items: { type: string, minLength: 1, maxLength: 64 }, description: "Interní štítky. Při úpravě vynechání zachová přiřazení a prázdný seznam je odebere." }
         client_id: { type: integer }
         project_id: { type: [integer, "null"] }
         name: { type: string, maxLength: 200 }

@@ -514,6 +514,14 @@ V `Firma → Nastavení`, záložce **Fakturace**, je přepínač **Generovat pr
 Pokud je vypnutý, cron tohoto dodavatele úplně přeskočí a všechny šablony se
 zastaví, dokud ho zase nezapnete. Ruční tlačítko **Vygenerovat teď** funguje nezávisle.
 
+#### Interní štítky šablon
+
+V editoru pod názvem šablony začněte psát do pole **Štítky**. Vyberte nabízený
+štítek firmy nebo potvrďte nový název klávesou Enter a šablonu uložte.
+V seznamu klikněte na štítek pod názvem nebo ho vyberte ve filtrech. Při výběru
+více štítků zůstanou šablony se všemi vybranými štítky. Filtr **Bez štítku**
+najde dosud nezařazené šablony. Obě možnosti můžete kombinovat se stavem a hledáním.
+
 ### 17.8.13 Vazba na vygenerované faktury
 
 Každá faktura vytvořená šablonou si pamatuje, z které šablony pochází. V detailu

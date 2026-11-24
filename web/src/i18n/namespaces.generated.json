@@ -81,6 +81,7 @@
     "domain_login",
     "domains",
     "electronic_signatures",
+    "entity_tags",
     "errors",
     "eshop",
     "expense_categories",
@@ -630,7 +631,8 @@
     ],
     "documents": [
       "capture_photo",
-      "documents"
+      "documents",
+      "entity_tags"
     ],
     "scan-attach": [
       "attachment_check",
@@ -638,6 +640,7 @@
     ],
     "document-detail": [
       "documents",
+      "entity_tags",
       "other_items"
     ],
     "other-items": [
@@ -1490,10 +1493,13 @@
       "price_list"
     ],
     "recurring": [
+      "entity_tags",
       "recurring"
     ],
     "recurring-new": [
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "number_template",
       "payment_method",
@@ -1510,6 +1516,8 @@
     ],
     "recurring-edit": [
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "number_template",
       "payment_method",

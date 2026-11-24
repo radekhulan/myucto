@@ -11,6 +11,9 @@ use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\EntityTagRepository;
+use MyInvoice\Repository\TagTarget;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -93,6 +96,14 @@ final class RecurringTemplateAction
         $supplierId = SupplierGuard::currentId($request);
         $filters = ['supplier_id' => $supplierId];
         $q = $request->getQueryParams();
+        $value = $q['tag_ids'] ?? '';
+        if (!EntityTagRepository::validFilter($value)) {
+            return Json::error($response, 'validation_failed', 'Neplatný filtr štítků.', 422);
+        }
+        if ($value !== '' && RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
+        }
+        $filters['tag_ids'] = $value;
         if (!empty($q['client_id'])) $filters['client_id'] = (int) $q['client_id'];
         if (!empty($q['status']))    $filters['status'] = (string) $q['status'];
         if (isset($q['q']) && is_string($q['q']) && trim($q['q']) !== '') $filters['q'] = mb_substr(trim($q['q']), 0, 100);
@@ -118,10 +129,23 @@ final class RecurringTemplateAction
 
         $result = $this->repo->list($filters, $page, $perPage, $sort, $czkRates);
         $this->applyCatalogEstimates($result['data']);
+        $result['data'] = $this->withTags($request, $result['data']);
         // Souhrn částek do hlavičky: per měna z repo + přepočet na CZK (dnešní ČNB kurz)
         // pokud je víc měn. Počítá se přes celou filtrovanou množinu (ne jen stránku).
         $result['meta']['summary'] = $this->buildSummary($result['meta']['totals_by_currency'] ?? []);
         return Json::ok($response, $result);
+    }
+
+    private function withTags(Request $request, array $templates): array
+    {
+        if (RequestAuthorization::isClientType($request)) return $templates;
+        $tags = (new EntityTagRepository($this->db))->forEntities(
+            TagTarget::RecurringTemplate, SupplierGuard::currentId($request), array_column($templates, 'id')
+        );
+        foreach ($templates as &$template) {
+            $template['tags'] = $tags[$template['id']] ?? [];
+        }
+        return $templates;
     }
 
     /** @param list<array<string,mixed>> $templates */
@@ -226,7 +250,7 @@ final class RecurringTemplateAction
         $estimated = [$tpl];
         $this->applyCatalogEstimates($estimated);
         $tpl = $estimated[0];
-        return Json::ok($response, $tpl);
+        return Json::ok($response, $this->withTags($request, [$tpl])[0]);
     }
 
     /**
@@ -295,6 +319,9 @@ final class RecurringTemplateAction
             ]);
         }
 
+        if (array_key_exists('tags', $body) && RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
+        }
         $errors = $this->validate($body);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
@@ -311,7 +338,7 @@ final class RecurringTemplateAction
             'frequency' => $body['frequency'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, $this->repo->find($id), 201);
+        return Json::ok($response, $this->withTags($request, [$this->repo->find($id)])[0], 201);
     }
 
     public function update(Request $request, Response $response, array $args): Response
@@ -393,6 +420,9 @@ final class RecurringTemplateAction
             }
         }
 
+        if (array_key_exists('tags', $body) && RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
+        }
         $errors = $this->validate($body);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
@@ -408,7 +438,7 @@ final class RecurringTemplateAction
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('recurring.updated', $user['id'] ?? null, 'recurring_template', $id, null, $ip, $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, $this->repo->find($id));
+        return Json::ok($response, $this->withTags($request, [$this->repo->find($id)])[0]);
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -598,6 +628,9 @@ final class RecurringTemplateAction
     private function validate(array $data): array
     {
         $err = [];
+        if (array_key_exists('tags', $data) && !EntityTagRepository::validNames($data['tags'])) {
+            $err['tags'][] = 'Zadejte nejvýše 64 neprázdných štítků po nejvýše 64 znacích.';
+        }
 
         if (empty($data['client_id']) || !is_numeric($data['client_id'])) {
             $err['client_id'][] = 'Klient je povinný';

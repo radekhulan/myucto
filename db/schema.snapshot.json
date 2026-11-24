@@ -1239,7 +1239,8 @@
         "2333_purchase_renumber_date_basis.sql",
         "2334_money_s3_import_fingerprint.sql",
         "2335_document_dimension_filter_indexes.sql",
-        "2336_purchase_numbering_date_basis.sql"
+        "2336_purchase_numbering_date_basis.sql",
+        "2337_entity_tags_recurring_templates.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6204,6 +6205,24 @@
             "foreign_keys": {
                 "fk_ech_period": "(period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_ech_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "entity_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "name": "varchar(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_entity_tag_name": "UNIQUE BTREE (supplier_id, name)"
+            },
+            "foreign_keys": {
+                "fk_entity_tag_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -24109,9 +24128,9 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_pii_pol": "BTREE (purchase_order_line_id)",
-                "ft_pii_description": "FULLTEXT (description)",
                 "fk_pii_stock_item": "BTREE (stock_item_id)",
                 "fk_pii_vat": "BTREE (vat_rate_id)",
+                "ft_pii_description": "FULLTEXT (description)",
                 "idx_pii_accrual_to": "BTREE (accrual_to)",
                 "idx_pii_expense_rule": "BTREE (expense_rule_id)",
                 "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)",
@@ -24700,6 +24719,24 @@
                 "fk_rit_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_rit_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_rit_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "recurring_template_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "entity_id": "bigint(20) unsigned NOT NULL",
+                "tag_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (entity_id, tag_id)",
+                "idx_recurring_tag_entity": "BTREE (tag_id, entity_id)"
+            },
+            "foreign_keys": {
+                "fk_recurring_tag_tag": "(tag_id) -> entity_tags (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_recurring_tag_template": "(entity_id) -> recurring_invoice_templates (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

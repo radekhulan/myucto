@@ -1,4 +1,9 @@
 {
+  "entity_tags": {
+    "label": "Tags",
+    "none": "Untagged",
+    "remove": "Remove tag {name}"
+  },
   "user_sessions": {
     "select_page": "Select all on this page",
     "select_session": "Select session of {name}",
