@@ -1268,7 +1268,7 @@ final class InvoiceRepository
         $sortColumns = [
             'number' => 'i.varsymbol', 'client' => 'c.company_name', 'type' => 'i.invoice_type',
             'client_ic' => "($clientIcSql)", 'client_dic' => "($clientDicSql)",
-            'issued' => 'COALESCE(i.tax_date, i.issue_date)', 'due' => 'i.due_date', 'amount' => 'i.amount_to_pay',
+            'issue_date' => 'i.issue_date', 'issued' => 'COALESCE(i.tax_date, i.issue_date)', 'due' => 'i.due_date', 'amount' => 'i.amount_to_pay',
             'status' => 'i.status', 'payment_vs' => "COALESCE(NULLIF(LEFT(REGEXP_REPLACE(i.payment_variable_symbol, '[^0-9]', ''), 10), ''), LEFT(REGEXP_REPLACE(i.varsymbol, '[^0-9]', ''), 10))",
             'order_number' => 'i.supplier_order_number', 'paid_at' => 'i.paid_at',
             'payment_method' => 'i.payment_method', 'booked_at' => 'i.booked_at',

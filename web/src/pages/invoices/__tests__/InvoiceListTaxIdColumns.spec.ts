@@ -65,4 +65,16 @@ describe('InvoiceList — sloupce IČ a DIČ odběratele', () => {
     mocks.visible = new Set()
     wrapper.unmount()
   })
+  it('nabídne výchozí skrytý sloupec Vystaveno před DUZP a ukáže ho i na kartě (issue #432)', async () => {
+    mocks.visible = new Set(['issue_date'])
+    const wrapper = await open()
+    const keys = mocks.columns.map(c => c.key)
+    expect(keys.indexOf('issue_date')).toBe(keys.indexOf('issued') - 1)
+    expect(mocks.columns.find(c => c.key === 'issue_date')?.defaultHidden).toBe(true)
+    const vm = wrapper.vm as unknown as { mobileExtraFields: (inv: Record<string, unknown>) => Array<{ key: string; value: string }> }
+    expect(vm.mobileExtraFields({ issue_date: '2026-10-02', currency: 'CZK' }).find(f => f.key === 'issue_date')?.value).not.toBe('—')
+    expect(vm.mobileExtraFields({ issue_date: null, currency: 'CZK' }).find(f => f.key === 'issue_date')?.value).toBe('—')
+    mocks.visible = new Set()
+    wrapper.unmount()
+  })
 })
