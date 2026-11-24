@@ -322,7 +322,10 @@ U spravovaného hostingu stejně funguje i nákup většího prostoru. Nákup pr
 a hostingové akce se u self-hosted licence nezobrazují. Nabídka ceny je
 krátkodobě platná a potvrzení je svázané právě se zobrazenou částkou. Pokud
 platební brána platbu zpracovává asynchronně, aplikace její stav průběžně
-ověřuje a nový rozsah zpřístupní hned po potvrzení.
+ověřuje. Úložiště se zpřístupní po potvrzení poskytovatelem hostingu.
+Obrazovka **Předplatné a provoz** během zavádění automaticky kontroluje novou
+kvótu. Tlačítko **Aktualizovat počty licencí a úložiště** funguje i při
+vyčerpané kvótě.
 
 Instance s velkým objemem dat si u spravovaného hostingu může zapnout
 **výkonnostní instanci** (`Předplatné a provoz`, sekce **Výkonnostní instance**):

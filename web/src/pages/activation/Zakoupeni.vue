@@ -480,14 +480,14 @@ function errBuyUrl(e: unknown): string | null {
  * změna se zaplatí jednorázově kartou. `charge_failed`: uložená karta neprošla.
  * V obou případech je to jediná cesta dál — opakování vrátí tutéž objednávku.
  */
-interface ChangePayLink { url: string; cardRequired: boolean }
+interface ChangePayLink { url: string; cardRequired: boolean; orderId?: string }
 
 function errPayLink(e: unknown): ChangePayLink | null {
-  const err = e as { response?: { data?: { error?: { code?: string; pay_url?: string } } } }
+  const err = e as { response?: { data?: { error?: { code?: string; pay_url?: string; order_id?: string } } } }
   const error = err.response?.data?.error
   const url = error?.pay_url
   if (typeof url !== 'string' || url === '') return null
-  return { url, cardRequired: error?.code === 'card_payment_required' }
+  return { url, cardRequired: error?.code === 'card_payment_required', orderId: error?.order_id }
 }
 
 const upgradePayLink = ref<ChangePayLink | null>(null)
@@ -700,6 +700,18 @@ async function applyPayrollChange(): Promise<void> {
     payrollError.value = upgradeErrMsg(e)
     payrollBuyUrl.value = errBuyUrl(e)
     payrollPayLink.value = errPayLink(e)
+    const orderId = payrollPayLink.value?.orderId
+    if (orderId) {
+      void licenseApi.waitForCheckout(orderId).then(async result => {
+        if (!result.applied || !result.license || payrollPayLink.value?.orderId !== orderId) return
+        status.value = result.license
+        payrollQuote.value = null
+        payrollError.value = null
+        payrollPayLink.value = null
+        payrollSuccess.value = t('license.payroll_change_success')
+        await auth.refresh()
+      }).catch(() => undefined)
+    }
   } finally {
     payrollBusy.value = false
   }
@@ -845,10 +857,10 @@ onMounted(async () => {
   await completePurchase()
   await load()
   if (!isAdmin.value) return
-  const settled = await licenseApi.resumePendingChanges()
-  const latest = [...settled].reverse().find(change => change.applied && change.license)
-  if (latest?.license) status.value = latest.license
-  if (latest) await auth.refresh()
+  await licenseApi.resumePendingChanges(async () => {
+    await load()
+    await auth.refresh()
+  })
 })
 </script>
 

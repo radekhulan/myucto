@@ -261,6 +261,42 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame($before, $this->service->countActiveUsers());
     }
 
+    public function testAccountantCanGetPayrollCompanyAccessWithAnAvailablePayrollSeat(): void
+    {
+        $roles = $this->roleIds();
+        $userId = $this->insertUser('accountant', $roles['accountant']);
+        $pdo = $this->db->pdo();
+        $supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$userId, $supplierId, $roles['readonly']]);
+        $payrollUsers = $this->service->countActivePayrollUsers();
+        $accountingUsers = $this->service->countActiveUsers();
+        $this->licenseWithToken($this->token([
+            'users' => $accountingUsers,
+            'payroll_enabled' => true,
+            'payroll_tier' => 'up_to_25',
+            'payroll_users_licensed' => $payrollUsers,
+        ]));
+        $blocked = $this->replaceAssignments($userId, $supplierId, $roles['accountant']);
+        self::assertSame('license_payroll_user_limit', $this->error($blocked));
+
+        $this->licenseWithToken($this->token([
+            'users' => $accountingUsers,
+            'payroll_enabled' => true,
+            'payroll_tier' => 'up_to_25',
+            'payroll_users_licensed' => $payrollUsers + 1,
+        ]));
+        $this->service->forgetCachedRow();
+        $saved = $this->replaceAssignments($userId, $supplierId, $roles['accountant']);
+
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $payload = json_decode((string) $saved->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($roles['accountant'], $payload[0]['effective_role']['id']);
+        self::assertSame($payrollUsers + 1, $this->service->countActivePayrollUsers());
+        self::assertSame($accountingUsers, $this->service->countActiveUsers());
+    }
+
     public function testAddingWriteToCustomRoleDoesNotAddAlreadyCountedSeats(): void
     {
         $pdo = $this->db->pdo();

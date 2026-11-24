@@ -57,4 +57,27 @@ describe('Uživatelé — technický rozsah', () => {
     expect(m.updateUser).toHaveBeenCalledWith(42, expect.any(Object))
     expect(m.setTechnicalSuppliers).toHaveBeenCalledTimes(2)
   })
+
+  it('u stávajícího účtu uloží roli Účetní u firmy i při plném počtu obecných míst', async () => {
+    const accountant = { id: 2, name: 'Účetní', system_key: 'accountant', role_type: 'staff', is_active: true }
+    const readonly = { id: 3, name: 'Pouze pro čtení', system_key: 'readonly', role_type: 'staff', is_active: true }
+    const existing = { ...user, role_id: 2, role: { ...accountant, type: 'staff' } }
+    m.listUsers.mockResolvedValue([existing])
+    m.listRoles.mockResolvedValue([accountant, readonly])
+    m.listUserSuppliers.mockResolvedValue([{ supplier_id: 1, name: 'Testovací firma', role_id: 3 }])
+    m.setUserSuppliers.mockResolvedValue([])
+    m.updateUser.mockResolvedValue(existing)
+
+    const wrapper = mount(Users)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const companyRole = wrapper.findAll('select').find(select => select.element.value === '3')!
+    await companyRole.setValue('2')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.setUserSuppliers).toHaveBeenCalledWith(42, [{ supplier_id: 1, role_id: 2 }])
+    expect(wrapper.find('form').exists()).toBe(false)
+  })
 })

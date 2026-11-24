@@ -9,6 +9,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { cs, i18nMessages } from '../../../../tests/locales'
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   upgradeQuote: vi.fn(),
   upgrade: vi.fn(),
   refresh: vi.fn(),
+  waitForCheckout: vi.fn(),
 }))
 
 const auth = vi.hoisted(() => ({ isSuperadmin: true, refresh: vi.fn() }))
@@ -53,14 +55,14 @@ async function mountHosting(path = '/hosting') {
   await router.isReady()
 
   const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs: i18nMessages.cs } })
-  const wrapper = mount(Hosting, { global: { plugins: [router, i18n] } })
+  const wrapper = mount(Hosting, { global: { plugins: [router, i18n, createPinia()] } })
   await flushPromises()
 
   return wrapper
 }
 
 /** Odmítnutí, jak ho vrací axios — chyba je v `response.data.error`. */
-function declined(payUrl: string | null): unknown {
+function declined(payUrl: string | null, orderId?: string): unknown {
   return {
     response: {
       data: {
@@ -69,6 +71,7 @@ function declined(payUrl: string | null): unknown {
           message: 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
             + 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
           ...(payUrl === null ? {} : { pay_url: payUrl }),
+          ...(orderId === undefined ? {} : { order_id: orderId }),
         },
       },
     },
@@ -125,8 +128,34 @@ async function orderStorage(wrapper: Awaited<ReturnType<typeof mountHosting>>) {
 }
 
 describe('Hosting — neproběhlá platba doplatku', () => {
+  it('obnoví vyčerpanou kvótu, když hosting mezitím potvrdí 7 GB', async () => {
+    const initial = previewStatus('storage_100')
+    const instance = initial.instance!
+    const pending = {
+      ...initial,
+      instance: { ...instance, storage: { ...instance.storage, quota_bytes: 2 * 1024 ** 3, quota_gb_ordered: 7, change_pending: true } },
+    }
+    const confirmed = {
+      ...pending,
+      instance: { ...instance, storage: { ...pending.instance.storage, quota_bytes: 7 * 1024 ** 3, change_pending: false, blocks_writes: false, percent: 32 } },
+    }
+    mocks.status.mockResolvedValueOnce(pending).mockResolvedValueOnce(confirmed)
+    const { promise, resolve } = Promise.withResolvers<unknown>()
+    mocks.refresh.mockReturnValueOnce(promise)
+
+    const wrapper = await mountHosting()
+    expect(wrapper.find('[data-hosting-storage-pending]').exists()).toBe(true)
+    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+    resolve({ refreshed: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-hosting-storage-pending]').exists()).toBe(false)
+    expect(auth.refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('u rozšíření místa nabídne zaplacení jinou kartou', async () => {
-    mocks.storageUpgrade.mockRejectedValue(declined(PAY_URL))
+    mocks.storageUpgrade.mockRejectedValue(declined(PAY_URL, '42'))
+    mocks.waitForCheckout.mockResolvedValue({ applied: false })
     const wrapper = await mountHosting()
 
     await orderStorage(wrapper)
@@ -136,6 +165,32 @@ describe('Hosting — neproběhlá platba doplatku', () => {
     const link = error.get('[data-hosting-pay-again] a')
     expect(link.attributes('href')).toBe(PAY_URL)
     expect(link.text()).toContain(cs.hosting.pay_again)
+    expect(mocks.waitForCheckout).toHaveBeenCalledWith('42')
+  })
+
+  it('po doplacení čeká na potvrzenou kvótu i při výpadku načtení stavu', async () => {
+    const initial = previewStatus('manual_key')
+    const instance = initial.instance!
+    const confirmed = {
+      ...initial,
+      instance: { ...instance, storage: { ...instance.storage, quota_gb_ordered: 22, quota_bytes: 22 * 1024 ** 3, change_pending: false } },
+    }
+    mocks.status.mockResolvedValueOnce(initial).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(confirmed)
+    mocks.storageUpgrade.mockRejectedValue(declined(PAY_URL, '42'))
+    mocks.waitForCheckout.mockResolvedValue({ applied: true })
+    const { promise, resolve } = Promise.withResolvers<unknown>()
+    mocks.refresh.mockReturnValueOnce(promise)
+
+    const wrapper = await mountHosting()
+    await orderStorage(wrapper)
+
+    expect(wrapper.text()).not.toContain('Rozšířeno')
+    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+    resolve({ refreshed: true })
+    await flushPromises()
+    expect(mocks.status).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(wrapper.get('[data-hosting-storage-done]').text()).toBe(cs.hosting.storage_done.replace('{gb}', '22'))
+    expect(wrapper.find('[data-hosting-storage-pending]').exists()).toBe(false)
   })
 
   it('bez odkazu ze serveru žádné tlačítko nevymýšlí', async () => {

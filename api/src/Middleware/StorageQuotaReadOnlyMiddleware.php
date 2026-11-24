@@ -108,6 +108,7 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
         '/api/license/period',
         '/api/license/period/quote',
         '/api/license/change-status',
+        '/api/license/refresh',
         '/api/license/activate',
         // Export instance — jediná cesta, jak zákazník dostane data ven.
         '/api/admin/instance-export/start',

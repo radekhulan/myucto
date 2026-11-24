@@ -12,6 +12,7 @@ use MyInvoice\Service\License\LicenseNetworkException;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\License\LicenseTokenVerifier;
+use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Tests\Support\LicenseTokenTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -48,11 +49,13 @@ final class LicenseRenewTest extends TestCase
         }
 
         $this->client = $this->createMock(LicenseClient::class);
+        $config = new Config(['license' => ['public_key' => $this->licensePublicKeyBase64()]]);
         $this->service = new LicenseService(
             $this->db,
-            new Config(['license' => ['public_key' => $this->licensePublicKeyBase64()]]),
+            $config,
             new LicenseTokenVerifier(),
             $this->client,
+            entitlement: new InstanceEntitlement($this->db, $config),
         );
 
         $pdo = $this->db->pdo();
@@ -78,8 +81,8 @@ final class LicenseRenewTest extends TestCase
         $newToken = $this->token(['nonce' => 'nonce-2']);
         $this->client->expects($this->once())->method('renew')->willReturn(['ok' => true, 'token' => $newToken]);
 
-        $this->service->renewIfDue(); // síť: 1×, nastaví last_check_at = dnes
-        $this->service->renewIfDue(); // týž den → mutex blokuje, žádné síťové volání
+        self::assertTrue($this->service->renewIfDue());
+        self::assertFalse($this->service->renewIfDue());
 
         $row = $this->row();
         self::assertSame($newToken, $row['token'], 'Token se má obnovit prvním voláním.');
@@ -149,6 +152,26 @@ final class LicenseRenewTest extends TestCase
         $this->client->expects($this->never())->method('renew');
 
         $this->service->renewScheduled();
+    }
+
+    public function testScheduledRenewDownloadsConfirmedStorageOutsideBillingWindow(): void
+    {
+        $this->prime(date('Y-m-d H:i:s', time() - 3600));
+        $this->db->pdo()->prepare('UPDATE license SET instance_info = ? WHERE id = 1')->execute([
+            json_encode(['quota_gb' => 2, 'quota_gb_ordered' => 7, 'quota_change_pending' => true], JSON_THROW_ON_ERROR),
+        ]);
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok' => true,
+            'token' => $this->token(),
+            'instance' => ['quota_gb' => 7, 'quota_gb_ordered' => 7, 'quota_change_pending' => false],
+        ]);
+
+        $this->service->renewScheduled();
+        $this->service->renewScheduled();
+
+        $info = json_decode($this->row()['instance_info'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(7, $info['quota_gb']);
+        self::assertFalse($info['quota_change_pending']);
     }
 
     public function testPastDueSubscriptionUsesHourlyScheduledRenew(): void

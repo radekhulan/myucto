@@ -68,6 +68,9 @@ final class PayrollChangeAction
             // jediná nabídka, která dává smysl — opakovat totéž nepomůže.
             // U předplatného bez karty je tou nabídkou nákup na webu.
             $extra = isset($result['pay_url']) ? ['pay_url' => (string) $result['pay_url']] : [];
+            if (isset($result['order_id'], $extra['pay_url'])) {
+                $extra['order_id'] = (string) $result['order_id'];
+            }
             if (in_array($error, PayrollQuoteAction::BUY_URL_ERRORS, true)) {
                 $extra['buy_url'] = $this->license->buyUrl();
             }
@@ -81,6 +84,7 @@ final class PayrollChangeAction
         }
         $state = $result['state_local'] ?? $this->license->current();
         unset($result['ok'], $result['state_local']);
+        $result['order_id'] = isset($result['order_id']) ? (string) $result['order_id'] : null;
         $result['state'] = $state->toArray($this->license->buyUrl());
         return Json::ok($response, $result);
     }
