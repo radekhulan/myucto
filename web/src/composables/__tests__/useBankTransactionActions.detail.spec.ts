@@ -28,7 +28,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toast, error: mocks.toast, info: mocks.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: (_key: string, callback: () => void) => { mocks.escape = callback } }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message, apiErrorCode: () => undefined }))
+vi.mock('@/api/errors', async importOriginal => ({ ...await importOriginal<typeof import('@/api/errors')>(), apiErrorMessage: (e: Error) => e.message, apiErrorCode: () => undefined }))
 
 const wrappers: ReturnType<typeof mount>[] = []
 function setup(refresh = vi.fn(), fallbackCurrency?: () => string) {
