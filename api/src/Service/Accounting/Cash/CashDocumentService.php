@@ -1819,6 +1819,8 @@ final class CashDocumentService
      * Výplata dokladu k vyplacení v hotovosti (výdajový doklad s účelem `invoice_payment`).
      * Jen se zapnutým `supplier.allow_refund_invoices` a jen v plné výši: vrácení se
      * eviduje stavem dokladu, částečnou výplatu by nebylo kde držet.
+     * Výplata v CZK je vyhrazená korunovým dokladům. Pro cizí měnu chybí doložená
+     * vazba vratky na nominál a kurz původního předpisu.
      */
     private function validateInvoiceRefund(int $supplierId, int $invoiceId, float $amount): void
     {
@@ -1845,10 +1847,6 @@ final class CashDocumentService
         if (!RefundDocument::isOpenRefund($inv)) {
             throw new CashException('invoice_invalid_status', 'Doklad v tomto stavu nelze vyplatit v hotovosti.');
         }
-        // Výplata cizoměnového dokladu k vyplacení zůstává jen v korunách: banka cizoměnovou
-        // vratku dobropisu automaticky neúčtuje (`fx_not_supported`) a pokladna nesmí umět
-        // víc než banka. Korunová úhrada cizoměnové faktury ({@see foreignInvoiceSettlement()})
-        // se týká jen příjmu, kde předpis na 311 vyrovnává kladná pohledávka.
         if ((string) $inv['currency'] !== 'CZK') {
             throw new CashException('foreign_currency_invoice', 'Výplatu cizoměnového dokladu k vyplacení z pokladny nelze zaúčtovat.');
         }
@@ -2008,6 +2006,8 @@ final class CashDocumentService
      * Na rozdíl od úhrady se NEVYŽADUJE plná výše — vrací se, co se vrací — ale nesmí
      * přesáhnout to, co je na faktuře zaplaceno. Jinak by na 321 vznikl debetní
      * zůstatek a v peněžním deníku záporný výdaj bez podkladu.
+     * U cizího dokladu z korunové vratky neplyne částka v měně dokladu ani kurz,
+     * kterým se má obnovit závazek. Původní úhrada mohla použít jiný kurz.
      */
     private function validatePurchaseRefund(int $supplierId, int $purchaseInvoiceId, float $amount, ?int $excludeCashDocumentId = null): void
     {
@@ -2016,10 +2016,6 @@ final class CashDocumentService
         if ($pf === null) {
             throw new CashException('invoice_not_found', 'Přijatá faktura nenalezena.', 404);
         }
-        // Vratka k cizoměnovému dokladu zůstává jen v korunách: vrácená částka v měně
-        // dokladu ani kurz, kterým se má závazek obnovit, nejsou z korunové vratky
-        // jednoznačné (korunová úhrada se mohla zaúčtovat jiným kurzem) a banka cizoměnovou
-        // vratku také automaticky neúčtuje (`fx_not_supported`).
         if ((string) $pf['currency'] !== 'CZK') {
             throw new CashException('foreign_currency_invoice', 'Vratku k cizoměnovému dokladu z pokladny nelze zaúčtovat.');
         }

@@ -68,7 +68,8 @@ use PDO;
  * best-effort hook (běžné chyby loguje, abort celé transakce propaguje), Action cesty (approve/reject/post/
  * unpost) chyby propagují jako {@see PostingException}.
  *
- * CZK-only v1, avíza se nikdy neúčtují, saldokonta mimo automatiku (blacklist H2).
+ * Nespárovaná cizoměnová platba potřebuje pravidlo pro svou měnu, jinak zůstává
+ * k ručnímu zaúčtování. Učení vychází z korunových částek. Avíza se neúčtují.
  */
 final class BankPostingService
 {
@@ -676,7 +677,9 @@ final class BankPostingService
      * @param array<string,mixed> $tx
      * @return array{lines:list<array<string,mixed>>}
      */
-    private function buildMatched(int $supplierId, array $tx, ?string $cashAccount = null, bool $createCard = false): array
+    private function buildMatched(
+        int $supplierId, array $tx, ?string $cashAccount = null, bool $createCard = false, ?float $postedPaymentRate = null,
+    ): array
     {
         // Bankovní zápis platby kartou v režimu mezičlenu (378.x/221). Vypořádání s dokladem
         // staví tatáž funkce níž s $cashAccount = analytika mezičlenu místo banky.
@@ -691,11 +694,11 @@ final class BankPostingService
         $isForeign = $this->effectiveCurrency($tx) !== 'CZK';
         if ((float) $tx['amount'] > 0) {
             return $isForeign
-                ? $this->buildIncomingMatchedFx($supplierId, $tx, $cashAccount)
+                ? $this->buildIncomingMatchedFx($supplierId, $tx, $cashAccount, $postedPaymentRate)
                 : $this->buildIncomingMatched($supplierId, $tx, $cashAccount);
         }
         return $isForeign
-            ? $this->buildOutgoingMatchedFx($supplierId, $tx, $cashAccount)
+            ? $this->buildOutgoingMatchedFx($supplierId, $tx, $cashAccount, $postedPaymentRate)
             : $this->buildOutgoingMatched($supplierId, $tx, $cashAccount);
     }
 
@@ -857,6 +860,7 @@ final class BankPostingService
      * CZK úhrada jedné cizoměnové vydané faktury. Bankovní noha zůstává
      * ve skutečné CZK částce, zatímco 311 se odúčtuje v CZK hodnotě alokace
      * podle kurzu předpisu. Rozdíl je realizovaný kurzový výsledek 563/663.
+     * Podmínkou je kladná alokace v měně dokladu a odúčtovatelný předpis.
      *
      * @return array{lines:list<array<string,mixed>>}
      */
@@ -869,9 +873,11 @@ final class BankPostingService
         string $bankAcc,
     ): array {
         $invoice = $this->loadInvoice($supplierId, $invoiceId);
+        if (($invoice['invoice_type'] ?? '') === 'proforma') {
+            throw new PostingException('cross_currency', 'Korunová úhrada cizoměnové proformy vyžaduje ruční ověření.');
+        }
         if ($invoice === null
             || (string) $invoice['currency'] === FxPaymentSettlement::LOCAL_CURRENCY
-            || (string) $invoice['invoice_type'] === 'proforma'
             || $foreignAmount <= 0.0
         ) {
             throw new PostingException('fx_not_supported', 'Křížovou měnu této vydané faktury nelze automaticky zaúčtovat.');
@@ -1036,7 +1042,8 @@ final class BankPostingService
     /**
      * CZK úhrada více cizoměnových přijatých faktur. Alokace v payment_matches nesou
      * rozpad skutečné CZK částky pohybu; nominál saldokonta se pro každý doklad bere
-     * z jeho celého zbytku a kurzu zaúčtovaného předpisu.
+     * z jeho celého zbytku a kurzu zaúčtovaného předpisu. Záloha nemá předpis
+     * a pro rozpad korunové platby na cizoměnové zálohy je nutné ruční ověření.
      *
      * @param array<string,mixed> $tx
      * @param list<array<string,mixed>> $allocations
@@ -1065,6 +1072,9 @@ final class BankPostingService
             $purchaseId = (int) $allocation['purchase_invoice_id'];
             $foreign = round((float) ($allocation['purchase_amount_to_pay'] ?? 0.0), 2);
             $currency = strtoupper((string) ($allocation['purchase_currency'] ?? ''));
+            if (($allocation['purchase_document_kind'] ?? '') === 'advance') {
+                throw new PostingException('cross_currency', 'Korunová úhrada cizoměnové přijaté zálohy vyžaduje ruční ověření.');
+            }
             if (!PurchasePaymentKinds::allowsCrossCurrency((string) ($allocation['purchase_document_kind'] ?? ''))
                 || !in_array((string) ($allocation['purchase_status'] ?? ''), ['booked', 'paid'], true)
                 || $currency === ''
@@ -1097,7 +1107,9 @@ final class BankPostingService
      * CZK karetní/bankovní úhrada jedné cizoměnové přijaté faktury. Částka 321 se
      * bere ze zbytku dokladu v cizí měně a kurzu předpisu, bankovní noha je skutečně
      * odepsaná CZK částka.
-     * Rozdíl je kurzový zisk/ztráta; nejde o haléřové dorovnání 548/648.
+     * Rozdíl je kurzový zisk/ztráta; nejde o haléřové dorovnání 548/648. Doklad
+     * musí mít vlastní splatný závazek. Kurzový rozdíl proti předpisu zálohy
+     * nelze spočítat, protože záloha předpis nemá.
      *
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
@@ -1109,6 +1121,9 @@ final class BankPostingService
         string $bankAcc,
     ): array {
         $purchase = $this->loadPurchase($supplierId, $purchaseId);
+        if (($purchase['document_kind'] ?? '') === 'advance') {
+            throw new PostingException('cross_currency', 'Korunová úhrada cizoměnové přijaté zálohy vyžaduje ruční ověření.');
+        }
         if ($purchase === null
             || (string) $purchase['currency'] === 'CZK'
             || !PurchasePaymentKinds::allowsCrossCurrency((string) $purchase['document_kind'])
@@ -1170,7 +1185,8 @@ final class BankPostingService
     /**
      * Protiúčet příchozí spárované platby (B5): proforma = inkaso přijaté zálohy 221/324
      * (proforma není daňový doklad, nemá zaúčtovaný předpis), běžná FV = saldokonto 311
-     * (guard H1: CZK + zaúčtovaný nestornovaný předpis).
+     * (guard H1: CZK + zaúčtovaný nestornovaný předpis). Cizí doklad v korunové
+     * hromadné alokaci vyžaduje pro každý doklad doloženou částku v jeho měně.
      */
     private function incomingCounterAccount(int $supplierId, int $invoiceId, string $receivable): string
     {
@@ -1179,11 +1195,13 @@ final class BankPostingService
             throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' neexistuje.');
         }
         if ((string) $inv['currency'] !== 'CZK') {
-            throw new PostingException('fx_not_supported', 'Cizoměnová faktura se zatím neúčtuje.');
+            if ((string) $inv['invoice_type'] === 'proforma') {
+                throw new PostingException('cross_currency', 'Korunová úhrada cizoměnové proformy vyžaduje ruční ověření.');
+            }
+            throw new PostingException('fx_not_supported', 'Cizoměnovou fakturu ve smíšené korunové úhradě zaúčtujte ručně.');
         }
         if ((string) $inv['invoice_type'] === 'proforma') {
-            $rule = $this->postingRules->resolve($supplierId, 'advance.received.collection');
-            return ($rule['credit_account_code'] ?? null) ?: '324';
+            return $this->advancePaymentAccount($supplierId, true);
         }
         return $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'invoice', $invoiceId, false,
@@ -1194,7 +1212,8 @@ final class BankPostingService
     /**
      * Protiúčet odchozí spárované platby (B5): zálohová PF (document_kind=advance) =
      * poskytnutá záloha 314/221, běžná PF = saldokonto 321 (guard H1: CZK + zaúčtovaný
-     * nestornovaný předpis).
+     * nestornovaný předpis). Smíšená korunová alokace může obsahovat cizí doklad
+     * bez spolehlivého nominálu k odúčtování, proto zůstává k ručnímu zaúčtování.
      */
     private function outgoingCounterAccount(int $supplierId, int $pfId, string $payable): string
     {
@@ -1203,7 +1222,10 @@ final class BankPostingService
             throw new PostingException('document_not_posted', 'Přijatá faktura #' . $pfId . ' neexistuje.');
         }
         if ((string) $pf['currency'] !== 'CZK') {
-            throw new PostingException('fx_not_supported', 'Cizoměnová přijatá faktura se zatím neúčtuje.');
+            if ((string) $pf['document_kind'] === 'advance') {
+                throw new PostingException('cross_currency', 'Korunová úhrada cizoměnové přijaté zálohy vyžaduje ruční ověření.');
+            }
+            throw new PostingException('fx_not_supported', 'Cizoměnovou přijatou fakturu ve smíšené korunové úhradě zaúčtujte ručně.');
         }
         // DDKP navázaný na zálohovou fakturu vlastní úhradu nemá — zaplatila se ZÁLOHA a DDKP
         // k ní jen dokládá daň (účtuje 343/314). Úhradu proto patří spárovat se zálohou;
@@ -1229,8 +1251,7 @@ final class BankPostingService
         if ((string) $pf['document_kind'] === 'advance'
             || (string) $pf['document_kind'] === 'tax_document'
         ) {
-            $rule = $this->postingRules->resolve($supplierId, 'advance.paid.payment');
-            return ($rule['debit_account_code'] ?? null) ?: '314';
+            return $this->advancePaymentAccount($supplierId, false);
         }
         return $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'purchase_invoice', $pfId, false,
@@ -1276,6 +1297,10 @@ final class BankPostingService
         return $this->fxSettlement ??= new FxSettlementPosting($this->db, $this->postingRules, $this->journal);
     }
 
+    /**
+     * Korunová vratka přijatého dobropisu. Cizí vratka vyžaduje doložit měnu
+     * a vratkovou alokaci včetně znaménka předpisu (i červeného storna).
+     */
     private function incomingPurchaseRefundCounter(int $supplierId, int $pfId): string
     {
         $pf = $this->loadPurchase($supplierId, $pfId);
@@ -1298,6 +1323,10 @@ final class BankPostingService
         return $this->purchasePayable($supplierId, $pfId, ($rule['debit_account_code'] ?? null) ?: '321');
     }
 
+    /**
+     * Korunová vratka vydaného dobropisu. Vratku nelze vést běžnou FX úhradou:
+     * má opačnou stranu saldokonta a alokaci v payment_matches bez měny dokladu.
+     */
     private function outgoingIssuedRefundCounter(int $supplierId, int $invoiceId): string
     {
         $inv = $this->loadInvoice($supplierId, $invoiceId);
@@ -1334,19 +1363,30 @@ final class BankPostingService
      * Příchozí cizoměnová úhrada FV (EUR faktura, EUR platba na EUR účet): saldokonto 311
      * se odúčtuje v CZK hodnotě PŘEDPISU (cizí částka × kurz předpisu), banka 221 v CZK
      * hodnotě SKUTEČNÉ úhrady (cizí částka × kurz ČNB dne banky), rozdíl → 563 MD (ztráta) /
-     * 663 D (zisk). Podporuje i částečnou / sloučenou úhradu (per-alokace poměrná část).
+     * 663 D (zisk). Podporuje i částečnou / sloučenou úhradu. Přijatá záloha
+     * se oceňuje kurzem platby, protože nemá předpis. FX vratka přijatého
+     * dobropisu má opačnou stranu závazku a samostatnou alokaci, viz
+     * {@see incomingPurchaseRefundCounter}.
      *
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildIncomingMatchedFx(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildIncomingMatchedFx(int $supplierId, array $tx, ?string $cashAccount, ?float $postedPaymentRate): array
     {
         $txId = (int) $tx['id'];
         $currency = $this->effectiveCurrency($tx);
         $absForeign = round(abs((float) $tx['amount']), 2);
 
+        $refund = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payment_matches
+              WHERE supplier_id = ? AND bank_transaction_id = ? AND purchase_invoice_id IS NOT NULL LIMIT 1'
+        );
+        $refund->execute([$supplierId, $txId]);
+        if ($refund->fetchColumn() !== false) {
+            throw new PostingException('fx_not_supported', 'Cizoměnovou refundaci přijatého dobropisu zaúčtujte ručně.');
+        }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ?'
+            'SELECT invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ? ORDER BY id'
         );
         $stmt->execute([$txId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -1385,25 +1425,32 @@ final class BankPostingService
         $bankAcc = $cashAccount ?? ($rule['debit_account_code'] ?? '221');
         $receivable = $rule['credit_account_code'] ?? '311';
 
-        $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
+        $paymentRate = $postedPaymentRate ?? $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
         $bankCzk = round($absForeign * $paymentRate, 2);
         $lines = [$this->line($bankAcc, 'debit', $bankCzk)];
 
         $allocForeignSum = 0.0;
+        $advanceForeign = 0.0;
         foreach ($allocations as $a) {
             $invId = (int) $a['invoice_id'];
             // Fallback (bez invoice_payments) u stejnoměnové úhrady = plná částka pohybu.
             $allocForeign = $usedFallback ? $absForeign : round((float) $a['amount'], 2);
             $allocForeignSum += $allocForeign;
-            [$counter, $fxRate] = $this->incomingFxSaldo($supplierId, $invId, $receivable, $currency);
+            [$counter, $fxRate, $advance] = $this->incomingFxSaldo($supplierId, $invId, $receivable, $currency, $paymentRate);
+            $czk = $advance
+                ? $this->allocateFxAdvance($advanceForeign, $allocForeign, $paymentRate)
+                : round($allocForeign * $fxRate, 2);
             $lines[] = $this->withFxTrace(
-                $this->line($counter, 'credit', round($allocForeign * $fxRate, 2)),
+                $this->line($counter, 'credit', $czk),
                 $currency, $fxRate, $allocForeign,
             );
         }
+        if ($advanceForeign > 0.0) {
+            $lines[0] = $this->withFxTrace($lines[0], $currency, $paymentRate, $absForeign);
+        }
 
         $this->assertFxAllocation($absForeign, round($allocForeignSum, 2));
-        $remainderCzk = round(($absForeign - round($allocForeignSum, 2)) * $paymentRate, 2);
+        $remainderCzk = $this->fxAllocationRemainder($absForeign, $allocForeignSum, $advanceForeign, $paymentRate);
         $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], $remainderCzk, true);
         return ['lines' => $lines];
     }
@@ -1550,23 +1597,27 @@ final class BankPostingService
     /**
      * Odchozí cizoměnová úhrada PF: saldokonto 321 se odúčtuje v CZK hodnotě předpisu,
      * banka 221 v CZK hodnotě skutečné úhrady (kurz ČNB dne banky), rozdíl → 563/663.
-     * Symetrie k {@see buildIncomingMatchedFx}.
+     * Poskytnutá záloha vzniká kurzem platby. FX vratka vydaného dobropisu
+     * vyžaduje oddělené doložení alokace a předpisu, viz {@see outgoingIssuedRefundCounter}.
      *
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildOutgoingMatchedFx(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildOutgoingMatchedFx(int $supplierId, array $tx, ?string $cashAccount, ?float $postedPaymentRate): array
     {
         $txId = (int) $tx['id'];
         $currency = $this->effectiveCurrency($tx);
         $absForeign = round(abs((float) $tx['amount']), 2);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT purchase_invoice_id, amount FROM payment_matches
-              WHERE bank_transaction_id = ? AND purchase_invoice_id IS NOT NULL'
+            'SELECT invoice_id, purchase_invoice_id, amount FROM payment_matches
+              WHERE supplier_id = ? AND bank_transaction_id = ? ORDER BY id'
         );
-        $stmt->execute([$txId]);
+        $stmt->execute([$supplierId, $txId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (array_any($allocations, static fn (array $a): bool => $a['invoice_id'] !== null)) {
+            throw new PostingException('fx_not_supported', 'Cizoměnovou refundaci vydaného dobropisu zaúčtujte ručně.');
+        }
         if ($allocations === []) {
             throw new PostingException('document_not_posted', 'Spárovaná odchozí cizoměnová platba nemá alokaci na přijatou fakturu.');
         }
@@ -1586,25 +1637,30 @@ final class BankPostingService
             }
         }
 
-        $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
+        $paymentRate = $postedPaymentRate ?? $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
         $bankCzk = round($absForeign * $paymentRate, 2);
 
         $lines = [];
         $allocForeignSum = 0.0;
+        $advanceForeign = 0.0;
         foreach ($allocations as $a) {
             $pfId = (int) $a['purchase_invoice_id'];
             $allocForeign = round((float) $a['amount'], 2);
             $allocForeignSum += $allocForeign;
-            [$counter, $fxRate] = $this->outgoingFxSaldo($supplierId, $pfId, $payable, $currency);
+            [$counter, $fxRate, $advance] = $this->outgoingFxSaldo($supplierId, $pfId, $payable, $currency, $paymentRate);
+            $czk = $advance
+                ? $this->allocateFxAdvance($advanceForeign, $allocForeign, $paymentRate)
+                : round($allocForeign * $fxRate, 2);
             $lines[] = $this->withFxTrace(
-                $this->line($counter, 'debit', round($allocForeign * $fxRate, 2)),
+                $this->line($counter, 'debit', $czk),
                 $currency, $fxRate, $allocForeign,
             );
         }
-        $lines[] = $this->line($bankAcc, 'credit', $bankCzk);
+        $bankLine = $this->line($bankAcc, 'credit', $bankCzk);
+        $lines[] = $advanceForeign > 0.0 ? $this->withFxTrace($bankLine, $currency, $paymentRate, $absForeign) : $bankLine;
 
         $this->assertFxAllocation($absForeign, round($allocForeignSum, 2));
-        $remainderCzk = round(($absForeign - round($allocForeignSum, 2)) * $paymentRate, 2);
+        $remainderCzk = $this->fxAllocationRemainder($absForeign, $allocForeignSum, $advanceForeign, $paymentRate);
         $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], $remainderCzk, false);
         return ['lines' => $lines];
     }
@@ -1618,7 +1674,8 @@ final class BankPostingService
      * Celý zbytek smí platba vypořádat jen doloženě: banka uvádí původní částku nákupu
      * v měně dokladu a ta zbytek pokrývá, nebo CZK hodnota platby leží v kurzové toleranci
      * od CZK hodnoty závazku (u karty širší). Jinak jde o částečnou nebo cizí úhradu
-     * a návrh zůstane k ručnímu ověření (`cross_currency`).
+     * a návrh zůstane k ručnímu ověření (`cross_currency`). Totéž platí pro
+     * zálohu, která nemá zaúčtovaný závazek k odúčtování.
      *
      * @param array<string,mixed> $tx
      * @param array<string,mixed> $purchase
@@ -1635,7 +1692,10 @@ final class BankPostingService
         $purchaseId = (int) $purchase['id'];
         $currency = $this->effectiveCurrency($tx);
         $absForeign = round(abs((float) $tx['amount']), 2);
-        if ((string) $purchase['document_kind'] === 'advance' || (float) ($purchase['amount_to_pay'] ?? 0) <= 0.0) {
+        if ((string) $purchase['document_kind'] === 'advance') {
+            throw new PostingException('cross_currency', 'Křížová úhrada přijaté zálohy vyžaduje ruční ověření.');
+        }
+        if ((float) ($purchase['amount_to_pay'] ?? 0) <= 0.0) {
             throw new PostingException('fx_not_supported', 'Křížovou měnu této přijaté faktury nelze automaticky zaúčtovat.');
         }
         $this->assertFxAllocation($absForeign, $allocated);
@@ -1683,62 +1743,86 @@ final class BankPostingService
     }
 
     /**
-     * Saldokonto + kurz předpisu pro cizoměnovou příchozí úhradu FV. Scope B6 (EUR faktura
-     * placená EUR): měna faktury == měna transakce a faktura má ZAÚČTOVANÝ nestornovaný
-     * předpis (guard H1). Proforma (cizoměnová záloha), CZK faktura placená cizí měnou i
-     * křížová měna → fx_not_supported (skip, ruční zaúčtování).
+     * Faktura ve stejné měně se odúčtuje kurzem předpisu. Proforma předpis nemá,
+     * takže přijatá záloha vzniká v korunové hodnotě platby.
      *
-     * @return array{0:string, 1:float} [receivable account, kurz předpisu]
+     * @return array{string, float, bool} Protiúčet, kurz a příznak zálohy.
      */
-    private function incomingFxSaldo(int $supplierId, int $invoiceId, string $receivable, string $txCurrency): array
+    private function incomingFxSaldo(int $supplierId, int $invoiceId, string $receivable, string $txCurrency, float $paymentRate): array
     {
         $inv = $this->loadInvoice($supplierId, $invoiceId);
         if ($inv === null) {
             throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' neexistuje.');
         }
-        if ((string) $inv['currency'] === 'CZK' || (string) $inv['currency'] !== $txCurrency) {
-            throw new PostingException('fx_not_supported', 'Měna úhrady neodpovídá měně faktury #' . $invoiceId . '.');
+        if (strtoupper((string) $inv['currency']) !== $txCurrency) {
+            throw new PostingException('cross_currency', 'Měna úhrady neodpovídá měně faktury #' . $invoiceId . '.');
         }
         if ((string) $inv['invoice_type'] === 'proforma') {
-            throw new PostingException('fx_not_supported', 'Cizoměnová záloha (proforma) se zatím neúčtuje automaticky.');
+            return [$this->advancePaymentAccount($supplierId, true), $paymentRate, true];
         }
         $saldo = $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'invoice', $invoiceId, false,
             'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.',
         ), $receivable);
-        return [$receivable, $this->predpisFxRate($supplierId, $saldo, $inv)];
+        return [$receivable, $this->predpisFxRate($supplierId, $saldo, $inv), false];
     }
 
     /**
-     * Saldokonto + kurz předpisu pro cizoměnovou odchozí úhradu PF (symetrie k
-     * {@see incomingFxSaldo}). Zálohová PF (document_kind=advance) → fx_not_supported.
+     * Závazek ve stejné měně se odúčtuje kurzem předpisu, poskytnutá záloha
+     * vzniká v korunové hodnotě platby (symetrie k {@see incomingFxSaldo}).
      *
-     * @return array{0:string, 1:float} [payable account, kurz předpisu]
+     * @return array{string, float, bool} Protiúčet, kurz a příznak zálohy.
      */
-    private function outgoingFxSaldo(int $supplierId, int $pfId, string $payable, string $txCurrency): array
+    private function outgoingFxSaldo(int $supplierId, int $pfId, string $payable, string $txCurrency, float $paymentRate): array
     {
         $pf = $this->loadPurchase($supplierId, $pfId);
         if ($pf === null) {
             throw new PostingException('document_not_posted', 'Přijatá faktura #' . $pfId . ' neexistuje.');
         }
-        if ((string) $pf['currency'] === 'CZK' || (string) $pf['currency'] !== $txCurrency) {
+        if (strtoupper((string) $pf['currency']) !== $txCurrency) {
             // Korunová PF hrazená cizí měnou i dvojí konverze (jiná cizí měna) → ruční ověření
             // (blokovaný návrh), ne tichý skip. payment_matches.amount je v měně transakce, takže
             // CZK odúčtování závazku nelze spolehlivě odvodit — proto ne automaticky.
             throw new PostingException('cross_currency', 'Měna úhrady neodpovídá měně přijaté faktury #' . $pfId . '.');
         }
-        // Úhrada ve stejné cizí měně jako doklad: vylučuje se jen záloha (314). Výčet
-        // PurchasePaymentKinds::CROSS_CURRENCY tu záměrně neplatí, ten vymezuje korunovou
-        // úhradu cizoměnového dokladu, ne úhradu v měně dokladu.
         if ((string) $pf['document_kind'] === 'advance') {
-            throw new PostingException('fx_not_supported', 'Cizoměnová poskytnutá záloha se zatím neúčtuje automaticky.');
+            return [$this->advancePaymentAccount($supplierId, false), $paymentRate, true];
         }
         $payable = $this->purchasePayable($supplierId, $pfId, $payable);
         $saldo = $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'purchase_invoice', $pfId, false,
             'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.',
         ), $payable);
-        return [$payable, $this->predpisFxRate($supplierId, $saldo, $pf)];
+        return [$payable, $this->predpisFxRate($supplierId, $saldo, $pf), false];
+    }
+
+    private function advancePaymentAccount(int $supplierId, bool $incoming): string
+    {
+        $rule = $this->postingRules->resolve($supplierId, $incoming ? 'advance.received.collection' : 'advance.paid.payment');
+        return $incoming
+            ? (($rule['credit_account_code'] ?? null) ?: '324')
+            : (($rule['debit_account_code'] ?? null) ?: '314');
+    }
+
+    /** Přidělí haléř z přepočtu rozdělené platby záloze místo účtování kurzového rozdílu. */
+    private function allocateFxAdvance(float &$allocated, float $foreign, float $rate): float
+    {
+        $before = round($allocated * $rate, 2);
+        $allocated = round($allocated + $foreign, 2);
+        return round(round($allocated * $rate, 2) - $before, 2);
+    }
+
+    /** Drobný zbytek platby určené jen pro zálohy patří celý na zaokrouhlení. */
+    private function fxAllocationRemainder(float $payment, float $allocated, float $advance, float $rate): float
+    {
+        $allocated = round($allocated, 2);
+        if ($advance > 0.0 && $allocated === $advance) {
+            if ($allocated > $payment) {
+                throw new PostingException('allocation_mismatch', 'Alokace cizoměnových záloh převyšují částku transakce.');
+            }
+            return round(round($payment * $rate, 2) - round($allocated * $rate, 2), 2);
+        }
+        return round(($payment - $allocated) * $rate, 2);
     }
 
     /**
@@ -2003,7 +2087,9 @@ final class BankPostingService
      *
      * Zápis: MD 321 (kurzem předpisu) / D 378.x (částka z bankovního zápisu), kurzový rozdíl
      * 563/663, haléřový rozdíl 548/648 — stejné sestavení jako úhrada 321/221 bez mezičlenu,
-     * jen s analytikou karty na místě banky. Bez párování → živé vypořádání se stornuje.
+     * jen s analytikou karty na místě banky. U zálohy se 314 oceňuje kurzem již
+     * zaúčtovaného mezičlenu, takže ani při jeho vypořádání nevznikne kurzový rozdíl.
+     * Bez párování se živé vypořádání stornuje.
      *
      * @return array{action:string, entry_id?:int, reason?:string}
      */
@@ -2031,7 +2117,7 @@ final class BankPostingService
         $lines = null;
         if (!empty($tx['has_explicit_allocation'])) {
             try {
-                $lines = $this->buildMatched($supplierId, $tx, $clearing['code'])['lines'];
+                $lines = $this->buildMatched($supplierId, $tx, $clearing['code'], postedPaymentRate: $clearing['fx_rate'])['lines'];
             } catch (PostingException $e) {
                 return ['action' => 'skipped', 'reason' => $e->errorCode];
             }
@@ -2932,6 +3018,7 @@ final class BankPostingService
             $result['lines'] = JournalPairer::stripPairKeys($lines);
         } catch (PostingException $e) {
             $result['reason'] = $e->errorCode;
+            $result['message'] = $e->getMessage();
         }
         return $result;
     }

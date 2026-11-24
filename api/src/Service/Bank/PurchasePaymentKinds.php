@@ -16,9 +16,8 @@ namespace MyInvoice\Service\Bank;
  *   Dobropis má vlastní tok vratky (příchozí platba, CreditRefundAllocation) a DDKP
  *   (tax_document) platebním cílem není, peníze patří k zálohové faktuře.
  * - {@see CROSS_CURRENCY}: korunová úhrada cizoměnového dokladu s kurzovým rozdílem
- *   563/663 ({@see FxPaymentSettlement}). Cizoměnovou poskytnutou zálohu (314) banka
- *   automaticky nezaúčtuje (BankPostingService vrací fx_not_supported), proto se
- *   korunovou platbou nepáruje.
+ *   563/663 ({@see FxPaymentSettlement}). Záloha nemá předpis k odúčtování
+ *   a automaticky se páruje s platbou ve své měně.
  */
 final class PurchasePaymentKinds
 {

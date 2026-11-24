@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting\Bank;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\FixedExchangeRateRepository;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 
 /**
  * Cizoměnové úhrady faktur/PF z banky s kurzovým rozdílem 563/663 (Fáze B, B6).
@@ -192,6 +193,78 @@ final class FxPaymentTest extends BankPostingTestCase
     {
         parent::setUp();
         $this->eurId = $this->ensureEur();
+    }
+
+    #[TestWith([true])]
+    #[TestWith([false])]
+    public function testSameCurrencyAdvanceUsesBankAnalyticAndPaymentRate(bool $incoming): void
+    {
+        $client = $this->client('Protistrana zálohy');
+        $amount = 702.37;
+        $advance = $incoming
+            ? $this->fxSaleInvoice('FX-ZALOHA-V', $client, $amount, 24.00, kind: 'proforma')
+            : $this->fxPurchaseInvoice('FX-ZALOHA-P', $client, $amount, 24.00, kind: 'advance');
+        $this->container->get(AccountingSupplierSettingsRepository::class)->setFxRateMode($this->supplierId, 'daily');
+        $this->seedRate('EUR', self::YEAR . '-06-15', 25.50);
+        $stmt = $this->statement();
+        $this->db->pdo()->prepare("UPDATE bank_statements SET currency = 'EUR' WHERE id = ?")->execute([$stmt]);
+        $this->db->pdo()->prepare("UPDATE supplier_bank_accounts SET analytic_suffix = NULL WHERE supplier_id = ? AND analytic_suffix = '003'")
+            ->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, currency,
+                 account_canonical, kind, analytic_suffix, source, is_active)
+             VALUES (?, 'Test EUR', ?, ?, ?, 'EUR', ?, 'current', '003', 'manual', 1)
+             ON DUPLICATE KEY UPDATE analytic_suffix = VALUES(analytic_suffix), is_active = 1"
+        )->execute([$this->supplierId, self::ACCOUNT, self::BANK_CODE, self::BANK_CODE, self::ACCOUNT]);
+
+        $tx = $this->transaction($stmt, $incoming ? $amount : -$amount, ['match_status' => 'manual', 'currency' => 'EUR']);
+        if ($incoming) {
+            $this->fxInvoicePayment($advance, $tx, $amount);
+        } else {
+            $this->paymentMatch($tx, $advance, $amount);
+        }
+        $first = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $first['action'], json_encode($first));
+        $entry = (int) $first['entry_id'];
+        self::assertCount(2, $this->journal->find($entry, $this->supplierId)['lines']);
+        foreach (['221.003' => $incoming ? 'debit' : 'credit', ($incoming ? '324' : '314') => $incoming ? 'credit' : 'debit'] as $code => $side) {
+            $line = $this->lineForAccount($entry, (string) $code);
+            self::assertSame($side, $line['side']);
+            self::assertSame(17910.44, (float) $line['amount']);
+            self::assertSame('EUR', $line['currency_code']);
+            self::assertSame(25.50, (float) $line['fx_rate']);
+            self::assertSame($amount, (float) $line['amount_foreign']);
+        }
+        $retry = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame($entry, $retry['entry_id']);
+        self::assertSame(1, $this->entryCountForTx($tx));
+    }
+
+    #[TestWith([true, 'USD'])]
+    #[TestWith([true, 'CZK'])]
+    #[TestWith([false, 'USD'])]
+    #[TestWith([false, 'CZK'])]
+    public function testAdvancePaidInDifferentCurrencyRequiresReview(bool $incoming, string $currency): void
+    {
+        $client = $this->client('Protistrana zálohy v EUR');
+        $advance = $incoming
+            ? $this->fxSaleInvoice('FX-RUCNI-V', $client, 100.00, 25.00, kind: 'proforma')
+            : $this->fxPurchaseInvoice('FX-RUCNI-P', $client, 100.00, 25.00, kind: 'advance');
+        $amount = $currency === 'CZK' ? 2500.00 : 110.00;
+        $tx = $this->transaction($this->statement(), $incoming ? $amount : -$amount, ['match_status' => 'manual', 'currency' => $currency]);
+        if ($incoming) {
+            $this->fxInvoicePayment($advance, $tx, 100.00);
+        } else {
+            $this->paymentMatch($tx, $advance, $amount);
+        }
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $result['action'], json_encode($result));
+        self::assertSame('cross_currency', $result['reason']);
+        $suggestion = $this->suggestionRow((int) $result['suggestion_id']);
+        self::assertSame('cross_currency', $suggestion['note']);
+        self::assertSame('blocked', $suggestion['status']);
+        self::assertSame(0, $this->entryCountForTx($tx));
     }
 
     // (a) — plná úhrada FX faktury s kurzovým ZISKem (banka > předpis).
@@ -1028,7 +1101,7 @@ final class FxPaymentTest extends BankPostingTestCase
     }
 
     /** Vydaná faktura v EUR + zaúčtovaný předpis 311/602 s FX stopou na saldokontu (guard H1). */
-    private function fxSaleInvoice(string $vs, int $clientId, float $foreignTotal, float $rate, string $receivable = '311'): int
+    private function fxSaleInvoice(string $vs, int $clientId, float $foreignTotal, float $rate, string $receivable = '311', string $kind = 'invoice'): int
     {
         $issue = self::YEAR . '-06-10';
         $this->db->pdo()->prepare(
@@ -1036,12 +1109,15 @@ final class FxPaymentTest extends BankPostingTestCase
                 (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                  currency_id, exchange_rate, reverse_charge, total_without_vat, total_vat, total_with_vat,
                  paid_total, status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, "issued", "1", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, "issued", "1", ?)'
         )->execute([
-            $this->supplierId, $vs, $clientId, $issue, $issue, $issue, $this->eurId, $rate,
+            $this->supplierId, $vs, $kind, $clientId, $issue, $issue, $issue, $this->eurId, $rate,
             $foreignTotal, $foreignTotal, $this->userId,
         ]);
         $invId = (int) $this->db->pdo()->lastInsertId();
+        if ($kind === 'proforma') {
+            return $invId;
+        }
 
         $czk = round($foreignTotal * $rate, 2);
         $map = $this->accounts->codeToIdMap($this->supplierId);
@@ -1064,7 +1140,7 @@ final class FxPaymentTest extends BankPostingTestCase
     }
 
     /** Přijatá faktura v EUR + zaúčtovaný předpis 518/321 s FX stopou na saldokontu (guard H1). */
-    private function fxPurchaseInvoice(string $number, int $vendorId, float $foreignTotal, float $rate, string $payable = '321'): int
+    private function fxPurchaseInvoice(string $number, int $vendorId, float $foreignTotal, float $rate, string $payable = '321', string $kind = 'invoice'): int
     {
         $issue = self::YEAR . '-06-10';
         $snapshot = json_encode(['company_name' => 'EUR Dodavatel'], JSON_UNESCAPED_UNICODE);
@@ -1073,12 +1149,15 @@ final class FxPaymentTest extends BankPostingTestCase
                 (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, vat_deduction,
                  issue_date, tax_date, due_date, received_at, currency_id, exchange_rate, reverse_charge, is_fixed_asset,
                  total_without_vat, total_vat, total_with_vat, status, created_by)
-             VALUES (?, ?, ?, ?, "invoice", "full", ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, "booked", ?)'
+             VALUES (?, ?, ?, ?, ?, "full", ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, "booked", ?)'
         )->execute([
-            $this->supplierId, $vendorId, $number, $snapshot, $issue, $issue, $issue, $issue, $this->eurId, $rate,
+            $this->supplierId, $vendorId, $number, $snapshot, $kind, $issue, $issue, $issue, $issue, $this->eurId, $rate,
             $foreignTotal, $foreignTotal, $this->userId,
         ]);
         $pfId = (int) $this->db->pdo()->lastInsertId();
+        if ($kind === 'advance') {
+            return $pfId;
+        }
 
         $czk = round($foreignTotal * $rate, 2);
         $map = $this->accounts->codeToIdMap($this->supplierId);
