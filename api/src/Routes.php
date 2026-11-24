@@ -3285,6 +3285,7 @@ final class Routes
             $g->get   ('/assets/{id:[0-9]+}/depreciation-plan',     [DepreciationAction::class, 'plan']);
             $g->get   ('/assets/{id:[0-9]+}/depreciation-card',     [AssetAction::class, 'depreciationCard']);
             $g->post  ('/assets/{id:[0-9]+}/put-into-use',          [AssetLifecycleAction::class, 'putIntoUse']);
+            $g->post  ('/assets/{id:[0-9]+}/put-into-use/revert',   [AssetLifecycleAction::class, 'revertPutIntoUse']);
             $g->post  ('/assets/{id:[0-9]+}/improvements',          [AssetLifecycleAction::class, 'addImprovement']);
             $g->delete('/assets/{id:[0-9]+}/improvements/{impId:[0-9]+}', [AssetLifecycleAction::class, 'deleteImprovement']);
             $g->post  ('/assets/{id:[0-9]+}/dispose',               [AssetLifecycleAction::class, 'dispose']);

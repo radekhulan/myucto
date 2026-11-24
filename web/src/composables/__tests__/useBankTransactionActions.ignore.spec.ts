@@ -14,7 +14,7 @@ vi.mock('vue-router', () => ({ useRouter: () => ({}), RouterLink: { props: ['to'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: api.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message, apiErrorCode: (e: { code?: string }) => e.code }))
+vi.mock('@/api/errors', async importOriginal => ({ ...await importOriginal<typeof import('@/api/errors')>(), apiErrorMessage: (e: Error) => e.message, apiErrorCode: (e: { code?: string }) => e.code }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} CZK` }))
 vi.mock('@/api/invoices', () => ({ invoicesApi: {} }))
 vi.mock('@/api/documentRequests', () => ({ documentRequestsApi: {} }))

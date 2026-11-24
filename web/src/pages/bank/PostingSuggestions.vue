@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { postingPeriodErrorKey } from '@/api/errors'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -263,6 +264,8 @@ function noteText(item: PostingSuggestion): string {
   const note = item.note
   if (!note) return '—'
   const code = note.replace(/:#\d+$/, '')
+  const periodError = postingPeriodErrorKey(code)
+  if (periodError) return t(periodError)
   if ((AUTOMATION_NOTE_CODES as readonly string[]).includes(code)) {
     return t(`automation.reason.${code as AutomationNoteCode}`)
   }
@@ -285,7 +288,7 @@ function emptyText(): string {
 
 function resolveLink(it: PostingSuggestion) {
   const code = it.note?.replace(/:#\d+$/, '')
-  if (code === 'period_closed') return { name: 'accounting-periods' }
+  if (code && (code === 'period_closed' || postingPeriodErrorKey(code))) return { name: 'accounting-periods' }
   if (code === 'liability_prescription_missing' || code === 'document_not_posted') {
     return { path: '/accounting/journal' }
   }

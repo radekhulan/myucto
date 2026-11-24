@@ -128,6 +128,33 @@ final class MonthlyCheckTest extends TestCase
         self::assertSame('open', $period['status']);
     }
 
+    public function testMonthlyCheckReportsOpenPeriodsWithoutEntriesBeforeAccountingStart(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET accounting_starts_on = ? WHERE id = ?')
+            ->execute([self::STARTS_ON, $this->supplierId]);
+        $emptyYear = self::YEAR - 3;
+        $emptyId = $this->periods->create($this->supplierId, $emptyYear, $emptyYear . '-01-01', $emptyYear . '-12-31');
+        $importedYear = self::YEAR - 2;
+        $this->periods->create($this->supplierId, $importedYear, $importedYear . '-01-01', $importedYear . '-12-31', 'import');
+        $usedYear = self::YEAR - 1;
+        $this->periods->create($this->supplierId, $usedYear, $usedYear . '-01-01', $usedYear . '-12-31', 'posting');
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 100],
+        ], ['entry_date' => $usedYear . '-06-15', 'user_id' => $this->userId]);
+
+        $result = $this->closing->monthlyCheck($this->supplierId, $this->periodId, self::YEAR . '-06-01', self::YEAR . '-06-30');
+        $checks = array_column($result['checks'], null, 'key');
+        self::assertArrayHasKey('empty_period_before_accounting_start', $checks);
+        $check = $checks['empty_period_before_accounting_start'];
+        self::assertFalse($check['ok']);
+        self::assertSame('warning', $check['severity']);
+        self::assertSame(1, $check['value']['count']);
+        self::assertSame($emptyId, $check['value']['findings'][0]['doc_id']);
+        self::assertSame((string) $emptyYear, $check['value']['findings'][0]['doc_no']);
+        self::assertSame('open', $this->periods->findById($this->supplierId, $emptyId)['status']);
+    }
+
     public function testFlagsUnusualSideAndProcurementOpenBalances(): void
     {
         $entryDate = self::YEAR . '-03-15';

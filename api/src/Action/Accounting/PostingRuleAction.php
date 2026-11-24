@@ -11,6 +11,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\PostingRuleChartAlignmentService;
 use MyInvoice\Service\Accounting\PostingRuleLineScope;
+use MyInvoice\Service\Accounting\Vat\VatPostingAccounts;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -65,6 +66,10 @@ final class PostingRuleAction
         if ($ruleKey === '') {
             return Json::error($response, 'validation_failed', 'Chybí rule_key.', 422);
         }
+        $rateRule = VatPostingAccounts::parseRateRule($ruleKey);
+        if ($rateRule === null && preg_match('/^invoice\.vat\.(input|output)\./i', $ruleKey) === 1) {
+            return Json::error($response, 'validation_failed', 'Neplatný klíč sazby DPH.', 422);
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         // Chybějící strana = beze změny vůči efektivnímu pravidlu, explicitní null = vyprázdnit.
@@ -75,7 +80,16 @@ final class PostingRuleAction
         $credit = array_key_exists('credit_account_code', $body)
             ? $this->nullableString($body['credit_account_code'])
             : $this->nullableString($existing['credit_account_code'] ?? null);
-        if ($debit === null && $credit === null) {
+        if ($rateRule !== null) {
+            $error = VatPostingAccounts::validationError(
+                $this->accounts->listForTenant($supplierId, true),
+                $this->rules->effectiveMap($supplierId),
+                $rateRule[0], $debit, $credit,
+            );
+            if ($error !== null) {
+                return Json::error($response, 'validation_failed', $error, 422);
+            }
+        } elseif ($debit === null && $credit === null) {
             return Json::error($response, 'validation_failed', 'Zadej alespoň debit_account_code nebo credit_account_code.', 422);
         }
 

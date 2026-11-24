@@ -262,7 +262,12 @@ final class VatRateResolver
     /** Kód sazby, např. 'PL-23' nebo 'SI-9.5' — bez mezer a desetinné čárky (VARCHAR(20)). */
     private static function rateCode(string $country, float $percent): string
     {
-        return $country . '-' . rtrim(rtrim(number_format($percent, 2, '.', ''), '0'), '.');
+        return $country . '-' . self::rateKey($percent);
+    }
+
+    public static function rateKey(float $percent): string
+    {
+        return rtrim(rtrim(number_format($percent, 2, '.', ''), '0'), '.');
     }
 
     private static function fmtPct(float $percent): string

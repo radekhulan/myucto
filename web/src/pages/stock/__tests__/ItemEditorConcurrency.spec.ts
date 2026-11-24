@@ -64,7 +64,7 @@ vi.mock('@/api/codebooks', () => ({
   },
 }))
 
-vi.mock('@/api/errors', () => ({ apiErrorMessage: () => 'load failed' }))
+vi.mock('@/api/errors', async importOriginal => ({ ...await importOriginal<typeof import('@/api/errors')>(), apiErrorMessage: () => 'load failed' }))
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: (permission: string) => ['eshop.write', 'stock.items.write'].includes(permission) }),

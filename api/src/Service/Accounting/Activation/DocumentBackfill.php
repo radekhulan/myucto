@@ -195,7 +195,7 @@ final class DocumentBackfill
 
                 $yearKey = (int) substr($entryDate, 0, 4);
                 if (!isset($ensuredYears[$yearKey])) {
-                    $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
+                    $this->periods->ensureOpenPeriodFor($supplierId, $entryDate, forPosting: false);
                     $ensuredYears[$yearKey] = true;
                 }
                 // Popis ani číslo dokladu záměrně nepředáváme: postDocument je složí stejně

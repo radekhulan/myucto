@@ -210,8 +210,12 @@ Celý mechanismus jde firmě vypnout, pokud si přejete účtovat nad holými sy
 Všechny tři jsou závazkové a **saldní**: smějí stát na obou stranách, protože nadměrný odpočet je pohledávka
 za státem.
 
-Přednost má vždy **předkontace** vstupní a výstupní DPH faktur; analytika je jen výchozí hodnota. Kdo chce
-zůstat na plochém 343, přepíše si kontaci a nic se pro něj nemění.
+V **Účetnictví → Nástroje → Předkontace** lze nastavit **účty DPH podle sazby** zvlášť pro vstup
+a výstup. Prázdná volba použije společný účet daného směru. Účty podle sazby vyberte ze stejné
+syntetiky jako společný účet. Pro vstup, výstup a zúčtování používejte odlišné účty.
+Předkontace podle sazby platí pro faktury, dobropisy, daňové doklady k záloze, pokladní doklady a obě
+strany samovyměření. OSS používá samostatnou kontaci a ruční interní doklady účty zadané na řádcích.
+Převod z Money S3 doplní účty doložené předkontacemi zdrojové agendy.
 
 Firma, která analytiky nemá, o nic nepřijde. Chybí-li 343.100 nebo 343.200 v rozvrhu (nebo je někdo
 deaktivoval), aplikace se sama vrátí na holou **343** a účtuje jako dřív. Cena za to je, že se vstup
@@ -232,9 +236,9 @@ vstupní a výstupní daně na zúčtovací účet, přesně tak, jak to účetn
     MD 343.900 / D 343.100     daň na vstupu za období
 ```
 
-Po dokladu jsou 343.100 i 343.200 za období nulové a na **343.900 leží přesně to, co se odvede** (nebo co má
-finanční úřad vrátit). Ten zůstatek pak uzavře platba z banky, takže je průběžně srovnatelný se saldem
-u správce daně. Na plochém 343 to z principu nešlo.
+Zúčtování přidá jeden pár řádků pro každý společný účet DPH a účet podle sazby s nenulovým obratem.
+Náhled v přiznání k DPH ukáže částky po účtech. Po zápisu jsou účty daně za období nulové
+a na **343.900** zbývá částka k odvodu či vrácení. Zůstatek pak uzavře platba z banky.
 
 <!-- cols: 26 74 -->
 | Vlastnost | Chování |

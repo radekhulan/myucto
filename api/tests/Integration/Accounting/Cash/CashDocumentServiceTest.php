@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting\Cash;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
@@ -277,6 +278,35 @@ final class CashDocumentServiceTest extends TestCase
         $byAcc = $this->linesByAccountCode($res['journal_entry_id']);
         self::assertEqualsWithDelta(330.00, $byAcc['343.200']['credit'], 0.001);
         self::assertEqualsWithDelta(2000.00, $byAcc['602']['credit'], 0.001);
+    }
+
+    public function testMultiRateSaleAndPurchaseUseConfiguredVatAccounts(): void
+    {
+        $accounts = new ChartOfAccountsRepository($this->db);
+        $rules = new PostingRuleRepository($this->db);
+        $parent = $accounts->findByCode($this->supplierId, '343')['id'];
+        $register = $this->makeRegister();
+        foreach (['sale' => ['in', 'output', 'credit', '343.310', '343.320'],
+            'purchase' => ['out', 'input', 'debit', '343.110', '343.120']] as $purpose => [$type, $direction, $side, $standard, $reduced]) {
+            foreach ([21 => $standard, 12 => $reduced] as $rate => $account) {
+                $accounts->insert($this->supplierId, [
+                    'account_code' => $account, 'name' => 'Vzorová analytika DPH', 'account_type' => 'liability',
+                    'normal_side' => null, 'parent_id' => $parent,
+                ]);
+                $rules->upsertOverride($this->supplierId, 'invoice.vat.' . $direction . '.' . $rate,
+                    $side === 'debit' ? $account : null, $side === 'credit' ? $account : null, 'Vzorová DPH');
+            }
+            $res = $this->service->create($this->supplierId, $this->doc([
+                'purpose' => $purpose, 'doc_type' => $type, 'total_amount' => 2330.0, 'vat_mode' => 'vat',
+                'vat_lines' => [
+                    ['vat_rate' => 21, 'base_amount' => 1000.0, 'vat_amount' => 210.0],
+                    ['vat_rate' => 12, 'base_amount' => 1000.0, 'vat_amount' => 120.0],
+                ],
+            ], $register), $this->userId);
+            $byAccount = $this->linesByAccountCode($res['journal_entry_id']);
+            self::assertSame(210.0, $byAccount[$standard][$side]);
+            self::assertSame(120.0, $byAccount[$reduced][$side]);
+        }
     }
 
     public function testVatRateValidation(): void

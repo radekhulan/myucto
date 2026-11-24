@@ -24,6 +24,7 @@
  */
 
 import { formatMoney } from '@/composables/useFormat'
+import { postingPeriodErrorKey } from './errors'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
@@ -96,7 +97,7 @@ export function cashErrorMessage(e: unknown, t: Translate): string {
   const localized = t(cashKey)
   if (localized !== cashKey) return localized
 
-  const accountingKey = 'accounting.error.' + short
+  const accountingKey = postingPeriodErrorKey(short) ?? 'accounting.error.' + short
   const accounting = t(accountingKey)
   if (accounting !== accountingKey) return accounting
 

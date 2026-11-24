@@ -102,6 +102,25 @@ final class InvoiceListOptionalColumnsTest extends TestCase
         }
     }
 
+    /** Vydané faktury se řadí i podle data vystavení, ne jen podle DUZP (issue #432). */
+    public function testIssuedInvoicesSortByIssueDate(): void
+    {
+        $later = $this->document('invoice', 'LC-ISSUE-LATER', 'Alpha', '300');
+        $earlier = $this->document('invoice', 'LC-ISSUE-EARLIER', 'Zulu', '400');
+        // DUZP v opačném pořadí než vystavení: řazení musí jít podle issue_date.
+        $this->db->pdo()->prepare('UPDATE invoices SET issue_date = ?, tax_date = ? WHERE supplier_id = ? AND id = ?')
+            ->execute(['2097-01-20', '2097-01-02', $this->supplierId, $later]);
+        $this->db->pdo()->prepare('UPDATE invoices SET issue_date = ?, tax_date = ? WHERE supplier_id = ? AND id = ?')
+            ->execute(['2097-01-10', '2097-01-25', $this->supplierId, $earlier]);
+        $repo = $this->container->get(InvoiceRepository::class);
+        $filter = ['supplier_id' => $this->supplierId, 'group_by_month' => false, 'sort_key' => 'issue_date', 'sort_dir' => 'asc'];
+        $first = $repo->listGroupedByMonth($filter, 1, 1)['data'][0]['invoices'][0];
+        self::assertSame($earlier, $first['id']);
+        self::assertSame('2097-01-10', $first['issue_date']);
+        $filter['sort_dir'] = 'desc';
+        self::assertSame($later, $repo->listGroupedByMonth($filter, 1, 1)['data'][0]['invoices'][0]['id']);
+    }
+
     public function testTaxIdColumnsComeFromDocumentSnapshotWithClientCardFallback(): void
     {
         $pdo = $this->db->pdo();

@@ -385,6 +385,94 @@ final class AssetLifecycleTest extends TestCase
         self::assertSame(0, (int) $count->fetchColumn());
     }
 
+    public function testPutIntoUseRefusesActivationEntryForCardWithOpeningState(): void
+    {
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => 'M-OPEN-001',
+            'name' => 'Převzatý byt',
+            'input_price' => 6000000.00,
+            'acquisition_date' => (self::YEAR - 4) . '-04-01',
+            'put_into_use_date' => (self::YEAR - 4) . '-04-01',
+            'tax_method' => 'straight',
+            'tax_group' => 5,
+            'opening_tax_years' => 4,
+            'opening_tax_amount' => 696000.00,
+            'opening_acc_months' => 56,
+            'opening_acc_amount' => 900000.00,
+            'acc_method' => 'by_tax',
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+
+        try {
+            $this->service->putIntoUse($this->supplierId, $assetId, (self::YEAR - 4) . '-04-01', true, ['user_id' => $this->userId]);
+            self::fail('Karta s počátečními oprávkami nesmí dostat zápis o zařazení.');
+        } catch (AssetException $e) {
+            self::assertSame('opening_state_entry', $e->errorCode);
+        }
+        $this->service->putIntoUse($this->supplierId, $assetId, (self::YEAR - 4) . '-04-01', false, ['user_id' => $this->userId]);
+        self::assertSame('in_use', $this->assets->find($this->supplierId, $assetId)['status']);
+        self::assertSame(0, $this->activationEntries($assetId));
+    }
+
+    public function testPutIntoUseRefusesActivationEntryBeforeFirstPeriod(): void
+    {
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => 'M-OLD-001',
+            'name' => 'Starý stroj',
+            'input_price' => 100000.00,
+            'acquisition_date' => '1990-06-01',
+            'tax_method' => 'straight',
+            'tax_group' => 2,
+            'acc_useful_life_months' => 60,
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+
+        try {
+            $this->service->putIntoUse($this->supplierId, $assetId, '1990-06-01', true, ['user_id' => $this->userId]);
+            self::fail('Zápis o zařazení před prvním obdobím nesmí založit dávné období.');
+        } catch (AssetException $e) {
+            self::assertSame('period_before_start', $e->errorCode);
+        }
+        self::assertNull($this->periods->findForDate($this->supplierId, '1990-06-01'));
+    }
+
+    public function testRevertPutIntoUseDeletesActivationEntryAndAllowsDateFix(): void
+    {
+        $assetId = $this->createAssetInUse('M-REV-001', self::YEAR . '-04-01');
+        self::assertSame(1, $this->activationEntries($assetId));
+        try {
+            $this->service->update($this->supplierId, $assetId, ['put_into_use_date' => self::YEAR . '-05-01'], ['user_id' => $this->userId]);
+            self::fail('Zařazená karta nemění datum zařazení.');
+        } catch (AssetException $e) {
+            self::assertSame('asset_locked', $e->errorCode);
+        }
+
+        $result = $this->service->revertPutIntoUse($this->supplierId, $assetId, ['user_id' => $this->userId]);
+        self::assertSame('draft', $result['asset']['status']);
+        self::assertNotNull($result['activation_entry_id']);
+        self::assertSame(0, $this->activationEntries($assetId));
+        self::assertEqualsWithDelta(0.0, $this->accountBalance('022'), 0.001);
+
+        $this->service->update($this->supplierId, $assetId, ['put_into_use_date' => self::YEAR . '-05-01'], ['user_id' => $this->userId]);
+        $this->service->putIntoUse($this->supplierId, $assetId, self::YEAR . '-05-01', true, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        self::assertSame(self::YEAR . '-05-01', (string) $this->assets->find($this->supplierId, $assetId)['put_into_use_date']);
+
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        try {
+            $this->service->revertPutIntoUse($this->supplierId, $assetId, ['user_id' => $this->userId]);
+            self::fail('Karta se zaúčtovanými odpisy se do konceptu nevrací.');
+        } catch (AssetException $e) {
+            self::assertSame('asset_has_depreciation', $e->errorCode);
+        }
+    }
+
+    private function activationEntries(int $assetId): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND source_type = 'asset' AND source_id = ?");
+        $stmt->execute([$this->supplierId, $assetId]);
+        return (int) $stmt->fetchColumn();
+    }
+
     // ── I5: tenant izolace ─────────────────────────────────────────────────────
 
     public function testI5TenantIsolation(): void

@@ -10,7 +10,7 @@ use MyInvoice\Service\ActivityLogger;
 use PDO;
 
 /**
- * JEDINÉ veřejné pravidlo „pro tohle datum chybí účetní období → založ ho otevřené".
+ * Automatické otevření chybějícího období při účtování, importu a správě účetnictví.
  *
  * PROČ TO EXISTUJE
  * ------------------------------------------------------------------------------
@@ -20,8 +20,8 @@ use PDO;
  * ale účetnictví má aktivované od 1. 1. 2026 — a všechno starší je slepá ulička.
  * Totéž se stane na přelomu roku, kdy se zapomene otevřít nový rok.
  *
- * Pravidlo je proto na JEDNOM veřejně volatelném místě (AGENTS.md: „SSOT musí jít
- * ZAVOLAT"), aby si ho import ani účtování nekopírovaly jako privátní helper.
+ * Import může doplnit historická období. Při účtování rozhoduje o doplnění řady
+ * společná kontrola {@see AccountingPeriodRepository::assertCanAutomaticallyOpenForPosting}.
  *
  * CO SE SMÍ A CO NE
  * ------------------------------------------------------------------------------
@@ -47,7 +47,7 @@ use PDO;
  *
  * ODLIŠNOST OD {@see AccountingPeriodRepository::ensureOpenPeriodFor}
  * ------------------------------------------------------------------------------
- * `ensureOpenPeriodFor` zakládá kalendářní rok BEZ kontroly režimu firmy a používá ho
+ * `ensureOpenPeriodFor` zakládá období bez kontroly režimu firmy a používá ho
  * aktivační backfill (CashBackfill/DocumentBackfill/OpeningBalanceService). Ten běží
  * DŘÍV, než se firmě přepne `accounting_mode` na `double_entry` (viz konec
  * {@see \MyInvoice\Service\Accounting\Activation\BackfillService::run}), takže by
@@ -84,6 +84,7 @@ final class AccountingPeriodProvisioner
      * `open`. `null` znamená „nesmí se založit" (jiný účetní režim, nesmyslný rok,
      * překryv s existující řadou); volající pak hlásí `no_accounting_period`.
      *
+     * @throws PostingException při účtování do chybějícího období před řadou nebo uvnitř ní
      * @param self::REASON_* $reason proč se období zakládá (auditní stopa)
      * @return array<string,mixed>|null
      */
@@ -91,12 +92,18 @@ final class AccountingPeriodProvisioner
     {
         // Existující období se NIKDY nemění — vrací se i uzavřené, o zápisu do něj
         // rozhoduje volající (§35 ZoÚ).
-        $existing = $this->periods->findForDate($supplierId, $date);
+        $forPosting = $reason === self::REASON_POSTING;
+        $existing = $forPosting && $this->db->pdo()->inTransaction()
+            ? $this->periods->findForDateForUpdate($supplierId, $date)
+            : $this->periods->findForDate($supplierId, $date);
         if ($existing !== null) {
             return $existing;
         }
         if (!$this->hasActiveDoubleEntry($supplierId)) {
             return null;
+        }
+        if ($forPosting) {
+            $this->periods->assertCanAutomaticallyOpenForPosting($supplierId, $date);
         }
         $bounds = $this->boundsForDate($supplierId, $date);
         if ($bounds === null) {

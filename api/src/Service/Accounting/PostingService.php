@@ -20,6 +20,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\JournalPairer;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\Pair\JournalPairException;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
@@ -36,7 +37,9 @@ use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
+use MyInvoice\Service\Accounting\Vat\VatPostingAccounts;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\Vat\VatRateResolver;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 use PDO;
@@ -55,11 +58,10 @@ use PDO;
  *   {@see UnbalancedEntryException}.
  * - Období: zápis se zařadí do období obsahujícího entry_date. Období MUSÍ být
  *   'open' — 'closing'/'closed' → {@see PostingException} (§35 ZoÚ: uzavřené období
- *   je neměnné). Chybí-li období ÚPLNĚ, založí se otevřené
- *   ({@see AccountingPeriodProvisioner}) — a to i do minulosti, protože přesně tak
- *   vypadá migrace historických dokladů z jiného systému do instalace, která má
- *   účetnictví aktivované od letoška. Existujícím obdobím se automat nedotkne, takže
- *   §35 ZoÚ platí dál: nad uzavřeným obdobím zápis skončí na 'period_not_open'.
+ *   je neměnné). Při účtování lze automaticky založit první období a období po
+ *   konci řady ({@see AccountingPeriodProvisioner}). Chybějící starší období
+ *   a mezery v řadě vyžadují ruční založení. Existující uzavřené období zápis
+ *   odmítne s 'period_not_open'.
  *   Neotevře se rok mimo rozsah 2000–2200 a rok, jehož dopočtené hranice by se
  *   překryly s existující (nepravidelnou) řadou — tam skončí zápis na
  *   'no_accounting_period' a rozhodne účetní.
@@ -219,7 +221,7 @@ final class PostingService
      *    ({@see Bank\BankAnalyticResolver}, CashRegisterService). Firma může mít dnes
      *    jeden účet a zítra dva; „jediná analytika" je u nich náhodný okamžitý stav a
      *    svést na ni nespárovaný pohyb by zamaskovalo neznámou protistranu.
-     *  - 343 … vstup/výstup/zúčtování rozhoduje směr daně ({@see vatAccount()},
+     *  - 343 … vstup/výstup/zúčtování rozhoduje směr daně ({@see vatPostingCodes()},
      *    Vat\VatClearingService). Se třemi analytikami by přesměr stejně nenaskočil,
      *    ale kdyby si tenant dvě smazal, nesmí zbylá spolknout všechno.
      *  - 345 … šablona pod ním veze 345.100 = DPH v režimu OSS, tedy daň JINÉHO státu.
@@ -483,6 +485,7 @@ final class PostingService
             if ($stmt->fetchColumn() !== false) throw new \LogicException('Property issuance batch source already has an active journal entry.');
         }
         $periods = [];
+        ksort($dates, SORT_STRING);
         foreach (array_keys($dates) as $entryDate) {
             $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
@@ -623,12 +626,8 @@ final class PostingService
             }
             $period = $batchDocument['period'] ?? $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
-                // Chybějící období (zapomenutý přelom roku, naimportovaná historie) se
-                // založí otevřené — jediné pravidlo pro to má
-                // {@see AccountingPeriodProvisioner}, sdílené s importem. Nedotýká se
-                // ničeho existujícího, takže §35 ZoÚ zůstává v platnosti: pokrývá-li
-                // datum UZAVŘENÉ období, provisioner ho jen vrátí a kontrola stavu níž
-                // zápis odmítne. Znovu pod zámkem, ať se souběh serializuje jako dřív.
+                // Provisioner ověří, zda je možné období při účtování doplnit.
+                // Stav období dál čteme pod zámkem kvůli souběhu s uzávěrkou.
                 $this->provisioner()->ensureOpenPeriodForDate(
                     $supplierId,
                     $entryDate,
@@ -1922,7 +1921,7 @@ final class PostingService
             return $this->buildPenaltyInvoiceLines($supplierId, $invoiceId, $inv, $opts);
         }
 
-        [$net, $vat] = $this->ledgerTotals(
+        [$net, $vat, , $vatByRate] = $this->ledgerTotals(
             $supplierId,
             'sale',
             $invoiceId,
@@ -2020,9 +2019,8 @@ final class PostingService
         // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
         $this->appendSplit($lines, $weights, $revenue, self::sideBySign($net + $ossNet + $voucherNet, $otherSide, $isCreditNote), $net + $ossNet + $voucherNet, $cc);
-        if ($vat !== 0.0) {
-            $lines[] = $this->line($this->outputVatAccount($supplierId), $vatSide($vat), abs($vat), $cc);
-        }
+        $outputAccounts = $this->vatPostingCodes($supplierId, 'output');
+        $this->appendVatLines($lines, $vatByRate, $outputAccounts, $vat, $otherSide, $isCreditNote, $cc);
         // Daň odváděná do jiného členského státu na vlastní účet (kontace oss.output.vat,
         // default analytika 345.100). Tohle je celý smysl rozdělení: na 343 zůstane přesně
         // to, co jde do přiznání k DPH, takže zůstatek účtu jde s přiznáním srovnat.
@@ -2061,37 +2059,32 @@ final class PostingService
      */
     private function buildAdvanceVatDocumentLines(int $supplierId, int $invoiceId, array $inv, array $opts): array
     {
-        [, $vat] = $this->ledgerTotals(
+        [, $vat, , $vatByRate] = $this->ledgerTotals(
             $supplierId,
             'sale',
             $invoiceId,
             (string) ($inv['tax_date'] ?? $inv['issue_date']),
             (string) $inv['issue_date'],
         );
-        if (self::cents($vat) === 0) {
+        $ruleKey = $opts['rule_key'] ?? 'advance.received.vatdocument';
+        $taxAccounts = $this->vatPostingCodes($supplierId, 'output', $ruleKey);
+        $amounts = VatPostingAccounts::split($vatByRate, $taxAccounts['rates'], $taxAccounts['common'], $vat);
+        if ($amounts === []) {
             throw new PostingException(
                 'document_not_postable',
                 'Daňový doklad k přijaté platbě #' . $invoiceId . ' nemá DPH k zaúčtování '
                     . '(neplátce / reverse charge / nulová sazba?) — DDKP bez daně se neúčtuje.',
             );
         }
-        $ruleKey = $opts['rule_key'] ?? 'advance.received.vatdocument';
-        $draw    = $this->ruleCode($supplierId, $ruleKey, 'debit', '324');
-        $vatAcc  = $this->vatAccount($supplierId, $ruleKey, 'credit', self::OUTPUT_VAT_ACCOUNT);
+        $draw = $this->ruleCode($supplierId, $ruleKey, 'debit', '324');
         $cc = $opts['cost_center'] ?? null;
-
-        // Opravný DDKP (snížení dříve přiznané DPH ze zálohy, vat < 0) obrací strany:
-        // 343 MD / 324 D. Zrcadlo buildPurchaseAdvanceVatDocumentLines na přijaté větvi.
-        // Bez otočení by se abs($vat) zaúčtovalo na původní strany, tedy PŘESNĚ OBRÁCENĚ —
-        // zápis by zůstal vyvážený a JournalIntegrityService by to nechytil, protože
-        // checkAmountMismatch porovnává ABS(l.amount). Pro vat > 0 je výstup nezměněný.
-        $drawSide = $vat < 0.0 ? 'credit' : 'debit';
-        $vatSide  = $vat < 0.0 ? 'debit'  : 'credit';
-
-        return [
-            $this->line($draw, $drawSide, abs($vat), $cc),
-            $this->line($vatAcc, $vatSide, abs($vat), $cc),
-        ];
+        $lines = [];
+        foreach ($amounts as $code => $amount) {
+            $drawLine = $this->line($draw, self::sideBySign($amount, 'debit', false), abs($amount), $cc);
+            $vatLine = $this->line((string) $code, self::sideBySign($amount, 'credit', false), abs($amount), $cc);
+            array_push($lines, $drawLine, $vatLine);
+        }
+        return count($amounts) > 1 ? PairGroups::consecutive($lines, 'advance_vat') : $lines;
     }
 
     /**
@@ -2308,9 +2301,9 @@ final class PostingService
         }
 
         if ($vatDeduction === 'full' || $isRc) {
-            [$net, $vat, $selfAssessedVat] = $this->purchaseLedgerTotals($supplierId, $purchaseInvoiceId, $pi, $rate, $vatDeduction);
+            [$net, $vat, $selfAssessedVat, $vatByRate, $selfAssessedByRate] = $this->purchaseLedgerTotals($supplierId, $purchaseInvoiceId, $pi, $rate, $vatDeduction);
         } else {
-            [$net, $vat] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
+            [$net, $vat, $vatByRate] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
             $selfAssessedVat = 0.0;
         }
         $net = round($net + $deduction['base'], 2);
@@ -2365,6 +2358,7 @@ final class PostingService
         $totalOnCredit = !$isCreditNote;
 
         $lines = [];
+        $inputAccounts = $vatDeduction === 'none' ? null : $this->vatPostingCodes($supplierId, 'input');
         if ($isRc) {
             // Vendor fakturuje bez DPH → závazek = základ; daň se samovyměří na 343 (obě strany).
             // Smíšený doklad nese vedle řádků § 92a i tuzemský řádek s daní dodavatele: ta je
@@ -2376,22 +2370,30 @@ final class PostingService
             // Neodpočitatelná část daně je nákladem stejně jako u tuzemského dokladu bez nároku.
             [$supplierVat, $deductibleSelfAssessed, $deductibleSupplierVat, $nonDeductibleVat] = self::reverseChargeVatSplit($vat, $selfAssessedVat, $vatDeduction, $pct);
             $this->appendSplit($lines, $weights, $expense, self::sideBySign(round($net + $nonDeductibleVat, 2), $expenseSide, $isCreditNote), round($net + $nonDeductibleVat, 2), $cc);
-            if ($selfAssessedVat !== 0.0) {
-                // Samovyměření: obě nohy patří na RŮZNÉ analytiky — odpočet na vstup, přiznaná
-                // daň na výstup. Na plochém 343 se okamžitě vynetovaly a v zúčtování období
-                // po nich nezůstala stopa.
-                // Jednoduchý zápis: plný odpočet samovyměřené daně je samostatná dvojice
-                // 343 vstup / 343 výstup (skupina ji drží stranou od závazku).
-                $rcGroup = self::cents($deductibleSelfAssessed) === self::cents($selfAssessedVat);
-                if ($deductibleSelfAssessed !== 0.0) {
-                    $input = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
-                    $lines[] = $rcGroup ? $this->pairHint($input, 'pair_group', 'reverse_charge') : $input;
+            $outputAccounts = $this->vatPostingCodes($supplierId, 'output');
+            $share = $vatDeduction === 'proportional' ? $pct : 1.0;
+            $rcGroup = $inputAccounts !== null && self::cents($deductibleSelfAssessed) === self::cents($selfAssessedVat)
+                ? 'reverse_charge' : null;
+            $rateAccounts = ($inputAccounts['rates'] ?? []) + $outputAccounts['rates'];
+            if ($rcGroup !== null && array_intersect_key($selfAssessedByRate, $rateAccounts) !== []) {
+                foreach ($selfAssessedByRate as $key => $amount) {
+                    $amount = round($amount, 2);
+                    if ($amount === 0.0) {
+                        continue;
+                    }
+                    $input = $inputAccounts['rates'][$key] ?? $inputAccounts['common'];
+                    $output = $outputAccounts['rates'][$key] ?? $outputAccounts['common'];
+                    $lines[] = $this->pairHint($this->line($input, self::sideBySign($amount, $expenseSide, $isCreditNote), abs($amount), $cc), 'pair_group', $rcGroup . ':' . $key);
+                    $lines[] = $this->pairHint($this->line($output, self::sideBySign($amount, $payableSide, $isCreditNote), abs($amount), $cc), 'pair_group', $rcGroup . ':' . $key);
                 }
-                $output = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
-                $lines[] = $rcGroup ? $this->pairHint($output, 'pair_group', 'reverse_charge') : $output;
+            } else {
+                if ($inputAccounts !== null) {
+                    $this->appendVatLines($lines, $selfAssessedByRate, $inputAccounts, $deductibleSelfAssessed, $expenseSide, $isCreditNote, $cc, $share, $rcGroup);
+                }
+                $this->appendVatLines($lines, $selfAssessedByRate, $outputAccounts, $selfAssessedVat, $payableSide, $isCreditNote, $cc, group: $rcGroup);
             }
-            if ($deductibleSupplierVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSupplierVat, $expenseSide, $isCreditNote), abs($deductibleSupplierVat), $cc);
+            if ($inputAccounts !== null) {
+                $this->appendVatLines($lines, $vatByRate, $inputAccounts, $deductibleSupplierVat, $expenseSide, $isCreditNote, $cc, $share);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $supplierVat, $cc, $totalOnCredit);
@@ -2405,9 +2407,7 @@ final class PostingService
             $nonDeductibleVat = round($vat - $deductibleVat, 2);
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
             $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
-            if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $expenseSide, $isCreditNote), abs($deductibleVat), $cc);
-            }
+            $this->appendVatLines($lines, $vatByRate, $inputAccounts, $deductibleVat, $expenseSide, $isCreditNote, $cc, $pct);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } elseif ($deduction['active']) {
@@ -2415,12 +2415,12 @@ final class PostingService
             // vidět plná daň plnění i daň, kterou už uplatnil DDKP. Součet = daň z evidence.
             $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
             $ownVat = round($vat + $deduction['vat'], 2);
-            if ($ownVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($ownVat, $expenseSide, $isCreditNote), abs($ownVat), $cc);
+            $deductionByRate = $deduction['vat_by_rate'];
+            foreach ($deductionByRate as $key => $amount) {
+                $vatByRate[$key] = ($vatByRate[$key] ?? 0.0) + $amount;
             }
-            if ($deduction['vat'] !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign(-$deduction['vat'], $expenseSide, $isCreditNote), abs($deduction['vat']), $cc);
-            }
+            $this->appendVatLines($lines, $vatByRate, $inputAccounts, $ownVat, $expenseSide, $isCreditNote, $cc);
+            $this->appendVatLines($lines, $deductionByRate, $inputAccounts, -$deduction['vat'], $expenseSide, $isCreditNote, $cc, -1.0);
             $lines[] = $this->withForeign(
                 $this->line($payable, $payableSide, abs($totalCzk), $cc),
                 $pi,
@@ -2430,9 +2430,7 @@ final class PostingService
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
         } else {
             $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
-            if ($vat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($vat, $expenseSide, $isCreditNote), abs($vat), $cc);
-            }
+            $this->appendVatLines($lines, $vatByRate, $inputAccounts, $vat, $expenseSide, $isCreditNote, $cc);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
         }
@@ -2476,7 +2474,7 @@ final class PostingService
         $receivedAt = ((string) ($pi['received_at_source'] ?? '') === 'manual')
             ? ($pi['received_at'] !== null ? (string) $pi['received_at'] : null)
             : null;
-        [, $vat] = $this->ledgerTotals(
+        [, $vat, , $vatByRate] = $this->ledgerTotals(
             $supplierId,
             'purchase',
             $purchaseInvoiceId,
@@ -2484,26 +2482,25 @@ final class PostingService
             (string) $pi['issue_date'],
             $receivedAt,
         );
-        if (self::cents($vat) === 0) {
+        $ruleKey = $opts['rule_key'] ?? 'advance.paid.vatdocument';
+        $taxAccounts = $this->vatPostingCodes($supplierId, 'input', $ruleKey);
+        $amounts = VatPostingAccounts::split($vatByRate, $taxAccounts['rates'], $taxAccounts['common'], $vat);
+        if ($amounts === []) {
             throw new PostingException(
                 'document_not_postable',
                 'Daňový doklad k poskytnuté záloze #' . $purchaseInvoiceId . ' nemá DPH k zaúčtování '
                     . '(neplátce / nulová sazba?) — DDKP bez daně se neúčtuje.',
             );
         }
-        $ruleKey = $opts['rule_key'] ?? 'advance.paid.vatdocument';
-        $vatAcc  = $this->vatAccount($supplierId, $ruleKey, 'debit', self::INPUT_VAT_ACCOUNT);  // odpočet DPH
-        $draw    = $this->ruleCode($supplierId, $ruleKey, 'credit', '314'); // čerpání zálohy o DPH
+        $draw = $this->ruleCode($supplierId, $ruleKey, 'credit', '314');
         $cc = $opts['cost_center'] ?? null;
-
-        // Opravný DDKP (snížení dříve odečtené DPH ze zálohy, vat < 0) obrací strany: 314 MD / 343 D.
-        $vatSide  = $vat < 0.0 ? 'credit' : 'debit';
-        $drawSide = $vat < 0.0 ? 'debit'  : 'credit';
-
-        return [
-            $this->line($vatAcc, $vatSide, abs($vat), $cc),
-            $this->line($draw, $drawSide, abs($vat), $cc),
-        ];
+        $lines = [];
+        foreach ($amounts as $code => $amount) {
+            $drawLine = $this->line($draw, self::sideBySign($amount, 'credit', false), abs($amount), $cc);
+            $vatLine = $this->line((string) $code, self::sideBySign($amount, 'debit', false), abs($amount), $cc);
+            array_push($lines, $vatLine, $drawLine);
+        }
+        return count($amounts) > 1 ? PairGroups::consecutive($lines, 'advance_vat') : $lines;
     }
 
     /**
@@ -3078,7 +3075,7 @@ final class PostingService
      * Základ, daň a samovyměřená daň dokladu pro větev plného nároku a přenesení povinnosti.
      *
      * @param array<string,mixed> $pi
-     * @return array{0:float,1:float,2:float}
+     * @return array{0:float,1:float,2:float,3:array,4:array}
      */
     private function purchaseLedgerTotals(int $supplierId, int $purchaseInvoiceId, array $pi, float $rate, string $vatDeduction): array
     {
@@ -3088,7 +3085,7 @@ final class PostingService
         $receivedAt = ((string) ($pi['received_at_source'] ?? '') === 'manual')
             ? ($pi['received_at'] !== null ? (string) $pi['received_at'] : null)
             : null;
-        [$net, $vat, $selfAssessedVat] = $this->ledgerTotals(
+        [$net, $vat, $selfAssessedVat, $vatByRate, $selfAssessedByRate] = $this->ledgerTotals(
             $supplierId,
             'purchase',
             $purchaseInvoiceId,
@@ -3099,10 +3096,10 @@ final class PostingService
         // Kniha DPH tuzemské řádky bez nároku vyřadí a u § 75 je zkrátí, samovyměření
         // ale nechá celé. Pro zápis je proto doklad z položek a z knihy jen samovyměřená daň.
         if ((bool) $pi['reverse_charge'] && in_array($vatDeduction, ['none', 'proportional'], true)) {
-            [$net, $itemVat] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
+            [$net, $itemVat, $vatByRate] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
             $vat = round($itemVat + $selfAssessedVat, 2);
         }
-        return [$net, $vat, $selfAssessedVat];
+        return [$net, $vat, $selfAssessedVat, $vatByRate, $selfAssessedByRate];
     }
 
     /**
@@ -3315,6 +3312,7 @@ final class PostingService
         $cc = $opts['cost_center'] ?? null;
         $lines = [];
         $allocatedCzk = 0.0;
+        $inputAccounts = $this->vatPostingCodes($supplierId, 'input');
 
         foreach ($allocations as $allocation) {
             $base = round((float) $allocation['base_amount'] * $rate, 2);
@@ -3330,7 +3328,9 @@ final class PostingService
                 $lines[] = $this->line($accountCode, self::sideBySign($accountAmount, $debitSide, $isCreditNote), abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $debitSide, $isCreditNote), abs($deductibleVat), $cc);
+                $key = VatRateResolver::rateKey((float) $allocation['vat_rate']);
+                $code = $inputAccounts['rates'][$key] ?? $inputAccounts['common'];
+                $lines[] = $this->line($code, self::sideBySign($deductibleVat, $debitSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $allocatedCzk = round($allocatedCzk + $accountAmount + $deductibleVat, 2);
         }
@@ -4411,6 +4411,7 @@ final class PostingService
         $vat = 0.0;
         $ids = [];
         $byAdvance = [];
+        $vatByRate = [];
         foreach ($rows as $row) {
             $advanceId = $row['advance_purchase_invoice_id'];
             if (!in_array($advanceId, $linked, true)) {
@@ -4431,6 +4432,8 @@ final class PostingService
             $foreignBase += -$row['total_without_vat'];
             $base += $rowBase;
             $vat += $rowVat;
+            $key = VatRateResolver::rateKey($row['vat_rate_snapshot']);
+            $vatByRate[$key] = ($vatByRate[$key] ?? 0.0) + $rowVat;
             $byAdvance[$advanceId] ??= self::noPurchaseDeduction();
             $byAdvance[$advanceId]['active'] = true;
             $byAdvance[$advanceId]['item_ids'][] = $row['id'];
@@ -4447,6 +4450,7 @@ final class PostingService
             'gross'        => round($base + $vat, 2),
             'item_ids'     => $ids,
             'by_advance'   => $byAdvance,
+            'vat_by_rate'  => $vatByRate,
         ];
     }
 
@@ -4592,49 +4596,45 @@ final class PostingService
     }
 
     /**
-     * Účet daně na VSTUPU (nárok na odpočet) — kontace `invoice.vat.input`, fallback
-     * {@see INPUT_VAT_ACCOUNT}. Tenant, který chce zůstat na plochém 343, si rule_key
-     * přepíše na '343' a chování se vrátí do stavu před migrací 1323.
+     * Společná kontace a účty podle sazby pro faktury i pokladnu. Samovyměření používá
+     * odpočet na vstupu a přiznanou daň na výstupu podle téže sazby. Bez rozpisu
+     * sazeb DDKP používá svou dosavadní kontaci. OSS má vlastní kontaci 345.100.
+     * Ruční interní doklady účtují na účty zadané přímo na jejich řádcích.
+     *
+     * @return array{common:string,rates:array<int|string,string>}
      */
-    private function inputVatAccount(int $supplierId): string
+    public function vatPostingCodes(int $supplierId, string $direction, ?string $advanceRule = null): array
     {
-        return $this->vatAccount($supplierId, 'invoice.vat.input', 'debit', self::INPUT_VAT_ACCOUNT);
-    }
-
-    /** Účet daně na VÝSTUPU — kontace `invoice.vat.output`, fallback {@see OUTPUT_VAT_ACCOUNT}. */
-    private function outputVatAccount(int $supplierId): string
-    {
-        return $this->vatAccount($supplierId, 'invoice.vat.output', 'credit', self::OUTPUT_VAT_ACCOUNT);
-    }
-
-    /**
-     * Daňový účet s DEGRADACÍ NA SYNTETIKU. Pořadí: kontace → analytika ze šablony →
-     * holé 343.
-     *
-     * Ta poslední větev je záměrná pojistka pro nasazení, kde kód už běží, ale migrace
-     * 1323 ještě neproběhla (rolling deploy, kontejner nahozený před entrypointem), nebo
-     * kde si tenant analytiku smazal či deaktivoval. Bez ní by KAŽDÝ doklad s DPH spadl
-     * na `unknown_account` — účtování by se u takové firmy zastavilo úplně. Degradace na
-     * syntetiku je horší účetně (vstup a výstup se na 343 vynetují, měsíční zúčtování
-     * takovou firmu přeskočí), ale je to stav, ve kterém aplikace fungovala doteď.
-     *
-     * Naopak když v osnově není ANI 343 (firma bez podvojného účetnictví, nezaseedovaná
-     * osnova), vrací se kód z kontace beze změny — ať chybu nahlásí resolveLines()
-     * hlasitě a se správným kódem, místo aby ji tahle metoda zamaskovala.
-     *
-     * Bankovní ani pokladní analytiky (221.x / 211.x) obdobnou pojistku NEPOTŘEBUJÍ:
-     * {@see \MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner::ensureChartAccount()}
-     * a CashRegisterService si chybějící analytiku samy dohrají do osnovy dřív, než na ni
-     * pošlou řádek.
-     */
-    private function vatAccount(int $supplierId, string $ruleKey, string $side, string $fallback): string
-    {
-        $code = $this->ruleCode($supplierId, $ruleKey, $side, $fallback);
-        if ($code === self::VAT_SYNTHETIC || $this->isPostableAccount($supplierId, $code)) {
-            return $code;
+        $key = 'invoice.vat.' . $direction;
+        $side = VatPostingAccounts::SIDES[$direction];
+        $rules = $this->rules->effectiveMap($supplierId, $key);
+        $rates = VatPostingAccounts::byRate($rules)[$direction];
+        $fallback = VatPostingAccounts::FALLBACKS[$direction];
+        $common = $advanceRule !== null && $rates === []
+            ? $this->ruleCode($supplierId, $advanceRule, $side, $fallback)
+            : VatPostingAccounts::common($rules, $direction);
+        if ($common !== self::VAT_SYNTHETIC && !$this->isPostableAccount($supplierId, $common)
+            && $this->isPostableAccount($supplierId, self::VAT_SYNTHETIC)) {
+            $common = self::VAT_SYNTHETIC;
         }
+        return ['common' => $common, 'rates' => $rates];
+    }
 
-        return $this->isPostableAccount($supplierId, self::VAT_SYNTHETIC) ? self::VAT_SYNTHETIC : $code;
+    private function appendVatLines(
+        array &$lines,
+        array $byRate,
+        array $accounts,
+        float $total,
+        string $side,
+        bool $isCreditNote,
+        ?string $costCenter,
+        float $share = 1.0,
+        ?string $group = null,
+    ): void {
+        foreach (VatPostingAccounts::split($byRate, $accounts['rates'], $accounts['common'], $total, $share) as $code => $amount) {
+            $line = $this->line((string) $code, self::sideBySign($amount, $side, $isCreditNote), abs($amount), $costCenter);
+            $lines[] = $group === null ? $line : $this->pairHint($line, 'pair_group', $group);
+        }
     }
 
     /**
@@ -5383,7 +5383,7 @@ final class PostingService
      * Zbytek daně je daň dodavatele k odpočtu, i na dokladu s příznakem přenesení v hlavičce.
      *
      * @param 'sale'|'purchase' $source
-     * @return array{0:float,1:float,2:float} [net, vat, selfAssessedVat]
+     * @return array{0:float,1:float,2:float,3:array,4:array} základ, daň, samovyměření, daň dodavatele a samovyměření podle sazby
      */
     private function ledgerTotals(int $supplierId, string $source, int $invoiceId, string $docDate, string $issueDate, ?string $receivedAt = null): array
     {
@@ -5398,16 +5398,21 @@ final class PostingService
         $net = 0.0;
         $vat = 0.0;
         $selfAssessed = 0.0;
+        $vatByRate = $selfAssessedByRate = [];
         foreach ($this->vatLedger->documentRows($supplierId, $source, $invoiceId, $start, $end, true) as $row) {
             if ($row['source'] === $source && (int) $row['invoice_id'] === $invoiceId) {
                 $net += (float) $row['base_czk'];
                 $vat += (float) $row['vat_czk'];
+                $key = VatRateResolver::rateKey((float) $row['vat_rate']);
                 if (VatLedgerService::isSelfAssessedRow($row)) {
                     $selfAssessed += (float) $row['vat_czk'];
+                    $selfAssessedByRate[$key] = ($selfAssessedByRate[$key] ?? 0.0) + (float) $row['vat_czk'];
+                } else {
+                    $vatByRate[$key] = ($vatByRate[$key] ?? 0.0) + (float) $row['vat_czk'];
                 }
             }
         }
-        return [round($net, 2), round($vat, 2), round($selfAssessed, 2)];
+        return [round($net, 2), round($vat, 2), round($selfAssessed, 2), $vatByRate, $selfAssessedByRate];
     }
 
     /**
@@ -5416,21 +5421,25 @@ final class PostingService
      * vyřazuje ('none'), nebo krátí na vat_deduction_percent ('proportional'); pro
      * účetní zápis ale potřebujeme PLNOU částku dokladu (audit B1), ne DPH pohled.
      *
-     * @return array{0:float,1:float} [net, vat]
+     * @return array{0:float,1:float,2:array} základ, daň a daň podle sazby
      */
     private function purchaseItemTotals(int $purchaseInvoiceId, float $rate): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT total_without_vat, total_vat FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+            'SELECT total_without_vat, total_vat, vat_rate_snapshot FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
         );
         $stmt->execute([$purchaseInvoiceId]);
         $net = 0.0;
         $vat = 0.0;
+        $vatByRate = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $net += round((float) $row['total_without_vat'] * $rate, 2);
-            $vat += round((float) $row['total_vat'] * $rate, 2);
+            $amount = round((float) $row['total_vat'] * $rate, 2);
+            $vat += $amount;
+            $key = VatRateResolver::rateKey((float) $row['vat_rate_snapshot']);
+            $vatByRate[$key] = ($vatByRate[$key] ?? 0.0) + $amount;
         }
-        return [round($net, 2), round($vat, 2)];
+        return [round($net, 2), round($vat, 2), $vatByRate];
     }
 
     /**

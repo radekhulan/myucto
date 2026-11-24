@@ -286,6 +286,10 @@ firmy nemění, viz [§ 106.10.10](#1061010-danova-evidence).
 | karty dlouhodobého majetku a jejich pohyby | karty majetku s počátečními stavy, technickými zhodnoceními a odpisy převedených let, viz níže |
 | karty drobného majetku | evidence drobného majetku včetně vyřazených karet |
 
+Položka faktury přebírá popisy položek Money se stejnou sazbou DPH. Různé popisy
+se spojí středníkem v pořadí z Money. Pokud u sazby žádný popis položky není,
+použije se popis z hlavičky faktury.
+
 #### 106.10.2.1 Majetek
 
 Převod přebírá evidenci majetku Money (karty a jejich pohyby). Zařazení, odpisy

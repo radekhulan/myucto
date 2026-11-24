@@ -138,6 +138,44 @@ final class AccountingByTaxStrategyTest extends TestCase
         self::assertSame(128720.0, $years[2027]); // půlodpis §26/7: ceil(22,25 % VC / 2)
     }
 
+    /**
+     * Karta převzatá z POHODY: daňové oprávky za 2022–2025 (4 roky), účetní oprávky
+     * i s odpisem běžného roku 2026, který už je v deníku. Rok 2026 se znovu neplánuje
+     * a součet oprávek nepřeroste vstupní cenu.
+     */
+    public function testOpeningAccountingAheadOfTaxAbsorbsCoveredYear(): void
+    {
+        $ctx = $this->ctx([
+            'inputPrice' => 6000000.0,
+            'taxGroup' => 5,
+            'putIntoUseDate' => '2022-04-01',
+            'openingTaxYears' => 4,
+            'openingTaxAmount' => 696000.0,
+            'openingAccMonths' => 56,
+            'openingAccAmount' => 900000.0,
+        ]);
+        $strategy = $this->strategy();
+        $tax = $this->byYear((new TaxStraightLineStrategy())->plan($ctx));
+        $acc = $this->byYear($strategy->plan($ctx));
+
+        self::assertSame(204000.0, $tax[2026]);
+        self::assertSame(0.0, $acc[2026]);
+        self::assertSame(204000.0, $acc[2027]);
+        self::assertSame(0.0, round((float) $strategy->yearRow($ctx, 2026)['amount'], 2));
+        self::assertSame(204000.0, round((float) $strategy->yearRow($ctx, 2027)['amount'], 2));
+        self::assertSame(6000000.0, round(900000.0 + array_sum($acc), 2));
+        $last = $strategy->plan($ctx);
+        self::assertSame(0.0, round((float) end($last)['residual_end'], 2));
+    }
+
+    public function testOpeningAccountingBehindTaxKeepsTaxAmounts(): void
+    {
+        $ctx = $this->ctx(['openingTaxYears' => 1, 'openingTaxAmount' => 127273.0, 'openingAccMonths' => 3, 'openingAccAmount' => 57852.0]);
+
+        self::assertSame(257439.0, $this->byYear($this->strategy()->plan($ctx))[2026]);
+        self::assertSame(257439.0, round((float) $this->strategy()->yearRow($ctx, 2026)['amount'], 2));
+    }
+
     public function testTaxMethodNoneYieldsEmptyPlan(): void
     {
         $strategy = new AccountingByTaxStrategy(null);

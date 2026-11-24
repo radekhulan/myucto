@@ -20391,6 +20391,8 @@
       "advance_payment_only": "An advance document is not posted as a liability. Post its bank or cash payment to account 314 instead.",
       "missing_exchange_rate": "The foreign-currency document has no exchange rate — fill in the rate for the accounting date.",
       "no_accounting_period": "No accounting period exists for the document date — create one first in Accounting → Closing.",
+      "period_before_start": "The date is before the company started accounting in MyÚčto. Check the year for a typo. If you intended to post to an earlier year, create the period manually under Tools → Closing.",
+      "period_gap": "The date falls in a gap between accounting periods. Check the date or create the missing period manually under Tools → Closing.",
       "period_missing": "The accounting period for the document year does not exist — create it first in Accounting → Closing.",
       "depreciation_journal_missing": "The asset card shows the year's accounting depreciation as posted, but its journal entry is missing. It was not posted again to avoid doubling it. Check the journal for another entry carrying the year's depreciation (e.g. taken over from the previous software) and post it manually if needed.",
       "open_periods_action": "Create period",
@@ -20719,6 +20721,11 @@
       "global": "Global",
       "edit_title": "Edit posting rule",
       "at_least_one": "Enter at least a debit or credit account.",
+      "vat_rates_title": "VAT accounts by rate",
+      "vat_common": "Shared account {account}",
+      "vat_use_common": "Use shared account",
+      "vat_output": "Output VAT",
+      "vat_input": "Input VAT",
       "alignment": {
         "button": "Align with chart",
         "title": "Align posting rules with the chart of accounts",
@@ -21793,6 +21800,7 @@
         "put_into_use_date": "Put-into-use date",
         "put_into_use_book": "Post the entry (02x / 04x)",
         "put_into_use_no_book_hint": "Without posting — asset balances must already be in the books (opening balances, historical assets).",
+        "put_into_use_opening_hint": "The card has opening accumulated depreciation, so the asset is already in the opening balances. It is put into use without a journal entry.",
         "put_into_use_done": "The asset has been put into use.",
         "improvement": "Technical improvement",
         "dispose": "Dispose",
@@ -21814,7 +21822,10 @@
         "delete_confirm": "Really delete the asset card? This action cannot be undone.",
         "delete_in_use_confirm": "Really delete the asset card in use? Its put-into-use journal entry will also be deleted. This cannot be undone and is allowed only without confirmed depreciation or technical improvements.",
         "download_card": "Download asset card",
-        "download_card_error": "Could not download the asset card."
+        "download_card_error": "Could not download the asset card.",
+        "revert_put_into_use": "Return to draft",
+        "revert_put_into_use_confirm": "Return the card to draft? The put-into-use journal entry will be deleted and the card can be edited (including the put-into-use date) and put into use again. Allowed only without confirmed or posted depreciation and technical improvements.",
+        "revert_put_into_use_done": "The card is back in draft."
       },
       "improvement": {
         "list_title": "Technical improvements (§33)",
@@ -22630,6 +22641,7 @@
       },
       "checks": {
         "prior_period_open": "The previous period is not closed",
+        "empty_period_before_accounting_start": "Open periods with no journal entries before accounting started",
         "pl_balance_before_period": "Non-zero expense/revenue balances before the period start",
         "drafts_in_period": "Unposted journal drafts in the period",
         "journal_unbalanced": "The period journal is not balanced (Σ Dr ≠ Σ Cr)",
@@ -31953,6 +31965,7 @@
           "manual": "manual run",
           "cron": "scheduled task"
         },
+        "stale_accounts_hint": "The total matches. The posted breakdown by account differs from the current turnover.",
         "stale_hint": "The document was posted at {posted}, but today's data gives {fresh} — a document was added or changed in the period after it was cleared. Recompute so the general ledger shows the real liability.",
         "missing_hint": "The period still has an untransferred balance on the VAT accounts — the clearing document is missing.",
         "last_run": "Last recomputed: {trigger}, {at}",
@@ -46456,7 +46469,8 @@
       "purchase_invoice": "Received document",
       "bank_statement": "Bank statement",
       "account": "Account",
-      "other_item": "Other item"
+      "other_item": "Other item",
+      "asset": "Asset card"
     },
     "sources": {
       "pohoda": "POHODA",
@@ -46470,6 +46484,11 @@
       "include_uploaded": "Also switch statements uploaded after the migration that clearly belong to the account by their file to the account currency."
     },
     "checks": {
+      "asset_account_undetermined": {
+        "title": "Undetermined account for an asset migrated from POHODA",
+        "hint": "Asset cards flagged during POHODA migration because their asset account could not be determined.",
+        "description": "The check uses opening balances and the accumulated depreciation account to identify the asset account. The fix sets the account on the card if the opening balance covers the combined cost of the cards on that account within CZK 1."
+      },
       "settled_without_payment": {
         "title": "Paid amount of invoices without a payment record",
         "hint": "POHODA: prior-year payments, Money S3: offsets and payments without a payment document.",

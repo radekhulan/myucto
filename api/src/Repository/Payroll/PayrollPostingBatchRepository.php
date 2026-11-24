@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingPreview;
 use PDO;
 
@@ -16,7 +18,7 @@ final class PayrollPostingBatchRepository
         private readonly Connection $db,
         // Zakládá chybějící účetní období stejnou cestou jako ostatní
         // zaúčtovací služby — viz openMissingAccountingPeriod().
-        private readonly \MyInvoice\Repository\AccountingPeriodRepository $accountingPeriods,
+        private readonly AccountingPeriodRepository $accountingPeriods,
     ) {}
 
     /**
@@ -175,6 +177,9 @@ final class PayrollPostingBatchRepository
                 'Konec mzdového období není platné datum.',
             );
         }
+        if ($this->accountingPeriods->findForDateForUpdate($supplierId, $payrollPeriodEnd) === null) {
+            $this->accountingPeriods->assertCanAutomaticallyOpenForPosting($supplierId, $payrollPeriodEnd);
+        }
 
         $lock = $this->db->pdo()->prepare(
             'SELECT locked_until
@@ -219,20 +224,6 @@ final class PayrollPostingBatchRepository
         $statement->execute([$supplierId, $minimumDate, $minimumDate]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
-            /*
-             * Chybějící účetní období se ZALOŽÍ, stejně jako u ostatních
-             * zaúčtovacích cest.
-             *
-             * Nová firma žádné období nemá a bankovní zápis, majetek i doklady
-             * si ho doplní samy ({@see AccountingPeriodRepository::ensureOpenPeriodFor()}).
-             * Mzdy jediné místo toho spadly na „není dostupné otevřené účetní
-             * období" na příkazu Schválit — tedy až po zamčení vstupů,
-             * a hláška neřekla ani který rok, ani kde se období zakládá.
-             *
-             * ⚠️ Zakládá se jen rok, který v evidenci VŮBEC NENÍ. Uzavřený rok
-             * se neotevírá — to je rozhodnutí účetní, ne vedlejší účinek
-             * mzdového běhu.
-             */
             $row = $this->openMissingAccountingPeriod($supplierId, $minimum);
         }
         if (!is_array($row)) {
@@ -292,12 +283,18 @@ final class PayrollPostingBatchRepository
         if ($existing->fetchColumn() !== false) {
             return null;
         }
+        $minimumDate = $minimum->format('Y-m-d');
+        if ($this->accountingPeriods->findForDateForUpdate($supplierId, $minimumDate) !== null) {
+            return null;
+        }
+        $this->accountingPeriods->assertCanAutomaticallyOpenForPosting($supplierId, $minimumDate);
 
         $this->accountingPeriods->create(
             $supplierId,
             $year,
             sprintf('%04d-01-01', $year),
             sprintf('%04d-12-31', $year),
+            AccountingPeriodProvisioner::REASON_POSTING,
         );
 
         $reload = $pdo->prepare(
@@ -313,7 +310,6 @@ final class PayrollPostingBatchRepository
               LIMIT 1
               FOR UPDATE'
         );
-        $minimumDate = $minimum->format('Y-m-d');
         $reload->execute([$supplierId, $minimumDate, $minimumDate]);
         $row = $reload->fetch(PDO::FETCH_ASSOC);
 

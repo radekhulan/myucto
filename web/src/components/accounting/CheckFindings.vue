@@ -394,6 +394,8 @@ function docLink(f: Finding): RouteLocationRaw | null {
       return { name: 'other-item-detail', params: { id: f.doc_id } }
     case 'asset':
       return { name: 'accounting-asset-detail', params: { id: f.doc_id } }
+    case 'accounting_period':
+      return { name: 'accounting-periods', query: { fiscal_year: f.doc_no ?? undefined } }
     default:
       return null
   }

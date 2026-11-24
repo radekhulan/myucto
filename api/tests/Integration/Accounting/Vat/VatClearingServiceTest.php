@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Vat\VatClearingService;
@@ -96,19 +97,19 @@ final class VatClearingServiceTest extends TestCase
     }
 
     /** Zaúčtuje ručně DPH na výstupu (311/343.200) k danému datu. */
-    private function bookOutputVat(float $amount, string $date, int $sourceId): void
+    private function bookOutputVat(float $amount, string $date, int $sourceId, string $account = '343.200'): void
     {
         $this->posting->postDocument($this->supplierId, 'manual', $sourceId, [
             ['account_code' => '311', 'side' => 'debit', 'amount' => $amount],
-            ['account_code' => '343.200', 'side' => 'credit', 'amount' => $amount],
+            ['account_code' => $account, 'side' => 'credit', 'amount' => $amount],
         ], ['entry_date' => $date, 'description' => 'DPH na výstupu']);
     }
 
     /** Zaúčtuje ručně DPH na vstupu (343.100/321) k danému datu. */
-    private function bookInputVat(float $amount, string $date, int $sourceId): void
+    private function bookInputVat(float $amount, string $date, int $sourceId, string $account = '343.100'): void
     {
         $this->posting->postDocument($this->supplierId, 'manual', $sourceId, [
-            ['account_code' => '343.100', 'side' => 'debit', 'amount' => $amount],
+            ['account_code' => $account, 'side' => 'debit', 'amount' => $amount],
             ['account_code' => '321', 'side' => 'credit', 'amount' => $amount],
         ], ['entry_date' => $date, 'description' => 'DPH na vstupu']);
     }
@@ -212,6 +213,51 @@ final class VatClearingServiceTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->netCredit('343.200', $from, $to), 0.001, '343.200 je po zúčtování za období nulová.');
         self::assertEqualsWithDelta(0.0, $this->netCredit('343.100', $from, $to), 0.001, '343.100 je po zúčtování za období nulová.');
         self::assertEqualsWithDelta(1260.00, $this->netCredit('343.900', $from, $to), 0.001, 'Na 343.900 zůstal celý závazek k odvodu.');
+    }
+
+    public function testClearsAllVatAccountsAndDetectsReclassificationWithoutTotalChange(): void
+    {
+        $rules = new PostingRuleRepository($this->db);
+        $accounts = ['output.21' => '343.310', 'output.12' => '343.320', 'input.21' => '343.110', 'input.12' => '343.120'];
+        $parent = $this->accounts->findByCode($this->supplierId, '343')['id'];
+        foreach ($accounts as $key => $code) {
+            $this->accounts->insert($this->supplierId, [
+                'account_code' => $code, 'name' => 'Vzorová analytika DPH', 'account_type' => 'liability',
+                'normal_side' => null, 'parent_id' => $parent,
+            ]);
+            $input = str_starts_with($key, 'input.');
+            $rules->upsertOverride($this->supplierId, 'invoice.vat.' . $key, $input ? $code : null, $input ? null : $code, 'Vzorová DPH');
+        }
+        $rules->upsertOverride($this->supplierId, 'invoice.vat.output.15', null, '343.310', 'Druhá sazba na stejném účtu');
+        $date = self::YEAR . '-06-15';
+        $this->bookOutputVat(210, $date, 900101, '343.310');
+        $this->bookOutputVat(120, $date, 900102, '343.320');
+        $this->bookOutputVat(20, $date, 900103);
+        $this->bookInputVat(105, $date, 900104, '343.110');
+        $this->bookInputVat(60, $date, 900105, '343.120');
+        $this->bookInputVat(10, $date, 900106);
+
+        $result = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 6);
+        self::assertSame(VatClearingService::STATUS_POSTED, $result['status']);
+        self::assertSame(350.0, $result['output_vat']);
+        self::assertSame(175.0, $result['input_vat']);
+        self::assertCount(6, $result['accounts_detail']);
+        foreach ([...array_values($accounts), '343.100', '343.200'] as $code) {
+            self::assertEqualsWithDelta(0.0, $this->netCredit($code, self::YEAR . '-06-01', self::YEAR . '-06-30'), 0.001);
+        }
+        self::assertSame(175.0, $this->netCredit('343.900', self::YEAR . '-06-01', self::YEAR . '-06-30'));
+        $status = $this->clearing->status($this->supplierId, self::YEAR, 6);
+        self::assertSame(VatClearingService::FRESHNESS_OK, $status['freshness']);
+        self::assertSame(350.0, $status['run']['output_vat']);
+        self::assertSame(175.0, $status['run']['input_vat']);
+
+        $this->posting->postDocument($this->supplierId, 'manual', 900107, [
+            ['account_code' => '343.310', 'side' => 'debit', 'amount' => 30.0],
+            ['account_code' => '343.320', 'side' => 'credit', 'amount' => 30.0],
+        ], ['entry_date' => $date, 'description' => 'Přeúčtování DPH']);
+        $status = $this->clearing->status($this->supplierId, self::YEAR, 6);
+        self::assertSame($status['output_vat'], $status['posted']['output_vat']);
+        self::assertSame(VatClearingService::FRESHNESS_STALE, $status['freshness']);
     }
 
     /**

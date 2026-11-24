@@ -1,4 +1,5 @@
 import type { EntryForm, EntryFormHistoryRow } from '@/api/accounting'
+import { postingPeriodErrorKey } from '@/api/errors'
 
 /**
  * Forma účetního zápisu firmy k datu: řádek historie s nejvyšším `valid_from <= date`,
@@ -88,7 +89,7 @@ export function apiErrorText(
   const info = apiErrorInfo(e)
   const known = (PAIR_ERROR_CODES as readonly string[]).includes(info.code)
   if (info.code && (known || allCodes)) {
-    const key = `accounting.error.${info.code}`
+    const key = postingPeriodErrorKey(info.code) ?? `accounting.error.${info.code}`
     const localized = t(key)
     if (localized && localized !== key) {
       return info.pairNo !== null && info.code.startsWith('pair_')

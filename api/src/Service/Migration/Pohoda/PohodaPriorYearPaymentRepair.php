@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
 
@@ -38,15 +39,13 @@ final class PohodaPriorYearPaymentRepair
         private readonly PohodaPriorYearPayments $payments,
         private readonly AccountingPeriodRepository $periods,
         private readonly ActivityLogger $activity,
+        private readonly PohodaImportRepository $imports,
     ) {}
 
     /** @return list<int> firmy s dokončeným převodem z POHODY */
     public function convertedSuppliers(): array
     {
-        return array_map('intval', $this->db->pdo()->query(
-            "SELECT DISTINCT supplier_id FROM pohoda_imports
-              WHERE mode = 'import' AND status IN ('completed', 'completed_with_warnings') ORDER BY supplier_id"
-        )->fetchAll(PDO::FETCH_COLUMN));
+        return $this->imports->completedSuppliers();
     }
 
     /**
