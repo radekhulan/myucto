@@ -47,7 +47,7 @@ const canWrite = computed(() => auth.canWrite('accounting.accruals.write'))
 
 const items = ref<AccrualItem[]>([])
 const total = ref(0)
-const totals = ref<{ basis_amount: number; balance: number }>({ basis_amount: 0, balance: 0 })
+const totalsByKind = ref<Record<string, { count: number; basis_amount: number; balance: number }>>({})
 const page = ref(1)
 const perPage = ref(50)
 const loading = ref(false)
@@ -264,7 +264,7 @@ async function load(append = false) {
     page.value = nextPage
     total.value = result.total
     perPage.value = result.per_page || 50
-    totals.value = result.totals ?? { basis_amount: 0, balance: 0 }
+    totalsByKind.value = result.totals_by_kind ?? {}
     loadedAsOf.value = result.as_of || ''
     if (!append) {
       loadedParams = requestedParams
@@ -428,10 +428,6 @@ function projectedFor(accountCode: string): number | null {
   const hit = PROJECTION_KINDS.find(k => kinds[k].account === accountCode)
   return hit ? kinds[hit].totals.deferred : null
 }
-const projectedTotal = computed(() => {
-  const kinds = projection.value?.kinds
-  return kinds ? Math.round((kinds.prepaid_expense.totals.deferred + kinds.deferred_revenue.totals.deferred) * 100) / 100 : 0
-})
 async function loadProjection() {
   projectionLoading.value = true
   try {
@@ -613,7 +609,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.items_balance) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.closing_balance) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="!hasDifference(row.difference) ? 'text-neutral-500' : agendaUnused ? 'font-semibold text-neutral-700' : 'font-semibold text-danger-600'"
-                  :title="agendaUnused && hasDifference(row.difference) ? t('accruals.unused.difference_title') : undefined">{{ formatMoney(row.difference) }}</td>
+                  :title="agendaUnused && hasDifference(row.difference) ? t('accruals.unused.difference_title') : undefined" :data-test="`reconciliation-difference-${row.account_code}`">{{ formatMoney(row.difference) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :data-test="`reconciliation-projected-${row.account_code}`">
                   <button v-if="projectedFor(row.account_code) !== null" type="button" class="cursor-pointer text-primary-600 hover:underline"
                     @click="showProjectionFor(row.account_code)">{{ formatMoney(projectedFor(row.account_code)!) }}</button>
@@ -663,17 +659,6 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
               </tr>
             </template>
           </tbody>
-          <tfoot class="border-t-2 border-neutral-300 bg-neutral-50 font-semibold">
-            <tr>
-              <td class="px-3 py-2">{{ t('accruals.reconciliation.total') }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.ledger_balance) }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.items_balance) }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.closing_balance) }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="hasDifference(reconciliation.totals.difference) && !agendaUnused ? 'text-danger-600' : ''" data-test="reconciliation-difference">{{ formatMoney(reconciliation.totals.difference) }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ projection ? formatMoney(projectedTotal) : '' }}</td>
-              <td></td>
-            </tr>
-          </tfoot>
         </table>
       </div>
     </section>
@@ -794,7 +779,9 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
             <tfoot class="border-t-2 border-neutral-300 bg-neutral-50 text-xs font-semibold">
               <tr>
                 <td :colspan="visibleColumns.length + 1" class="px-3 py-2 text-right" data-test="accruals-totals">
-                  {{ t('accruals.totals', { basis: formatMoney(totals.basis_amount), balance: formatMoney(totals.balance), date: loadedAsOf ? formatDate(loadedAsOf) : '' }) }}
+                  <div v-for="(sum, k) in totalsByKind" :key="k" :data-test="`accruals-totals-${k}`">
+                    {{ kindLabel(String(k)) }}: {{ t('accruals.totals', { basis: formatMoney(sum.basis_amount), balance: formatMoney(sum.balance), date: loadedAsOf ? formatDate(loadedAsOf) : '' }) }}
+                  </div>
                 </td>
               </tr>
             </tfoot>

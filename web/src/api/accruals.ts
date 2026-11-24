@@ -133,6 +133,8 @@ export interface AccrualList {
   items: AccrualItem[]
   total: number
   totals: { basis_amount: number; balance: number }
+  /** Součty po druzích (náklady a výnosy příštích období se nesčítají dohromady). */
+  totals_by_kind?: Record<string, { count: number; basis_amount: number; balance: number }>
   page: number
   per_page: number
   as_of: string
