@@ -189,6 +189,30 @@ final class Section74bReportMappingTest extends TestCase
         self::assertSame(2700.0, round(-($ours[0]['vat21'] + $ours[0]['vat12']), 2));
     }
 
+    /** Položka 0 % (vratné obaly) na ř. 40/41 nebyla, snížení odpočtu ji na ř. 41 nesmí poslat. */
+    public function testZeroRateItemStaysOutOfReduction(): void
+    {
+        $id = $this->seedTwoRateInvoice();
+        $this->db->pdo()->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat,
+                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat,
+                 order_index, vat_classification_code)
+             VALUES (?, "Vratné obaly", 1, "ks", 300, ?, 0, 300, 0, 300, 2, "40")'
+        )->execute([$id, $this->rate21Id]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET total_without_vat = 15300, total_with_vat = 18000 WHERE id = ?')->execute([$id]);
+        $this->service->recordAging($this->supplierId, 2025, 7, $this->userId);
+
+        $ours = array_values(array_filter(
+            $this->service->periodCorrectionLines($this->supplierId, 2025, 7)['invoices'],
+            fn ($r) => $r['vendor_invoice_number'] === 'PF-74B-EP9'
+        ));
+        self::assertCount(1, $ours);
+        self::assertSame(-10000.0, $ours[0]['base21']);
+        self::assertSame(-5000.0, $ours[0]['base12']);
+        self::assertSame(-600.0, $ours[0]['vat12']);
+    }
+
     // ── DPHDP3: §74b snížení sníží ř. 40/41 daň a zvýší ř. 34 opr_dluz ─────────
     public function testDphdp3EmitsSection74bReduction(): void
     {

@@ -1446,9 +1446,11 @@ final class KontrolniHlaseniBuilder
                     if ($r['kh_section'] === 'B.1') $g['has_b1'] = true;
                     if (!empty($r['vat_deduction_partial'])) $g['is_pomer'] = true;
                     $rowKodPredPl = (string) ($r['kod_pred_pl'] ?? '');
-                    $is21 = $r['vat_rate'] >= $bucket;
+                    $rateKind = VatLedgerService::rateBucket((float) $r['vat_rate'], $bucket);
+                    $is21 = $rateKind === VatLedgerService::RATE_BASIC;
+                    $is12 = $rateKind === VatLedgerService::RATE_REDUCED;
                     if ($is21) { $g['all_base21'] += $base; $g['all_vat21'] += $vat; }
-                    elseif ($r['vat_rate'] > 0) { $g['all_base12'] += $base; $g['all_vat12'] += $vat; }
+                    elseif ($is12) { $g['all_base12'] += $base; $g['all_vat12'] += $vat; }
                     else { $g['all_base0'] += $base; }
                     // Rozřazení základu/daně do KH kbelíků PODLE SEKCE klasifikace — každá položka
                     // přispěje jen do JEDNÉ sekce. Tím se mixed faktura (např. §92 RC řádek +
@@ -1461,13 +1463,13 @@ final class KontrolniHlaseniBuilder
                             break;
                         case 'A.2': // přeshraniční samovyměřené (§ 24 služby, § 25 pořízení zboží z JČS)
                             if ($is21) { $g['a2_base21'] += $base; $g['a2_vat21'] += $vat; }
-                            elseif ($r['vat_rate'] > 0) { $g['a2_base12'] += $base; $g['a2_vat12'] += $vat; }
+                            elseif ($is12) { $g['a2_base12'] += $base; $g['a2_vat12'] += $vat; }
                             break;
                         case 'B.1': // tuzemský §92 příjemce — samovyměřená daň (vat z rcSelfAssess)
                             $b1 = $g['b1_by_code'][$rowKodPredPl]
                                 ?? ['base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0];
                             if ($is21) { $b1['base21'] += $base; $b1['vat21'] += $vat; }
-                            elseif ($r['vat_rate'] > 0) { $b1['base12'] += $base; $b1['vat12'] += $vat; }
+                            elseif ($is12) { $b1['base12'] += $base; $b1['vat12'] += $vat; }
                             $g['b1_by_code'][$rowKodPredPl] = $b1;
                             break;
                         default:
@@ -1477,7 +1479,7 @@ final class KontrolniHlaseniBuilder
                                 $g['kh_regime_codes'][(string) ($r['kh_regime_code'] ?? '0')] = true;
                                 $g['kh_bad_debt_codes'][(string) ($r['kh_bad_debt'] ?? 'N')] = true;
                                 if ($is21) { $g['dom_base21'] += $base; $g['dom_vat21'] += $vat; }
-                                elseif ($r['vat_rate'] > 0) { $g['dom_base12'] += $base; $g['dom_vat12'] += $vat; }
+                                elseif ($is12) { $g['dom_base12'] += $base; $g['dom_vat12'] += $vat; }
                             }
                     }
                     unset($g);

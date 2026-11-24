@@ -286,7 +286,8 @@ final class DphPriznaniBuilder
                 VatLedgerService::collectMissingExchangeRate($missingByDoc, $r);
                 self::collectDocumentRef($documentRefs, $r);
                 if (!empty($r['zero_rate_outside_return']) && $r['source'] === 'sale') {
-                    $number = (string) ($r['doc_number'] ?? ('#' . $r['invoice_id']));
+                    $number = (string) ($r['doc_number'] ?? '');
+                    $number = $number !== '' ? $number : '#' . $r['invoice_id'];
                     $zeroRateSales[$number] = ($zeroRateSales[$number] ?? 0.0) + (float) $r['base_czk'];
                 }
                 yield $r;

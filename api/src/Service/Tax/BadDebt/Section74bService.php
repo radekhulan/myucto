@@ -391,9 +391,14 @@ final class Section74bService
 
             $b21 = 0.0; $v21 = 0.0; $b12 = 0.0; $v12 = 0.0;
             foreach ($bucketCache[$invoiceId] as $bk) {
+                // Položky 0 % na ř. 1/2 ani 40/41 nebyly, opravu nenesou.
+                $kind = VatLedgerService::rateBucket((float) $bk['rate'], $bucket);
+                if ($kind === null) {
+                    continue;
+                }
                 $baseCorr = round($bk['base'] * $fraction, 2);
                 $vatCorr  = round($bk['claimed_vat'] * $fraction, 2);
-                if ($bk['rate'] >= $bucket) {
+                if ($kind === VatLedgerService::RATE_BASIC) {
                     $b21 += $baseCorr; $v21 += $vatCorr;
                 } else {
                     $b12 += $baseCorr; $v12 += $vatCorr;

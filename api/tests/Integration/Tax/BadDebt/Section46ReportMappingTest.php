@@ -113,6 +113,22 @@ final class Section46ReportMappingTest extends TestCase
         self::assertEqualsWithDelta(2700.0, $lines['opr_verit'], 0.01);
     }
 
+    /** Položka 0 % (zaokrouhlení, poplatek) na ř. 1/2 nebyla, oprava ji na ř. 2 nesmí poslat. */
+    public function testZeroRateItemStaysOutOfCorrection(): void
+    {
+        $id = $this->seedMixedRateInvoice();
+        $this->seedItem($id, $this->rate21Id, 0.0, 300.0, 0.0, 3);
+        $this->db->pdo()->prepare('UPDATE invoices SET total_without_vat = 15300, total_with_vat = 18000 WHERE id = ?')->execute([$id]);
+        $this->service->registerCorrection($this->supplierId, $id, 'insolvency', '2099-09-20', 'OD-1', null, $this->userId);
+
+        $lines = $this->service->periodCorrectionLines($this->supplierId, 2099, 9);
+
+        self::assertEqualsWithDelta(-10000.0, $lines['basic']['base'], 0.01);
+        self::assertEqualsWithDelta(-5000.0, $lines['reduced']['base'], 0.01);
+        self::assertEqualsWithDelta(-600.0, $lines['reduced']['vat'], 0.01);
+        self::assertEqualsWithDelta(2700.0, $lines['opr_verit'], 0.01);
+    }
+
     /**
      * Oprava musí dotéct do PŘIZNÁNÍ, projít XSD a sedět na ř. 33 `opr_verit` kladně,
      * zatímco ř. 1/2 klesnou. Přesně tohle nález N-021 postrádal.

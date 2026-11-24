@@ -1696,6 +1696,26 @@ final class VatLedgerService
             && abs($vatCzk) < 0.005;
     }
 
+    /** Sazbová skupina základní sazby (ř. 1/40, KH sloupec 1). */
+    public const RATE_BASIC = 'basic';
+    /** Sazbová skupina snížené sazby (ř. 2/41, KH sloupec 2). */
+    public const RATE_REDUCED = 'reduced';
+
+    /**
+     * Sazbová skupina řádku pro přiznání a KH: základní od prahu `$threshold`
+     * ({@see \MyInvoice\Repository\TaxConstantsRepository::vatBucketThreshold()}), snížená
+     * nad nulou, null pro 0 %. Sazba 0 % nepatří do žádné sazbové skupiny, ani u oprav
+     * § 46 / § 74b ({@see isZeroRateOnRateLine()}).
+     */
+    public static function rateBucket(float $vatRate, float $threshold): ?string
+    {
+        return match (true) {
+            $vatRate >= $threshold => self::RATE_BASIC,
+            $vatRate > 0.0         => self::RATE_REDUCED,
+            default                => null,
+        };
+    }
+
     /**
      * Totéž pravidlo pro řádek dokladu před vznikem evidence: nese řádek dokladu
      * s příznakem přenesení v hlavičce daň dodavatele (tuzemský kód 40/41), nebo se

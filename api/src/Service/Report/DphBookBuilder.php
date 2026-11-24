@@ -118,9 +118,11 @@ final class DphBookBuilder
                 if (($g['code'] ?? '') !== '') {
                     continue;
                 }
-                $line = $g['vat_rate'] >= $vatBucket
-                    ? ($g['source'] === 'sale' ? '1' : '40')
-                    : ($g['vat_rate'] > 0 ? ($g['source'] === 'sale' ? '2' : '41') : null);
+                $line = match (VatLedgerService::rateBucket((float) $g['vat_rate'], $vatBucket)) {
+                    VatLedgerService::RATE_BASIC   => $g['source'] === 'sale' ? '1' : '40',
+                    VatLedgerService::RATE_REDUCED => $g['source'] === 'sale' ? '2' : '41',
+                    default                        => null,
+                };
             }
             $cls = [
                 'code'                  => $g['code'] ?? '',

@@ -366,7 +366,8 @@ final class VatCrossCheckService
                 . "\0" . (empty($r['is_reverse_charge']) ? '0' : '1')
                 . (empty($r['classification_reverse_charge']) ? '0' : '1')
                 . (empty($r['rc_self_assessed_vat']) ? '0' : '1')
-                . (empty($r['vat_deduction_none']) ? '0' : '1');
+                . (empty($r['vat_deduction_none']) ? '0' : '1')
+                . (empty($r['zero_rate_outside_return']) ? '0' : '1');
             if (!isset($groups[$key])) {
                 $groups[$key] = array_intersect_key($r, self::GROUP_FIELDS);
                 $groups[$key]['base_czk'] = 0.0;
@@ -386,7 +387,7 @@ final class VatCrossCheckService
         'doc_number' => true, 'vendor_invoice_number' => true, 'tax_date' => true,
         'counterparty_name' => true, 'counterparty_dic' => true,
         'country_iso2' => true, 'country_is_eu' => true,
-        'dphdp3_line' => true, 'code' => true,
+        'dphdp3_line' => true, 'code' => true, 'zero_rate_outside_return' => true,
         'is_reverse_charge' => true, 'classification_reverse_charge' => true, 'rc_self_assessed_vat' => true,
         'vat_deduction_none' => true,
     ];
