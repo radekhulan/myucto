@@ -30,4 +30,24 @@ final class PohodaAssetAccountResolverTest extends TestCase
         yield 'jiná analytika nestačí' => [['022000' => 2500.0], 750.0, '082007', null];
         yield 'bez účtu oprávek' => [['021000' => 2500.0], 750.0, null, null];
     }
+
+    #[DataProvider('analytics')]
+    public function testResolvesAnalyticAccount(string $synthetic, array $opening, array $journalAccounts, ?string $expected): void
+    {
+        self::assertSame($expected, PohodaAssetAccountResolver::resolveAnalytic($synthetic, $opening, $journalAccounts));
+    }
+
+    public static function analytics(): iterable
+    {
+        yield 'jednoznačné oprávky z počátečních stavů' => ['082', ['082.007' => 1200.0, '082.008' => 0.0, '081.001' => 100.0], [], '082.007'];
+        yield 'několik analytik oprávek se zůstatkem' => ['081', ['081.001' => 100.0, '081.002' => 200.0], [], null];
+        yield 'syntetika i analytika mají počáteční zůstatek' => ['081', ['081' => 100.0, '081.001' => 200.0], [], null];
+        yield 'oprávky s počátečním zůstatkem na MD' => ['081', ['081.001' => -200.0], [], null];
+        yield 'zápisy přiřazené ke kartě mají přednost' => ['081', ['081.001' => 100.0, '081.002' => 200.0], ['081.002', '081.002'], '081.002'];
+        yield 'rozpor mezi analytikami v zápisech karty' => ['081', ['081.001' => 100.0], ['081.001', '081.002'], null];
+        yield 'zápis odpisů na syntetice brání změně' => ['089', ['089.001' => 100.0], ['089'], null];
+        yield 'chybějící účet v nativním zápisu brání změně' => ['082', ['082.001' => 100.0], [''], null];
+        yield 'majetek zařazený na analytice' => ['022', [], ['022.007'], '022.007'];
+        yield 'zařazení na syntetice brání změně' => ['022', ['022.007' => 3000.0], ['022'], null];
+    }
 }

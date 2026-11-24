@@ -46490,9 +46490,27 @@
     },
     "checks": {
       "asset_account_undetermined": {
-        "title": "Neurčený majetkový účet karty z POHODY",
-        "hint": "Karty s poznámkou o neurčeném majetkovém účtu z převodu POHODY.",
-        "description": "Kontrola určí majetkový účet podle počátečních stavů a účtu oprávek. Oprava nastaví účet na kartě, pokud počáteční stav pokrývá součet cen karet na tomto účtu s tolerancí 1 Kč."
+        "title": "Neurčený účet majetku nebo oprávek na kartě z POHODY",
+        "hint": "Převedené karty s neurčeným majetkovým účtem nebo s účtem majetku či oprávek bez analytiky.",
+        "description": "Kontrola hledá účet majetku a účet oprávek podle deníku a počátečních stavů. Oprava změní účet na kartě, pokud jej lze jednoznačně určit a souhlasí s existujícími zápisy.",
+        "reasons": {
+          "asset_changed": "Majetkový účet {old} → {new}.",
+          "accumulated_changed": "Účet oprávek {old} → {new}.",
+          "review_note": "Poznámka v popisu nemá formát kontroly z převodu.",
+          "missing_opening": "Chybí platný zápis počátečních stavů z POHODY.",
+          "ambiguous_asset": "Majetkový účet nelze jednoznačně určit z deníku nebo počátečních stavů.",
+          "ambiguous_asset_analytic": "Analytiku majetkového účtu nelze jednoznačně určit z deníku nebo počátečních stavů.",
+          "ambiguous_accumulated": "Analytiku účtu oprávek nelze jednoznačně určit z deníku nebo počátečních stavů.",
+          "asset_journal_mismatch": "Zápisy o zařazení v deníku nejsou na navrženém majetkovém účtu.",
+          "accumulated_journal_mismatch": "Zápisy odpisů v deníku nejsou na navrženém účtu oprávek.",
+          "opening_capacity": "Na účtu {account} by součet cen karet {total} převýšil počáteční stav {balance} o více než 1 Kč."
+        }
+      },
+      "asset_activation_missing": {
+        "title": "Majetek pořízený v roce převodu bez zařazení na účet majetku",
+        "hint": "V deníku chybí pořizovací cena karty na účtu 01x nebo 02x a účet pořízení 04x má otevřený zůstatek.",
+        "description": "Ověřte, zda zůstatek na účtu pořízení patří kartě. U zařazené karty použijte akci Vrátit do konceptu. Poté kartu zařaďte se zápisem o zařazení.",
+        "reason": "Na účtu pořízení {account} je otevřený zůstatek {balance}."
       },
       "settled_without_payment": {
         "title": "Uhrazená částka faktur bez záznamu platby",

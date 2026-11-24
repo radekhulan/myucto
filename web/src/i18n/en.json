@@ -46490,9 +46490,27 @@
     },
     "checks": {
       "asset_account_undetermined": {
-        "title": "Undetermined account for an asset migrated from POHODA",
-        "hint": "Asset cards flagged during POHODA migration because their asset account could not be determined.",
-        "description": "The check uses opening balances and the accumulated depreciation account to identify the asset account. The fix sets the account on the card if the opening balance covers the combined cost of the cards on that account within CZK 1."
+        "title": "Undetermined asset or accumulated depreciation account on a POHODA asset card",
+        "hint": "Migrated cards with an undetermined asset account or a general ledger account without a subaccount for the asset or its accumulated depreciation.",
+        "description": "The check looks for the asset and accumulated depreciation accounts in journal entries and opening balances. The fix updates an account on the card when the account is unambiguous and matches existing entries.",
+        "reasons": {
+          "asset_changed": "Asset account {old} → {new}.",
+          "accumulated_changed": "Accumulated depreciation account {old} → {new}.",
+          "review_note": "The card description does not contain a migration note in the expected format.",
+          "missing_opening": "No valid opening balance entry from POHODA was found.",
+          "ambiguous_asset": "The journal and opening balances do not identify a unique asset account.",
+          "ambiguous_asset_analytic": "The journal and opening balances do not identify a unique asset subaccount.",
+          "ambiguous_accumulated": "The journal and opening balances do not identify a unique accumulated depreciation subaccount.",
+          "asset_journal_mismatch": "The capitalization entries use a different asset account.",
+          "accumulated_journal_mismatch": "The depreciation entries use a different accumulated depreciation account.",
+          "opening_capacity": "The total card cost of {total} on account {account} would exceed the opening balance of {balance} by more than CZK 1."
+        }
+      },
+      "asset_activation_missing": {
+        "title": "Assets acquired in the migration year without a capitalization entry",
+        "hint": "The journal has no acquisition cost entry for the card on a 01x or 02x account, and the 04x acquisition account still has an open balance.",
+        "description": "Verify that the balance on the acquisition account belongs to the asset. If the asset is already in use, choose Return to draft. Then put the asset into use with a capitalization entry.",
+        "reason": "Acquisition account {account} has an open balance of {balance}."
       },
       "settled_without_payment": {
         "title": "Paid amount of invoices without a payment record",

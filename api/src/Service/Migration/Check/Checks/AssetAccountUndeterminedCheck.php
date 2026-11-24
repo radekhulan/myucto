@@ -29,7 +29,7 @@ final class AssetAccountUndeterminedCheck extends SourceScopedCheck implements F
 
     public function title(): string
     {
-        return 'Neurčený majetkový účet karty z POHODY';
+        return 'Neurčený účet majetku nebo oprávek na kartě z POHODY';
     }
 
     public function manual(): string
@@ -72,14 +72,25 @@ final class AssetAccountUndeterminedCheck extends SourceScopedCheck implements F
         $items = [];
         foreach ($plan['cards'] as $card) {
             $account = $card['new_account'];
+            $accumulated = $card['new_accumulated_account'];
+            $changes = [];
+            if ($account !== null) {
+                $changes[] = sprintf('Majetkový účet %s → %s.', $card['asset_account_code'], $account);
+            }
+            if ($accumulated !== null) {
+                $changes[] = sprintf('Účet oprávek %s → %s.', $card['accumulated_account_code'], $accumulated);
+            }
             $items[] = new CheckItem('asset', $card['id'], $card['inventory_number'] . ' ' . $card['name'],
-                null, $card['opening_price'], $account === null ? CheckItem::REVIEW : CheckItem::FIXABLE,
-                $card['reason'] ?? sprintf('Na kartě se nastaví účet %s (nyní %s).', $account, $card['asset_account_code']),
+                null, $card['opening_price'], $changes === [] ? CheckItem::REVIEW : CheckItem::FIXABLE,
+                $card['reason'] ?? implode(' ', $changes),
                 details: [
                     'old_account' => $card['asset_account_code'],
                     'new_account' => $account,
-                    'description_hash' => hash('sha256', $card['description']),
-                ]);
+                    'old_accumulated_account' => $card['accumulated_account_code'],
+                    'new_accumulated_account' => $accumulated,
+                    'description_hash' => $card['description'] === null ? null : hash('sha256', $card['description']),
+                    'reason_key' => $card['reason_key'] ?? null,
+                ] + ($card['reason_details'] ?? []));
         }
         return new CheckResult($items, $plan['reason'] === null ? [] : [$plan['reason']]);
     }
