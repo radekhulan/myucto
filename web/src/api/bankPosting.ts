@@ -186,6 +186,7 @@ export interface BankTransactionPostingPreview {
   lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number; currency_code?: string; fx_rate?: number; amount_foreign?: number }>
   resolved: boolean
   reason: string | null
+  message?: string
 }
 
 export const bankPostingApi = {

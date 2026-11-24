@@ -81,6 +81,7 @@ final class PostingService
     public const AUTOMATIC_PAIRING_FAILED = 'automatic_pairing_failed';
 
     public const POSTABLE_ISSUED_INVOICE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty'];
+    public const ADVANCE_FX_LINE_TEXT = 'Kurzový rozdíl při zúčtování zálohy';
 
     /**
      * Strop haléřového dorovnání 648/548 (v haléřích). Nad tímto rozdílem hlavička
@@ -2033,7 +2034,7 @@ final class PostingService
         // Vyúčtovací faktura z proformy (parent_invoice_id → proforma): DOPLŇ zúčtování
         // skutečně přijaté zálohy 324 MD / 311 D (self-balanced pár — nemění vyváženost
         // vlastní faktury). Běžná faktura bez proformy zůstává beze změny.
-        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines, abs($totalCzk), $deduction);
+        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines, abs($totalCzk), $deduction, $entryDate);
 
         return $lines;
     }
@@ -2437,7 +2438,7 @@ final class PostingService
 
         // Finální PF navázaná na zaplacenou zálohu (advance_purchase_invoice_id): DOPLŇ
         // zúčtování skutečně zaplacené zálohy 321 MD / 314 D (self-balanced pár).
-        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $deduction);
+        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $entryDate, $deduction);
 
         return $lines;
     }
@@ -3340,7 +3341,7 @@ final class PostingService
             ?? $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
-        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines);
+        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $entryDate);
         return $lines;
     }
 
@@ -3490,7 +3491,7 @@ final class PostingService
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
      * @param array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>, groups:list<array<string,mixed>>} $deduction
      */
-    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction): void
+    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction, string $entryDate): void
     {
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return; // jen finální vyúčtovací faktura (ne dobropis/proforma/DDKP)
@@ -3539,19 +3540,16 @@ final class PostingService
             );
         }
 
-        // invoice_payments.amount je v měně proformy, daň DDKP v Kč → přepočet kurzem
-        // proformy. Kurz se čte jen tam, kde je co přepočítávat, aby cizoměnová proforma
-        // bez kurzu nerozbila vyúčtování, které zálohu stejně nezúčtovává.
-        $received = $this->advanceReceived($supplierId, $parentId);
-        if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
-            $received = round($received * $this->fxRate($parent), 2);
+        if (!$deduction['active'] && $this->appendTracedBankAdvanceSettlement($supplierId, 'sale', $parent, $inv, $lines, $entryDate)) {
+            return;
         }
+        $received = $this->receivedAdvanceCzk($supplierId, $parent);
         $remaining = round($received - $deduction['drawn_vat'], 2);
         if ($deduction['active'] && self::cents($remaining) <= 0) {
             // Vyúčtování už základ zálohy odečetlo a vrátilo do předpisu 311 — bez zúčtování
             // by na 311 zůstal jako fantomová pohledávka a na účtu zálohy celý základ.
             // Typicky úhrada zálohy není zaúčtovaná bankou/pokladnou (ruční úhrada, cizí
-            // měna, kterou banka automaticky neúčtuje).
+            // měna bez bankovního zápisu).
             throw new PostingException(
                 'advance_settlement_ambiguous',
                 'Proforma #' . $parentId . ' má daňový doklad k platbě, ale k ní není zaúčtovaná úhrada '
@@ -3598,10 +3596,7 @@ final class PostingService
         float $receivable,
         array $deduction,
     ): void {
-        $received = $this->advanceReceived($supplierId, $parentId);
-        if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
-            $received = round($received * $this->fxRate($parent), 2);
-        }
+        $received = $this->receivedAdvanceCzk($supplierId, $parent);
         $available = round($received - $deduction['drawn_vat'] - $this->otherFinalsDrawnBase($supplierId, $parentId, $invoiceId), 2);
         if ($deduction['base'] > $available + self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
             throw new PostingException(
@@ -3666,7 +3661,7 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>}|null $deduction
      */
-    private function appendAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, ?array $deduction = null): void
+    private function appendAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, string $entryDate, ?array $deduction = null): void
     {
         $deduction ??= self::noPurchaseDeduction();
         if ((string) ($pi['document_kind'] ?? 'invoice') !== 'invoice') {
@@ -3718,6 +3713,9 @@ final class PostingService
             );
         }
 
+        if ($this->appendTracedBankAdvanceSettlement($supplierId, 'purchase', $adv, $pi, $lines, $entryDate)) {
+            return;
+        }
         $paid = min(
             $this->postedAdvancePaid($supplierId, $adv),
             abs((float) ($pi['total_with_vat'] ?? 0) * $this->fxRate($pi)),
@@ -3733,6 +3731,84 @@ final class PostingService
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $paid, null), 'pair_group', 'advance');
         $lines[] = $this->pairHint($this->line($advAcc, 'credit', $paid, null), 'pair_group', 'advance');
+    }
+
+    /**
+     * Odpočet zálohy bez DDKP v hlavičce cizoměnové faktury. Účet zálohy se
+     * odúčtuje v hodnotě platby, saldokonto v hodnotě konečné faktury.
+     * Rozdíl se zachytí jednou na konečné faktuře.
+     *
+     * @param 'sale'|'purchase' $side
+     * @param array<string,mixed> $advance
+     * @param array<string,mixed> $final
+     * @param list<array<string,mixed>> $lines
+     */
+    private function appendTracedBankAdvanceSettlement(
+        int $supplierId, string $side, array $advance, array $final, array &$lines, string $entryDate,
+    ): bool {
+        $currency = (string) ($advance['currency_code'] ?? 'CZK');
+        $deducted = min((float) ($final['advance_paid_amount'] ?? 0), (float) $final['total_with_vat']);
+        if ($currency === 'CZK' || $currency !== ($final['currency_code'] ?? null) || self::cents($deducted) <= 0) {
+            return false;
+        }
+        $receipt = $this->tracedAdvance($supplierId, $side, $advance);
+        if ($receipt['foreign'] <= 0.0) {
+            return false;
+        }
+
+        $isSale = $side === 'sale';
+        $evidence = new AdvanceSettlementEvidenceReader($this->db);
+        $legacyTotal = $isSale
+            ? $evidence->advanceReceived($supplierId, (int) $advance['id'])
+            : $evidence->postedAdvancePaid($supplierId, $advance, $this->fxRate(...));
+        $legacyBank = $isSale ? $receipt['foreign'] : round($receipt['foreign'] * $this->fxRate($advance), 2);
+        if (self::cents($legacyTotal - $legacyBank) !== 0) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Záloha kombinuje cizoměnovou bankovní úhradu a jiné úhrady. Zúčtujte zálohu ručně.',
+            );
+        }
+
+        $foreign = min($deducted, $receipt['foreign']);
+        $historical = round($foreign / $receipt['foreign'] * $receipt['czk'], 2);
+        $nominal = round($foreign * $this->fxRate($final), 2);
+        ['debit' => $debit, 'credit' => $credit] = $this->advanceSettlementAccounts($supplierId, $side);
+        if ($debit === $credit) {
+            if (self::cents($historical - $nominal) !== 0) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Záloha je účtovaná přímo na saldokonto a její kurz se liší od kurzu faktury. Zúčtujte zálohu ručně.',
+                );
+            }
+            return true;
+        }
+        $settlement = [
+            $this->line($debit, 'debit', $isSale ? $historical : $nominal, null),
+            $this->line($credit, 'credit', $isSale ? $nominal : $historical, null),
+        ];
+        (new FxSettlementPosting($this->db, $this->rules, $this->journal))->appendFxDifference($settlement, $supplierId, $entryDate);
+        if (isset($settlement[2])) {
+            $settlement[2]['line_text'] = self::ADVANCE_FX_LINE_TEXT;
+        }
+        foreach ($settlement as $line) {
+            $lines[] = $this->pairHint($line, 'pair_group', 'advance');
+        }
+        return true;
+    }
+
+    /**
+     * @param 'sale'|'purchase' $side
+     * @param array<string,mixed> $advance
+     * @return array{foreign:float, czk:float}
+     */
+    private function tracedAdvance(int $supplierId, string $side, array $advance): array
+    {
+        $accounts = $this->advanceSettlementAccounts($supplierId, $side);
+        $code = $accounts[$side === 'sale' ? 'debit' : 'credit'];
+        return (new AdvanceSettlementEvidenceReader($this->db))->tracedBankAdvance(
+            $supplierId, $side, (int) $advance['id'], (string) $advance['currency_code'],
+            $this->redirectedAccountCode($supplierId, $code),
+        );
     }
 
     /**
@@ -3911,7 +3987,7 @@ final class PostingService
     }
 
     /**
-     * Skutečně přijatá záloha k proformě = součet ALOKOVANÝCH částek plateb navázaných na
+     * Skutečně přijatá záloha k proformě v Kč = součet ALOKOVANÝCH částek plateb navázaných na
      * proformu (invoice_payments.amount z banky + cash_documents.total_amount z pokladny),
      * ale JEN z těch, jejichž úhradový zápis v deníku je ŽIVÝ (source bank/cash, reversed_by
      * IS NULL). Sčítá se alokace ke KONKRÉTNÍ proformě, ne řádky účtu 324 celého zápisu —
@@ -3920,11 +3996,19 @@ final class PostingService
      *
      * K tomu úhrady proformy převzaté z počátečních stavů (záloha přijatá před otevřením
      * knih, zůstatek nese otevírací zápis na 324,
-     * {@see AdvanceSettlementEvidenceReader::openingAdvanceReceived()}).
+     * {@see AdvanceSettlementEvidenceReader::openingAdvanceReceived()}). U dohledané
+     * cizoměnové bankovní úhrady se použije skutečná korunová hodnota z deníku.
      */
-    private function advanceReceived(int $supplierId, int $proformaId): float
+    private function receivedAdvanceCzk(int $supplierId, array $proforma): float
     {
-        return (new AdvanceSettlementEvidenceReader($this->db))->advanceReceived($supplierId, $proformaId);
+        $evidence = new AdvanceSettlementEvidenceReader($this->db);
+        $received = $evidence->advanceReceived($supplierId, (int) $proforma['id']);
+        if (self::cents($received) <= 0 || ($proforma['currency_code'] ?? 'CZK') === 'CZK') {
+            return $received;
+        }
+        $traced = $this->tracedAdvance($supplierId, 'sale', $proforma);
+        $untraced = $received - $traced['foreign'];
+        return $traced['czk'] + (self::cents($untraced) === 0 ? 0.0 : round($untraced * $this->fxRate($proforma), 2));
     }
 
     /**
@@ -3935,8 +4019,8 @@ final class PostingService
      * záloze, ne 314 celého zápisu.
      *
      * Alokace je v MĚNĚ POHYBU (banka) resp. POKLADNY, ne v měně zálohy. Korunová částka
-     * se bere, jak je; částka v měně zálohy se přepočte kurzem zálohy (zrcadlo vydané strany,
-     * která přijatou zálohu přepočítává kurzem proformy). Úhradu v jiné cizí měně nejde
+     * se bere, jak je. U doložené bankovní úhrady se bere korunová hodnota z deníku,
+     * u starších zápisů bez stopy v měně zálohy se použije kurz zálohy. Úhradu v jiné cizí měně nejde
      * jednoznačně ocenit — zúčtování se pak neúčtuje automaticky. Dřív se cizoměnová
      * alokace sčítala jako koruny: záloha 100 EUR zaplacená z eurového účtu zúčtovala
      * na 321/314 sto korun.
@@ -3945,7 +4029,14 @@ final class PostingService
      */
     private function postedAdvancePaid(int $supplierId, array $advance): float
     {
-        return (new AdvanceSettlementEvidenceReader($this->db))->postedAdvancePaid($supplierId, $advance, $this->fxRate(...));
+        $paid = (new AdvanceSettlementEvidenceReader($this->db))->postedAdvancePaid($supplierId, $advance, $this->fxRate(...));
+        if (($advance['currency_code'] ?? 'CZK') === 'CZK') {
+            return $paid;
+        }
+        $traced = $this->tracedAdvance($supplierId, 'purchase', $advance);
+        return $traced['foreign'] <= 0.0
+            ? $paid
+            : round($paid + $traced['czk'] - round($traced['foreign'] * $this->fxRate($advance), 2), 2);
     }
 
     /**

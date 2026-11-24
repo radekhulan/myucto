@@ -37074,7 +37074,9 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-      description: Vyžaduje právo bank.post a podvojné účetnictví. Náhled nevytváří účetní zápis.
+      description: >
+        Vyžaduje právo bank.post a podvojné účetnictví. Náhled nevytváří účetní zápis.
+        Pokud kontaci nelze sestavit, odpověď obsahuje kód a popis důvodu.
   /api/v1/purchase-invoices/{id}/ai-suggest:
     post:
       tags:
@@ -68192,22 +68194,21 @@ components:
                 - credit
               amount:
                 type: number
-              currency:
+              currency_code:
                 type: string
-              foreign_amount:
-                anyOf:
-                - type: number
-                - type: 'null'
-              exchange_rate:
-                anyOf:
-                - type: number
-                - type: 'null'
+              amount_foreign:
+                type: number
+              fx_rate:
+                type: number
         resolved:
           type: boolean
         reason:
           anyOf:
           - type: string
           - type: 'null'
+        message:
+          type: string
+          description: Hláška k důvodu, proč náhled kontace nelze sestavit.
         card_clearing:
           anyOf:
           - type: object

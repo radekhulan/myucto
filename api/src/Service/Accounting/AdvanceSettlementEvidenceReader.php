@@ -132,6 +132,7 @@ final class AdvanceSettlementEvidenceReader
         $entries = $this->rows('SELECT e.id FROM journal_entries e LEFT JOIN journal_entries rev ON rev.id=e.reversed_by AND rev.supplier_id=e.supplier_id WHERE e.supplier_id=? AND e.source_type=? AND e.source_id=? AND e.posted_at IS NOT NULL AND e.entry_date<=? AND (e.reversed_by IS NULL OR rev.entry_date>?) ORDER BY e.id', [$supplierId, $type, (int) $document['id'], $asOf, $asOf], $currentRead);
         $originals = [];
         $settlement = '0.00';
+        $settlementFx = '0.00';
         $counter = [];
         $accountId = (int) $item['account_id'];
         foreach ($entries as $entry) {
@@ -143,6 +144,11 @@ final class AdvanceSettlementEvidenceReader
                     elseif ($line['currency_code'] === null && $line['side'] === ($direction === 'sale' ? 'credit' : 'debit')) $settlement = bcadd($settlement, (string) $line['signed_amount'], 2);
                 } elseif (isset($available[(int) $line['account_id']]) && $line['side'] === ($direction === 'sale' ? 'debit' : 'credit')) {
                     $counter[(int) $line['account_id']] = bcadd($counter[(int) $line['account_id']] ?? '0.00', (string) $line['signed_amount'], 2);
+                } elseif (($line['line_text'] ?? null) === PostingService::ADVANCE_FX_LINE_TEXT
+                    && in_array($line['account_type'], ['revenue', 'expense'], true)) {
+                    $settlementFx = $line['side'] === ($direction === 'sale' ? 'debit' : 'credit')
+                        ? bcsub($settlementFx, (string) $line['signed_amount'], 2)
+                        : bcadd($settlementFx, (string) $line['signed_amount'], 2);
                 }
             }
         }
@@ -152,7 +158,7 @@ final class AdvanceSettlementEvidenceReader
             if (bccomp($amount, $available[$counterId], 2) > 0) $findings[] = 'advance_settlement_exceeds_receipts';
             $counterTotal = bcadd($counterTotal, $amount, 2);
         }
-        if (bccomp($settlement, $counterTotal, 2) !== 0) $findings[] = 'advance_settlement_pair_unproven';
+        if (bccomp($settlement, bcsub($counterTotal, $settlementFx, 2), 2) !== 0) $findings[] = 'advance_settlement_pair_unproven';
         $applied = bcadd($settlement, $available[$accountId] ?? '0.00', 2);
         $foreign = $availableForeign[$accountId] ?? '0.00';
         foreach ($counter as $counterId => $amount) {
@@ -264,7 +270,7 @@ final class AdvanceSettlementEvidenceReader
 
     private function entryLines(int $supplierId, int $entryId, bool $currentRead): array
     {
-        return $this->rows('SELECT l.id,l.account_id,l.side,l.signed_amount,l.signed_amount_foreign,l.currency_code,a.account_type FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE l.supplier_id=? AND l.entry_id=? ORDER BY l.line_no,l.id', [$supplierId, $entryId], $currentRead);
+        return $this->rows('SELECT l.id,l.account_id,l.side,l.signed_amount,l.signed_amount_foreign,l.currency_code,l.line_text,a.account_type FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE l.supplier_id=? AND l.entry_id=? ORDER BY l.line_no,l.id', [$supplierId, $entryId], $currentRead);
     }
 
     private function rows(string $sql, array $params, bool $currentRead): array
@@ -285,6 +291,53 @@ final class AdvanceSettlementEvidenceReader
             [$supplierId, $proformaId],
         );
         return round($bank + $cash, 2);
+    }
+
+    /**
+     * Korunová hodnota konkrétní bankovní alokace ve stejné měně jako záloha.
+     * Čte se z živého zápisu na účtu zálohy (u karty ze zápisu vypořádání).
+     * Stejný pohyb může platit několik dokladů, proto se řádek hledá podle
+     * měny a nominálu alokace, nikoli jen podle účtu celého zápisu.
+     *
+     * @param 'sale'|'purchase' $side
+     * @return array{foreign:float, czk:float}
+     */
+    public function tracedBankAdvance(int $supplierId, string $side, int $advanceId, string $currency, string $account): array
+    {
+        $isSale = $side === 'sale';
+        $member = $isSale ? 'ip' : 'pm';
+        $bankCurrency = "UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''), 'CZK'))";
+        $source = $isSale ? "UPPER(ip.currency)" : $bankCurrency;
+        $members = $this->receiptSql($side, 'bank',
+            "{$member}.id, {$member}.amount, {$member}.supplier_id, je.id AS entry_id, je.source_id, je.posted_at, {$source} AS currency");
+        $cardSettlement = Card\CardSettlementService::SOURCE_SETTLEMENT;
+        $sql = "WITH members AS ({$members})
+                SELECT m.id, m.amount, MIN(l.amount) AS czk, MAX(l.amount) AS max_czk
+                  FROM members m
+             LEFT JOIN journal_entries card ON card.supplier_id = m.supplier_id
+                       AND card.source_type = '{$cardSettlement}' AND card.source_id = m.source_id
+                       AND card.reversed_by IS NULL AND card.posted_at IS NOT NULL
+                  JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id
+                       AND l.entry_id = COALESCE(card.id, m.entry_id)
+                       AND l.side = ? AND l.currency_code = m.currency
+                       AND l.amount_foreign = m.amount AND l.is_red_storno = 0
+                  JOIN chart_of_accounts a ON a.supplier_id = m.supplier_id AND a.id = l.account_id AND a.account_code = ?
+                 WHERE m.currency = ? AND m.posted_at IS NOT NULL
+                 GROUP BY m.id, m.amount";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, $advanceId, $isSale ? 'credit' : 'debit', $account, $currency]);
+        $total = ['foreign' => 0.0, 'czk' => 0.0];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($row['czk'] !== $row['max_czk']) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Zaúčtované alokace zálohy se stejnou cizoměnovou částkou mají různé korunové částky. Zúčtujte zálohu ručně.',
+                );
+            }
+            $total['foreign'] += (float) $row['amount'];
+            $total['czk'] += (float) $row['czk'];
+        }
+        return array_map(static fn (float $amount): float => round($amount, 2), $total);
     }
 
     /**

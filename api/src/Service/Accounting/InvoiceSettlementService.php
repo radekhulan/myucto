@@ -448,7 +448,9 @@ final class InvoiceSettlementService
     }
 
     /**
-     * Kontrola vydané faktury + účet, na kterém pohledávka visí.
+     * Kontrola vydané faktury + účet, na kterém pohledávka visí. Vydaná strana
+     * má jen korunový zápis. FX varianta potřebuje doložit ocenění zvoleného
+     * protiúčtu, protože zápočet nemá částku ani kurz bankovní úhrady.
      *
      * @return array{number:string, doc_account:string, counter_account:string}
      */

@@ -235,6 +235,7 @@ final class FxSettlementPosting
      *
      * Skupina zaúčtování bere kurz ze saldokontních řádků svých nosičů ({@see predpisSaldo}),
      * bez stopy z ostatních řádků těchže nosičů.
+     * U počátečního stavu chybí kurz jednotlivého dokladu k rozvahovému dni.
      *
      * @param array{code:string, entry_ids:list<int>, fx_rate:?float, opening?:bool} $saldo
      * @param array<string,mixed> $doc

@@ -29,7 +29,8 @@ use MyInvoice\Service\Invoice\InvoicePaymentService;
  * potvrzení už jen znovu (idempotentně) přepíše týž účetní zápis, nezdvojí platby
  * ani nevyrovná doklady podruhé.
  *
- * V1 rozsah: jen CZK doklady (booking = měna dokladu). Přijatá faktura vyrovnaná
+ * Rozsah: jen CZK doklady, protože jedna částka dohody odúčtuje obě saldokonta.
+ * Cizoměnový zápočet potřebuje ocenit oba předpisy samostatně. Přijatá faktura vyrovnaná
  * částečně (zápočet < zbytek) zůstává ve stavu 'received'/'booked' — účetní zápis
  * 321 ji přesto sníží; plné označení 'paid' se děje jen při úplném pokrytí.
  */
