@@ -8,6 +8,8 @@ const m = vi.hoisted(() => ({
   listOpenAiModels: vi.fn(),
   setAiCredentials: vi.fn(),
   updateSupplier: vi.fn(),
+  query: {} as Record<string, string>,
+  replace: vi.fn(),
 }))
 
 vi.mock('@/api/integrations', () => ({
@@ -28,8 +30,8 @@ vi.mock('@/api/settings', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ path: '/admin/integrations', query: { tab: 'ai' } }),
-  useRouter: () => ({ replace: vi.fn() }),
+  useRoute: () => ({ path: '/admin/integrations', query: m.query }),
+  useRouter: () => ({ replace: m.replace }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -99,6 +101,8 @@ describe('Externí integrace → AI extrakce', () => {
     m.listOpenAiModels.mockReset()
     m.setAiCredentials.mockReset()
     m.updateSupplier.mockReset().mockResolvedValue({})
+    m.query = { tab: 'ai' }
+    m.replace.mockClear()
   })
 
   it('řadí záložky s webhooky pro správce firmy', async () => {
@@ -113,6 +117,26 @@ describe('Externí integrace → AI extrakce', () => {
     await w.vm.$nextTick()
     expect(tabs()).toEqual(['integrations.ai.tab', 'integrations.webhooks.tab', 'integrations.fakturoid.tab', 'integrations.idoklad.tab'])
     w.unmount()
+  })
+
+  it('otevře výchozí Webhooky pro správce a ponechá přímý odkaz na iDoklad', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    m.query = {}
+    const auth = useAuthStore()
+    const w = await mountPage()
+    expect(w.get('button[aria-pressed="true"]').text()).toBe('integrations.idoklad.tab')
+
+    auth.user = { is_superadmin: true } as NonNullable<typeof auth.user>
+    await w.vm.$nextTick()
+    expect(w.get('button[aria-pressed="true"]').text()).toBe('integrations.webhooks.tab')
+    await w.findAll('button').find(button => button.text() === 'integrations.idoklad.tab')!.trigger('click')
+    expect(m.replace).toHaveBeenCalledExactlyOnceWith({ query: { tab: 'idoklad' } })
+    w.unmount()
+
+    m.query = { tab: 'idoklad' }
+    const idoklad = await mountPage()
+    expect(idoklad.get('button[aria-pressed="true"]').text()).toBe('integrations.idoklad.tab')
+    idoklad.unmount()
   })
 
   it('firma bez klíče nevidí u Anthropicu odznak „aktivní"', async () => {

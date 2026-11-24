@@ -58,6 +58,7 @@ import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/com
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { resolveIntegrationTab } from '@/config/integrationTabs'
 import { manualHelpHref } from '@/config/manualChapters'
 import {
   canFitCompactNavigation,
@@ -1538,11 +1539,11 @@ const tabletNavSections = computed(() => orderedNav.value.map(section => ({
   icon: sectionIcon(section),
 })))
 
-const manualHref = computed(() => manualHelpHref(
-  activeRoute.value.path,
-  activeRoute.value.query.tab,
-  auth.domainContext?.locked ? auth.domainContext.canonical_base_url : null,
-))
+const manualHref = computed(() => {
+  const { name, path, query } = activeRoute.value
+  const tab = name === 'admin-integrations' ? resolveIntegrationTab(query.tab, auth.canManageWebhooks) : query.tab
+  return manualHelpHref(path, tab, auth.domainContext?.locked ? auth.domainContext.canonical_base_url : null)
+})
 
 /**
  * „Pokrývá" URL (path + případná query) současnou route?

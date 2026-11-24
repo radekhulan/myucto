@@ -11,6 +11,7 @@ import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/se
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
+import { resolveIntegrationTab, type IntegrationTab } from '@/config/integrationTabs'
 import { manualHelpHref } from '@/config/manualChapters'
 import { useToast } from '@/composables/useToast'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
@@ -25,18 +26,12 @@ const toast = useToast()
 const suppliers = useSupplierStore()
 const auth = useAuthStore()
 
-type Tab = 'idoklad' | 'fakturoid' | 'ai' | 'webhooks'
-const canManageWebhooks = computed(() => auth.isCompanyAdminRole && auth.canWrite('settings.company.write'))
-const tabs = computed<Tab[]>(() => canManageWebhooks.value
+const tabs = computed<IntegrationTab[]>(() => auth.canManageWebhooks
   ? ['ai', 'webhooks', 'fakturoid', 'idoklad']
   : ['ai', 'fakturoid', 'idoklad'])
 const route = useRoute()
 const router = useRouter()
-const tab = computed<Tab>(() => {
-  const value = route.query.tab
-  return value === 'fakturoid' || value === 'ai' || value === 'webhooks' ? value : 'idoklad'
-})
-const activeTab = computed(() => tab.value === 'webhooks' && !canManageWebhooks.value ? 'idoklad' : tab.value)
+const activeTab = computed(() => resolveIntegrationTab(route.query.tab, auth.canManageWebhooks))
 const webhookTemplateId = computed(() => {
   const value = route.query.template
   if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) return null
@@ -49,9 +44,9 @@ const webhookHelpHref = computed(() => manualHelpHref(
   auth.domainContext?.locked ? auth.domainContext.canonical_base_url : null,
 ))
 
-function selectTab(value: Tab) {
-  if (value !== tab.value) {
-    void router.replace({ query: { ...route.query, tab: value === 'idoklad' ? undefined : value } })
+function selectTab(value: IntegrationTab) {
+  if (value !== activeTab.value) {
+    void router.replace({ query: { ...route.query, tab: value } })
   }
 }
 
