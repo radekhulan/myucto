@@ -185,4 +185,21 @@ describe('PayrollBulkClosureDialog', () => {
 
     expect(m.bulkClosurePreview).toHaveBeenLastCalledWith({ inactivity_months: 6, archive_after_months: 12 })
   })
+
+  /*
+   * Dohoda s prací po konci zůstává aktivní i po nočním ukončení dohod. Dialog
+   * je jediné místo, kde se o ní účetní dozví, proto u ní nabídne kartu vztahu.
+   */
+  it('u zablokované dohody nabídne proklik na kartu vztahu', async () => {
+    m.bulkClosurePreview.mockResolvedValue(preview())
+
+    const wrapper = mount(PayrollBulkClosureDialog, MOUNT)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="bulk-closure-open-11"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-closure-blocked-12"]').text()).toContain('2026-07')
+    await wrapper.get('[data-test="bulk-closure-open-12"]').trigger('click')
+
+    expect(wrapper.emitted('open-employment')).toEqual([[{ employee_id: 5, employment_id: 12 }]])
+  })
 })

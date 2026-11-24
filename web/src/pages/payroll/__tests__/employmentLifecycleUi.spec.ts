@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bulkClosureButtonCounts,
   employmentDiffFields,
   employmentDiffValue,
   mergedFromCode,
@@ -135,5 +136,23 @@ describe('employmentLifecycleUi', () => {
       { ...base, id: 2, start_date: '2026-02-07', end_date: '2026-02-28' },
     ])).toBe(1)
     expect(openingBalancesHostId([])).toBeNull()
+  })
+
+  /*
+   * Dohoda s prací po konci se do počtu k ukončení nepočítala a tlačítko se
+   * s ní schovalo do „Další funkce". Noční úloha ji přitom nechá aktivní.
+   */
+  it('tlačítko ukončení dohod počítá i dohody k posouzení', () => {
+    const items = [
+      { before_period: true, blocked_reason: null },
+      { before_period: true, blocked_reason: 'activity_after_end' as const },
+      { before_period: false, blocked_reason: 'settled_after_end' as const },
+    ] as Parameters<typeof bulkClosureButtonCounts>[0]['items']
+    const summary = { expired: 3, inactive: 1, archive: 2, blocked: 2 }
+
+    expect(bulkClosureButtonCounts({ summary, items }, null)).toEqual({ ready: 2, blocked: 2 })
+    expect(bulkClosureButtonCounts({ summary, items }, '2026-11')).toEqual({ ready: 1, blocked: 1 })
+    expect(bulkClosureButtonCounts({ summary: { expired: 1, inactive: 0, archive: 0, blocked: 1 }, items: [] }, null))
+      .toEqual({ ready: 0, blocked: 1 })
   })
 })

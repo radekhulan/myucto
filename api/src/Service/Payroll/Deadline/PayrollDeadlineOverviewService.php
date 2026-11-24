@@ -90,6 +90,12 @@ use Psr\Clock\ClockInterface;
  * vztahu, znamenalo by 225 lidí po importu 225 ručních kroků. Fáze souhrnu
  * se tím nemění, počet nese zvlášť `summary.undated`.
  *
+ * Do téže fáze patří položka, jejíž lhůta uplynula dřív, než firma mzdy
+ * v MyÚčtu aktivovala (firma zapne modul v říjnu, mzdy vede od ledna a lidi
+ * doplní importem z ePortálu ČSSZ). Takovou lhůtu nikdo v aplikaci zmeškat
+ * nemohl; po termínu by jen přehlušila to, co se zmeškalo opravdu. Výběr
+ * drží {@see PayrollDeadlineOverviewRepository}, položka nese `lapsed_due_on`.
+ *
  * Cron ani e-mail tady NENÍ. Přehled je čtecí; rozeslat ho je samostatné
  * rozhodnutí s vlastními následky (komu, jak často, co s firmou bez účetní).
  */
@@ -905,14 +911,17 @@ final readonly class PayrollDeadlineOverviewService
     /**
      * Položka checklistu tak, jak ji vidí přehled. Bez termínu nese fázi
      * {@see self::UNDATED_PHASE} a `due_on` i `days_to_due` null, tedy nic,
-     * co by se dalo splést s lhůtou.
+     * co by se dalo splést s lhůtou. Stejně se čte položka, jejíž lhůta
+     * uplynula před aktivací mezd v MyÚčtu: tu nikdo v aplikaci zmeškat
+     * nemohl, takže po termínu není; původní lhůta zůstává v `lapsed_due_on`.
      *
      * @param array<string,mixed> $row
      * @return array<string,mixed>
      */
     private function checklistRowItem(array $row): array
     {
-        $dueOn = $row['due_date'] === null ? null : (string) $row['due_date'];
+        $lapsed = (bool) ($row['lapsed_before_activation'] ?? false) && $row['due_date'] !== null;
+        $dueOn = $row['due_date'] === null || $lapsed ? null : (string) $row['due_date'];
         $phase = $dueOn === null ? self::UNDATED_PHASE : $this->phase($dueOn);
 
         return [
@@ -935,6 +944,7 @@ final readonly class PayrollDeadlineOverviewService
             'employment_end_date' => $row['employment_end_date'] ?? null,
             'deadline_source' => $row['deadline_source'],
             'deadline_source_status' => $row['deadline_source_status'],
+            'lapsed_due_on' => $lapsed ? (string) $row['due_date'] : null,
             // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná
             // z názvu tabulky, ne z routeru, takže odkaz z přehledu termínů
             // vedl na prázdno. Adresa karty člověka je `/payroll/people/{id}`.

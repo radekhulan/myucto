@@ -587,7 +587,9 @@ dohod** níže se nic neděje samo, rozhodujete vy.
 3. Zkontrolujte výběr. U ukončení můžete změnit datum, ukončit lze jen k dnešku
    nebo ke dni v minulosti. Vztah, který má po datu konce ještě mzdový vstup,
    docházku nebo zúčtovanou mzdu, je označený **Vyžaduje kontrolu** a není
-   předvybraný. Datum konce u něj opravte, nebo ho ukončete ručně na kartě.
+   předvybraný. Tlačítkem **Otevřít kartu vztahu** u něj přejdete na kartu,
+   kde datum konce opravíte nebo vztah ukončíte ručně ke dni, kdy skutečně
+   skončil.
 4. Klikněte na **Pokračovat**, zkontrolujte souhrn a klikněte na **Potvrdit**.
    Najednou lze zpracovat nejvýše 500 vztahů.
 5. Výsledek ukáže počet provedených a u každého vztahu, který se nepovedl,
@@ -611,7 +613,11 @@ v časové ose, výstupním checklistem a auditní stopou, kde je jako autor
 uvedený systém. Dohodu, která má po sjednaném konci ještě mzdový vstup,
 docházku nebo zúčtovanou mzdu, nechá aktivní. Ta zůstane ve skupině
 **Uplynul sjednaný konec** označená **Vyžaduje kontrolu** a datum konce
-posoudíte vy. Pracovní poměr na dobu určitou se sám neukončuje, protože
+posoudíte vy. Aby nezapadla, tlačítko nad seznamem ji počítá zvlášť
+(**Ukončit skončené dohody (N, k posouzení M)**) a nezmizí do **Další
+funkce**, ani když už není co ukončit hromadně. Kontrola mzdového běhu ji
+jmenuje v nálezu o vztazích se sjednaným koncem před obdobím jako první,
+s měsícem práce nebo mzdy po konci. Pracovní poměr na dobu určitou se sám neukončuje, protože
 pokračováním v práci se mění na dobu neurčitou; ten ukončíte ručně.
 
 **Oprava ukončeného vztahu pro JMHZ.** U ukončeného vztahu jde dál opravit

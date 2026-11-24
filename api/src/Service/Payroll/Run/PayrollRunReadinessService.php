@@ -1128,24 +1128,53 @@ final class PayrollRunReadinessService
         if ($rows === []) {
             return null;
         }
+        // Vztah s prací nebo mzdou po sjednaném konci hromadná akce nepředvybere
+        // a noční úloha ho neukončí. Rada „ukončete hromadně" by u něj nevedla
+        // nikam, proto se jmenuje zvlášť a jde v seznamu první.
+        $blocked = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['blocked_reason'] !== null,
+        ));
+        $message = sprintf(
+            'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
+            . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
+            substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
+            count($rows),
+        );
+        if ($blocked !== []) {
+            $message .= sprintf(
+                ' Z toho %d s mzdovým vstupem, docházkou nebo zúčtovanou mzdou po sjednaném konci '
+                . 'neukončí hromadná akce ani noční ukončení dohod: na kartě vztahu posuďte, '
+                . 'kdy vztah skutečně skončil, nebo opravte sjednaný konec.',
+                count($blocked),
+            );
+        }
+        $ordered = [
+            ...$blocked,
+            ...array_filter($rows, static fn (array $row): bool => $row['blocked_reason'] === null),
+        ];
 
         return self::finding(
             'employments_past_agreed_end',
-            sprintf(
-                'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
-                . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
-                substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
-                count($rows),
-            ),
+            $message,
             '/payroll/people?bulk=closure&period=' . substr($periodStart, 0, 7),
             count($rows),
             array_map(
                 static fn (array $row): array => [
                     'entity_type' => 'employment',
                     'entity_id' => $row['employment_id'],
-                    'label' => (string) $row['full_name'],
+                    'label' => $row['blocked_reason'] === null
+                        ? (string) $row['full_name']
+                        : sprintf(
+                            '%s (%s %s)',
+                            (string) $row['full_name'],
+                            $row['blocked_reason'] === 'settled_after_end'
+                                ? 'zúčtovaná mzda za'
+                                : 'práce za',
+                            substr((string) $row['blocked_period'], 5, 2) . '/' . substr((string) $row['blocked_period'], 0, 4),
+                        ),
                 ],
-                array_slice($rows, 0, self::MAX_ENTITIES),
+                array_slice($ordered, 0, self::MAX_ENTITIES),
             ),
         );
     }

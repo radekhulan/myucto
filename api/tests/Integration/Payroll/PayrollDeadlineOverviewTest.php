@@ -314,6 +314,82 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(1, $overview['summary']['overdue']);
     }
 
+    /**
+     * Firma vede mzdy od ledna, modul ale aktivovala až v srpnu a lidi doplnila
+     * importem registrací. Lhůty smluv a oznámení u jarních nástupů uplynuly
+     * dřív, než aplikaci používala: dřív je hlídač hlásil stovkami jako
+     * zmeškané. Neschovají se, jen přejdou mezi položky bez termínu
+     * s hromadným odškrtnutím. Lhůta uplynulá po aktivaci zůstává po termínu.
+     */
+    public function testChecklistDeadlineLapsedBeforeActivationIsNotOverdue(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_at)
+             VALUES (?, 'active', '2026-01-01', '2026-08-10 14:00:00')
+             ON DUPLICATE KEY UPDATE status = 'active', start_period = '2026-01-01',
+                                     activated_at = '2026-08-10 14:00:00'",
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status, is_primary, start_date)
+             VALUES (?, ?, "TRM-2", "dpp", "active", 0, "2026-03-02")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $spring = (int) $pdo->lastInsertId();
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, status, due_date)
+             VALUES (?, ?, "onboarding", ?, "pending", ?)',
+        );
+        $insert->execute([$this->supplierId, $spring, 'employment_contract', '2026-03-02']);
+        $insert->execute([$this->supplierId, $spring, 'health_insurance_registration', '2026-03-10']);
+        // Lhůta v den aktivace už běží v aplikaci, stejně jako ta po ní.
+        $insert->execute([$this->supplierId, $this->employmentId, 'health_insurance_registration', '2026-08-10']);
+        $insert->execute([$this->supplierId, $this->employmentId, 'employment_contract', '2026-08-11']);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $dated = $this->itemsOfSource($overview, 'checklist');
+        self::assertSame(
+            [[$this->employmentId, '2026-08-10'], [$this->employmentId, '2026-08-11']],
+            array_map(static fn (array $item): array => [$item['employment_id'], $item['due_on']], $dated),
+        );
+        self::assertSame(2, $overview['summary']['overdue']);
+
+        $grouped = $this->service->groupedOverview($this->supplierId, 'production');
+        self::assertSame(2, $grouped['summary']['undated']);
+        $undatedGroups = array_values(array_filter(
+            $grouped['groups'],
+            static fn (array $group): bool => $group['phase'] === PayrollDeadlineOverviewService::UNDATED_PHASE,
+        ));
+        self::assertEqualsCanonicalizing(
+            ['employment_contract', 'health_insurance_registration'],
+            array_column($undatedGroups, 'title'),
+        );
+
+        $page = $this->service->groupItems(
+            $this->supplierId,
+            'production',
+            45,
+            PayrollDeadlineOverviewService::UNDATED_PHASE,
+            'checklist',
+            'employment_contract',
+        );
+        self::assertSame(1, $page['total']);
+        self::assertSame($spring, $page['items'][0]['employment_id']);
+        self::assertNull($page['items'][0]['due_on']);
+        self::assertFalse($page['items'][0]['is_overdue']);
+        self::assertSame('2026-03-02', $page['items'][0]['lapsed_due_on']);
+
+        // Hromadné odškrtnutí skupiny bez termínu vybírá tytéž položky.
+        $candidates = $this->service->checklistGroupCandidates(
+            $this->supplierId,
+            45,
+            PayrollDeadlineOverviewService::UNDATED_PHASE,
+            'health_insurance_registration',
+        );
+        self::assertSame([$spring], array_column($candidates, 'employment_id'));
+    }
+
     public function testChecklistKeepsEmploymentEndDateWithAndWithoutDeadline(): void
     {
         $this->db->pdo()->prepare(

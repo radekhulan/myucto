@@ -7,7 +7,7 @@ import type {
   PayrollDeadlineSource,
 } from '@/api/payroll'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
-import { formatMoneyMinor } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 
 /**
  * Popisky a prokliky přehledu termínů. Sdílí je panel na přehledu mezd
@@ -183,6 +183,11 @@ export function usePayrollDeadlineLabels() {
   }
 
   function dueLabel(item: PayrollDeadlineItem): string {
+    // Lhůta uplynula dřív, než firma mzdy v aplikaci aktivovala: zmeškat
+    // ji tu nikdo nemohl, ale datum pomůže dohledat, o co šlo.
+    if (item.lapsed_due_on) {
+      return t('payroll.dashboard.deadlines.lapsed_before_activation_label', { date: formatDate(item.lapsed_due_on) })
+    }
     if (isUndatedPhase(item.phase) || item.days_to_due === null) {
       return t('payroll.dashboard.deadlines.undated_label')
     }

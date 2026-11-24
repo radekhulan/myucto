@@ -25,6 +25,7 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
 
     private Connection $db;
     private PayrollEmploymentBulkClosure $bulk;
+    private \DI\Container $container;
     private int $supplierId;
     private int $foreignSupplierId;
     private int $userId;
@@ -42,6 +43,7 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
             $this->markTestSkipped('Chybí tabulka podmínek pracovního vztahu.');
         }
         $this->bulk = $container->get(PayrollEmploymentBulkClosure::class);
+        $this->container = $container;
 
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -243,6 +245,40 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         self::assertSame('activity_after_end', $preview['items'][0]['blocked_reason']);
         self::assertSame('2026-07', $preview['items'][0]['blocked_period']);
         self::assertSame(1, $preview['summary']['blocked']);
+    }
+
+    /**
+     * Dohoda s koncem v únoru a docházkou v říjnu: noční úloha ji nechá aktivní
+     * (`blocked`) a hromadná akce ji nepředvybere. Kontrola běhu přitom radila
+     * „ukončete hromadně", takže se uživatel nedozvěděl, proč dohoda zůstala
+     * aktivní a že o datu konce musí rozhodnout sám.
+     */
+    public function testRunCheckNamesAgreementTheBulkActionCannotEnd(): void
+    {
+        $plain = $this->employment($this->supplierId, 'Skončená Dohoda', 'dpp', '2026-01-05', '2026-01-31');
+        $continued = $this->employment($this->supplierId, 'Dohoda S Docházkou', 'dpp', '2026-01-05', '2026-02-28');
+        $this->timeEntry($continued, '2026-10-06');
+
+        $rows = array_column(
+            $this->bulk->expiredBeforePeriod($this->supplierId, '2026-11-01', self::TODAY),
+            null,
+            'employment_id',
+        );
+        self::assertNull($rows[$plain]['blocked_reason']);
+        self::assertSame('activity_after_end', $rows[$continued]['blocked_reason']);
+        self::assertSame('2026-10', $rows[$continued]['blocked_period']);
+        self::assertGreaterThan(0, $rows[$continued]['employee_id']);
+
+        $readiness = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::class);
+        $finding = (new \ReflectionMethod($readiness, 'pastAgreedEndFinding'))
+            ->invoke($readiness, $this->supplierId, '2026-11-01');
+        self::assertIsArray($finding);
+        self::assertSame('employments_past_agreed_end', $finding['code']);
+        self::assertStringContainsString('Z toho 1 s mzdovým vstupem, docházkou nebo zúčtovanou mzdou', $finding['message']);
+        $entities = $finding['entities'];
+        self::assertSame($continued, $entities[0]['entity_id'], 'Vztah, který hromadně ukončit nejde, jde první.');
+        self::assertSame('Dohoda S Docházkou (práce za 10/2026)', $entities[0]['label']);
+        self::assertSame('Skončená Dohoda', $entities[1]['label']);
     }
 
     public function testBulkClosureEndsThroughTransitionAndOneConflictDoesNotStopOthers(): void
