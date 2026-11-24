@@ -276,6 +276,54 @@ final class VatClassificationMapperTest extends TestCase
         self::assertSame(63.0, $lines['1']['vat']);
     }
 
+    public function testZeroRateRoundingRowStaysOffDomesticRateLines(): void
+    {
+        // Přijatý doklad kódu 40: 21% položka + zaokrouhlení se sazbou 0 %. KH (B.2/B.3)
+        // zaokrouhlení nepočítá, ř. 40 ho proto nesmí mít v základu, jinak se rozejde
+        // s VetaC pln23.
+        $common = [
+            'invoice_id' => 7,
+            'source' => 'purchase',
+            'document_kind' => 'invoice',
+            'code' => '40',
+            'dphdp3_line' => '40',
+            'dphdp3_line_secondary' => null,
+            'label' => 'Přijaté 21 %',
+            'vat_deduction_none' => false,
+            'is_fixed_asset' => false,
+        ];
+
+        $lines = $this->mapper->projectDphLines([
+            array_replace($common, ['vat_rate' => 21.0, 'base_czk' => 1000.0, 'vat_czk' => 210.0]),
+            array_replace($common, ['vat_rate' => 0.0, 'base_czk' => -0.42, 'vat_czk' => 0.0]),
+        ]);
+
+        self::assertSame(1000.0, $lines['40']['base']);
+        self::assertSame(210.0, $lines['40']['vat']);
+        self::assertSame(1, $lines['40']['count']);
+    }
+
+    public function testZeroRateRowOnExemptLineIsKept(): void
+    {
+        // Sazba 0 % na řádku, který na sazbě nestojí (osvobozené plnění ř. 50), zůstává.
+        $lines = $this->mapper->projectDphLines([[
+            'invoice_id' => 8,
+            'source' => 'sale',
+            'document_kind' => 'invoice',
+            'code' => '50',
+            'dphdp3_line' => '50',
+            'dphdp3_line_secondary' => null,
+            'vat_rate' => 0.0,
+            'base_czk' => 500.0,
+            'vat_czk' => 0.0,
+            'label' => 'Osvobozené',
+            'vat_deduction_none' => false,
+            'is_fixed_asset' => false,
+        ]]);
+
+        self::assertSame(500.0, $lines['50']['base']);
+    }
+
     public function testMissingExchangeRatesKeepInvoiceAndCashDocumentWithSameNumericIdDistinct(): void
     {
         $common = [
