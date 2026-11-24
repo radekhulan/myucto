@@ -12008,6 +12008,10 @@
         "oldest": "{label} (oldest)",
         "bulk_done": "Marked as done: {n}.",
         "undated_label": "no statutory deadline",
+        "awaiting_label": "sent, awaiting result",
+        "submitted_late_label": "sent after the deadline, awaiting result",
+        "isds_reply_hint": "The authority replies to the data box. Download the reply there; the app does not pick messages up on its own, because picking a message up counts as its delivery.",
+        "isds_reply_link": "Download messages in the Data box",
         "lapsed_before_activation_label": "deadline {date} passed before payroll was activated",
         "undated_hint": "Open per-person items with no statutory deadline, or one the app does not derive (for example the ČSSZ registration for a start before 1 July 2026), and items whose deadline passed before you activated payroll in the app (people added by import or retroactively). Expand a group to mark items handled outside the app as done in bulk.",
         "group": {

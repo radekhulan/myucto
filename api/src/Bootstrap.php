@@ -276,6 +276,12 @@ final class Bootstrap
                 )->constructorParameter(
                     'jmhzGate',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate::class),
+                )->constructorParameter(
+                    'historicalPeriods',
+                    \DI\get(\MyInvoice\Service\Payroll\PayrollHistoricalPeriodService::class),
+                )->constructorParameter(
+                    'healthNotifications',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService::class =>
                 \DI\autowire()->constructorParameter(
@@ -289,6 +295,15 @@ final class Bootstrap
                 )->constructorParameter(
                     'awaitingRuns',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService::class),
+                )->constructorParameter(
+                    'agendaDuties',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService::class),
+                )->constructorParameter(
+                    'historicalPeriods',
+                    \DI\get(\MyInvoice\Service\Payroll\PayrollHistoricalPeriodService::class),
+                )->constructorParameter(
+                    'healthNotifications',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Run\PayrollSnapshotHealthInsurers;
 use PDO;
 
@@ -122,6 +123,128 @@ final class PayrollMonthlyAgendaDutyRepository
         }
 
         return $rows;
+    }
+
+    /**
+     * Období (`RRRR-MM`) v rozsahu, která mají nezrušený běh se schválenou
+     * revizí. Úzký dotaz bez snímku: hlídač termínů podle něj vybere měsíce,
+     * u kterých má smysl číst {@see self::approvedRunsForPeriod()}.
+     *
+     * @return list<string>
+     */
+    public function approvedRunPeriods(
+        int $supplierId,
+        string $fromPeriodStart,
+        string $toPeriodStart,
+    ): array {
+        if (!$this->db->hasTable('payroll_run_revisions')) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT DISTINCT DATE_FORMAT(run.period_start, "%Y-%m") AS period
+               FROM payroll_runs run
+              WHERE run.supplier_id = ?
+                AND run.period_start >= ?
+                AND run.period_start <= ?
+                AND run.status <> "cancelled"
+                AND EXISTS (
+                    SELECT 1
+                      FROM payroll_run_revisions revision
+                     WHERE revision.supplier_id = run.supplier_id
+                       AND revision.run_id = run.id
+                       AND revision.status IN ("approved", "superseded")
+                )
+              ORDER BY period',
+        );
+        $statement->execute([$supplierId, $fromPeriodStart, $toPeriodStart]);
+
+        return array_map(
+            static fn (mixed $period): string => (string) $period,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
+    }
+
+    /**
+     * Povinnosti agend v evidenci s počátkem období v rozsahu — tytéž dvojice
+     * agenda + `subject_reference`, jaké si Měsíční přehled čte z evidence
+     * za jeden měsíc. Zrušené se nevyřazují: o zrušené povinnosti mluví dál
+     * pramen `submission` (viz {@see \MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService}).
+     *
+     * @param list<string> $agendaCodes
+     * @return list<array{agenda_code:string,subject_reference:string}>
+     */
+    public function registeredObligations(
+        int $supplierId,
+        string $environment,
+        array $agendaCodes,
+        string $fromPeriodStart,
+        string $toPeriodStart,
+    ): array {
+        if ($agendaCodes === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($agendaCodes), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.agenda_code, obligation.subject_reference
+               FROM payroll_obligations obligation
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.period_start >= ?
+                AND obligation.period_start <= ?
+                AND obligation.agenda_code IN (' . $placeholders . ')',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $fromPeriodStart,
+            $toPeriodStart,
+            ...$agendaCodes,
+        ]);
+
+        return array_map(
+            static fn (array $row): array => [
+                'agenda_code' => (string) $row['agenda_code'],
+                'subject_reference' => (string) $row['subject_reference'],
+            ],
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
+    /**
+     * Období (`RRRR-MM`), za která řádné měsíční hlášení podal předchozí
+     * program nebo portál ČSSZ mimo MyÚčto a podání stále platí — převzatý
+     * doklad (PAMICA, XML) i potvrzení účetní (`manual_attestation`). Totéž
+     * pravidlo jako zákaz druhého řádného hlášení
+     * ({@see JmhzExternalSubmissionStore::sentMonthly()}).
+     *
+     * Jen ostré prostředí: zkušební podání nic nepodává a předchozí program
+     * testovací hlášení nevede.
+     *
+     * @param list<string> $periods
+     * @return list<string>
+     */
+    public function externallyFiledMonthlyPeriods(int $supplierId, array $periods): array
+    {
+        if ($periods === [] || !$this->db->hasTable('payroll_external_jmhz_submissions')) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($periods), '?'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT DISTINCT s.period
+               FROM payroll_external_jmhz_submissions s
+              WHERE s.supplier_id = ? AND s.environment = 'production'
+                AND s.document_kind = 'monthly'
+                AND s.period IN (" . $placeholders . ")
+                AND s.status = 'sent'
+                AND (s.submission_type IS NULL OR s.submission_type <> 'S')
+                " . JmhzExternalSubmissionStore::inForceSql('s', $this->db->hasTable('payroll_imported_jmhz_protocols')),
+        );
+        $statement->execute([$supplierId, ...$periods]);
+
+        return array_map(
+            static fn (mixed $period): string => (string) $period,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
     }
 
     /**

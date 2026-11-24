@@ -695,4 +695,46 @@ describe('PayrollDeadlinesPanel', () => {
     expect(wrapper.get('[data-test="payroll-deadline-person-payroll_checklist_item:2"]').text())
       .toContain('payroll.dashboard.deadlines.undated_label')
   })
+
+  it('shows a submission sent after the deadline as awaiting result and points to the data box', async () => {
+    const sent = item({
+      reference: 'payroll_obligation:7',
+      title: 'PPZ_2026',
+      phase: 'awaiting_result',
+      days_to_due: -13,
+      submitted_late: true,
+      dispatched_via_isds: true,
+    })
+    m.deadlineGroups.mockResolvedValue(overview([group({ items: [sent] })]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-deadlines-group-overdue"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="payroll-deadline-due-payroll_obligation:7"]').text())
+      .toBe('payroll.dashboard.deadlines.submitted_late_label')
+    const hint = wrapper.get('[data-test="payroll-deadline-isds-reply-payroll_obligation:7"]')
+    expect(hint.text()).toContain('payroll.dashboard.deadlines.isds_reply_hint')
+    expect(hint.get('a').attributes('data-to')).toBe('"/admin/databox?tab=inbox"')
+  })
+
+  it('offers the data box link only to whoever may open the data box', async () => {
+    m.canWrite.mockImplementation((key: string) => key !== 'settings.signing')
+    const sent = item({
+      reference: 'payroll_obligation:8',
+      phase: 'awaiting_result',
+      days_to_due: 3,
+      submitted_late: false,
+      dispatched_via_isds: true,
+    })
+    m.deadlineGroups.mockResolvedValue(overview([group({ items: [sent] })]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payroll-deadline-due-payroll_obligation:8"]').text())
+      .toBe('payroll.dashboard.deadlines.awaiting_label')
+    const hint = wrapper.get('[data-test="payroll-deadline-isds-reply-payroll_obligation:8"]')
+    expect(hint.find('a').exists()).toBe(false)
+  })
 })

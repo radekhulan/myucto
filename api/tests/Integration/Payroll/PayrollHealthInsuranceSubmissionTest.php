@@ -36,6 +36,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private \DI\Container $container;
     private PayrollSubmissionRepository $repository;
     private HealthInsuranceSubmissionService $service;
     private HealthInsuranceSchemaCatalog $schemas;
@@ -67,6 +68,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 $this->markTestSkipped("Chybí tabulka {$table}.");
             }
         }
+        $this->container = $container;
         $service = $container->get(HealthInsuranceSubmissionService::class);
         $submissions = $container->get(PayrollSubmissionService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -1330,6 +1332,62 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         $again = $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
 
         self::assertSame($first, $again['submission_id']);
+    }
+
+    /**
+     * Nástup zakládá povinnost oznámit ho pojišťovně (`employment:{id}`), ale
+     * podává se jen hromadným oznámením za měsíc. Po odeslání HOZ zůstávala
+     * individuální povinnost otevřená a hlídač termínů ji hlásil po termínu
+     * vedle hromadného, které ji pokrylo.
+     */
+    public function testDeliveredBulkNotificationCoversTheIndividualDuty(): void
+    {
+        $registered = $this->service->registerPeriodObligations($this->supplierId, 'production', '2026-03');
+        self::assertSame(1, $registered['total']);
+        $obligationId = (int) $registered['items'][0]['obligation_id'];
+        $statement = $this->db->pdo()->prepare(
+            'SELECT source_event_type, source_event_reference, period_start
+               FROM payroll_obligations WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $obligationId]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        $reference = (string) $rows[0]['source_event_reference'];
+
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-03-20 09:00:00', new \DateTimeZone('Europe/Prague')));
+        $overview = new \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService(
+            new \MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository($this->db),
+            new \MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService($clock),
+            new \MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository($this->db),
+            $this->container->get(\MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::class),
+            new \MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy(),
+            new \MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository($this->db),
+            new \MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy(
+                $this->container->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+            ),
+            $clock,
+            healthNotifications: $this->service,
+        );
+        $individual = fn (): array => array_values(array_filter(
+            $overview->overview($this->supplierId, 'production')['items'],
+            static fn (array $item): bool => $item['reference'] === 'payroll_obligation:' . $obligationId,
+        ));
+
+        self::assertSame([], $this->service->bulkNotifiedAmong($this->supplierId, 'production', $rows));
+        self::assertCount(1, $individual(), 'Bez hromadného oznámení je povinnost otevřená.');
+
+        // Připravené, ale neodeslané HOZ povinnost nesplnilo.
+        $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
+        self::assertSame([], $this->service->bulkNotifiedAmong($this->supplierId, 'production', $rows));
+
+        $this->deliverMarchBulkNotification();
+        self::assertSame(
+            [$reference => true],
+            $this->service->bulkNotifiedAmong($this->supplierId, 'production', $rows),
+        );
+        self::assertSame([], $individual(), 'Odeslané HOZ povinnost pokrylo.');
+        // Na jiném prostředí hromadné oznámení neodešlo.
+        self::assertSame([], $this->service->bulkNotifiedAmong($this->supplierId, 'test', $rows));
     }
 
     private function deliverMarchBulkNotification(): int

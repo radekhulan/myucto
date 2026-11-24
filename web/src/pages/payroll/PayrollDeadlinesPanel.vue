@@ -59,10 +59,19 @@ const {
   itemSubject,
   itemLink,
   dueLabel,
+  awaitsIsdsReply,
   amountLabel,
   groupDueLabel,
   groupCountLabel,
 } = usePayrollDeadlineLabels()
+
+/**
+ * Odpověď úřadu na podání odeslané datovou schránkou se vyzvedává ručně
+ * v Datové schránce: vyzvednutí je doručení a od něj běží lhůty, takže ho
+ * aplikace sama nedělá. Odkaz jen tomu, kdo na schránku smí.
+ */
+const canOpenDataBox = computed(() => auth.canWrite('settings.signing'))
+const DATABOX_INBOX_LINK = '/admin/databox?tab=inbox'
 
 const loading = ref(true)
 const loadError = ref('')
@@ -332,6 +341,18 @@ defineExpose({ reload: load })
                   </div>
                   <span class="sr-only">{{ t('payroll.dashboard.deadlines.resolve') }}</span>
                 </RouterLink>
+                <p
+                  v-if="awaitsIsdsReply(group.items[0])"
+                  class="px-3 pb-2 text-xs text-neutral-600"
+                  :data-test="`payroll-deadline-isds-reply-${group.items[0].reference}`"
+                >
+                  {{ t('payroll.dashboard.deadlines.isds_reply_hint') }}
+                  <RouterLink
+                    v-if="canOpenDataBox"
+                    :to="DATABOX_INBOX_LINK"
+                    class="font-medium text-primary-700 underline"
+                  >{{ t('payroll.dashboard.deadlines.isds_reply_link') }}</RouterLink>
+                </p>
               </li>
 
               <!-- Víc položek: řádek skupiny s počtem, obsah po rozbalení. -->
@@ -422,6 +443,18 @@ defineExpose({ reload: load })
                         </div>
                         <span class="sr-only">{{ t('payroll.dashboard.deadlines.resolve') }}</span>
                       </RouterLink>
+                      <p
+                        v-if="awaitsIsdsReply(item)"
+                        class="pr-3 pb-2 pl-10 text-xs text-neutral-600"
+                        :data-test="`payroll-deadline-isds-reply-${item.reference}`"
+                      >
+                        {{ t('payroll.dashboard.deadlines.isds_reply_hint') }}
+                        <RouterLink
+                          v-if="canOpenDataBox"
+                          :to="DATABOX_INBOX_LINK"
+                          class="font-medium text-primary-700 underline"
+                        >{{ t('payroll.dashboard.deadlines.isds_reply_link') }}</RouterLink>
+                      </p>
                     </li>
                   </ul>
                 </template>

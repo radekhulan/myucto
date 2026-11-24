@@ -182,6 +182,10 @@ export function usePayrollDeadlineLabels() {
     return t('payroll.dashboard.deadlines.due_in', days)
   }
 
+  /**
+   * Odeslané podání čeká na výsledek i po lhůtě; „po termínu o N dnů" by ho
+   * vydávalo za nesplněné. Že odešlo pozdě, říká text, ne fáze.
+   */
   function dueLabel(item: PayrollDeadlineItem): string {
     // Lhůta uplynula dřív, než firma mzdy v aplikaci aktivovala: zmeškat
     // ji tu nikdo nemohl, ale datum pomůže dohledat, o co šlo.
@@ -191,7 +195,17 @@ export function usePayrollDeadlineLabels() {
     if (isUndatedPhase(item.phase) || item.days_to_due === null) {
       return t('payroll.dashboard.deadlines.undated_label')
     }
+    if (item.phase === 'awaiting_result') {
+      return item.submitted_late
+        ? t('payroll.dashboard.deadlines.submitted_late_label')
+        : t('payroll.dashboard.deadlines.awaiting_label')
+    }
     return daysLabel(item.days_to_due)
+  }
+
+  /** Odpověď na podání odeslané datovou schránkou se tam vyzvedává ručně. */
+  function awaitsIsdsReply(item: PayrollDeadlineItem): boolean {
+    return item.phase === 'awaiting_result' && item.dispatched_via_isds === true
   }
 
   function amountLabel(item: PayrollDeadlineItem): string {
@@ -205,6 +219,9 @@ export function usePayrollDeadlineLabels() {
   function groupDueLabel(group: PayrollDeadlineGroup): string {
     if (isUndatedPhase(group.phase) || group.min_days_to_due === null) {
       return t('payroll.dashboard.deadlines.undated_label')
+    }
+    if (group.phase === 'awaiting_result') {
+      return t('payroll.dashboard.deadlines.awaiting_label')
     }
     const label = daysLabel(group.min_days_to_due)
     return group.min_days_to_due === group.max_days_to_due
@@ -225,6 +242,7 @@ export function usePayrollDeadlineLabels() {
     itemLink,
     daysLabel,
     dueLabel,
+    awaitsIsdsReply,
     amountLabel,
     groupDueLabel,
     groupCountLabel,

@@ -1944,6 +1944,125 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
+     * Které z daných povinností evidence (řádky `payroll_obligations`) jsou
+     * oznámení pojišťovně pokrytá odeslaným hromadným oznámením
+     * ({@see self::bulkNotifiedDutyReferences()}). Jediné místo pro hlídač
+     * termínů i Měsíční přehled, aby o téže povinnosti neříkaly dvě věci.
+     *
+     * Pokrytí se zjišťuje jen za měsíce, ve kterých nějaké oznámení je. Když
+     * ho za měsíc nejde zjistit (chybí údaje, nečitelný artefakt), oznámení
+     * zůstává nepokryté: přehled musí ukázat i to, co ví.
+     *
+     * @param iterable<array<string,mixed>> $obligations s klíči `source_event_type`,
+     *        `source_event_reference` a `period_start`
+     * @return array<string,true> klíčem je `source_event_reference`
+     */
+    public function bulkNotifiedAmong(int $supplierId, string $environment, iterable $obligations): array
+    {
+        $periods = [];
+        foreach ($obligations as $obligation) {
+            if ((string) ($obligation['source_event_type'] ?? '') === self::SOURCE_EVENT_NOTIFICATION) {
+                $periods[substr((string) $obligation['period_start'], 0, 7)] = true;
+            }
+        }
+        $covered = [];
+        foreach (array_keys($periods) as $period) {
+            try {
+                foreach ($this->bulkNotifiedDutyReferences($supplierId, $environment, (string) $period) as $reference) {
+                    $covered[$reference] = true;
+                }
+            } catch (HealthNotificationException | \DomainException | \UnexpectedValueException) {
+                continue;
+            }
+        }
+
+        return $covered;
+    }
+
+    /**
+     * Povinnosti oznámit událost pojišťovně (`source_event_reference`), které
+     * za období splnilo ODESLANÉ hromadné oznámení.
+     *
+     * Událost u člověka zakládá vlastní povinnost (`employment:{id}`), ale
+     * podává se jedině hromadným oznámením za měsíc a pojišťovnu; vlastní
+     * podání individuální povinnost nemá nikdy. Bez téhle vazby zůstala po
+     * odeslání HOZ otevřená a po termínu vedle hromadného, které ji pokrylo.
+     *
+     * Pokrytí se nepředpokládá, ale ČTE z toho, co odešlo: věta odeslaného
+     * XML (kód změny, den změny, číslo pojištěnce) musí odpovídat větě, kterou
+     * by z povinnosti sestavilo oznámení dnes. Událost zapsaná až po odeslání,
+     * nebo s opraveným údajem, pokrytá není a dál se hlásí. Uložený stav
+     * povinnosti se nepřepisuje: oznámení vrácené k opravě nebo zrušené
+     * pokrytí samo vezme zpět.
+     *
+     * @param string $period RRRR-MM
+     * @return list<string>
+     */
+    public function bulkNotifiedDutyReferences(
+        int $supplierId,
+        string $environment,
+        string $period,
+    ): array {
+        $bounds = $this->periodBounds($period);
+        $byInsurer = [];
+        foreach ($this->periodDutySet($supplierId, $period)['duties'] as $entry) {
+            $duty = $entry['duty'];
+            if ($duty->reportedByEmployer && $this->codes->isDutyCodeDocumented($duty)) {
+                $byInsurer[$duty->insurerCode][] = $duty;
+            }
+        }
+
+        $covered = [];
+        foreach ($byInsurer as $insurerCode => $duties) {
+            $sent = [];
+            foreach ($this->submissionRepository->submissionIdsForScope(
+                $supplierId,
+                $environment,
+                self::AGENDA_BULK_NOTIFICATION,
+                self::SUBJECT_EMPLOYER,
+                'health_bulk_notification:' . $period . ':' . $insurerCode,
+                $bounds['from'],
+                $bounds['to'],
+                ['submitted', 'processing', 'accepted', 'partially_accepted'],
+            ) as $submissionId) {
+                $artifactId = $this->submissionRepository->findOutboundXmlArtifactId(
+                    $supplierId,
+                    $environment,
+                    $submissionId,
+                );
+                if ($artifactId === null) {
+                    continue;
+                }
+                try {
+                    $lines = HealthBulkNotificationCorrectionGuard::linesFromXml(
+                        $this->submissions->artifactBytes($supplierId, $artifactId),
+                    );
+                } catch (HealthNotificationException) {
+                    continue;
+                }
+                foreach ($lines as $line) {
+                    $sent[$line['code'] . '|' . $line['date'] . '|' . $line['number']] = true;
+                }
+            }
+            if ($sent === []) {
+                continue;
+            }
+            foreach ($duties as $duty) {
+                try {
+                    $change = $this->changeForDuty($supplierId, $duty);
+                } catch (HealthNotificationException) {
+                    continue;
+                }
+                if (isset($sent[$change->changeCode . '|' . $change->changedOn . '|' . $change->insuranceNumber])) {
+                    $covered[] = $duty->sourceEventReference();
+                }
+            }
+        }
+
+        return $covered;
+    }
+
+    /**
      * Lhůta celé dávky je ta NEJBLIŽŠÍ z lhůt zahrnutých povinností — dávka
      * smí čekat na doplnění dalších vět jen do dne, kdy propadne ta první.
      *

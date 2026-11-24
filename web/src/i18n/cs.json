@@ -12008,6 +12008,10 @@
         "oldest": "{label} (nejstarší)",
         "bulk_done": "Označeno jako splněné: {n}.",
         "undated_label": "bez zákonné lhůty",
+        "awaiting_label": "odesláno, čeká na výsledek",
+        "submitted_late_label": "odesláno po termínu, čeká na výsledek",
+        "isds_reply_hint": "Odpověď úřadu přijde do datové schránky. Stáhněte ji tam, aplikace zprávy sama nevyzvedává, protože vyzvednutím je zpráva doručená.",
+        "isds_reply_link": "Stáhnout zprávy v Datové schránce",
         "lapsed_before_activation_label": "lhůta {date} uplynula před aktivací mezd",
         "undated_hint": "Nevyřízené položky u lidí, u kterých zákon lhůtu neukládá nebo ji aplikace neodvozuje (třeba přihláška ČSSZ u nástupu před 1. 7. 2026), a položky, jejichž lhůta uplynula dřív, než jste mzdy v aplikaci aktivovali (lidé doplnění importem nebo zpětně). Co bylo vyřízeno mimo aplikaci, označte po rozbalení skupiny hromadně.",
         "group": {

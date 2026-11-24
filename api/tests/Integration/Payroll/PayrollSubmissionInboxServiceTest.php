@@ -322,6 +322,50 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
         self::assertSame($resolvedEscalation, $item['escalation_level']);
     }
 
+    /**
+     * Podání odeslané po lhůtě čeká na výsledek úřadu. Položka „po termínu"
+     * se tím vypořádá stejně jako u podání odeslaného včas; dřív zůstala
+     * otevřená navždy, protože posudek odeslané podání po lhůtě dál hodnotil
+     * jako zmeškané.
+     */
+    public function testSubmissionSentAfterDueResolvesOverdueItem(): void
+    {
+        $clock = new MockClock('2026-08-10 09:00:00 Europe/Prague');
+        $service = $this->service($clock);
+        $obligation = $this->registerObligation(
+            $this->supplierId,
+            '2026-08-08',
+            'inbox-sent-late',
+        );
+
+        $item = $this->findByObligation($service->list($this->supplierId), $obligation['id']);
+        self::assertNotNull($item);
+        self::assertSame('overdue', $item['problem_kind']);
+
+        $submission = $this->submissions->prepare(
+            $this->supplierId,
+            $obligation['id'],
+            'regular',
+            'manual_upload',
+            str_repeat('a', 64),
+            'inbox-sent-late-submission',
+            createdBy: $this->userId,
+        );
+        $version = $submission['row_version'];
+        foreach (['validated', 'prepared', 'ready', 'submitted'] as $status) {
+            $version = $this->submissions->transition(
+                $this->supplierId,
+                $submission['id'],
+                $version,
+                $status,
+            )['row_version'];
+        }
+
+        $item = $this->findByObligation($service->list($this->supplierId), $obligation['id']);
+        self::assertNotNull($item);
+        self::assertSame('resolved', $item['status']);
+    }
+
     public function testTenantIsolation(): void
     {
         $clock = new MockClock('2026-08-10 09:00:00 Europe/Prague');

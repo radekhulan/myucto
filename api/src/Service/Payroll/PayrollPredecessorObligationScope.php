@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
+
 /**
  * JEDINÉ pravidlo pro otázku „patří tahle povinnost checklistu MyÚčtu, nebo ji
  * vyřídil předchozí program?".
@@ -71,6 +74,14 @@ final class PayrollPredecessorObligationScope
     private const REQUEST_ANCHORED = ['taxable_income_confirmation'];
 
     /**
+     * Stavy podání, ve kterých z MyÚčta ještě nic neodešlo (rozpracované,
+     * připravené, včas zrušené).
+     *
+     * @var list<string>
+     */
+    private const UNSENT_SUBMISSION_STATUSES = ['draft', 'validated', 'prepared', 'ready', 'cancelled_in_time'];
+
+    /**
      * Den, podle kterého se o položce rozhoduje; `null` = nevíme, položka zůstává
      * relevantní.
      */
@@ -125,6 +136,59 @@ final class PayrollPredecessorObligationScope
     {
         return $eventDay !== null && $eventDay !== ''
             && PayrollHistoricalPeriodService::precedesStart($startPeriod, $eventDay);
+    }
+
+    /**
+     * Uložená povinnost podání vázaná na událost u člověka (přihláška či
+     * odhláška ČSSZ, oznámení zdravotní pojišťovně), kterou vyřídil předchozí
+     * program. Totéž pravidlo jako u checklistu a u přehledu oznámení
+     * pojišťovně, jen nad řádkem `payroll_obligations`.
+     *
+     * Povinnost v evidenci vzniká až PŘÍPRAVOU podání (registrace ČSSZ) nebo
+     * synchronizací oznámení. Účetní si tak může připravit i odhlášku za vztah,
+     * který skončil v převzatém měsíci, a lhůta 8 dnů z doby předchozího
+     * programu pak svítila jako zmeškaná povinnost MyÚčta. Povinnost se proto
+     * čte jako „vyřízeno předchozím programem" a hlídač termínů ji nepřipomíná;
+     * připravené podání zůstává, kdo ho přesto chce podat, podá ho z karty.
+     *
+     * Rozhodný den:
+     * - oznámení pojišťovně: `period_start` je den události (`occurredOn`),
+     *   stejný den, podle kterého rozhoduje přehled oznámení za období,
+     * - registrace ČSSZ: uložená povinnost den události nenese (u přihlášky je
+     *   `period_start` počátek okna PŘED nástupem), takže rozhoduje termín,
+     *   stejně jako u uložené položky checklistu se změnou. Je to opatrná
+     *   volba: schová jen povinnost, jejíž lhůta celá uplynula před prvním
+     *   mzdovým obdobím v MyÚčtu, tedy nic, co mělo MyÚčto podat včas.
+     *
+     * Jakmile z MyÚčta k povinnosti něco ODEŠLO, pravidlo neplatí: účetní se
+     * rozhodla podat sama a podání má vlastní průběh (čeká na výsledek,
+     * odmítnutí), který se hlídá jako u každého jiného.
+     *
+     * Ostatní povinnosti (měsíční hlášení, přehledy, vyúčtování) se tu
+     * nerozhodují: převzatý měsíc bez hlášení hlídá
+     * {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService}
+     * a povinnost za něj založená v MyÚčtu je vědomé podání.
+     */
+    public static function storedObligationHandledByPredecessor(
+        ?string $startPeriod,
+        string $sourceEventType,
+        string $periodStart,
+        string $dueOn,
+        ?string $latestSubmissionStatus,
+    ): bool {
+        if ($latestSubmissionStatus !== null
+            && !in_array($latestSubmissionStatus, self::UNSENT_SUBMISSION_STATUSES, true)
+        ) {
+            return false;
+        }
+
+        return match ($sourceEventType) {
+            HealthInsuranceSubmissionService::SOURCE_EVENT_NOTIFICATION
+                => self::eventHandledByPredecessor($startPeriod, $periodStart),
+            PayrollRegistrationSubmissionService::SOURCE_EVENT_TYPE
+                => self::eventHandledByPredecessor($startPeriod, $dueOn),
+            default => false,
+        };
     }
 
     /**

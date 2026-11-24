@@ -164,8 +164,8 @@ final class PayrollSubmissionRepository
      *   id:int,environment:string,agenda_code:string,subject_type:string,
      *   subject_reference:string,period_start:string,period_end:string,
      *   obligation_kind:string,preferred_channel:string,status:string,
-     *   row_version:int,agenda_group:string,
-     *   earliest_submission_on:string,due_on:string,
+     *   row_version:int,source_event_type:string,source_event_reference:string,
+     *   agenda_group:string,earliest_submission_on:string,due_on:string,
      *   calendar_basis:string,latest_submission:?array{
      *     id:int,status:string,submission_kind:string,channel:string,
      *     submitted_at:?string,decided_at:?string
@@ -206,6 +206,8 @@ final class PayrollSubmissionRepository
                     obligation.period_end, obligation.obligation_kind,
                     obligation.preferred_channel, obligation.status,
                     obligation.row_version,
+                    obligation.source_event_type,
+                    obligation.source_event_reference,
                     ' . self::agendaGroupSql() . ' AS agenda_group,
                     deadline.earliest_submission_on, deadline.due_on,
                     deadline.calendar_basis,
@@ -245,6 +247,8 @@ final class PayrollSubmissionRepository
                 ),
                 'status' => self::string($row, 'status'),
                 'row_version' => self::integer($row, 'row_version'),
+                'source_event_type' => self::string($row, 'source_event_type'),
+                'source_event_reference' => self::string($row, 'source_event_reference'),
                 'agenda_group' => self::string($row, 'agenda_group'),
                 'earliest_submission_on' => self::string(
                     $row,
@@ -992,6 +996,64 @@ final class PayrollSubmissionRepository
             : self::submissionRow(
                 self::associativeRow($row, 'mzdové podání'),
             );
+    }
+
+    /**
+     * Všechna řádná i opravná podání jedné povinnosti v daných stavech, bez
+     * zámku a od nejstaršího. Čtecí protějšek
+     * {@see self::latestSubmissionForScopeForUpdate()}: co pojišťovně odešlo,
+     * nese i dřívější podání, ne jen poslední oprava.
+     *
+     * @param list<string> $statuses
+     * @return list<int>
+     */
+    public function submissionIdsForScope(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectType,
+        string $subjectReference,
+        string $periodStart,
+        string $periodEnd,
+        array $statuses,
+    ): array {
+        if ($statuses === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id
+               FROM payroll_obligations obligation
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = obligation.supplier_id
+                AND submission.environment = obligation.environment
+                AND submission.obligation_id = obligation.id
+              WHERE obligation.supplier_id = ?
+                AND obligation.subject_type = ?
+                AND obligation.subject_reference = ?
+                AND obligation.environment = ?
+                AND obligation.agenda_code = ?
+                AND obligation.period_start = ?
+                AND obligation.period_end = ?
+                AND submission.submission_kind IN (\'regular\', \'correction\')
+                AND submission.status IN (' . $placeholders . ')
+              ORDER BY submission.id ASC',
+        );
+        $statement->execute([
+            $supplierId,
+            $subjectType,
+            $subjectReference,
+            $environment,
+            $agendaCode,
+            $periodStart,
+            $periodEnd,
+            ...$statuses,
+        ]);
+
+        return array_map(
+            static fn (mixed $id): int => (int) $id,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
     }
 
     /**

@@ -145,6 +145,42 @@ final class PayrollMonthlyAgendaDutyServiceTest extends TestCase
     }
 
     /**
+     * Hlášení za měsíc podané mimo MyÚčto (převzatý doklad nebo potvrzení
+     * účetní) povinnost splnilo. Příprava druhé řádné hlášení stejně odmítne;
+     * přehled ho dřív nabízel jako „Nepřipraveno". Přehled o platbě tím
+     * splněný není.
+     */
+    public function testMonthlyReportFiledOutsideMyUctoIsNotUnprepared(): void
+    {
+        $duties = $this->service([$this->runRow(insurerCodes: ['111'])], [self::PERIOD])
+            ->unprepared(11, self::PERIOD, []);
+
+        self::assertSame(
+            [HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW],
+            array_column($duties, 'agenda_code'),
+        );
+    }
+
+    /**
+     * Okno hlídače termínů bere tatáž pravidla jako jeden měsíc: povinnost
+     * jen ze schváleného běhu, s lhůtou v okně a bez evidované povinnosti.
+     */
+    public function testWindowKeepsOnlyRequestedAgendaWithDueInWindow(): void
+    {
+        $service = $this->service([$this->runRow(insurerCodes: ['111'])], [], [self::PERIOD]);
+
+        $duties = $service->unpreparedInWindow(11, 'production', '2026-09-01', '2026-09-30', [
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+        ]);
+        self::assertSame([JmhzSubmissionBridgeService::AGENDA_CODE], array_column($duties, 'agenda_code'));
+        self::assertSame([self::PERIOD], array_column($duties, 'period'));
+
+        self::assertSame([], $service->unpreparedInWindow(11, 'production', '2026-09-22', '2026-10-31', [
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+        ]));
+    }
+
+    /**
      * @param list<string> $insurerCodes
      * @param ?list<string> $insuredCodes
      * @return array{run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>,insured_codes:?list<string>}
@@ -160,11 +196,17 @@ final class PayrollMonthlyAgendaDutyServiceTest extends TestCase
         ];
     }
 
-    /** @param list<array<string,mixed>> $runs */
-    private function service(array $runs): PayrollMonthlyAgendaDutyService
+    /**
+     * @param list<array<string,mixed>> $runs
+     * @param list<string> $filedElsewhere období podaná mimo MyÚčto
+     * @param list<string> $runPeriods období se schváleným během (okno)
+     */
+    private function service(array $runs, array $filedElsewhere = [], array $runPeriods = []): PayrollMonthlyAgendaDutyService
     {
         $repository = $this->createStub(PayrollMonthlyAgendaDutyRepository::class);
         $repository->method('approvedRunsForPeriod')->willReturn($runs);
+        $repository->method('externallyFiledMonthlyPeriods')->willReturn($filedElsewhere);
+        $repository->method('approvedRunPeriods')->willReturn($runPeriods);
 
         // Lhůta JMHZ žije v rulesetu (tedy v databázi), takže se sem předává
         // hotová; lhůta přehledu o platbě se počítá SKUTEČNOU politikou —
