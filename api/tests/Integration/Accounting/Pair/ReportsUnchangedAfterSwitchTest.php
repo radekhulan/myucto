@@ -87,13 +87,20 @@ final class ReportsUnchangedAfterSwitchTest extends TestCase
         $c = $this->container;
         $fs = $c->get(FinancialStatementService::class);
         $json = static fn (mixed $v): string => json_encode($v, JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $statementJson = static function (array $statement) use ($json): string {
+            // Okamžik sestavení se mezi voláními může změnit i při totožném účetním obsahu.
+            self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/D', $statement['entity']['prepared_at']);
+            unset($statement['entity']['prepared_at']);
+            return $json($statement);
+        };
+        $asOf = self::YEAR . '-12-31';
         $vatMonth = 6;
         return [
             'predvaha'        => $json($c->get(TrialBalanceService::class)->build($this->supplierId, $this->periodId, null, null)),
             'predvaha_analytika' => $json($c->get(TrialBalanceService::class)->build($this->supplierId, $this->periodId, null, null, true)),
             'hlavni_kniha'    => $json($c->get(GeneralLedgerService::class)->build($this->supplierId, $this->periodId, null, null)),
-            'rozvaha'         => $json($fs->balanceSheet($this->supplierId, $this->periodId, null, 'full')),
-            'vysledovka'      => $json($fs->incomeStatement($this->supplierId, $this->periodId, null, 'full')),
+            'rozvaha'         => $statementJson($fs->balanceSheet($this->supplierId, $this->periodId, $asOf, 'full')),
+            'vysledovka'      => $statementJson($fs->incomeStatement($this->supplierId, $this->periodId, $asOf, 'full')),
             'dph'             => $json($c->get(DphPriznaniBuilder::class)->build($this->supplierId, self::YEAR, $vatMonth, 'monthly')),
             'kontrolni_hlaseni' => $json($c->get(KontrolniHlaseniBuilder::class)->build($this->supplierId, self::YEAR, $vatMonth)),
             'souhrnne_hlaseni'  => $json($c->get(SouhrnneHlaseniBuilder::class)->build($this->supplierId, self::YEAR, $vatMonth)),

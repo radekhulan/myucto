@@ -122,8 +122,17 @@ final class NonprofitDppoProfileHttpTest extends TestCase
 
     private function rowsLocked(): int
     {
-        $value = $this->pdo->query('SELECT trx_rows_locked FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id=CONNECTION_ID()')
-            ->fetchColumn();
-        return $value === false ? 0 : (int) $value;
+        // INNODB_TRX obnovuje snímek s odstupem. První čtení může ještě zachytit zámky ze začátku setUp().
+        $previous = null;
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            usleep(150_000);
+            $value = $this->pdo->query('SELECT trx_rows_locked FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id=CONNECTION_ID()')
+                ->fetchColumn();
+            if ($value !== false && (int) $value === $previous) {
+                return $previous;
+            }
+            $previous = $value === false ? null : (int) $value;
+        }
+        self::fail('Počet zámků testovací transakce se v INNODB_TRX neustálil.');
     }
 }
