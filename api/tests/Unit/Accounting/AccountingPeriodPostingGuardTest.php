@@ -53,8 +53,7 @@ final class AccountingPeriodPostingGuardTest extends TestCase
         return [
             'začátek přes provisioner' => [true, '2016-10-07', 'period_before_start'],
             'začátek přes repository' => [false, '2016-10-07', 'period_before_start'],
-            'mezera přes provisioner' => [true, '2027-01-01', 'period_gap'],
-            'mezera přes repository' => [false, '2027-01-01', 'period_gap'],
+            'starší rok přes provisioner' => [true, '2024-12-31', 'period_before_start'],
         ];
     }
 
@@ -87,6 +86,16 @@ final class AccountingPeriodPostingGuardTest extends TestCase
         self::assertSame($first, $this->openForPosting(false, '2026-01-01'));
         self::assertSame($next, $this->openForPosting(true, '2027-12-31'));
         self::assertCount(2, $this->periods->listForTenant(7));
+    }
+
+    public function testPostingFillsGapAndYearBeforeFirstPeriod(): void
+    {
+        $this->periods->create(7, 2026, '2026-01-01', '2026-12-31');
+        $this->periods->create(7, 2028, '2028-01-01', '2028-12-31');
+
+        self::assertSame('2027-01-01', $this->openForPosting(true, '2027-06-30')['starts_on']);
+        self::assertSame('2025-01-01', $this->openForPosting(false, '2025-12-31')['starts_on']);
+        self::assertCount(4, $this->periods->listForTenant(7));
     }
 
     public function testImportMayStillOpenHistoricalPeriod(): void

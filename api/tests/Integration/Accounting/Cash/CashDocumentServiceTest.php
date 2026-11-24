@@ -285,6 +285,7 @@ final class CashDocumentServiceTest extends TestCase
         $accounts = new ChartOfAccountsRepository($this->db);
         $rules = new PostingRuleRepository($this->db);
         $parent = $accounts->findByCode($this->supplierId, '343')['id'];
+        $register = $this->makeRegister();
         foreach (['sale' => ['in', 'output', 'credit', '343.310', '343.320'],
             'purchase' => ['out', 'input', 'debit', '343.110', '343.120']] as $purpose => [$type, $direction, $side, $standard, $reduced]) {
             foreach ([21 => $standard, 12 => $reduced] as $rate => $account) {
@@ -301,7 +302,7 @@ final class CashDocumentServiceTest extends TestCase
                     ['vat_rate' => 21, 'base_amount' => 1000.0, 'vat_amount' => 210.0],
                     ['vat_rate' => 12, 'base_amount' => 1000.0, 'vat_amount' => 120.0],
                 ],
-            ], $this->makeRegister()), $this->userId);
+            ], $register), $this->userId);
             $byAccount = $this->linesByAccountCode($res['journal_entry_id']);
             self::assertSame(210.0, $byAccount[$standard][$side]);
             self::assertSame(120.0, $byAccount[$reduced][$side]);

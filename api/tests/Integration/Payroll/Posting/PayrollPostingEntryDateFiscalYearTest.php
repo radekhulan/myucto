@@ -105,8 +105,8 @@ final class PayrollPostingEntryDateFiscalYearTest extends TestCase
         $this->createPeriod(self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31', 'closed');
 
         try {
-            $this->batches->resolveEntryDate($this->supplierId, (self::YEAR - 1) . '-12-31');
-            self::fail('Mzdy nesmí založit období před prvním obdobím firmy.');
+            $this->batches->resolveEntryDate($this->supplierId, (self::YEAR - 3) . '-12-31');
+            self::fail('Mzdy nesmí založit období dávno před prvním obdobím firmy.');
         } catch (PostingException $e) {
             self::assertSame('period_before_start', $e->errorCode);
             self::assertSame(422, $e->httpStatus);

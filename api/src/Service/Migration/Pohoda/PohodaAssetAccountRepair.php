@@ -182,7 +182,7 @@ final class PohodaAssetAccountRepair
     private function openingBalances(int $supplierId, int $entryId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT c.account_code, SUM(CASE l.side WHEN 'debit' THEN l.amount ELSE -l.amount END)
+            "SELECT c.account_code, SUM(CASE l.side WHEN 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                FROM journal_entry_lines l
                JOIN chart_of_accounts c ON c.supplier_id = l.supplier_id AND c.id = l.account_id
               WHERE l.supplier_id = ? AND l.entry_id = ? AND (c.account_code LIKE '01%' OR c.account_code LIKE '02%')

@@ -467,32 +467,34 @@ final class AccountingPeriodRepository
 
     /**
      * Kontrola před automatickým založením chybějícího období při účtování.
-     * První období a pokračování po konci řady se mohou založit automaticky.
-     * Mezeru uvnitř řady musí doplnit účetní, protože může být záměrná a nemusí
-     * odpovídat běžným hranicím účetního roku firmy.
+     *
+     * Automaticky se zakládá první období firmy, období po konci řady, mezera uvnitř
+     * řady (zapomenutý rok mezi převzatou historií a současností) a jeden účetní rok
+     * bezprostředně před prvním obdobím (pozdní doklad nebo storno za loňský rok).
+     * Starší datum před začátkem účetnictví je skoro vždy překlep v roce (2016 místo
+     * 2026) a založilo by prázdné staré období, proto se odmítne; skutečně starší rok
+     * založí účetní ručně.
      */
     public function assertCanAutomaticallyOpenForPosting(int $supplierId, string $date): void
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT MIN(starts_on) AS first_start, MAX(ends_on) AS last_end
-               FROM accounting_periods WHERE supplier_id = ?' . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
+            'SELECT MIN(starts_on) AS first_start FROM accounting_periods WHERE supplier_id = ?'
+            . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId]);
-        $bounds = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($bounds['first_start'] === null || $date > $bounds['last_end']) {
+        $firstStart = $stmt->fetchColumn();
+        if ($firstStart === null || $firstStart === false || $date >= (string) $firstStart) {
             return;
         }
-        if ($date < $bounds['first_start']) {
-            throw new PostingException(
-                'period_before_start',
-                'Datum je před začátkem účetnictví firmy v MyÚčtu. Zkontrolujte, zda nejde o překlep v roce. '
-                . 'Pokud jde opravdu o starší rok, založte období ručně v Nástroje → Uzávěrka.',
-            );
+        $calendar = $this->fiscalCalendar($supplierId);
+        if ($calendar->fiscalYearOfDate($date) >= $calendar->fiscalYearOfDate((string) $firstStart) - 1) {
+            return;
         }
         throw new PostingException(
-            'period_gap',
-            'Datum spadá do mezery mezi účetními obdobími. Zkontrolujte datum, nebo chybějící období založte ručně v Nástroje → Uzávěrka.',
+            'period_before_start',
+            'Datum je před začátkem účetnictví firmy v MyÚčtu. Zkontrolujte, zda nejde o překlep v roce. '
+            . 'Pokud jde opravdu o starší rok, založte období ručně v Nástroje → Uzávěrka.',
         );
     }
 

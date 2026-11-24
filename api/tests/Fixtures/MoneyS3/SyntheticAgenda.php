@@ -920,6 +920,16 @@ final class SyntheticAgenda
                 ]],
             );
         }
+        // Převod přebírá do osnovy jen účty použité v deníku: daň dokladů na analytikách podle sazby.
+        $journal = iterator_to_array(Ms3Table::fromString($files[$path . 'UcDenik.DAT'], 'UcDenik')->rows(), false);
+        foreach ([
+            [101, 'FV', 'VYS25001', '311000', '343320', 120.0], [102, 'FV', 'VYS25001', '311000', '343310', 210.0],
+            [103, 'FP', 'NAK25001', '343120', '321000', 120.0], [104, 'FP', 'NAK25001', '343110', '321000', 210.0],
+        ] as [$number, $source, $docNo, $debit, $credit, $amount]) {
+            $journal[] = ['Cislo' => $number, 'Zdroj' => $source, 'Doklad' => $docNo, 'Datum' => '2025-05-10', 'DatPlnDPH' => '2025-05-10',
+                'Popis' => 'Vzorová daň podle sazby', 'UcMD' => $debit, 'UcD' => $credit, 'Castka' => $amount];
+        }
+        $files[$path . 'UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $journal);
         return $files;
     }
 

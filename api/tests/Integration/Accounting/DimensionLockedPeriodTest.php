@@ -521,6 +521,11 @@ final class DimensionLockedPeriodTest extends TestCase
         $gone = $notes->add($entryId, $this->supplierId, 'Smazaná', false, $this->userId);
         $notes->softDelete($gone, $entryId, $this->supplierId, $this->userId);
         $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
+        // Storno a nový zápis jdou do dnešního data; v reálu je dnešní období otevřené.
+        // Testovací firma má jen vzdálené období, dnešní rok by byl „před začátkem".
+        if ($this->periods->findForDate($this->supplierId, date('Y-m-d')) === null) {
+            $this->periods->create($this->supplierId, (int) date('Y'), date('Y') . '-01-01', date('Y') . '-12-31');
+        }
 
         $res = $this->call($this->journalAction, 'repost', 'POST',
             ['source' => 'purchase-invoices', 'id' => (string) $purchase],
