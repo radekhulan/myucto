@@ -8,6 +8,7 @@
  * tlačítko se stejnou kartou pořád dokola.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { deferred } from '../../../../tests/helpers/deferred'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
@@ -140,7 +141,7 @@ describe('Hosting — neproběhlá platba doplatku', () => {
       instance: { ...instance, storage: { ...pending.instance.storage, quota_bytes: 7 * 1024 ** 3, change_pending: false, blocks_writes: false, percent: 32 } },
     }
     mocks.status.mockResolvedValueOnce(pending).mockResolvedValueOnce(confirmed)
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    const { promise, resolve } = deferred<unknown>()
     mocks.refresh.mockReturnValueOnce(promise)
 
     const wrapper = await mountHosting()
@@ -178,7 +179,7 @@ describe('Hosting — neproběhlá platba doplatku', () => {
     mocks.status.mockResolvedValueOnce(initial).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(confirmed)
     mocks.storageUpgrade.mockRejectedValue(declined(PAY_URL, '42'))
     mocks.waitForCheckout.mockResolvedValue({ applied: true })
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    const { promise, resolve } = deferred<unknown>()
     mocks.refresh.mockReturnValueOnce(promise)
 
     const wrapper = await mountHosting()

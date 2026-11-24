@@ -7,6 +7,7 @@
  * i když licenční server změnu umí prodat jednorázovou platbou kartou.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { deferred } from '../../../../tests/helpers/deferred'
 import { reactive, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -243,7 +244,7 @@ describe('zrušené, ale zaplacené předplatné', () => {
     api.changePayroll.mockRejectedValue({
       response: { data: { error: { code: 'charge_failed', message: 'Karta neprošla.', pay_url: PAY_URL, order_id: '232' } } },
     })
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    const { promise, resolve } = deferred<unknown>()
     api.waitForCheckout.mockReturnValue(promise)
 
     const wrapper = await mountPage()

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { deferred } from '../../../tests/helpers/deferred'
 import { licenseApi } from '../license'
 
 const { post } = vi.hoisted(() => ({ post: vi.fn() }))
@@ -40,7 +41,7 @@ describe('sledování změny licence', () => {
 
   it('zveřejní zaplacenou změnu, i když jiná objednávka stále čeká', async () => {
     window.localStorage.setItem(storageKey, '["42","43"]')
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    const { promise, resolve } = deferred<unknown>()
     post.mockResolvedValueOnce({ data: { applied: true } }).mockReturnValueOnce(promise)
     const onApplied = vi.fn()
 
