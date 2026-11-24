@@ -278,9 +278,7 @@ final class VatClassificationMapperTest extends TestCase
 
     public function testZeroRateRoundingRowStaysOffDomesticRateLines(): void
     {
-        // Přijatý doklad kódu 40: 21% položka + zaokrouhlení se sazbou 0 %. KH (B.2/B.3)
-        // zaokrouhlení nepočítá, ř. 40 ho proto nesmí mít v základu, jinak se rozejde
-        // s VetaC pln23.
+        // Kód 40: 21% položka + zaokrouhlení 0 %; ř. 40 nese jen 21% základ, jako KH.
         $common = [
             'invoice_id' => 7,
             'source' => 'purchase',
@@ -305,7 +303,7 @@ final class VatClassificationMapperTest extends TestCase
 
     public function testZeroRateRowOnExemptLineIsKept(): void
     {
-        // Sazba 0 % na řádku, který na sazbě nestojí (osvobozené plnění ř. 50), zůstává.
+        // Řádek 0 % mimo sazbové řádky (osvobozené ř. 50) zůstává.
         $lines = $this->mapper->projectDphLines([[
             'invoice_id' => 8,
             'source' => 'sale',
