@@ -480,7 +480,6 @@ final class SupplierLogoConverter
 
         if ($tw === $w && $th === $h && $mime === 'image/png') {
             // Bezeztrátový passthrough — PNG na PNG bez resize
-            imagedestroy($src);
             if (!@copy($sourcePath, $targetPath)) {
                 throw new \RuntimeException('Nepodařilo se uložit logo.');
             }
@@ -496,12 +495,8 @@ final class SupplierLogoConverter
         imagecopyresampled($dst, $src, 0, 0, 0, 0, $tw, $th, $w, $h);
 
         if (!imagepng($dst, $targetPath, 6)) {
-            imagedestroy($src);
-            imagedestroy($dst);
             throw new \RuntimeException('Nepodařilo se zapsat PNG.');
         }
-        imagedestroy($src);
-        imagedestroy($dst);
     }
 
     /** Resize již existujícího PNG na disku (in-place). */
@@ -517,8 +512,6 @@ final class SupplierLogoConverter
         imagefilledrectangle($dst, 0, 0, $tw, $th, $transparent);
         imagecopyresampled($dst, $src, 0, 0, 0, 0, $tw, $th, imagesx($src), imagesy($src));
         imagepng($dst, $path, 6);
-        imagedestroy($src);
-        imagedestroy($dst);
     }
 
     /** Spočítej rozměry, které se vejdou do (maxW × maxH) při zachování poměru stran. */

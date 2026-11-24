@@ -126,8 +126,6 @@ final class ThumbnailGenerator
         imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
         imagecopyresampled($dst, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
         $ok = imagejpeg($dst, $out, 82);
-        imagedestroy($img);
-        imagedestroy($dst);
         return $ok && is_file($out);
     }
 }
