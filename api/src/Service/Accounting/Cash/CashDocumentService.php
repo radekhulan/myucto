@@ -24,6 +24,7 @@ use MyInvoice\Service\Vat\VatRateResolver;
 use MyInvoice\Service\Accounting\PurchasePayableAccount;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
@@ -759,7 +760,7 @@ final class CashDocumentService
         if ($kind === 'invoice') {
             $stmt = $pdo->prepare(
                 "SELECT i.id, i.varsymbol AS number, i.issue_date, i.amount_to_pay, i.paid_total,
-                        i.invoice_type, i.exchange_rate, cur.code AS currency, c.company_name AS partner_name,
+                        i.invoice_type, i.exchange_rate, i.import_amount_to_pay_czk, cur.code AS currency, c.company_name AS partner_name,
                         c.ic AS partner_ic, c.dic AS partner_dic
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
@@ -802,7 +803,11 @@ final class CashDocumentService
                     // Úhrada proformy spustí vystavení finální faktury / DDKP — UI to musí
                     // uživateli ukázat dřív, než doklad založí (M-3).
                     'is_proforma'   => (string) $r['invoice_type'] === 'proforma',
-                ] + self::foreignSettlementHint((string) $r['currency'], (float) ($r['exchange_rate'] ?? 0), round($total - $paid, 2));
+                ] + self::foreignSettlementHint(
+                    (string) $r['currency'], (float) ($r['exchange_rate'] ?? 0), round($total - $paid, 2),
+                    $r['import_amount_to_pay_czk'] === null ? null
+                        : IssuedCzkAmounts::allocated($r, round($total - $paid, 2), (float) $r['exchange_rate'], $paid),
+                );
             }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         }
 
@@ -880,12 +885,12 @@ final class CashDocumentService
      *
      * @return array<string,float>
      */
-    private static function foreignSettlementHint(string $currency, float $rate, float $remaining): array
+    private static function foreignSettlementHint(string $currency, float $rate, float $remaining, ?float $amountCzk = null): array
     {
         if (strtoupper($currency) === FxPaymentSettlement::LOCAL_CURRENCY || $rate <= 0.0) {
             return [];
         }
-        $expected = FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
+        $expected = $amountCzk ?? FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
         return [
             'exchange_rate' => $rate,
             'remaining_czk' => $expected,
@@ -1512,8 +1517,9 @@ final class CashDocumentService
     ): array {
         $fx = $this->fxSettlement();
         $table = $docType === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $snapshot = $docType === 'invoice' ? ', d.import_amount_to_pay_czk, d.paid_total' : '';
         $stmt = $this->db->pdo()->prepare(
-            "SELECT d.exchange_rate, cur.code AS currency
+            "SELECT d.exchange_rate, d.amount_to_pay, cur.code AS currency{$snapshot}
                FROM {$table} d JOIN currencies cur ON cur.id = d.currency_id
               WHERE d.id = ? AND d.supplier_id = ?"
         );
@@ -1530,8 +1536,11 @@ final class CashDocumentService
         );
         $rate = $fx->predpisFxRate($supplierId, $saldo, $header);
         $foreign = round((float) $doc['settled_document_amount'], 2);
+        $amountCzk = $docType === 'invoice'
+            ? IssuedCzkAmounts::allocated($header, $foreign, $rate, (float) $header['paid_total'])
+            : FxPaymentSettlement::expectedLocalAmount($foreign, $rate);
         $saldoLine = FxSettlementPosting::withFxTrace(
-            $this->line($saldo['code'], $docType === 'invoice' ? 'credit' : 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+            $this->line($saldo['code'], $docType === 'invoice' ? 'credit' : 'debit', $amountCzk),
             strtoupper((string) $header['currency']),
             $rate,
             $foreign,
@@ -1731,7 +1740,8 @@ final class CashDocumentService
         // (create/post), zámek se drží do jejího konce.
         $this->lockRow('invoices', $invoiceId, $supplierId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, i.other_item_id, i.exchange_rate, cur.code AS currency
+            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, i.other_item_id, i.exchange_rate,
+                    i.import_amount_to_pay_czk, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?'
         );
@@ -1782,7 +1792,7 @@ final class CashDocumentService
             );
         }
         $currency = strtoupper((string) $inv['currency']);
-        $rate = (float) ($inv['exchange_rate'] ?? 0);
+        $rate = IssuedCzkAmounts::settlementRate($inv);
         if ($rate <= 0.0) {
             throw new CashException('fx_rate_unavailable', 'Faktura nemá kurz pro přepočet korunové úhrady.');
         }

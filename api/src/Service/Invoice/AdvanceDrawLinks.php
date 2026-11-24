@@ -78,7 +78,7 @@ final class AdvanceDrawLinks
     {
         $in = implode(',', array_fill(0, count($statuses), '?'));
         $stmt = $pdo->prepare(
-            'SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
+            'SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.import_amount_to_pay_czk, i.status, i.invoice_type,
                     i.parent_invoice_id, cur.code AS currency
                FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
                JOIN invoices i ON i.id = fx.id

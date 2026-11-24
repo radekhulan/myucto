@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\MultiPurposeVoucher;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 
 /**
  * Kanonický producent VAT řádků — JEDNO místo se sdílenou logikou pro všechny
@@ -32,7 +33,7 @@ use MyInvoice\Service\Invoice\MultiPurposeVoucher;
  *     DPH/KH ne); u vystavených navíc bez 'proforma', u přijatých bez 'advance'
  *     (zálohová/proforma není daňový doklad)
  *   - resolve klasifikačního kódu: řádek → hlavička → auto-default dle sazby + RC + směru
- *   - přepočet na CZK kurzem faktury
+ *   - převzaté částky v Kč, pokud je doklad nese, jinak přepočet kurzem faktury
  *   - RC samovyměření (jen přijaté): když pii.total_vat=0 a (reverse_charge flag NEBO
  *     is_reverse_charge kódu) → daň = základ × sazba/100; má-li řádek sazbu 0 %
  *     (import z cizího dokladu), použije se sazba klasifikačního kódu (issue #116)
@@ -592,8 +593,10 @@ final class VatLedgerService
     {
         $sourceSign = $db->hasColumn('invoices', 'import_tax_sign')
             ? "WHEN {$alias}.import_tax_sign IN (-1, 1) THEN {$alias}.import_tax_sign " : '';
+        $total = $db->hasColumn('invoices', 'import_total_with_vat_czk')
+            ? "COALESCE({$alias}.import_total_with_vat_czk, {$alias}.total_with_vat)" : "{$alias}.total_with_vat";
         return "CASE {$sourceSign}WHEN {$alias}.invoice_type = 'credit_note'
-            AND {$alias}.total_with_vat > 0 THEN -1 ELSE 1 END";
+            AND {$total} > 0 THEN -1 ELSE 1 END";
     }
 
     /**
@@ -616,19 +619,29 @@ final class VatLedgerService
      * Splátka kalendáře se hlásí pod číslem kalendáře a limit kontrolního hlášení se posuzuje
      * podle jeho součtu: odběratel zná jen kalendář, FS posuzuje celý doklad (§ 31, § 31a).
      *
-     * @return array{0:string, 1:string, 2:string} JOIN, výraz čísla, výraz celkové částky
+     * @return array{0:string, 1:string, 2:string, 3:string} JOIN, číslo, celková částka a převzatá částka v Kč
      */
     private function calendarInstalmentSql(): array
     {
+        $imported = $this->db->hasColumn('invoices', 'import_total_with_vat_czk');
         if (!$this->db->hasColumn('invoices', 'calendar_id')) {
-            return ['', 'i.varsymbol', 'i.total_with_vat'];
+            return ['', 'i.varsymbol', 'i.total_with_vat', $imported ? 'i.import_total_with_vat_czk' : 'NULL'];
         }
 
         return [
             'LEFT JOIN invoices cal ON cal.id = i.calendar_id AND cal.supplier_id = i.supplier_id',
             'COALESCE(cal.varsymbol, i.varsymbol)',
             'COALESCE(cal.total_with_vat, i.total_with_vat)',
+            $imported ? 'IF(cal.id IS NULL, i.import_total_with_vat_czk, cal.import_total_with_vat_czk)' : 'NULL',
         ];
+    }
+
+    /** @return array{string, string} Podepsaný základ a DPH položky ve zdrojových Kč. */
+    private function saleItemSourceAmounts(string $sign): array
+    {
+        return $this->db->hasColumn('invoice_items', 'import_tax_base_czk')
+            ? ["({$sign}) * ii.import_tax_base_czk", "({$sign}) * ii.import_tax_vat_czk"]
+            : ['NULL', 'NULL'];
     }
 
     /**
@@ -643,7 +656,8 @@ final class VatLedgerService
         $saleSign = self::saleTaxSignExpr($this->db, 'i');
         // DIČ protistrany ze snapshotu dokladu s fallbackem na živého klienta (viz helper).
         $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
-        [$calendarJoin, $calendarNumber, $calendarTotal] = $this->calendarInstalmentSql();
+        [$calendarJoin, $calendarNumber, $calendarTotal, $calendarTotalCzk] = $this->calendarInstalmentSql();
+        [$sourceBase, $sourceVat] = $this->saleItemSourceAmounts($saleSign);
         $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
             ? 'AND COALESCE(ii.oss_applicable, 0) = 0'
             : '';
@@ -658,10 +672,15 @@ final class VatLedgerService
         // s daní zůstává, jeho daň se z přiznání ztratit nesmí.
         // Hodnota dokladu pro limit KH (§ 101e) je hodnota plnění, poukaz do ní nepatří.
         $vouchers = $this->db->hasColumn('stock_items', 'eet_item_kind');
-        [$voucherJoin, $voucherFilter, $voucherParams, $voucherTotal] = $vouchers
+        $voucherSource = $sourceBase !== 'NULL'
+            ? ', SUM(CASE WHEN vii.import_tax_base_czk IS NOT NULL THEN vii.total_with_vat ELSE 0 END) AS source_foreign,
+                 SUM(COALESCE(vii.import_tax_base_czk, 0) + COALESCE(vii.import_tax_vat_czk, 0)) AS source_czk'
+            : ', 0 AS source_foreign, 0 AS source_czk';
+        $voucherRate = CzkAmountExpr::rate('i');
+        [$voucherJoin, $voucherFilter, $voucherParams, $voucherTotal, $voucherTotalCzk] = $vouchers
             ? [
                 MultiPurposeVoucher::stockJoinSql('ii', 'vsi', 'i.supplier_id') . "
-         LEFT JOIN (SELECT vii.invoice_id, SUM(vii.total_with_vat) AS total
+         LEFT JOIN (SELECT vii.invoice_id, SUM(vii.total_with_vat) AS total {$voucherSource}
                       FROM stock_items vs
                       JOIN invoice_items vii ON vii.stock_item_id = vs.id
                      WHERE vs.supplier_id = ? AND " . MultiPurposeVoucher::untaxedLineSql('vii', 'vs') . "
@@ -669,8 +688,10 @@ final class VatLedgerService
                 'AND NOT ' . MultiPurposeVoucher::untaxedLineSql('ii', 'vsi'),
                 [$supplierId],
                 ' - COALESCE(vtot.total, 0)',
+                " - COALESCE(vtot.source_czk, 0)
+                  - ROUND((COALESCE(vtot.total, 0) - COALESCE(vtot.source_foreign, 0)) * {$voucherRate}, 2)",
             ]
-            : ['', '', [], ''];
+            : ['', '', [], '', ''];
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období
         // (číselník daňových konstant, ne natvrdo 20.5).
         // ZÁKLADNÍ sazba, ne práh mezi buckety: fallback rozhoduje, jestli je sazba česká
@@ -693,6 +714,7 @@ final class VatLedgerService
                    -- Normalizuje se CELÝ DOKLAD jedním znaménkem podle jeho součtu, ne každá
                    -- položka zvlášť — zdůvodnění a precedent viz tentýž výraz ve fetchPurchases().
                    ({$saleSign}) * ({$calendarTotal}{$voucherTotal}) AS inv_total,
+                   ({$saleSign}) * ({$calendarTotalCzk}{$voucherTotalCzk}) AS inv_total_czk,
                    i.reverse_charge AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -732,7 +754,9 @@ final class VatLedgerService
                    ii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
                    ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
-                   ({$saleSign}) * COALESCE(ii.total_vat, 0) AS vat
+                   ({$saleSign}) * COALESCE(ii.total_vat, 0) AS vat,
+                   {$sourceBase} AS import_tax_base_czk,
+                   {$sourceVat} AS import_tax_vat_czk
               FROM invoices i
          {$calendarJoin}
               JOIN clients c ON c.id = i.client_id
@@ -767,7 +791,7 @@ final class VatLedgerService
      *
      * @return list<array<string,mixed>>
      */
-    public function ossRows(int $supplierId, string $start, string $end): array
+    public function ossRows(int $supplierId, string $start, string $end, bool $returnInCzk = false): array
     {
         if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
             return [];
@@ -775,6 +799,12 @@ final class VatLedgerService
         $manualReview = $this->db->hasColumn('invoice_items', 'oss_needs_manual_review')
             ? 'ii.oss_needs_manual_review'
             : '0 AS oss_needs_manual_review';
+        $ossBase = 'ii.oss_taxable_amount_return';
+        $ossVat = 'ii.oss_vat_amount_return';
+        if ($returnInCzk && $this->db->hasColumn('invoice_items', 'import_tax_base_czk')) {
+            $ossBase = "COALESCE({$ossBase}, IF(ii.oss_exchange_rate IS NULL, ii.import_tax_base_czk, NULL))";
+            $ossVat = "COALESCE({$ossVat}, IF(ii.oss_exchange_rate IS NULL, ii.import_tax_vat_czk, NULL))";
+        }
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.invoice_type, i.status,
@@ -784,7 +814,7 @@ final class VatLedgerService
                     ii.total_without_vat, ii.total_vat,
                     ii.oss_consumer_country, ii.oss_rate_type, ii.oss_supply_type,
                     ii.oss_exchange_rate, ii.oss_exchange_rate_date,
-                    ii.oss_taxable_amount_return, ii.oss_vat_amount_return,
+                    {$ossBase} AS oss_taxable_amount_return, {$ossVat} AS oss_vat_amount_return,
                     ii.oss_original_period, {$manualReview}
                FROM invoice_items ii
                JOIN invoices i ON i.id = ii.invoice_id
@@ -855,7 +885,8 @@ final class VatLedgerService
      * položky z tuzemské evidence vylučuje (daň z nich jde do OSS přiznání, ne na
      * ř. 1/2), takže dřív z přiznání zmizely úplně a ř. 24 zůstal prázdný.
      *
-     * Hodnota je ZÁKLAD bez zahraniční daně v Kč kurzem dokladu, zařazená podle DUZP
+     * Hodnota je základ bez zahraniční daně v Kč, převzatý ze zdroje nebo přepočtený
+     * kurzem dokladu, zařazený podle DUZP
      * jako ostatní uskutečněná plnění; zahraniční daň do přiznání nevstupuje (vat = 0).
      * Kód `24z` je tentýž, kterým se na ř. 24 vykazují plnění mimo OSS zadaná ručně —
      * dvojí započtení nehrozí, protože {@see fetchSales()} bere jen `oss_applicable = 0`
@@ -884,13 +915,15 @@ final class VatLedgerService
         [$documentFilter, $documentParams] = self::idFilter('i.id', $invoiceIds);
         $saleSign = self::saleTaxSignExpr($this->db, 'i');
         $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
-        [$calendarJoin, $calendarNumber, $calendarTotal] = $this->calendarInstalmentSql();
+        [$calendarJoin, $calendarNumber, $calendarTotal, $calendarTotalCzk] = $this->calendarInstalmentSql();
+        [$sourceBase] = $this->saleItemSourceAmounts($saleSign);
         $stmt = $this->db->pdo()->prepare("
             SELECT i.id AS invoice_id, {$calendarNumber} AS doc_number, {$calendarNumber} AS vendor_invoice_number,
                    i.invoice_type AS document_kind, i.status,
                    i.effective_tax_date AS tax_date, i.issue_date,
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
                    ({$saleSign}) * {$calendarTotal} AS inv_total,
+                   ({$saleSign}) * {$calendarTotalCzk} AS inv_total_czk,
                    0 AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -900,6 +933,7 @@ final class VatLedgerService
                    {$lineColumns}
                    ii.description AS description,
                    ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
+                   {$sourceBase} AS import_tax_base_czk,
                    0 AS vat
               FROM invoices i
          {$calendarJoin}
@@ -1390,12 +1424,14 @@ final class VatLedgerService
         $vatRate = (float) $r['vat_rate'];
         $baseRaw = (float) $r['base'];
         $vatRaw = (float) $r['vat'];
+        $sourceVatCzk = $r['import_tax_vat_czk'] ?? null;
         $projectionVatCzk = $source === 'purchase' ? ($r['import_projection_vat_czk'] ?? null) : null;
 
         $code = $r['code'] !== null ? (string) $r['code'] : null;
         if ($source === 'sale' && in_array($code, ['26', '24z'], true)
             && isset($r['tax_country']) && strtoupper((string) $r['tax_country']) !== 'CZ') {
             $vatRaw = 0.0;
+            $sourceVatCzk = null;
         }
         $clsf = $code !== null ? ($map[$code] ?? null) : null;
         // Dvě různé otázky. `$isRc` (klasifikace NEBO příznak v hlavičce) řídí samovyměření
@@ -1491,8 +1527,8 @@ final class VatLedgerService
             ? round((float) $projectionVatCzk * ($isPartialDeduction && !$rcSelfAssess ? $deductionRatio : 1.0), 2)
             : ($rcSelfAssess
                 ? round($baseCzk * $vatRate / 100, 2)
-                : (($r['import_tax_vat_czk'] ?? null) !== null
-                    ? round((float) $r['import_tax_vat_czk'] * ($isPartialDeduction ? $deductionRatio : 1.0), 2)
+                : ($sourceVatCzk !== null
+                    ? round((float) $sourceVatCzk * ($isPartialDeduction ? $deductionRatio : 1.0), 2)
                     : round($vatRaw * $rate, 2)));
         $deductionBaseCzk = $rcSelfAssess && $isPartialDeduction
             ? round($baseCzk * $deductionRatio, 2)
@@ -1593,7 +1629,9 @@ final class VatLedgerService
             'vat_czk'               => $vatCzk,
             'deduction_base_czk'    => $deductionBaseCzk,
             'deduction_vat_czk'     => $deductionVatCzk,
-            'total_with_vat_czk'    => round((float) $r['inv_total'] * $rate, 2),
+            'total_with_vat_czk'    => isset($r['inv_total_czk'])
+                ? (float) $r['inv_total_czk']
+                : round((float) $r['inv_total'] * $rate, 2),
             'document_total'        => (float) $r['inv_total'],
             'is_fixed_asset'        => (bool) $r['is_fixed_asset'],
             'exchange_rate'         => $rate,

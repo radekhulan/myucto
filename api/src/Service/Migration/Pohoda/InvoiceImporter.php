@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
@@ -48,8 +49,8 @@ use MyInvoice\Support\Sql\PayablePredicate;
  * rekapitulaci; jinak z rekapitulace po sazbách. Ceny jsou vždy bez DPH.
  *
  * **Doklad v cizí měně** (`foreignCurrency`, v MDB `RefCM`/`CmKurs`/`CmMnoz` a na položkách
- * `Cm`/`CmDPH`) se převezme v měně a kurzu dokladu, když částky položek v měně kurzem dají
- * přesně Kč z POHODY ({@see ForeignCurrencyTakeover}); jinak v Kč s důvodem v poznámce.
+ * `Cm`/`CmDPH`) se převezme v měně a kurzu dokladu s částkami v Kč ze zdroje. Větší
+ * odchylka nebo nedoložené částky v měně zůstanou v Kč s důvodem v poznámce.
  *
  * **Odpočet zálohy** (`invoiceAdvancePaymentItem`): zdaněná záloha (daňový doklad k platbě)
  * je záporná položka se sazbou a daní - v přiznání i v KH je za konečnou fakturu jen
@@ -90,7 +91,7 @@ final class InvoiceImporter
         'commitment' => 'v POHODĚ ostatní závazek; v přiznání DPH, proto převeden jako přijatá faktura',
     ];
 
-    private const ISSUED_AGENDAS = [
+    public const ISSUED_AGENDAS = [
         'issued' => 'invoice',
         'issued_debit' => 'invoice',
         'issued_credit' => 'credit_note',
@@ -387,14 +388,16 @@ final class InvoiceImporter
         };
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
         $booked = !$ctx->taxEvidence && !$review && $type !== 'proforma' && !self::postedLater($doc);
-        if ($doc['foreign'] !== '') {
-            $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
+        $amounts = self::issuedCurrencyItems($doc, $amounts);
+        $blocked = ForeignCurrencyTakeover::paymentBlock(0.0, $pay['paid'], round($amounts['total'] - $amounts['advance'], 2));
+        if ($ctx->taxEvidence && ($doc['paid_date'] !== null || PohodaXml::all($r, 'liquidations/liquidation') !== []
+            || (is_numeric($doc['remaining']) && abs((float) $doc['remaining'] - ($amounts['total'] - $amounts['advance'])) >= 0.005))) {
+            $blocked = 'převod úhrad v daňové evidenci vyžaduje doložené párování v Kč';
         }
-        $fx = $this->foreignCurrency->decide($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $amounts['items'], $amounts['total'],
-            ForeignCurrencyTakeover::paymentBlock($amounts['advance'], $pay['paid'], round($amounts['total'] - $amounts['advance'], 2)));
+        $fx = $this->foreignCurrency->decideIssued($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $amounts,
+            self::issuedForeignTotal($doc, $amounts), $blocked);
         if ($fx->inForeignCurrency()) {
-            $amounts = self::inForeignCurrency($amounts);
-            $pay['paid'] = ForeignCurrencyTakeover::paidInForeignCurrency($pay['paid'], $amounts['total']);
+            $pay['paid'] = ForeignCurrencyTakeover::paidInForeignCurrency($pay['paid'], round($amounts['total'] - $amounts['advance'], 2));
         }
         try {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
@@ -405,7 +408,6 @@ final class InvoiceImporter
                 issueDate: $doc['issue'],
                 taxDate: $type === 'proforma' ? $doc['tax'] : ($doc['tax'] ?? $doc['issue']),
                 dueDate: $doc['due'],
-                // Doklad v cizí měně v ní, když částky v měně kurzem dají Kč z Pohody ({@see ForeignCurrencyTakeover}).
                 currencyId: $fx->currencyId ?? $this->homeCurrency->id($ctx->supplierId),
                 exchangeRate: $fx->rate,
                 // Položky i rekapitulace Pohody jsou bez DPH.
@@ -432,6 +434,7 @@ final class InvoiceImporter
                 bookedBy: $booked ? $ctx->userOrNull() : null,
                 vatClassificationCode: $class['code'],
                 paymentMethod: $doc['payment'],
+                czkSnapshot: $amounts['snapshot'] ?? [],
             ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
@@ -447,6 +450,8 @@ final class InvoiceImporter
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['code'] ?? $class['code'],
                 $item['oss'] ?? OssMigrationPolicy::DOMESTIC_COLUMNS,
+                importTaxBaseCzk: $item['home_base'] ?? null,
+                importTaxVatCzk: $item['home_vat'] ?? null,
             );
         }
         $this->writer->insertIssuedItems($id, $items);
@@ -768,12 +773,21 @@ final class InvoiceImporter
         return ['key' => self::mapKey($agenda, $number, $issue), 'number' => $number] + self::foreignCurrency($r, 'invoice');
     }
 
+    /** @return array{key:string,doc:array<string,mixed>,amounts:array<string,mixed>} */
+    public function issuedRepairSource(PohodaContext $ctx, array $record, string $agenda): array
+    {
+        $doc = $this->header($record, 'invoice');
+        $amounts = self::issuedCurrencyItems($doc, $this->amounts($ctx, self::STEP_ISSUED, $doc, $record, 'invoice'));
+        $doc['foreign_total'] = self::issuedForeignTotal($doc, $amounts);
+        return ['key' => self::mapKey($agenda, $doc['number'], $doc['issue']), 'doc' => $doc, 'amounts' => $amounts];
+    }
+
     private static function mapKey(string $agenda, string $number, ?string $issue): string
     {
         return $agenda . '|' . $number . '|' . $issue;
     }
 
-    /** @return array{foreign:string,foreign_rate:float,foreign_units:float,foreign_total:float} */
+    /** @return array{foreign:string,foreign_rate:float,foreign_units:float,foreign_total:float,foreign_total_provided:bool} */
     private static function foreignCurrency(array $r, string $prefix): array
     {
         return [
@@ -782,6 +796,7 @@ final class InvoiceImporter
             'foreign_rate' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/rate'),
             'foreign_units' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/amount') ?: 1.0,
             'foreign_total' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/priceSum'),
+            'foreign_total_provided' => is_numeric(PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/priceSum')),
         ];
     }
 
@@ -886,7 +901,8 @@ final class InvoiceImporter
 
         $grossTotal = round(array_sum(array_column($items, 'base')) + array_sum(array_column($items, 'vat')), 2);
         $rounding = round($docTotal - $grossTotal, 2);
-        if (abs($rounding) > self::ROUNDING_LIMIT) {
+        $summaryMismatch = abs($rounding) > self::ROUNDING_LIMIT;
+        if ($summaryMismatch) {
             $ctx->protocol->warn($step, 'total_mismatch', sprintf(
                 'Doklad %s: položky %s nesedí na celkem %s z Pohody.',
                 $doc['number'], number_format($grossTotal, 2, ',', ' '), number_format($docTotal, 2, ',', ' ')
@@ -896,20 +912,34 @@ final class InvoiceImporter
 
         // Rekapitulace Pohody je před odpočtem záloh - odpočty se přidávají až teď.
         $advance = 0.0;
+        $foreignAdvance = 0.0;
+        $hasForeignAdvance = true;
+        $foreignTaxAdvance = 0.0;
         $advanceItems = 0;
         foreach (PohodaXml::all($r, $prefix . 'Detail/invoiceAdvancePaymentItem') as $a) {
             $vat = round(PohodaXml::num($a, 'homeCurrency/priceVAT'), 2);
             if (abs($vat) < 0.005) {
-                $advance += PohodaXml::num($a, 'homeCurrency/priceSum');
+                $home = PohodaXml::num($a, 'homeCurrency/priceSum');
+                $advance += $home;
+                $foreign = PohodaXml::text($a, 'foreignCurrency/priceSum');
+                $currency = PohodaXml::text($a, 'foreignCurrency/currency/ids');
+                if (abs($home) >= 0.005 && (!is_numeric($foreign) || (float) $foreign === 0.0
+                    || ($currency !== '' && strcasecmp($currency, $doc['foreign']) !== 0))) {
+                    $hasForeignAdvance = false;
+                } elseif (abs($home) >= 0.005) {
+                    $foreignAdvance += (float) $foreign;
+                }
                 continue;
             }
             $base = round(PohodaXml::num($a, 'homeCurrency/price'), 2);
             $ref = PohodaXml::text($a, 'note') ?: PohodaXml::text($a, 'sourceDocument/number');
+            $foreignItem = self::foreignAmounts($a);
+            $foreignTaxAdvance += ($foreignItem['foreign_base'] ?? 0.0) + ($foreignItem['foreign_vat'] ?? 0.0);
             $items[] = [
                 'description' => 'Odpočet zálohy' . ($ref !== '' ? ' ' . $ref : ''),
                 'quantity' => 1.0, 'unit' => null, 'unit_price' => $base,
                 'base' => $base, 'vat' => $vat, 'rate' => $itemRate($a),
-            ] + self::foreignAmounts($a);
+            ] + $foreignItem;
             $advanceItems++;
         }
         foreach ($items as &$item) {
@@ -930,6 +960,9 @@ final class InvoiceImporter
             'gross_total' => round($grossTotal + $rounding, 2),
             'rounding' => $rounding,
             'advance' => round(-$advance, 2),
+            'foreign_advance' => $hasForeignAdvance ? round(-$foreignAdvance, 2) : null,
+            'foreign_tax_advance' => round($foreignTaxAdvance, 2),
+            'summary_mismatch' => $summaryMismatch,
             'advance_items' => $advanceItems,
             'source' => $source,
         ];
@@ -1533,8 +1566,9 @@ final class InvoiceImporter
                 $pohoda = round($pohoda + PohodaXml::num($a, 'homeCurrency/priceSum'), 2);
             }
         }
-        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
-        $stmt = $this->stmt('changed_' . $table, 'SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $home = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        $total = $table === 'invoices' ? IssuedCzkAmounts::grossSql('d', $home) : $home;
+        $stmt = $this->stmt('changed_' . $table, "SELECT {$total} FROM {$table} d WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $pohoda) < 0.005) {
@@ -1584,6 +1618,31 @@ final class InvoiceImporter
         $amounts['rounding'] = 0.0;
         $amounts['advance'] = 0.0;
         return $amounts;
+    }
+
+    /** @param array<string,mixed> $doc @param array<string,mixed> $amounts @return array<string,mixed> */
+    private static function issuedCurrencyItems(array $doc, array $amounts): array
+    {
+        if ($doc['foreign'] !== '') {
+            $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
+        }
+        return $amounts;
+    }
+
+    /** @param array<string,mixed> $doc @param array<string,mixed> $amounts */
+    private static function issuedForeignTotal(array $doc, array $amounts): ?float
+    {
+        if (!$doc['foreign_total_provided']) {
+            return null;
+        }
+        $total = $doc['foreign_total'];
+        if ($amounts['foreign_tax_advance'] !== 0.0) {
+            $gross = round(array_sum(array_column($amounts['items'], 'foreign_base')) + array_sum(array_column($amounts['items'], 'foreign_vat')), 2);
+            if (abs($total + $amounts['foreign_tax_advance'] - $gross) < 0.005) {
+                $total = $gross;
+            }
+        }
+        return $total;
     }
 
     /**

@@ -12,6 +12,7 @@ use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Security\ProjectAssignmentAccess;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
@@ -63,7 +64,7 @@ final class GetClientAction
         // CZK přepočet: pro klienty s multi-currency obratem chceme graf v jedné měně.
         // i.exchange_rate je CZK / 1 jednotka cizí měny, fixovaná k DUZP (CNB).
         // CZK řádky mají exchange_rate buď NULL nebo 1 → COALESCE(.., 1) ošetří oba případy.
-        $revCzk = "$rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)";
+        $revCzk = CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat');
 
         // Obrat po měsících za posledních 24 měsíců.
         // Zahrnuje invoice + credit_note (dobropis má záporné částky, automaticky odečte).
@@ -147,14 +148,15 @@ final class GetClientAction
 
         // Nezaplaceno (issued/sent + invoice/credit_note) + Po splatnosti per měna.
         // _czk fieldy: stejný přepočet jako revenue_by_*, pro UI agregaci v multi-ccy scénáři.
+        $remainingCzk = CzkAmountExpr::issuedRemaining();
         $stmtU = $pdo->prepare(
             "SELECT cur.code AS currency,
                     SUM(i.amount_to_pay - i.paid_total) AS unpaid_total,
-                    SUM((i.amount_to_pay - i.paid_total) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS unpaid_total_czk,
+                    SUM($remainingCzk) AS unpaid_total_czk,
                     COUNT(*) AS unpaid_count,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE() THEN i.amount_to_pay - i.paid_total ELSE 0 END) AS overdue_total,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE()
-                             THEN (i.amount_to_pay - i.paid_total) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)
+                             THEN $remainingCzk
                              ELSE 0 END) AS overdue_total_czk,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE() THEN 1 ELSE 0 END) AS overdue_count
                FROM invoices i

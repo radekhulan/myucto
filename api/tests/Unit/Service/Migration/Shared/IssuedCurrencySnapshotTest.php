@@ -1,0 +1,76 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Service\Migration\Shared;
+
+use MyInvoice\Service\Migration\Shared\IssuedCurrencySnapshot;
+use PHPUnit\Framework\TestCase;
+
+final class IssuedCurrencySnapshotTest extends TestCase
+{
+    public function testSourceAmountsAreKeptWithForeignAmounts(): void
+    {
+        $amounts = self::amounts([['base' => 24000.04, 'vat' => 5040.01, 'foreign_base' => 998.96, 'foreign_vat' => 209.78]], 29040.05);
+        $result = IssuedCurrencySnapshot::prepare($amounts, 24.025, 1208.74);
+
+        self::assertIsArray($result);
+        self::assertSame(209.78, $result['vat']);
+        self::assertSame(1208.74, $result['total']);
+        self::assertSame(24000.04, $result['items'][0]['home_base']);
+        self::assertSame(5040.01, $result['items'][0]['home_vat']);
+        self::assertSame(29040.05, $result['snapshot']['import_amount_to_pay_czk']);
+    }
+
+    public function testCreditNoteKeepsBothSignsAndSourceTotals(): void
+    {
+        $amounts = self::amounts([['base' => -251.20, 'vat' => -52.76, 'foreign_base' => -10.0, 'foreign_vat' => -2.10]], -303.96);
+        $result = IssuedCurrencySnapshot::prepare($amounts, 25.12, -12.10);
+
+        self::assertIsArray($result);
+        self::assertSame(-12.10, $result['total']);
+        self::assertSame(-52.76, $result['snapshot']['import_total_vat_czk']);
+    }
+
+    public function testLargeOrOffsettingDifferencesStayInCrowns(): void
+    {
+        $amounts = self::amounts([['base' => 251.20, 'vat' => 54.0, 'foreign_base' => 10.0, 'foreign_vat' => 2.10]], 305.20);
+        self::assertStringContainsString('daň 1. položky', IssuedCurrencySnapshot::prepare($amounts, 25.12, 12.10));
+
+        $items = array_fill(0, 8, ['base' => 25.40, 'vat' => 4.60, 'foreign_base' => 1.0, 'foreign_vat' => 0.20]);
+        self::assertStringContainsString('součet odchylek', IssuedCurrencySnapshot::prepare(self::amounts($items, 240.0), 25.0, 9.60));
+    }
+
+    public function testAdvanceInCrownsOnlyStaysInCrowns(): void
+    {
+        $amounts = ['advance' => 100.0] + self::amounts([['base' => 251.20, 'vat' => 0.0, 'foreign_base' => 10.0, 'foreign_vat' => 0.0]], 251.20);
+        self::assertStringStartsWith('odpočet nedaňové zálohy', IssuedCurrencySnapshot::prepare($amounts, 25.12, 10.0));
+    }
+
+    public function testExplicitAdvanceUsesSourceAmountInBothCurrencies(): void
+    {
+        $amounts = ['advance' => 126.0, 'foreign_advance' => 5.0]
+            + self::amounts([['base' => 251.20, 'vat' => 0.0, 'foreign_base' => 10.0, 'foreign_vat' => 0.0]], 251.20);
+        $result = IssuedCurrencySnapshot::prepare($amounts, 25.12, 5.0);
+
+        self::assertIsArray($result);
+        self::assertSame(10.0, $result['total']);
+        self::assertSame(5.0, $result['advance']);
+        self::assertSame(126.0, $result['snapshot']['import_advance_paid_czk']);
+        self::assertSame(125.20, $result['snapshot']['import_amount_to_pay_czk']);
+    }
+
+    public function testIncompatibleSourceForeignTotalStaysInCrowns(): void
+    {
+        $amounts = self::amounts([['base' => 251.20, 'vat' => 0.0, 'foreign_base' => 10.0, 'foreign_vat' => 0.0]], 251.20);
+        self::assertStringContainsString('celkem v měně', IssuedCurrencySnapshot::prepare($amounts, 25.12, 11.0));
+    }
+
+    private static function amounts(array $items, float $total): array
+    {
+        return [
+            'items' => $items, 'base' => array_sum(array_column($items, 'base')),
+            'vat' => array_sum(array_column($items, 'vat')), 'total' => $total, 'rounding' => 0.0, 'advance' => 0.0,
+        ];
+    }
+}

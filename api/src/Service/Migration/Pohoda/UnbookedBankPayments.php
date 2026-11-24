@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\Match\MatchScorer;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Support\Sql\PayablePredicate;
@@ -318,7 +319,7 @@ final class UnbookedBankPayments
         }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            "SELECT i.id, i.status, i.amount_to_pay, i.paid_total, i.exchange_rate, cur.code AS currency
+            "SELECT i.id, i.status, i.amount_to_pay, i.import_amount_to_pay_czk, i.paid_total, i.exchange_rate, cur.code AS currency
                FROM payment_matches pm
                JOIN invoices i ON i.id = pm.invoice_id AND i.supplier_id = pm.supplier_id
                JOIN currencies cur ON cur.id = i.currency_id
@@ -332,13 +333,14 @@ final class UnbookedBankPayments
         }
         $invoice = $rows[0];
         $amount = round(abs($tx['amount']), 2);
-        // Pohyb je v Kč; faktura převzatá v cizí měně se porovná přepočtená kurzem dokladu
-        // (pojistka převzetí zaručuje koruny zdroje) a platba se zapíše v měně faktury.
+        // Pohyb je v Kč, evidovaná platba se zapisuje v měně faktury.
         $rate = $invoice['exchange_rate'] !== null ? (float) $invoice['exchange_rate'] : null;
         $paid = round((float) $invoice['paid_total'], 2);
         $due = round((float) $invoice['amount_to_pay'], 2);
-        $alreadyPaid = (string) $invoice['status'] === 'paid' && abs(ForeignCurrencyTakeover::toHome($paid, $rate) - $amount) < self::TOLERANCE;
-        $opening = in_array((string) $invoice['status'], ['issued', 'sent', 'reminded'], true) && abs($paid) < self::TOLERANCE && abs(ForeignCurrencyTakeover::toHome($due, $rate) - $amount) < self::TOLERANCE;
+        $alreadyPaid = (string) $invoice['status'] === 'paid'
+            && abs(IssuedCzkAmounts::allocated($invoice, $paid, $rate ?? 1.0) - $amount) < self::TOLERANCE;
+        $opening = in_array((string) $invoice['status'], ['issued', 'sent', 'reminded'], true)
+            && abs($paid) < self::TOLERANCE && abs(IssuedCzkAmounts::due($invoice, $rate) - $amount) < self::TOLERANCE;
         if (!$alreadyPaid && !$opening) {
             return;
         }
@@ -532,7 +534,7 @@ final class UnbookedBankPayments
                                       AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id)
                                       AND d.id IN (%s)",
             'invoice' => "SELECT d.id, d.varsymbol, d.payment_variable_symbol, NULL AS original, NULL AS account_no, NULL AS bank_code,
-                                 d.amount_to_pay, d.paid_total, d.exchange_rate, d.issue_date, d.due_date, cur.code AS currency,
+                                 d.amount_to_pay, d.import_amount_to_pay_czk, d.paid_total, d.exchange_rate, d.issue_date, d.due_date, cur.code AS currency,
                                  JSON_UNQUOTE(JSON_EXTRACT(d.client_snapshot, '$.company_name')) AS party
                             FROM invoices d JOIN currencies cur ON cur.id = d.currency_id
                            WHERE d.supplier_id = ? AND d.status IN ('issued', 'sent', 'reminded') AND d.invoice_type = 'invoice'
@@ -551,7 +553,9 @@ final class UnbookedBankPayments
                     if (strtoupper((string) $r['currency']) !== 'CZK' && $rate === null) {
                         continue;
                     }
-                    $mine = round(ForeignCurrencyTakeover::toHome((float) $r['amount_to_pay'], $rate) - ForeignCurrencyTakeover::toHome((float) $r['paid_total'], $rate), 2);
+                    $mine = $type === 'invoice'
+                        ? round(IssuedCzkAmounts::due($r, $rate) - IssuedCzkAmounts::allocated($r, (float) $r['paid_total'], $rate ?? 1.0), 2)
+                        : ForeignCurrencyTakeover::toHome((float) $r['amount_to_pay'], $rate);
                     $remaining = $ctx->remaining[$type . '|' . $id] ?? $mine;
                     if ($remaining <= self::TOLERANCE) {
                         continue;

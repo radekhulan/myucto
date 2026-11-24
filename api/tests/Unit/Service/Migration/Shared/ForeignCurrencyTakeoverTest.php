@@ -56,6 +56,21 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         self::assertNull(ForeignCurrencyTakeover::check(ForeignCurrencyTakeover::rate(7.52, 100.0), $items, 752.0));
     }
 
+    public function testIssuedDocumentWithSmallDifferenceKeepsSourceCrownsAndOriginalCurrency(): void
+    {
+        $amounts = [
+            'items' => [['base' => 251.2, 'vat' => 52.76, 'foreign_base' => 10.0, 'foreign_vat' => 2.1]],
+            'base' => 251.2, 'vat' => 52.76, 'total' => 303.96, 'rounding' => 0.0,
+        ];
+        self::assertFalse($this->takeover->decide(5, 'EUR', 25.12, 1.0, $amounts['items'], $amounts['total'])->inForeignCurrency());
+        $issued = $this->takeover->decideIssued(5, 'EUR', 25.12, 1.0, $amounts, 12.10);
+        self::assertSame(2, $issued->currencyId);
+        self::assertSame(25.12, $issued->rate);
+        self::assertSame(12.10, $amounts['total']);
+        self::assertSame(52.76, $amounts['items'][0]['home_vat']);
+        self::assertSame(303.96, $amounts['snapshot']['import_total_with_vat_czk']);
+    }
+
     public function testItemThatDoesNotConvertToSourceCrownsKeepsDocumentInCrowns(): void
     {
         // Zdroj spočítal daň z korunového základu (2 512,50 × 21 % = 527,63) - to sedí; ale

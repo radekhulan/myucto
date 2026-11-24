@@ -26,6 +26,7 @@ use MyInvoice\Service\Tax\VatPaymentInstruction;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PurchaseCostSql;
 
 /**
@@ -233,8 +234,9 @@ final class CrmAggregationService
                 PurchaseCostSql::cost('pi', $payer), PurchaseCostSql::deductionJoin('pi', $supplierId)],
         ] as [$metric, $table, $alias, $date, $predicate, $amount, $join]) {
             $known = "(cur.code = 'CZK' OR {$alias}.exchange_rate > 0 OR COALESCE({$amount}, 0) = 0)";
+            $amountCzk = $table === 'invoices' ? CzkAmountExpr::issuedRevenue($payer, $alias) : CzkAmountExpr::amount($amount, $alias);
             $find = $this->db->pdo()->prepare("SELECT cur.code AS currency,
-                SUM(CASE WHEN {$known} THEN COALESCE({$amount}, 0) * IF(cur.code = 'CZK', 1, COALESCE({$alias}.exchange_rate, 1)) ELSE 0 END) AS known_amount,
+                SUM(CASE WHEN {$known} THEN COALESCE({$amountCzk}, 0) ELSE 0 END) AS known_amount,
                 SUM(CASE WHEN {$known} THEN 1 ELSE 0 END) AS known_count,
                 SUM(CASE WHEN {$known} THEN 0 ELSE 1 END) AS missing_count
                 FROM {$table} {$alias}{$join} JOIN currencies cur ON cur.id = {$alias}.currency_id
@@ -279,8 +281,8 @@ final class CrmAggregationService
             "SELECT cur.code AS currency,
                     SUM(COALESCE(i.total_with_vat, 0))    AS g,
                     SUM(COALESCE(i.total_without_vat, 0)) AS n,
-                    SUM(COALESCE(i.total_with_vat, 0)    * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(i.total_without_vat, 0) * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS nc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(false) . ") AS gc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(true) . ") AS nc,
                     COUNT(*) AS cnt
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -455,8 +457,8 @@ final class CrmAggregationService
         $draft = $pdo->prepare(
             "SELECT cur.code AS currency,
                     SUM(COALESCE(i.total_with_vat,0))    AS g, SUM(COALESCE(i.total_without_vat,0)) AS n,
-                    SUM(COALESCE(i.total_with_vat,0)    * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(i.total_without_vat,0) * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS nc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(false) . ") AS gc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(true) . ") AS nc,
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -478,8 +480,8 @@ final class CrmAggregationService
         $prof = $pdo->prepare(
             "SELECT cur.code AS currency,
                     SUM(COALESCE(i.total_with_vat,0))    AS g, SUM(COALESCE(i.total_without_vat,0)) AS n,
-                    SUM(COALESCE(i.total_with_vat,0)    * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(i.total_without_vat,0) * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS nc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(false) . ") AS gc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(true) . ") AS nc,
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -532,8 +534,8 @@ final class CrmAggregationService
         $rev = $pdo->prepare(
             "SELECT DATE_FORMAT(" . self::REV_DATE . ", '%Y-%m') AS ym, cur.code AS currency,
                     SUM(COALESCE(i.total_with_vat,0)) AS g, SUM(COALESCE(i.total_without_vat,0)) AS n,
-                    SUM(COALESCE(i.total_with_vat,0)    * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(i.total_without_vat,0) * COALESCE(IF(cur.code='CZK',1,i.exchange_rate),1)) AS nc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(false) . ") AS gc,
+                    SUM(" . CzkAmountExpr::issuedRevenue(true) . ") AS nc,
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -599,10 +601,10 @@ final class CrmAggregationService
         $params = [$supplierId, $start];
         $sql = "
             SELECT i.client_id, c.company_name,
-                   SUM(COALESCE($rev, 0) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS revenue_czk,
+                   SUM(" . CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat') . ") AS revenue_czk,
                    COUNT(*) AS invoice_count,
                    GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
-                   SUM(SUM(COALESCE($rev, 0) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1))) OVER () AS total_all
+                   SUM(SUM(" . CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat') . ")) OVER () AS total_all
               FROM invoices i
               JOIN clients c ON c.id = i.client_id
               JOIN currencies cur ON cur.id = i.currency_id
@@ -858,7 +860,7 @@ final class CrmAggregationService
             "SELECT i.id, COALESCE(i.varsymbol, '') AS doc_no, COALESCE(cl.company_name, '') AS partner_name,
                     i.issue_date, i.due_date, COALESCE(c.code, 'CZK') AS currency,
                     COALESCE(i.amount_to_pay, 0) - COALESCE(i.paid_total, 0) AS remaining,
-                    CASE WHEN COALESCE(c.code, 'CZK') = 'CZK' THEN 1 ELSE COALESCE(i.exchange_rate, 1) END AS rate
+                    " . CzkAmountExpr::issuedRemaining('i', 'c') . " AS remaining_czk
                FROM invoices i
           LEFT JOIN currencies c ON c.id = i.currency_id
           LEFT JOIN clients cl ON cl.id = i.client_id
@@ -879,7 +881,7 @@ final class CrmAggregationService
             'due_date' => (string) $r['due_date'],
             'currency' => (string) $r['currency'],
             'remaining' => round((float) $r['remaining'], 2),
-            'remaining_czk' => round((float) $r['remaining'] * (float) $r['rate'], 2),
+            'remaining_czk' => round((float) $r['remaining_czk'], 2),
         ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
     }
 
@@ -1143,7 +1145,7 @@ final class CrmAggregationService
         $params = [$supplierId, $start];
         $sql = "
             SELECT i.revenue_category_id, rc.code, rc.label,
-                   SUM(COALESCE($rev, 0) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS total,
+                   SUM(" . CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat') . ") AS total,
                    COUNT(*) AS cnt
               FROM invoices i
          LEFT JOIN revenue_categories rc ON rc.id = i.revenue_category_id
@@ -1185,7 +1187,7 @@ final class CrmAggregationService
             "SELECT c.id AS client_id, c.company_name,
                     MAX(i.issue_date) AS last_invoice_date,
                     DATEDIFF(?, MAX(i.issue_date)) AS days_since,
-                    SUM(COALESCE($rev, 0) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS total_revenue,
+                    SUM(" . CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat') . ") AS total_revenue,
                     GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies
                FROM clients c
                JOIN invoices i ON i.client_id = c.id AND i.status NOT IN ('draft', 'cancelled')

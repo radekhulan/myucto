@@ -143,7 +143,8 @@ final class IntrastatService
             }
 
             $itemQuantity = self::nonZeroDecimal($candidate['invoice_item_quantity'] ?? null);
-            $itemValue = self::decimal($candidate['invoice_item_value'] ?? null);
+            $sourceCzk = self::decimal($candidate['invoice_item_source_czk'] ?? null);
+            $itemValue = $sourceCzk ?? self::decimal($candidate['invoice_item_value'] ?? null);
             $itemValuePositive = $itemValue !== null && bccomp(self::absolute($itemValue), '0', 8) === 1;
             if (empty($candidate['invoice_item_id']) && empty($candidate['purchase_invoice_item_id'])) {
                 $issues[] = $this->issue(
@@ -214,7 +215,7 @@ final class IntrastatService
                     self::absolute($itemValue),
                     $qty,
                     self::absolute($itemQuantity),
-                    $rate,
+                    $sourceCzk !== null ? '1' : $rate,
                 );
                 if (preg_match('/^[0-9]{1,14}$/D', $roundedValue) !== 1) {
                     $issues[] = $this->issue(

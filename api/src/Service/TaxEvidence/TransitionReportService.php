@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\TaxEvidence;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockReportService;
 use MyInvoice\Repository\TaxConstantsRepository;
@@ -117,13 +118,14 @@ final class TransitionReportService
         ";
         $sql = "
             SELECT t.id, t.doc_no, t.partner, t.currency, t.exchange_rate, t.issue_date, t.due_date,
+                   t.amount_to_pay, t.paid_before, t.import_amount_to_pay_czk,
                    (t.amount_to_pay - t.paid_before) AS amount
               FROM (
                 SELECT i.id, COALESCE(i.varsymbol, '') AS doc_no, COALESCE(cl.company_name, '') AS partner,
                        COALESCE(cur.code, 'CZK') AS currency,
                        COALESCE(i.amount_to_pay, 0) AS amount_to_pay,
                        {$paidBefore} AS paid_before,
-                       i.exchange_rate,
+                       i.exchange_rate, i.import_amount_to_pay_czk,
                        i.issue_date, i.due_date, i.invoice_type
                   FROM invoices i
              LEFT JOIN currencies cur ON cur.id = i.currency_id
@@ -186,14 +188,16 @@ final class TransitionReportService
             $currency = (string) $r['currency'];
             $amount   = round((float) $r['amount'], 2);
             $fallback = $r['exchange_rate'] === null ? null : (float) $r['exchange_rate'];
-            $rate     = $currency === 'CZK' ? 1.0 : $this->rateAt($currency, $asOf, $fallback);
+            $amountCzk = ($r['import_amount_to_pay_czk'] ?? null) === null
+                ? round($amount * ($currency === 'CZK' ? 1.0 : $this->rateAt($currency, $asOf, $fallback)), 2)
+                : IssuedCzkAmounts::allocated($r, $amount, $fallback ?? 1.0, (float) ($r['paid_before'] ?? 0.0));
             return [
                 'id'         => (int) $r['id'],
                 'doc_no'     => (string) $r['doc_no'],
                 'partner'    => (string) $r['partner'],
                 'currency'   => $currency,
                 'amount'     => $amount,
-                'amount_czk' => round($amount * $rate, 2),
+                'amount_czk' => $amountCzk,
                 'issue_date' => (string) $r['issue_date'],
                 'due_date'   => (string) $r['due_date'],
             ];
@@ -244,7 +248,7 @@ final class TransitionReportService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, COALESCE(i.varsymbol,'') doc_no, COALESCE(cl.company_name,'') partner,
-                    COALESCE(c.code,'CZK') currency, i.exchange_rate,
+                    COALESCE(c.code,'CZK') currency, i.exchange_rate, i.amount_to_pay, i.import_amount_to_pay_czk,
                     i.issue_date, i.due_date, COALESCE(SUM(ip.amount),0) amount
                FROM invoices i JOIN invoice_payments ip ON ip.invoice_id=i.id AND ip.paid_on<=?
           LEFT JOIN clients cl ON cl.id=i.client_id LEFT JOIN currencies c ON c.id=i.currency_id

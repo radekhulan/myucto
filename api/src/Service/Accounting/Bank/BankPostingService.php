@@ -50,6 +50,7 @@ use MyInvoice\Service\Currency\ExchangeRateUnavailableException;
 use MyInvoice\Service\Currency\FixedExchangeRateService;
 use MyInvoice\Service\Currency\PaymentExchangeRate;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Ai\AiKillSwitchService;
 use MyInvoice\Service\Ai\AiSuggestionService;
@@ -710,7 +711,7 @@ final class BankPostingService
 
         // Alokace z invoice_payments (idempotentně přes bank_transaction_id).
         $stmt = $this->db->pdo()->prepare(
-            'SELECT invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ?'
+            'SELECT id, invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ?'
         );
         $stmt->execute([$txId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -758,6 +759,7 @@ final class BankPostingService
                     (float) $allocations[0]['amount'],
                     (string) $receivable,
                     (string) $bankAcc,
+                    isset($allocations[0]['id']) ? (int) $allocations[0]['id'] : null,
                 );
             }
         }
@@ -867,6 +869,7 @@ final class BankPostingService
         float $foreignAmount,
         string $receivable,
         string $bankAcc,
+        ?int $paymentId,
     ): array {
         $invoice = $this->loadInvoice($supplierId, $invoiceId);
         if ($invoice === null
@@ -883,7 +886,7 @@ final class BankPostingService
         ), $receivable);
         $rate = $this->predpisFxRate($supplierId, $saldo, $invoice);
         $foreign = round($foreignAmount, 2);
-        $predpisCzk = FxPaymentSettlement::expectedLocalAmount($foreign, $rate);
+        $predpisCzk = $this->incomingPredpisAmount($supplierId, $invoice, $foreign, $rate, $paymentId);
         $bankCzk = round(abs((float) $tx['amount']), 2);
 
         $lines = [
@@ -1346,7 +1349,7 @@ final class BankPostingService
         $absForeign = round(abs((float) $tx['amount']), 2);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ?'
+            'SELECT id, invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ?'
         );
         $stmt->execute([$txId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -1395,9 +1398,11 @@ final class BankPostingService
             // Fallback (bez invoice_payments) u stejnoměnové úhrady = plná částka pohybu.
             $allocForeign = $usedFallback ? $absForeign : round((float) $a['amount'], 2);
             $allocForeignSum += $allocForeign;
-            [$counter, $fxRate] = $this->incomingFxSaldo($supplierId, $invId, $receivable, $currency);
+            [$counter, $fxRate, $amountCzk] = $this->incomingFxSaldo(
+                $supplierId, $invId, $receivable, $currency, $allocForeign, $paymentRate, isset($a['id']) ? (int) $a['id'] : null,
+            );
             $lines[] = $this->withFxTrace(
-                $this->line($counter, 'credit', round($allocForeign * $fxRate, 2)),
+                $this->line($counter, 'credit', $amountCzk),
                 $currency, $fxRate, $allocForeign,
             );
         }
@@ -1568,6 +1573,9 @@ final class BankPostingService
         $stmt->execute([$txId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         if ($allocations === []) {
+            if ($tx['matched_invoice_id'] !== null) {
+                return $this->buildOutgoingIssuedRefundFx($supplierId, $tx, $cashAccount);
+            }
             throw new PostingException('document_not_posted', 'Spárovaná odchozí cizoměnová platba nemá alokaci na přijatou fakturu.');
         }
 
@@ -1606,6 +1614,45 @@ final class BankPostingService
         $this->assertFxAllocation($absForeign, round($allocForeignSum, 2));
         $remainderCzk = round(($absForeign - round($allocForeignSum, 2)) * $paymentRate, 2);
         $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], $remainderCzk, false);
+        return ['lines' => $lines];
+    }
+
+    private function buildOutgoingIssuedRefundFx(int $supplierId, array $tx, ?string $cashAccount): array
+    {
+        $invoiceId = (int) $tx['matched_invoice_id'];
+        $doc = $this->loadInvoice($supplierId, $invoiceId);
+        $currency = $this->effectiveCurrency($tx);
+        if ($doc === null || $doc['currency'] !== $currency || $doc['import_amount_to_pay_czk'] === null
+            || !RefundDocument::isRefundDocument($doc)) {
+            throw new PostingException('fx_not_supported', 'Cizoměnovou vratku nelze automaticky zaúčtovat.');
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pm.amount, (SELECT COALESCE(SUM(prior.amount), 0) FROM payment_matches prior
+                                 WHERE prior.supplier_id = pm.supplier_id AND prior.invoice_id = pm.invoice_id AND prior.id < pm.id) AS prior_amount
+               FROM payment_matches pm
+              WHERE pm.supplier_id = ? AND pm.bank_transaction_id = ? AND pm.invoice_id = ? AND pm.purchase_invoice_id IS NULL'
+        );
+        $stmt->execute([$supplierId, (int) $tx['id'], $invoiceId]);
+        $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($payments) !== 1) {
+            throw new PostingException('allocation_mismatch', 'Cizoměnová vratka nemá jednoznačnou alokaci na vydaný doklad.');
+        }
+        $foreign = (float) $payments[0]['amount'];
+        $bankForeign = abs((float) $tx['amount']);
+        $this->assertFxAllocation($bankForeign, $foreign);
+
+        $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'invoice', $invoiceId, true, 'Vydaný dobropis #' . $invoiceId . ' nemá zaúčtovaný předpis.',
+        ), $rule['credit_account_code'] ?? '311');
+        $rate = $this->predpisFxRate($supplierId, $saldo, $doc);
+        $czk = IssuedCzkAmounts::allocated($doc, $foreign, $rate, (float) $payments[0]['prior_amount']);
+        $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
+        $lines = [
+            $this->withFxTrace($this->line($saldo['code'], 'debit', $czk), $currency, $rate, $foreign),
+            $this->line($cashAccount ?? ($rule['debit_account_code'] ?? '221'), 'credit', round($bankForeign * $paymentRate, 2)),
+        ];
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], round(($bankForeign - $foreign) * $paymentRate, 2), false);
         return ['lines' => $lines];
     }
 
@@ -1685,12 +1732,11 @@ final class BankPostingService
     /**
      * Saldokonto + kurz předpisu pro cizoměnovou příchozí úhradu FV. Scope B6 (EUR faktura
      * placená EUR): měna faktury == měna transakce a faktura má ZAÚČTOVANÝ nestornovaný
-     * předpis (guard H1). Proforma (cizoměnová záloha), CZK faktura placená cizí měnou i
-     * křížová měna → fx_not_supported (skip, ruční zaúčtování).
+     * předpis (guard H1). U převzaté proformy vzniká závazek z přijaté zálohy až úhradou.
      *
-     * @return array{0:string, 1:float} [receivable account, kurz předpisu]
+     * @return array{0:string, 1:float, 2:float} [účet, kurz, částka v Kč]
      */
-    private function incomingFxSaldo(int $supplierId, int $invoiceId, string $receivable, string $txCurrency): array
+    private function incomingFxSaldo(int $supplierId, int $invoiceId, string $receivable, string $txCurrency, float $amount, float $paymentRate, ?int $paymentId): array
     {
         $inv = $this->loadInvoice($supplierId, $invoiceId);
         if ($inv === null) {
@@ -1700,13 +1746,35 @@ final class BankPostingService
             throw new PostingException('fx_not_supported', 'Měna úhrady neodpovídá měně faktury #' . $invoiceId . '.');
         }
         if ((string) $inv['invoice_type'] === 'proforma') {
+            if ($inv['import_amount_to_pay_czk'] !== null) {
+                $rule = $this->postingRules->resolve($supplierId, 'advance.received.collection');
+                return [($rule['credit_account_code'] ?? null) ?: '324', $paymentRate, round($amount * $paymentRate, 2)];
+            }
             throw new PostingException('fx_not_supported', 'Cizoměnová záloha (proforma) se zatím neúčtuje automaticky.');
         }
         $saldo = $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'invoice', $invoiceId, false,
             'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.',
         ), $receivable);
-        return [$receivable, $this->predpisFxRate($supplierId, $saldo, $inv)];
+        $rate = $this->predpisFxRate($supplierId, $saldo, $inv);
+        $counter = $inv['import_amount_to_pay_czk'] !== null ? $saldo['code'] : $receivable;
+        return [$counter, $rate, $this->incomingPredpisAmount($supplierId, $inv, $amount, $rate, $paymentId)];
+    }
+
+    private function incomingPredpisAmount(int $supplierId, array $invoice, float $amount, float $rate, ?int $paymentId): float
+    {
+        $previous = 0.0;
+        if ($invoice['import_amount_to_pay_czk'] !== null) {
+            $previous = (float) $invoice['paid_total'];
+            if ($paymentId !== null) {
+                $stmt = $this->db->pdo()->prepare(
+                    'SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND id < ?'
+                );
+                $stmt->execute([(int) $invoice['id'], $supplierId, $paymentId]);
+                $previous = (float) $stmt->fetchColumn();
+            }
+        }
+        return IssuedCzkAmounts::allocated($invoice, $amount, $rate, $previous);
     }
 
     /**
@@ -5106,7 +5174,7 @@ final class BankPostingService
     private function loadInvoice(int $supplierId, int $invoiceId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.id, i.invoice_type, i.status, i.exchange_rate, i.amount_to_pay, i.paid_total,
+            'SELECT i.id, i.invoice_type, i.status, i.exchange_rate, i.amount_to_pay, i.paid_total, i.parent_invoice_id, i.import_amount_to_pay_czk,
                     cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?'

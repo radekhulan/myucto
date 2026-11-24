@@ -39,8 +39,10 @@ final class MigratedDocumentWriter
                  total_without_vat, total_vat, total_with_vat, rounding, advance_paid_amount, paid_total, paid_at,
                  status, booked_at, booked_by, vat_classification_code, reverse_charge, payment_method,
                  prices_include_vat, created_by, supplier_snapshot, bank_snapshot, parent_invoice_id,
-                 corrective_delivered_on)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                 corrective_delivered_on, import_total_without_vat_czk, import_total_vat_czk, import_total_with_vat_czk,
+                 import_amount_to_pay_czk, import_advance_paid_czk)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?)')->execute([
             $d->supplierId,
             $d->invoiceType,
             $d->clientId,
@@ -73,6 +75,11 @@ final class MigratedDocumentWriter
             $d->bankSnapshot,
             $d->parentInvoiceId,
             $d->correctiveDeliveredOn,
+            $d->czkSnapshot['import_total_without_vat_czk'] ?? null,
+            $d->czkSnapshot['import_total_vat_czk'] ?? null,
+            $d->czkSnapshot['import_total_with_vat_czk'] ?? null,
+            $d->czkSnapshot['import_amount_to_pay_czk'] ?? null,
+            $d->czkSnapshot['import_advance_paid_czk'] ?? null,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -92,8 +99,8 @@ final class MigratedDocumentWriter
                 (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
                  oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type, oss_needs_manual_review,
-                 oss_taxable_amount_return, oss_vat_amount_return, revenue_account_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                 oss_taxable_amount_return, oss_vat_amount_return, revenue_account_code, import_tax_base_czk, import_tax_vat_czk)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
             $invoiceId, $item->description, $item->quantity, $item->unit, $item->unitPrice,
             $item->vatRateId, $item->vatRateSnapshot, $item->totalWithoutVat, $item->totalVat, $item->totalWithVat,
             $orderIndex, $item->vatClassificationCode,
@@ -101,6 +108,8 @@ final class MigratedDocumentWriter
             $oss['oss_supply_type'], $oss['oss_needs_manual_review'],
             $oss['oss_taxable_amount_return'], $oss['oss_vat_amount_return'],
             $item->revenueAccountCode,
+            $item->importTaxBaseCzk,
+            $item->importTaxVatCzk,
         ]);
     }
 

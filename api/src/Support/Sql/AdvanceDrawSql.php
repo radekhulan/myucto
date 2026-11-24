@@ -30,6 +30,20 @@ final class AdvanceDrawSql
         return "{$item}.total_with_vat < 0 AND COALESCE({$item}.item_kind, 'standard') <> 'discount'";
     }
 
+    /** Čerpání zálohy z hlavičky a jejích odpočtových řádků v Kč. Bez řádků je 0. */
+    public static function parentDrawCzk(string $final, string $rate): string
+    {
+        self::assertAlias($final);
+        $advance = \MyInvoice\Service\Invoice\IssuedCzkAmounts::advancePaidSql($final, "{$final}.advance_paid_amount * {$rate}");
+        return "COALESCE((SELECT CASE WHEN -SUM(di.total_without_vat) > 0.005
+                                    THEN ROUND({$advance} - SUM(COALESCE(di.import_tax_base_czk, di.total_without_vat * {$rate})), 2)
+                                    ELSE 0 END
+                            FROM invoice_items di
+                           WHERE di.invoice_id = {$final}.id
+                             AND COALESCE(di.advance_invoice_id, {$final}.parent_invoice_id) = {$final}.parent_invoice_id
+                             AND " . self::deductionLine('di') . '), 0)';
+    }
+
     /**
      * Odpočtové řádky konečných faktur, které čerpají zálohu `$advanceExpr` (odvozená tabulka
      * se sloupci `final_id`, `status`, `exchange_rate`, `currency_id`, `item_id`, `vat_rate_id`,
@@ -39,7 +53,7 @@ final class AdvanceDrawSql
     public static function advanceLines(string $supplierExpr, string $advanceExpr): string
     {
         $cols = 'f.id AS final_id, f.status, f.exchange_rate, f.currency_id, ii.id AS item_id, ii.vat_rate_id,
-                 ii.total_without_vat, ii.total_vat, ii.total_with_vat';
+                 ii.total_without_vat, ii.total_vat, ii.total_with_vat, ii.import_tax_base_czk, ii.import_tax_vat_czk';
         return "SELECT {$cols}
                   FROM invoice_items ii
                   JOIN invoices f ON f.id = ii.invoice_id
@@ -98,8 +112,8 @@ final class AdvanceDrawSql
     public static function itemDraws(string $supplierExpr): string
     {
         return "SELECT f.supplier_id, ii.invoice_id AS final_invoice_id, ii.advance_invoice_id,
-                       SUM(ROUND(-ii.total_without_vat * CASE WHEN dcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0
-                                                            THEN 1 ELSE f.exchange_rate END, 2)) AS amount
+                       SUM(COALESCE(-ii.import_tax_base_czk, ROUND(-ii.total_without_vat * CASE WHEN dcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0
+                                                            THEN 1 ELSE f.exchange_rate END, 2))) AS amount
                   FROM invoice_items ii
                   JOIN invoices f ON f.id = ii.invoice_id
                   JOIN currencies dcur ON dcur.id = f.currency_id

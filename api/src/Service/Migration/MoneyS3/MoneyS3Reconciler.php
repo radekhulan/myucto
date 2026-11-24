@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
@@ -195,7 +196,7 @@ final class MoneyS3Reconciler
         $spec = [
             // [klíč, tabulka, částka dokladu, druh v mapě, účet, znaménko řádku]
             ['purchase_invoices', 'purchase_invoices', self::documentTotal(), 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
-            ['issued_invoices', 'invoices', self::documentTotal(), 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', IssuedCzkAmounts::grossSql('d', self::documentTotal()), 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             // Znaménko pokladního dokladu nese doc_type (in = příjem na MD 211, out = výdej z 211).
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
@@ -245,7 +246,7 @@ final class MoneyS3Reconciler
         $total = self::documentTotal();
         return [
             'purchase_invoices' => ['purchase_invoices', $total, 'purchase_invoice', 'purchase_invoice', '321', true],
-            'issued_invoices' => ['invoices', $total, 'invoice', 'invoice', '311', false],
+            'issued_invoices' => ['invoices', IssuedCzkAmounts::grossSql('d', $total), 'invoice', 'invoice', '311', false],
             'cash' => ['cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', false],
         ];
     }

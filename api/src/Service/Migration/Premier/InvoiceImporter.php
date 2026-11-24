@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
@@ -245,7 +246,16 @@ final class InvoiceImporter
         $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'))));
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         $reverse = VatReturnLineClassifier::isDomesticReverseSale($codes);
-        [$fx, $items, $amounts] = $this->takeOverCurrency($ctx, $doc, $items, ForeignCurrencyTakeover::paymentBlock((float) ($doc['advance_deducted'] ?? 0.0), (float) $doc['paid'], (float) $doc['total'] - (float) ($doc['advance_deducted'] ?? 0.0)));
+        $advance = (float) ($doc['advance_deducted'] ?? 0.0);
+        $amounts = ['items' => $items, 'base' => (float) $doc['base'], 'vat' => (float) $doc['vat'],
+            'total' => (float) $doc['total'], 'rounding' => (float) $doc['rounding'], 'advance' => $advance, 'paid' => (float) $doc['paid']];
+        $rate = (float) $doc['factor'] !== 1.0 ? (float) $doc['factor'] : 0.0;
+        $fx = $this->foreignCurrency->decideIssued($ctx->supplierId, (string) $doc['currency'], $rate, 1.0, $amounts,
+            blocked: ForeignCurrencyTakeover::paymentBlock($advance, (float) $doc['paid'], (float) $doc['total'] - $advance));
+        if ($fx->inForeignCurrency()) {
+            $amounts['paid'] = ForeignCurrencyTakeover::paidInForeignCurrency((float) $doc['paid'], $amounts['total']);
+        }
+        $items = $amounts['items'];
         try {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
@@ -277,6 +287,7 @@ final class InvoiceImporter
                 bookedBy: $booked ? $ctx->userOrNull() : null,
                 vatClassificationCode: count($codes) === 1 ? $codes[0] : null,
                 paymentMethod: self::paymentMethod($doc['payment_form']),
+                czkSnapshot: $amounts['snapshot'] ?? [],
             ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
@@ -292,6 +303,8 @@ final class InvoiceImporter
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['target_code'],
                 $item['oss'],
+                importTaxBaseCzk: $item['home_base'] ?? null,
+                importTaxVatCzk: $item['home_vat'] ?? null,
             );
         }
         $this->writer->insertIssuedItems($id, $rows);
@@ -630,7 +643,9 @@ final class InvoiceImporter
     private function reportChanged(PremierContext $ctx, string $step, string $table, int $id, string $label, float $total): void
     {
         // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
-        $stmt = $this->stmt('changed_' . $table, 'SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $home = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        $total = $table === 'invoices' ? IssuedCzkAmounts::grossSql('d', $home) : $home;
+        $stmt = $this->stmt('changed_' . $table, "SELECT {$total} FROM {$table} d WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $total) < 0.005) {

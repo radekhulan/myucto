@@ -9565,8 +9565,9 @@ paths:
       summary: Kontrola dat po převodu z jiného účetního programu (přehled)
       description: >-
         Kontroly nejčastějších chyb dat převzatých z POHODY, Money S3, ABRA Flexi a dalších programů
-        se souhrnem po kontrolách. Jen kontroly, které se firmy týkají podle zdroje převodu. Čte,
-        nic neopravuje; opravu provádí jen přihlášený uživatel v aplikaci.
+        se souhrnem po kontrolách podle zdroje převodu. Kontrola foreign_issued_in_czk ukáže vydané
+        doklady, které převod z POHODY uložil v Kč. Opravu těchto dokladů spouští správce příkazem
+        repair-pohoda-foreign-issued.php s původním exportem.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -9583,7 +9584,7 @@ paths:
       summary: Detail kontroly dat po převodu s jednotlivými nálezy
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: key, required: true, schema: { type: string, pattern: '^[a-z0-9_]+$' }, description: 'Klíč kontroly z přehledu, např. asset_account_undetermined.' }
+        - { in: path, name: key, required: true, schema: { type: string, pattern: '^[a-z0-9_]+$' }, description: 'Klíč kontroly z přehledu, např. foreign_issued_in_czk.' }
         - { in: query, name: state, schema: { type: string, enum: [fixable, locked, review] }, description: Jen nálezy v daném stavu. }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -52256,7 +52257,7 @@ components:
       type: object
       required: [key, title, fixable, manual, status, count, fixable_count, locked_count, review_count, amount_czk, fixable_amount_czk, notes]
       properties:
-        key: { type: string, description: 'Klíč kontroly, např. settled_without_payment, foreign_bank_in_czk, tax_document_advance_link.' }
+        key: { type: string, description: 'Klíč kontroly, např. settled_without_payment, foreign_issued_in_czk, tax_document_advance_link.' }
         title: { type: string }
         fixable: { type: boolean, description: Kontrola má jednoznačnou opravu. }
         manual: { type: string, description: 'Kapitola manuálu s postupem (126_Kontrola_dat_po_prevodu#…).' }

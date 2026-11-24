@@ -412,12 +412,15 @@ Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do účtov�
 Protokol ho vypíše i s důvodem. Po opravě druhu dokladu nebo klasifikace
 DPH ho potvrďte.
 
-**Doklad v cizí měně** koncept není. Převezme se v měně a kurzu dokladu,
-když základ a daň po sazbách v měně přepočtené kurzem dávají na haléř koruny,
-které Money vykázalo v přiznání; DPH, kontrolní hlášení i deník tak zůstávají
-v Kč přesně stejné. Jinak (a u samovyměření nebo měny, kterou firma nemá
-v číselníku měn) se převezme v Kč a poznámka dokladu i protokol uvedou důvod. Přijatá faktura s členěním „do přiznání nezahrnovat" se
-převezme bez nároku na odpočet.
+**Doklad v cizí měně.** Vydaný doklad se převezme v měně a kurzu dokladu,
+pokud Money poskytlo částky po sazbách v obou měnách a jejich přepočet se vejde
+do tolerance zaokrouhlení. Základy a daň v Kč se ukládají podle zdroje a používají
+se pro DPH i kontrolní hlášení. U přijatého dokladu musí přepočet odpovídat na
+haléř. Doklad bez potřebných částek, při větší odchylce, samovyměření nebo při
+chybějící měně v číselníku se převezme v Kč s důvodem v poznámce a protokolu.
+Vydaný doklad s úhradou v daňové evidenci se také převezme v Kč kvůli zachování
+párování pohybů v peněžním deníku.
+Přijatá faktura s členěním „do přiznání nezahrnovat" se převezme bez nároku na odpočet.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FP001/2025`. Money čísluje řady každý rok od začátku, takže stejné číslo

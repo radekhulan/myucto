@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
@@ -285,7 +286,7 @@ final class AdvanceReceiptMatcher
         $filler = MoneyS3SettledPayments::fillerSql('ip');
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, i.varsymbol, COALESCE(i.client_id, 0) AS client_id, COALESCE(cl.company_name, '') AS client, DATE(i.paid_at) AS paid_on,
-                    cur.code AS currency, i.exchange_rate, i.paid_total - COALESCE(pay.recorded, 0) AS room
+                    cur.code AS currency, i.exchange_rate, i.amount_to_pay, i.import_amount_to_pay_czk, i.paid_total - COALESCE(pay.recorded, 0) AS room
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
                LEFT JOIN clients cl ON cl.id = i.client_id AND cl.supplier_id = i.supplier_id
@@ -302,7 +303,7 @@ final class AdvanceReceiptMatcher
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $out[] = ['id' => (int) $r['id'], 'number' => (string) $r['varsymbol'], 'client_id' => (int) $r['client_id'], 'client' => (string) $r['client'],
                 'paid_on' => (string) $r['paid_on'], 'currency' => (string) $r['currency'],
-                'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                'rate' => IssuedCzkAmounts::settlementRate($r) ?: null,
                 'room' => round((float) $r['room'], 2)];
         }
         return $out;

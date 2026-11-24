@@ -263,7 +263,32 @@ počáteční stav účtu nejvýše o 1 Kč. Náhled ukáže původní a navrže
 Pokud účet nelze jednoznačně určit nebo jeho počáteční stav nestačí, otevřete kartu
 a ověřte její účet proti původní evidenci POHODY.
 
-## 126.15 Související kapitoly
+## 126.15 Vydané doklady v cizí měně převzaté v Kč
+
+Kontrola ukáže vydané faktury, zálohové faktury a dobropisy z POHODY, které mají v poznámce
+„doklad v EUR, převzat v Kč" (případně jinou měnu). Počet dokladů, které čekají na původní export,
+najdete v detailu kontroly. Při novém převodu se drobné rozdíly zaokrouhlení ukládají jako částky
+v Kč ze zdroje vedle částek v měně dokladu.
+
+Opravu spouští správce instalace. Použijte původní ZIP z exportního nástroje nebo rozbalenou složku
+agendy. IČO firmy, IČO souborů exportu a rok agendy musí odpovídat běhu převodu, který doklad založil.
+
+```bash
+php api/bin/repair-pohoda-foreign-issued.php --all-pohoda
+php api/bin/repair-pohoda-foreign-issued.php --supplier=12 --export=/cesta/12345678_2026.zip
+php api/bin/repair-pohoda-foreign-issued.php --supplier=12 --export=/cesta/12345678_2026.zip --commit
+```
+
+První příkaz vypíše dotčené doklady. Druhý provede celý zápis nanečisto a vrátí ho. Třetí potvrdí
+převod dokladů, u kterých evidence DPH, kontrolní hlášení, saldokonto v Kč a peněžní deník zůstaly
+stejné. Převod se zapisuje do auditní stopy. Volba `--quiet` vypíše jen souhrny.
+
+Doklady v chráněném období se pouze ohlásí. Ke kontrole zůstávají také doklady s evidovanou úhradou,
+zápočtem, odeslaným e-mailem, upomínkou, vystaveným PDF, vazbou na jiný doklad, nedaňovou zálohou
+v Kč nebo položkami OSS. Oprava ponechá v Kč i doklad, u kterého původní export nesouhlasí nebo
+částky v měně překračují toleranci pro zaokrouhlení.
+
+## 126.16 Související kapitoly
 
 - [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)

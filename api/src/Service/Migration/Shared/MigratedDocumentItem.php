@@ -36,6 +36,7 @@ final class MigratedDocumentItem
         public readonly ?string $expenseAccountCode = null,
         public readonly ?string $revenueAccountCode = null,
         public readonly ?float $importTaxBaseCzk = null,
+        public readonly ?float $importTaxVatCzk = null,
     ) {}
 
     /**
@@ -55,6 +56,8 @@ final class MigratedDocumentItem
         ?string $vatClassificationCode,
         array $oss,
         ?string $revenueAccountCode = null,
+        ?float $importTaxBaseCzk = null,
+        ?float $importTaxVatCzk = null,
     ): self {
         $missing = array_diff(self::OSS_KEYS, array_keys($oss));
         if ($missing !== []) {
@@ -78,6 +81,8 @@ final class MigratedDocumentItem
             null,
             null,
             $revenueAccountCode,
+            $importTaxBaseCzk,
+            $importTaxVatCzk,
         );
     }
 

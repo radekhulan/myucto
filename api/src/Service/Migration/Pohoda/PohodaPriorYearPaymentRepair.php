@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\PohodaImportRepository;
@@ -174,7 +175,7 @@ final class PohodaPriorYearPaymentRepair
         $types = "'" . implode("','", PohodaPriorYearPayments::PAYABLE_TYPES) . "'";
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS document_no, i.invoice_type, i.status, i.issue_date,
-                    cur.code AS currency, i.exchange_rate, i.amount_to_pay, i.paid_total,
+                    cur.code AS currency, i.exchange_rate, i.amount_to_pay, i.import_amount_to_pay_czk, i.paid_total,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = i.id) AS paid_before
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -187,12 +188,12 @@ final class PohodaPriorYearPaymentRepair
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $amount = round((float) $r['paid_total'] - (float) $r['paid_before'], 2);
-            $rate = (string) $r['currency'] !== 'CZK' && $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : 1.0;
+            $rate = (string) $r['currency'] !== 'CZK' ? (IssuedCzkAmounts::settlementRate($r) ?: 1.0) : 1.0;
             $out[] = [
                 'id' => (int) $r['id'], 'document_no' => (string) $r['document_no'], 'invoice_type' => (string) $r['invoice_type'],
                 'status' => (string) $r['status'], 'issue_date' => (string) $r['issue_date'], 'currency' => (string) $r['currency'],
                 'amount_to_pay' => (float) $r['amount_to_pay'], 'paid_total' => (float) $r['paid_total'],
-                'paid_before' => (float) $r['paid_before'], 'amount' => $amount, 'amount_czk' => round($amount * $rate, 2),
+                'paid_before' => (float) $r['paid_before'], 'amount' => $amount, 'amount_czk' => IssuedCzkAmounts::allocated($r, $amount, $rate, (float) $r['paid_before']),
             ];
         }
         return $out;

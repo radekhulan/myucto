@@ -1251,8 +1251,8 @@ final class SyntheticPohodaExport
      *
      *  - 26FV0020: 2 položky, 100 + 21 EUR a 40 + 8,40 EUR, v Kč 2 512 + 527,52 a 1 004,80 + 211,01
      *    (přesně kurzem 25,12), celkem 169,40 EUR = 4 255,33 Kč, neuhrazená;
-     *  - 26FV0021: 10 + 2,10 EUR, daň v Kč 52,76 místo 52,75 (POHODA ji spočítala jinak než
-     *    přepočtem daně v EUR) - kurzem nevyjde, převod ji musí nechat v Kč;
+     *  - 26FV0021: 329 + 69,09 EUR, základ 8 264,45 a daň 1 735,55 Kč ze zdroje.
+     *    Zdrojový součet je 10 000 Kč, přepočet kurzem 10 000,02 Kč (hranice KH A.4/A.5).
      *  - 26PF0020: přijatá 200 + 42 EUR = 5 024 + 1 055,04 Kč, uhrazená bankou 6 079,04 Kč.
      */
     public static function withForeignCurrencyDocuments(string $agendaDir): void
@@ -1280,7 +1280,7 @@ final class SyntheticPohodaExport
                 $item('Konzultace', 2.0, 2512.0, 527.52, 100.0, 21.0) . $item('Licence', 1.0, 1004.8, 211.01, 40.0, 8.4),
                 3516.8, 738.53, 169.4, '<inv:liquidation><typ:amountHome>4255.33</typ:amountHome></inv:liquidation>')
             . $document('issuedInvoice', self::FOREIGN_MISMATCH, '260021', '2026-02-21',
-                $item('Podpora', 1.0, 251.2, 52.76, 10.0, 2.1), 251.2, 52.76, 12.1, '<inv:liquidation><typ:amountHome>303.96</typ:amountHome></inv:liquidation>'));
+                $item('Podpora', 1.0, 8264.45, 1735.55, 329.0, 69.09), 8264.45, 1735.55, 398.09, '<inv:liquidation><typ:amountHome>10000.00</typ:amountHome></inv:liquidation>'));
         self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
             $document('receivedInvoice', self::FOREIGN_PURCHASE, '2026020', '2026-02-22',
                 $item('Vývoj', 1.0, 5024.0, 1055.04, 200.0, 42.0), 5024.0, 1055.04, 242.0,
@@ -1293,8 +1293,8 @@ final class SyntheticPohodaExport
         self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
             self::entry('Vydané faktury', self::FOREIGN_ISSUED, 'Služby v EUR', 3516.8, '311001', '602000', '2026-02-20')
             . self::entry('Vydané faktury', self::FOREIGN_ISSUED, 'DPH', 738.53, '311001', '343021', '2026-02-20')
-            . self::entry('Vydané faktury', self::FOREIGN_MISMATCH, 'Služby v EUR', 251.2, '311001', '602000', '2026-02-21')
-            . self::entry('Vydané faktury', self::FOREIGN_MISMATCH, 'DPH', 52.76, '311001', '343021', '2026-02-21')
+            . self::entry('Vydané faktury', self::FOREIGN_MISMATCH, 'Služby v EUR', 8264.45, '311001', '602000', '2026-02-21')
+            . self::entry('Vydané faktury', self::FOREIGN_MISMATCH, 'DPH', 1735.55, '311001', '343021', '2026-02-21')
             . self::entry('Přijaté faktury', self::FOREIGN_PURCHASE, 'Vývoj', 5024, '518000', '321001', '2026-02-22')
             . self::entry('Přijaté faktury', self::FOREIGN_PURCHASE, 'DPH', 1055.04, '343011', '321001', '2026-02-22')
             . self::entry('Banka', self::FOREIGN_PURCHASE_BANK, 'Úhrada ' . self::FOREIGN_PURCHASE, 6079.04, '321001', '221001', '2026-02-25'));

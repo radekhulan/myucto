@@ -2594,8 +2594,8 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
-     * Doklad v EUR se převezme v měně a kurzu z POHODY, jen když částky v EUR kurzem dají
-     * přesně Kč z POHODY - DPH, KH i deník pak zůstanou na haléř stejné jako převzetí v Kč.
+     * Doklad v EUR se převezme v měně a kurzu z POHODY i s rozdílem ze zaokrouhlení.
+     * DPH, KH i deník zůstanou na haléř stejné jako převzetí v Kč.
      * Firma B dostane týž export bez částek v cizí měně (převzetí v Kč, jak to bylo dřív)
      * a přiznání i KH obou firem se musí shodovat.
      */
@@ -2632,13 +2632,14 @@ final class PohodaImportTest extends TestCase
         self::assertSame([['50.000000', '100.00', '21.00'], ['40.000000', '40.00', '8.40']], $items->fetchAll(\PDO::FETCH_NUM));
         $purchase = $doc($this->db, 'purchase_invoices', $foreign, SyntheticPohodaExport::FOREIGN_PURCHASE);
         self::assertSame(['EUR', '25.120000', '200.00', '42.00', '242.00', '0.00'], array_slice(array_values($purchase), 0, 6));
-        // Daň v Kč nevychází přepočtem daně v EUR - doklad zůstává v Kč a poznámka říká proč.
         $mismatch = $doc($this->db, 'invoices', $foreign, SyntheticPohodaExport::FOREIGN_MISMATCH);
-        self::assertSame(['CZK', null, '251.20', '52.76', '303.96'], array_slice(array_values($mismatch), 0, 5));
-        self::assertStringContainsString('doklad v EUR, převzat v Kč (daň 1. položky 2,10 × kurz 25,12 nedává 52,76 Kč ze zdroje)', $mismatch['note_below_items']);
-        self::assertSame([1, 1], [self::stepCounts($protocol, 'issued_invoices')['foreign_currency'] ?? 0, self::stepCounts($protocol, 'issued_invoices')['foreign_currency_in_home'] ?? 0]);
+        self::assertSame(['EUR', '25.120000', '329.00', '69.09', '398.09'], array_slice(array_values($mismatch), 0, 5));
+        $mismatchId = $this->documentId('invoices', $foreign, SyntheticPohodaExport::FOREIGN_MISMATCH);
+        $snapshot = $this->db->pdo()->prepare('SELECT import_tax_base_czk, import_tax_vat_czk FROM invoice_items WHERE invoice_id = ?');
+        $snapshot->execute([$mismatchId]);
+        self::assertSame([['8264.45', '1735.55']], $snapshot->fetchAll(\PDO::FETCH_NUM));
+        self::assertSame([2, 0], [self::stepCounts($protocol, 'issued_invoices')['foreign_currency'] ?? 0, self::stepCounts($protocol, 'issued_invoices')['foreign_currency_in_home'] ?? 0]);
         self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['foreign_currency'] ?? 0);
-        self::assertContains('foreign_currency_in_home', $this->messageCodes($protocol));
 
         // Bez částek v měně jsou všechny tři v Kč jako dřív.
         self::assertSame('CZK', $doc($this->db, 'invoices', $home, SyntheticPohodaExport::FOREIGN_ISSUED)['code']);
@@ -2646,9 +2647,14 @@ final class PohodaImportTest extends TestCase
         // Přiznání DPH a KH za únor (všechny tři doklady) na haléř stejné jako převzetí v Kč.
         $dph = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
         $kh = $container->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+        $ledger = $container->get(\MyInvoice\Service\Report\VatLedgerService::class);
+        $rows = $ledger->documentRows($foreign, 'sale', $mismatchId, '2026-02-01', '2026-02-28');
+        self::assertCount(1, $rows);
+        self::assertSame([8264.45, 1735.55, 10000.0], [$rows[0]['base_czk'], $rows[0]['vat_czk'], $rows[0]['total_with_vat_czk']]);
+        self::assertNotSame('', \MyInvoice\Service\Report\KontrolniHlaseniBuilder::cleanDic($rows[0]['counterparty_dic']));
         $returnA = $dph->build($foreign, SyntheticPohodaExport::YEAR, 2, 'monthly');
         $returnB = $dph->build($home, SyntheticPohodaExport::YEAR, 2, 'monthly');
-        self::assertEqualsWithDelta(3768.0, (float) $returnB['summary']['lines']['1']['base'], 0.005, 'Kontrola fixture: 3 516,80 + 251,20 Kč na ř. 1.');
+        self::assertEqualsWithDelta(11781.25, (float) $returnB['summary']['lines']['1']['base'], 0.005, 'Kontrola fixture: 3 516,80 + 8 264,45 Kč na ř. 1.');
         self::assertSame($returnB['summary']['lines'], $returnA['summary']['lines']);
         $khA = $kh->build($foreign, SyntheticPohodaExport::YEAR, 2);
         $khB = $kh->build($home, SyntheticPohodaExport::YEAR, 2);
@@ -2656,6 +2662,11 @@ final class PohodaImportTest extends TestCase
         $sections = static fn (string $xml): array => preg_match_all('~<Veta[ABC][^>]*/>~', $xml, $m) > 0 ? $m[0] : [];
         self::assertNotSame([], $sections($khB['xml']));
         self::assertSame($sections($khB['xml']), $sections($khA['xml']));
+        $a5 = $kh->sectionDocuments($foreign, SyntheticPohodaExport::YEAR, 2)['sections']['A.5']['rows'];
+        $byId = array_column($a5, null, 'invoice_id');
+        self::assertArrayHasKey($mismatchId, $byId);
+        self::assertSame(8264.45, $byId[$mismatchId]['base21']);
+        self::assertSame(1735.55, $byId[$mismatchId]['vat21']);
 
         // Deník převzatý z POHODY se nemění.
         $journal = fn (int $supplierId): array => $this->journalTotals($supplierId);

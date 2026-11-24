@@ -602,7 +602,7 @@ final class AdvancePartialDrawdown
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, client_id, currency_id, status, invoice_type, parent_invoice_id, prices_include_vat, language,
-                    advance_paid_amount
+                    advance_paid_amount, import_total_with_vat_czk
                FROM invoices WHERE id = ? AND supplier_id = ?' . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$invoiceId, $supplierId]);
@@ -612,6 +612,9 @@ final class AdvancePartialDrawdown
         }
         if ((string) $row['invoice_type'] !== 'invoice' || (string) $row['status'] !== 'draft') {
             throw new \DomainException('Zálohu lze čerpat jen konceptem běžné faktury.');
+        }
+        if ($row['import_total_with_vat_czk'] !== null) {
+            throw new \DomainException('Na převzatém dokladu s částkami ze zdroje nelze změnit čerpání zálohy.');
         }
         return $row;
     }

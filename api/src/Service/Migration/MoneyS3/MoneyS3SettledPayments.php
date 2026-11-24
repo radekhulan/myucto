@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Invoice\TakenOverPayment;
@@ -115,7 +116,7 @@ final class MoneyS3SettledPayments
         $note = TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE;
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS document_no, i.invoice_type, i.status,
-                    cur.code AS currency, i.exchange_rate, i.paid_at, i.paid_total, i.amount_to_pay,
+                    cur.code AS currency, i.exchange_rate, i.paid_at, i.paid_total, i.amount_to_pay, i.import_amount_to_pay_czk,
                     COALESCE(pay.others, 0) AS others, pay.own_id, pay.own_note, COALESCE(pay.own_amount, 0) AS own_amount
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -137,7 +138,7 @@ final class MoneyS3SettledPayments
             $out[] = [
                 'id' => (int) $r['id'], 'document_no' => (string) $r['document_no'], 'invoice_type' => (string) $r['invoice_type'],
                 'status' => (string) $r['status'], 'currency' => (string) $r['currency'],
-                'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                'rate' => IssuedCzkAmounts::settlementRate($r) ?: null,
                 'paid_at' => $paidAt, 'paid_total' => (float) $r['paid_total'], 'amount_to_pay' => (float) $r['amount_to_pay'],
                 'others' => (float) $r['others'], 'own_id' => $r['own_id'] !== null ? (int) $r['own_id'] : null,
                 'own_amount' => (float) $r['own_amount'], 'in_range' => $paidAt !== null && $paidAt <= $lastEnd,
