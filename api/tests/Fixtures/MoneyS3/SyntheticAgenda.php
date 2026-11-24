@@ -876,6 +876,40 @@ final class SyntheticAgenda
         return $files;
     }
 
+    /** @return array<string,string> */
+    public static function filesWithInvoiceItemDescriptions(): array
+    {
+        $files = self::files();
+        foreach ([
+            ['ROK.001/PFaktury.DAT', self::PURCHASE_FIELDS, 'FP24001', []],
+            ['ROK.002/PFaktury.DAT', self::PURCHASE_FIELDS, 'FP24001', []],
+            ['ROK.002/VFaktury.DAT', self::ISSUED_FIELDS, 'FV25001', ['Zaklad_0' => 400.0, 'CelkemSDPH' => 1610.0]],
+        ] as [$path, $fields, $docNo, $changes]) {
+            $rows = [];
+            foreach (Ms3Table::fromString($files[$path], pathinfo($path, PATHINFO_FILENAME))->rows() as $row) {
+                $rows[] = $row['Doklad'] === $docNo ? ['Cislo' => 73] + $changes + $row : $row;
+            }
+            $files[$path] = Ms3FixtureWriter::table([...$fields, ['Cislo', 'L', 4]], $rows);
+        }
+        $path = 'ROK.002/UcDenik.DAT';
+        $journal = iterator_to_array(Ms3Table::fromString($files[$path], 'UcDenik')->rows(), false);
+        $journal[] = ['Cislo' => 80, 'Zdroj' => 'FV', 'Doklad' => 'FV25001', 'Datum' => '2025-05-20', 'DatPlnDPH' => '2025-05-20',
+            'Popis' => 'Pronájem', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 400.0];
+        $files[$path] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $journal);
+
+        $fields = [['Cislo', 'L', 4], ['Popis', 'C', 60], ['SazbaDPH', 'E', 10], ['KodDPH', 'C', 12],
+            ['Cena', 'E', 10], ['CenaTyp', 'B', 1], ['PocetMJ', 'E', 10], ['Poradi', 'L', 4]];
+        $files['ROK.002/VFaktPol.DAT'] = Ms3FixtureWriter::table($fields, [
+            ['Cislo' => 73, 'Popis' => 'Pronájem', 'KodDPH' => '19Ř50', 'Cena' => 400.0, 'CenaTyp' => 3, 'PocetMJ' => 1.0, 'Poradi' => 1],
+            ['Cislo' => 73, 'Popis' => 'Servis', 'SazbaDPH' => 21.0, 'Cena' => 605.0, 'CenaTyp' => 4, 'PocetMJ' => 1.0, 'Poradi' => 3],
+            ['Cislo' => 73, 'Popis' => 'Dohled', 'SazbaDPH' => 21.0, 'Cena' => 605.0, 'CenaTyp' => 4, 'PocetMJ' => 1.0, 'Poradi' => 2],
+        ]);
+        $files['ROK.002/PFaktPol.DAT'] = Ms3FixtureWriter::table($fields, [
+            ['Cislo' => 73, 'Popis' => 'Revize zařízení', 'SazbaDPH' => 21.0, 'Cena' => 300.0, 'PocetMJ' => 1.0, 'Poradi' => 1],
+        ]);
+        return $files;
+    }
+
     /**
      * Agenda s úhradami po částech, které Money páruje párovacím symbolem deníku (`ParSym`);
      * faktura v `UDoklad` drží jen poslední doklad, který ji vyrovnal:
