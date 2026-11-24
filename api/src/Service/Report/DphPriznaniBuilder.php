@@ -293,7 +293,8 @@ final class DphPriznaniBuilder
                 yield $r;
             }
         })();
-        $lines = $this->mapper->projectDphLines($vatRows);
+        $projection = $this->mapper->dphLineProjection($vatRows);
+        $lines = $projection->lines();
         // Položka 0 % na vydaném dokladu s kódem 1/2 do přiznání ani KH nevstupuje
         // ({@see VatLedgerService::isZeroRateOnRateLine()}). Haléřové zaokrouhlení je v pořádku,
         // větší částka bývá osvobozené plnění (ř. 50) se špatně zvoleným kódem.
@@ -318,6 +319,7 @@ final class DphPriznaniBuilder
         if ($isIdentified) {
             $lines = self::filterLinesForIdentified($lines, $warnings);
         }
+        $accountingLines = array_intersect_key($projection->lines(wholeCzkMirror: false), $lines);
         $quarter = $period === 'quarterly' ? (int) ceil($month / 3) : null;
 
         // OPRAVNÉ přiznání (§ 138 DŘ) nahrazuje dříve podané řádné — bez základny nemá co
@@ -344,6 +346,7 @@ final class DphPriznaniBuilder
         $corrections = $this->correctionEntries($supplierId, $year, $month, $period, $isIdentified, !empty($supplier['is_vat_payer']));
         foreach ($corrections['entries'] as $entry) {
             $this->addToLine($lines, $entry['line'], $entry['base'], $entry['vat'], $entry['label']);
+            $this->addToLine($accountingLines, $entry['line'], $entry['base'], $entry['vat'], $entry['label']);
         }
         array_push($warnings, ...$corrections['warnings']);
 
@@ -816,6 +819,7 @@ final class DphPriznaniBuilder
             'typ_platce'              => $isIdentified ? 'I' : 'P',
             'quarter'                 => $quarter,
             'lines'                   => $lines,
+            'accounting_vat_net'      => $this->mapper->dphSummaryTotals($accountingLines)['due'],
             'total_vat_output'        => round($totalDanZdanitelne, 2),
             'total_vat_input'         => round($totalDanOdpocitatelne, 2),
             'tax_due'                 => round($vlastniDan, 2),
