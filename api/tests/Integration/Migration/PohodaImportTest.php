@@ -1202,11 +1202,105 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Adresář vede tentýž subjekt (IČO) na dvou kartách se starým a novým názvem. Každá karta
+     * je samostatný kontakt; doklad patří ke kartě podle vazby na adresář (i ke kartě s jiným
+     * IČO), bez vazby podle IČO a názvu, a bez shody k první kartě s upozorněním v protokolu. Opakovaný převod nic
+     * nezdvojí a kontakt firmy se stejným IČO a názvem se použije.
+     */
+    public function testCardsWithSameIcoAndDifferentNamesStaySeparateContacts(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withRenamedVendor($dir);
+        $export = PohodaExport::open($dir);
+        foreach ([1, 2] as $run) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            self::assertSame([
+                SyntheticPohodaExport::RENAMED_BY_CARD => SyntheticPohodaExport::RENAMED_NEW_NAME,
+                SyntheticPohodaExport::RENAMED_BY_NAME => SyntheticPohodaExport::RENAMED_NEW_NAME,
+                SyntheticPohodaExport::RENAMED_FOREIGN_CARD => 'Dodavatel Test s.r.o.',
+                SyntheticPohodaExport::RENAMED_AMBIGUOUS => SyntheticPohodaExport::RENAMED_OLD_NAME,
+            ], $this->renamedVendors($supplierId), "běh {$run}");
+            self::assertSame([SyntheticPohodaExport::RENAMED_OLD_NAME, SyntheticPohodaExport::RENAMED_NEW_NAME], $this->renamedContacts($supplierId), "běh {$run}");
+        }
+        $first = $this->importer->run($this->supplier(), $this->userId, $export, false);
+        self::assertSame(1, self::stepCounts($first, 'partners')['split_by_name'] ?? null);
+        self::assertSame(1, self::stepCounts($first, 'partners')['partner_name_ambiguous'] ?? null);
+
+        $own = $this->supplier();
+        $this->db->pdo()->prepare("INSERT INTO clients (supplier_id, company_name, ic, street, city, zip, country_id, currency_default_id)
+            SELECT ?, ?, ?, 'Ulice 1', 'Brno', '60200', ?, default_currency_id FROM supplier WHERE id = ?")
+            ->execute([$own, SyntheticPohodaExport::RENAMED_NEW_NAME, SyntheticPohodaExport::RENAMED_ICO, $this->czId, $own]);
+        $manual = (int) $this->db->pdo()->lastInsertId();
+        $protocol = $this->importer->run($own, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([SyntheticPohodaExport::RENAMED_NEW_NAME, SyntheticPohodaExport::RENAMED_OLD_NAME], $this->renamedContacts($own));
+        self::assertSame(2, $this->rows('purchase_invoices', $own, "vendor_id = {$manual}"));
+    }
+
+    /**
+     * Mapa dřívějšího převodu, který obě karty IČO spojil do kontaktu první karty: karta
+     * s novým názvem se při dalším převodu přesměruje na jediný kontakt se stejným IČO
+     * a názvem karty (doklad s vazbou na ni jde k němu). Bez takového kontaktu vazba zůstává
+     * a protokol ji ohlásí - převod nové kontakty naslepo nezakládá.
+     */
+    public function testStaleCardMappingIsVerifiedAgainstAddressbookCardName(): void
+    {
+        foreach ([true, false] as $withNamedContact) {
+            $supplierId = $this->supplier();
+            $pdo = $this->db->pdo();
+            $insert = $pdo->prepare("INSERT INTO clients (supplier_id, company_name, ic, street, city, zip, country_id, currency_default_id)
+                SELECT ?, ?, ?, 'Testovací 1', 'Brno', '60200', ?, default_currency_id FROM supplier WHERE id = ?");
+            $insert->execute([$supplierId, SyntheticPohodaExport::RENAMED_OLD_NAME, SyntheticPohodaExport::RENAMED_ICO, $this->czId, $supplierId]);
+            $old = (int) $pdo->lastInsertId();
+            $map = $pdo->prepare('INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id, run_id) VALUES (?, ?, ?, ?, NULL)');
+            $map->execute([$supplierId, PohodaImportRepository::KIND_CLIENT, 'ab:' . SyntheticPohodaExport::RENAMED_OLD_CARD, $old]);
+            $map->execute([$supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, 'ab:' . SyntheticPohodaExport::RENAMED_NEW_CARD, $old]);
+            $named = null;
+            if ($withNamedContact) {
+                $insert->execute([$supplierId, SyntheticPohodaExport::RENAMED_NEW_NAME, SyntheticPohodaExport::RENAMED_ICO, $this->czId, $supplierId]);
+                $named = (int) $pdo->lastInsertId();
+            }
+            $dir = SyntheticPohodaExport::write($this->tmp . '/' . ($withNamedContact ? 'a' : 'b'));
+            SyntheticPohodaExport::withRenamedVendor($dir);
+            $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $vendor = (int) $pdo->query("SELECT vendor_id FROM purchase_invoices WHERE supplier_id = {$supplierId} AND varsymbol = '" . SyntheticPohodaExport::RENAMED_BY_CARD . "'")->fetchColumn();
+            $target = (int) $pdo->query("SELECT target_id FROM pohoda_import_map WHERE supplier_id = {$supplierId} AND pohoda_key = 'ab:" . SyntheticPohodaExport::RENAMED_NEW_CARD . "'")->fetchColumn();
+            if ($withNamedContact) {
+                self::assertSame([$named, $named], [$vendor, $target], $this->explain($protocol));
+                self::assertSame(1, self::stepCounts($protocol, 'partners')['remapped_by_name'] ?? null);
+            } else {
+                self::assertSame([$old, $old], [$vendor, $target], $this->explain($protocol));
+                self::assertContains('partner_mapping_name_mismatch', $this->messageCodes($protocol));
+            }
+        }
+    }
+
+    /** @return array<string,string> číslo přijaté faktury z {@see SyntheticPohodaExport::withRenamedVendor()} => název jejího kontaktu */
+    private function renamedVendors(int $supplierId): array
+    {
+        return $this->db->pdo()->query("SELECT pi.varsymbol, c.company_name FROM purchase_invoices pi JOIN clients c ON c.id = pi.vendor_id
+            WHERE pi.supplier_id = {$supplierId} AND pi.varsymbol LIKE '26PF007%' ORDER BY pi.varsymbol")->fetchAll(\PDO::FETCH_KEY_PAIR);
+    }
+
+    /** @return list<string> názvy kontaktů subjektu */
+    private function renamedContacts(int $supplierId): array
+    {
+        return $this->db->pdo()->query("SELECT company_name FROM clients WHERE supplier_id = {$supplierId} AND ic = '"
+            . SyntheticPohodaExport::RENAMED_ICO . "' ORDER BY id")->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
+    /**
      * Služba z EU se samovyměřením v cizí měně: POHODA vyměří daň ze základu 2 500 Kč (kurz ke
-     * dni plnění), faktura zní na 2 530 Kč (kurz faktury). Rozdíl 30 Kč je položka dokladu, ale
+     * dni plnění), faktura zní na 100 EUR = 2 530 Kč (kurz faktury 25,30). Rozdíl 30 Kč
      * předmětem daně není - v přiznání ani v KH A.2 nesmí být. Dřív ho evidence DPH kvůli
      * příznaku samovyměření na hlavičce zařadila jako službu z EU (24e) a dopočítala z něj
      * daň 6,30 Kč na ř. 5 i ř. 43 a do KH A.2.
+     *
+     * Doklad se převezme v EUR (dřív v Kč s důvodem „samovyměření DPH"): jedna položka 100 EUR
+     * se základem samovyměření 2 500 Kč ze zdroje, přiznání i KH zůstávají stejné.
      */
     public function testSelfAssessedForeignPurchaseDoesNotTaxTheRateDifference(): void
     {
@@ -1216,8 +1310,20 @@ final class PohodaImportTest extends TestCase
 
         $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
         self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['self_assessed'] ?? 0, $this->explain($protocol));
-        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf(
-            "varsymbol = '%s' AND reverse_charge = 1 AND total_with_vat = 2530.00 AND status <> 'draft'", SyntheticPohodaExport::SELF_ASSESSED_PURCHASE)), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['foreign_currency'] ?? 0, $this->explain($protocol));
+        $doc = $this->db->pdo()->query(sprintf(
+            "SELECT c.code, pi.exchange_rate, pi.total_without_vat, pi.total_vat, pi.total_with_vat, pi.reverse_charge, pi.status, pi.note_below_items
+               FROM purchase_invoices pi JOIN currencies c ON c.id = pi.currency_id WHERE pi.supplier_id = %d AND pi.varsymbol = '%s'",
+            $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE))->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['EUR', '25.300000', '100.00', '0.00', '100.00', 1], [$doc['code'], $doc['exchange_rate'], $doc['total_without_vat'],
+            $doc['total_vat'], $doc['total_with_vat'], (int) $doc['reverse_charge']], $this->explain($protocol));
+        self::assertNotSame('draft', $doc['status']);
+        self::assertStringContainsString('doklad v EUR, převzat v měně dokladu kurzem 25,3 Kč', (string) $doc['note_below_items']);
+        self::assertStringContainsString('samovyměření DPH ze základu 2 500,00 Kč', (string) $doc['note_below_items']);
+        $items = $this->db->pdo()->query(sprintf(
+            "SELECT i.total_without_vat, i.total_vat, i.import_tax_base_czk FROM purchase_invoice_items i JOIN purchase_invoices pi ON pi.id = i.purchase_invoice_id
+              WHERE pi.supplier_id = %d AND pi.varsymbol = '%s'", $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE))->fetchAll(\PDO::FETCH_NUM);
+        self::assertSame([['100.00', '0.00', '2500.00']], $items);
 
         $container = Bootstrap::buildContainer();
         $lines = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];

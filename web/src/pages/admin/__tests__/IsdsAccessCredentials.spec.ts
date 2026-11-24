@@ -101,6 +101,36 @@ describe('Shared data box credentials administration', () => {
     wrapper.unmount()
   })
 
+  it('selects sending or receipts in all companies at once, but never incoming messages', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await button(wrapper, 'isdsAccess.admin.add').trigger('click')
+    const dialog = wrapper.get('[role="dialog"]')
+    const company = (name: string, operation: string) =>
+      dialog.get<HTMLInputElement>(`input[aria-label="${name} · isdsAccess.admin.operation.${operation}"]`)
+
+    await dialog.get('[data-testid="isds-access-all-send"]').setValue(true)
+    expect(company('Alpha', 'send').element.checked).toBe(true)
+    expect(company('Beta', 'send').element.checked).toBe(true)
+    expect(company('Alpha', 'receive').element.checked).toBe(false)
+    expect(dialog.find('[data-testid="isds-access-all-receive"]').exists()).toBe(false)
+
+    await company('Beta', 'send').setValue(false)
+    const all = dialog.get<HTMLInputElement>('[data-testid="isds-access-all-send"]').element
+    expect(all.checked).toBe(false)
+    expect(all.indeterminate).toBe(true)
+
+    await dialog.get('[data-testid="isds-access-all-receipts"]').setValue(true)
+    await dialog.get('[data-testid="isds-access-all-send"]').setValue(true)
+    expect(company('Beta', 'send').element.checked).toBe(true)
+    await dialog.get('[data-testid="isds-access-all-send"]').setValue(false)
+    expect(company('Alpha', 'send').element.checked).toBe(false)
+    expect(company('Beta', 'send').element.checked).toBe(false)
+    expect(company('Alpha', 'receipts').element.checked).toBe(true)
+    expect(company('Beta', 'receipts').element.checked).toBe(true)
+    wrapper.unmount()
+  })
+
   it('edits a label without sending stored credentials and leaves replacement fields blank', async () => {
     const wrapper = mountPage()
     await flushPromises()

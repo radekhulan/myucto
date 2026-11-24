@@ -52,6 +52,7 @@ final class AccrualAction
         private readonly \MyInvoice\Service\Accounting\Closing\ClosingService $closing,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Migration\Check\MigrationSources $sources,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -254,7 +255,11 @@ final class AccrualAction
     public function reconcile(Request $request, Response $response): Response
     {
         if (!$this->guard($request, $response, false, $err)) return $err;
-        return $this->run($response, fn () => $this->reconciliation->reconcile($this->currentSupplierId($request), $request->getQueryParams()['as_of'] ?? null));
+        return $this->run($response, function () use ($request): array {
+            $sid = $this->currentSupplierId($request);
+            return $this->reconciliation->reconcile($sid, $request->getQueryParams()['as_of'] ?? null)
+                + ['takeover_available' => $this->sources->has($sid, \MyInvoice\Service\Migration\Check\MigrationSources::POHODA)];
+        });
     }
 
     public function unallocated(Request $request, Response $response): Response

@@ -100,5 +100,15 @@ describe('Money S3: volba „Převést do roku"', () => {
   it('daňová evidence volbu nemá', async () => {
     const wrapper = await mountPage([], true)
     expect(wrapper.find('[data-testid="to-year"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="opening-only-next"]').exists()).toBe(false)
+  })
+
+  it('počáteční stavy dalšího roku jsou ve výchozím stavu vypnuté a zaškrtnutím jdou do startu', async () => {
+    await dryRun(await mountPage([]))
+    expect(m.start).toHaveBeenLastCalledWith('dry_run', expect.objectContaining({ opening_only_next: false }))
+    const wrapper = await mountPage([])
+    await wrapper.get('[data-testid="opening-only-next"]').setValue(true)
+    await dryRun(wrapper)
+    expect(m.start).toHaveBeenLastCalledWith('dry_run', expect.objectContaining({ opening_only_next: true }))
   })
 })

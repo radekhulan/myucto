@@ -34,6 +34,7 @@ vi.mock('@/api/epoSubmissions', async (importOriginal) => {
       submitDirect: m.submitDirect,
       uploadCredential: m.uploadCredential,
       xmlUrl: (id: number) => `/api/reports/submissions/${id}/xml`,
+      pdfUrl: (id: number) => `/api/reports/submissions/${id}/pdf`,
       artifactDownloadUrl: (id: number) => `/api/documents/${id}`,
     },
   }
@@ -246,7 +247,7 @@ describe('TaxSubmissions.vue — dostupnost „Podepsat a podat"', () => {
     expect(wrapper.text()).not.toContain('reports.submissions.certificates')
     expect(wrapper.text()).not.toContain('reports.submissions.upload_title')
     const actions = vm.submissionActions as Array<{ key: string; show?: boolean }>
-    expect(actions.filter(action => action.show !== false).map(action => action.key)).toEqual(['download_xml'])
+    expect(actions.filter(action => action.show !== false).map(action => action.key)).toEqual(['download_pdf', 'download_xml'])
   })
 
   it('client submitter keeps send actions while management and source evidence stay hidden', async () => {

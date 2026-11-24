@@ -827,6 +827,12 @@
     "totals": "Základ celkem {basis} · zůstatek {balance} k {date}",
     "empty": "Filtru neodpovídá žádná položka.",
     "empty_title": "Zatím žádné položky časového rozlišení",
+    "unused": {
+      "title": "Agenda zatím nemá žádné položky",
+      "hint": "Zůstatek účtů časového rozlišení pochází z převodu a čeká na převzetí. Položky z POHODY převezmete tlačítkem Převzít z POHODY, ostatní zápisy založíte nebo přiřadíte z řádků bez položky. Rozdíl v odsouhlasení pak klesne na nulu.",
+      "difference_title": "Zůstatek k převzetí do agendy",
+      "empty_hint": "Zůstatek účtů časového rozlišení z převodu převezmete tlačítkem Převzít z POHODY. Zápisy, které převzetí nepokryje, založte nebo přiřaďte z řádků bez položky v odsouhlasení výše."
+    },
     "empty_hint": "Založte položku ručně, z dokladu nebo z řádku účtu 381/384 bez položky. Agenda podle plánu rozpouští zůstatek do nákladů nebo výnosů.",
     "book": "Rozpis k datu",
     "book_failed": "Rozpis časového rozlišení se nepodařilo stáhnout.",
@@ -952,7 +958,9 @@
       "difference": "Rozdíl",
       "total": "Celkem",
       "items_count": "bez položek | 1 položka | {count} položky | {count} položek",
-      "filter_hint": "Filtrovat položky podle účtu"
+      "filter_hint": "Filtrovat položky podle účtu",
+      "projected": "Odloží uzávěrka {year}",
+      "projected_hint": "Částka, kterou uzávěrka účetního období přeúčtuje z nákladů či výnosů dokladů s obdobím přesahujícím konec roku. Podrobně v záložce Spravuje uzávěrka."
     },
     "unallocated": {
       "toggle": "Řádky {account} bez položky",
@@ -969,11 +977,29 @@
       "amount": "Přiřazená částka"
     },
     "projection": {
-      "hint": "Období zadané přímo na řádku dokladu. Odklad a rozpuštění účtuje uzávěrka, tady je jen přehled.",
-      "empty": "Uzávěrka žádné řádky dokladů s obdobím nespravuje.",
+      "kind_prepaid_expense": "Náklady příštích období",
+      "kind_deferred_revenue": "Výnosy příštích období",
+      "hint_prepaid_expense": "Přijaté faktury a ostatní závazky s obdobím přesahujícím {date} se během roku účtují celé do nákladů, proto je na účtu {account} zatím nevidíte. Uzávěrka roku {year} přeúčtuje část připadající na další roky na náklady příštích období ({account}) a v dalších letech ji rozpustí zpět do nákladů. Výkaz zisku a ztráty s volbou Průběžné časové rozlišení a odpisy s tím počítá už během roku.",
+      "hint_deferred_revenue": "Vydané faktury a ostatní pohledávky s obdobím přesahujícím {date} se během roku účtují celé do výnosů, proto je na účtu {account} zatím nevidíte. Uzávěrka roku {year} přeúčtuje část připadající na další roky na výnosy příštích období ({account}) a v dalších letech ji rozpustí zpět do výnosů. Výkaz zisku a ztráty s volbou Průběžné časové rozlišení a odpisy s tím počítá už během roku.",
+      "empty_prepaid_expense": "Žádný náklad s obdobím přesahujícím {date}.",
+      "empty_deferred_revenue": "Žádný výnos s obdobím přesahujícím {date}.",
       "document": "Doklad",
-      "totals": "Náklady příštích období {prepaid} · výnosy příštích období {deferred}",
-      "truncated": "Zobrazeny jsou jen první řádky."
+      "description": "Popis",
+      "account_prepaid_expense": "Nákladový účet",
+      "account_deferred_revenue": "Výnosový účet",
+      "amount": "Celkem",
+      "current_year": "Zůstane v roce {year}",
+      "deferred": "Odloží se na {account}",
+      "release_year": "Rozpuštění {year}",
+      "source_other_prepaid_expense": "Ostatní závazek",
+      "source_other_deferred_revenue": "Ostatní pohledávka",
+      "source_membership": "Členský příspěvek",
+      "truncated": "Zobrazeny jsou jen první řádky.",
+      "summary_current_prepaid_expense": "Zůstane v nákladech {year}",
+      "summary_current_deferred_revenue": "Zůstane ve výnosech {year}",
+      "summary_deferred": "Uzávěrka {year} odloží na {account}",
+      "summary_release_prepaid_expense": "Rozpustí se do nákladů {year}",
+      "summary_release_deferred_revenue": "Rozpustí se do výnosů {year}"
     },
     "detail": {
       "not_found": "Položka časového rozlišení neexistuje.",
@@ -21186,6 +21212,12 @@
         "empty": "K datu nejsou žádné otevřené položky."
       },
       "mode_inventory": "Inventura účtu",
+      "group_by_dimension": "Rozpad podle",
+      "no_dimension_breakdown": "Bez rozpadu",
+      "dimension_breakdown_title": "Rozpad podle dimenze {type}",
+      "dimension_breakdown_total": "Celkem",
+      "dimension_breakdown_mismatch": "Součet rozpadu nesouhlasí se součtem výpisu účtu.",
+      "dimension_unassigned": "Bez dimenze",
       "filter_counter": "Protiúčet",
       "counter_all": "Všechny protiúčty",
       "counter_none": "bez protiúčtu",
@@ -21201,10 +21233,10 @@
         "no_rows": "Účet nemá v období žádný pohyb.",
         "no_period": "K tomuto datu není založené účetní období."
       },
-      "scope_title": "Zúženo podle hlavní knihy:",
+      "scope_title": "Aktivní filtry",
       "scope_own_only": "Jen zápisy účtu bez analytik",
       "scope_remove": "Odebrat filtr",
-      "scope_export_blocked": "Zúžený opis nelze exportovat. Pro export zrušte filtry hlavní knihy."
+      "scope_export_blocked": "Pro export vyberte rozpad podle dimenze nebo zrušte filtry."
     },
     "section18": {
       "title": "Peněžní toky a změny vlastního kapitálu",
@@ -28735,6 +28767,10 @@
     "balances_load_failed": "Zůstatky na účtech se nepodařilo načíst.",
     "balances_title": "Aktuální stav na účtech",
     "balances_subtitle": "Nejnovější zůstatek z výpisu, bankovního API, e-mailového avíza nebo převodu účetnictví.",
+    "api_badge": "Online · {provider}",
+    "api_badge_never": "zatím nesynchronizováno",
+    "api_badge_title": "Účet je online napojený na banku ({provider}). Poslední synchronizace: {last}.",
+    "api_badge_error_title": "Účet je online napojený na banku ({provider}), poslední synchronizace skončila chybou. Poslední pokus: {last}.",
     "balances_source_api": "z API",
     "balances_source_api_hint": "Zůstatek k datu posledního API výpisu, případně vypočtený z bankovního zůstatku a navazujících pohybů.",
     "balances_source_import": "z převodu",
@@ -29666,7 +29702,9 @@
     "email_profile_transport_global": "Globální cfg.php",
     "email_profile_transport_smtp": "Vlastní SMTP",
     "email_profile_transport_sendmail": "Lokální sendmail",
-    "email_profile_transport_managed": "Ve spravované instalaci odesílá e-maily provozovatel. Vlastní SMTP server ani obálkovou adresu tu nastavit nelze; odesílatele (From, Reply-To) měnit můžete.",
+    "email_profile_transport_managed": "Ve spravované instalaci odesílá e-maily provozovatel. Vlastní SMTP server ani obálkovou adresu tu nastavit nelze.",
+    "email_profile_managed_sender_title": "Odesílací adresu nelze ve spravované instalaci měnit",
+    "email_profile_managed_sender_warning": "E-maily odcházejí z adresy provozovatele instalace (například noreply@myucto.online). Vaše adresa se k nim přidává jako adresa pro odpověď (Reply-To), takže odpovědi odběratelů dostanete vy. Vlastní odesílací adresu (From) na vaší doméně si sami nastavit nemůžete: vyžaduje podepisování DKIM a záznamy SPF pro vaši doménu na straně provozovatele, jinak by e-maily končily ve spamu nebo by je příjemci odmítli. Pokud ji potřebujete, objednejte ji prosím u podpory.",
     "email_profile_smtp_host": "SMTP server",
     "email_profile_smtp_port": "Port",
     "email_profile_smtp_encryption": "Šifrování",
@@ -30979,6 +31017,12 @@
       "status_failed": "Chyby",
       "status_skipped": "Bez schématu",
       "download_xml": "Stáhnout XML",
+      "download_pdf": "Stáhnout PDF",
+      "filing_proof_title": "Doklad o podání",
+      "filing_proof_available": "Doručenka nebo potvrzení o podání je uložené. Originály stáhnete v seznamu souborů níže, souhrn je i v PDF podání.",
+      "filing_proof_not_submitted": "Doručenka zatím není: podání ještě není označené jako podané.",
+      "filing_proof_isds_receipt_pending": "Datová zpráva odešla, doručenka ze schránky ale zatím není přiložená.",
+      "filing_proof_submitted_outside": "Doručenka ani potvrzení o podání nejsou v MyÚčtu uložené. Podání bylo označené jako podané ručně, typicky se podávalo mimo MyÚčto (například přímo v portálu EPO). Potvrzení z EPO můžete doplnit přes „Nahrát výstupy z EPO\".",
       "delete_confirm": "Smazat XML snapshot? Doklad o skutečně podaném podání smazat nelze.",
       "records": "záznamů",
       "form_ossei1": "OSS přiznání",
@@ -35225,6 +35269,10 @@
       "verifyNew": "MyÚčto při uložení ověří přístupy v ISDS a zjistí ID schránky.",
       "companies": "Použití ve firmách",
       "companiesHint": "Odesílání a doručenky můžete povolit více firmám. Pro příchozí zprávy má každá schránka v daném prostředí jedinou cílovou firmu.",
+      "allCompanies": {
+        "send": "Odesílání ve všech firmách",
+        "receipts": "Doručenky ve všech firmách"
+      },
       "noCompanies": "Nejsou dostupné žádné firmy.",
       "noGrants": "Přístup zatím nemá povolené použití v žádné firmě.",
       "companyFallback": "Firma č. {id}",
@@ -36595,6 +36643,8 @@
     "to_year_auto": "Automaticky (všechny roky zálohy)",
     "to_year_auto_year": "Automaticky (do roku {year})",
     "to_year_hint": "Pozdější roky zálohy se nepřevedou. Hodí se, když v MyÚčtu už účtujete další rok a z Money převádíte znovu rok předchozí (třeba rok 2026 po uzávěrce v Money, zatímco rok 2027 běží v MyÚčtu). Automatická volba převede roky až po poslední rok bez vlastních zápisů v MyÚčtu a pozdější roky, které už v MyÚčtu účtujete, vynechá.",
+    "opening_only_next": "Z dalšího roku jen počáteční stavy",
+    "opening_only_next_hint": "Z roku po posledním převáděném se převezmou jen počáteční stavy z Money. Poslední převáděný rok se proti nim ověří a uzavře; kroky uzávěrky, které proběhly v Money (odpisy, dohadné položky, časové rozlišení, rezervy, daň), průvodce uzávěrkou znovu nenabídne. Hodí se pro finální převod, když rok 2027 už běží v MyÚčtu a v Money je založený s počátečními stavy.",
     "reports_title": "Sestavy z Money ke kontrole (volitelné)",
     "reports_hint": "Obratová předvaha vyexportovaná z Money do CSV: účet v prvním sloupci, dál PS MD, PS D, obrat MD, obrat D, KS MD, KS D. Rekonciliace ji porovná s předvahou MyÚčta na haléř.",
     "report_upload": "Nahrát předvahu {year}",
@@ -36673,6 +36723,7 @@
       "link": "Vazby dokladů na deník",
       "dimensions": "Střediska a zakázky",
       "payments": "Úhrady faktur",
+      "payroll_liabilities": "Mzdové závazky",
       "recurring": "Pravidelné faktury z historie",
       "assets": "Dlouhodobý majetek",
       "small_assets": "Drobný majetek",
@@ -36680,6 +36731,7 @@
       "closing": "Uzávěrka historických let",
       "payroll": "Mzdy",
       "reconciliation": "Rekonciliace",
+      "saldo_check": "Kontrola saldokonta",
       "tax_records_plan": "Kontrola peněžního deníku",
       "vat_status": "Plátcovství DPH",
       "tax_records_payments": "Úhrady z peněžního deníku",
@@ -36791,7 +36843,12 @@
       "blocked": "Neuzavřen kvůli předchozímu roku",
       "mismatch": "Nesedí na počáteční stavy",
       "no_opening": "Další rok nemá počáteční stavy",
-      "failed": "Uzávěrka selhala"
+      "failed": "Uzávěrka selhala",
+      "opening_only": "Jen počáteční stavy z Money",
+      "closing_started": "Uzávěrka rozpracovaná, dokončete ji v Uzávěrce",
+      "closing_in_progress": "Uzávěrku rozpracovala účetní, převod ji nemění",
+      "open_next_pending": "Knihy uzavřené, otevření dalšího roku čeká na účetní",
+      "opening_differs": "Otevírací zápis nesedí na Money"
     },
     "doc_type": {
       "purchase_invoice": "Přijatá faktura",
@@ -36903,6 +36960,8 @@
       "take_over_filings_hint": "Existující rozpracované přiznání se nepřepíše, finální se nemění nikdy. Zkouška nanečisto jen ukáže, která přiznání by se převzala.",
       "from_year_auto": "Automaticky (od roku, od kterého v Money navazují stavy)",
       "from_year_hint": "Rok, jehož konečné stavy v Money nenavazují na počáteční stavy dalšího roku, nejde uzavřít. Automatická volba začne u každé firmy prvním rokem, od kterého stavy navazují; starší roky zůstanou v archivu Money.",
+      "to_year_auto": "Automaticky (u každé firmy poslední rok bez vlastních zápisů v MyÚčtu)",
+      "to_year_hint": "Pozdější roky zálohy se nepřevedou. Platí pro všechny firmy dávky.",
       "existing": "Firma už v MyÚčtu je",
       "existing_skip": "Přeskočit",
       "existing_update": "Převést znovu (doplní jen to, co chybí)",
@@ -37130,6 +37189,11 @@
     "dry_run_title": "Zkouška nanečisto",
     "dry_run_hint": "Proběhne celý převod vybraných roků ({years}) včetně rekonciliace, na konci se ale všechno vrátí. V MyÚčtu nic nezůstane.",
     "dry_run_locks_hint": "Zkouška běží v jedné databázové transakci. Spouštějte ji mimo běžnou práci ve firmě: zápisy, na které zkouška sáhne, počkají, dokud neskončí.",
+    "relink": {
+      "option": "Opravit vazby už převedené firmy (nový export do vedeného účetnictví)",
+      "hint": "Pro firmu, která už je převedená z POHODY a dál se účtuje v MyÚčtu. Zápisy zadané v MyÚčtu zůstanou beze změny a nové doklady z POHODY se nepřidají. Převod doplní jen vazby: daňové doklady k zálohám a platbám, úhrady dokladů a zápočty. Sklad ani mzdy se nepřevádějí.",
+      "mode_note": "Opravný převod vazeb: zápisy z MyÚčtu zůstanou, nové doklady se nepřidají, doplní se jen vazby (daňové doklady k zálohám a platbám, úhrady, zápočty)."
+    },
     "dry_run_background_hint": "Zkouška je jedna transakce, proto během běhu nehlásí jednotlivé kroky - celý protokol se všemi kroky se ukáže po jejím konci. Obvykle trvá do minuty; stránku můžete zavřít.",
     "dry_run_start": "Spustit zkoušku nanečisto",
     "dry_run_again": "Zkoušku zopakovat",
@@ -37299,6 +37363,10 @@
       "matched": "spárováno s existujícím",
       "skipped": "vynecháno",
       "created_from_documents": "partnerů z dokladů",
+      "split_by_name": "IČO s více názvy v adresáři (samostatné kontakty)",
+      "partner_name_ambiguous": "dokladů s nejednoznačným názvem partnera",
+      "remapped_by_name": "karet adresáře přesměrovaných na kontakt podle názvu",
+      "partner_mapping_name_mismatch": "karet adresáře s vazbou na kontakt jiného názvu (k ručnímu přeřazení)",
       "duplicate_code": "duplicitních zkratek",
       "kept": "ponecháno",
       "previous_period": "z minulého období",
@@ -46441,6 +46509,11 @@
         "title": "Konečná faktura s DPH ze zálohy podruhé",
         "hint": "Záloha s DDKP odečtená jen v hlavičce bez odpočtových řádků.",
         "description": "Konečná faktura odečítá zálohu s DDKP jen v hlavičce, takže DPH zálohy je v přiznání dvakrát. Oprava se dělá v aplikaci odpočtem zálohy řádkem podle manuálu."
+      },
+      "foreign_purchase_in_czk": {
+        "title": "Přijaté doklady v cizí měně převzaté v Kč",
+        "hint": "Faktury od zahraničních dodavatelů se samovyměřením DPH v Kč místo v měně dokladu.",
+        "description": "Převod z POHODY dřív převzal přijaté doklady v EUR či jiné měně se samovyměřením DPH v Kč. DPH, KH i deník jsou správně, chybí měna, kurz a částka v měně, takže nejde spárovat platbu v měně ani spočítat kurzový rozdíl. Oprava čte měnu a kurz z původního exportu z POHODY a spouští ji správce instalace podle manuálu."
       }
     }
   },

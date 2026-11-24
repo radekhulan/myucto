@@ -334,6 +334,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/maintenance(/|$)#',
         '#^/api/mcp(/|$)#',
         '#^/api/oauth(/|$)#',
+        // Katalog i dávka jsou interním kontraktem přehledu podle efektivní role v relaci.
+        '#^/api/dashboard-widgets/(catalog|query)$#',
         // Osobní rozložení je nastavení uživatelské relace, včetně jeho obnovy.
         '#^/api/user/dashboard-layouts/(home|portal)$#',
         '#^/api/settings/(domains|signing|pdf-signing|certificates|email-profiles|databox|isds-gateway|bank-connections|ai-assist)(/|$)#',
@@ -369,8 +371,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
                 return Json::error(
                     $this->responseFactory->createResponse(403),
                     'token_endpoint_forbidden',
-                    'Přihlášení, MFA, heslo, správa tokenů, licence, správa instance a přístupové údaje '
-                        . 'jsou dostupné jen z webového rozhraní, ani token s plným zápisem k nim nemá přístup.',
+                    'Tento endpoint je dostupný jen z webového rozhraní, ani token s plným zápisem k němu nemá přístup.',
                     403,
                 );
             }

@@ -8,6 +8,7 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\ReadOnlySnapshot;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Reports\AccountStatementScope;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
@@ -47,6 +48,7 @@ final class AccountStatementAction
         private readonly LoggerInterface $log,
         private readonly Connection $db,
         private readonly DimensionService $dimensions,
+        private readonly ReadOnlySnapshot $snapshot,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -59,7 +61,7 @@ final class AccountStatementAction
         if ($scope === null) return $err;
 
         try {
-            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], $params['page'], $params['per_page'], $params['after_closing'], $params['counter_account_id'], $scope);
+            $data = $this->buildStatement($supplierId, $params, $scope, $params['page'], $params['per_page']);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -81,17 +83,27 @@ final class AccountStatementAction
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
-        // Export zúžení v hlavičce neuvádí, zúžený opis by se vydával za celý účet.
         $scope = $this->ledgerScope($request, $response, $supplierId, $params['from'], $err);
         if ($scope === null) return $err;
-        if (!$scope->isDefault()) {
+        if (!$scope->isDefault() && $params['group_by_dimension_type'] === null) {
             return Json::error($response, 'validation_failed', 'Export opisu účtu nepodporuje filtr dimenze, dodavatele, odběratele ani položky, opening_date ani include_analytics.', 422);
         }
 
         try {
-            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], 1, self::EXPORT_MAX_ROWS, $params['after_closing'], $params['counter_account_id']);
+            $data = $this->buildStatement($supplierId, $params, $scope, 1, self::EXPORT_MAX_ROWS);
             $data['from'] = $params['from'];
             $data['to']   = $params['to'];
+            if (isset($data['dimension_breakdown'])) {
+                $data['scope_notes'] = array_filter([
+                    isset($data['dimension']['label']) ? 'Dimenze: ' . $data['dimension']['label'] : null,
+                    isset($data['vendor']) ? 'Dodavatel: ' . $data['vendor'] : null,
+                    isset($data['client']) ? 'Odběratel: ' . $data['client'] : null,
+                    isset($data['item']) ? 'Položka: ' . $data['item'] : null,
+                    $scope->openingDate !== null ? 'Den otevíracího zápisu v počátečním stavu: ' . $scope->openingDate : null,
+                    !$scope->withAnalytics ? 'Pouze vlastní pohyby účtu bez analytik' : null,
+                    $params['after_closing'] ? 'Stav po uzavření knih' : null,
+                ]);
+            }
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->pdf->render($data),
@@ -119,8 +131,18 @@ final class AccountStatementAction
             ->withHeader('Cache-Control', 'private, no-store');
     }
 
+    private function buildStatement(int $supplierId, array $params, AccountStatementScope $scope, int $page, int $perPage): array
+    {
+        $groupBy = $params['group_by_dimension_type'];
+        $build = fn (): array => $this->statement->build(
+            $supplierId, $params['account_id'], $params['from'], $params['to'], $page, $perPage,
+            $params['after_closing'], $params['counter_account_id'], $scope, $groupBy,
+        );
+        return $groupBy === null ? $build() : $this->snapshot->read($build);
+    }
+
     /**
-     * @return array{account_id:int, from:string, to:string, page:int, per_page:int, after_closing:bool, counter_account_id:?int}|null
+     * @return array{account_id:int, from:string, to:string, page:int, per_page:int, after_closing:bool, counter_account_id:?int, group_by_dimension_type:?int}|null
      */
     private function validateParams(Request $request, Response $response, array $args, ?Response &$err): ?array
     {
@@ -154,6 +176,17 @@ final class AccountStatementAction
             $err = Json::error($response, 'validation_failed', 'counter_account_id musí být ID účtu.', 422);
             return null;
         }
+        $groupBy = $q['group_by_dimension_type'] ?? null;
+        $dimensionTypeId = null;
+        if ($groupBy !== null) {
+            $dimensionTypeId = (is_string($groupBy) || is_int($groupBy))
+                ? filter_var($groupBy, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+                : false;
+            if ($dimensionTypeId === false) {
+                $err = Json::error($response, 'validation_failed', 'group_by_dimension_type musí být kladné ID typu dimenze.', 422);
+                return null;
+            }
+        }
 
         $err = null;
         return [
@@ -166,6 +199,7 @@ final class AccountStatementAction
             // nulový a opis by k rozvahovému dni neukázal nic.
             'after_closing' => (string) ($q['after_closing'] ?? '') === '1',
             'counter_account_id' => $counterRaw === '' ? null : (int) $counterRaw,
+            'group_by_dimension_type' => $dimensionTypeId,
         ];
     }
 

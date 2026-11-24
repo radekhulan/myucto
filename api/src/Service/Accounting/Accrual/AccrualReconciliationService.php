@@ -32,6 +32,7 @@ final class AccrualReconciliationService
         private readonly Connection $db,
         private readonly AccrualItemRepository $items,
         private readonly AccrualItemService $service,
+        private readonly \MyInvoice\Service\Accounting\Closing\AccrualDeferralService $deferrals,
     ) {}
 
     /** @return array<string,mixed> */
@@ -47,6 +48,11 @@ final class AccrualReconciliationService
         $gl = $this->sumByAccount($supplierId, $ids, $start, $asOf);
         $closing = $this->closingByAccount($supplierId, $ids, $asOf);
         $items = $this->itemsByAccount($supplierId, $asOf);
+        // Účty odkladu uzávěrky (381, 384) jsou vidět vždy, i s nulovým zůstatkem během roku.
+        $deferralAccounts = [
+            $this->deferrals->deferralAccount($supplierId, \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::RULE_PREPAID_EXPENSE),
+            $this->deferrals->deferralAccount($supplierId, \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::RULE_DEFERRED_REVENUE),
+        ];
         $rows = [];
         $totals = self::zero();
         foreach ($accounts as $id => $acc) {
@@ -56,7 +62,8 @@ final class AccrualReconciliationService
             $closingBal = round(($closing[$id] ?? 0.0) * $sign, 2);
             $itemsBal = round(($items[$id]['balance'] ?? 0.0) * $sign, 2);
             $diff = round($glBal - $closingBal - $itemsBal, 2);
-            if ((int) round($glBal * 100) === 0 && (int) round($itemsBal * 100) === 0 && (int) round($closingBal * 100) === 0) {
+            if ((int) round($glBal * 100) === 0 && (int) round($itemsBal * 100) === 0 && (int) round($closingBal * 100) === 0
+                && !in_array($acc['account_code'], $deferralAccounts, true)) {
                 continue;
             }
             $rows[] = [

@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   cashFlow: vi.fn(),
   exportProfit: vi.fn(),
   exportCashFlow: vi.fn(),
+  getTrialBalance: vi.fn(),
   responsibleCandidates: vi.fn(),
   replace: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -38,6 +39,16 @@ vi.mock('@/api/dimensions', () => ({
     responsibleCandidates: m.responsibleCandidates,
   },
 }))
+vi.mock('@/api/accounting', () => ({
+  accountingApi: {
+    listPeriods: async () => [{ id: 2, fiscal_year: 2094, starts_on: '2094-01-01', ends_on: '2094-12-31', status: 'open' }],
+    getTrialBalance: m.getTrialBalance,
+  },
+}))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve() }))
+vi.mock('@/composables/useTablePrefs', () => ({
+  useTablePrefs: () => ({ densityClass: { value: '' }, sort: { value: null }, flag: () => false, isVisible: () => true }),
+}))
 vi.mock('vue-router', async (importOriginal) => ({
   ...await importOriginal<typeof import('vue-router')>(),
   useRoute: () => ({ query: m.routeQuery }),
@@ -51,6 +62,7 @@ vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v
 import DimensionProfit from '../DimensionProfit.vue'
 import DimensionProfitMatrix from '@/components/dimensions/DimensionProfitMatrix.vue'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
+import TrialBalance from '../TrialBalance.vue'
 
 const stubs = {
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
@@ -219,6 +231,25 @@ describe('Výkazy po dimenzi', () => {
 })
 
 describe('Propojení účetních sestav', () => {
+  it('odkaz účtu z předvahy předá výpisu všechny hodnoty dimenze i volbu podřízených', async () => {
+    m.routeQuery = { dimension_value_id: '9,4', dimension_descendants: '0' }
+    m.getTrialBalance.mockResolvedValue({
+      period: { fiscal_year: 2094 }, from: '2094-01-01', to: '2094-12-31',
+      rows: [{ account_id: 7, account_code: '518', name: 'Služby', account_type: 'expense' }],
+      totals: {}, checks: {},
+    })
+    const w = mount(TrialBalance, { global: {
+      directives: { 'column-labels': {} },
+      stubs: { ...stubs, ActivationBanner: true, ColumnPicker: true, DensityToggle: true, DateInput: true, SortableTh: true },
+    } })
+    await flushPromises()
+    const links = w.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to') ?? '{}'))
+    expect(links.find(link => link.name === 'accounting-account-statement')).toEqual({
+      name: 'accounting-account-statement', params: { accountId: 7 },
+      query: { from: '2094-01-01', to: '2094-12-31', dimension_value_id: '9,4', dimension_descendants: '0' },
+    })
+  })
+
   it('předá z předvahy hodnotu dimenze i do výsledovky a ostatních sestav', async () => {
     const w = mount(DimensionReportLinks, {
       props: { current: 'trial', from: '2094-01-01', to: '2094-12-31', valueIds: [9], descendants: false },

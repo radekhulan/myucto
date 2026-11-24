@@ -985,6 +985,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/tax-return/.*/filed-import/preview$#', 'reports', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions/settings$#', 'reports.submit', AccessLevel::WRITE],
         ['GET', '#^/api/reports/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'reports.export', AccessLevel::READ],
+        ['GET', '#^/api/reports/submissions/[0-9]+/pdf$#', 'reports.export', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions(/|$)#', 'reports', AccessLevel::READ],
         ['*', '#^/api/reports/submissions(/|$)#', 'reports.submit', AccessLevel::WRITE],
         // Plánovaný export do Pohody: čtení a „spustit teď“ patří k exportům (stejné právo jako ruční export
@@ -1321,7 +1322,7 @@ final class RoutePermissionMap
                 }
                 $key = $path === '/api/reports/submissions/settings'
                     ? 'reports.submit'
-                    : (preg_match('#/(?:xml|download)$#D', $path) === 1 ? 'reports.export' : 'reports');
+                    : (preg_match('#/(?:xml|pdf|download)$#D', $path) === 1 ? 'reports.export' : 'reports');
                 return new RoutePermission(self::PERMISSION, $key, AccessLevel::READ,
                     $path === '/api/reports/submissions/settings'
                         ? ['reports.submissions', 'reports.submissions.manage']

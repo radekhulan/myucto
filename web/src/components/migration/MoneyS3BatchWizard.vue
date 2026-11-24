@@ -39,6 +39,8 @@ const uploading = ref(false)
 const filingBusy = ref(false)
 
 const fromYear = ref<'auto' | 'all'>('auto')
+const toYear = ref<'auto' | number>('auto')
+const openingOnlyNext = ref(false)
 const existing = ref<'skip' | 'update'>('skip')
 const closeHistory = ref(true)
 const disposalYearTax = ref<'half' | 'none'>('half')
@@ -62,6 +64,15 @@ let disposed = false
 const readyUploads = computed(() => uploads.value.filter(isBatchUploadReady))
 const pendingUploads = computed(() => uploads.value.filter(u => !isBatchUploadReady(u)))
 const selectedTokens = computed(() => readyUploads.value.filter(u => selected.value.has(u.token)).map(u => u.token))
+/** Účetní roky vybraných záloh (volba „Převést do roku"). */
+const selectedYears = computed(() => {
+  const years = new Set<number>()
+  for (const u of readyUploads.value) {
+    if (!selected.value.has(u.token)) continue
+    for (const y of u.agenda.years ?? []) if (typeof y.fiscal_year === 'number') years.add(y.fiscal_year)
+  }
+  return [...years].sort((a, b) => a - b)
+})
 const selectedNew = computed(() => readyUploads.value.filter(u => selected.value.has(u.token) && u.company.access === 'none').length)
 const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
 const percent = computed(() => job.value?.total_items ? Math.min(100, Math.round((job.value.processed / job.value.total_items) * 100)) : null)
@@ -203,6 +214,8 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     filing_ids: filings.value.map(f => f.id),
     mode,
     from_year: fromYear.value,
+    to_year: toYear.value,
+    opening_only_next: openingOnlyNext.value,
     existing: existing.value,
     close_history: closeHistory.value,
     disposal_year_tax: disposalYearTax.value,
@@ -418,6 +431,13 @@ onBeforeUnmount(() => {
           </select>
           <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('money_s3.batch.from_year_hint') }}</span>
         </label>
+        <label class="block text-sm font-medium">{{ t('money_s3.to_year') }}
+          <select v-model="toYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="batch-to-year">
+            <option value="auto">{{ t('money_s3.batch.to_year_auto') }}</option>
+            <option v-for="y in selectedYears" :key="y" :value="y">{{ y }}</option>
+          </select>
+          <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('money_s3.batch.to_year_hint') }}</span>
+        </label>
         <label class="block text-sm font-medium">{{ t('money_s3.batch.existing') }}
           <select v-model="existing" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="batch-existing">
             <option value="skip">{{ t('money_s3.batch.existing_skip') }}</option>
@@ -445,6 +465,10 @@ onBeforeUnmount(() => {
         <label class="flex cursor-pointer items-start gap-3">
           <input v-model="closeHistory" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" />
           <span class="text-sm"><span class="font-medium">{{ t('money_s3.close_history') }}</span><br /><span class="text-neutral-500">{{ t('money_s3.close_history_hint') }}</span></span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3">
+          <input v-model="openingOnlyNext" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="batch-opening-only-next" />
+          <span class="text-sm"><span class="font-medium">{{ t('money_s3.opening_only_next') }}</span><br /><span class="text-neutral-500">{{ t('money_s3.opening_only_next_hint') }}</span></span>
         </label>
         <label class="flex cursor-pointer items-start gap-3">
           <input v-model="relatedParties" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" />

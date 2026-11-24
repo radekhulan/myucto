@@ -25,9 +25,11 @@ use PDO;
  * Převod agendy Money S3 do firmy v MyÚčtu — orchestrátor kroků průvodce.
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
- * faktury → pokladna a banka → vazby dokladů na deník a úhrady → pozastavené šablony
+ * faktury → pokladna a banka → vazby dokladů na deník a úhrady → mzdové závazky otevřené
+ * ke konci posledního roku jako ostatní závazky → pozastavené šablony
  * pravidelných faktur z historie → uzávěrka historických
- * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace. Automatika účtování je po celou dobu vypnutá
+ * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace → kontrolní
+ * sestava saldokonta proti počátečním stavům dalšího roku ({@see SaldoOpeningCheck}). Automatika účtování je po celou dobu vypnutá
  * ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí —
@@ -70,6 +72,8 @@ final class MoneyS3Importer
         private readonly VatFilingsTakeover $vatFilings,
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly InvoicePdfRenderer $pdf,
+        private readonly PayrollLiabilityImporter $payrollLiabilities,
+        private readonly SaldoOpeningCheck $saldoCheck,
     ) {}
 
     /**
@@ -110,6 +114,7 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK,
             DimensionImporter::STEP,
             DocumentLinker::STEP_PAYMENTS,
+            PayrollLiabilityImporter::STEP,
             RecurringSeriesTakeover::STEP,
             AssetImporter::STEP,
             AssetImporter::STEP_SMALL,
@@ -117,6 +122,7 @@ final class MoneyS3Importer
             HistoricalYearCloser::STEP,
             PayrollImporter::STEP,
             MoneyS3Reconciler::STEP,
+            SaldoOpeningCheck::STEP,
         ];
     }
 
@@ -200,23 +206,24 @@ final class MoneyS3Importer
      */
     public function preflight(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview = null): array
     {
-        [$options, $notes, $explicit] = $this->resolveToYear($supplierId, $backup, $agenda, $options, $journalPreview);
-        return [...$notes, ...$this->checks($supplierId, $backup, $agenda, $options, $journalPreview, $explicit)];
+        [$options, $notes, $explicit, $openingOnly] = $this->resolveToYear($supplierId, $backup, $agenda, $options, $journalPreview);
+        return [...$notes, ...$this->checks($supplierId, $backup, $agenda, $options, $journalPreview, $explicit, $openingOnly)];
     }
 
     /**
      * Volba „Převést do roku" pro převod: výslovně zvolený rok, jinak výchozí podle firmy
      * ({@see defaultToYear()}). Vrací volby s rokem, zprávy kontroly před převodem (výchozí
-     * rok, vynechané pozdější adresáře zálohy) a zda roky převodu vybral uživatel.
+     * rok, vynechané pozdější adresáře zálohy), zda roky převodu vybral uživatel a rok, ze
+     * kterého se převezmou jen počáteční stavy ({@see ImportOptions::$openingOnlyNext}).
      *
      * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
-     * @return array{0:ImportOptions,1:list<array{level:string,code:string,message:string,context:array<string,mixed>}>,2:array{from:bool,to:bool}}
+     * @return array{0:ImportOptions,1:list<array{level:string,code:string,message:string,context:array<string,mixed>}>,2:array{from:bool,to:bool},3:?array<string,mixed>}
      */
     private function resolveToYear(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview): array
     {
         $explicit = ['from' => $options->fromYear !== null, 'to' => $options->toYear !== null];
         if ($agenda->taxRecordsOnly()) {
-            return [$options, [], $explicit];
+            return [$options, [], $explicit, null];
         }
         $full = $this->fullPlan($supplierId, $backup, $options, $journalPreview);
         $notes = [];
@@ -230,8 +237,38 @@ final class MoneyS3Importer
                 ), 'context' => $default];
             }
         }
+        $openingOnly = null;
+        if ($options->openingOnlyNext && !$options->relinkOnly) {
+            if ($options->toYear === null) {
+                // Bez „Převést do roku" je posledním převáděným rokem předposlední rok zálohy.
+                // Prázdný rozsah převod zastaví: jinak by převzal celý rok určený jen pro počáteční stavy.
+                $toYear = self::openingOnlyToYear($this->fullPlan($supplierId, $backup, new ImportOptions(), $journalPreview));
+                if ($toYear === null || ($options->fromYear !== null && $toYear < $options->fromYear)) {
+                    $notes[] = ['level' => 'error', 'code' => 'opening_only_empty', 'message' => $toYear === null
+                        ? 'Záloha má jediný účetní rok. S volbou „Z dalšího roku jen počáteční stavy“ je posledním převáděným rokem předposlední rok zálohy, není tedy co převést. Zvolte „Převést do roku“, nebo volbu vypněte.'
+                        : sprintf('S volbou „Z dalšího roku jen počáteční stavy“ je posledním převáděným rokem %d (předposlední rok zálohy), převod ale začíná rokem %d. Rok %d je určený jen pro počáteční stavy, není tedy co převést.',
+                            $toYear, $options->fromYear, $toYear + 1),
+                        'context' => ['to_year' => $toYear, 'from_year' => $options->fromYear]];
+                    return [$options, $notes, $explicit, null];
+                }
+                $options = $options->withToYear($toYear);
+            }
+            $openingOnly = $options->toYear !== null ? self::openingOnlyItem($full, $options->toYear) : null;
+            if ($openingOnly === null) {
+                $notes[] = ['level' => 'warning', 'code' => 'opening_only_missing', 'message' => sprintf(
+                    'Záloha nemá adresář roku %s s počátečními stavy. Rok %s proto nepůjde ověřit proti Money ani uzavřít, zůstane otevřený.',
+                    $options->toYear !== null ? (string) ($options->toYear + 1) : 'po posledním převáděném', $options->toYear ?? 'poslední',
+                ), 'context' => ['to_year' => $options->toYear]];
+            } else {
+                $notes[] = ['level' => 'info', 'code' => 'opening_only_next', 'message' => sprintf(
+                    'Z adresáře %s se převezmou jen počáteční stavy roku %d. Rok %d se proti nim ověří a uzavře; doklady, banka ani deník roku %2$d z Money do MyÚčta nepřijdou.',
+                    $openingOnly['dir'], $openingOnly['year'], $options->toYear,
+                ), 'context' => ['year' => $openingOnly['year'], 'dir' => $openingOnly['dir'], 'to_year' => $options->toYear]];
+            }
+        }
         if ($options->toYear !== null) {
-            $later = array_values(array_filter($full, static fn (array $p): bool => $p['year'] > $options->toYear));
+            $later = array_values(array_filter($full, static fn (array $p): bool => $p['year'] > $options->toYear
+                && ($openingOnly === null || $p['dir'] !== $openingOnly['dir'])));
             if ($later !== []) {
                 $notes[] = ['level' => 'info', 'code' => 'later_years_skipped', 'message' => sprintf(
                     'Adresáře zálohy po roce %d se nepřevádějí: %s. Jejich deník, doklady ani banka do MyÚčta nepřijdou.',
@@ -244,7 +281,42 @@ final class MoneyS3Importer
                     'context' => ['to_year' => $options->toYear]];
             }
         }
-        return [$options, $notes, $explicit];
+        return [$options, $notes, $explicit, $openingOnly];
+    }
+
+    /**
+     * Poslední převáděný rok s volbou „Z dalšího roku jen počáteční stavy" ({@see ImportOptions::$openingOnlyNext})
+     * bez „Převést do roku": předposlední rok zálohy, poslední je určený jen pro počáteční
+     * stavy. Null = záloha nemá dva roky a převádět není co. Podle něj vybírá i dávka
+     * „od roku" automaticky ({@see MoneyS3BatchImporter}): rok jen s počátečními stavy do
+     * navazování let nepatří.
+     *
+     * @param list<array<string,mixed>> $plan rozvrh celé zálohy (bez „od roku" i „do roku")
+     */
+    public static function openingOnlyToYear(array $plan): ?int
+    {
+        $years = array_values(array_unique(array_map(static fn (array $p): int => (int) $p['year'], $plan)));
+        sort($years);
+        return count($years) >= 2 ? $years[count($years) - 2] : null;
+    }
+
+    /**
+     * Adresář roku po posledním převáděném (`$toYear` + 1), ze kterého se převezmou jen
+     * počáteční stavy. Má-li rok v záloze víc adresářů, platí poslední (Money v něm vede
+     * aktuální počáteční stavy).
+     *
+     * @param list<array<string,mixed>> $plan rozvrh bez horní hranice
+     * @return array<string,mixed>|null
+     */
+    private static function openingOnlyItem(array $plan, int $toYear): ?array
+    {
+        $found = null;
+        foreach ($plan as $item) {
+            if ((int) $item['year'] === $toYear + 1) {
+                $found = $item;
+            }
+        }
+        return $found;
     }
 
     /**
@@ -322,11 +394,15 @@ final class MoneyS3Importer
      *
      * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
      * @param array{from:bool,to:bool} $explicit
+     * @param array<string,mixed>|null $openingOnly rok jen s počátečními stavy ({@see openingOnlyItem()})
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    private function checks(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview, array $explicit): array
+    private function checks(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview, array $explicit, ?array $openingOnly = null): array
     {
         $calendar = $this->periods->fiscalCalendar($supplierId);
+        // Adresáře s deníkem z náhledu nahrání (celá záloha), ať kontrola adresářů bez deníku deníky znovu nečte.
+        $journalDirs = self::journalPreviewComplete($journalPreview) && $journalPreview['start_month'] === $calendar->startMonth()
+            ? array_column($journalPreview['plan'], 'dir') : [];
         if ($options->fromYear !== null || $options->firstPeriodStart !== null || !self::journalPreviewComplete($journalPreview)
             || $journalPreview['start_month'] !== $calendar->startMonth()) {
             $journalPreview = null;
@@ -447,14 +523,113 @@ final class MoneyS3Importer
             }
             if ((string) $period['status'] !== 'open' && !$mapped) {
                 $add('error', 'period_not_open', "Účetní období {$item['year']} je v MyÚčtu uzavřené.", ['year' => $item['year']]);
-            } elseif ((string) $period['status'] !== 'open' && $explicit['to'] && !$options->relinkOnly && (int) $item['year'] === $options->toYear) {
+            } elseif ((string) $period['status'] !== 'open' && $explicit['to'] && !$options->relinkOnly && !$options->openingOnlyNext && (int) $item['year'] === $options->toYear) {
                 // Uzavřený historický rok převod jen přeskočí; rok, do kterého má převod podle
-                // volby „Převést do roku" zapisovat, ale uzavřený být nesmí.
+                // volby „Převést do roku" zapisovat, ale uzavřený být nesmí. S počátečními stavy
+                // dalšího roku ho uzavírá sám převod, opakovaný převod ho jen přeskočí.
                 $add('error', 'period_not_open', "Účetní období {$item['year']}, do kterého má převod zapisovat (volba „Převést do roku“), je v MyÚčtu uzavřené.", ['year' => $item['year']]);
+            }
+        }
+        if ($openingOnly !== null && !$taxRecords) {
+            array_push($out, ...$this->openingOnlyChecks($supplierId, $openingOnly, $lockedUntil));
+        }
+        if (!$taxRecords) {
+            foreach (self::directoriesWithoutJournal($backup, $journalDirs) as $dir => $counts) {
+                $add('warning', 'dir_without_journal', sprintf(
+                    'Adresář %s zálohy nemá účetní deník, ale obsahuje doklady (%s). Převod bere jen roky s deníkem, tyto doklady se nepřevedou. Bývá to čerstvě založený rok v Money.',
+                    $dir, implode(', ', array_map(static fn (string $t, int $n): string => "{$t} {$n}", array_keys($counts), $counts)),
+                ), ['dir' => $dir, 'documents' => $counts]);
+            }
+        }
+        if ($plan !== [] && !$taxRecords && !$options->relinkOnly) {
+            // Pohyby z banky na účtech Money, se kterými se v MyÚčtu už pracovalo: převod by se na
+            // nich zastavil až v kroku banky, po zápisu deníku a dokladů.
+            $probe = new ImportContext($supplierId, 0, $backup, $agenda, $options, new ImportProtocol($options->mode), $calendar);
+            $probe->lockedUntil = $lockedUntil;
+            foreach ($plan as $item) {
+                $probe->dirYears[(string) $item['dir']] = (int) $item['year'];
+                $period = $this->periods->findByYear($supplierId, (int) $item['year']);
+                $probe->periods[(int) $item['year']] = ['id' => (int) ($period['id'] ?? 0), 'starts_on' => (string) ($period['starts_on'] ?? $item['starts_on']),
+                    'ends_on' => (string) ($period['ends_on'] ?? $item['ends_on']), 'status' => (string) ($period['status'] ?? 'open'),
+                    'locked' => $period !== null && (string) $period['status'] !== 'open'];
+            }
+            $bank = $this->cashBank->foreignMovementsBlocker($probe);
+            if ($bank !== null) {
+                $add('error', $bank['code'], $bank['message'], $bank['context']);
             }
         }
         if ($plan !== [] && !$taxRecords && $conflict === null && ($supplier['accounting_mode'] ?? '') !== 'double_entry') {
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
+        }
+        return $out;
+    }
+
+    /**
+     * Adresáře zálohy bez účetního deníku, které přesto nesou doklady, banku nebo pokladnu:
+     * rozvrh převodu stojí na deníku, takový adresář by převod vynechal bez zmínky. Patří sem
+     * každá evidence dokladů, kterou převod čte (faktury, ostatní závazky a pohledávky včetně
+     * mzdových, interní doklady, banka a pokladna).
+     *
+     * @param list<string> $journalDirs adresáře, o kterých je známo, že deník mají (náhled nahrání)
+     * @return array<string,array<string,int>> adresář => tabulka => počet řádků
+     */
+    private static function directoriesWithoutJournal(Ms3Backup $backup, array $journalDirs = []): array
+    {
+        $labels = ['VFaktury' => 'vydané faktury', 'PFaktury' => 'přijaté faktury', 'KnihZav' => 'ostatní závazky', 'KnihPohl' => 'ostatní pohledávky',
+            'IntDokl' => 'interní doklady', 'BankKnih' => 'banka', 'PoklKnih' => 'pokladna'];
+        $known = array_fill_keys(array_map('strtoupper', $journalDirs), true);
+        $out = [];
+        foreach ($backup->yearDirs() as $dir) {
+            if (isset($known[strtoupper(basename($dir))])) {
+                continue;
+            }
+            $journal = $backup->table('UcDenik', $dir);
+            if ($journal !== null && $journal->hasData()) {
+                continue;
+            }
+            foreach ($labels as $table => $label) {
+                $t = $backup->table($table, $dir);
+                if ($t !== null && $t->hasData() && ($n = $t->countRows()) > 0) {
+                    $out[basename($dir)][$label] = $n;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Kontrola roku, ze kterého se převezmou jen počáteční stavy: období musí být otevřené
+     * a mimo zámek k datu (převod do něj zapisuje otevírací zápis). Vlastní zápisy z MyÚčta
+     * nevadí; otevírací zápis z MyÚčta převod nemění a jen ho ohlásí.
+     *
+     * @param array<string,mixed> $item
+     * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
+     */
+    private function openingOnlyChecks(int $supplierId, array $item, ?string $lockedUntil): array
+    {
+        $out = [];
+        $year = (int) $item['year'];
+        if (!($item['has_opening'] ?? false)) {
+            $out[] = ['level' => 'warning', 'code' => 'opening_only_no_opening', 'message' => "Adresář {$item['dir']} roku {$year} nemá v Money počáteční stavy (XP). Rok " . ($year - 1)
+                . ' proto nepůjde ověřit ani uzavřít.', 'context' => ['year' => $year, 'dir' => $item['dir']]];
+        }
+        $period = $this->periods->findByYear($supplierId, $year);
+        if ($period !== null && (string) $period['status'] !== 'open') {
+            $out[] = ['level' => 'error', 'code' => 'opening_only_period_not_open', 'message' => "Účetní období {$year}, do kterého se mají převzít počáteční stavy z Money, je v MyÚčtu uzavřené.",
+                'context' => ['year' => $year]];
+            return $out;
+        }
+        $blocker = self::periodBlocker($year, $period ?? ['status' => 'open', 'starts_on' => $item['starts_on']], $lockedUntil);
+        if ($blocker !== null) {
+            $out[] = ['level' => 'error', 'code' => $blocker->errorCode, 'message' => $blocker->getMessage(), 'context' => $blocker->context];
+        }
+        if ($period !== null && $this->map->get($supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|' . Ms3Journal::OPENING_SOURCE) === null) {
+            $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'opening' AND reversed_by IS NULL");
+            $stmt->execute([$supplierId, (int) $period['id']]);
+            if ((int) $stmt->fetchColumn() > 0) {
+                $out[] = ['level' => 'info', 'code' => 'opening_only_existing', 'message' => "Účetní období {$year} už má v MyÚčtu otevírací zápis. Převod ho nemění, počáteční stavy z Money s ním porovná uzávěrka roku " . ($year - 1) . '.',
+                    'context' => ['year' => $year]];
+            }
         }
         return $out;
     }
@@ -567,6 +742,7 @@ final class MoneyS3Importer
     /**
      * `$agenda` a `$journalPreview` = náhled agendy a deníku, který už spočítal job nahrání
      * (`meta.json`); bez nich se čtou ze zálohy.
+     * Při `$callerRollsBackPreview` drží celou transakci náhledu dávka a vždy ji odvolá.
      *
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
@@ -582,14 +758,21 @@ final class MoneyS3Importer
         ?callable $shouldCancel = null,
         ?AgendaInfo $agenda = null,
         ?array $journalPreview = null,
+        bool $callerRollsBackPreview = false,
     ): ImportProtocol {
+        $pdo = $this->db->pdo();
+        $dryRun = $options->isDryRun();
+        if ($callerRollsBackPreview && (!$dryRun || !$pdo->inTransaction())) {
+            throw new \LogicException('Převzetí rollbacku vyžaduje otevřenou transakci zkoušky Money S3.');
+        }
+        $ownPreview = $dryRun && !$callerRollsBackPreview;
         $protocol = new ImportProtocol($options->mode, $options->acceptDifferences);
         $agenda ??= AgendaInfo::fromBackup($backup);
         $protocol->set('agenda', $agenda->toArray());
-        [$options, $notes, $explicit] = $this->resolveToYear($supplierId, $backup, $agenda, $options, $journalPreview);
+        [$options, $notes, $explicit, $openingOnly] = $this->resolveToYear($supplierId, $backup, $agenda, $options, $journalPreview);
         $protocol->set('options', $options->toArray());
 
-        $preflight = [...$notes, ...$this->checks($supplierId, $backup, $agenda, $options, $journalPreview, $explicit)];
+        $preflight = [...$notes, ...$this->checks($supplierId, $backup, $agenda, $options, $journalPreview, $explicit, $openingOnly)];
         $protocol->set('preflight', $preflight);
         $protocol->begin(self::STEP_PREFLIGHT);
         foreach ($preflight as $m) {
@@ -607,8 +790,10 @@ final class MoneyS3Importer
         $ctx->runId = $runId;
         $ctx->progress = $progress;
         $ctx->taxRecords = $agenda->taxRecordsOnly();
+        $ctx->openingOnly = $openingOnly;
         if (!$ctx->taxRecords) {
             $ctx->lockedUntil = $this->settings->getLockedUntil($supplierId);
+            $ctx->openingDocumentDirs = $this->openingDocumentDirs($backup, $options, $ctx->calendar);
         }
         // Daňová evidence se neúčtuje: automatika účtování ani výchozí nastavení účetní
         // jednotky se jí netýkají a převod je nemění.
@@ -616,19 +801,21 @@ final class MoneyS3Importer
 
         $frameworkGuard = new AccountingFrameworkImportGuard($this->db);
         $frameworkPeriods = $this->journal->plan($backup, $options, $this->periods->fiscalCalendar($supplierId));
+        if ($openingOnly !== null) {
+            // Rok jen s počátečními stavy: převod do něj zapisuje otevírací zápis.
+            $frameworkPeriods[] = $openingOnly;
+        }
         // Roky, do kterých převod zapisuje: otevřená (nebo nová) období rozvrhu. Uzavřené
         // historické roky převod přeskočí; zapisované se ověřují v transakci každého kroku.
         $targets = $automationManaged ? $this->writableTargets($supplierId, $frameworkPeriods) : [];
         // Opravný převod vazeb deník ani DPH nemění: zámek k datu ho nezastaví, jen uzavření období.
         $lockChecked = !$options->relinkOnly;
-        $pdo = $this->db->pdo();
-        $dryRun = $options->isDryRun();
-        // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes
-        // savepoint — vlastní BEGIN by PDO odmítlo a vnější transakci by nesměla vrátit.
-        $savepoint = $dryRun && $pdo->inTransaction();
-        if ($savepoint) {
-            $pdo->exec('SAVEPOINT money_s3_dry_run');
-        } elseif ($dryRun) {
+        // Obnova dříve převzatých dokladů maže řádky s FULLTEXT. Po částečném rollbacku
+        // může další zápis do stejných řádků shodit MariaDB 12.3.3.
+        if ($ownPreview) {
+            if ($pdo->inTransaction()) {
+                throw new \LogicException('Zkouška převodu Money S3 vyžaduje vlastní transakci.');
+            }
             $pdo->beginTransaction();
         }
         try {
@@ -688,8 +875,7 @@ final class MoneyS3Importer
                     }
                     $protocol->finish($key);
                 } catch (\Throwable $e) {
-                    // Odvolaná transakce (1020/1213) nesmí zůstat viset jako otevřená:
-                    // savepoint zkušebního běhu i zbytek převodu by jinak pracovaly naslepo.
+                    // Odvolaná transakce (1020/1213) nesmí zůstat viset jako otevřená.
                     TransactionFailure::rollbackIfAborted($pdo, $e);
                     if ($e instanceof MoneyS3Exception || $e instanceof AccountingFrameworkException) {
                         $protocol->error($key, $e->errorCode, $e->getMessage());
@@ -736,9 +922,7 @@ final class MoneyS3Importer
             $protocol->error(self::STEP_PREFLIGHT, $e->errorCode, $e->getMessage());
             $protocol->fail(self::STEP_PREFLIGHT);
         } finally {
-            if ($savepoint && $pdo->inTransaction()) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_dry_run');
-            } elseif ($dryRun && $pdo->inTransaction()) {
+            if ($ownPreview && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             if ($dryRun) {
@@ -747,6 +931,31 @@ final class MoneyS3Importer
             }
         }
         return $protocol;
+    }
+
+    /**
+     * Adresáře zálohy z let před prvním převáděným rokem (volba „Převést od roku"): adresář
+     * => účetní rok. Jejich doklady otevřené k začátku prvního období převod založí jako
+     * doklady počátečního stavu ({@see OpeningDocuments}).
+     *
+     * @return array<string,int>
+     */
+    private function openingDocumentDirs(Ms3Backup $backup, ImportOptions $options, FiscalCalendar $calendar): array
+    {
+        if ($options->fromYear === null) {
+            return [];
+        }
+        $plan = $this->journal->plan($backup, $options, $calendar);
+        if ($plan === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($this->journal->plan($backup, new ImportOptions(firstPeriodStart: $options->firstPeriodStart), $calendar) as $item) {
+            if ((int) $item['year'] < (int) $plan[0]['year']) {
+                $out[(string) $item['dir']] = (int) $item['year'];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -820,7 +1029,7 @@ final class MoneyS3Importer
     private const RELINK_SKIPPED_STEPS = [
         self::STEP_ACCOUNTING_MODE, CodebookImporter::STEP_POSTING_RULES, DimensionImporter::STEP, RecurringSeriesTakeover::STEP,
         AssetImporter::STEP, AssetImporter::STEP_SMALL, VatCoefficientSeeder::STEP, HistoricalYearCloser::STEP,
-        PayrollImporter::STEP, MoneyS3Reconciler::STEP,
+        PayrollImporter::STEP, MoneyS3Reconciler::STEP, PayrollLiabilityImporter::STEP,
     ];
 
     /** @return array<string,callable():void> */
@@ -853,6 +1062,7 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
             DimensionImporter::STEP => fn () => $this->dimensions->run($ctx),
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
+            PayrollLiabilityImporter::STEP => fn () => $this->payrollLiabilities->run($ctx),
             RecurringSeriesTakeover::STEP => fn () => $this->takeOverRecurring($ctx),
             AssetImporter::STEP =>fn () => $this->assets->importLongTerm($ctx),
             AssetImporter::STEP_SMALL => fn () => $this->assets->importSmall($ctx),
@@ -860,6 +1070,7 @@ final class MoneyS3Importer
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
             PayrollImporter::STEP => fn () => $this->payroll->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
+            SaldoOpeningCheck::STEP => fn () => $this->saldoCheck->run($ctx),
         ];
     }
 

@@ -123,7 +123,7 @@ final class ClientTaxSubmissionPermissionsTest extends TestCase
     public static function routes(): iterable
     {
         foreach ([
-            ['GET', '', true], ['GET', '/17', true], ['GET', '/17/xml', true], ['GET', '/17/payment', true],
+            ['GET', '', true], ['GET', '/17', true], ['GET', '/17/xml', true], ['GET', '/17/pdf', true], ['GET', '/17/payment', true],
             ['GET', '/17/artifacts/23/download', true], ['GET', '/settings', true], ['GET', '/isds-routes', true],
             ['GET', '/epo-credentials', true], ['POST', '/epo-credentials', true],
             ['PUT', '/epo-credentials/23/supplier', true], ['DELETE', '/epo-credentials/23', false],
@@ -136,7 +136,7 @@ final class ClientTaxSubmissionPermissionsTest extends TestCase
             ['PUT', '/settings', false], ['PUT', '/isds-routes', false], ['DELETE', '/17', false],
             ['POST', '/17/epo-attempts/23/resolve-not-submitted', false], ['GET', '/17/isds-inbox', false],
             ['POST', '/17/isds-inbox/23', false], ['GET', '/17/kh-evidence', false], ['GET', '/17/kh-evidence/export', false],
-            ['POST', '/17/unknown-action', false], ['GET', '/17/xml/extra', false], ['POST', '', false],
+            ['POST', '/17/unknown-action', false], ['GET', '/17/xml/extra', false], ['GET', '/17/pdf/extra', false], ['POST', '', false],
         ] as [$method, $suffix, $allowed]) {
             yield "$method $suffix" => [$method, '/api/reports/submissions' . $suffix, $allowed];
         }

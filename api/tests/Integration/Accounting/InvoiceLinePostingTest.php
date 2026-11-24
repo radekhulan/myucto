@@ -9,6 +9,7 @@ use MyInvoice\Action\Accounting\JournalAction;
 use MyInvoice\Action\Invoice\CreateInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\CreatePurchaseInvoiceAction;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\OwnedSandboxDatabase;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -30,12 +32,13 @@ use Slim\Psr7\Response as Psr7Response;
  *
  * Hlídá tři věci: řádek s účty se zaúčtuje podle nich, doklad bez nových polí se
  * zaúčtuje přesně jako dřív a náhled v editoru dá tytéž řádky, jaké pak vzniknou
- * zaúčtováním, aniž by cokoli uložil. Vše v transakci s rollbackem, data syntetická.
+ * zaúčtováním, aniž by cokoli uložil. Testy náhledu používají vlastní kopii testovací DB.
  */
 #[Group('integration')]
 final class InvoiceLinePostingTest extends TestCase
 {
     use IsolatedSupplierTrait;
+    use OwnedSandboxDatabase;
 
     private const DATE = '2026-03-02';
 
@@ -53,15 +56,19 @@ final class InvoiceLinePostingTest extends TestCase
     private int $userId = 0;
     private int $currencyId = 0;
     private int $rate21 = 0;
-    private bool $inTx = false;
 
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
+        $ownsTransactions = in_array('fulltext-transactions', $this->groups(), true);
         try {
             $c = Bootstrap::buildContainer();
+            if ($ownsTransactions) {
+                $c->set(Config::class, self::sandboxConfig('posting_preview'));
+                $c->set(Connection::class, self::sandboxConnection('posting_preview'));
+            }
             $this->db = $c->get(Connection::class);
             $this->posting = $c->get(PostingService::class);
             $this->journal = $c->get(JournalAction::class);
@@ -84,8 +91,9 @@ final class InvoiceLinePostingTest extends TestCase
             $this->markTestSkipped('Chybí základní data.');
         }
 
-        $pdo->beginTransaction();
-        $this->inTx = true;
+        if (!$ownsTransactions) {
+            $pdo->beginTransaction();
+        }
         $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
         $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
         $this->setVatPayerAt($pdo, $this->supplierId, '2020-01-01', true);
@@ -111,7 +119,7 @@ final class InvoiceLinePostingTest extends TestCase
 
     protected function tearDown(): void
     {
-        if (isset($this->db) && $this->inTx) {
+        if (isset($this->db)) {
             if ($this->db->pdo()->inTransaction()) {
                 $this->db->pdo()->rollBack();
             }
@@ -242,6 +250,7 @@ final class InvoiceLinePostingTest extends TestCase
      * JÁDRO: náhled v editoru z NEULOŽENÉHO stavu nic nezapíše a dá přesně tytéž řádky,
      * jaké vzniknou uložením, přijetím a zaúčtováním.
      */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewMatchesPostingAndWritesNothing(): void
     {
         $payload = $this->purchasePayload([
@@ -276,6 +285,7 @@ final class InvoiceLinePostingTest extends TestCase
      * (602, 325), zaúčtování ho ale přesměruje na analytiku (602.100, 325.100). Náhled
      * musí ukázat přesně zapsané účty, u vydané i přijaté faktury.
      */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewShowsAnalyticAccountsAsPosted(): void
     {
         $this->analytic('602', '602.100');
@@ -304,6 +314,7 @@ final class InvoiceLinePostingTest extends TestCase
     }
 
     /** Náhled nového konceptu vydané faktury: koncept se pro náhled bere jako vystavený. */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewOfNewIssuedInvoice(): void
     {
         $preview = $this->draftPreview('invoices', null, $this->invoicePayload([$this->saleItem(['posting_rule_key' => 'invoice.goods.issued'])]));
@@ -316,6 +327,7 @@ final class InvoiceLinePostingTest extends TestCase
     }
 
     /** Chyba uložení (tady chybějící dodavatel) je odpovědí náhledu, nic se neuloží. */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewReturnsSaveValidationError(): void
     {
         $payload = $this->purchasePayload([$this->purchaseItem()]);
@@ -327,6 +339,7 @@ final class InvoiceLinePostingTest extends TestCase
     }
 
     /** Chyba zaúčtování (smíšené protiúčty) nese `stage: posting`, chyba uložení ne. */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewMarksPostingErrorStage(): void
     {
         $preview = $this->draftPreview('purchase-invoices', null, $this->purchasePayload([
@@ -346,6 +359,7 @@ final class InvoiceLinePostingTest extends TestCase
     }
 
     /** Zaúčtovaný doklad se nesimuluje, náhled jen odkáže na živý zápis. */
+    #[Group('fulltext-transactions')]
     public function testDraftPreviewOfPostedDocumentReturnsEntry(): void
     {
         $id = $this->receivedPurchase([$this->purchaseItem()]);

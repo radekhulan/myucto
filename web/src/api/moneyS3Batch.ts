@@ -107,6 +107,10 @@ export interface BatchStartParams {
   filing_ids: string[]
   mode: 'dry_run' | 'import'
   from_year: 'auto' | 'all'
+  /** Poslední převáděný rok všech firem dávky, nebo auto (u každé firmy poslední rok bez vlastních zápisů). */
+  to_year: 'auto' | number
+  /** Z roku po posledním převáděném jen počáteční stavy. */
+  opening_only_next: boolean
   existing: 'skip' | 'update'
   close_history: boolean
   disposal_year_tax: 'half' | 'none'

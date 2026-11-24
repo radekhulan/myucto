@@ -67,7 +67,7 @@ final class AccrualItemRepository
      * Seznam položek se zůstatkem k datu, stránkovaný.
      *
      * @param array<string,mixed> $filters
-     * @return array{items: list<array<string,mixed>>, total:int, totals: array<string,float>}
+     * @return array{items: list<array<string,mixed>>, total:int, totals: array<string,float>, totals_by_kind: array<string,array{count:int,basis_amount:float,balance:float}>}
      */
     public function list(int $supplierId, array $filters, string $asOf, int $page, int $perPage, string $sortBy, string $sortDir): array
     {
@@ -84,12 +84,22 @@ final class AccrualItemRepository
         if (!empty($filters['with_balance'])) {
             $base .= ' AND COALESCE(b.bal, 0) <> 0';
         }
-        $count = $this->db->pdo()->prepare("SELECT COUNT(*) AS n,
+        // Součty po druzích: náklady a výnosy příštích období se nesčítají dohromady.
+        $count = $this->db->pdo()->prepare("SELECT ai.kind, COUNT(*) AS n,
                        COALESCE(SUM(COALESCE(b.bal, 0) * (CASE WHEN ai.kind IN ('deferred_revenue','accrued_expense') THEN -1 ELSE 1 END)), 0) AS balance,
                        COALESCE(SUM(ai.basis_amount), 0) AS basis
-                  {$base}");
+                  {$base}
+                 GROUP BY ai.kind
+                 ORDER BY ai.kind");
         $count->execute($baseParams);
-        $agg = $count->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'balance' => 0, 'basis' => 0];
+        $agg = ['n' => 0, 'balance' => 0.0, 'basis' => 0.0];
+        $byKind = [];
+        foreach ($count->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $agg['n'] += (int) $r['n'];
+            $agg['balance'] += (float) $r['balance'];
+            $agg['basis'] += (float) $r['basis'];
+            $byKind[(string) $r['kind']] = ['count' => (int) $r['n'], 'basis_amount' => round((float) $r['basis'], 2), 'balance' => round((float) $r['balance'], 2)];
+        }
         $order = (self::SORTABLE[$sortBy] ?? 'ai.item_no') . ' ' . ($sortDir === 'desc' ? 'DESC' : 'ASC') . ', ai.id DESC';
         $offset = max(0, ($page - 1) * $perPage);
         $stmt = $this->db->pdo()->prepare("SELECT ai.*, COALESCE(b.bal, 0) AS balance_raw, COALESCE(b.released, 0) AS released_raw,
@@ -104,6 +114,7 @@ final class AccrualItemRepository
             'items' => $items,
             'total' => (int) $agg['n'],
             'totals' => ['basis_amount' => round((float) $agg['basis'], 2), 'balance' => round((float) $agg['balance'], 2)],
+            'totals_by_kind' => $byKind,
         ];
     }
 

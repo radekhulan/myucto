@@ -173,8 +173,81 @@ final class JournalImporter
             }
             $years[] = $this->importYear($ctx, $item, $period, $dirsPerYear[$item['year']] === 1);
         }
+        if ($ctx->openingOnly !== null && !$ctx->options->relinkOnly) {
+            $years[] = $this->importOpeningOnly($ctx, $ctx->openingOnly);
+        }
         $p->set('journal', $years);
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Rok po posledním převáděném jen s počátečními stavy ({@see ImportOptions::$openingOnlyNext}):
+     * z deníku adresáře jen otevírací zápis (XP) se stejným klíčem jako u převáděných let
+     * a se zdrojem `opening` a klíčem = id období, jako zakládá {@see \MyInvoice\Service\Accounting\Closing\ClosingService::openNext()}.
+     * Smí i do období s vlastními zápisy z MyÚčta, jen když v něm otevírací zápis ještě není;
+     * otevírací zápis z MyÚčta převod nemění a počáteční stavy Money s ním porovná uzávěrka
+     * posledního převáděného roku. Období se do mapy převodu nezapisuje: převáděným rokem
+     * není (konec převáděných období, opravy úhrad).
+     *
+     * @param array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool} $item
+     * @return array<string,int|float|string|bool>
+     */
+    private function importOpeningOnly(ImportContext $ctx, array $item): array
+    {
+        $p = $ctx->protocol;
+        $year = $item['year'];
+        $period = (new MigrationPeriods($this->periods))
+            ->ensure($ctx->supplierId, $year, $item['starts_on'], $item['ends_on'], $p, self::STEP, static fn (int $id): null => null, null, true);
+        $ctx->openingOnlyPeriod = $period;
+        $ctx->openingOnlyBalances = $item['has_opening'] ? self::openingBalances($ctx->backup, (string) $item['dir']) : null;
+        $stats = ['year' => $year, 'opening_only' => true, 'entries' => 0, 'existing' => 0];
+        if ($period['locked']) {
+            $p->warn(self::STEP, 'opening_only_year_locked', "Rok {$year} je v MyÚčtu uzavřený, počáteční stavy z Money se do něj nepřevezmou.", ['year' => $year]);
+            return $stats;
+        }
+        if (!$item['has_opening']) {
+            $p->warn(self::STEP, 'opening_only_no_opening', "Adresář {$item['dir']} roku {$year} nemá v Money počáteční stavy (XP), není co převzít.", ['year' => $year, 'dir' => $item['dir']]);
+            return $stats;
+        }
+        $mapped = $this->map->get($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|' . Ms3Journal::OPENING_SOURCE);
+        if ($mapped === null) {
+            $own = $this->db->pdo()->prepare(
+                "SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'opening' AND reversed_by IS NULL"
+            );
+            $own->execute([$ctx->supplierId, $period['id']]);
+            if ((int) $own->fetchColumn() > 0) {
+                $p->info(self::STEP, 'opening_only_existing', "Rok {$year} už má v MyÚčtu otevírací zápis, převod ho nemění. Počáteční stavy z Money s ním porovná uzávěrka roku " . ($year - 1) . '.', ['year' => $year]);
+                $stats['existing'] = 1;
+                return $stats;
+            }
+        }
+        return $stats + $this->importYear($ctx, $item, $period, false, true);
+    }
+
+    /**
+     * Počáteční stavy (XP) adresáře zálohy po účtech MyÚčta: kód účtu => MD − D, bez účtů
+     * třídy 7 (protiúčet počátečních stavů). Stejné účty a strany jako otevírací zápis, který
+     * z nich převod zakládá ({@see groupLines()}).
+     *
+     * @return array<string,float>
+     */
+    private static function openingBalances(Ms3Backup $backup, string $dir): array
+    {
+        $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $dir);
+        $out = [];
+        foreach ($table !== null ? $table->rows(['Zdroj', 'Castka', 'UcMD', 'UcD']) : [] as $r) {
+            $effect = Ms3Journal::isOpening($r) ? Ms3Journal::effect($r) : null;
+            if ($effect === null) {
+                continue;
+            }
+            foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
+                $code = AccountCode::fromMoney((string) $code) ?? (string) $code;
+                if (!str_starts_with($code, '7')) {
+                    $out[$code] = ($out[$code] ?? 0.0) + $sign * $effect['amount'];
+                }
+            }
+        }
+        return array_map(static fn (float $v): float => round($v, 2), $out);
     }
 
     /**
@@ -200,21 +273,28 @@ final class JournalImporter
      * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
      * @param bool $singleDir rok má v záloze jediný adresář: zápis roku, který v deníku adresáře
      *        není, Money smazalo (u roku ve více adresářích může být v jiném)
+     * @param bool $openingOnly z deníku jen otevírací zápis ({@see importOpeningOnly()})
      * @return array<string,int|float|string>
      */
-    private function importYear(ImportContext $ctx, array $item, array $period, bool $singleDir = true): array
+    private function importYear(ImportContext $ctx, array $item, array $period, bool $singleDir = true, bool $openingOnly = false): array
     {
         $p = $ctx->protocol;
         $year = $item['year'];
         $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
 
         [$groups, $closingRows] = self::groupRows($table !== null ? $table->rows([...Ms3Journal::FIELDS, ...Ms3Journal::CURRENCY_FIELDS]) : []);
+        if ($openingOnly) {
+            $groups = array_intersect_key($groups, [Ms3Journal::OPENING_SOURCE => true]);
+            $closingRows = 0;
+        }
         $fxAccounts = $this->foreignAccounts($ctx, $item['dir']);
         $fillForeign = $this->db->pdo()->prepare(
             'UPDATE journal_entry_lines SET currency_code = ?, fx_rate = ?, amount_foreign = ?
               WHERE supplier_id = ? AND entry_id = ? AND line_no = ? AND account_id = ? AND side = ? AND currency_code IS NULL'
         );
-        $ctx->yearEndClosingRows[$year] = $closingRows;
+        if (!$openingOnly) {
+            $ctx->yearEndClosingRows[$year] = $closingRows;
+        }
         if ($closingRows > 0) {
             $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }
@@ -881,12 +961,21 @@ final class JournalImporter
     {
         $merged = count(array_unique($ctx->dirYears)) !== count($ctx->dirYears);
         $out = [];
-        foreach ($ctx->dirYears as $dir => $year) {
+        $dirs = $ctx->dirYears;
+        $openingOnlyDir = $ctx->openingOnly !== null && !isset($dirs[$ctx->openingOnly['dir']]) ? (string) $ctx->openingOnly['dir'] : null;
+        if ($openingOnlyDir !== null) {
+            // Rok jen s počátečními stavy: dimenze jen otevíracího zápisu.
+            $dirs[$openingOnlyDir] = (int) $ctx->openingOnly['year'];
+        }
+        foreach ($dirs as $dir => $year) {
             $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $dir);
             if ($table === null || !$table->hasData()) {
                 continue;
             }
             [$groups] = self::groupRows($table->rows(['Zdroj', 'Doklad', 'Datum', 'Castka', 'UcMD', 'UcD', 'Stred', 'Zakazka']));
+            if ((string) $dir === $openingOnlyDir) {
+                $groups = array_intersect_key($groups, [Ms3Journal::OPENING_SOURCE => true]);
+            }
             foreach ($groups as $groupKey => $groupRows) {
                 $lineNo = 0;
                 $lines = [];

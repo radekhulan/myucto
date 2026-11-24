@@ -179,6 +179,10 @@ test('výpis účetního účtu používá povinná data místo nepodporovaného
   assert.deepEqual(defined(request.query), { from: '2026-01-01', to: '2026-06-30', page: 2, per_page: 25, after_closing: 1, counter_account_id: 12 });
   const filtered = await call('account_statement', { account_id: 9, from: '2026-03-01', to: '2026-03-31', vendor: 'Dodavatel', client: 'Klient', item: 'Text', opening_date: '2026-01-01', include_analytics: false, dimension_value_id: 11, dimension_descendants: false });
   assert.deepEqual(defined(filtered.query), { from: '2026-03-01', to: '2026-03-31', vendor: 'Dodavatel', client: 'Klient', item: 'Text', opening_date: '2026-01-01', include_analytics: 0, dimension_value_id: 11, dimension_descendants: 0 });
+  const grouped = { account_id: 9, from: '2026-03-01', to: '2026-03-31', group_by_dimension_type: 5 };
+  assert.deepEqual(validateToolArguments(tool, grouped), grouped);
+  assert.equal((await call('account_statement', grouped)).query.group_by_dimension_type, 5);
+  assert.throws(() => validateToolArguments(tool, { ...grouped, group_by_dimension_type: 0 }));
 });
 
 test('seznamy dokladů vracejí dimenze jen na explicitní požadavek', async () => {

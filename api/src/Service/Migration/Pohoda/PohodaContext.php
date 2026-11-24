@@ -77,6 +77,9 @@ final class PohodaContext
     /** @var array<string,int> IČO => clients.id */
     public array $clientsByIco = [];
 
+    /** @var array<string,array<string,int>> IČO => [klíč názvu karty adresáře => clients.id] */
+    public array $clientsByIcoName = [];
+
     /** @var array<string,int> číslo dokladu => invoices.id */
     public array $issuedInvoices = [];
 
@@ -97,6 +100,9 @@ final class PohodaContext
 
     /** @var array<string,int> číslo dokladu => cash_documents.id */
     public array $cashDocuments = [];
+
+    /** @var array<string,int> id pokladního dokladu v POHODĚ => cash_documents.id */
+    public array $cashByPohodaId = [];
 
     /** @var array<string,list<array{id:int,date:string,amount:float}>> číslo pohybu => bank_transactions (částka v Kč se znaménkem) */
     public array $bankTransactions = [];
@@ -128,9 +134,20 @@ final class PohodaContext
      * Úhrady dokladů z `liquidations` - kterým bankovním nebo pokladním dokladem Pohody
      * byl doklad uhrazen. Páruje je {@see DocumentLinker::matchPayments()}.
      *
-     * @var list<array{doc:string,id:int,number:string,agenda:string,source:string,date:?string,amount:float,liq:string}>
+     * @var list<array{doc:string,id:int,number:string,agenda:string,source:string,source_id:string,date:?string,amount:float,liq:string,tax_document_ref?:string}>
      */
     public array $liquidations = [];
+
+    /** @var array<int,array<string,int>> id vydané zálohy => id úhrady POHODY => id DDKP v MyÚčtu */
+    public array $taxDocumentsByLiquidation = [];
+
+    /**
+     * DDKP čekající na vazbu platby zálohy ({@see DocumentLinker::matchPayments()}); co zůstane,
+     * převod ohlásí.
+     *
+     * @var array<int,array{tax_document:string,advance:string,source:string}> id DDKP => čísla dokladů
+     */
+    public array $taxDocumentPaymentPending = [];
 
     /** @var array<string,true> id převedených dokladů minulého období („typ|id“) - nemají zápis v deníku roku */
     public array $previousPeriod = [];

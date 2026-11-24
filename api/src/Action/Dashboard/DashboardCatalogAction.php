@@ -17,7 +17,6 @@ final class DashboardCatalogAction
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
         $board = $request->getQueryParams()['board'] ?? 'portal';
         try {
             if (!is_string($board)) throw new \InvalidArgumentException();

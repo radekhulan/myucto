@@ -26,6 +26,7 @@ vi.mock('@/api/epoSubmissions', async (importOriginal) => {
       credentials: m.credentials,
       settings: m.settings,
       xmlUrl: (id: number) => `/api/reports/submissions/${id}/xml`,
+      pdfUrl: (id: number) => `/api/reports/submissions/${id}/pdf`,
       artifactDownloadUrl: (id: number) => `/api/documents/${id}`,
     },
   }

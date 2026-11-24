@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\Accounting\AccountBalanceSign;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
@@ -33,6 +34,7 @@ final class AccountStatementService
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalLineContext $context,
         private readonly EntryFormService $entryForms,
+        private readonly DimensionRepository $dimensions,
     ) {}
 
     /**
@@ -41,7 +43,7 @@ final class AccountStatementService
      *        se s filtry knihy nepočítají.
      * @return array<string,mixed> struktura dle spec §2.6
      */
-    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null, ?AccountStatementScope $scope = null): array
+    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null, ?AccountStatementScope $scope = null, ?int $groupByDimensionType = null): array
     {
         $scope ??= new AccountStatementScope();
         $filters = $scope->filters;
@@ -53,6 +55,13 @@ final class AccountStatementService
         $account = $this->accounts->findById($supplierId, $accountId, $to);
         if ($account === null) {
             throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
+        }
+        $dimensionType = null;
+        if ($groupByDimensionType !== null) {
+            $dimensionType = $this->dimensions->findType($supplierId, $groupByDimensionType);
+            if ($dimensionType === null) {
+                throw new ReportException('dimension_type_not_found', 'Typ dimenze nenalezen.', 404);
+            }
         }
         $counterAccount = null;
         if ($counterAccountId !== null) {
@@ -165,7 +174,52 @@ final class AccountStatementService
         if ($pairs) {
             $out['layout'] = 'pairs';
         }
+        if ($dimensionType !== null) {
+            $rows = $this->ledger->accountDimensionTotals(
+                $supplierId, $accountId, $from, $to, $periodStart, $excludeClosing, $scope,
+                $groupByDimensionType, $dimensionType['kind'] === 'cost_center',
+            );
+            $out['dimension_breakdown'] = self::dimensionBreakdown($dimensionType, $rows, $out);
+        }
         return $out;
+    }
+
+    private static function dimensionBreakdown(array $dimensionType, array $rows, array $statement): array
+    {
+        if ($rows === [] || $rows[array_key_last($rows)]['value_id'] !== null) {
+            $rows[] = ['value_id' => null, 'code' => null, 'name' => null, 'opening_balance' => 0, 'turnover_md' => 0, 'turnover_d' => 0];
+        }
+        $totals = array_fill_keys(['opening_balance_signed', 'turnover_md', 'turnover_d', 'closing_balance_signed'], 0);
+        $sign = $statement['account']['balance_sign'];
+        foreach ($rows as &$row) {
+            $opening = (int) round((float) $row['opening_balance'] * 100);
+            $md = (int) round((float) $row['turnover_md'] * 100);
+            $d = (int) round((float) $row['turnover_d'] * 100);
+            $cents = [
+                'opening_balance_signed' => $sign * $opening,
+                'turnover_md' => $md,
+                'turnover_d' => $d,
+                'closing_balance_signed' => $sign * ($opening + $md - $d),
+            ];
+            foreach ($cents as $key => $value) {
+                $totals[$key] += $value;
+            }
+            unset($row['opening_balance']);
+            $row['value_id'] = $row['value_id'] === null ? null : (int) $row['value_id'];
+            $row = array_replace($row, array_map(static fn (int $n): float => $n / 100, $cents));
+        }
+        unset($row);
+        $matches = true;
+        foreach ($totals as $key => $value) {
+            $matches = $matches && $value === (int) round($statement[$key] * 100);
+        }
+        return [
+            'type_id' => (int) $dimensionType['id'],
+            'type_name' => $dimensionType['name'],
+            'rows' => $rows,
+            'totals' => array_map(static fn (int $n): float => $n / 100, $totals),
+            'matches' => $matches,
+        ];
     }
 
     /**

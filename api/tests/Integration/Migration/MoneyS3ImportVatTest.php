@@ -280,6 +280,7 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
      * ano. Zkouška nanečisto selže jen na rozdílu k přijetí, ostrý převod s přijetím rozdílů
      * doběhne s upozorněním a rozdíl vypíše v `accepted_differences`.
      */
+    #[Group('fulltext-transactions')]
     public function testUnknownVatRateSkipsOnlyThatDocument(): void
     {
         $supplierId = $this->supplier();

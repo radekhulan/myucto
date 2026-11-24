@@ -20,7 +20,7 @@ declare(strict_types=1);
  *
  * Kontroly: settled_without_payment, foreign_bank_in_czk, imported_statement_balances,
  * payroll_liabilities, subledger_vs_ledger, purchase_settled_uncovered,
- * tax_document_advance_link, final_invoice_advance_vat.
+ * tax_document_advance_link, final_invoice_advance_vat, foreign_purchase_in_czk.
  */
 
 if (PHP_SAPI !== 'cli') {

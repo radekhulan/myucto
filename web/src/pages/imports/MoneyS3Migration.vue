@@ -53,6 +53,7 @@ const closeHistory = ref(true)
 const firstPeriodStart = ref('')
 const fromYear = ref<number | null>(null)
 const toYear = ref<number | null>(null)
+const openingOnlyNext = ref(false)
 const confirmIco = ref(false)
 const reportBusy = ref<number | null>(null)
 
@@ -74,6 +75,7 @@ const {
     confirmIco.value = params.confirm_ico ?? false
     fromYear.value = params.from_year ?? null
     toYear.value = params.to_year ?? null
+    openingOnlyNext.value = params.opening_only_next ?? false
   },
 })
 
@@ -129,6 +131,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     confirm_ico: confirmIco.value,
     from_year: fromYear.value,
     to_year: toYear.value !== null && (fromYear.value === null || toYear.value >= fromYear.value) ? toYear.value : null,
+    opening_only_next: !taxRecords.value && openingOnlyNext.value,
   })
 }
 
@@ -311,6 +314,10 @@ const actions = computed<ActionItem[]>(() => {
             </select>
           </label>
           <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.to_year_hint') }}</p>
+          <label class="mb-5 flex cursor-pointer items-start gap-3">
+            <input v-model="openingOnlyNext" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="opening-only-next" />
+            <span class="text-sm"><span class="font-medium">{{ t('money_s3.opening_only_next') }}</span><br /><span class="text-neutral-500">{{ t('money_s3.opening_only_next_hint') }}</span></span>
+          </label>
         </template>
 
         <template v-if="!taxRecords">

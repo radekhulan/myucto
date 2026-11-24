@@ -43,6 +43,8 @@ function Set-Answers([object[]]$Values) {
 }
 
 try {
+    Assert-True ($PohodaAccountingTables['Uhrady'] -contains 'RefDD') 'Export úhrad musí přenášet odkaz na DDKP.'
+
     # --- konfigurace JSON ----------------------------------------------------
     $config = Join-Path $testRoot 'pohoda-sql.json'
     $json = [ordered]@{

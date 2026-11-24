@@ -11,6 +11,7 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Support\Sql\PurchaseCostSql;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
+use MyInvoice\Tests\Support\SavepointStatus;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -317,6 +318,7 @@ final class PurchaseMultiAdvanceSettlementTest extends BankPostingTestCase
     }
 
     /** `PUT …/items`: odpočet nad částku zálohy řádky neuloží (422, doklad beze změny). */
+    #[Group('fulltext-transactions')]
     public function testSetItemsRollsBackOnOverdeduction(): void
     {
         $vendor = $this->client('Dodavatel energie RADKY');
@@ -332,17 +334,38 @@ final class PurchaseMultiAdvanceSettlementTest extends BankPostingTestCase
         $rowsBefore = $this->documentRows($final);
 
         $action = $this->container->get(\MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceItemsAction::class);
-        $res = $this->callAction($action, '__invoke', 'PUT', 'admin', ['items' => [
+        $save = fn (): array => $this->callAction($action, '__invoke', 'PUT', 'admin', ['items' => [
             ['description' => 'Spotřeba', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 4000, 'vat_rate_id' => $this->vatRateId],
             ['description' => 'Odpočet', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => -2000, 'vat_rate_id' => $this->vatRateId,
                 'advance_purchase_invoice_id' => $a1],
         ]], ['id' => (string) $final]);
 
+        $pdo = $this->db->pdo();
+        $counters = SavepointStatus::read($pdo);
+        $res = $save();
         self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE) ?: '');
         self::assertSame('advance_overdeducted', $res['body']['error']['code'] ?? $res['body']['code'] ?? null);
         self::assertSame($before, $this->itemsSnapshot($final), 'Řádky se neuložily.');
         self::assertSame($rowsBefore, $this->documentRows($final), 'Čerpání záloh beze změny.');
-        self::assertTrue($this->db->pdo()->inTransaction(), 'Transakce testu zůstala otevřená.');
+        self::assertFalse($pdo->inTransaction());
+        self::assertSame($counters, SavepointStatus::read($pdo));
+
+        $pdo->beginTransaction();
+        try {
+            self::assertSame($before, $this->itemsSnapshot($final));
+            try {
+                $save();
+                self::fail('Chybu vnořeného zápisu musí dostat vlastník transakce.');
+            } catch (PurchaseAdvanceLinkException $e) {
+                self::assertSame('advance_overdeducted', $e->errorCode);
+            }
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame($counters, SavepointStatus::read($pdo));
+        } finally {
+            $pdo->rollBack();
+        }
+        self::assertSame($before, $this->itemsSnapshot($final));
+        self::assertSame($rowsBefore, $this->documentRows($final));
     }
 
     // ── fixtury ──────────────────────────────────────────────────────────────

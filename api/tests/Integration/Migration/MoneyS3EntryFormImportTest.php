@@ -73,17 +73,36 @@ final class MoneyS3EntryFormImportTest extends MoneyS3ImportTestCase
         });
     }
 
+    protected function setUp(): void
+    {
+        if ($this->name() !== 'testDryRunLeavesNoEntryFormBehind') {
+            parent::setUp();
+            return;
+        }
+        $env = 'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM';
+        $previous = getenv($env);
+        putenv($env . '=single');
+        EntryFormService::forgetShared();
+        try {
+            parent::setUp();
+        } finally {
+            putenv($previous === false ? $env : $env . '=' . $previous);
+        }
+    }
+
+    #[Group('fulltext-transactions')]
     public function testDryRunLeavesNoEntryFormBehind(): void
     {
-        $this->withDefaultEntryForm('single', function (ContainerInterface $c, PDO $pdo): void {
-            $supplierId = $this->firm($pdo);
-            $protocol = $c->get(MoneyS3Importer::class)->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_DRY_RUN, true));
-            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
-            $history = $pdo->prepare('SELECT COUNT(*) FROM accounting_entry_form_history WHERE supplier_id = ?');
-            $history->execute([$supplierId]);
-            self::assertSame(0, (int) $history->fetchColumn());
-            self::assertFalse($c->get(EntryFormService::class)->hasAnySingle($supplierId));
-        });
+        $pdo = $this->db->pdo();
+        $supplierId = $this->firm($pdo);
+        $protocol = $this->container->get(MoneyS3Importer::class)->run(
+            $supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_DRY_RUN, true)
+        );
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $history = $pdo->prepare('SELECT COUNT(*) FROM accounting_entry_form_history WHERE supplier_id = ?');
+        $history->execute([$supplierId]);
+        self::assertSame(0, (int) $history->fetchColumn());
+        self::assertFalse($this->container->get(EntryFormService::class)->hasAnySingle($supplierId));
     }
 
     /** @return array<string,mixed> */

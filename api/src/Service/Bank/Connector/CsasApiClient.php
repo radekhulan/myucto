@@ -188,9 +188,11 @@ final class CsasApiClient
             || !array_is_list($signIds)) {
             throw new BankConnectorException(BankConnectorException::INVALID_PAYMENT_ORDER, 'Dávku České spořitelny nelze sestavit.');
         }
+        // BatchPaymentRequest.payments je pole řetězců signId z odpovědí na založení plateb,
+        // ne pole objektů; objekty banka odmítne chybou 400 FIELD_INVALID (scope payments).
         $payments = [];
         foreach ($signIds as $signId) {
-            $payments[] = ['signId' => $this->identifier($signId)];
+            $payments[] = $this->identifier($signId);
         }
         $data = $this->paymentRequest('POST', $this->paymentsBaseUrl() . '/my/batchpayments', $credentials, 'batch_create',
             ['json' => ['exchangeIdentification' => $exchangeIdentification, 'payments' => $payments]], true);

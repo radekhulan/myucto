@@ -150,6 +150,7 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
     {
         $sid = $this->supplierId;
         $pdo = $this->db->pdo();
+        $converted = $this->settlementKinds();
         // Stav firmy převedené dřív: úhrady bez dokladu jen v paid_total, zápis ID25020 jen vazbou,
         // přijaté doklady bez úhrady mimo evidenci a platba zálohy bez vazby na DDKP.
         foreach (['ID25020', 'ID25040'] as $entry) {
@@ -176,17 +177,55 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
         self::assertSame($before['journal'], $after['journal'], 'Deník se nemění.');
         self::assertSame($before['invoices'], $after['invoices'], 'Stav a uhrazená částka dokladů se nemění.');
         self::assertNotSame($before['payments'], $after['payments']);
-        self::assertSame(1, $this->rowCount('invoice_payments', $sid, "invoice_id = {$this->invoice('FV25040')} AND source = 'settlement' AND amount = 1210.00"));
         self::assertSame(1, $this->rowCount('invoice_settlements', $sid, "doc_type = 'invoice' AND doc_id = {$this->invoice('FV25020')} AND journal_entry_id = {$this->entry('ID25020')}"));
-        self::assertSame(1210.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$this->purchase('DF-2025-640')]));
-        self::assertSame(1, $this->rowCount('activity_log', $sid, "action = '" . MoneyS3SettledPaymentRepair::AUDIT_ACTION . "' AND entity_id = {$this->invoice('FV25040')}"));
+        // Zápočet ID25040 převod přiřadil podle čísla úhrady ze zálohy Money (UDoklad). CLI zálohu
+        // nemá a v převzatých datech ho nic nepotvrzuje: popis „Vzájemný zápočet" nenese číslo
+        // dokladu a vydanou FV25040 (Odběratel Beta) s přijatou DF-2025-640 (Dodavatel Alfa)
+        // nespojuje partner. Shodu dne a částky proto jen navrhne (nanečisto i při zápisu)
+        // a doklady dostanou výplň jako dřív.
+        $fv40 = $this->invoice('FV25040');
+        $fp40 = $this->purchase('DF-2025-640');
+        $id40 = $this->entry('ID25040');
+        $proposals = static fn (array $row): array => array_map(static fn (array $p): array => [$p['doc_type'], $p['id'], $p['entry_id'], $p['amount_czk']], $row['proposals'] ?? []);
+        $expected = [['invoice', $fv40, $id40, 1210.0], ['purchase_invoice', $fp40, $id40, 1210.0]];
+        self::assertSame(0, $this->rowCount('invoice_settlements', $sid, "journal_entry_id = {$id40}"));
+        self::assertSame(1, $this->rowCount('invoice_payments', $sid,
+            "invoice_id = {$fv40} AND source = 'settlement' AND amount = 1210.00 AND note = " . $pdo->quote(MoneyS3SettledPayments::note())));
+        self::assertSame(1210.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$fp40]));
+        self::assertSame($expected, $proposals($dry));
+        self::assertSame($expected, $proposals($done));
+        $withoutId40 = array_values(array_filter($converted, static fn (array $s): bool => $s[2] !== 'ID25040'));
+        self::assertSame($withoutId40, $this->settlementKinds(), 'Opravné CLI dá stejné zápočty jako převod kromě nepotvrzeného ID25040.');
+        $audit = json_decode((string) $this->scalar("SELECT payload FROM activity_log WHERE supplier_id = ? AND action = ? AND entity_id = ? ORDER BY id LIMIT 1",
+            [$sid, MoneyS3SettledPaymentRepair::AUDIT_ACTION, $fv40]), true);
+        self::assertSame('ID25040', $audit['settlement_proposal']['entry_no'] ?? null, json_encode($audit));
 
         $again = $repair->run([$sid], true)[0];
         self::assertSame('nothing', $again['status'], json_encode($again));
         self::assertSame($after, $this->state());
+        self::assertSame($expected, $proposals($again), 'Návrh zůstává vidět, dokud ho uživatel nevyřeší.');
+
+        // Uživatel návrh potvrdí navázáním zápisu na doklady: opakovaná oprava dá zápočty jako převod.
+        foreach ([['invoice', $fv40], ['purchase_invoice', $fp40]] as [$type, $doc]) {
+            $pdo->prepare('INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id) VALUES (?, ?, ?, ?)')->execute([$sid, $id40, $type, $doc]);
+        }
+        $confirmed = $repair->run([$sid], true)[0];
+        self::assertSame('repaired', $confirmed['status'], json_encode($confirmed));
+        self::assertSame([], $confirmed['proposals']);
+        self::assertSame($converted, $this->settlementKinds(), 'Po potvrzení dá opravné CLI stejné zápočty jako převod.');
+        self::assertSame(0, $this->rowCount('invoice_payments', $sid, "invoice_id = {$fv40} AND note LIKE " . $pdo->quote(TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%')));
+        self::assertSame(0.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$fp40]));
+        self::assertSame($before['invoices'], $this->state()['invoices']);
     }
 
     // ── pomocníci ────────────────────────────────────────────────────────────
+
+    /** @return list<array{0:string,1:string,2:string}> zápočty firmy: druh dokladu, částka, číslo zápisu */
+    private function settlementKinds(): array
+    {
+        return $this->db->pdo()->query("SELECT s.doc_type, s.amount, e.document_no FROM invoice_settlements s JOIN journal_entries e ON e.id = s.journal_entry_id
+            WHERE s.supplier_id = {$this->supplierId} AND s.status = 'confirmed' ORDER BY s.doc_type, e.document_no, s.amount")->fetchAll(PDO::FETCH_NUM);
+    }
 
     /** @return array<string,mixed> */
     private function state(): array

@@ -958,6 +958,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/settings/databox'],
             ['POST', '/api/settings/domains'],
             ['PUT', '/api/settings/ai-assist'],
+            ['GET', '/api/dashboard-widgets/catalog'],
+            ['POST', '/api/v1/dashboard-widgets/query'],
             ['GET', '/api/user/dashboard-layouts/home'],
             ['PUT', '/api/v1/user/dashboard-layouts/portal'],
             ['DELETE', '/api/user/dashboard-layouts/home'],

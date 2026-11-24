@@ -10,8 +10,9 @@ declare(strict_types=1);
  * smaže a doklad se vrátí mezi neuhrazené. Skript doplní vydaným dokladům zápočet interním
  * dokladem navázaným na doklad a zbytek jako evidovanou platbu „Převzato z Money S3, úhrada
  * bez dokladu úhrady" k datu úhrady, přijatým dokladům zbytek do `settled_outside_amount`
- * a jediné platbě zálohy vazbu na jediný DDKP z Money. Deník, uhrazená částka ani stav
- * dokladů se nemění. Pravidla a pojistky jsou
+ * a jediné platbě zálohy vazbu na jediný DDKP z Money. Zápis interního dokladu ze dne úhrady
+ * na stejnou částku, který zápočet nepotvrzuje číslem dokladu ani partnerem, vypíše jako
+ * NÁVRH a nezapíše. Deník, uhrazená částka ani stav dokladů se nemění. Pravidla a pojistky jsou
  * v {@see \MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPaymentRepair}.
  *
  * Výchozí je zkouška nanečisto s výpisem, zápis jen s --commit. Idempotentní.
@@ -75,7 +76,18 @@ foreach ($rows as $r) {
         printf("  %d dokladů má úhradu v převedené bance bez evidované platby (výplň nevzniká, doplní ji opakovaný převod): %s Kč\n",
             count($r['left_for_matching']), $fmt(array_sum(array_map(static fn (array $i): float => $i['amount'] * ($i['currency'] === 'CZK' ? 1.0 : ($i['rate'] ?? 1.0)), $r['left_for_matching']))));
     }
+    if ($r['proposals'] !== []) {
+        printf("  %d návrhů zápočtu podle dne a částky, nezapsáno: zápis nenese číslo dokladu a nejde o potvrzený zápočet s partnerem dokladu, doklad má úhradu bez dokladu úhrady (přijatý mimo evidenci). "
+            . "Po ověření navažte zápis na doklad a spusťte opravu znovu.\n", count($r['proposals']));
+        if (!$quiet) {
+            foreach ($r['proposals'] as $p) {
+                printf("  NÁVRH %s #%d  %-20s zápis %s ze dne %s  %s Kč  (%s)\n",
+                    $p['doc_type'] === 'invoice' ? 'FV' : 'FP', $p['id'], $p['document_no'], $p['entry_no'], $p['date'], $fmt($p['amount_czk']), $p['reason']);
+            }
+        }
+    }
     $totals['left'] = ($totals['left'] ?? 0) + count($r['left_for_matching']);
+    $totals['proposals'] = ($totals['proposals'] ?? 0) + count($r['proposals']);
     $totals['issued'] += $r['issued_count'];
     $totals['issued_czk'] += $r['issued_amount_czk'];
     $totals['purchase'] += $r['purchase_count'];
@@ -94,8 +106,8 @@ foreach ($rows as $r) {
         }
     }
 }
-printf("Celkem vydané %d dokladů, %s Kč; přijaté %d dokladů, %s Kč; vazby na DDKP %d; ponecháno párování %d.\n",
-    $totals['issued'], $fmt($totals['issued_czk']), $totals['purchase'], $fmt($totals['purchase_czk']), $totals['links'], $totals['left'] ?? 0);
+printf("Celkem vydané %d dokladů, %s Kč; přijaté %d dokladů, %s Kč; vazby na DDKP %d; ponecháno párování %d; návrhy zápočtu k ověření %d.\n",
+    $totals['issued'], $fmt($totals['issued_czk']), $totals['purchase'], $fmt($totals['purchase_czk']), $totals['links'], $totals['left'] ?? 0, $totals['proposals'] ?? 0);
 if (!$commit && ($totals['issued'] + $totals['purchase'] + $totals['links']) > 0) {
     echo PHP_EOL . 'Nic nezměněno. Zápis provede spuštění s --commit.' . PHP_EOL;
 }

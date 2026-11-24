@@ -100,8 +100,9 @@ function triple(v: [number, number, number]): string {
 
 function statusClass(status: string): string {
   if (status === 'ok' || status === 'completed' || status === 'closed') return 'bg-success-50 text-success-600'
-  if (status === 'warning' || status === 'completed_with_warnings' || status === 'verified' || status === 'open' || status === 'already_closed') return 'bg-warning-50 text-warning-700'
-  if (status === 'error' || status === 'failed' || status === 'mismatch') return 'bg-danger-50 text-danger-600'
+  if (status === 'warning' || status === 'completed_with_warnings' || status === 'verified' || status === 'open' || status === 'already_closed'
+    || status === 'closing_started' || status === 'closing_in_progress' || status === 'open_next_pending') return 'bg-warning-50 text-warning-700'
+  if (status === 'error' || status === 'failed' || status === 'mismatch' || status === 'opening_differs') return 'bg-danger-50 text-danger-600'
   return 'bg-neutral-100 text-neutral-600'
 }
 

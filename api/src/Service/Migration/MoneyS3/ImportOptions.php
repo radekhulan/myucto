@@ -35,6 +35,11 @@ final class ImportOptions
      *                         adresáře zálohy se nepřevádějí a protokol je vyjmenuje. Null =
      *                         výchozí podle firmy: poslední rok, za kterým už v MyÚčtu běží
      *                         rok s vlastními zápisy ({@see MoneyS3Importer::withDefaultToYear()}).
+     * @param bool $openingOnlyNext rok po posledním převáděném jen počáteční stavy: z adresáře
+     *                         roku po „Převést do roku" se převezme jen otevírací zápis (XP),
+     *                         poslední převáděný rok se ověří proti němu a uzavře jako
+     *                         historické roky ({@see HistoricalYearCloser}). Bez „Převést do
+     *                         roku" je posledním převáděným rokem předposlední rok zálohy.
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -48,6 +53,7 @@ final class ImportOptions
         public readonly bool $acceptDifferences = false,
         public readonly bool $relinkOnly = false,
         public readonly ?int $toYear = null,
+        public readonly bool $openingOnlyNext = false,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -73,7 +79,7 @@ final class ImportOptions
     public function withToYear(?int $toYear): self
     {
         return new self($this->mode, $this->closeHistory, $this->firstPeriodStart, $this->relatedPartyIcos, $this->moneyReports,
-            $this->confirmedIco, $this->fromYear, $this->disposalYearTax, $this->acceptDifferences, $this->relinkOnly, $toYear);
+            $this->confirmedIco, $this->fromYear, $this->disposalYearTax, $this->acceptDifferences, $this->relinkOnly, $toYear, $this->openingOnlyNext);
     }
 
     public function isDryRun(): bool
@@ -95,6 +101,7 @@ final class ImportOptions
             'to_year' => $this->toYear,
             'disposal_year_tax' => $this->disposalYearTax,
         ] + ($this->acceptDifferences && !$this->isDryRun() ? ['accept_differences' => true] : [])
-          + ($this->relinkOnly ? ['relink_only' => true] : []);
+          + ($this->relinkOnly ? ['relink_only' => true] : [])
+          + ($this->openingOnlyNext ? ['opening_only_next' => true] : []);
     }
 }

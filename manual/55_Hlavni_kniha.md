@@ -260,6 +260,16 @@ Každý řádek dál ukazuje:
 
 XLSX opisu nese partnera, VS, protiúčet a okruh také.
 
+**Filtr a rozpad podle dimenze.** Na záložce **Pohyby** můžete vybrat jednu nebo více
+hodnot dimenzí. Volba **Včetně podřízených** zahrne celou větev vybraných hodnot.
+Při otevření účtu z obratové předvahy se přenesou její vybrané hodnoty i tato volba.
+V poli **Rozpad podle** vyberte například Středisko. Nad pohyby se zobrazí počáteční
+stav, obrat MD, obrat Dal a konečný stav za každou přímo přiřazenou hodnotu.
+Pohyby bez hodnoty zvoleného typu jsou v řádku **Bez dimenze**. Částky rozdělené
+mezi více hodnot se započtou podle jejich podílů a řádek **Celkem** se kontroluje
+proti součtům výpisu. Kliknutí na hodnotu nastaví filtr jen na tuto hodnotu.
+Zvolený rozpad je v PDF jako tabulka a v XLSX jako samostatný list.
+
 #### 55.8.5.1 Otevřené položky a párování
 
 Záložka **Otevřené položky - párování** ukazuje, z čeho se skládá zůstatek

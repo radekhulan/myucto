@@ -65,7 +65,7 @@ zápočtem, a oprava zapíše přesně to, co ukázal náhled.
 
 Oprava jen doplní evidenci úhrady, kterou doklad už nese, proto ji uzavřené účetní období (ani převedené
 roky, které převod z Money S3 uzavřel) neblokuje. Neopraví úhradu za zámkem účtování k datu ani v podaném
-období DPH ([§ 126.11](#12611-opravneni-a-pojistky)). Oprava opravuje firmu jen celou: leží-li některý
+období DPH ([§ 126.12](#12612-opravneni-a-pojistky)). Oprava opravuje firmu jen celou: leží-li některý
 nález za zámkem nebo v podaném období, neopraví se nic a nálezy zůstanou ke kontrole.
 
 ## 126.4 Bankovní účet v cizí měně převedený v Kč
@@ -183,7 +183,41 @@ bez odpočtových řádků. DPH zálohy je pak v přiznání dvakrát: jednou z 
 Leží-li faktura v podaném období DPH, nález to uvádí a opravu podejte dodatečným přiznáním a následným
 kontrolním hlášením.
 
-## 126.11 Oprávnění a pojistky
+## 126.11 Přijaté doklady v cizí měně převzaté v Kč
+
+**Co kontrola hledá:** přijatou fakturu v EUR nebo jiné měně se samovyměřením DPH (služba nebo zboží od
+zahraničního dodavatele), kterou převod z POHODY převzal v Kč. Poznámka dokladu končí textem „doklad v EUR,
+převzat v Kč (samovyměření DPH …)". DPH, kontrolní hlášení i deník takového dokladu jsou správně, chybí jen
+měna, kurz a částka v měně: platbu v měně nejde spárovat a kurzový rozdíl ani přecenění ke konci roku se
+nespočítá.
+
+**Oprava:** měnu a kurz databáze nezná (POHODA je bere k různým datům i ručně), proto je oprava čte
+z původního exportu z POHODY a spouští ji správce instalace z příkazové řádky:
+
+```bash
+php api/bin/repair-pohoda-foreign-purchases.php --all-pohoda                                   # přehled dotčených firem
+php api/bin/repair-pohoda-foreign-purchases.php --supplier=12 --export=/cesta/12345678_2026.zip # nanečisto
+php api/bin/repair-pohoda-foreign-purchases.php --supplier=12 --export=/cesta/12345678_2026.zip --commit
+```
+
+Export je tentýž ZIP (nebo rozbalený adresář), ze kterého se převádělo. K firmě se přiřadí podle IČO;
+IČO každého souboru exportu i agenda a rok převodu, který doklad založil, musí sedět. Dvě firmy se
+stejným IČO dostanou export jen výslovně přes `--supplier`.
+Doklad dostane měnu a kurz z POHODY a jednu položku s částkou v měně. Když POHODA vyměřila daň jiným kurzem
+(ke dni plnění), nese položka základ samovyměření v Kč z POHODY a poznámka dokladu to uvádí. Položka
+„Rozdíl proti základu samovyměření (kurz)" zanikne. Přiznání DPH, kontrolní hlášení, deník, úhrady
+a párování se nemění. Oprava doklady zapíše v transakci pod zámkem období a podání, porovná evidenci DPH,
+saldokonto v Kč a peněžní deník před a po zápisu a doklad, kterému by se cokoli změnilo, vrátí a ukáže
+ke kontrole. Nanečisto proběhne totéž a na konci se vrátí všechno.
+
+**Jen ke kontrole:** doklad s odečtenou zálohou, se zápočtem nebo úhradou mimo evidenci, s úhradou bez
+bankovního pohybu i pokladního dokladu (v měně by se úhrada přecenila kurzem dne úhrady), s dimenzí
+přiřazenou položce, s tuzemskou daní dodavatele, se samovyměřením ve více sazbách nebo s kurzem, který
+nedává Kč dokladu na haléř. Takový doklad zůstává v Kč,
+měnu a kurz lze opravit ručně v detailu dokladu. Doklad v chráněném období (i podle data účetního zápisu) oprava nemění
+([§ 126.12](#12612-opravneni-a-pojistky)).
+
+## 126.12 Oprávnění a pojistky
 
 - **Zobrazení a náhled opravy:** role s přístupem do účetnictví (čtení).
 - **Oprava:** správce firmy nebo role se zápisem do účetnictví, jen v aplikaci. API token a MCP server
@@ -202,7 +236,7 @@ kontrolním hlášením.
   zapíše do auditní stopy (`Systém → Log`). Opakované spuštění nic nezdvojí.
 - **Souběh:** dvě opravy téže firmy neběží současně.
 
-## 126.12 Příkazová řádka a MCP
+## 126.13 Příkazová řádka a MCP
 
 Správce instalace spustí tytéž kontroly z příkazové řádky:
 
@@ -216,7 +250,7 @@ php api/bin/migration-data-check.php --supplier=12 --check=foreign_bank_in_czk -
 Bez `--fix` nic nemění. Pojistky jsou stejné jako v aplikaci. AI asistent napojený přes MCP server čte
 kontroly nástrojem `migration_data_checks` (přehled, nebo nálezy jedné kontroly); opravu nespustí.
 
-## 126.13 Související kapitoly
+## 126.14 Související kapitoly
 
 - [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)

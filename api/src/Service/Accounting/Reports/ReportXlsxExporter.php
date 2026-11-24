@@ -397,8 +397,12 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A3', 'Počáteční zůstatek: ' . $this->czMoney((float) ($data['opening_balance_signed'] ?? $data['opening_balance'] ?? 0))
             . ' · zůstatek se znaménkem podle typu účtu');
         $filter = $data['counter_filter'] ?? null;
+        $notes = $data['scope_notes'] ?? [];
         if ($filter !== null) {
-            $sheet->setCellValueExplicit('A4', 'Filtr protiúčtu: ' . (string) $filter['account_code'] . ' ' . (string) $filter['name'], DataType::TYPE_STRING);
+            $notes[] = 'Filtr protiúčtu: ' . (string) $filter['account_code'] . ' ' . (string) $filter['name'];
+        }
+        if ($notes !== []) {
+            $sheet->setCellValueExplicit('A4', implode(' · ', $notes), DataType::TYPE_STRING);
         }
 
         $headers = ['Datum', 'Doklad', 'Popis', 'Partner', 'VS', 'Protiúčet', 'MD', 'D', 'Zůstatek', 'Okruh'];
@@ -455,7 +459,40 @@ final class ReportXlsxExporter
             }
         }
 
+        if (isset($data['dimension_breakdown'])) {
+            $this->accountStatementDimensionSheet($ss->createSheet(), $data['dimension_breakdown'], $notes);
+            $ss->setActiveSheetIndex(0);
+        }
+
         return $this->out($ss, 'opis-uctu-' . $code . '-' . $from . '-' . $to . '.xlsx');
+    }
+
+    private function accountStatementDimensionSheet(Worksheet $sheet, array $breakdown, array $notes): void
+    {
+        $sheet->setTitle('Rozpad podle dimenze');
+        $sheet->setCellValueExplicit('A1', 'Rozpad podle: ' . $breakdown['type_name'], DataType::TYPE_STRING);
+        $sheet->getStyle('A1')->getFont()->setBold(true);
+        if ($notes !== []) {
+            $sheet->setCellValueExplicit('A2', implode(' · ', $notes), DataType::TYPE_STRING);
+        }
+        if (!$breakdown['matches']) {
+            $sheet->setCellValue('A3', 'Součet rozpadu nesouhlasí se součtem výpisu účtu.');
+            $sheet->getStyle('A3')->getFont()->getColor()->setRGB('B91C1C');
+        }
+        $head = 4;
+        $this->headerRow($sheet, $head, ['Hodnota dimenze', 'Počáteční stav', 'Obrat MD', 'Obrat D', 'Konečný stav']);
+        $r = $head + 1;
+        $rows = [...$breakdown['rows'], $breakdown['totals'] + ['value_id' => null]];
+        foreach ($rows as $index => $row) {
+            $label = $row['value_id'] !== null ? trim($row['code'] . ' ' . $row['name'])
+                : ($index === array_key_last($rows) ? 'Celkem' : 'Bez dimenze');
+            $sheet->setCellValueExplicit([1, $r], $label, DataType::TYPE_STRING);
+            $sheet->fromArray([$row['opening_balance_signed'], $row['turnover_md'], $row['turnover_d'], $row['closing_balance_signed']], null, 'B' . $r, true);
+            $r++;
+        }
+        $this->boldRow($sheet, $r - 1, 5);
+        $this->finishTable($sheet, $head, $r - 1, 5, 2);
+        $sheet->getStyle("B" . ($head + 1) . ":E" . ($r - 1))->getNumberFormat()->setFormatCode('#,##0.00');
     }
 
     /**

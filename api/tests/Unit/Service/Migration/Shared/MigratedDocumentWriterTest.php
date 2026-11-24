@@ -59,7 +59,7 @@ final class MigratedDocumentWriterTest extends TestCase
             purchase_invoice_id INT, description TEXT, quantity NUMERIC, unit TEXT, unit_price_without_vat NUMERIC,
             vat_rate_id INT, vat_rate_snapshot NUMERIC, total_without_vat NUMERIC, total_vat NUMERIC,
             total_with_vat NUMERIC, order_index INT, vat_classification_code TEXT, is_fixed_asset INT,
-            expense_kind TEXT, expense_account_code TEXT)');
+            expense_kind TEXT, expense_account_code TEXT, import_tax_base_czk NUMERIC)');
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
         $this->writer = new MigratedDocumentWriter($db);

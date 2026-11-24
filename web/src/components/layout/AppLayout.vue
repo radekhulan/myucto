@@ -1649,6 +1649,8 @@ const MOBILE_ICONS = {
 const phoneNavigation = computed(() => !isDesktop.value && !tabletNavigationRail.value)
 /** Zásuvka a nabídky na telefonu leží mezi hlavičkou a spodní lištou, obě zůstávají vidět. */
 const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }
+// Menu na telefonu zakryje i hlavičku s výběrem firmy, aby měl seznam celou výšku.
+const phoneDrawerStyle = { top: 'var(--instance-alert-h, 0px)', bottom: 'var(--app-footer-height)', height: 'auto', zIndex: 40, paddingTop: 'env(safe-area-inset-top, 0px)' }
 const openDrawerSections = ref<Set<string>>(new Set())
 
 function drawerSectionOpen(key: string): boolean {
@@ -2122,7 +2124,7 @@ onBeforeUnmount(() => {
       <div
         v-if="mobileOpen" @click="mobileOpen = false"
         class="lg:hidden fixed inset-0 bg-black/50 z-20"
-        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        :style="phoneNavigation ? { ...phoneDrawerStyle, zIndex: 39, paddingTop: undefined } : undefined"
         aria-hidden="true"
       ></div>
 
@@ -2144,7 +2146,7 @@ onBeforeUnmount(() => {
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
           mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0',
         ]"
-        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        :style="phoneNavigation ? phoneDrawerStyle : undefined"
         data-testid="app-drawer"
       >
         <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-slim px-2.5 py-3">
@@ -2367,9 +2369,23 @@ onBeforeUnmount(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
               </svg>
             </a>
+            <!-- Na telefonu je odhlášení vedle jména, ať nezabírá samostatný řádek. -->
+            <button
+              v-if="phoneNavigation"
+              type="button"
+              data-test="mobile-logout"
+              class="ml-1 inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-2.5 text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
+              :disabled="logoutBusy"
+              @click="logout"
+            >
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
+              </svg>
+              {{ t('nav.logout') }}
+            </button>
           </div>
           <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
-               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
+               v jednom řádku se zamknutím, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
                Zamknutí a odhlášení jsou pro obě podoby tatáž tlačítka, mění se jen vzhled. -->
           <div :class="phoneNavigation ? 'flex flex-wrap items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
             <template v-if="phoneNavigation">
@@ -2393,17 +2409,12 @@ onBeforeUnmount(() => {
               <template v-else>{{ t('session_lock.lock_now') }}</template>
             </button>
             <button
+              v-if="!phoneNavigation"
               type="button"
-              class="cursor-pointer h-9 border border-neutral-300 rounded-md text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
-              :class="phoneNavigation
-                ? ['inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3', canLockSession ? '' : 'ml-auto']
-                : 'w-full px-2'"
+              class="cursor-pointer h-9 w-full border border-neutral-300 rounded-md px-2 text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
               :disabled="logoutBusy"
               @click="logout"
             >
-              <svg v-if="phoneNavigation" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
-              </svg>
               {{ t('nav.logout') }}
             </button>
           </div>

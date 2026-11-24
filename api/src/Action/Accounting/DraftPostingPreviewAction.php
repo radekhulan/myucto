@@ -49,8 +49,6 @@ final class DraftPostingPreviewAction
      */
     public const ATTR = 'draft_posting_preview';
 
-    private const SAVEPOINT = 'draft_posting_preview';
-
     /** Souběh s jiným zápisem dokladu: náhled stačí zopakovat. */
     public const CONFLICT_CODE = 'preview_conflict_retry';
 
@@ -102,37 +100,25 @@ final class DraftPostingPreviewAction
         unset($document['submission_id']);
 
         $pdo = $this->db->pdo();
-        $nested = $pdo->inTransaction();
-        $nested ? $pdo->exec('SAVEPOINT ' . self::SAVEPOINT) : $pdo->beginTransaction();
+        // Náhrada řádků faktury maže položky s FULLTEXT. MariaDB 12.3.3 po návratu
+        // k savepointu může spadnout při dalším zápisu do týchž řádků.
+        if ($pdo->inTransaction()) {
+            throw new \LogicException('Náhled zápisu vyžaduje vlastní transakci.');
+        }
+        $pdo->beginTransaction();
         try {
-            $result = $this->simulate($request, $response, $supplierId, $isPurchase, $sourceType, $docId, $document, $nested);
+            return $this->simulate($request, $response, $supplierId, $isPurchase, $sourceType, $docId, $document);
         } catch (\Throwable $e) {
-            // Odvolanou transakci (deadlock, lock wait) už vrátit nejde; řeší ji volající.
-            if (!TransactionFailure::rollbackIfAborted($pdo, $e)) {
-                if ($nested) {
-                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVEPOINT);
-                    $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
-                } elseif ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-            }
-            // Souběh s jiným zápisem týchž řádků (1020, 1213, 1205) není chyba aplikace.
-            // Ve vlastní transakci je náhled celý odvolaný a stačí ho zopakovat; v cizí
-            // transakci rozhoduje o opakování její vlastník.
-            if (!$nested && TransactionFailure::lockConflict($e)) {
+            TransactionFailure::rollbackIfAborted($pdo, $e);
+            if (TransactionFailure::lockConflict($e)) {
                 return self::conflict($response);
             }
             throw $e;
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
         }
-        // Náhled nic neukládá: uložení dokladu se vždy odvolá.
-        if ($nested) {
-            $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVEPOINT);
-            $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
-        } elseif ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        return $result;
     }
 
     /**
@@ -141,7 +127,7 @@ final class DraftPostingPreviewAction
      *
      * @param array<string,mixed> $document
      */
-    private function simulate(Request $request, Response $response, int $supplierId, bool $isPurchase, string $sourceType, int $docId, array $document, bool $nested): Response
+    private function simulate(Request $request, Response $response, int $supplierId, bool $isPurchase, string $sourceType, int $docId, array $document): Response
     {
         $pdo = $this->db->pdo();
         $saveRequest = $request
@@ -161,11 +147,7 @@ final class DraftPostingPreviewAction
         }
         if (!$pdo->inTransaction()) {
             // Transakci ukončila MariaDB (odvolaný snapshot nebo deadlock), jejíž chybu
-            // někde v uložení spolkl široký catch. Vlastní náhled se dá zopakovat, cizí
-            // transakci musí dostat její vlastník.
-            if ($nested) {
-                throw new \LogicException('Uložení v náhledu zápisu ukončilo transakci náhledu.');
-            }
+            // někde v uložení spolkl široký catch. Náhled se dá zopakovat.
             error_log('Náhled zápisu ' . $sourceType . ' #' . $docId . ': uložení ukončilo transakci náhledu.');
             return self::conflict($response);
         }

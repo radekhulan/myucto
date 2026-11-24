@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   epoSubmissionsApi,
+  PRINTABLE_SUBMISSION_FORMS,
   TAX_ISDS_FORMS,
   type ArtifactUploadResult,
   type EpoArtifact,
@@ -886,6 +887,18 @@ function receipt(item: TaxSubmission): EpoReceiptSummary | null {
   return null
 }
 
+function isPrintableForm(item: TaxSubmission): boolean {
+  return (PRINTABLE_SUBMISSION_FORMS as readonly string[]).includes(item.form_code)
+}
+
+/** Text panelu „Doklad o podání": stav i důvod počítá backend (receipt_evidence). */
+function filingProofText(item: TaxSubmission): string {
+  const evidence = item.receipt_evidence
+  if (!evidence) return ''
+  if (evidence.available) return t('reports.submissions.filing_proof_available')
+  return evidence.reason ? t(`reports.submissions.filing_proof_${evidence.reason}`) : ''
+}
+
 /**
  * Co se přečetlo z PDF opisu. Je to jen odečtený text, ne důkaz — používá se
  * k předvyplnění tehdy, když dodejka chybí.
@@ -1702,6 +1715,15 @@ const submissionActions = computed<ActionItem[]>(() => {
       run: () => openTestModal(s),
     },
     {
+      // PDF podaného výkazu z uloženého XML včetně údajů o doručení.
+      key: 'download_pdf',
+      label: t('reports.submissions.download_pdf'),
+      icon: 'doc',
+      tier: 'secondary',
+      show: isPrintableForm(s),
+      href: epoSubmissionsApi.pdfUrl(s.id),
+    },
+    {
       key: 'download_xml',
       label: t('reports.submissions.download_xml'),
       icon: 'download',
@@ -2388,6 +2410,15 @@ useWindowRefresh(refreshSilently, () => !loading.value
                 <div class="text-xs text-neutral-500 mt-1">{{ uploadProgress }} %</div>
               </div>
             </button>
+          </div>
+
+          <div
+            v-if="selected.receipt_evidence"
+            :class="['rounded-lg border p-3 text-xs', selected.receipt_evidence.available ? 'border-success-500/30 bg-success-50 text-success-800' : 'border-warning-500/30 bg-warning-50 text-warning-800']"
+            data-testid="filing-proof"
+          >
+            <div class="font-medium text-sm">{{ t('reports.submissions.filing_proof_title') }}</div>
+            <p class="mt-1">{{ filingProofText(selected) }}</p>
           </div>
 
           <div>

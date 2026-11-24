@@ -34,6 +34,8 @@ final class MoneyS3BatchOptions
      * @param string|int|null $fromYear `auto`, rok, nebo null = všechny roky zálohy
      * @param list<string> $relatedPartyIcos IČO spřízněných osob (typicky firmy dávky / skupiny)
      * @param string|int $toYear `auto` nebo poslední převáděný rok všech firem dávky
+     * @param bool $openingOnlyNext rok po posledním převáděném jen počáteční stavy
+     *                              ({@see ImportOptions::$openingOnlyNext})
      */
     public function __construct(
         public readonly string $mode = ImportOptions::MODE_DRY_RUN,
@@ -48,6 +50,7 @@ final class MoneyS3BatchOptions
         public readonly bool $useRegistry = true,
         public readonly bool $takeOverFilings = true,
         public readonly string|int $toYear = self::TO_YEAR_AUTO,
+        public readonly bool $openingOnlyNext = false,
     ) {
         if (!in_array($mode, [ImportOptions::MODE_DRY_RUN, ImportOptions::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -106,6 +109,7 @@ final class MoneyS3BatchOptions
             filter_var($data['use_registry'] ?? true, FILTER_VALIDATE_BOOL),
             filter_var($data['take_over_filings'] ?? true, FILTER_VALIDATE_BOOL),
             $toYear,
+            filter_var($data['opening_only_next'] ?? false, FILTER_VALIDATE_BOOL),
         );
     }
 
@@ -125,6 +129,7 @@ final class MoneyS3BatchOptions
             'use_registry' => $this->useRegistry,
             'take_over_filings' => $this->takeOverFilings,
             'to_year' => $this->toYear,
+            'opening_only_next' => $this->openingOnlyNext,
         ];
     }
 
@@ -132,6 +137,6 @@ final class MoneyS3BatchOptions
     public function withGroup(?int $groupId, array $relatedPartyIcos): self
     {
         return new self($this->mode, $this->fromYear, $this->existing, $this->closeHistory, $this->disposalYearTax,
-            $groupId, null, $this->relatedParties, $relatedPartyIcos, $this->useRegistry, $this->takeOverFilings, $this->toYear);
+            $groupId, null, $this->relatedParties, $relatedPartyIcos, $this->useRegistry, $this->takeOverFilings, $this->toYear, $this->openingOnlyNext);
     }
 }

@@ -220,7 +220,7 @@ final class PohodaImporter
             $add('error', 'nonprofit_agenda_needs_504', 'Agenda POHODY je vedená v osnově pro neziskové organizace, firma v MyÚčtu ale účtuje podle vyhlášky 500. Nastavte firmě účetní rámec vyhlášky 504 a převod spusťte znovu.');
         }
 
-        if ($relinkOnly && !$this->map->hasAny($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY)) {
+        if ($relinkOnly && !$this->hasConversion($supplierId)) {
             $add('error', 'relink_without_conversion', 'Opravný převod vazeb předpokládá firmu převedenou z Pohody; deník převodu tu chybí.');
         }
         foreach (array_merge([$agendaLabel], $laterYears) as $year) {
@@ -256,6 +256,15 @@ final class PohodaImporter
             $add('info', 'payroll_separate', 'Export obsahuje mzdy z datového souboru POHODY (91_mzdy.xml). Převod účetnictví je nepřevádí, zaměstnanci a mzdy se převádějí zvlášť.');
         }
         return $out;
+    }
+
+    /**
+     * Firma už má převod účetnictví z POHODY (deník převodu). Jen nad ní má smysl opravný
+     * převod vazeb ({@see PohodaContext::$relinkOnly}); průvodce podle toho volbu nabízí.
+     */
+    public function hasConversion(int $supplierId): bool
+    {
+        return $this->map->hasAny($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
     }
 
     /**

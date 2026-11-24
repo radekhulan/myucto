@@ -10,6 +10,7 @@ final class PohodaMdbTables
     public readonly int $year;
     public readonly string $version;
     private array $tables = [];
+    private array $firstRowColumns = [];
     private readonly string $fingerprint;
     private int $passes = 0;
 
@@ -38,6 +39,11 @@ final class PohodaMdbTables
     public function has(string $table): bool
     {
         return $this->tables[$table] ?? false;
+    }
+
+    public function hasColumn(string $table, string $column): bool
+    {
+        return isset($this->firstRowColumns[$table][$column]);
     }
 
     public function rows(string $table): \Generator
@@ -186,6 +192,9 @@ final class PohodaMdbTables
                         }
                         $field = null;
                     } elseif ($reader->depth === 2) {
+                        if ($initialize && $table !== null && $columns !== []) {
+                            $this->firstRowColumns[$table] ??= $columns;
+                        }
                         if ($table !== null && isset($wanted[$table])) {
                             yield $table => $row;
                         }

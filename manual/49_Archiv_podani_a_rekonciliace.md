@@ -139,6 +139,23 @@ Použijte po asistovaném podání, po podání mimo aplikaci nebo když dodejka
 > [!TIP]
 > Pro každý formulář archivujte trojici **odeslané XML + potvrzení + stručné vysvětlení ručních změn**. Při kontrole nebo dalším dodatečném podání pak lze přesně doložit, z jakého stavu se vycházelo.
 
+### 49.6.1 Stáhněte odeslané přiznání a doručenku
+
+Použijte, když potřebujete podané přiznání k DPH, kontrolní nebo souhrnné hlášení v PDF, třeba pro klienta, banku nebo do šanonu.
+
+1. Otevřete `Daně → EPO podání a archív` a detail podání.
+2. V liště akcí klikněte na **Stáhnout PDF**. PDF se sestaví z uloženého XML, které bylo podáno, ne z dnešních dokladů. Pozdější změny dokladů v něm proto nejsou.
+3. Na začátku PDF je oddíl **Potvrzení o podání**: podací číslo, čas podání a seznam uložených dokladů o podání. Následují identifikační údaje a řádky přiznání, u kontrolního hlášení oddíly A a B se všemi doklady a kontrolní řádky C.
+4. Originály doručenek stáhnete v části **Soubory a důkazy** tlačítkem **Stáhnout**: podepsanou dodejku EPO (P7S) a její čitelný přepis, PDF potvrzení z portálu EPO nebo doručenku datové zprávy (ZFO).
+
+Panel **Doklad o podání** v detailu řekne, jestli je doručenka uložená. Když není, uvede proč:
+
+- podání ještě není označené jako podané,
+- datová zpráva odešla, ale doručenka ze schránky zatím není přiložená,
+- podání bylo označené jako podané ručně, bez doručenky. Typicky se podávalo mimo MyÚčto, například přímo v portálu EPO. Potvrzení z EPO (P7S nebo PDF) pak doplňte podle [§ 49.6](#496-krok-za-krokem-dolozte-podani) a v příštím stažení PDF už bude.
+
+**Jak poznáte, že je hotovo:** Stažené PDF má v hlavičce stejné období, typ podání a otisk XML jako záznam v archivu a v oddílu **Potvrzení o podání** podací číslo.
+
 ## 49.7 Krok za krokem: rekonciliace
 
 Rekonciliace odpovídá na otázku: „Shoduje se dnešní výpočet MyÚčta s tím, co bylo skutečně odesláno?" Není to totéž jako kontrola, že dvě interní sestavy čerpají ze stejných dokladů.
@@ -173,6 +190,8 @@ Rekonciliace odpovídá na otázku: „Shoduje se dnešní výpočet MyÚčta s 
 | Snapshot nejde smazat | Snapshot je označený jako podaný, má podací číslo, doručenku, nebo běží zadržení podle § 32 ZoÚ | Viz [§ 49.9.3](#4993-kdy-jde-snapshot-smazat) |
 | Tlačítko **Pokračovat do EPO** zmizelo | Odkaz je jednorázový, byl použitý, uplynulo 20 minut, nebo se XML změnilo | Klikněte na **Vytvořit nový odkaz EPO** |
 | Nahrané XML se liší od snapshotu | Podání se v EPO upravovalo a archiv už neodpovídá tomu, co bylo podáno | Aplikace vypíše počet rozdílných údajů, případně upozorní na jiný formulář. Ověřte podané hodnoty. |
+| Tlačítko **Stáhnout PDF** chybí | PDF podání je jen u přiznání k DPH, kontrolního a souhrnného hlášení, nebo chybí oprávnění exportovat výkazy | U ostatních výkazů stáhněte XML, případně požádejte správce o oprávnění |
+| V PDF chybí doručenka | Podání se dokládalo ručně bez potvrzení, typicky po podání v portálu EPO mimo MyÚčto | Nahrajte potvrzení z EPO podle [§ 49.6](#496-krok-za-krokem-dolozte-podani) a PDF stáhněte znovu |
 | U tištěného PDF se nepředvyplnilo číslo | Skenované PDF bez textové vrstvy se jen archivuje | Nahrajte dodejku P7S |
 | Pokus je ve stavu **Výsledek je nejistý** | Přerušené spojení nebo dodejka nepotvrzená kryptograficky | Postup v upozornění v [§ 49.4](#494-krok-za-krokem-prime-podani-pres-epo-api) |
 | Aplikace certifikát nepřijme | Chybí šifrovací klíč, soukromý klíč v PFX, nebo jde o certifikát pro pečeť či o QSCD | Viz [§ 49.9.5](#4995-jak-ziskat-vhodny-certifikat) a [§ 49.9.6](#4996-zabezpeceni-certifikatu) |
@@ -271,7 +290,8 @@ podklady. Na rekonstrukci i neúspěšnou kontrolu XML aplikace upozorní, expor
 dokončí.
 
 U DPHDP3, KH a souhrnného hlášení je archivovaný soubor technickým obrazem
-vygenerovaného výkazu. Před odesláním vždy porovnejte období, typ podání,
+vygenerovaného výkazu. Z něj se skládá i **PDF podání** ([§ 49.6.1](#4961-stahnete-odeslane-priznani-a-dorucenku)),
+takže tisk odpovídá podanému XML. Před odesláním vždy porovnejte období, typ podání,
 identifikační údaje a součty s náhledem a související kontrolní sestavou.
 
 ### 49.9.5 Jak získat vhodný certifikát
