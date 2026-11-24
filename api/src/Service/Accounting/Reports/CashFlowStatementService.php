@@ -12,10 +12,6 @@ use PDO;
 /**
  * Přehled o peněžních tocích — § 18 odst. 2 ZoÚ, § 40 až § 43 vyhl. 500/2002 Sb.
  *
- * U velké a střední účetní jednotky (a u každé, která má povinný audit) je součástí
- * závěrky stejně jako rozvaha a výsledovka. Systém ho neuměl vůbec, takže balíček
- * závěrky takové firmě hlásil „hotovo" u závěrky, které dvě povinné části chyběly.
- *
  * ── Proč PŘÍMÁ klasifikace pohybů, a ne nepřímá metoda ──────────────────────
  * Nepřímá metoda staví provozní tok jako výsledek hospodaření upravený o nepeněžní
  * operace a o změny pracovního kapitálu. Každá z těch úprav je odhad nad agregáty

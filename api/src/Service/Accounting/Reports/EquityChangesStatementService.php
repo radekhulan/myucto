@@ -11,10 +11,6 @@ use PDO;
 /**
  * Přehled o změnách vlastního kapitálu — § 18 odst. 2 ZoÚ, § 44 vyhl. 500/2002 Sb.
  *
- * Spolu s přehledem o peněžních tocích je součástí závěrky u velké a střední účetní
- * jednotky a u každé s povinným auditem. Systém ho neuměl, takže balíček závěrky hlásil
- * „hotovo" u závěrky, které tahle část chyběla.
- *
  * ── Co výkaz ukazuje ────────────────────────────────────────────────────────
  * Za každou složku vlastního kapitálu počáteční stav, zvýšení, snížení a konečný stav.
  * Vyhláška nepředepisuje pevné řádky jako u rozvahy — vykazují se položky, které účetní

@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\Reports\EquityChangesStatementService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\CashFlowPdfRenderer;
@@ -29,9 +30,7 @@ use Psr\Log\LoggerInterface;
  *
  *   GET /api/accounting/reports/section18-statements?period_id=
  *
- * Oba výkazy jedním endpointem záměrně: povinnost je společná (velká a střední účetní
- * jednotka a každá s povinným auditem je má oba), sestavují se ze stejného období a
- * účetní je posuzuje spolu. Dva požadavky by jen zdvojily načtení období.
+ * Oba výkazy se sestavují za stejné období a účetní je posuzuje spolu.
  *
  * Součástí odpovědi je i `category` — bez ní by uživatel nevěděl, zda se ho povinnost
  * TÝKÁ. Výkazy se sestaví každé firmě (jsou to platné sestavy i pro malou ÚJ, jen
@@ -55,7 +54,7 @@ final class Section18StatementsAction
         private readonly ReportXlsxExporter $xlsx,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
-        private readonly \MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy $frameworks,
+        private readonly StatementSupplementPolicy $frameworks,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -86,16 +85,11 @@ final class Section18StatementsAction
             return Json::error($response, 'build_failed', 'Sestavu se nepodařilo vytvořit.', 500);
         }
 
-        // Stejné kritérium jako v kontrole závěrky (`section18_statements_required`) —
-        // rozejít se nesmí, jinak by uzávěrka a tahle stránka tvrdily každá něco jiného.
-        $required = in_array((string) $category['category'], ['large', 'medium'], true)
-            || ($category['scope_override'] === null && (string) $category['scope'] === 'full');
-
         return Json::ok($response, [
             'cash_flow' => $cashFlow,
             'equity'    => $equity,
             'category'  => $category['category'],
-            'required'  => $required,
+            'required'  => StatementSupplementPolicy::requiredForCategory($category['category']),
         ]);
     }
 

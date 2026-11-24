@@ -492,6 +492,20 @@ final class ClosingWorkflowTest extends TestCase
         self::assertNotNull($this->findCheck($precheck['checks'], 'unposted_invoices'), 'Ostatní kontroly doběhnou.');
     }
 
+    public function testPrecheckDoesNotRequireSupplementaryStatementsForAuditedMicroEntity(): void
+    {
+        (new \MyInvoice\Repository\AccountingSupplierSettingsRepository($this->db))
+            ->upsert($this->supplierId, 0, null, statutoryAudit: true);
+        $category = $this->categories->evaluate($this->supplierId, $this->periodId);
+        self::assertSame('micro', $category['category']);
+        self::assertSame('full', $category['scope']);
+
+        $period = $this->periods->findById($this->supplierId, $this->periodId);
+        $checks = $this->closing->buildChecks($this->supplierId, $period, onlyKeys: ['section18_statements_required']);
+
+        self::assertSame([], $checks);
+    }
+
     /**
      * Plátcovství z dolního limitu vzniká až 1. ledna dalšího roku. Uzávěrka roku, v němž
      * firma limit překročila, ho hodnotí k rozvahovému dni (varování), ne k dnešku, kdy už

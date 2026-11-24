@@ -53,6 +53,7 @@ use MyInvoice\Service\Tax\Return\LegalProvisionLedgerService;
 use MyInvoice\Service\Accounting\Reports\BalanceInventoryService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\SmallAssetReportService;
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\Match\PaymentMatchAuditChecker;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
@@ -6483,17 +6484,7 @@ final class ClosingService
             ];
         }
 
-        // § 18 odst. 2 ZoÚ — velká a střední ÚJ (a každá s povinným auditem) musí mít
-        // v závěrce i přehled o peněžních tocích a o změnách vlastního kapitálu. Balíček
-        // závěrky je mezi povinnými částmi nemá, takže takové firmě hlásil „hotovo"
-        // u závěrky, které dvě povinné části chyběly — a to je vada, kterou nikdo
-        // nezachytí, dokud ji nenajde auditor.
-        //
-        // Oba přehledy jsou nově součástí balíčku závěrky (`cash_flow`, `equity_changes`),
-        // takže kontrola už nemá být natvrdo `ok => false` — to bylo správně jen do doby,
-        // kdy se výkazy nedaly vygenerovat a účetní je musela přiložit ručně. Nově se
-        // ptá na to, co jediné může být špatně: SEDÍ oba výkazy? Nesedící přehled je vada
-        // v datech (typicky pohyb, jehož protiúčet nejde zařadit) a takhle se odevzdat nedá.
+        // § 18 odst. 2 ZoÚ: u povinných přehledů zkontrolujeme soulad s účetní evidencí.
         $category = null;
         if ($wants('section18_statements_required', 'entity_category_unavailable')) {
             try {
@@ -6510,10 +6501,7 @@ final class ClosingService
                 ];
             }
         }
-        $needsSection18 = $category !== null
-            && (in_array((string) $category['category'], ['large', 'medium'], true)
-                || ($category['scope_override'] === null && (string) $category['scope'] === 'full'));
-        if ($needsSection18) {
+        if (StatementSupplementPolicy::requiredForCategory($category['category'] ?? null)) {
             $cashFlow = $this->cashFlowStatement->build($supplierId, $periodId);
             $equityReconciles = $this->equityStatement->build($supplierId, $periodId)['reconciles'];
             $checks[] = [

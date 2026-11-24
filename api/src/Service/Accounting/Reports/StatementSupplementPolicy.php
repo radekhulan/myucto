@@ -17,6 +17,11 @@ final class StatementSupplementPolicy
         return $this->frameworks->context($supplierId, $periodId, $period['ends_on'] ?? null)['framework'];
     }
 
+    public static function requiredForCategory(?string $category): bool
+    {
+        return in_array($category, ['medium', 'large'], true);
+    }
+
     public function assert500Supplement(int $supplierId, int $periodId): void
     {
         if ($this->framework($supplierId, $periodId) === 'cz_504') {

@@ -10,6 +10,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
@@ -1471,7 +1472,7 @@ final class TaxReturnService
      * dřív se stavěla jako `ObecnaPriloha`, což je špatná přihrádka.
      *
      * Stejnou cestou (`Prilohy/PredepsanaPriloha`) nese podání i další dvě přílohy, KDYŽ
-     * je pro danou ÚJ § 18 odst. 2 ZoÚ vyžaduje (viz needsSection18Statements()):
+     * je pro danou ÚJ § 18 odst. 2 ZoÚ vyžaduje (viz StatementSupplementPolicy):
      * přehled o peněžních tocích (`PP_PTOK`, {@see buildCashFlowAttachment()}) a přehled
      * o změnách vlastního kapitálu (`PP_ZVKAP`, {@see buildEquityChangesAttachment()}).
      * `PP_UZMUS` (IFRS závěrka) se NESTAVÍ — aplikace IFRS nepodporuje.
@@ -1532,12 +1533,7 @@ final class TaxReturnService
             $usedBytes,
         );
 
-        // § 18 odst. 2 ZoÚ — jen velká/střední ÚJ a každá s povinným auditem (stejné
-        // kritérium jako Section18StatementsAction/ClosingService, viz
-        // needsSection18Statements()). Mikro/malá ÚJ bez auditu povinnost nemá — tam se
-        // přehledy k DPPO NEPŘIKLÁDAJÍ, i kdyby šly sestavit (appendix by nesl přílohu,
-        // kterou zákon nevyžaduje).
-        if ($this->needsSection18Statements((array) $appendix['category'])) {
+        if (StatementSupplementPolicy::requiredForCategory($appendix['category']['category'])) {
             $this->attachIfWithinBudget(
                 $appendix,
                 'cash_flow_attachment',
@@ -1563,27 +1559,6 @@ final class TaxReturnService
      * velikost SOUBORU (před base64), protože to je částka, kterou dokumentace jmenuje.
      */
     private const STATEMENT_NOTES_MAX_BYTES = 10_240 * 1024;
-
-    /**
-     * § 18 odst. 2 ZoÚ: přehled o peněžních tocích a o změnách vlastního kapitálu jsou
-     * POVINNOU součástí závěrky jen u velké a střední ÚJ a u KAŽDÉ ÚJ s povinným auditem
-     * (auditovaná mikro/malá ÚJ dostane plný `scope`, i když by jinak byla zkrácená —
-     * R18/Epic F4, {@see \MyInvoice\Service\Accounting\Reports\EntityCategoryService::evaluate()}).
-     * Mikro a malá ÚJ bez auditu povinnost NEMAJÍ.
-     *
-     * Stejné kritérium jako {@see \MyInvoice\Action\Accounting\Reports\Section18StatementsAction::get()}
-     * (`required` v odpovědi) a kontrola `section18_statements_required` v
-     * {@see \MyInvoice\Service\Accounting\Closing\ClosingService} — JEDNO místo pravdy;
-     * kdyby se rozešlo, uzávěrka/report/přiznání by o téže povinnosti tvrdily každé něco
-     * jiného.
-     *
-     * @param array<string,mixed> $category výstup EntityCategoryService::evaluate()
-     */
-    private function needsSection18Statements(array $category): bool
-    {
-        return in_array((string) ($category['category'] ?? ''), ['large', 'medium'], true)
-            || (($category['scope_override'] ?? null) === null && (string) ($category['scope'] ?? '') === 'full');
-    }
 
     /**
      * Připojí e-přílohu k appendixu, jen když se s dosavadním součtem vejde do limitu
@@ -1699,7 +1674,7 @@ final class TaxReturnService
      * ({@see \MyInvoice\Service\Export\ClosingPackageService}, část `cash_flow`) — žádný
      * druhý generátor, jen jiný výstupní kontejner (příloha DPPO místo souboru v ZIPu).
      *
-     * Volá se JEN když {@see needsSection18Statements()} vrátí true (přehled je pro tuhle
+     * Volá se, pokud {@see StatementSupplementPolicy::requiredForCategory()} vrátí true (přehled je pro tuto
      * ÚJ povinný) — proto je selhání sestavení/renderu vždy warning „je povinný, ale…",
      * ne tiché vynechání.
      *

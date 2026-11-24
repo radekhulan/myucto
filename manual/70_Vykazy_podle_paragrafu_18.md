@@ -56,11 +56,10 @@ pohyby jsou prázdné, nebo vysvětlené.
 
 ### 70.5.1 Povinnost a období
 
-Oba přehledy se sestaví za celé vybrané účetní období. Stránka současně vyhodnotí kategorii účetní jednotky.
-Pro střední a velkou jednotku a pro jednotku, jejíž nastavení vynutí plný rozsah bez ručního přepisu, je
-označí jako povinnou součást závěrky; menší jednotka je může použít dobrovolně. Kategorie a auditní
-nastavení vycházejí ze stejné služby jako automatický rozsah [Rozvahy](57_Rozvaha.md), aby stránka
-a uzávěrka nepoužívaly jiné kritérium.
+Oba přehledy se sestaví za celé vybrané účetní období. Střední a velké obchodní společnosti je uvádějí
+jako povinnou součást závěrky. Malé a mikro účetní jednotky je mohou sestavit
+dobrovolně i při povinném auditu a vykazování v plném rozsahu. Stránka, kontrola uzávěrky a přílohy
+DPPO vycházejí ze stejného pravidla pro kategorii účetní jednotky.
 
 ### 70.5.2 Přehled o peněžních tocích
 
