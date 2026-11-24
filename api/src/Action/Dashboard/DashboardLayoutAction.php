@@ -34,7 +34,6 @@ final class DashboardLayoutAction
 
     private function handle(Request $request, Response $response, array $args, string $operation): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
         $board = $args['board'] ?? '';
         try {
             if (!is_string($board)) throw new \InvalidArgumentException();

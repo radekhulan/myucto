@@ -958,6 +958,9 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/settings/databox'],
             ['POST', '/api/settings/domains'],
             ['PUT', '/api/settings/ai-assist'],
+            ['GET', '/api/user/dashboard-layouts/home'],
+            ['PUT', '/api/v1/user/dashboard-layouts/portal'],
+            ['DELETE', '/api/user/dashboard-layouts/home'],
         ];
         foreach ($closed as [$method, $path]) {
             $response = $this->middleware()->process($this->systemWrite($method, $path), $this->okHandler());

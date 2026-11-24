@@ -334,6 +334,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/maintenance(/|$)#',
         '#^/api/mcp(/|$)#',
         '#^/api/oauth(/|$)#',
+        // Osobní rozložení je nastavení uživatelské relace, včetně jeho obnovy.
+        '#^/api/user/dashboard-layouts/(home|portal)$#',
         '#^/api/settings/(domains|signing|pdf-signing|certificates|email-profiles|databox|isds-gateway|bank-connections|ai-assist)(/|$)#',
         '#^/api/settings/client/signing(/|$)#',
     ];
