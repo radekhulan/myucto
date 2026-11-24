@@ -123,15 +123,26 @@ foreach ($byIco as $ico => $supplierIds) {
         foreach ($counts as $status => $count) {
             $totals[$status] = ($totals[$status] ?? 0) + $count;
         }
-        echo PHP_EOL . sprintf('Firma %d, nalezeno %d dokladů (%s)', $id, count($rows), $countText($counts)) . PHP_EOL;
+        echo PHP_EOL . sprintf('Firma %d, nalezeno %d dokladů (%s), úhrady k převodu nebo převedené: %d',
+            $id, count($rows), $countText($counts), array_sum(array_column($rows, 'payments_converted'))) . PHP_EOL;
+        $reasons = [];
+        foreach ($rows as $row) {
+            if (in_array($row['status'], ['review', 'locked'], true)) {
+                $reason = $row['reason'];
+                $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
+            }
+        }
+        foreach ($reasons as $reason => $count) {
+            echo sprintf('  %d ke kontrole: %s', $count, $reason) . PHP_EOL;
+        }
         if ($quiet) {
             continue;
         }
         foreach ($rows as $row) {
             $detail = $row['rate'] === null
-                ? $row['reason'] . ' Původní důvod převzetí v Kč: ' . $row['source_reason']
-                : sprintf('%s %s × %s', number_format($row['total_foreign'], 2, ',', ' '), $row['currency'],
-                    rtrim(rtrim(number_format($row['rate'], 6, ',', ''), '0'), ','));
+                ? $row['reason'] . ' Úhrady: 0. Původní důvod převzetí v Kč: ' . $row['source_reason']
+                : sprintf('%s %s × %s. Úhrady: %d.', number_format($row['total_foreign'], 2, ',', ' '), $row['currency'],
+                    rtrim(rtrim(number_format($row['rate'], 6, ',', ''), '0'), ','), $row['payments_converted']);
             echo sprintf('  %-16s %s  %s Kč  %s. %s', $row['document_no'], $row['issue_date'],
                 number_format($row['total_czk'], 2, ',', ' '), $labels[$row['status']], $detail) . PHP_EOL;
         }

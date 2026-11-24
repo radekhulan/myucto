@@ -265,7 +265,7 @@ a ověřte její účet proti původní evidenci POHODY.
 
 ## 126.15 Vydané doklady v cizí měně převzaté v Kč
 
-Kontrola ukáže vydané faktury, zálohové faktury a dobropisy z POHODY, které mají v poznámce
+Kontrola ukáže vydané faktury, zálohové faktury, dobropisy a daňové doklady k přijaté platbě z POHODY, které mají v poznámce
 „doklad v EUR, převzat v Kč" (případně jinou měnu). Počet dokladů, které čekají na původní export,
 najdete v detailu kontroly. Při novém převodu se drobné rozdíly zaokrouhlení ukládají jako částky
 v Kč ze zdroje vedle částek v měně dokladu.
@@ -283,10 +283,17 @@ První příkaz vypíše dotčené doklady. Druhý provede celý zápis nanečis
 převod dokladů, u kterých evidence DPH, kontrolní hlášení, saldokonto v Kč a peněžní deník zůstaly
 stejné. Převod se zapisuje do auditní stopy. Volba `--quiet` vypíše jen souhrny.
 
-Doklady v chráněném období se pouze ohlásí. Ke kontrole zůstávají také doklady s evidovanou úhradou,
-zápočtem, odeslaným e-mailem, upomínkou, vystaveným PDF, vazbou na jiný doklad, nedaňovou zálohou
-v Kč nebo položkami OSS. Oprava ponechá v Kč i doklad, u kterého původní export nesouhlasí nebo
-částky v měně překračují toleranci pro zaokrouhlení.
+Oprava převede úhradu z bankovního pohybu ve stejné měně jako doklad. U rozděleného pohybu
+převede všechny jeho alokace společně a jejich součet dorovná na částku pohybu. Úhrady minulých
+let a částku uhrazenou bez řádku úhrady přepočte poměrem k částce k úhradě. Převzaté účetní
+zápisy v bance zůstanou stejné. Výpis u dokladu uvádí počet převedených úhrad, souhrn za firmu
+ukazuje i důvody ruční kontroly a počet dokladů, u kterých chybí export.
+
+Doklady v chráněném období se pouze ohlásí. Ke kontrole patří platby v Kč nebo v jiné měně
+než doklad, zápočty, doklady odeslané z MyÚčta, upomínky, uložená PDF a položky OSS.
+Vazbu DDKP na zálohu a odpočet nedaňové zálohy v měně dokladu musí doložit původní export.
+Oprava ponechá v Kč i doklad, u kterého export nesouhlasí, částky v měně překračují toleranci
+nebo by se po převodu změnil byť jen haléř v Kč.
 
 ## 126.16 Související kapitoly
 

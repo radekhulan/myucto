@@ -582,8 +582,7 @@ final class CashJournalService
         //     jeden pohyb = jeden řádek i u sloučené úhrady N faktur/PF, #89). base/vat/exempt
         //     hotové v CZK — klasifikátor jen rozdělí do kbelíků.
         if ($source === 'bank' && ($r['bank_class'] ?? null) === 'income') {
-            $fit = self::bankAllocationFit($r);
-            return $this->bankIncomeAlloc($fit['portion'], $direction, $r, $fit['ratio']) + $fit;
+            return self::bankIncomeAllocation($r);
         }
         if ($source === 'bank' && ($r['bank_class'] ?? null) === 'expense') {
             $fit = self::bankAllocationFit($r);
@@ -920,7 +919,14 @@ final class CashJournalService
      * @param array<string,mixed> $r
      * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
      */
-    private function bankIncomeAlloc(float $amount, string $direction, array $r, float $ratio = 1.0): array
+    public static function bankIncomeAllocation(array $r): array
+    {
+        $fit = self::bankAllocationFit($r);
+        $classification = self::bankIncomeAlloc($fit['portion'], (string) $r['direction'], $r, $fit['ratio']);
+        return $classification + $fit;
+    }
+
+    private static function bankIncomeAlloc(float $amount, string $direction, array $r, float $ratio): array
     {
         $sign   = $direction === 'in' ? 1.0 : -1.0;
         $base   = round((float) ($r['bank_income_base'] ?? 0.0) * $ratio, 2);

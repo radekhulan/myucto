@@ -7,11 +7,16 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankPostingSuggestionRepository;
+use MyInvoice\Repository\PohodaImportRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\Check\Checks\ForeignIssuedInCzkCheck;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckRegistry;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaForeignIssuedRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -146,6 +151,125 @@ final class PohodaForeignIssuedRepairTest extends TestCase
         self::assertSame([['10.00', 'CZK']], $stmt->fetchAll(PDO::FETCH_NUM));
     }
 
+    public function testPaidInvoiceUsesTheWholeEuroMovementAndEntersTheNormalFxPath(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $txId = $this->bankPayment($supplierId, 'EUR', 398.09, [$id => 10000.00], 50.0);
+        $bank = $this->container->get(BankPostingService::class);
+        self::assertSame('cross_currency', $bank->previewTransaction($supplierId, $txId)['reason']);
+        $suggestions = $this->container->get(BankPostingSuggestionRepository::class);
+        $suggestion = $suggestions->createIfNoPending([
+            'supplier_id' => $supplierId, 'bank_transaction_id' => $txId, 'source' => 'payment_match',
+            'debit_account_code' => '221', 'credit_account_code' => '311', 'amount' => 398.09,
+            'note' => 'cross_currency', 'status' => 'blocked',
+        ]);
+        $paymentBefore = $this->payments($id)[0];
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame([1], array_column($result, 'payments_converted'));
+        self::assertSame([array_replace($paymentBefore, ['amount' => '398.09', 'currency' => 'EUR'])], $this->payments($id));
+        self::assertSame(['paid', '398.09', '0.00', '2026-02-25'], $this->paymentState($id));
+        self::assertSame('superseded', $suggestions->find($supplierId, $suggestion['id'])['status']);
+        self::assertContains($txId, array_column($suggestions->matchedUnpostedWithoutSuggestion($supplierId), 'tx_id'));
+        $preview = $bank->previewTransaction($supplierId, $txId);
+        self::assertNull($preview['reason']);
+        self::assertNotEmpty($preview['lines']);
+        self::assertContains('EUR', array_column($preview['lines'], 'currency_code'));
+    }
+
+    public function testSharedBankMovementIsConvertedTogetherAndKeepsThePostedEntry(): void
+    {
+        [$supplierId, $first, $export] = $this->legacyInvoice();
+        $second = $this->makeLegacy($supplierId, SyntheticPohodaExport::FOREIGN_ISSUED, 3516.80, 738.53);
+        $txId = $this->bankPayment($supplierId, 'EUR', 567.49, [$first => 10000.0, $second => 4255.33]);
+        $entry = $this->takeOverBankEntry($supplierId, $first, $txId);
+        $before = $this->bankJournal($entry);
+        self::assertCount(2, $before);
+        $bank = $this->container->get(BankPostingService::class);
+        self::assertSame('posted', $bank->transactionPostingInfo($supplierId, [$txId])[$txId]['status']);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted', 'converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame([1, 1], array_column($result, 'payments_converted'));
+        self::assertSame('398.09', $this->payments($first)[0]['amount']);
+        self::assertSame('169.40', $this->payments($second)[0]['amount']);
+        self::assertSame('0.00', $this->paymentState($first)[2]);
+        self::assertSame('0.00', $this->paymentState($second)[2]);
+        self::assertSame('taken_over', $bank->handleTransaction($txId)['reason']);
+        self::assertSame($before, $this->bankJournal($entry));
+        self::assertSame('posted', $bank->transactionPostingInfo($supplierId, [$txId])[$txId]['status']);
+        $suggestions = $this->container->get(BankPostingSuggestionRepository::class);
+        self::assertNull($suggestions->pendingForTx($supplierId, $txId));
+        self::assertNotContains($txId, array_column($suggestions->matchedUnpostedWithoutSuggestion($supplierId), 'tx_id'));
+    }
+
+    public function testPartialPriorYearPaymentIsConvertedByShare(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET paid_total = 5023.99 WHERE id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, note)
+            VALUES (?, ?, '2025-12-31', 5023.99, 'CZK', 'settlement', ?)")->execute([$supplierId, $id, PohodaPriorYearPayments::NOTE]);
+        $before = $this->payments($id)[0];
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame([1], array_column($result, 'payments_converted'));
+        self::assertSame([array_replace($before, ['amount' => '200.00', 'currency' => 'EUR'])], $this->payments($id));
+        self::assertSame(['sent', '200.00', '198.09', null], $this->paymentState($id));
+    }
+
+    public function testPaidDocumentWithoutPaymentRowPreservesStatusAndDate(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_total = amount_to_pay, paid_at = '2026-02-25' WHERE id = ?")
+            ->execute([$id]);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame([0], array_column($result, 'payments_converted'));
+        self::assertSame([], $this->payments($id));
+        self::assertSame(['paid', '398.09', '0.00', '2026-02-25'], $this->paymentState($id));
+    }
+
+    public function testPaymentFromCrownBankMovementRemainsForReview(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $this->bankPayment($supplierId, 'CZK', 10000.0, [$id => 10000.0]);
+        $before = $this->payments($id);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['review'], array_column($result, 'status'));
+        self::assertStringContainsString('bankovní pohyb v CZK', $result[0]['reason']);
+        self::assertSame($before, $this->payments($id));
+        self::assertSame('CZK', $this->invoice($id)['code']);
+    }
+
+    public function testIssuedRepairRollsBackIfCrownBalanceChangesByOneCent(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET paid_total = 2512.00 WHERE id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, note)
+            VALUES (?, ?, '2025-12-31', 2512.00, 'CZK', 'settlement', ?)")->execute([$supplierId, $id, PohodaPriorYearPayments::NOTE]);
+        $before = $this->invoice($id);
+        $payments = $this->payments($id);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['review'], array_column($result, 'status'));
+        self::assertStringContainsString('saldo dokladu v Kč. Zápis byl vrácen.', $result[0]['reason']);
+        self::assertSame($before, $this->invoice($id));
+        self::assertSame($payments, $this->payments($id));
+        self::assertSame(0, $this->auditCount($supplierId, $id));
+    }
+
     public function testIssuedRepairRollsBackIfEvenOneCentOfVatWouldChange(): void
     {
         [$supplierId, $id, $export] = $this->legacyInvoice();
@@ -167,8 +291,17 @@ final class PohodaForeignIssuedRepairTest extends TestCase
         }
     }
 
+    public function testNewImportUsesTheSamePaymentConversion(): void
+    {
+        [$supplierId, $id] = $this->legacyInvoice(paidInExport: true, restoreLegacy: false);
+
+        self::assertSame('EUR', $this->invoice($id)['code']);
+        self::assertSame(['paid', '398.09', '0.00', null], $this->paymentState($id));
+        self::assertSame(1, $this->auditCount($supplierId, $id));
+    }
+
     /** @return array{int,int,PohodaExport} */
-    private function legacyInvoice(): array
+    private function legacyInvoice(bool $paidInExport = false, bool $restoreLegacy = true): array
     {
         $pdo = $this->db->pdo();
         $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
@@ -197,27 +330,115 @@ final class PohodaForeignIssuedRepairTest extends TestCase
 
         $dir = SyntheticPohodaExport::write($this->tmp);
         SyntheticPohodaExport::withForeignCurrencyDocuments($dir);
+        if ($paidInExport) {
+            $path = $dir . '/12_faktury_issuedInvoice.xml';
+            $xml = file_get_contents($path);
+            self::assertIsString($xml);
+            $xml = str_replace('<typ:amountHome>10000.00</typ:amountHome>', '<typ:amountHome>0</typ:amountHome>', $xml, $count);
+            self::assertSame(1, $count);
+            file_put_contents($path, $xml);
+        }
         $export = PohodaExport::open($dir);
         $protocol = $this->container->get(PohodaImporter::class)->run($supplierId, $userId, $export, false, $runId);
         self::assertFalse($protocol->hasErrors(), json_encode($protocol->toArray(), JSON_UNESCAPED_UNICODE));
 
+        if ($restoreLegacy) {
+            $id = $this->makeLegacy($supplierId, SyntheticPohodaExport::FOREIGN_MISMATCH, 8264.45, 1735.55);
+        } else {
+            $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ?');
+            $stmt->execute([$supplierId, SyntheticPohodaExport::FOREIGN_MISMATCH]);
+            $id = (int) $stmt->fetchColumn();
+            self::assertGreaterThan(0, $id);
+        }
+        return [$supplierId, $id, $export];
+    }
+
+    private function makeLegacy(int $supplierId, string $number, float $base, float $vat): int
+    {
+        $pdo = $this->db->pdo();
         $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ?');
-        $stmt->execute([$supplierId, SyntheticPohodaExport::FOREIGN_MISMATCH]);
+        $stmt->execute([$supplierId, $number]);
         $id = (int) $stmt->fetchColumn();
         self::assertGreaterThan(0, $id);
         $pdo->prepare(
-            "UPDATE invoices SET currency_id = ?, exchange_rate = NULL, total_without_vat = 8264.45, total_vat = 1735.55, total_with_vat = 10000.00,
+            "UPDATE invoices SET currency_id = (SELECT default_currency_id FROM supplier WHERE id = ?), exchange_rate = NULL,
+                    total_without_vat = ?, total_vat = ?, total_with_vat = ?,
                     import_total_with_vat_czk = NULL, import_total_without_vat_czk = NULL, import_total_vat_czk = NULL,
-                    import_amount_to_pay_czk = NULL, import_advance_paid_czk = NULL,
-                    note_below_items = 'Převzato z Pohody, doklad 26FV0021; doklad v EUR, převzat v Kč (základ 1. položky 329,00 × kurz 25,12 nedává 8 264,45 Kč ze zdroje)'
+                    import_amount_to_pay_czk = NULL, import_advance_paid_czk = NULL, note_below_items = ?
               WHERE supplier_id = ? AND id = ?"
-        )->execute([$czk, $supplierId, $id]);
+        )->execute([$supplierId, $base, $vat, round($base + $vat, 2),
+            "Převzato z Pohody, doklad {$number}; doklad v EUR, převzat v Kč (odchylka v přepočtu částek ze zdroje)", $supplierId, $id]);
         $pdo->prepare(
-            'UPDATE invoice_items SET unit_price_without_vat = 8264.45, total_without_vat = 8264.45, total_vat = 1735.55, total_with_vat = 10000.00,
+            'UPDATE invoice_items SET unit_price_without_vat = ROUND(import_tax_base_czk / quantity, 2),
+                    total_without_vat = import_tax_base_czk, total_vat = import_tax_vat_czk,
+                    total_with_vat = import_tax_base_czk + import_tax_vat_czk,
                     import_tax_base_czk = NULL, import_tax_vat_czk = NULL WHERE invoice_id = ?'
         )->execute([$id]);
+        return $id;
+    }
 
-        return [$supplierId, $id, $export];
+    private function bankPayment(int $supplierId, string $currency, float $amount, array $shares, float $rate = 25.12): int
+    {
+        $pdo = $this->db->pdo();
+        $account = '1000000005';
+        $pdo->prepare('UPDATE currencies SET account_number = ?, bank_code = ? WHERE supplier_id = ? AND code = ?')
+            ->execute([$account, '0100', $supplierId, $currency]);
+        if ($currency === 'EUR') {
+            $pdo->prepare("INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES ('2026-02-25', 'EUR', ?)
+                ON DUPLICATE KEY UPDATE rate = VALUES(rate)")->execute([$rate]);
+        }
+        $pdo->prepare("INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date)
+            VALUES (?, 'test.gpc', ?, ?, '0100', ?, '2026-02-25')")->execute([$supplierId, hash('sha256', 'test-' . $supplierId), $account, $currency]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, amount, currency, posted_at, matched_invoice_id, match_status)
+            VALUES (?, ?, ?, '2026-02-25', ?, 'manual')")->execute([$statementId, $amount, $currency, array_key_first($shares)]);
+        $txId = (int) $pdo->lastInsertId();
+        $payment = $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, bank_transaction_id, paid_on, amount, currency, source)
+            VALUES (?, ?, ?, '2026-02-25', ?, 'CZK', 'bank')");
+        $header = $pdo->prepare("UPDATE invoices SET status = 'paid', paid_total = ?, paid_at = '2026-02-25' WHERE id = ?");
+        foreach ($shares as $id => $share) {
+            $payment->execute([$supplierId, $id, $txId, $share]);
+            $header->execute([$share, $id]);
+        }
+        return $txId;
+    }
+
+    private function takeOverBankEntry(int $supplierId, int $invoiceId, int $txId): int
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare("SELECT period_id FROM journal_entries WHERE supplier_id = ? AND source_type = 'invoice' AND source_id = ?");
+        $stmt->execute([$supplierId, $invoiceId]);
+        $periodId = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $periodId);
+        $entry = $this->container->get(PostingService::class)->postDocument($supplierId, 'bank', $txId, [
+            ['account_code' => '221.001', 'side' => 'debit', 'amount' => 14255.33],
+            ['account_code' => '311.001', 'side' => 'credit', 'amount' => 14255.33],
+        ], ['entry_date' => '2026-02-25', 'description' => 'Převzatá úhrada']);
+        $this->container->get(PohodaImportRepository::class)->put($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY, 'test-eur-bank', $entry, null);
+        return $entry;
+    }
+
+    private function bankJournal(int $entry): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT l.* FROM journal_entry_lines l WHERE l.entry_id = ? ORDER BY l.line_no');
+        $stmt->execute([$entry]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function payments(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, amount, currency, paid_on, bank_transaction_id, tax_document_invoice_id FROM invoice_payments WHERE invoice_id = ? ORDER BY id'
+        );
+        $stmt->execute([$id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function paymentState(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status, paid_total, amount_to_pay - paid_total, paid_at FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        return $stmt->fetch(PDO::FETCH_NUM);
     }
 
     private function invoice(int $id): array

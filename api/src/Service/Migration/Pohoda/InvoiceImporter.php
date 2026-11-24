@@ -389,8 +389,12 @@ final class InvoiceImporter
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
         $booked = !$ctx->taxEvidence && !$review && $type !== 'proforma' && !self::postedLater($doc);
         $amounts = self::issuedCurrencyItems($doc, $amounts);
-        $blocked = ForeignCurrencyTakeover::paymentBlock(0.0, $pay['paid'], round($amounts['total'] - $amounts['advance'], 2));
-        if ($ctx->taxEvidence && ($doc['paid_date'] !== null || PohodaXml::all($r, 'liquidations/liquidation') !== []
+        $deferred = $ctx->verifyPaidIssuedCurrency && (str_starts_with($agenda, 'issued') || $agenda === 'internal')
+            && ($type === 'tax_document' || $pay['paid'] !== 0.0 || $doc['paid_date'] !== null
+                || PohodaXml::all($r, 'liquidations/liquidation') !== []);
+        $blocked = $deferred ? PohodaForeignIssuedRepair::PAYMENT_PENDING
+            : ForeignCurrencyTakeover::paymentBlock(0.0, $pay['paid'], round($amounts['total'] - $amounts['advance'], 2));
+        if (!$deferred && $ctx->taxEvidence && ($doc['paid_date'] !== null || PohodaXml::all($r, 'liquidations/liquidation') !== []
             || (is_numeric($doc['remaining']) && abs((float) $doc['remaining'] - ($amounts['total'] - $amounts['advance'])) >= 0.005))) {
             $blocked = 'převod úhrad v daňové evidenci vyžaduje doložené párování v Kč';
         }
@@ -455,7 +459,11 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertIssuedItems($id, $items);
-        ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
+        if ($deferred && $fx->isForeignDocument()) {
+            $ctx->foreignIssuedPaymentIds[] = $id;
+        } else {
+            ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
+        }
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'invoice', $id, $doc);
@@ -765,21 +773,29 @@ final class InvoiceImporter
      *
      * @return array{key:string,number:string,foreign:string,foreign_rate:float,foreign_units:float,foreign_total:float}
      */
-    public static function purchaseSource(array $r, string $agenda): array
+    public static function purchaseSource(array $r, string $agenda, string $prefix = 'invoice'): array
     {
-        $h = PohodaXml::get($r, 'invoiceHeader') ?? [];
+        $h = PohodaXml::get($r, $prefix . 'Header') ?? [];
         $number = PohodaXml::text($h, 'number/numberRequested');
         $issue = PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'dateAccounting');
-        return ['key' => self::mapKey($agenda, $number, $issue), 'number' => $number] + self::foreignCurrency($r, 'invoice');
+        return ['key' => self::mapKey($agenda, $number, $issue), 'number' => $number] + self::foreignCurrency($r, $prefix);
     }
 
-    /** @return array{key:string,doc:array<string,mixed>,amounts:array<string,mixed>} */
+    /** @return array{doc:array<string,mixed>,amounts:array<string,mixed>,id:string,advance_links:list<string>} */
     public function issuedRepairSource(PohodaContext $ctx, array $record, string $agenda): array
     {
-        $doc = $this->header($record, 'invoice');
-        $amounts = self::issuedCurrencyItems($doc, $this->amounts($ctx, self::STEP_ISSUED, $doc, $record, 'invoice'));
+        $prefix = $agenda === 'internal' ? 'intDoc' : 'invoice';
+        $doc = $this->header($record, $prefix);
+        $amounts = self::issuedCurrencyItems($doc, $this->amounts($ctx, self::STEP_ISSUED, $doc, $record, $prefix));
         $doc['foreign_total'] = self::issuedForeignTotal($doc, $amounts);
-        return ['key' => self::mapKey($agenda, $doc['number'], $doc['issue']), 'doc' => $doc, 'amounts' => $amounts];
+        return [
+            'doc' => $doc, 'amounts' => $amounts, 'id' => PohodaXml::text($doc['h'], 'id'),
+            'advance_links' => array_values(array_filter(array_map(
+                static fn (array $link): string => PohodaXml::text($link, 'sourceAgenda') === 'issuedAdvanceInvoice'
+                    ? PohodaXml::text($link, 'sourceDocument/number') : '',
+                PohodaXml::all($record, 'linkedDocuments/link'),
+            ))),
+        ];
     }
 
     private static function mapKey(string $agenda, string $number, ?string $issue): string

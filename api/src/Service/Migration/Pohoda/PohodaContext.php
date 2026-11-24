@@ -83,6 +83,11 @@ final class PohodaContext
     /** @var array<string,int> číslo dokladu => invoices.id */
     public array $issuedInvoices = [];
 
+    /** @var list<int> */
+    public array $foreignIssuedPaymentIds = [];
+
+    public bool $verifyPaidIssuedCurrency = false;
+
     /** @var array<string,int> číslo ostatní pohledávky => invoices.id */
     public array $receivables = [];
 

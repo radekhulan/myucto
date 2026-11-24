@@ -839,10 +839,11 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
   vychází DPH, kontrolní hlášení a ocenění pohledávky v Kč. Pojistka dovoluje rozdíl
   z přepočtu do 1 Kč na položku a nejvýše 5 Kč na doklad podle počtu položek.
   Odpočet nedaňové zálohy lze převzít spolu s dokladem, pokud export uvádí
-  odpovídající částku odpočtu v jeho měně. Doklad s větším rozdílem, chybějícími
-  částkami nebo s nedoloženou částečnou úhradou či zálohou v měně se převezme v Kč
-  s důvodem v poznámce a protokolu. Převod vydaných dokladů s úhradou v daňové
-  evidenci používá také Kč, aby se zachovalo párování pohybů v peněžním deníku.
+  odpovídající částku odpočtu v jeho měně. Při ostrém převodu se po spárování
+  úhrad ověří také doklady placené bankovním pohybem ve stejné měně a úhrady
+  z minulých let. Doklad zůstane v Kč, pokud částky ze zdroje nesouhlasí,
+  úhradu v měně nelze doložit nebo by se změnilo saldo v Kč, evidence DPH,
+  kontrolní hlášení či peněžní deník. Protokol uvádí důvod.
   Takové vydané doklady ukáže Kontrola dat po převodu
   ([§ 126.15](126_Kontrola_dat_po_prevodu.md#12615-vydane-doklady-v-cizi-mene-prevzate-v-kc)).
   Běžné přijaté doklady se přebírají v měně, když přepočet odpovídá částkám v Kč na haléř.
