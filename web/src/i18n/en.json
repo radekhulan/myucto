@@ -36768,6 +36768,7 @@
       "lines": "lines",
       "bank_accounts": "bank accounts",
       "created_from_documents": "partners from documents",
+      "advance_accounts": "advance posting rules added",
       "related_marked": "partners marked as related parties",
       "registers": "cash registers",
       "statements": "statements",
@@ -36880,6 +36881,11 @@
       "failure": "The transfer stopped at step: {step}",
       "steps_title": "Transfer steps",
       "messages": "Messages",
+      "advance_accounts": {
+        "advance_accounts_ambiguous_documents": "Posting rules for advances on account {root} were left unchanged. Advance invoices use several subaccounts ({accounts}) with no clear majority.",
+        "advance_accounts_ambiguous_journal": "Posting rules for advances on account {root} were left unchanged. Payments in the journal use several subaccounts ({accounts}).",
+        "advance_accounts_unavailable": "Posting rules for advances on account {root} were left unchanged. Account {account} is missing or inactive in the company’s chart of accounts."
+      },
       "reconciliation_title": "Reconciliation",
       "tax_records_title": "Cash book against Money",
       "tax_records_hint": "Taxable income and expenses according to the cash book MyÚčto computes from the transferred documents, bank and cash register, and according to the Money cash book.",

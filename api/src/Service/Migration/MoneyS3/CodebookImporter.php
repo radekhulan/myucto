@@ -36,6 +36,7 @@ final class CodebookImporter
         private readonly MoneyS3ImportRepository $map,
         private readonly PartnerIdentityMatcher $identity,
         private readonly MoneyS3VatRateAccounts $vatRateAccounts,
+        private readonly MoneyS3AdvanceAccounts $advanceAccounts,
     ) {}
 
     public function importPartners(ImportContext $ctx): void
@@ -209,6 +210,15 @@ final class CodebookImporter
         );
         if ($vatRules !== []) {
             $p->count(self::STEP_POSTING_RULES, 'vat_accounts', count($vatRules));
+        }
+        if ($ctx->advanceAccounts !== []) {
+            $advance = $this->advanceAccounts->prefill($ctx->advanceAccounts, $ctx->supplierId, !$ctx->options->isDryRun());
+            if ($advance['rules'] !== []) {
+                $p->count(self::STEP_POSTING_RULES, 'advance_accounts', count($advance['rules']));
+            }
+            foreach ($advance['warnings'] as $warning) {
+                $p->warn(self::STEP_POSTING_RULES, $warning['code'], $warning['text'], $warning['context']);
+            }
         }
         $p->finish(self::STEP_POSTING_RULES);
     }

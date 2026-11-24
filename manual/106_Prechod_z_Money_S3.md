@@ -270,7 +270,7 @@ firmy nemění, viz [§ 106.10.10](#1061010-danova-evidence).
 
 | Z Money | Do MyÚčta |
 |---|---|
-| účtový rozvrh (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy, `042000` → `042.000` |
+| účtový rozvrh (používané účty a vybrané analytiky pro předkontace záloh) | analytiky pod syntetiky osnovy, `042000` → `042.000` |
 | účetní roky | účetní období |
 | účetní deník včetně počátečních stavů | účetní zápisy, počáteční stavy jako otevírací zápis k 1. dni období |
 | středisko na řádku deníku | dimenze Středisko a středisko na řádku zápisu, viz níže |
@@ -289,6 +289,18 @@ firmy nemění, viz [§ 106.10.10](#1061010-danova-evidence).
 Položka faktury přebírá popisy položek Money se stejnou sazbou DPH. Různé popisy
 se spojí středníkem v pořadí z Money. Pokud u sazby žádný popis položky není,
 použije se popis z hlavičky faktury.
+
+Převod doplní firemní předkontace pro platbu, vyúčtování a daňový doklad k záloze,
+pokud určí analytiku účtu 324 pro přijaté nebo 314 pro poskytnuté zálohy. Vychází
+z předkontací zálohových faktur. Při více analytikách musí jedna připadat alespoň
+na dvě třetiny dokladů s použitelnou předkontací. Bez takových předkontací se použije
+jediná analytika doložená platbami z banky nebo pokladny v deníku. Při nejednoznačném
+výběru převod uvede v protokolu důvod. Stávající firemní předkontace mají přednost.
+
+Správce může dříve převedené firmě doplnit chybějící předkontace příkazem
+`php api/bin/repair-money-s3-advance-accounts.php --backup=<adresář rozbalené zálohy> --supplier=ID`.
+Pokud zálohu nemá, může místo `--backup` použít `--from-journal`. Příkaz vypíše
+stávající a navržené předkontace. Změny uloží po přidání `--commit`.
 
 #### 106.10.2.1 Majetek
 

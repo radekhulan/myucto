@@ -28,7 +28,11 @@ interface ReconciliationView {
 const protocol = computed(() => props.run.protocol ?? null)
 const money = computed(() => new Intl.NumberFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 const messages = computed(() => (protocol.value?.steps ?? []).flatMap(step =>
-  step.messages.map(message => ({ ...message, step: step.key }))))
+  step.messages.map(message => {
+    const key = k(`protocol.advance_accounts.${message.code}`)
+    const text = message.code.startsWith('advance_accounts_') && te(key) ? t(key, { ...message.context }) : message.text
+    return { ...message, step: step.key, text }
+  })))
 const agendaLabel = computed(() => {
   const run = props.run
   if ('agenda_name' in run) return run.agenda_name ?? ''

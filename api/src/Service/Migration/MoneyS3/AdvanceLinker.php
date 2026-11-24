@@ -38,8 +38,6 @@ use PDO;
  */
 final class AdvanceLinker
 {
-    private const ADVANCE_KINDS = ['L', 'Z', 'F'];
-
     public function __construct(
         private readonly Connection $db,
         private readonly ?MoneyS3ImportRepository $map = null,
@@ -89,8 +87,8 @@ final class AdvanceLinker
                 $rok = trim((string) ($r['RokZaFak'] ?? ''));
                 $advance = $heads[($rok !== '' ? 'ROK.' . str_pad($rok, 3, '0', STR_PAD_LEFT) : $r['__dir']) . '|' . (int) $r['CisloZaFak']] ?? null;
                 $text = (string) ($r['Popis'] ?? '');
-                if ($final === null || $advance === null || !in_array($advance['kind'], self::ADVANCE_KINDS, true)
-                    || in_array($final['kind'], self::ADVANCE_KINDS, true) || !str_contains($text, $advance['doc'])) {
+                if ($final === null || $advance === null || !InvoiceImporter::isAdvance($advance['kind'])
+                    || InvoiceImporter::isAdvance($final['kind']) || !str_contains($text, $advance['doc'])) {
                     continue;
                 }
                 $gross = round(abs((float) ($r['Cena'] ?? 0) * (float) (($r['PocetMJ'] ?? 0) ?: 1)), 2);
@@ -104,7 +102,7 @@ final class AdvanceLinker
             // Popis DDKP („Doklad k přijaté platbě (záloha ZF190001)") - záloha z téhož nebo minulého roku.
             $advanceByNo = [];
             foreach ($heads as $h) {
-                if (in_array($h['kind'], self::ADVANCE_KINDS, true)) {
+                if (InvoiceImporter::isAdvance($h['kind'])) {
                     $advanceByNo[$h['year'] . '|' . $h['doc']] = $h['id'];
                 }
             }
