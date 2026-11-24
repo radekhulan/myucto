@@ -13,6 +13,7 @@ function shortcut(overrides: Partial<KeyboardEvent> = {}): Pick<KeyboardEvent, '
   }
 }
 
+// Platforma výslovně: Node 21+ má globální `navigator`, na macOS by test čekal Cmd.
 describe('panel keyboard shortcuts', () => {
   it.each([
     ['Digit1', 0],
@@ -20,11 +21,11 @@ describe('panel keyboard shortcuts', () => {
     ['Digit3', 2],
     ['Numpad3', 2],
   ])('mapuje Ctrl+Alt+%s na panel', (code, index) => {
-    expect(panelIndexFromShortcut(shortcut({ code }))).toBe(index)
+    expect(panelIndexFromShortcut(shortcut({ code }), false)).toBe(index)
   })
 
   it('funguje i podle key, pokud code není dostupný', () => {
-    expect(panelIndexFromShortcut(shortcut({ code: '', key: '2' }))).toBe(1)
+    expect(panelIndexFromShortcut(shortcut({ code: '', key: '2' }), false)).toBe(1)
   })
 
   it('na macOS používá Cmd+Option místo Ctrl+Alt', () => {
@@ -39,7 +40,7 @@ describe('panel keyboard shortcuts', () => {
     { shiftKey: true },
     { code: 'Digit4', key: '4' },
   ])('ignoruje jinou kombinaci %#', (overrides) => {
-    expect(panelIndexFromShortcut(shortcut(overrides))).toBeNull()
+    expect(panelIndexFromShortcut(shortcut(overrides), false)).toBeNull()
   })
 
   it.each([
