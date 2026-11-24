@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\StatementNotesService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -141,6 +143,41 @@ final class StatementNotesTest extends TestCase
         self::assertStringContainsString('Příloha s.r.o.', (string) $sections['entity_identification']['content']);
         self::assertStringContainsString('12345678', (string) $sections['entity_identification']['content']);
         self::assertNotContains('entity_identification', $this->notes->build($this->supplierId, $this->periodId)['missing']);
+    }
+
+    public function testStatementDetailsAreSuggestedWithoutCompletingTheSection(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $container->get(PostingService::class)->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 10000.5],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 10000.5],
+        ], ['entry_date' => self::YEAR . '-11-01']);
+
+        $notes = $this->notes->build($this->supplierId, $this->periodId, true);
+        $section = array_column($notes['sections'], null, 'key')['balance_pl_details'];
+
+        self::assertStringContainsString('Čistý obrat: 10 000,50 Kč', (string) ($section['suggestion'] ?? ''));
+        self::assertNull($section['content']);
+        self::assertContains('balance_pl_details', $notes['missing']);
+        self::assertNull($this->storedSection('balance_pl_details'));
+
+        $this->notes->saveSection($this->supplierId, self::YEAR, 'balance_pl_details', 'Odsouhlasený rozpis.', null);
+        $saved = array_column($this->notes->build($this->supplierId, $this->periodId, true)['sections'], null, 'key');
+        self::assertSame('Odsouhlasený rozpis.', $saved['balance_pl_details']['content']);
+        self::assertNull($saved['balance_pl_details']['suggestion']);
+    }
+
+    public function testExplicitZeroEmployeesIsPrefilledButMissingCountRemainsBlank(): void
+    {
+        $sections = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
+        self::assertNull($sections['average_employees']['content']);
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, avg_employees) VALUES (?, 0)')
+            ->execute([$this->supplierId]);
+
+        $sections = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
+        self::assertStringContainsString('období: 0.', (string) $sections['average_employees']['content']);
+        self::assertTrue($sections['average_employees']['filled']);
     }
 
     /** Uložený text se vrátí zpět a sekce přestane chybět. */

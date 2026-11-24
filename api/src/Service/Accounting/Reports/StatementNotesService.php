@@ -179,7 +179,7 @@ final class StatementNotesService
      *   missing:list<string>, complete:bool
      * }
      */
-    public function build(int $supplierId, int $periodId): array
+    public function build(int $supplierId, int $periodId, bool $includeSuggestions = false): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -188,7 +188,9 @@ final class StatementNotesService
         $fiscalYear = (int) $period['fiscal_year'];
         $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
         $categoryInfo504 = $is504 ? $this->categories->evaluate($supplierId, $periodId) : null;
-        $category = $is504 ? (string) $categoryInfo504['category'] : $this->categoryFor($supplierId, $periodId);
+        [$category, $categoryError] = $is504
+            ? [(string) $categoryInfo504['category'], null]
+            : $this->evaluatedCategory($supplierId, $periodId);
         $full504 = $is504 && ($this->isAudited($supplierId) || $categoryInfo504['scope'] === 'full' || !in_array($category, ['micro', 'small'], true));
         $definitions = $is504 ? StatementNotes504Definition::sections() : self::SECTIONS;
         $scopes = $is504 ? ($full504 ? ['all', 'full504'] : ['all']) : self::scopesFor($category, $this->isAudited($supplierId));
@@ -199,7 +201,30 @@ final class StatementNotesService
         }
         $auto = $this->autoValues($supplierId, $fiscalYear, $category);
         if ($is504) $auto = $this->auto504($auto, $period);
-        $offsetText = $is504 ? null : $this->taxAuthorityOffsetText($supplierId, $periodId);
+        $draft = !$is504 && $includeSuggestions
+            && in_array($period['status'], ['open', 'closing', 'closed', 'reviewed'], true);
+        $needsDetails = $draft && $categoryError === null && !isset($stored['balance_pl_details']);
+        $usesTaxOffset = !$is504 && $this->settings->taxAuthorityOffsetAppliesIn($supplierId, $fiscalYear);
+        $balance = null;
+        if ($needsDetails || $usesTaxOffset) {
+            try {
+                $balance = $this->statements->balanceSheet($supplierId, $periodId, (string) $period['ends_on'], 'full');
+            } catch (ReportException) {
+            }
+        }
+        $offsetText = $usesTaxOffset ? self::taxAuthorityOffsetText($balance) : null;
+        $suggestions = [];
+        if ($draft) {
+            $suggestions['accounting_principles'] = $offsetText;
+            $suggestions['fx_policy'] = match ($this->settings->getFxRateMode($supplierId)) {
+                'fixed_monthly' => 'V nastavení MyÚčta je pro přepočet dokladů zadán pevný měsíční kurz.',
+                'fixed_annual' => 'V nastavení MyÚčta je pro přepočet dokladů zadán pevný roční kurz.',
+                default => null,
+            };
+        }
+        if ($needsDetails && $balance !== null) {
+            $suggestions['balance_pl_details'] = $this->statementDetailsSuggestion($supplierId, $periodId, $balance);
+        }
 
         $sections = [];
         $missing = [];
@@ -224,6 +249,7 @@ final class StatementNotesService
                 'scope'   => $def['scope'],
                 'auto'    => $def['auto'],
                 'content' => $content,
+                'suggestion' => $filled ? null : ($suggestions[$key] ?? null),
                 'filled'  => $filled,
                 // Rok, ze kterého je text převzatý a účetní ho ještě nepotvrdila.
                 'carried_over_from_year' => $storedRows[$key]['carried_over_from_year'] ?? null,
@@ -500,41 +526,69 @@ final class StatementNotesService
         // se sem tahá ta hodnota, kterou jednotka uvádí i pro kategorizaci — jiné číslo
         // na dvou místech závěrky by byl rozpor.
         $avg = $this->settings->get($supplierId)['avg_employees'] ?? null;
-        if ($avg !== null && (int) $avg > 0) {
+        if ($avg !== null) {
             $out['average_employees'] = 'Průměrný přepočtený počet zaměstnanců v období: ' . (int) $avg . '.';
         }
 
         return $out;
     }
 
-    /**
-     * Věta do přílohy o souhrnném vykázání daní vůči finančnímu úřadu (§ 58 odst. 2 vyhl.
-     * 500/2002 Sb. ukládá souhrnné vykázání uvést v příloze), s částkami z rozvahy.
-     * Null, když firma tuto možnost nepoužívá.
-     */
-    private function taxAuthorityOffsetText(int $supplierId, int $periodId): ?string
+    private function statementDetailsSuggestion(int $supplierId, int $periodId, array $balance): ?string
     {
-        $period = $this->periods->findById($supplierId, $periodId);
-        if ($period === null || !$this->settings->taxAuthorityOffsetAppliesIn($supplierId, (int) $period['fiscal_year'])) {
+        $checks = $balance['checks'];
+        if (!$checks['balanced'] || !$checks['profit_matches'] || $checks['unmapped_accounts'] !== []
+            || $checks['negative_net_rows'] !== []) {
             return null;
         }
-        $amounts = ['current' => 0.0, 'previous' => 0.0];
-        try {
-            // Příloha patří k závěrce, částky proto k rozvahovému dni (konci období).
-            $sheet = $this->statements->balanceSheet($supplierId, $periodId, (string) $period['ends_on'], 'full');
-            $amounts = (array) ($sheet['checks']['tax_authority_offset'] ?? $amounts) + $amounts;
-        } catch (ReportException) {
-            // Bez výkazu zůstane věta bez částek — příloha se kvůli tomu nezastaví.
-        }
-        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ') . ' Kč';
 
-        return sprintf(
-            'Pohledávky a závazky vůči finančnímu úřadu (daň z příjmů, daň z přidané hodnoty a ostatní daně) '
-            . 'se splatností do jednoho roku jsou v rozvaze vykázány souhrnně podle § 58 odst. 2 vyhlášky '
-            . 'č. 500/2002 Sb. Souhrnně vykázaná částka činí %s v běžném a %s v minulém účetním období.',
-            $fmt((float) $amounts['current']),
-            $fmt((float) $amounts['previous']),
-        );
+        try {
+            $income = $this->statements->incomeStatement($supplierId, $periodId, $balance['as_of'], 'full');
+        } catch (ReportException) {
+            return null;
+        }
+        if (!$income['checks']['profit_matches'] || $income['checks']['unmapped_accounts'] !== []) {
+            return null;
+        }
+
+        $assets = array_column($balance['assets'], 'net', 'row_code');
+        $liabilities = array_column($balance['liabilities'], 'amount', 'row_code');
+        $amounts = [
+            'Aktiva celkem (netto)' => $checks['assets_net'],
+            'Stálá aktiva (netto)' => $assets['B.'] ?? null,
+            'Vlastní kapitál' => $liabilities['P.A.'] ?? null,
+            'Rezervy' => $liabilities['P.B.'] ?? null,
+            'Závazky' => $liabilities['P.C.'] ?? null,
+            'Čistý obrat' => $income['checks']['net_turnover'],
+            'Výsledek hospodaření za účetní období' => $income['checks']['profit_current'],
+        ];
+        $lines = [];
+        foreach ($amounts as $label => $amount) {
+            if ($amount !== null && (float) $amount !== 0.0) {
+                $lines[] = $label . ': ' . self::formatAmount((float) $amount);
+            }
+        }
+
+        return $lines === [] ? null : 'Podklady k ' . date('j. n. Y', strtotime($balance['as_of'])) . ":\n" . implode("\n", $lines);
+    }
+
+    private static function taxAuthorityOffsetText(?array $balance): string
+    {
+        $text = 'Pohledávky a závazky vůči finančnímu úřadu (daň z příjmů, daň z přidané hodnoty a ostatní daně) '
+            . 'se splatností do jednoho roku jsou v rozvaze vykázány souhrnně podle § 58 odst. 2 vyhlášky č. 500/2002 Sb.';
+        $amounts = $balance['checks']['tax_authority_offset'] ?? null;
+        if (isset($amounts['current'], $amounts['previous'])) {
+            $text .= sprintf(
+                ' Souhrnně vykázaná částka činí %s v běžném a %s v minulém účetním období.',
+                self::formatAmount((float) $amounts['current']),
+                self::formatAmount((float) $amounts['previous']),
+            );
+        }
+        return $text;
+    }
+
+    private static function formatAmount(float $amount): string
+    {
+        return number_format($amount, 2, ',', ' ') . ' Kč';
     }
 
     private function definitionsForYear(int $supplierId, int $fiscalYear): array
@@ -550,11 +604,6 @@ final class StatementNotesService
         return ['n504_identification' => $auto['entity_identification'] ?? '',
             'n504_category' => $auto['entity_category'] ?? '',
             'n504_period' => 'Účetní období od ' . $date($period['starts_on']) . ' do ' . $date($period['ends_on']) . '.'];
-    }
-
-    private function categoryFor(int $supplierId, int $periodId): string
-    {
-        return $this->evaluatedCategory($supplierId, $periodId)[0];
     }
 
     /**

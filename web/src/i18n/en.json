@@ -22563,6 +22563,7 @@
       }
     },
     "statement_notes": {
+      "suggestion_hint": "Prefilled from statements or settings. Review the figures and add material information before saving.",
       "carry_over_offer": "You filled in the notes last year — {count} sections can be carried over from {year}. Only sections that are empty this year get filled.",
       "carry_over_action": "Carry over from {year}",
       "carried_over_done": "Carried over {count} sections. Review them and change whatever no longer holds.",

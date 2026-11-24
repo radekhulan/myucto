@@ -22563,6 +22563,7 @@
       }
     },
     "statement_notes": {
+      "suggestion_hint": "Předvyplněno z účetních výkazů nebo nastavení. Před uložením zkontrolujte údaje a doplňte významné skutečnosti.",
       "carry_over_offer": "Loni jste přílohu vyplnili - {count} sekcí lze převzít z roku {year}. Přepíše se jen to, co je letos prázdné.",
       "carry_over_action": "Převzít z roku {year}",
       "carried_over_done": "Převzato {count} sekcí. Projděte je a upravte, co už letos neplatí.",

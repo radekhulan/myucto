@@ -1054,6 +1054,7 @@ export interface StatementNotesSection {
   scope: 'all' | 'audited' | 'large' | 'full504'
   auto: boolean
   content: string | null
+  suggestion?: string | null
   filled: boolean
   /** Rok, ze kterého je text převzatý a účetní ho ještě nepotvrdila. */
   carried_over_from_year: number | null
