@@ -104,6 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
   function canRead(permission: PermissionKey): boolean { return can(permission, 'read') }
   function canWrite(permission: PermissionKey): boolean { return can(permission, 'write') }
+  const canManageWebhooks = computed(() => isCompanyAdminRole.value && canWrite('settings.company.write'))
   function clearPermissions(): void {
     permissions.value = {}
     permissionCatalogVersion.value = ''
@@ -362,6 +363,7 @@ export const useAuthStore = defineStore('auth', () => {
     isInstanceAdmin,
     isAdminPlusRole,
     isCompanyAdminRole,
+    canManageWebhooks,
     isClientRole,
     isAccountantRole,
     can,
