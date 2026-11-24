@@ -14,7 +14,9 @@ use PHPUnit\Framework\TestCase;
 #[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 final class CsasOnboardingServiceTest extends TestCase
 {
-    private function setupService(): array
+    private const RELAY = 'https://relay.invalid/oauth/csas/callback';
+
+    private function setupService(?array $platform = null): array
     {
         $oauth = $this->createMock(CsasOAuthRepository::class);
         $connections = $this->createMock(BankConnectionRepository::class);
@@ -24,7 +26,11 @@ final class CsasOnboardingServiceTest extends TestCase
         $calls = $this->createMock(BankConnectorCallGuard::class);
         $secrets = $this->createMock(SecretEncryption::class);
         $config = $this->createMock(Config::class);
-        $config->method('get')->willReturn('https://example.invalid');
+        $config->method('get')->willReturnCallback(static fn (string $path, mixed $default = null): mixed => match ($path) {
+            'app.url' => 'https://example.invalid',
+            'bank_connectors.csas.platform' => $platform,
+            default => $default,
+        });
         $calls->method('withConnectionLock')->willReturnCallback(static fn (int $supplier, int $currency, callable $fn): mixed => $fn());
         $oauth->method('account')->willReturn(['id' => 3, 'supplier_id' => 7, 'bank_code' => '0800', 'code' => 'CZK',
             'account_number' => '1000000005', 'iban' => null, 'is_active' => true]);
@@ -212,6 +218,91 @@ final class CsasOnboardingServiceTest extends TestCase
         $api->expects(self::never())->method('exchange');
 
         $this->expectExceptionObject(new BankConnectorOperationException('csas_oauth_expired'));
+        $service->completeCallback($this->oauthCallback(str_repeat('a', 64), 'synthetic-code'));
+    }
+
+    private static function platform(): array
+    {
+        return ['api_key' => 'platform-key', 'client_id' => 'platform-client', 'client_secret' => 'platform-secret', 'redirect_uri' => self::RELAY];
+    }
+
+    public function testPlatformKeysAreNeverAskedAndBankReturnsViaPlatformAddressWithInstanceInState(): void
+    {
+        [$service, , , $api, , $secrets] = $this->setupService(self::platform());
+        $secrets->method('validateKey')->willReturn(null);
+        $status = $service->status(7, 3);
+        self::assertTrue($status['platform']);
+        self::assertNull($status['callback_url']);
+        $authorization = new OAuthAuthorization(str_repeat('c', 64), Pkce::verifier());
+        $this->flow->method('authorize')->willReturn($authorization);
+        $api->expects(self::once())->method('authorizationUrl')->with(
+            self::callback(static fn (array $c): bool => $c['client_secret'] === 'platform-secret' && $c['api_key'] === 'platform-key'
+                && $c['redirect_uri'] === self::RELAY),
+            $authorization->state, true, 'example.invalid')->willReturn('https://bezpecnost.csas.cz/api/psd2/fl/oidc/v1/auth?state=synthetic');
+        $this->flow->expects(self::once())->method('store')->with($authorization, 7, 11, 'bank', 'csas', 3, OAuthClientFlow::FLOW_REDIRECT,
+            self::callback(static fn (array $secret): bool => $secret['redirect_uri'] === self::RELAY && $secret['client_id'] === 'platform-client'), 600);
+
+        $service->start(7, 3, 11, ['payments' => true]);
+    }
+
+    public function testWithPlatformKeysCompanyCannotSendOwnKeys(): void
+    {
+        [$service, , , $api, , $secrets] = $this->setupService(self::platform());
+        $secrets->method('validateKey')->willReturn(null);
+        $api->expects(self::never())->method('authorizationUrl');
+
+        $this->expectExceptionObject(new BankConnectorOperationException('credential_invalid'));
+        $service->start(7, 3, 11, ['api_key' => 'synthetic-key', 'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-secret']);
+    }
+
+    public function testOwnKeysKeepInstanceCallbackWithoutHostInState(): void
+    {
+        [$service, , , $api, , $secrets] = $this->setupService();
+        $secrets->method('validateKey')->willReturn(null);
+        self::assertFalse($service->status(7, 3)['platform']);
+        $this->flow->method('authorize')->willReturn(new OAuthAuthorization(str_repeat('c', 64), Pkce::verifier()));
+        $api->expects(self::once())->method('authorizationUrl')->with(self::anything(), str_repeat('c', 64), false, null)
+            ->willReturn('https://bezpecnost.csas.cz/api/psd2/fl/oidc/v1/auth?state=synthetic');
+
+        $service->start(7, 3, 11, ['api_key' => 'synthetic-key', 'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-secret']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidPlatforms')]
+    public function testIncompletePlatformConfigurationIsAnErrorNotAFallbackToOwnKeys(array $platform): void
+    {
+        [$service, , , $api] = $this->setupService($platform);
+        $api->expects(self::never())->method('authorizationUrl');
+
+        $this->expectExceptionObject(new BankConnectorOperationException('platform_config_invalid'));
+        $service->start(7, 3, 11, ['payments' => false]);
+    }
+
+    public static function invalidPlatforms(): iterable
+    {
+        yield 'bez secretu' => [array_diff_key(self::platform(), ['client_secret' => true])];
+        yield 'http' => [['redirect_uri' => 'http://relay.invalid/oauth/csas/callback'] + self::platform()];
+        yield 'query' => [['redirect_uri' => self::RELAY . '?to=x'] + self::platform()];
+        yield 'mezera v klíči' => [['api_key' => 'platform key'] + self::platform()];
+    }
+
+    public function testPlatformCallbackExchangesWithPlatformAddressAndRejectsSessionStartedWithOwnCallback(): void
+    {
+        [$service, , $connections, $api, $vault, $secrets] = $this->setupService(self::platform());
+        $session = new OAuthSession(str_repeat('d', 64), 7, 11, 'bank', 'csas', 3, OAuthClientFlow::FLOW_REDIRECT, 'oauth', 'processing', false,
+            self::platform() + ['environment' => 'production'], str_repeat('v', 64));
+        $this->flow->method('claim')->willReturn($session);
+        $api->expects(self::once())->method('exchange')->with(self::callback(static fn (array $c): bool => $c['redirect_uri'] === self::RELAY), 'synthetic-code')
+            ->willReturn(['access_token' => 'synthetic-access', 'refresh_token' => 'synthetic-refresh', 'expires_in' => 300]);
+        $api->method('accounts')->willReturn([['id' => 'synthetic-remote', 'identification' => ['iban' => 'CZ7508000000001000000005'], 'currency' => 'CZK']]);
+        $connections->method('ensure')->willReturn(9);
+        $vault->method('encode')->willReturn('synthetic-encoded');
+        $secrets->method('encryptFor')->willReturn('enc:v2:saved');
+        self::assertSame(3, $service->completeCallback($this->oauthCallback(str_repeat('a', 64), 'synthetic-code')));
+
+        [$service, , , $api] = $this->setupService(self::platform());
+        $this->flow->method('claim')->willReturn($this->sharedSession());
+        $api->expects(self::never())->method('exchange');
+        $this->expectExceptionObject(new BankConnectorOperationException('app_url_invalid'));
         $service->completeCallback($this->oauthCallback(str_repeat('a', 64), 'synthetic-code'));
     }
 

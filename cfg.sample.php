@@ -689,7 +689,16 @@ return [
     // ],
 
     'bank_connectors' => [
-        'csas' => ['sandbox' => false],
+        'csas' => [
+            'sandbox' => false,
+            // Klíče aplikace provozovatele registrované u ČS. Když jsou vyplněné, firmy
+            // klíče nezadávají a jen udělí souhlas v George Business. redirect_uri je
+            // společná návratová adresa (myucto.cz), která návrat předá této instanci.
+            // 'platform' => [
+            //     'api_key' => '', 'client_id' => '', 'client_secret' => '',
+            //     'redirect_uri' => 'https://myucto.cz/oauth/csas/callback',
+            // ],
+        ],
     ],
 
     // Auto-import bankovních výpisů (GPC/ABO) z monitorovaného adresáře.

@@ -77,10 +77,20 @@ final class CsasApiClient
         return in_array(self::SCOPE_PAYMENTS, preg_split('/\s+/', trim($scope)) ?: [], true);
     }
 
-    public function authorizationUrl(#[\SensitiveParameter] array $credentials, string $state, bool $payments = false): string
+    /**
+     * @param string|null $stateHost instance, které má společná návratová adresa platformy
+     *        (myucto.cz) předat návrat z banky; přidá se do state za tečku a předávací
+     *        stránka ji před přesměrováním na instanci zase odebere
+     */
+    public function authorizationUrl(#[\SensitiveParameter] array $credentials, string $state, bool $payments = false,
+        ?string $stateHost = null): string
     {
         $this->assertEnvironment($credentials);
         if (!preg_match('/^[a-f0-9]{64}$/D', $state)) throw $this->invalid();
+        if ($stateHost !== null) {
+            if (!preg_match('/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/D', $stateHost)) throw $this->invalid();
+            $state .= '.' . $stateHost;
+        }
         return $this->identityBaseUrl() . '/auth?' . http_build_query([
             'response_type' => 'code', 'client_id' => $this->value($credentials, 'client_id'),
             'redirect_uri' => $this->value($credentials, 'redirect_uri'), 'scope' => self::scope($payments),

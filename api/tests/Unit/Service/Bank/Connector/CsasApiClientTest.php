@@ -58,6 +58,22 @@ final class CsasApiClientTest extends TestCase
         return new CsasApiClient(new Client(['handler' => $stack]));
     }
 
+    public function testStateCarriesInstanceHostForPlatformCallbackOnlyWhenValid(): void
+    {
+        $history = [];
+        $url = $this->client([], $history)->authorizationUrl($this->credentials(), str_repeat('b', 64), false, 'zenergo.myucto.eu');
+        parse_str(parse_url($url, PHP_URL_QUERY), $query);
+        self::assertSame(str_repeat('b', 64) . '.zenergo.myucto.eu', $query['state']);
+        foreach (['zenergo.myucto.eu/x', 'Zenergo.myucto.eu', 'localhost', 'evil.cz?x=1', '-a.cz'] as $host) {
+            try {
+                $this->client([], $history)->authorizationUrl($this->credentials(), str_repeat('b', 64), false, $host);
+                self::fail($host);
+            } catch (\MyInvoice\Service\Bank\Connector\BankConnectorException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testCodeFlowUsesPkceAndRequestsAccountsWithPaymentsUnlessDeclined(): void
     {
         $history = [];
