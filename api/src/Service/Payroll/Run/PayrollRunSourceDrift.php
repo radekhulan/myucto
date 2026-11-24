@@ -158,7 +158,8 @@ final readonly class PayrollRunSourceDrift
         $workedTimeChanged = 0;
         if (isset($current['hourly_wage_claims'])) {
             $ids = array_unique([...array_keys($frozenHourlyClaims), ...array_keys($current['hourly_wage_claims'])]);
-            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenHourlyClaims[$id] ?? null) !== self::fingerprint($current['hourly_wage_claims'][$id] ?? null)) ++$workedTimeChanged;
+            // Pořadí zápisu nároku není změna podkladu ({@see PayrollHourlyWageClaimComparison}).
+            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint(PayrollHourlyWageClaimComparison::withoutSequence($frozenHourlyClaims[$id] ?? null)) !== self::fingerprint(PayrollHourlyWageClaimComparison::withoutSequence($current['hourly_wage_claims'][$id] ?? null))) ++$workedTimeChanged;
         }
         if (isset($current['hourly_average_input_sources'])) {
             $ids = array_unique([...array_keys($frozenAverageSources), ...array_keys($current['hourly_average_input_sources'])]);

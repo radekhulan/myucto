@@ -1052,7 +1052,11 @@ final class PayrollRunCommandService
                 && $snapshot !== null
                 && $revision !== null
                 && in_array($revision['status'] ?? null, ['snapshot', 'calculated', 'reviewed'], true)
-                && hash_equals((string) $revision['input_snapshot_hash'], $snapshot->hash)
+                && (hash_equals((string) $revision['input_snapshot_hash'], $snapshot->hash)
+                    || PayrollHourlyWageClaimComparison::sameSnapshot(
+                        $this->runs->currentInputSnapshot($supplierId, $runId)['input_snapshot'] ?? [],
+                        $snapshot->data,
+                    ))
                 && $this->runs->snapshotValidationsMatch(
                     $supplierId,
                     (int) $revision['id'],
