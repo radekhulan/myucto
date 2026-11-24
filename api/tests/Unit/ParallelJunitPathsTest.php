@@ -70,7 +70,8 @@ final class ParallelJunitPathsTest extends TestCase
     public function testRejectsDirectoryAsReportTarget(): void
     {
         $this->expectException(\RuntimeException::class);
-        \junitLogPaths(sys_get_temp_dir(), (string) getcwd());
+        // macOS vrací sys_get_temp_dir() s koncovým lomítkem; test má ověřit odmítnutí adresáře, ne lomítka.
+        \junitLogPaths(rtrim(sys_get_temp_dir(), '/\\'), (string) getcwd());
     }
 
     public function testTimingsRejectsMissingOptionValue(): void

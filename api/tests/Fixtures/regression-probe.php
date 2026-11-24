@@ -131,9 +131,10 @@ try {
     }
     $instrumented = str_ends_with($mode, '-guarded');
     $sqlite = str_starts_with($mode, 'sqlite-');
-    $config = \MyInvoice\Infrastructure\Config\Config::load($root);
     $database = $argv[2] ?? '';
     if (!$sqlite) {
+        // cfg.php je potřeba jen pro MariaDB režimy; sqlite sondy musí běžet i bez lokální konfigurace.
+        $config = \MyInvoice\Infrastructure\Config\Config::load($root);
         Safety::database($database, (string) $config->get('db.name'));
         Safety::host((string) $config->get('db.host'), null);
         Tripwire::configure($database, null);

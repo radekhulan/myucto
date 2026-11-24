@@ -144,7 +144,7 @@ final class TotpSetupAuthorizationTest extends TestCase
 
     public function testCorrectPasswordGeneratesSecretWithoutCaching(): void
     {
-        $this->passwords->method('verify')
+        $this->passwords->expects(self::atLeastOnce())->method('verify')
             ->with('Synthetic-test-password-42', self::PASSWORD_HASH)
             ->willReturn(true);
         $this->protectedOperations->expects(self::once())
@@ -179,7 +179,7 @@ final class TotpSetupAuthorizationTest extends TestCase
     public function testActivePasskeyRequiresStepUpProofInsteadOfPassword(): void
     {
         $this->credentials = $this->createMock(PasskeyCredentialRepository::class);
-        $this->credentials->method('countActiveForUser')->with(self::USER_ID)->willReturn(1);
+        $this->credentials->expects(self::atLeastOnce())->method('countActiveForUser')->with(self::USER_ID)->willReturn(1);
         $this->passwords->expects(self::never())->method('verify');
         $this->protectedOperations->expects(self::once())
             ->method('storePendingTotpSecret')
