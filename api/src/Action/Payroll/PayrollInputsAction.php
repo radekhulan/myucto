@@ -161,6 +161,9 @@ final class PayrollInputsAction
         try {
             $data = $this->validator->validate($this->input($request));
             $this->assertMonthOpen($this->currentSupplierId($request), $data);
+            // Záporná částka u složky v základech by běh zastavila až po
+            // zamknutí vstupů; odmítne se rovnou s návodem na opravu.
+            $this->inputs->assertNegativeAmountAllowed($this->currentSupplierId($request), $data);
             $input = $this->inputs->create(
                 $this->currentSupplierId($request),
                 $data,
@@ -458,6 +461,7 @@ final class PayrollInputsAction
             // Uzavřený nesmí být ani měsíc, odkud vstup odchází, ani ten, kam jde.
             $this->assertMonthOpen($supplierId, $current);
             $this->assertMonthOpen($supplierId, $data);
+            $this->inputs->assertNegativeAmountAllowed($supplierId, $data);
             $input = $this->inputs->update(
                 $supplierId,
                 $id,

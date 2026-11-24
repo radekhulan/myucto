@@ -192,6 +192,77 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
     }
 
     /**
+     * Podmínky, které sestavovač zákonných vstupů odkládá na výpočet, hlásí
+     * kontrola před během týmž výpočtem nasucho.
+     *
+     * První vlastní běh firmy po převzetí mezd: chybějící počáteční roční
+     * úhrny (měsíční základ se může dotknout ročního maxima) a chybějící
+     * příslušnost k sociálnímu pojištění u dohody, která založí účast, se
+     * dřív ukázaly až po zamknutí vstupů a každá oprava stála novou revizi.
+     */
+    public function testReadinessPredictsConditionsDecidedOnlyByCalculation(): void
+    {
+        // Rok bez převzatých počátečních stavů (testovací osoby je mají za 2026).
+        $period = '2027-07';
+        $periodStart = '2027-07-01';
+        $payday = '2027-08-13';
+        $officeId = $this->createOffice('CAL', 'Syntetická účtárna', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
+        $componentId = $this->createComponent('MZDA_MESICNI_CAL', 'base_wage', 'regular');
+        $highEarner = $this->createEmployment($officeId, 'Syntetický Bez úhrnů', 1, 'hpp', 'employment', 40, 10_000, true, $periodStart);
+        $agreement = $this->createEmployment($officeId, 'Syntetická Bez příslušnosti', 2, 'dpp', 'dpp', 10, 2_500, false, $periodStart);
+        $workdays = self::workdays($period);
+        foreach ([$highEarner, $agreement] as $person) {
+            $this->publishShifts($person['employment_id'], $workdays);
+            self::assertSame(200, $this->approveTimeMonth($person['employment_id'], $period, $workdays)->getStatusCode());
+        }
+        // 400 000 Kč × 7 měsíců přesáhne roční maximální vyměřovací základ.
+        $this->createApprovedInput($highEarner, $componentId, 40_000_000, 'cal-high', $periodStart);
+        // Dohoda nad rozhodným příjmem účast založí.
+        $this->createApprovedInput($agreement, $componentId, 2_000_000, 'cal-dpp', $periodStart);
+        $this->db->pdo()->prepare('DELETE FROM payroll_person_social_jurisdictions WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $agreement['employee_id']]);
+
+        // Výpočet založeného běhu obě osoby zastaví.
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, $periodStart, $payday);
+        $preview = $this->container->get(PayrollRunCalculationPipeline::class)
+            ->calculate($snapshot->data, $this->supplierId, persist: false);
+        self::assertSame('manual_review', $preview['statutory']['status']);
+        $stored = \MyInvoice\Service\Payroll\Run\PayrollRunValidationMessageFormatter::statutoryDetails($preview['statutory']);
+        $storedPeople = array_values(array_unique(array_column($stored, 'entity_id')));
+        sort($storedPeople);
+        $expected = [$highEarner['employee_id'], $agreement['employee_id']];
+        sort($expected);
+        self::assertSame($expected, $storedPeople, CanonicalJson::encode($stored));
+
+        $finding = array_column(
+            $this->container->get(PayrollRunReadinessService::class)
+                ->inspect($this->supplierId, $periodStart, $payday)['findings'],
+            null,
+            'code',
+        )['statutory_calculation_manual_review'] ?? null;
+        self::assertNotNull($finding, 'Kontrola před během musí předpovědět, co výpočet zastaví.');
+        $entities = array_column($finding['entities'], null, 'entity_id');
+        $ids = array_keys($entities);
+        sort($ids);
+        self::assertSame($expected, $ids, CanonicalJson::encode($finding['entities']));
+        self::assertStringContainsString('Počáteční stavy', $entities[$highEarner['employee_id']]['message']);
+        self::assertSame(
+            "/payroll/people?person={$highEarner['employee_id']}&panel=opening_balances",
+            $entities[$highEarner['employee_id']]['remediation_path'],
+        );
+        self::assertStringContainsString('příslušnost k sociálnímu pojištění', $entities[$agreement['employee_id']]['message']);
+        self::assertSame(
+            "/payroll/people?person={$agreement['employee_id']}&panel=statutory_evidence&field=statutory.social_jurisdictions",
+            $entities[$agreement['employee_id']]['remediation_path'],
+        );
+        self::assertSame(2, $finding['count']);
+        self::assertSame('approval', $finding['impact']);
+    }
+
+    /**
      * Vztah bez schválené složky hlásí samostatná skupina (vztah bez vstupů,
      * neschválené vstupy). Skupina zákonné evidence ho nesmí počítat podruhé:
      * kontrola u agentury hlásila „53×", ale výchozí údaje nabízela 31 osobám.

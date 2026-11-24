@@ -6166,6 +6166,8 @@
         "clear_selection": "Zrušit výběr",
         "select_page": "Vybrat všechny koncepty na stránce",
         "select_row": "Vybrat vstup",
+        "time_delta": "Rozdíl po přepočtu docházky",
+        "time_delta_hint": "Docházka se po schválení přepočítala a zapsal se jen rozdíl proti dřívějším vstupům téže složky. Do mzdy jde součet všech těchto vstupů za měsíc, zaokrouhlený jednou za měsíc a druh příplatku.",
         "group_count": "{count} vstupů",
         "group_drafts": "{count} konceptů",
         "group_all_approved": "Vše schváleno",

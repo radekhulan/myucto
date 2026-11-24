@@ -529,6 +529,13 @@ Druhé označení říká, kam údaj patří: **Nastavení firmy** (jednou), **M
 práce**, nebo **Údaj na kartě osoby** (jednou za osobu). Nález má
 v kontrole před zahájením stejnou závažnost jako po výpočtu.
 
+Nález **Zákonný výpočet zastaví** vychází z téhož výpočtu, jaký proběhne po
+zahájení, jen nanečisto. Ukáže proto předem i podmínky, které závisí na výši
+mzdy: chybějící počáteční roční úhrny u osoby, jejíž mzda se může dotknout
+ročního maxima pojistného, a chybějící příslušnost k sociálnímu pojištění
+u dohody, která založí účast na pojištění. Odkaz u každé osoby otevře místo
+opravy na její kartě.
+
 **Počty a výpis „N z M“.** Týká-li se nález víc osob, než se vejde do
 přehledu, vypíše se jen část a tlačítko **Zobrazit vypsaných N z M** ji
 rozbalí. Celou skupinu otevře odkaz **Zobrazit všech N osob v seznamu

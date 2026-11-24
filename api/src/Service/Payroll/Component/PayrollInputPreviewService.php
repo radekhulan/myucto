@@ -36,6 +36,7 @@ final class PayrollInputPreviewService
     public function preview(int $supplierId, array $input): array
     {
         $this->inputs->assertValidReferences($supplierId, $input);
+        $this->inputs->assertNegativeAmountAllowed($supplierId, $input);
         $component = $this->components->find(
             $supplierId,
             $input['component_id'],

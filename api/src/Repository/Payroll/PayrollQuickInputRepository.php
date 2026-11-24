@@ -3760,6 +3760,7 @@ final class PayrollQuickInputRepository
             // verzi 2, zatímco formulář by pracoval s jedničkou — každá druhá
             // editace téhož pole by pak spadla na 409 „změnil to jiný uživatel".
             // Schválený vstup proto vzniká rovnou, jedním INSERTem.
+            $this->inputs->assertNegativeAmountAllowed($supplierId, $data);
             if ($autoApprove) {
                 $this->inputs->createApproved($supplierId, $data, $userId, sourceAlreadyGuarded: true);
             } else {
@@ -3851,6 +3852,7 @@ final class PayrollQuickInputRepository
         // Nová hodnota i schvalovací sloupce jedním UPDATEm: běžná editace tak
         // posune `row_version` právě o jedničku, přesně jako před zavedením
         // automatického schvalování.
+        $this->inputs->assertNegativeAmountAllowed($supplierId, $data);
         $updated = $autoApprove
             ? $this->inputs->updateApproved(
                 $supplierId,

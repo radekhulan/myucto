@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\Absence\VacationCompensationReturn;
+use MyInvoice\Service\Payroll\Component\PayrollNegativeAmountPolicy;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthEmploymentKind;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthIncomeAttribution;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsurerSnapshotStatus;
@@ -2338,22 +2339,13 @@ final class PayrollRunStatutoryInputAssembler
      * podle zacházení, takže stornovaná nemocenská poslala celý běh do ručního
      * posouzení a nešla schválit. Období se dalo odblokovat jen ručním SQL.
      *
-     * `manual_review` se tu bere jako „vstupuje": nevíme to jistě, a mlčet
-     * u záporné částky, o které nevíme, kam patří, by bylo horší než falešný
-     * poplach.
+     * Pravidlo je jedno pro výpočet i uložení vstupu
+     * ({@see PayrollNegativeAmountPolicy::entersDomainBase()}): uložení
+     * zápornou částku u složky, kterou by tu výpočet zastavil, odmítne rovnou.
      */
     private static function entersDomainBase(array $component, string $domain): bool
     {
-        return match ($domain) {
-            'social_insurance' => ($component['social_treatment'] ?? 'manual_review') !== 'excluded',
-            'health_insurance' => ($component['health_treatment'] ?? 'manual_review') !== 'excluded',
-            'income_tax' => !in_array(
-                $component['tax_treatment'] ?? 'manual_review',
-                ['exempt', 'withholding_candidate'],
-                true,
-            ),
-            default => true,
-        };
+        return PayrollNegativeAmountPolicy::entersDomainBase($component, $domain);
     }
 
     /**

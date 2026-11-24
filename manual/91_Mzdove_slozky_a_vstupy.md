@@ -62,6 +62,20 @@ a cílová kolonka JMHZ zůstávají nastavitelné.
 **Jak poznáte, že je hotovo:** Vstup má stav **Schválený**. Po zahájení
 mzdového běhu se změní na **Uzamčený během**.
 
+**Záporná částka.** U složky, která vstupuje do vyměřovacího základu pojistného
+nebo do základu daně (mzda, prémie, nadlimitní cestovní náhrada), aplikace
+zápornou částku neuloží. Platí to pro formulář, rychlé zadání i import.
+Opravujete-li dřívější zadání téhož měsíce, upravte nebo zrušte původní vstup.
+Oprava mzdy za měsíc se schváleným během patří do opravné revize toho běhu.
+Zápornou částku mají složky mimo základy, například odpočet zálohy na pracovní
+cestu nebo srážky, a vrácená náhrada za dovolenou.
+
+**Rozdíl po přepočtu docházky.** Když se schválená docházka přepočítá,
+příplatek z docházky se nepřepisuje. Zapíše se jen rozdíl proti dřívějším
+vstupům téže složky a seznam ho označí popiskem **Rozdíl po přepočtu
+docházky**. Může jít i o několik haléřů, například po zaokrouhlení příplatku
+na celé koruny. Do mzdy jde součet všech těchto vstupů za měsíc.
+
 ### 91.3.1 Započtení vlastní složky do minimální mzdy
 
 V katalogu otevřete **Upravit** nebo **Nová složka** a zkontrolujte
@@ -113,6 +127,14 @@ konkrétní kontroly běhu; výplatní páska přebírá uložený rozpis nárok
 **Jak poznáte, že je hotovo:** Předpis je v seznamu se stavem *Platný* (nebo
 *Naplánovaný*, začíná-li v budoucnu) a v měsíci vznikne vstup ze zdroje
 předpisu.
+
+Předpis základní mzdy pevnou částkou se na podmínky vztahu neváže. Když se
+jeho měsíční částka liší od sjednané měsíční mzdy v podmínkách vztahu,
+kontrola před během i mzdový běh ukáží varování s oběma částkami a odkazem
+na předpis. Krácení za neodpracovanou
+dobu, nástup nebo odchod v průběhu měsíce varování nevyvolá, protože se
+porovnává celá měsíční částka předpisu. Při změně podmínek v průběhu měsíce
+stačí shoda s kterýmikoli podmínkami platnými v tom měsíci.
 
 ## 91.5 Krok za krokem: hromadné schválení vstupů
 
