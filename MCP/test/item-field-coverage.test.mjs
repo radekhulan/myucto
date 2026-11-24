@@ -32,6 +32,8 @@ const TABLES = [
       total_with_vat: 'součty řádku počítá server',
       line_discount_pct: 'procento slevy dopočítá server z list_unit_price',
       sales_quote_item_key: 'vazbu na nabídku obnovuje server z uložené položky podle jejího id',
+      import_tax_base_czk: 'otisk importu, replaceItems neukládá',
+      import_tax_vat_czk: 'otisk importu, replaceItems neukládá',
     },
   },
   {
