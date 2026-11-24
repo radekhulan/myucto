@@ -9,30 +9,51 @@ import { integrationsApi,
 import { aiProviderBadge } from './aiProviderBadge'
 import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/settings'
 import { useSupplierStore } from '@/stores/supplier'
-import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { useRoute, useRouter } from 'vue-router'
+import { manualHelpHref } from '@/config/manualChapters'
 import { useToast } from '@/composables/useToast'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import OllamaProviderFields from '@/components/admin/OllamaProviderFields.vue'
 import ImportJobReport from '@/components/admin/ImportJobReport.vue'
+import WebhookSettings from '@/components/admin/WebhookSettings.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const suppliers = useSupplierStore()
+const auth = useAuthStore()
 
-type Tab = 'idoklad' | 'fakturoid' | 'ai'
-// Tab z ?tab=... query (default idoklad). Watch pro proklik mezi sidebar položkami
-// "Externí integrace" (no query) ↔ "AI nastavení" (?tab=ai, sekce Firma).
+type Tab = 'idoklad' | 'fakturoid' | 'ai' | 'webhooks'
+const canManageWebhooks = computed(() => auth.isCompanyAdminRole && auth.canWrite('settings.company.write'))
+const tabs = computed<Tab[]>(() => canManageWebhooks.value
+  ? ['ai', 'webhooks', 'fakturoid', 'idoklad']
+  : ['ai', 'fakturoid', 'idoklad'])
 const route = useRoute()
-function readTabFromQuery(): Tab {
-  const q = String(route.query.tab ?? '')
-  return q === 'fakturoid' || q === 'ai' ? q as Tab : 'idoklad'
-}
-const tab = ref<Tab>(readTabFromQuery())
-watch(() => route.query.tab, () => {
-  tab.value = readTabFromQuery()
+const router = useRouter()
+const tab = computed<Tab>(() => {
+  const value = route.query.tab
+  return value === 'fakturoid' || value === 'ai' || value === 'webhooks' ? value : 'idoklad'
 })
+const activeTab = computed(() => tab.value === 'webhooks' && !canManageWebhooks.value ? 'idoklad' : tab.value)
+const webhookTemplateId = computed(() => {
+  const value = route.query.template
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) return null
+  const id = Number(value)
+  return Number.isSafeInteger(id) ? id : null
+})
+const webhookHelpHref = computed(() => manualHelpHref(
+  route.path,
+  'webhooks',
+  auth.domainContext?.locked ? auth.domainContext.canonical_base_url : null,
+))
+
+function selectTab(value: Tab) {
+  if (value !== tab.value) {
+    void router.replace({ query: { ...route.query, tab: value === 'idoklad' ? undefined : value } })
+  }
+}
 
 // ── iDoklad credentials state ─────────────────────────────────────────
 const idokladStatus = ref<IdokladCredentialsStatus | null>(null)
@@ -661,16 +682,16 @@ onMounted(() => {
   <div class="max-w-4xl">
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('integrations.title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('integrations.subtitle') }}</p>
+      <p class="text-sm text-neutral-500 mt-0.5">{{ t(activeTab === 'webhooks' ? 'integrations.webhooks.subtitle' : 'integrations.subtitle') }}</p>
     </div>
 
-    <!-- Tabs: iDoklad / Fakturoid / AI -->
     <div class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button
-        v-for="tt in (['idoklad', 'fakturoid', 'ai'] as const)" :key="tt"
-        @click="tab = tt"
+        v-for="tt in tabs" :key="tt"
+        :aria-pressed="activeTab === tt"
+        @click="selectTab(tt)"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
-        :class="tab === tt
+        :class="activeTab === tt
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'"
       >
@@ -678,8 +699,11 @@ onMounted(() => {
       </button>
     </div>
 
+    <WebhookSettings v-if="activeTab === 'webhooks' && suppliers.currentSupplierId"
+      :key="[suppliers.currentSupplierId, webhookTemplateId].join(':')" :template-id="webhookTemplateId" :help-href="webhookHelpHref" />
+
     <!-- ════ iDoklad tab ════ -->
-    <div v-if="tab === 'idoklad'" class="space-y-4">
+    <div v-else-if="activeTab === 'idoklad'" class="space-y-4">
       <!-- Box: credentials -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-medium text-neutral-700 mb-2">{{ t('integrations.idoklad.credentials_title') }}</h2>
@@ -856,7 +880,7 @@ onMounted(() => {
     </div>
 
     <!-- ════ Fakturoid tab ════ -->
-    <div v-else-if="tab === 'fakturoid'" class="space-y-4">
+    <div v-else-if="activeTab === 'fakturoid'" class="space-y-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-medium text-neutral-700 mb-2">{{ t('integrations.fakturoid.credentials_title') }}</h2>
         <p class="text-xs text-neutral-500 mb-4">{{ t('integrations.fakturoid.credentials_hint') }}</p>
@@ -1061,7 +1085,7 @@ onMounted(() => {
     </div>
 
     <!-- ════ AI extrakční brána (Epic F7 — 4 provideři + EU rezidence) ════ -->
-    <div v-else-if="tab === 'ai'" class="flex flex-col gap-4">
+    <div v-else-if="activeTab === 'ai'" class="flex flex-col gap-4">
       <!-- Konfigurace brány: onboarding rozbalené když aktivní provider není nakonfig. -->
       <details :open="!aiConfigured"
                :class="['group space-y-4', aiConfigured ? 'order-2' : 'order-1']">

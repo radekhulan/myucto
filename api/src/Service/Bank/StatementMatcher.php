@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
@@ -1056,9 +1057,13 @@ final class StatementMatcher
                         );
                     } else {
                         // Legacy fallback (izolované konstrukce bez payment service).
-                        $pdo->prepare(
-                            "UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?"
-                        )->execute([$row['posted_at'], $inv['id']]);
+                        $update = $pdo->prepare(
+                            "UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ? AND status IN ('issued', 'sent', 'reminded')"
+                        );
+                        $update->execute([$row['posted_at'], $inv['id']]);
+                        if ($update->rowCount() === 1) {
+                            InvoiceWebhookEvents::publish($pdo, (int) $inv['id'], InvoiceWebhookEvents::PAID, InvoiceWebhookEvents::PAYMENT);
+                        }
                     }
                 }
                 $pdo->prepare(

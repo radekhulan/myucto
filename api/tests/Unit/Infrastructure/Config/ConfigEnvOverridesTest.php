@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Infrastructure\Config;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Auth\SystemWriteTokenFeature;
 use PHPUnit\Framework\TestCase;
 
 final class ConfigEnvOverridesTest extends TestCase
@@ -160,6 +161,27 @@ PHP);
         self::assertFalse(Config::load($this->tmpDir)->get('invoices.public_links'));
         $this->setEnv('MYINVOICE_INVOICE_PUBLIC_LINKS', 'true');
         self::assertTrue(Config::load($this->tmpDir)->get('invoices.public_links'));
+    }
+
+    public function testSystemWriteTokensDefaultOnAndRespectExplicitOptOut(): void
+    {
+        $this->unsetEnv('MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS');
+        $config = Config::load($this->tmpDir);
+        self::assertTrue($config->get('api.allow_system_write_tokens'));
+        self::assertTrue(new SystemWriteTokenFeature(new Config([]))->isEnabled());
+
+        $feature = new SystemWriteTokenFeature($config);
+        self::assertTrue($feature->appliesTo(['scope' => 'read_write', 'allow_system_write' => true]));
+        self::assertFalse($feature->appliesTo(['scope' => 'read_write']));
+        self::assertFalse($feature->appliesTo(['scope' => 'read', 'allow_system_write' => true]));
+        self::assertFalse($feature->appliesTo(['scope' => 'read_write', 'allow_system_write' => true, 'audience' => 'mcp']));
+
+        file_put_contents($this->tmpDir . '/cfg.php', "<?php return ['api' => ['allow_system_write_tokens' => false]];");
+        self::assertFalse(new SystemWriteTokenFeature(Config::load($this->tmpDir))->isEnabled());
+        $this->setEnv('MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS', '1');
+        self::assertTrue(new SystemWriteTokenFeature(Config::load($this->tmpDir))->isEnabled());
+        $this->setEnv('MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS', '0');
+        self::assertFalse(new SystemWriteTokenFeature(Config::load($this->tmpDir))->isEnabled());
     }
 
     public function testEpoTestDefaultsOffAndCanBeEnabledByEnvironment(): void

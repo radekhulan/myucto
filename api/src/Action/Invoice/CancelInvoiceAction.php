@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Http\Json;
@@ -298,21 +299,23 @@ final class CancelInvoiceAction
             // pro klienta UPDATE podmíněný booked_at IS NULL — účetní mohla zaúčtovat
             // mezi guard-checkem a zápisem; 0 řádek → rollback + 409 document_locked.
             $upd = $pdo->prepare(
-                'UPDATE invoices SET status = "cancelled", cancelled_at = NOW() WHERE id = ?'
+                'UPDATE invoices SET status = "cancelled", cancelled_at = NOW() WHERE id = ? AND status <> "cancelled"'
                 . ($requireUnbooked ? ' AND booked_at IS NULL' : '')
             );
             $upd->execute([$invoice['id']]);
-            if ($requireUnbooked && $upd->rowCount() === 0) {
+            if ($upd->rowCount() === 0) {
                 if ($ownTx && $pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
                 return Json::error(
                     $response,
-                    'document_locked',
-                    'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                    $requireUnbooked ? 'document_locked' : 'invalid_state',
+                    $requireUnbooked ? 'Doklad byl mezitím zaúčtován nebo stornován.' : 'Doklad byl mezitím stornován.',
                     409,
                 );
             }
+
+            InvoiceWebhookEvents::publish($pdo, (int) $invoice['id'], InvoiceWebhookEvents::CANCELLED);
 
             // Epic SKLAD §5.3: interní storno stornuje i posted auto-doklady
             // k faktuře (protidoklad v původní ceně, hodnotově neutrální) —

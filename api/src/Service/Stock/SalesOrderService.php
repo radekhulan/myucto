@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Stock;
 
+use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Integration\IntegrationEventPublisher;
 use PDO;
@@ -373,6 +374,9 @@ final class SalesOrderService
                 ['fulfillment_status' => $fulfillment, 'reservations' => $reservations],
                 self::integrationOperationKey((string) $order['order_uuid'], 'confirm', $idempotencyKey),
             );
+            if ($isDraft) {
+                WebhookEvents::enqueue($pdo, $supplierId, WebhookEvents::SALES_ORDER_CONFIRMED, ['sales_order_id' => $id]);
+            }
             $pdo->commit();
             return $this->detail($supplierId, $id) ?? throw new \LogicException('Objednávka zmizela.');
         } catch (\Throwable $e) {

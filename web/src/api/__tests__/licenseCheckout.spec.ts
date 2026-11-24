@@ -40,7 +40,8 @@ describe('sledování změny licence', () => {
 
   it('zveřejní zaplacenou změnu, i když jiná objednávka stále čeká', async () => {
     window.localStorage.setItem(storageKey, '["42","43"]')
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    let resolve!: (value: unknown) => void
+    const promise = new Promise<unknown>((done) => { resolve = done })
     post.mockResolvedValueOnce({ data: { applied: true } }).mockReturnValueOnce(promise)
     const onApplied = vi.fn()
 

@@ -603,11 +603,11 @@ return [
         // storen, uzávěrek, mezd a SVJ. Platí jen oprávnění uživatele tokenu; přihlášení,
         // MFA, heslo, správa tokenů, licence a správa instance zůstávají tokenu
         // nedostupné a uzavřené ani podané období token nepřebije.
-        // false = příznak nejde zapnout a už vydané tokeny s příznakem se chovají jako
-        // běžné tokeny. Zapínejte vědomě, jen když integraci, které token dáváte, věříte
-        // jako člověku s tímtéž účtem.
-        // ENV varianta: MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS=1
-        'allow_system_write_tokens' => false,
+        // Výchozí hodnota je true. Příznak povolte jen tokenu pro integraci, které
+        // věříte jako člověku s tímtéž účtem. Hodnota false vrátí i vydané tokeny
+        // s příznakem do běžného režimu.
+        // Vypnutí přes ENV: MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS=0
+        'allow_system_write_tokens' => true,
     ],
 
     // ── Doručování mzdových dokumentů zaměstnancům ────────────────────────────────

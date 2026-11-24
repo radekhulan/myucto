@@ -310,6 +310,12 @@ final class RequestAuthorization
         return self::effectiveRole($request)->isSuperadmin();
     }
 
+    public static function canManageWebhooks(Request $request): bool
+    {
+        $role = self::effectiveRole($request);
+        return self::isSessionAuth($request) && $role->isActive && $role->isCompanyAdmin();
+    }
+
     public static function isCompanyAdmin(Request $request): bool
     {
         return self::effectiveRole($request)->isCompanyAdmin();

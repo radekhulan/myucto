@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
-import { ICONS } from '@/components/ui/buttonStyles'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency, type OssRateType, type OssSupplyType } from '@/api/recurring'
@@ -1734,6 +1734,13 @@ async function submit() {
         </button>
       </div>
     </form>
+
+    <div v-if="tplId && formLoaded && auth.isCompanyAdminRole && auth.canWrite('settings.company.write')" class="mt-4">
+      <RouterLink :to="{ name: 'admin-integrations', query: { tab: 'webhooks', template: String(tplId) } }" :class="btnOutline()">
+        <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.link" /></svg>
+        {{ t('integrations.webhooks.for_template') }}
+      </RouterLink>
+    </div>
 
     <!-- Inline create modaly — žádné opouštění editoru -->
     <ClientFormModal v-if="clientModalOpen"

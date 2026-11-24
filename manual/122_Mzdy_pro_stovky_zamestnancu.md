@@ -814,8 +814,9 @@ externí integrace úzký:
   [§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)) smí totéž co
   jeho uživatel v aplikaci, tedy i celý měsíc mezd: importy dohod a docházky,
   hromadné akce z kontroly před během, zamknutí, výpočet, schválení běhu,
-  přípravu a test hlášení. Musí ho povolit provozovatel instance
-  (`api.allow_system_write_tokens`) a zapíná se jen při založení tokenu.
+  přípravu a test hlášení. Schopnost se zapíná při založení tokenu.
+  Instalace ji ve výchozím stavu povoluje a provozovatel ji může vypnout
+  volbou `api.allow_system_write_tokens`.
   Platí jen oprávnění uživatele tokenu a pojistky zůstávají: token nezmění
   uzavřené účetní období ani podané období DPH, nespravuje tokeny, hesla
   a MFA a úkony s čerstvým ověřením člověkem (podpis plateb, přímé podání)

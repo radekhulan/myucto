@@ -40,6 +40,7 @@ final class ConfigSnapshot
         'b21b33782fa0f0fdb2ce28afce54e6693afb4f8cdfa7e0c9a3aada758512c023',
         // export.scheduled_pohoda a jeho ENV; DB, údaje ani runtime cesty beze změny.
         '304466d01b10d1423650cde85efe1ff197f8b8dd27dc3566fd93a746d0548f86',
+        '4dc2c6179e945698dbb30bfda23c17a0430a6d083f08dfdea6fc5f9eabaa84a8',
     ];
 
     private static ?Config $config = null;

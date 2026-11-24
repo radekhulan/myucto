@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Mobile;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientRepository;
@@ -322,6 +323,7 @@ final class QuickReceiptService
             throw new \RuntimeException('Doklad účtenky byl mezitím změněn.');
         }
         InvoiceIssuer::record($pdo, $invoiceId, $userId > 0 ? $userId : null);
+        InvoiceWebhookEvents::publish($pdo, $invoiceId, InvoiceWebhookEvents::ISSUED);
         if ($this->stockIssue->isStockEnabled($supplierId)) {
             $this->stockIssue->issueForInvoice($supplierId, array_merge($invoice, ['varsymbol' => $varsymbol]), $userId > 0 ? $userId : null);
         }

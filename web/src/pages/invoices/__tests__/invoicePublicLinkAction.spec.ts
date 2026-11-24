@@ -9,6 +9,8 @@ import type { ActionItem } from '@/components/ui/ActionBar.vue'
 
 const m = vi.hoisted(() => ({
   publicLinksEnabled: true,
+  publicLink: vi.fn(),
+  publishPublicLink: vi.fn(),
   invoice: {
     id: 9, supplier_id: 1, status: 'sent', invoice_type: 'invoice',
     varsymbol: '2610001', currency: 'CZK', total: 1210, amount_to_pay: 1210,
@@ -25,16 +27,19 @@ function emptyApi(overrides: Record<string, unknown> = {}) {
   })
 }
 
-vi.mock('@/api/invoices', () => ({ invoicesApi: emptyApi({ get: vi.fn(async () => m.invoice) }) }))
+vi.mock('@/api/invoices', () => ({
+  invoicesApi: emptyApi({ get: vi.fn(async () => m.invoice), publicLink: m.publicLink, publishPublicLink: m.publishPublicLink }),
+}))
 vi.mock('@/api/settings', () => ({ settingsApi: emptyApi() }))
 vi.mock('@/api/admin', () => ({ adminApi: emptyApi() }))
 vi.mock('@/api/stock', () => ({ stockApi: emptyApi() }))
+vi.mock('@/api/codebooks', () => ({ codebooksApi: emptyApi() }))
 vi.mock('@/api/eshop', () => ({ eshopApi: emptyApi() }))
 vi.mock('@/api/accounting', () => ({ accountingApi: emptyApi(), postingErrorI18nKey: () => 'error' }))
 vi.mock('@/api/vatClassifications', () => ({ vatClassificationsApi: emptyApi() }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    canRead: () => true,
+    canRead: (permission: string) => permission !== 'eet',
     canWrite: () => true,
     isClientRole: false,
     isSuperadmin: false,
@@ -59,7 +64,7 @@ vi.mock('vue-i18n', async importOriginal => ({
 
 import InvoiceDetail from '../InvoiceDetail.vue'
 
-async function actions(): Promise<ActionItem[]> {
+async function mountInvoice() {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/invoices/:id', component: { render: () => null } }],
@@ -67,6 +72,11 @@ async function actions(): Promise<ActionItem[]> {
   await router.push('/invoices/9')
   const wrapper = mount({ ...InvoiceDetail, render: () => null }, { global: { plugins: [router] } })
   await flushPromises()
+  return wrapper
+}
+
+async function actions(): Promise<ActionItem[]> {
+  const wrapper = await mountInvoice()
   const items = (wrapper.vm as unknown as { invoiceActions: ActionItem[] }).invoiceActions
   wrapper.unmount()
   return items
@@ -81,10 +91,43 @@ function publicLinkShown(items: ActionItem[]): boolean {
 describe('akce Web faktura v detailu faktury', () => {
   beforeEach(() => {
     m.publicLinksEnabled = true
+    m.invoice.status = 'sent'
+    m.publicLink.mockReset().mockResolvedValue({
+      url: 'https://invoice.example.test/invoice/test', token: 'test', public_viewed_at: null, published_at: null,
+    })
+    m.publishPublicLink.mockReset().mockResolvedValue({
+      url: 'https://invoice.example.test/invoice/test', token: 'test', public_viewed_at: null, published_at: '2026-01-01T10:00:00Z',
+    })
   })
 
   it('nabízí web fakturu u vystavené faktury', async () => {
     expect(publicLinkShown(await actions())).toBe(true)
+  })
+
+  it('otevřením odkazu nepublikuje a publikování vyžaduje vlastní akci', async () => {
+    const wrapper = await mountInvoice()
+    const vm = wrapper.vm as unknown as {
+      openPublicLink: () => Promise<void>
+      publishPublicLink: () => Promise<void>
+      publicLinkPublishedAt: string | null
+    }
+    await vm.openPublicLink()
+    expect(m.publicLink).toHaveBeenCalledWith(9)
+    expect(m.publishPublicLink).not.toHaveBeenCalled()
+    expect(vm.publicLinkPublishedAt).toBeNull()
+
+    await vm.publishPublicLink()
+    expect(m.publishPublicLink).toHaveBeenCalledWith(9)
+    expect(vm.publicLinkPublishedAt).toBe('2026-01-01T10:00:00Z')
+    wrapper.unmount()
+  })
+
+  it('zrušenou fakturu nepublikuje', async () => {
+    m.invoice.status = 'cancelled'
+    const wrapper = await mountInvoice()
+    await (wrapper.vm as unknown as { publishPublicLink: () => Promise<void> }).publishPublicLink()
+    expect(m.publishPublicLink).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('na instalaci s vypnutou web fakturou akci skryje', async () => {

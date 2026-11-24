@@ -25,7 +25,7 @@ final class PayrollRunDiscardCorrectionMigrationTest extends TestCase
         $db = PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);
         $sql = (string) file_get_contents(
-            \dirname(__DIR__, 4) . '/db/migrations/2338_payroll_run_discard_correction.sql',
+            \dirname(__DIR__, 4) . '/db/migrations/2339_payroll_run_discard_correction.sql',
         );
         foreach ([1, 2] as $_) {
             foreach (SqlStatementSplitter::split($sql) as $statement) {

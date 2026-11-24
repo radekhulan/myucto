@@ -14,7 +14,7 @@ const m = vi.hoisted(() => ({
   deadlineGroupItems: vi.fn(),
   completeDeadlineChecklist: vi.fn(),
   canRead: vi.fn(() => true),
-  canWrite: vi.fn(() => true),
+  canWrite: vi.fn((_key: string) => true),
 }))
 
 vi.mock('@/api/payroll', () => ({

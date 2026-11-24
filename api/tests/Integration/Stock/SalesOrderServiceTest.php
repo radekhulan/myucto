@@ -49,6 +49,14 @@ final class SalesOrderServiceTest extends StockTestCase
     public function testConfirmationIsIdempotentAndLastAvailableUnitCannotBeOverbooked(): void
     {
         $supplierId = $this->createSupplier();
+        $webhooks = $this->container->get(\MyInvoice\Service\Integration\WebhookEndpoints::class);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        $endpoint = $webhooks->create($supplierId, [
+            'name' => 'Potvrzení objednávky', 'url' => 'https://receiver.example.test/events',
+            'event_types' => ['sales_order.confirmed'],
+        ]);
+        $pdo->commit();
         $clientId = $this->client($supplierId);
         $warehouseId = $this->warehouse($supplierId);
         $itemId = $this->item($supplierId, 'SO-LAST');
@@ -71,6 +79,8 @@ final class SalesOrderServiceTest extends StockTestCase
         self::assertSame(1, (int) $this->db->pdo()->query(
             'SELECT COUNT(*) FROM sales_order_reservations WHERE stock_item_id = ' . $itemId
         )->fetchColumn());
+        $events = $webhooks->history($supplierId, $endpoint['id'], PHP_INT_MAX);
+        self::assertSame(['sales_order.confirmed'], array_column($events, 'event_type'));
     }
 
     public function testReservedStockOnlyShipsThroughItsTaskAndPartialShipmentKeepsRemainder(): void

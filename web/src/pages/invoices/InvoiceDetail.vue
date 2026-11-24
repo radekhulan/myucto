@@ -29,7 +29,7 @@ import EetCreditNoteRefundDialog from '@/components/eet/EetCreditNoteRefundDialo
 import { eetApi, type EetCreditNoteRefundInfo, type EetInvoiceSummaryItem } from '@/api/eet'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatPeriod, formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { formatPeriod, formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatUtcDateTime, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
 import { durationTotal, formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { invoiceIssuedBy } from '@/pages/invoices/invoiceIssuedBy'
 import { useAuthStore } from '@/stores/auth'
@@ -226,6 +226,7 @@ const approvalRejectReason = ref('')
 const publicLinkOpen = ref(false)
 const publicLinkUrl = ref('')
 const publicLinkViewedAt = ref<string | null>(null)
+const publicLinkPublishedAt = ref<string | null>(null)
 const publicLinkBusy = ref(false)
 
 const activity = ref<Array<{ id: number; user_name: string | null; action: string; payload: any; created_at: string }>>([])
@@ -968,6 +969,7 @@ function actionLabel(a: string): string {
     'invoice.approval_reset':         'invoice.actions.approval_reset',
     'invoice.public_link_created':     'invoice.actions.public_link_created',
     'invoice.public_link_regenerated': 'invoice.actions.public_link_regenerated',
+    'invoice.public_link_published':   'invoice.actions.public_link_published',
     'invoice.public_viewed':           'invoice.actions.public_viewed',
     'invoice.public_pdf_downloaded':   'invoice.actions.public_pdf_downloaded',
     'invoice.public_isdoc_downloaded': 'invoice.actions.public_isdoc_downloaded',
@@ -1762,6 +1764,7 @@ async function openPublicLink() {
     const r = await invoicesApi.publicLink(invoice.value.id)
     publicLinkUrl.value = r.url
     publicLinkViewedAt.value = r.public_viewed_at
+    publicLinkPublishedAt.value = r.published_at ?? null
   } catch (e: any) {
     publicLinkOpen.value = false
     toast.error(e?.response?.data?.error?.message || t('invoice.public_link.load_failed'))
@@ -1780,6 +1783,25 @@ async function copyPublicLink() {
   }
 }
 
+async function publishPublicLink() {
+  if (!invoice.value || isDraft.value || invoice.value.status === 'cancelled' || publicLinkBusy.value) return
+  const id = invoice.value.id
+  publicLinkBusy.value = true
+  try {
+    const result = await invoicesApi.publishPublicLink(id)
+    if (invoice.value?.id !== id) return
+    publicLinkUrl.value = result.url
+    publicLinkViewedAt.value = result.public_viewed_at
+    publicLinkPublishedAt.value = result.published_at
+    toast.success(t('invoice.public_link.published'))
+    invoicesApi.activity(id).then(a => { if (invoice.value?.id === id) activity.value = a }).catch(() => {})
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.public_link.publish_failed'))
+  } finally {
+    publicLinkBusy.value = false
+  }
+}
+
 async function regeneratePublicLink() {
   if (!invoice.value) return
   if (!confirm(t('invoice.public_link.regenerate_confirm'))) return
@@ -1788,6 +1810,7 @@ async function regeneratePublicLink() {
     const r = await invoicesApi.regeneratePublicLink(invoice.value.id)
     publicLinkUrl.value = r.url
     publicLinkViewedAt.value = null
+    publicLinkPublishedAt.value = r.published_at ?? null
     invoice.value.public_viewed_at = null
     toast.success(t('invoice.public_link.regenerated'))
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
@@ -2641,6 +2664,18 @@ useWindowRefresh(async () => {
                   : t('invoice.public_link.not_viewed') }}
             </p>
             <p class="text-xs text-neutral-500 mb-4">{{ t('invoice.public_link.email_note') }}</p>
+            <div v-if="publicLinkPublishedAt || (invoice && !isDraft && invoice.status !== 'cancelled')" class="mb-4 flex flex-wrap items-center gap-2">
+              <p v-if="publicLinkPublishedAt" class="text-sm text-success-700" role="status">
+                {{ t('invoice.public_link.published_at', { date: formatUtcDateTime(publicLinkPublishedAt) }) }}
+              </p>
+              <template v-else>
+                <button type="button" :class="btnFilled('primary')" :disabled="publicLinkBusy" @click="publishPublicLink">
+                  <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                  {{ t('invoice.public_link.publish') }}
+                </button>
+                <p class="text-xs text-neutral-500">{{ t('invoice.public_link.publish_hint') }}</p>
+              </template>
+            </div>
 
             <div class="flex flex-wrap justify-between gap-2">
               <button @click="regeneratePublicLink" :disabled="publicLinkBusy"

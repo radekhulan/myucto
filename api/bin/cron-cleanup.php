@@ -28,6 +28,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Document\ScanAttach\ScanStagingCleaner;
+use MyInvoice\Service\Integration\WebhookDeliveryWorker;
 use MyInvoice\Service\System\ManagedModeGuard;
 
 $rootDir    = Bootstrap::rootDir();
@@ -212,13 +213,21 @@ $report['stereo_nx_uploads'] = \MyInvoice\Service\Migration\StereoNx\StereoNxUpl
 // 8e) Soubory odložené pro import dokladů na pozadí, které worker po sobě neuklidil.
 $report['file_import_staging'] = \MyInvoice\Service\Import\FileImportJobService::purgeStaleStagingAll();
 // Nativní ZIPy obnovy: stejná retence, protokoly zůstávají v import_jobs.
-// Jediný úklid, který potřebuje kontejner: jeho selhání nesmí zastavit zbytek denního úklidu.
+$container = null;
 try {
-    $report['myucto_uploads'] = Bootstrap::buildContainer()
+    $container = Bootstrap::buildContainer();
+    $report['myucto_uploads'] = $container
         ->get(\MyInvoice\Service\Migration\Myucto\MyuctoImportWorkflow::class)
         ->uploads()->purgeStaleAll();
 } catch (\Throwable $e) {
     $report['myucto_uploads_error'] = $e->getMessage();
+}
+if ($container !== null) {
+    try {
+        $report['webhook_deliveries_purged'] = $container->get(WebhookDeliveryWorker::class)->purgeExpired();
+    } catch (\Throwable $e) {
+        $report['webhook_deliveries_error'] = $e::class;
+    }
 }
 $report['abra_flexi_snapshot_tenants'] = (new \MyInvoice\Service\Migration\Abra\AbraSnapshotStore())->pruneAll();
 $report['abra_flexi_cache_pages'] = \MyInvoice\Service\Migration\Abra\AbraPageCache::pruneExpired();

@@ -52,6 +52,8 @@ services:
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0
       # v jedné běžící replice ho nech zapnutý, jinak by úlohy běžely vícenásobně.
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}
+      MYINVOICE_WEBHOOKS_MODE: ${MYINVOICE_WEBHOOKS_MODE:-}
+      MYINVOICE_WEBHOOKS_ALLOWED_HOSTS: ${MYINVOICE_WEBHOOKS_ALLOWED_HOSTS:-}
       # Redis (profil `redis`). Bez tohoto wiringu by `--profile redis` sice Redis
       # spustil, ale aplikace by o něm nevěděla a jela dál na DB fallbacku.
       MYINVOICE_REDIS_ENABLED: ${MYINVOICE_REDIS_ENABLED:-0}

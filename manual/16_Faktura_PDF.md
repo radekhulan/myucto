@@ -147,6 +147,8 @@ Pravidla a hlášky najdete v [§ 16.9](#169-kdyz-neco-nejde) a [§ 16.10.3](#16
    **Zobrazit fakturu online**.
 5. Pokud odkaz unikl nesprávnému příjemci, v okně zvolte **Vygenerovat nový odkaz**.
    Starý odkaz okamžitě přestane platit.
+6. Pokud napojený systém čeká na událost publikace, v okně zvolte **Publikovat**.
+   Dialog pak zobrazí čas publikování.
 
 **Jak poznáte, že je hotovo:** po prvním otevření klientem se na detailu
 objeví štítek **Zobrazeno klientem**.
@@ -601,6 +603,9 @@ přihlášení prohlédne a stáhne PDF. Obdoba „web faktury“ z Fakturoidu.
 
 - **Vytvoření** - první kliknutí na **Web faktura** odkaz vytvoří, další otevření
   vrací tentýž odkaz.
+- **Publikovat** zaznamená výslovnou publikaci jednou za fakturu a vyvolá
+  událost `invoice.published` pro nastavené [webhooky](96_Nastaveni.md#961614-odchozi-webhooky).
+  Otevření dialogu, odeslání e-mailu a výměna odkazu tento záznam nevytvářejí.
 - **E-mail klientovi** - odkaz se vkládá do e-mailu při akci **Odeslat klientovi**
   (tlačítko „Zobrazit fakturu online“ a textový odkaz).
 - **Zobrazeno klientem** - první anonymní návštěva se zapíše a v detailu faktury

@@ -257,6 +257,11 @@ final class DocumentJournalSyncTest extends TestCase
 
     public function testCancelTransitionPostedPurchaseInvoiceReversesEntry(): void
     {
+        $webhooks = Bootstrap::buildContainer()->get(\MyInvoice\Service\Integration\WebhookEndpoints::class);
+        $endpoint = $webhooks->create($this->supplierId, [
+            'name' => 'Storno přijatého dokladu', 'url' => 'https://receiver.example.test/events',
+            'event_types' => ['purchase_invoice.cancelled'],
+        ]);
         $vendor     = $this->client('Dodavatel a.s.', false, true);
         $purchaseId = $this->purchase('PF-2099-C1', $vendor, '40', false, 2000.00, 420.00, 21.00);
         $entryId    = $this->postPurchaseEntry($purchaseId);
@@ -270,6 +275,8 @@ final class DocumentJournalSyncTest extends TestCase
 
         $status = $this->db->pdo()->query("SELECT status FROM purchase_invoices WHERE id = {$purchaseId}")->fetchColumn();
         self::assertSame('cancelled', $status, 'PF je stornovaná.');
+        $events = $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX);
+        self::assertSame(['purchase_invoice.cancelled'], array_column($events, 'event_type'));
     }
 
     // ── bonus H4: smazání zaúčtované PF ────────────────────────────────────

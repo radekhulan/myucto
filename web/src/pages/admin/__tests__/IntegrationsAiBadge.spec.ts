@@ -27,7 +27,10 @@ vi.mock('@/api/settings', () => ({
   },
 }))
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: { tab: 'ai' } }) }))
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ path: '/admin/integrations', query: { tab: 'ai' } }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
@@ -42,6 +45,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import Integrations from '@/pages/admin/Integrations.vue'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import type { SupplierBrief } from '@/api/auth'
 import { aiProviderBadge } from '@/pages/admin/aiProviderBadge'
 
@@ -95,6 +99,20 @@ describe('Externí integrace → AI extrakce', () => {
     m.listOpenAiModels.mockReset()
     m.setAiCredentials.mockReset()
     m.updateSupplier.mockReset().mockResolvedValue({})
+  })
+
+  it('řadí záložky s webhooky pro správce firmy', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    const auth = useAuthStore()
+    const w = await mountPage()
+    const tabs = () => w.findAll('button[aria-pressed]').map(button => button.text())
+      .filter(label => label.startsWith('integrations.') && label.endsWith('.tab'))
+
+    expect(tabs()).toEqual(['integrations.ai.tab', 'integrations.fakturoid.tab', 'integrations.idoklad.tab'])
+    auth.user = { is_superadmin: true } as NonNullable<typeof auth.user>
+    await w.vm.$nextTick()
+    expect(tabs()).toEqual(['integrations.ai.tab', 'integrations.webhooks.tab', 'integrations.fakturoid.tab', 'integrations.idoklad.tab'])
+    w.unmount()
   })
 
   it('firma bez klíče nevidí u Anthropicu odznak „aktivní"', async () => {

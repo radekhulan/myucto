@@ -140,7 +140,8 @@ describe('Hosting — neproběhlá platba doplatku', () => {
       instance: { ...instance, storage: { ...pending.instance.storage, quota_bytes: 7 * 1024 ** 3, change_pending: false, blocks_writes: false, percent: 32 } },
     }
     mocks.status.mockResolvedValueOnce(pending).mockResolvedValueOnce(confirmed)
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    let resolve!: (value: unknown) => void
+    const promise = new Promise<unknown>((done) => { resolve = done })
     mocks.refresh.mockReturnValueOnce(promise)
 
     const wrapper = await mountHosting()
@@ -178,7 +179,8 @@ describe('Hosting — neproběhlá platba doplatku', () => {
     mocks.status.mockResolvedValueOnce(initial).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(confirmed)
     mocks.storageUpgrade.mockRejectedValue(declined(PAY_URL, '42'))
     mocks.waitForCheckout.mockResolvedValue({ applied: true })
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    let resolve!: (value: unknown) => void
+    const promise = new Promise<unknown>((done) => { resolve = done })
     mocks.refresh.mockReturnValueOnce(promise)
 
     const wrapper = await mountHosting()

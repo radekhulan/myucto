@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
+use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -158,12 +160,12 @@ final class UnmarkPaidAction
         // Finální doklad krytý zálohou (amount_to_pay <= 0, žádné platby) service
         // nerevertuje — bookkeeping flip vrátíme přímo (původní chování).
         // Reminder stav (reminded) se nezachovává — uživatel může upomínku poslat znovu.
-        $this->db->pdo()->prepare(
-            "UPDATE invoices
-                SET status  = IF(sent_at IS NOT NULL, 'sent', 'issued'),
-                    paid_at = NULL
-              WHERE id = ? AND status = 'paid'"
-        )->execute([$id]);
+        $reason = match (true) {
+            InvoiceAmountPolicy::shouldAutoMarkPaidOnIssue($invoice) => InvoiceWebhookEvents::ADVANCE,
+            (float) $invoice['amount_to_pay'] > 0 => InvoiceWebhookEvents::PAYMENT,
+            default => null,
+        };
+        $this->payments->setSettledStatus($id, (int) $invoice['supplier_id'], null, $reason);
 
         // Cached PDF nese „UHRAZENO" stamp — bez invalidace by se po unmark vracel.
         $this->pdf->invalidate($id, 'invalidate_unmark_paid');

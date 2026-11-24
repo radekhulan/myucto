@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
@@ -372,6 +373,43 @@ final class InvoicePaymentService
         }
 
         return [$paymentId, $amount, $transition, $documents];
+    }
+
+    public function setSettledStatus(int $invoiceId, int $supplierId, ?string $paidOn, ?string $reason): void
+    {
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        try {
+            if ($paidOn === null) {
+                $change = $pdo->prepare(
+                    "UPDATE invoices SET status = IF(sent_at IS NOT NULL, 'sent', 'issued'), paid_at = NULL
+                      WHERE supplier_id = ? AND id = ? AND status = 'paid'"
+                );
+                $change->execute([$supplierId, $invoiceId]);
+                $event = InvoiceWebhookEvents::PAYMENT_REVERSED;
+            } else {
+                $change = $pdo->prepare(
+                    "UPDATE invoices SET status = 'paid', paid_at = ?
+                      WHERE supplier_id = ? AND id = ? AND status IN ('issued', 'sent', 'reminded')"
+                );
+                $change->execute([$paidOn, $supplierId, $invoiceId]);
+                $event = InvoiceWebhookEvents::PAID;
+            }
+            if ($change->rowCount() === 1 && $reason !== null) {
+                InvoiceWebhookEvents::publish($pdo, $invoiceId, $event, $reason);
+            }
+            if ($own) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /** @deprecated Použij {@see markRefunded()}; zůstává kvůli volajícím z doby jen dobropisů. */
@@ -824,6 +862,9 @@ final class InvoicePaymentService
                   WHERE id = ?'
             )->execute([$invoiceId]);
             $becamePaid = true;
+            if ($due > 0) {
+                InvoiceWebhookEvents::publish($pdo, $invoiceId, InvoiceWebhookEvents::PAID, InvoiceWebhookEvents::PAYMENT);
+            }
         } elseif (!$covered && (string) $row['status'] === 'paid' && $due > 0) {
             // Revert jen u dokladů s reálnou částkou k úhradě — finální doklady kryté
             // zálohou (amount_to_pay <= 0, auto-paid při vystavení) se nerevertují.
@@ -834,6 +875,7 @@ final class InvoicePaymentService
                   WHERE id = ? AND status = 'paid'"
             )->execute([$invoiceId]);
             $becameUnpaid = true;
+            InvoiceWebhookEvents::publish($pdo, $invoiceId, InvoiceWebhookEvents::PAYMENT_REVERSED, InvoiceWebhookEvents::PAYMENT);
         }
         CalendarInstalmentService::syncCalendarStatus($pdo, $invoiceId);
 

@@ -19,7 +19,7 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class SubmissionOutboxAppTimeMigrationTest extends TestCase
 {
-    private const MIGRATION = '2339_submission_outbox_app_time.sql';
+    private const MIGRATION = '2340_submission_outbox_app_time.sql';
 
     private ?PDO $db = null;
     private string $database = '';

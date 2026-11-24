@@ -381,6 +381,13 @@ export interface InvoiceOriginalPdfMatch {
   candidates: InvoiceOriginalPdfCandidate[]
 }
 
+export interface InvoicePublicLink {
+  url: string
+  token: string
+  public_viewed_at: string | null
+  published_at: string | null
+}
+
 export interface Invoice {
   id: number
   varsymbol: string | null
@@ -1307,13 +1314,13 @@ export const invoicesApi = {
 
   // Web faktura — trvalý veřejný odkaz (ensure = idempotentní vytvoření + URL)
   publicLink: (id: number) =>
-    api.post<{ url: string; token: string; public_viewed_at: string | null }>(
-      `/invoices/${id}/public-link`,
-      {},
-    ).then(r => r.data),
+    api.post<InvoicePublicLink>(`/invoices/${id}/public-link`, {}).then(r => r.data),
+
+  publishPublicLink: (id: number) =>
+    api.post<InvoicePublicLink>(`/invoices/${id}/public-link/publish`, {}).then(r => r.data),
 
   regeneratePublicLink: (id: number) =>
-    api.post<{ url: string; token: string; public_viewed_at: null }>(
+    api.post<InvoicePublicLink>(
       `/invoices/${id}/public-link/regenerate`,
       {},
     ).then(r => r.data),

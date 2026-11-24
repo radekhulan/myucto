@@ -63,6 +63,28 @@ final class CronPreflight
         ");
     }
 
+    public static function hasWebhookDeliveryWork(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM webhook_deliveries delivery
+              JOIN webhook_endpoints endpoint
+                ON endpoint.id = delivery.endpoint_id AND endpoint.supplier_id = delivery.supplier_id
+             WHERE delivery.status IN ('pending', 'processing')
+               AND delivery.available_at <= NOW(6)
+               AND endpoint.enabled = 1
+             LIMIT 1
+        ");
+    }
+
+    public static function hasWebhookEndpoint(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM webhook_endpoints
+             WHERE enabled = 1
+             LIMIT 1
+        ");
+    }
+
     /**
      * Čeká nějaké přímé podání EPO na stav, třeba i s dotazem až později?
      *

@@ -151,6 +151,14 @@ final class InvoiceIssuedByTest extends TestCase
     public function testInternalCancellationRecordsUser(): void
     {
         $container = Bootstrap::buildContainer();
+        $webhooks = $container->get(\MyInvoice\Service\Integration\WebhookEndpoints::class);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        $endpoint = $webhooks->create($this->supplierId, [
+            'name' => 'Vystavení a storno', 'url' => 'https://receiver.example.test/events',
+            'event_types' => ['invoice.issued', 'invoice.cancelled'],
+        ]);
+        $pdo->commit();
         $id = $this->draft();
         self::assertSame(200, $this->call($container->get(IssueInvoiceAction::class), 'issue', $id)['status']);
 
@@ -162,6 +170,8 @@ final class InvoiceIssuedByTest extends TestCase
         $cancellationId = (int) $stmt->fetchColumn();
         self::assertGreaterThan(0, $cancellationId);
         self::assertSame([$this->userId, $this->userName], $this->issuer($cancellationId));
+        $events = $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX);
+        self::assertSame(['invoice.cancelled', 'invoice.issued'], array_column($events, 'event_type'));
     }
 
     public function testPdfOmitsIssuerByDefault(): void

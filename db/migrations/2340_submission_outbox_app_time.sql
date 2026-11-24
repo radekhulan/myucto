@@ -52,7 +52,7 @@ SET NAMES utf8mb4;
 
 ALTER TABLE submission_outbox
   ADD COLUMN IF NOT EXISTS time_basis ENUM('utc','app') NOT NULL DEFAULT 'utc'
-    COMMENT 'utc = časy zapsané před migrací 2339 přes UTC_TIMESTAMP(); app = čas aplikace'
+    COMMENT 'utc = časy zapsané před migrací 2340 přes UTC_TIMESTAMP(); app = čas aplikace'
     AFTER updated_at;
 
 ALTER TABLE submission_outbox ALTER COLUMN time_basis SET DEFAULT 'app';

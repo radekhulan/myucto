@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
@@ -30,7 +30,6 @@ final class MarkPaidAction
 {
     public function __construct(
         private readonly InvoiceRepository $repo,
-        private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly StatsRecomputer $stats,
@@ -142,9 +141,12 @@ final class MarkPaidAction
         } else {
             // Finální doklad plně krytý zálohou (amount_to_pay <= 0) — žádná platba
             // neproběhla, jen bookkeeping flip (původní chování).
-            $this->db->pdo()->prepare(
-                'UPDATE invoices SET status = "paid", paid_at = ? WHERE id = ?'
-            )->execute([$paidAt, $id]);
+            $reason = match (true) {
+                InvoiceAmountPolicy::shouldAutoMarkPaidOnIssue($invoice) => InvoiceWebhookEvents::ADVANCE,
+                (float) $invoice['amount_to_pay'] > 0 => InvoiceWebhookEvents::PAYMENT,
+                default => null,
+            };
+            $this->payments->setSettledStatus($id, (int) $invoice['supplier_id'], $paidAt, $reason);
 
             // Cached PDF má embedded status (UHRAZENO stamp, QR skip) — bez invalidace by
             // se servíroval starý soubor s výzvou k platbě i po označení za zaplacené.

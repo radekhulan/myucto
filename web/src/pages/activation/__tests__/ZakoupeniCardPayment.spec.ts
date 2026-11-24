@@ -243,7 +243,8 @@ describe('zrušené, ale zaplacené předplatné', () => {
     api.changePayroll.mockRejectedValue({
       response: { data: { error: { code: 'charge_failed', message: 'Karta neprošla.', pay_url: PAY_URL, order_id: '232' } } },
     })
-    const { promise, resolve } = Promise.withResolvers<unknown>()
+    let resolve!: (value: unknown) => void
+    const promise = new Promise<unknown>((done) => { resolve = done })
     api.waitForCheckout.mockReturnValue(promise)
 
     const wrapper = await mountPage()

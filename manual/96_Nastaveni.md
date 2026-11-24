@@ -19,6 +19,7 @@
 | E-mail nedorazil klientovi | Zkontrolovat Odeslané e-maily a SMTP log | [§ 96.14](#9614-krok-za-krokem-diagnostika-odeslanych-e-mailu-a-activity-log) |
 | Často používáte stejný filtr seznamu | Uložit filtr a nastavit sloupce | [§ 96.8](#968-krok-za-krokem-ulozene-filtry-a-zobrazeni-tabulek) |
 | Chcete, aby se faktury účtovaly samy | Zapnout automatické účtování | [§ 96.9](#969-krok-za-krokem-automaticke-uctovani) |
+| Chcete upozornit externí systém na změnu faktury | Nastavit odchozí webhook | [§ 96.16.14](#961614-odchozi-webhooky) |
 | Potřebujete členit náklady a tržby | Spravovat kategorie | [§ 96.10](#9610-krok-za-krokem-kategorie-nakladu-a-trzeb) |
 | Vystavujete pod více značkami | Zapnout brandingové profily | [§ 96.11](#9611-krok-za-krokem-brandingove-profily) |
 | Klienti mají chodit na vlastní doménu | Zapnout vlastní doménu | [§ 96.12](#9612-krok-za-krokem-vlastni-domeny-klientskeho-rozhrani) |
@@ -1238,6 +1239,35 @@ Po zrušení převodu lze samostatně vrátit a opravit i původní uzávěrku. 
 zachovává zrušený převod jako samostatnou historii včetně původních částek a identit účetních zápisů.
 Osobní texty v historických podkladech se anonymizují; novější opravy původní historie se s převodem
 nesměšují. Neprůkazný nebo změněný historický podklad klonování zastaví.
+
+### 96.16.14 Odchozí webhooky
+
+Webhook upozorní externí systém na vybrané události vydaných faktur,
+přijatých dokladů, skladových dokladů a prodejních objednávek.
+Vyžaduje platnou placenou licenci. Každý webhook patří právě jedné firmě.
+
+1. Vyberte firmu a otevřete **Firma → Externí integrace → Webhooky**.
+2. Přidejte webhook, zadejte jeho název a veřejnou HTTPS adresu příjemce.
+   Vyberte události, které chcete posílat. Odběr událostí vydaných faktur
+   můžete omezit na jednu šablonu pravidelné fakturace.
+3. Uložte nastavení a podpisový klíč bezpečně uložte na straně příjemce.
+   K ověření požadavků použijte stejný klíč.
+4. Odešlete test a zkontrolujte historii doručení. Test použije samostatnou
+   syntetickou událost bez údajů ze skutečných faktur.
+
+U události úhrady lze volitelně zahrnout i konečné faktury plně kryté
+zálohou. Ve výchozím nastavení se posílá plná úhrada vzniklá skutečnou
+platbou, včetně skutečné platby zálohové faktury.
+
+Když příjemce neodpoví úspěšně, MyÚčto opakuje doručení s odstupem.
+V historii zkontrolujte stav a poslední výsledek. Neúspěšné doručení
+můžete zopakovat ručně. Pozastavení ponechá čekající zprávy ve frontě
+a vypne odběr nových událostí. Změna výběru událostí nebo filtru zruší
+nedokončená doručení podle původního odběru. Pro jinou adresu založte nový webhook.
+
+Nastavení povolených cílů pro celou
+instalaci najdete v [§ 5.9.9](05_Po_instalaci.md#599-odchozi-webhooky-na-vlastnim-serveru).
+Smlouvu zpráv a ověření podpisu popisuje [§ 103.9.27](103_API.md#103927-odchozi-webhooky).
 
 ## 96.17 Související kapitoly
 

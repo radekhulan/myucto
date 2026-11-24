@@ -1241,8 +1241,9 @@
         "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql",
         "2337_imported_issued_tax_snapshot.sql",
-        "2338_payroll_run_discard_correction.sql",
-        "2339_submission_outbox_app_time.sql"
+        "2338_outgoing_webhooks.sql",
+        "2339_payroll_run_discard_correction.sql",
+        "2340_submission_outbox_app_time.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7849,6 +7850,7 @@
                 "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "public_published_at": "datetime(6) NULL DEFAULT NULL",
                 "public_token": "char(48) NULL DEFAULT NULL",
                 "public_viewed_at": "datetime NULL DEFAULT NULL",
                 "recurring_template_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -31037,6 +31039,68 @@
                 "fk_webauthn_credentials_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
+        },
+        "webhook_deliveries": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "attempts": "tinyint(3) unsigned NOT NULL DEFAULT 0",
+                "available_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "body_json": "longtext NOT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "endpoint_id": "bigint(20) unsigned NOT NULL",
+                "event_id": "varchar(36) NOT NULL",
+                "event_type": "varchar(60) NOT NULL",
+                "http_status": "smallint(5) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "last_error_code": "varchar(32) NULL DEFAULT NULL",
+                "lease_token": "char(32) NULL DEFAULT NULL",
+                "status": "enum('pending','processing','delivered','failed','cancelled') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_webhook_delivery_due": "BTREE (status, available_at, id)",
+                "ix_webhook_delivery_history": "BTREE (supplier_id, endpoint_id, id)",
+                "ix_webhook_delivery_retention": "BTREE (created_at, id)",
+                "ix_webhook_delivery_test_rate": "BTREE (supplier_id, endpoint_id, event_type, created_at)",
+                "uq_webhook_delivery": "UNIQUE BTREE (supplier_id, endpoint_id, event_id)"
+            },
+            "foreign_keys": {
+                "fk_webhook_delivery_endpoint": "(supplier_id, endpoint_id) -> webhook_endpoints (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "body_json": "json_valid(`body_json`)"
+            }
+        },
+        "webhook_endpoints": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "enabled": "tinyint(1) NOT NULL DEFAULT 1",
+                "event_types": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "include_advance": "tinyint(1) NOT NULL DEFAULT 0",
+                "name": "varchar(120) NOT NULL",
+                "secret_enc": "text NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "template_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "url": "varchar(2048) NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_webhook_template": "BTREE (template_id)",
+                "uq_webhook_endpoint_scope": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_webhook_endpoint_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_webhook_endpoint_template": "(template_id) -> recurring_invoice_templates (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "event_types": "json_valid(`event_types`)"
+            }
         },
         "work_report_billing_templates": {
             "type": "BASE TABLE",

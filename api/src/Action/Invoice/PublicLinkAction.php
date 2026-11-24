@@ -52,6 +52,7 @@ final class PublicLinkAction
             'url'              => $this->links->url($token, (int) $invoice['supplier_id']),
             'token'            => $token,
             'public_viewed_at' => $invoice['public_viewed_at'] ?? null,
+            'published_at'     => $invoice['public_published_at'] ?? null,
         ]);
     }
 
@@ -69,6 +70,31 @@ final class PublicLinkAction
             'url'              => $this->links->url($token, (int) $invoice['supplier_id']),
             'token'            => $token,
             'public_viewed_at' => null,
+            'published_at'     => $invoice['public_published_at'] ?? null,
+        ]);
+    }
+
+    public function publish(Request $request, Response $response, array $args): Response
+    {
+        $invoice = $this->loadIssuedInvoice($request, $response, $args);
+        if ($invoice instanceof Response) {
+            return $invoice;
+        }
+
+        $supplierId = (int) $invoice['supplier_id'];
+        $result = $this->repo->publishPublicLink($supplierId, (int) $invoice['id']);
+        if ($result === null) {
+            return Json::error($response, 'invalid_state', 'Stornovaný doklad ani koncept nelze zveřejnit.', 409);
+        }
+        if ($result['first']) {
+            $this->log($request, 'invoice.public_link_published', (int) $invoice['id']);
+        }
+
+        return Json::ok($response, [
+            'url' => $this->links->url($result['token'], $supplierId),
+            'token' => $result['token'],
+            'public_viewed_at' => $result['public_viewed_at'],
+            'published_at' => $result['published_at'],
         ]);
     }
 

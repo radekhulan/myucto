@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Stock;
 
+use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Codebook\UnitPrecision;
 use MyInvoice\Repository\AccountingPeriodRepository;
@@ -422,6 +423,9 @@ final class StockDocumentService
             throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
         }
         $posted['warnings'] = $this->collectPostWarnings($supplierId, $lines);
+        WebhookEvents::enqueue($this->db->pdo(), $supplierId, WebhookEvents::STOCK_POSTED, [
+            'stock_document_id' => $id, 'document_type' => $docType, 'warehouse_id' => $warehouseId,
+        ]);
         $justPosted = true;
         return $posted;
     }
@@ -572,6 +576,10 @@ final class StockDocumentService
             if ($original === null || $reversal === null) {
                 throw new StockException('not_found', 'Skladový doklad nenalezen.', 500);
             }
+            WebhookEvents::enqueue($this->db->pdo(), $supplierId, WebhookEvents::STOCK_REVERSED, [
+                'stock_document_id' => $id, 'document_type' => $origType, 'warehouse_id' => (int) $orig['warehouse_id'],
+                'reversal_stock_document_id' => $counterId,
+            ]);
             return ['original' => $original, 'reversal' => $reversal];
         });
     }
