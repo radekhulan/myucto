@@ -18,6 +18,11 @@ final class ErrorCatalog
 {
     /** @var array<string,string> CZ → EN */
     private const MAP = [
+        'Neplatný model.' => 'Invalid model.',
+        'OpenAI API klíč není uložený.' => 'No OpenAI API key is saved.',
+        'OpenAI endpoint nesplňuje požadavek na EU rezidenci.' => 'The OpenAI endpoint does not meet the EU data residency requirement.',
+        'Seznam modelů z OpenAI se nepodařilo načíst.' => 'Could not load the list of models from OpenAI.',
+        'Model není dostupný v projektu OpenAI.' => 'The model is not available in the OpenAI project.',
         'Chybí oprávnění pro párování banky nebo změnu úhrady faktury.' => 'You do not have permission to match bank transactions or change invoice payments.',
         'Pro rozpad souhrnné platby zadejte pouze payout_allocations se 2 až 100 doklady.' => 'For a payout allocation, supply only payout_allocations with 2 to 100 documents.',
         'Každý doklad uveďte právě jednou a zadejte kladnou částku v celých haléřích.' => 'Specify each document once and enter a positive amount in whole hellers.',

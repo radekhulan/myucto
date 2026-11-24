@@ -5,6 +5,7 @@ import type { AiCredentialsResponse, AiProvider } from '@/api/integrations'
 
 const m = vi.hoisted(() => ({
   getAiCredentials: vi.fn(),
+  listOpenAiModels: vi.fn(),
   setAiCredentials: vi.fn(),
   updateSupplier: vi.fn(),
 }))
@@ -14,6 +15,7 @@ vi.mock('@/api/integrations', () => ({
     getIdokladCreds: vi.fn().mockResolvedValue(null),
     getFakturoidCreds: vi.fn().mockResolvedValue(null),
     getAiCredentials: m.getAiCredentials,
+    listOpenAiModels: m.listOpenAiModels,
     setAiCredentials: m.setAiCredentials,
   },
 }))
@@ -90,6 +92,7 @@ describe('Externí integrace → AI extrakce', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     m.getAiCredentials.mockReset()
+    m.listOpenAiModels.mockReset()
     m.setAiCredentials.mockReset()
     m.updateSupplier.mockReset().mockResolvedValue({})
   })
@@ -110,6 +113,27 @@ describe('Externí integrace → AI extrakce', () => {
     expect(active).toHaveLength(1)
     expect(active[0].element.closest('button')?.textContent).toContain('aiGateway.provider.anthropic')
     expect(w.find('[data-test="badge-no-key"]').exists()).toBe(false)
+  })
+
+  it('načte modely projektu OpenAI a uloží zvolený model s existujícím klíčem', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('openai', { openai: true }))
+    m.listOpenAiModels.mockResolvedValue({ models: ['gpt-6.2-sol'] })
+    m.setAiCredentials.mockResolvedValue({ saved: true, tested: false, test_ok: null })
+    const w = await mountPage()
+    const model = w.get('#ai-extraction-default-model')
+    expect(model.find('option[value="gpt-6.2-sol"]').exists()).toBe(false)
+
+    await w.findAll('button').find(b => b.text() === 'aiGateway.openai_models_load')!.trigger('click')
+    await flushPromises()
+    expect(m.listOpenAiModels).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
+    await model.setValue('gpt-6.2-sol')
+    await w.findAll('button').find(b => b.text() === 'integrations.idoklad.save_and_test')!.trigger('click')
+    await flushPromises()
+
+    expect(m.setAiCredentials).toHaveBeenCalledExactlyOnceWith({
+      provider: 'openai', default_model: 'gpt-6.2-sol', base_url: '',
+    })
+    w.unmount()
   })
 
   it('volba „jen do firem s nenastavenou AI" se ukáže až po zapnutí hromadného uložení', async () => {

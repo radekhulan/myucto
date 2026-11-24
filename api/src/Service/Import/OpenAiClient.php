@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ai\AiRedirectPolicy;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -96,6 +97,61 @@ final class OpenAiClient implements LlmGatewayInterface
     public function strongerModel(int $supplierId, ?string $currentModel): ?string
     {
         return $this->capabilities($supplierId)->strongerModel($currentModel);
+    }
+
+    /** @return list<string>|null */
+    public function listModels(#[\SensitiveParameter] string $apiKey, string $baseUrl): ?array
+    {
+        if (self::baseUrlError($baseUrl) !== null) {
+            return null;
+        }
+        $url = (rtrim(trim($baseUrl), '/') ?: self::DEFAULT_BASE_URL) . '/v1/models';
+        try {
+            $response = $this->http->get($url, [
+                'headers' => ['Authorization' => 'Bearer ' . $apiKey],
+                'timeout' => 5,
+                'connect_timeout' => 3,
+                'http_errors' => false,
+                'allow_redirects' => false,
+            ]);
+        } catch (GuzzleException | \InvalidArgumentException) {
+            return null;
+        }
+        if ($response->getStatusCode() !== 200) {
+            return null;
+        }
+        $data = json_decode((string) $response->getBody(), true)['data'] ?? null;
+        if (!is_array($data) || !array_is_list($data)) {
+            return null;
+        }
+
+        $models = [];
+        foreach ($data as $entry) {
+            $id = $entry['id'] ?? null;
+            if (is_string($id) && LlmProviderCapabilities::isOpenaiPdfModel($id)) {
+                $models[$id] = true;
+            }
+        }
+        $ids = array_keys($models);
+        rsort($ids, SORT_NATURAL);
+        return $ids;
+    }
+
+    /** Uložený klíč se smí posílat jen na HTTPS endpointy OpenAI. */
+    public static function baseUrlError(string $baseUrl): ?string
+    {
+        $baseUrl = trim($baseUrl);
+        if ($baseUrl === '') {
+            return null;
+        }
+        if (strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME)) !== 'https') {
+            return 'openai_base_url musí používat https.';
+        }
+        $host = strtolower((string) parse_url($baseUrl, PHP_URL_HOST));
+        if (!in_array($host, ['api.openai.com', 'eu.api.openai.com'], true)) {
+            return 'openai_base_url musí směřovat na api.openai.com nebo eu.api.openai.com.';
+        }
+        return null;
     }
 
     public function testConnection(int $supplierId): array

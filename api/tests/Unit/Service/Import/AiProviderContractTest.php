@@ -336,6 +336,62 @@ final class AiProviderContractTest extends TestCase
         self::assertNull($gemini->strongerModel('gemini-nesmysl-x'));
     }
 
+    public function testOpenAiModelDiscoveryReturnsOnlyPdfModelFamiliesFromProject(): void
+    {
+        $ids = ['gpt-4.1-mini', 'gpt-6.2-sol', 'gpt-6.2-sol', 'gpt-6.2-sol-2026-11-12',
+            'gpt-5-mini', 'gpt-5.4-codex', 'gpt-4o-realtime-preview', 'gpt-image-1',
+            'text-embedding-3-small', 'whisper-1'];
+        $body = ['data' => array_map(static fn (string $id) => ['id' => $id], $ids)];
+        $sent = [];
+        $handler = HandlerStack::create(new MockHandler([new Response(200, [], (string) json_encode($body))]));
+        $handler->push(Middleware::history($sent));
+        $client = new OpenAiClient(
+            $this->createStub(Connection::class),
+            $this->createStub(SecretEncryption::class),
+            new NullLogger(),
+            new Client(['handler' => $handler]),
+        );
+
+        $models = $client->listModels('sk-test-fixture', 'https://eu.api.openai.com/');
+        self::assertEqualsCanonicalizing(['gpt-4.1-mini', 'gpt-5-mini', 'gpt-6.2-sol', 'gpt-6.2-sol-2026-11-12'], $models);
+        self::assertCount(1, $sent);
+        $request = $sent[0]['request'];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('https://eu.api.openai.com/v1/models', (string) $request->getUri());
+        self::assertSame('Bearer sk-test-fixture', $request->getHeaderLine('Authorization'));
+        self::assertSame('', (string) $request->getBody());
+    }
+
+    public function testSavedOpenAiModelIsAvailableInExtractionWithoutDiscovery(): void
+    {
+        $caps = LlmProviderCapabilities::openai(null, 'gpt-6.2-sol');
+        self::assertSame('gpt-6.2-sol', $caps->defaultModel);
+        self::assertContains('gpt-6.2-sol', $caps->models);
+        self::assertNotContains('gpt-6.2-sol', LlmProviderCapabilities::openai(null, null)->models);
+        self::assertSame('gpt-5.6-sol', $caps->strongerModel('gpt-5.4-mini'));
+    }
+
+    public function testOpenAiModelDiscoveryStopsAtRedirect(): void
+    {
+        $sent = [];
+        $handler = HandlerStack::create(new MockHandler([
+            new Response(302, ['Location' => 'https://example.test/v1/models']),
+        ]));
+        $handler->push(Middleware::history($sent));
+        $client = new OpenAiClient(
+            $this->createStub(Connection::class),
+            $this->createStub(SecretEncryption::class),
+            new NullLogger(),
+            new Client(['handler' => $handler]),
+        );
+
+        self::assertNull($client->listModels('sk-test-fixture', 'https://example.test'));
+        self::assertSame([], $sent);
+        self::assertNull($client->listModels('sk-test-fixture', ''));
+        self::assertCount(1, $sent);
+        self::assertSame('https://api.openai.com/v1/models', (string) $sent[0]['request']->getUri());
+    }
+
     /**
      * Volba rychle/přesně se překládá na provider-nativní knob a hlavně se NEPOSÍLÁ
      * modelům, které ho neumí — tam je to tvrdá 400, ne degradace. Matice ověřena
@@ -513,7 +569,7 @@ final class AiProviderContractTest extends TestCase
                 $s->method('execute')->willReturn(true);
             }
             if (str_contains($sql, 'openai_api_key_enc')) {
-                $s->method('fetch')->willReturn(['openai_api_key_enc' => 'ENC', 'openai_default_model' => 'gpt-4o-mini', 'openai_base_url' => null]);
+                $s->method('fetch')->willReturn(['openai_api_key_enc' => 'ENC', 'openai_default_model' => 'gpt-6.2-sol', 'openai_base_url' => null]);
             } elseif (str_contains($sql, 'company_name')) {
                 $s->method('fetch')->willReturn(false); // tenantContext → prázdný blok
             } else {
@@ -534,6 +590,7 @@ final class AiProviderContractTest extends TestCase
         self::assertSame($golden, $result['data'], 'data normalizovaná dle golden schema');
         self::assertSame(1, $updateCount, 'čítač se smí inkrementovat právě jednou (žádné dvojí počítání)');
         $payload = json_decode((string) $history[0]['request']->getBody(), true);
+        self::assertSame('gpt-6.2-sol', $payload['model']);
         self::assertSame(16384, $payload['max_completion_tokens']);
         self::assertArrayNotHasKey('max_tokens', $payload);
         self::assertTrue($payload['response_format']['json_schema']['strict']);

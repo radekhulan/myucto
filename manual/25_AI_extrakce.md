@@ -51,6 +51,9 @@ přihlašovací údaje nastavíte podle [§ 25.3](#253-krok-za-krokem-nastavit-p
 **Jak poznáte, že je hotovo:** u poskytovatele je štítek **aktivní** a nahoře zůstane zelená značka s jeho jménem
 (případně štítek **EU data residency**). Zvolený poskytovatel bez klíče má místo toho štítek **bez klíče** a extrakce zatím neběží.
 
+U již nastaveného **OpenAI** klikněte vedle pole **Model** na **Načíst modely z OpenAI**. Nabídka se načte pro projekt
+uloženého klíče. Zvolte model a klikněte na **Uložit a otestovat**. Zvolený model se použije jako výchozí při vytěžování.
+
 > [!TIP]
 > Nejste si jistí, kterého poskytovatele zvolit? Anthropic Claude je výchozí a nejodladěnější volba (nativní čtení PDF, nejlepší
 > přesnost na komplexních fakturách). Azure OpenAI zvolte, pokud firma potřebuje EU rezidenci dat se smluvním zajištěním nebo už
@@ -406,10 +409,9 @@ vybere podle toho, co už používá, kde chce mít API klíč a jaké má poža
   vícesloupcových a naskenovaných fakturách.
 - **Azure OpenAI** - vlastní Azure resource (`endpoint`, `deployment`, `api_version`), hodí se, pokud firma už má Azure OpenAI
   smlouvu nebo potřebuje EU rezidenci dat se smluvním zajištěním od Microsoftu.
-- **OpenAI** (přímé API) - BYOK klíč z platformy OpenAI, výchozí model `gpt-5.4-mini`, dále `gpt-5.6-sol`, `gpt-5.6-terra`,
-  `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.1`, `gpt-5`, `gpt-4.1`, `gpt-4o` a jejich `mini` a `nano` varianty. Modely řady
-  `gpt-5` interně „přemýšlejí", bývají proto výrazně pomalejší než ostatní brány (u běžné faktury desítky sekund místo
-  jednotek), přesnost je srovnatelná.
+- **OpenAI** (přímé API) - vlastní klíč z platformy OpenAI, výchozí model `gpt-5.4-mini`. Tlačítko **Načíst modely z OpenAI**
+  nabídne modely pro vytěžování dostupné v projektu uloženého klíče. Použije uloženou adresu OpenAI včetně evropské, pokud
+  je nastavená. Klíč potřebuje oprávnění číst seznam modelů. Při chybě načítání zůstane k dispozici původní nabídka.
 - **Google Gemini** - BYOK klíč z Google AI Studio, výchozí model `gemini-3.7-flash`, dostupné jsou také `gemini-3.6-flash`,
   `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview` a `gemini-2.5-pro`.
 - **Ollama (lokální)** - open-source model spuštěný na vlastním stroji, bez API klíče (komunikace přes lokální nebo privátní
@@ -422,9 +424,9 @@ Podrobnosti k formuláři:
 
 - Zelená značka u tlačítka poskytovatele znamená, že poskytovatel už má uložené přihlašovací údaje. Štítek **aktivní** nese
   poskytovatel, přes kterého extrakce opravdu běží.
-- **Anthropic, OpenAI, Gemini**: jen pole **API klíč** (BYOK, jen pro zápis, po uložení se nikdy nezobrazí zpátky, jen
-  placeholder „uloženo") a volitelně **Model** (výběr z povoleného whitelistu daného poskytovatele, prázdné znamená výchozí
-  model poskytovatele). **Azure OpenAI** navíc **Azure endpoint**, **Deployment** (název nasazeného modelu v Azure resource)
+- **Anthropic, OpenAI, Gemini**: pole **API klíč** (po uložení je vidět pouze stav „uloženo") a volitelně **Model**.
+  **OpenAI** má také nepovinné pole **Base URL** pro evropský endpoint. **Azure OpenAI** vyžaduje **Azure endpoint**,
+  **Deployment** (název nasazeného modelu v Azure resource)
   a **API verze**. **Anthropic** má navíc nepovinné pole **ID workspace** (začíná `wrkspc_`), které vyplníte jen u klíče
   nepřiřazeného k žádnému workspace; Anthropic takový klíč bez ID odmítne s hláškou, že požadavek musí obsahovat
   `anthropic-workspace-id`.

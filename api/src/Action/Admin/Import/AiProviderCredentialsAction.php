@@ -36,6 +36,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/admin/imports/ai/credentials       — status všech providerů ({@see LlmProviderRegistry::PROVIDERS})
  *   PUT    /api/admin/imports/ai/credentials        — set klíče + testConnection (body.provider)
  *   DELETE /api/admin/imports/ai/credentials?provider=…  — remove klíč providera
+ *   POST   /api/admin/imports/ai/openai/models            — modely projektu uloženého klíče
  *   POST   /api/admin/imports/ai/ollama/models {base_url}  — modely v Ollamě
  *
  * Secrety jdou VÝHRADNĚ přes {@see \MyInvoice\Service\Auth\SecretEncryption} do
@@ -212,9 +213,9 @@ final class AiProviderCredentialsAction
         // Descriptor pro validaci (bez DB — postaven z body).
         $caps = $this->capabilitiesFromBody($provider, $body);
 
-        // Model whitelist validace (Azure model = deployment, whitelist nemá).
+        // OpenAI může použít model z katalogu projektu, Azure používá název deploymentu.
         $model = trim((string) ($body['default_model'] ?? ''));
-        if ($provider !== 'azure_openai' && $model !== '' && !in_array($model, $caps->models, true)) {
+        if (!in_array($provider, ['azure_openai', 'openai'], true) && $model !== '' && !in_array($model, $caps->models, true)) {
             return Json::error($response, 'validation_failed', 'Neplatný model.', 400);
         }
 
@@ -242,6 +243,26 @@ final class AiProviderCredentialsAction
         }
 
         $existing = $this->clientFor($provider)->getCredentials($supplierId);
+        if ($apiKey !== '') {
+            $keyErr = $caps->validateKey($apiKey);
+            if ($keyErr !== null) {
+                return Json::error($response, 'validation_failed', $keyErr, 400);
+            }
+        }
+        if ($provider === 'openai' && ($existing !== null || $apiKey !== '')) {
+            // Při výměně klíče odpovídá chybějící base_url výchozí adrese, stejně jako při uložení.
+            $baseUrl = array_key_exists('base_url', $body)
+                ? trim((string) $body['base_url'])
+                : ($apiKey === '' ? trim($existing['base_url']) : '');
+            $projectModel = $apiKey === '' && !array_key_exists('default_model', $body) ? $existing['default_model'] : $model;
+            $error = OpenAiClient::baseUrlError($baseUrl);
+            if ($error === null && $projectModel !== '' && !in_array($projectModel, $caps->models, true)) {
+                $error = $this->validateOpenaiProjectModel($supplierId, $projectModel, $baseUrl, $apiKey, $existing);
+            }
+            if ($error !== null) {
+                return Json::error($response, 'validation_failed', $error, 400);
+            }
+        }
 
         // Config-only update (klíč zůstává) — nemění secret, jen non-secret sloupce.
         if ($apiKey === '' && $existing !== null) {
@@ -263,11 +284,6 @@ final class AiProviderCredentialsAction
         if ($apiKey === '') {
             return Json::error($response, 'validation_failed', 'api_key je povinné.', 400);
         }
-        // Per-provider validace klíče (§3.8).
-        $keyErr = $caps->validateKey($apiKey);
-        if ($keyErr !== null) {
-            return Json::error($response, 'validation_failed', $keyErr, 400);
-        }
         // Azure vyžaduje endpoint + deployment + api-version.
         if ($provider === 'azure_openai') {
             $endpoint = trim((string) ($body['endpoint'] ?? ''));
@@ -280,15 +296,6 @@ final class AiProviderCredentialsAction
                 return Json::error($response, 'validation_failed', 'deployment je povinné.', 400);
             }
         }
-        // OpenAI base_url: exact-host allowlist (SSRF guard) — jinak by admin-set URL
-        // dostala dešifrovaný Bearer klíč + PDF faktury server-side (M2). Prázdné = default.
-        if ($provider === 'openai') {
-            $baseErr = self::validateOpenaiBaseUrl((string) ($body['base_url'] ?? ''));
-            if ($baseErr !== null) {
-                return Json::error($response, 'validation_failed', $baseErr, 400);
-            }
-        }
-
         // Persist secret přes dedikovaný setCredentials (do *_enc; NIKDY přes SettingsAction).
         $this->persistCredentials($provider, $supplierId, $apiKey, $body);
         $this->logger->log('import.ai_credentials_set', $userId, 'supplier', $supplierId, ['provider' => $provider], $ip, $ua);
@@ -387,6 +394,51 @@ final class AiProviderCredentialsAction
             'test_error' => ($result['ok'] ?? false) ? null : ($result['error'] ?? null),
             'model'      => $result['model'] ?? null,
         ]);
+    }
+
+    public function openaiModels(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        $supplierId = SupplierGuard::currentId($request);
+        $creds = $this->openai->getCredentials($supplierId);
+        if ($creds === null) {
+            return Json::error($response, 'provider_not_configured', 'OpenAI API klíč není uložený.', 400);
+        }
+        $region = LlmProviderCapabilities::openai($creds['base_url'], null)->dataRegion;
+        if ($this->residencyConflict('openai', $supplierId, $region)) {
+            return Json::error($response, 'residency_conflict', 'OpenAI endpoint nesplňuje požadavek na EU rezidenci.', 409);
+        }
+        $models = $this->openai->listModels($creds['api_key'], $creds['base_url']);
+        if ($models === null) {
+            return Json::error($response, 'openai_model_list_failed', 'Seznam modelů z OpenAI se nepodařilo načíst.', 502);
+        }
+        return Json::ok($response, ['models' => $models]);
+    }
+
+    /** @param array{api_key:string, base_url:string, default_model:string}|null $existing */
+    private function validateOpenaiProjectModel(
+        int $supplierId,
+        string $model,
+        string $baseUrl,
+        #[\SensitiveParameter] string $apiKey,
+        #[\SensitiveParameter] ?array $existing,
+    ): ?string
+    {
+        if (!LlmProviderCapabilities::isOpenaiPdfModel($model)) {
+            return 'Neplatný model.';
+        }
+        if ($apiKey === '' && $model === $existing['default_model'] && $baseUrl === trim($existing['base_url'])) {
+            return null;
+        }
+        $region = LlmProviderCapabilities::openai($baseUrl, null)->dataRegion;
+        if ($this->residencyConflict('openai', $supplierId, $region)) {
+            return 'OpenAI endpoint nesplňuje požadavek na EU rezidenci.';
+        }
+        $models = $this->openai->listModels($apiKey !== '' ? $apiKey : $existing['api_key'], $baseUrl);
+        if ($models === null) {
+            return 'Seznam modelů z OpenAI se nepodařilo načíst.';
+        }
+        return in_array($model, $models, true) ? null : 'Model není dostupný v projektu OpenAI.';
     }
 
     /**
@@ -512,7 +564,7 @@ final class AiProviderCredentialsAction
     {
         return match ($provider) {
             'anthropic'    => LlmProviderCapabilities::anthropic(),
-            'openai'       => LlmProviderCapabilities::openai((string) ($body['base_url'] ?? ''), (string) ($body['default_model'] ?? '')),
+            'openai'       => LlmProviderCapabilities::openai(null, null),
             'gemini'       => LlmProviderCapabilities::gemini((string) ($body['default_model'] ?? '')),
             'ollama'       => LlmProviderCapabilities::ollama((string) ($body['default_model'] ?? ''), 'us'),
             'azure_openai' => LlmProviderCapabilities::azureOpenai((string) ($body['endpoint'] ?? ''), (string) ($body['deployment'] ?? ''), 'eu'),
@@ -540,8 +592,8 @@ final class AiProviderCredentialsAction
             case 'openai':
                 $this->openai->setCredentials(
                     $supplierId, $apiKey,
-                    (string) ($body['default_model'] ?? ''),
-                    (string) ($body['base_url'] ?? ''),
+                    trim((string) ($body['default_model'] ?? '')),
+                    trim((string) ($body['base_url'] ?? '')),
                 );
                 break;
             case 'gemini':
@@ -579,10 +631,6 @@ final class AiProviderCredentialsAction
                 }
                 if (array_key_exists('base_url', $body)) {
                     $baseUrl = trim((string) $body['base_url']);
-                    $baseErr = self::validateOpenaiBaseUrl($baseUrl);
-                    if ($baseErr !== null) {
-                        return $baseErr;
-                    }
                     $sets[] = 'openai_base_url = ?';
                     $params[] = $baseUrl !== '' ? $baseUrl : null;
                 }
@@ -632,11 +680,6 @@ final class AiProviderCredentialsAction
     }
 
     /**
-     * SSRF/residency guard pro OpenAI base_url (M2): povolen jen https na EXACT host
-     * `api.openai.com` / `eu.api.openai.com`. Prázdné = default (api.openai.com). Model
-     * whitelist je fixní, legitimní custom-host neexistuje.
-     */
-    /**
      * Azure endpoint host allowlist (SSRF guard + residency, MEDIUM ze security auditu):
      * bez allowlistu by admin-set URL dostala dešifrovaný klíč + PDF faktury na
      * libovolný host, a `azureRegion` by rezidenci odvozovala z crafted hostname
@@ -651,34 +694,17 @@ final class AiProviderCredentialsAction
         return AzureOpenAiClient::endpointError($endpoint);
     }
 
-    private static function validateOpenaiBaseUrl(string $baseUrl): ?string
-    {
-        $baseUrl = trim($baseUrl);
-        if ($baseUrl === '') {
-            return null; // default endpoint
-        }
-        $scheme = strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
-        $host   = strtolower((string) parse_url($baseUrl, PHP_URL_HOST));
-        if ($scheme !== 'https') {
-            return 'openai_base_url musí používat https.';
-        }
-        if (!in_array($host, ['api.openai.com', 'eu.api.openai.com'], true)) {
-            return 'openai_base_url musí směřovat na api.openai.com nebo eu.api.openai.com.';
-        }
-        return null;
-    }
-
     /**
      * L1: vrací true, když tenant vyžaduje EU rezidenci a testovaný provider se
      * (dle reálného regionu z capabilities) rozpadá na non-EU → test se nesmí spustit.
      */
-    private function residencyConflict(string $provider, int $supplierId): bool
+    private function residencyConflict(string $provider, int $supplierId, ?string $region = null): bool
     {
         if (!$this->selection($supplierId)['ai_eu_residency_required']) {
             return false;
         }
         try {
-            $region = $this->clientFor($provider)->capabilities($supplierId)->dataRegion;
+            $region ??= $this->clientFor($provider)->capabilities($supplierId)->dataRegion;
             (new ResidencyPolicy())->assertAllowed($provider, $region, true);
             return false;
         } catch (ResidencyViolationException) {
