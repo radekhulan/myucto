@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
@@ -796,6 +797,7 @@ final class RecurringInvoiceGenerator
                 throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
             $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
+            InvoiceWebhookEvents::publish($pdo, $invoiceId, InvoiceWebhookEvents::ISSUED);
             // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
             $this->payments->recompute($invoiceId, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $invoiceId, $issuerId);

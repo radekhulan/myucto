@@ -9,7 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 /**
  * Plný zápis API tokenem (příznak `system_write`, issue #371) povoluje provozovatel
  * instalace přes `api.allow_system_write_tokens` v cfg.php (ENV
- * MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS). Výchozí stav je VYPNUTO.
+ * MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS). Bez nastavení je funkce povolená.
  *
  * Vypnutí platí okamžitě i pro už vydané tokeny: token s příznakem se pak chová
  * jako běžný token ({@see \MyInvoice\Middleware\AuthMiddleware}), takže provozovatel
@@ -22,7 +22,7 @@ final class SystemWriteTokenFeature
     public function isEnabled(): bool
     {
         return filter_var(
-            $this->config->get('api.allow_system_write_tokens', false),
+            $this->config->get('api.allow_system_write_tokens', true),
             FILTER_VALIDATE_BOOL,
             FILTER_NULL_ON_FAILURE,
         ) === true;

@@ -131,7 +131,9 @@ info:
     agendou SVJ (`/property/**`). Funguje na `/api/v1/...` i na stejných cestách bez
     verze. Platí jen oprávnění uživatele tokenu a firma, na kterou je token vázaný
     (`403 forbidden_permission`). Zda příznak platí, vrací `GET /auth/api-me`
-    v `token.system_write`.
+    v `token.system_write`. Pokud `api.allow_system_write_tokens` chybí, instalace
+    plný zápis povoluje. Výslovné `false` přepne i už vydané tokeny s příznakem
+    do běžného režimu.
 
     Operace, které běžný token nezavolá a token s plným zápisem ano, jsou ve spec
     zdokumentované s odpovědí 403 (`token_write_forbidden` u zápisu,
@@ -344,6 +346,29 @@ tags:
       Přiznání k dani z příjmů (DPFO/DPPO, Epic DP) — vstupy, lifecycle
       koncept→finalizace→reopen, EPO XML, přehledy pro OSSZ/zdravotní
       pojišťovnu a zálohy na daň (§38a) vč. rozhodnutí FÚ (§174).
+
+webhooks:
+  myUctoEvent:
+    post:
+      summary: Odchozí událost MyÚčta
+      operationId: receiveMyUctoWebhook
+      description: |
+        MyÚčto pošle událost jako POST na firemní HTTPS cíl. Vyžaduje placenou licenci.
+        HMAC-SHA-256 podle Standard Webhooks pokrývá přesné bajty id.timestamp.body.
+        Opakované doručení zachovává ID i tělo. Pořadí doručení není zaručeno.
+      security: []
+      parameters:
+        - { name: Webhook-Id, in: header, required: true, schema: { type: string } }
+        - { name: Webhook-Timestamp, in: header, required: true, schema: { type: integer }, description: Čas pokusu v sekundách Unix UTC }
+        - { name: Webhook-Signature, in: header, required: true, schema: { type: string }, description: Podpis v1 a Base64 HMAC oddělené čárkou }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OutgoingWebhookEvent' }
+      responses:
+        '2XX': { description: Příjemce událost přijal nebo již eviduje její ID. }
+        default: { description: Neúspěch doručení. MyÚčto může událost doručit znovu. }
 
 paths:
   /api/v1/accounting/catalog/context:
@@ -6947,6 +6972,7 @@ paths:
                   url: { type: string, example: "https://faktury.example.cz/invoice/a1b2…" }
                   token: { type: string, description: "48 hex znaků" }
                   public_viewed_at: { type: [string, "null"], format: date-time }
+                  published_at: { type: [string, "null"], format: date-time, description: Čas výslovného zveřejnění. }
         '409':
           description: Faktura je draft — web faktura je dostupná až po vystavení
           content:
@@ -6979,12 +7005,42 @@ paths:
                   url: { type: string }
                   token: { type: string }
                   public_viewed_at: { type: [string, "null"], example: null }
+                  published_at: { type: [string, "null"], format: date-time }
         '409':
           description: Faktura je draft
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '404': { description: "Faktura nenalezena, nebo je web faktura na instalaci vypnutá (`public_links_disabled`)" }
+
+  /api/v1/invoices/{id}/public-link/publish:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [InvoiceComms]
+      summary: Web faktura - zaznamená výslovné zveřejnění
+      description: |
+        Vytvoří nebo použije trvalý veřejný odkaz. První zveřejnění zařadí událost
+        invoice.published pro odpovídající odběry. Opakované volání vrátí stávající údaje.
+      responses:
+        '200':
+          description: Web faktura je zveřejněná.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, token, public_viewed_at, published_at]
+                properties:
+                  url: { type: string }
+                  token: { type: string }
+                  public_viewed_at: { type: [string, "null"], format: date-time }
+                  published_at: { type: string, format: date-time }
+        '404': { description: Faktura nenalezena nebo je web faktura vypnutá. }
+        '409': { description: Koncept ani stornovanou fakturu nelze zveřejnit. }
 
   /api/v1/invoices/{id}/receipt-link:
     parameters:
@@ -49001,6 +49057,28 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/CatalogChange' }
+    OutgoingWebhookEvent:
+      type: object
+      required: [type, version, event_id, occurred_at, supplier_id]
+      properties:
+        type:
+          type: string
+          enum: [invoice.issued, invoice.paid, invoice.payment_reversed, invoice.published, invoice.cancelled, purchase_invoice.received, purchase_invoice.approved, purchase_invoice.cancelled, stock_document.posted, stock_document.reversed, sales_order.confirmed, webhook.test]
+        version: { type: integer, const: 1 }
+        event_id: { type: string, description: Stabilní ID shodné s hlavičkou Webhook-Id. }
+        occurred_at: { type: string, format: date-time }
+        supplier_id: { type: integer }
+        invoice_id: { type: integer, description: ID vydaného dokladu pro události invoice.*. }
+        invoice_type: { type: string, description: Typ vydaného dokladu pro události invoice.*. }
+        recurring_template_id: { type: [integer, "null"], description: Šablona původu vydaného dokladu. }
+        reason: { type: string, enum: [payment, covered_by_advance], description: Způsob vyrovnání u událostí úhrady a jejího vrácení. }
+        purchase_invoice_id: { type: integer, description: ID přijatého dokladu pro události purchase_invoice.*. }
+        stock_document_id: { type: integer, description: ID původního skladového dokladu. }
+        document_type: { type: string, description: Typ skladového dokladu. }
+        warehouse_id: { type: integer, description: Sklad původního dokladu. }
+        reversal_stock_document_id: { type: integer, description: ID protidokladu při stornu skladového dokladu. }
+        sales_order_id: { type: integer, description: ID potvrzené prodejní objednávky. }
+        test: { type: boolean, const: true, description: Přítomno pouze u syntetické události webhook.test. }
     IntegrationWebhookEvent:
       type: object
       description: |
@@ -55222,6 +55300,7 @@ components:
           enum: [none, requested, approved, rejected, null]
         public_token: { type: [string, "null"], description: "Token trvalého veřejného odkazu „web faktura\" (/invoice/{token}); null dokud odkaz nevznikl. Viz POST /invoices/{id}/public-link." }
         public_viewed_at: { type: [string, "null"], format: date-time, description: "Poslední zobrazení web faktury klientem (anonymní přístup); null = klient ji zatím neotevřel." }
+        public_published_at: { type: [string, "null"], format: date-time, readOnly: true, description: Čas výslovného zveřejnění web faktury. }
         items:
           type: array
           items: { $ref: '#/components/schemas/InvoiceItem' }

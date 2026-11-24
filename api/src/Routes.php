@@ -925,6 +925,12 @@ final class Routes
         $app->delete ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'delete']);
         $app->post   ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/archive',  [PaymentOrderAction::class, 'archive']);
 
+        $app->map(['GET', 'POST'], '/api/admin/webhooks', \MyInvoice\Action\Admin\WebhookAction::class);
+        $app->map(['PATCH', 'DELETE'], '/api/admin/webhooks/{id:[0-9]+}', \MyInvoice\Action\Admin\WebhookAction::class);
+        $app->post('/api/admin/webhooks/{id:[0-9]+}/{operation:rotate|test}', \MyInvoice\Action\Admin\WebhookAction::class);
+        $app->get('/api/admin/webhooks/{id:[0-9]+}/deliveries', \MyInvoice\Action\Admin\WebhookAction::class);
+        $app->post('/api/admin/webhooks/{id:[0-9]+}/deliveries/{deliveryId:[0-9]+}/retry', \MyInvoice\Action\Admin\WebhookAction::class);
+
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);
         $app->post   ('/api/recurring',                       [RecurringTemplateAction::class, 'create']);
@@ -957,6 +963,7 @@ final class Routes
         // Web faktura — správa trvalého veřejného odkazu (authenticated)
         $app->post   ('/api/invoices/{id:[0-9]+}/public-link',            [PublicLinkAction::class, 'ensure']);
         $app->post   ('/api/invoices/{id:[0-9]+}/public-link/regenerate', [PublicLinkAction::class, 'regenerate']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/public-link/publish',    [PublicLinkAction::class, 'publish']);
 
         // Veřejná účtenka zákazníka /r/{token} — vytvoření a odvolání odkazu (authenticated)
         $app->post   ('/api/invoices/{id:[0-9]+}/receipt-link',           [\MyInvoice\Action\Invoice\ReceiptLinkAction::class, 'create']);

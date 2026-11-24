@@ -254,6 +254,16 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                'script' => 'cron-webhooks',
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => false,
+                'requires_usage' => CronJobGate::USAGE_WEBHOOK_ENDPOINTS,
+            ],
+            [
                 'script' => 'cron-send-reminders',
                 'recommended' => 'weekdays_0900',
                 'linux_cron' => '0 9 * * 1-5',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -402,6 +403,10 @@ final class IssueInvoiceAction
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
             $this->varsymbol->recordSeries($id, $invoice, $usedSeriesId);
+            InvoiceWebhookEvents::publish($pdo, $id, InvoiceWebhookEvents::ISSUED);
+            if ($autoPaid && $invoice['invoice_type'] === 'invoice') {
+                InvoiceWebhookEvents::publish($pdo, $id, InvoiceWebhookEvents::PAID, InvoiceWebhookEvents::ADVANCE);
+            }
             // Koncept může mít úhrady už před potvrzením. Výstupy obnoví běžná větev po commitu.
             if (!$autoPaid) $this->payments->recompute($id, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $id, isset($user['id']) ? (int) $user['id'] : null);

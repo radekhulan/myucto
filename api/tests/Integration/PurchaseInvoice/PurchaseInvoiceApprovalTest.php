@@ -157,6 +157,11 @@ final class PurchaseInvoiceApprovalTest extends TestCase
 
     public function testRequiredApprovalKeepsDraftAndApprovalReceives(): void
     {
+        $webhooks = $this->c->get(\MyInvoice\Service\Integration\WebhookEndpoints::class);
+        $endpoint = $webhooks->create($this->supplierId, [
+            'name' => 'Schválení dokladu', 'url' => 'https://receiver.example.test/events',
+            'event_types' => ['purchase_invoice.received', 'purchase_invoice.approved'],
+        ]);
         $this->db->pdo()->prepare('UPDATE dimension_types SET approval_threshold = 5000 WHERE id = ?')->execute([$this->typeId]);
         $id = $this->createInvoice([6000.0], header: 'A');
 
@@ -171,6 +176,7 @@ final class PurchaseInvoiceApprovalTest extends TestCase
         self::assertSame($this->approverA, $body['approvals'][0]['approver']['id']);
         self::assertSame('draft', $this->invoiceStatus($id));
         self::assertCount(1, $this->notifier->sent);
+        self::assertSame([], $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX));
 
         [$status, $decided] = $this->decide($this->approverA, $body['approvals'][0]['id'], 'approve');
         self::assertSame(200, $status, json_encode($decided, JSON_UNESCAPED_UNICODE));
@@ -180,6 +186,8 @@ final class PurchaseInvoiceApprovalTest extends TestCase
         self::assertNotEmpty($this->varsymbol($id), 'Přijetí po schválení přiděluje interní číslo jako ruční přechod.');
         self::assertGreaterThan(0, $this->auditCount($id, 'purchase_invoice.approval_requested'));
         self::assertGreaterThan(0, $this->auditCount($id, 'purchase_invoice.approval_approved'));
+        $events = $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX);
+        self::assertSame(['purchase_invoice.received', 'purchase_invoice.approved'], array_column($events, 'event_type'));
     }
 
     public function testFullyPaidDraftStaysPendingUntilApprovalThenBecomesPaid(): void

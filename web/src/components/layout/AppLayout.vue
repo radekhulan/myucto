@@ -58,7 +58,7 @@ import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/com
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { manualChapter, manualChapterPath } from '@/config/manualChapters'
+import { manualHelpHref } from '@/config/manualChapters'
 import {
   canFitCompactNavigation,
   NAV_COMPACT_SIDE,
@@ -1538,18 +1538,11 @@ const tabletNavSections = computed(() => orderedNav.value.map(section => ({
   icon: sectionIcon(section),
 })))
 
-const manualHref = computed(() => {
-  const chapter = manualChapter(manualChapterPath(activeRoute.value.path, activeRoute.value.query.tab))
-  const path = chapter ? `/manual?ch=${chapter}` : '/manual'
-  const canonicalBaseUrl = auth.domainContext?.canonical_base_url
-  if (!auth.domainContext?.locked || !canonicalBaseUrl) return path
-
-  try {
-    return `${new URL(canonicalBaseUrl).origin}${path}`
-  } catch {
-    return path
-  }
-})
+const manualHref = computed(() => manualHelpHref(
+  activeRoute.value.path,
+  activeRoute.value.query.tab,
+  auth.domainContext?.locked ? auth.domainContext.canonical_base_url : null,
+))
 
 /**
  * „Pokrývá" URL (path + případná query) současnou route?

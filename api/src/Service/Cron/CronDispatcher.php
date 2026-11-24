@@ -47,6 +47,7 @@ final class CronDispatcher
      */
     private const WORK_GATES = [
         'cron-epo-status' => [CronPreflight::class, 'hasEpoWork'],
+        'cron-webhooks' => [CronPreflight::class, 'hasWebhookDeliveryWork'],
         'cron-ai-worker'  => [CronPreflight::class, 'hasAiWork'],
         'cron-payroll-document-worker' => [CronPreflight::class, 'hasPayrollDocumentWork'],
         'cron-payroll-period-export-worker' => [CronPreflight::class, 'hasPayrollPeriodExportWork'],

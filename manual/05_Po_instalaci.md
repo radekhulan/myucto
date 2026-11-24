@@ -202,6 +202,7 @@ viz [§ 95.11](95_Multi_supplier.md#9511-krok-za-krokem-smazat-firmu)); auditní
 | `cron-bank-connections` | každých 15 min; aktivní API napojení bank, jednotlivé banky si hlídají vlastní odstup |
 | `cron-logbook-odometer-source` | 1× denně 03:30; jen při napojeném zdroji kilometrů vozidla |
 | `cron-payment-thanks` | každou minutu; fronta poděkování za přijaté platby |
+| `cron-webhooks` | každou minutu; doručení [odchozích webhooků](96_Nastaveni.md#961614-odchozi-webhooky) |
 | `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po-Pá |
 | `cron-scheduled-pohoda-export` | 1× denně 06:30; jen se zapnutou volbou `export.scheduled_pohoda` (automatický export do Pohody), jinak skončí bez práce |
@@ -323,6 +324,30 @@ ně není co dělat, jejich poslední běh proto legitimně stárne. Že plánov
 funguje, dokládá záznam o běhu samotného `cron-dispatch`, a takové úloze se
 místo varování ukáže neutrální **Nemá práci**. Jakmile dispatcher sám zestárne
 nebo začne selhávat, vrátí se u nich normální varování.
+
+### 5.9.9 Odchozí webhooky na vlastním serveru
+
+Provozovatel může nastavit politiku odesílání v `cfg.php`. V režimu `public`
+(výchozí) jsou přípustné veřejné HTTPS cíle. Režim `allowlist` navíc omezuje
+cíle na přesné názvy hostitelů z `webhooks.allowed_hosts`. Uvádějte názvy
+bez schématu, cest, portů a zástupných znaků. Privátní adresy se nepovolují
+v žádném režimu. Hodnota `disabled` pozastaví odesílání v celé instalaci.
+
+```php
+'webhooks' => [
+    'mode' => 'allowlist',
+    'allowed_hosts' => ['integrace.example.com'],
+],
+```
+
+Stejné volby lze předat v prostředí aplikace jako `MYINVOICE_WEBHOOKS_MODE`
+a `MYINVOICE_WEBHOOKS_ALLOWED_HOSTS`. Ve druhé proměnné oddělte hostitele
+čárkou. Nastavte je pro web i proces, který spouští plánované úlohy.
+
+Docker s vestavěným plánováním a režim **Jeden dispatcher** mají doručování
+v rozvrhu. V režimu jednotlivých úloh naplánujte `cmd/cron-webhooks.sh`
+nebo `cmd/cron-webhooks.cmd` každou minutu. Stav úlohy zkontrolujte
+v **Systém → Plánované úlohy** a jednotlivé pokusy v konfiguraci webhooku.
 
 ## 5.10 Související kapitoly
 

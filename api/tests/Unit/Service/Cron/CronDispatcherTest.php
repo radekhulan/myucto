@@ -19,12 +19,12 @@ use PHPUnit\Framework\TestCase;
  */
 final class CronDispatcherTest extends TestCase
 {
-    private PDO $pdo;
+    private \Pdo\Sqlite $pdo;
     private RecordingLauncher $launcher;
 
     protected function setUp(): void
     {
-        $this->pdo = new PDO('sqlite::memory:');
+        $this->pdo = new \Pdo\Sqlite('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->exec(
             'CREATE TABLE cron_dispatch_claims (
@@ -54,6 +54,7 @@ final class CronDispatcherTest extends TestCase
         self::assertSame(
             [
                 'cron-payment-thanks',
+                'cron-webhooks',
                 'cron-eet-dispatch',
                 'cron-epo-status',
                 'cron-payroll-document-worker',
@@ -63,6 +64,28 @@ final class CronDispatcherTest extends TestCase
             $report['due'],
         );
         self::assertSame([], $report['errors']);
+    }
+
+    public function testWebhooksDispatchOnlyForDueWorkOfAnEnabledEndpoint(): void
+    {
+        $this->pdo->exec('CREATE TABLE webhook_endpoints (id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, enabled INTEGER NOT NULL)');
+        $this->pdo->exec('CREATE TABLE webhook_deliveries (endpoint_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, status TEXT NOT NULL, available_at TEXT NOT NULL)');
+        $this->pdo->exec("INSERT INTO webhook_endpoints VALUES (1, 1, 1), (2, 1, 0)");
+        $this->pdo->exec("INSERT INTO webhook_deliveries VALUES
+            (1, 2, 'pending', '2000-01-01 00:00:00'),
+            (2, 1, 'pending', '2000-01-01 00:00:00'),
+            (1, 1, 'pending', '2999-01-01 00:00:00'),
+            (1, 1, 'processing', '2999-01-01 00:00:00'),
+            (1, 1, 'delivered', '2000-01-01 00:00:00')");
+        $this->pdo->createFunction('NOW', static fn (): string => gmdate('Y-m-d H:i:s'), 1);
+
+        $tick = new DateTimeImmutable('2026-08-03 13:37:00');
+        $report = $this->dispatcher()->tick($tick);
+        self::assertSame('no_work', $report['skipped']['cron-webhooks'] ?? null);
+
+        $this->pdo->exec("INSERT INTO webhook_deliveries VALUES (1, 1, 'processing', '2000-01-01 00:00:00')");
+        $report = $this->dispatcher()->tick($tick);
+        self::assertContains('cron-webhooks', $report['launched']);
     }
 
     /**

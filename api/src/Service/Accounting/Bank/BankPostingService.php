@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Bank;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\DocumentEntryNumber;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -4813,6 +4814,26 @@ final class BankPostingService
      */
     public function normalizeRoundingFullInvoice(int $supplierId, int $txId): bool
     {
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            return $this->normalizeRoundingFullInvoiceLocked($supplierId, $txId);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $normalized = $this->normalizeRoundingFullInvoiceLocked($supplierId, $txId);
+            $pdo->commit();
+            return $normalized;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function normalizeRoundingFullInvoiceLocked(int $supplierId, int $txId): bool
+    {
         if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
             return false;
         }
@@ -4874,14 +4895,18 @@ final class BankPostingService
                                       FROM invoice_payments p WHERE p.invoice_id = i.id)
               WHERE i.id = ?'
         )->execute([(int) $row['invoice_id']]);
-        $pdo->prepare(
+        $settle = $pdo->prepare(
             "UPDATE invoices
                 SET status = 'paid',
                     paid_at = COALESCE(paid_at, (SELECT MAX(p.paid_on) FROM invoice_payments p
                                                   WHERE p.invoice_id = invoices.id))
               WHERE id = ? AND status IN ('issued', 'sent', 'reminded')
                 AND paid_total >= amount_to_pay"
-        )->execute([(int) $row['invoice_id']]);
+        );
+        $settle->execute([(int) $row['invoice_id']]);
+        if ($settle->rowCount() === 1 && (float) $row['amount_to_pay'] > 0) {
+            InvoiceWebhookEvents::publish($pdo, (int) $row['invoice_id'], InvoiceWebhookEvents::PAID, InvoiceWebhookEvents::PAYMENT);
+        }
 
         if ((string) $row['match_status'] === 'auto_partial') {
             $pdo->prepare("UPDATE bank_transactions SET match_status = 'auto_exact' WHERE id = ? AND match_status = 'auto_partial'")

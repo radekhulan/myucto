@@ -69,6 +69,7 @@ final class CronJobGate
     public const USAGE_BANK_EMAIL_NOTICES = 'bank_email_notices';
     /** Fronta katalogových úloh nebo napojení e-shopu. */
     public const USAGE_CATALOG = 'catalog';
+    public const USAGE_WEBHOOK_ENDPOINTS = 'webhook_endpoints';
     /** Přímé podání EPO čekající na stav. */
     public const USAGE_EPO_PENDING = 'epo_pending';
     /** Tržba EET čekající na odeslání nebo opakování. */
@@ -93,6 +94,7 @@ final class CronJobGate
         self::USAGE_BANK_EMAIL_NOTICES => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
         self::USAGE_ODOMETER_SOURCE      => [CronPreflight::class, 'hasOdometerSourceConnections'],
         self::USAGE_CATALOG            => [CronPreflight::class, 'hasCatalogWorkerUse'],
+        self::USAGE_WEBHOOK_ENDPOINTS  => [CronPreflight::class, 'hasWebhookEndpoint'],
         self::USAGE_EPO_PENDING        => [CronPreflight::class, 'hasPendingEpoAttempts'],
         self::USAGE_EET_PENDING        => [CronPreflight::class, 'hasEetDispatchWork'],
         self::USAGE_JMHZ_TRANSPORT     => [CronPreflight::class, 'hasOpenJmhzTransport'],

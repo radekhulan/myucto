@@ -1171,6 +1171,7 @@ final class RoutePermissionMap
         ['*', '#^/api/admin/bank-rule-templates(/|$)#', 'bank.rules', AccessLevel::WRITE],
         // Import dokladů (Pohoda XML / ISDOC, iDoklad, Fakturoid) — ImportAction,
         // Start{Idoklad,Fakturoid}ImportAction, ImportJobStatus/Cancel/DeleteImportJobAction.
+        ['*', '#^/api/admin/webhooks(?:/|$)#', 'settings.company.write', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/import$#', 'utilities.import', AccessLevel::WRITE],
         // Tatáž dávka na pozadí (StartFileImportAction) — stejné oprávnění jako
         // synchronní cesta, liší se jen tím, kdo import odbaví.

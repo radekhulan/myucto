@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Integration\InvoiceWebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\ItemPostingAccounts;
@@ -3077,6 +3078,9 @@ final class InvoiceRepository
     private function castInvoice(array $row): array
     {
         $row['id']                  = (int) $row['id'];
+        if (array_key_exists('public_published_at', $row)) {
+            $row['public_published_at'] = self::publicPublishedAt($row['public_published_at']);
+        }
         $row['client_id']           = (int) $row['client_id'];
         $row['project_id']          = $row['project_id'] !== null ? (int) $row['project_id'] : null;
         if (array_key_exists('project_billing_template_id', $row)) {
@@ -3361,6 +3365,56 @@ final class InvoiceRepository
         }
         $sel->execute([$invoiceId]);
         return (string) $sel->fetchColumn();
+    }
+
+    /** @return array{token:string, published_at:string, public_viewed_at:?string, first:bool}|null */
+    public function publishPublicLink(int $supplierId, int $invoiceId): ?array
+    {
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT public_token, public_published_at, public_viewed_at FROM invoices
+                  WHERE supplier_id = ? AND id = ? AND status NOT IN ('draft', 'cancelled') FOR UPDATE"
+            );
+            $stmt->execute([$supplierId, $invoiceId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row === false) {
+                if ($own) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+
+            $first = $row['public_published_at'] === null;
+            if ($first) {
+                $pdo->prepare(
+                    'UPDATE invoices SET public_token = COALESCE(public_token, ?), public_published_at = UTC_TIMESTAMP(6)
+                      WHERE supplier_id = ? AND id = ?'
+                )->execute([bin2hex(random_bytes(24)), $supplierId, $invoiceId]);
+                InvoiceWebhookEvents::publish($pdo, $invoiceId, InvoiceWebhookEvents::PUBLISHED);
+                $stmt->execute([$supplierId, $invoiceId]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            }
+            if ($own) {
+                $pdo->commit();
+            }
+            return ['token' => $row['public_token'], 'published_at' => self::publicPublishedAt($row['public_published_at']),
+                'public_viewed_at' => $row['public_viewed_at'], 'first' => $first];
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private static function publicPublishedAt(?string $value): ?string
+    {
+        return $value === null ? null : str_replace(' ', 'T', $value) . 'Z';
     }
 
     /**

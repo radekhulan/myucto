@@ -204,6 +204,7 @@ final class OutboundUrlGuard
         int $timeout = self::DEFAULT_TIMEOUT,
         int $maxBytes = self::DEFAULT_MAX_BYTES,
         ?string $basicAuth = null,
+        bool $directConnection = false,
     ): OutboundResponse {
         $target = $this->validate($url, $allowedHosts);
 
@@ -263,6 +264,10 @@ final class OutboundUrlGuard
         // Připoj se na už ověřené IP; hostname zůstává pro SNI i validaci certifikátu.
         if (!$target->hostIsIpLiteral) {
             $opts[CURLOPT_RESOLVE] = [$target->host . ':' . $target->port . ':' . implode(',', $target->ips)];
+        }
+
+        if ($directConnection) {
+            $opts[CURLOPT_PROXY] = '';
         }
 
         if ($headers !== []) {

@@ -236,6 +236,7 @@ final class GlobalSeedTables
         // Napojení e-shopů a platebních bran (přístupy a mapování, ne stažená data).
         // Kurzory synchronizace (integration_*_state) se mažou, aby se data stáhla znovu.
         'integration_connections', 'external_bank_account_mappings',
+        'webhook_endpoints',
         'gopay_settings', 'shoptet_settings', 'catalog_import_profiles', 'catalog_import_sources',
         // DPH a daňová identita firmy v čase. Historie plátcovství je jediný zdroj
         // VatStatusService; bez ní by firma byla neplátce za všechna období.
@@ -413,6 +414,7 @@ final class GlobalSeedTables
         'instance_admin_events', 'instance_smtp_test_attempts',
         'integration_change_log', 'integration_change_state', 'integration_inbox', 'integration_inbox_state',
         'integration_outbox',
+        'webhook_deliveries',
         'internal_document_lines', 'internal_documents',
         'invoice_advance_deductions', 'invoice_attachments', 'invoice_items', 'invoice_payment_schedule', 'invoice_payments',
         'invoice_pdfs', 'invoice_settlements',
@@ -627,6 +629,7 @@ final class GlobalSeedTables
      * @var array<string, string>
      */
     public const RESET_KEEP_USERS_SUPPLIER_PARTIAL = [
+        'webhook_endpoints' => 'template_id IS NOT NULL',
         // Výchozí dimenze vlastního bankovního účtu: účet, typy i hodnoty dimenzí zůstávají.
         'dimension_defaults' => 'supplier_bank_account_id IS NULL',
     ];

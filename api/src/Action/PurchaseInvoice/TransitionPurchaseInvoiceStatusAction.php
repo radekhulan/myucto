@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
@@ -265,6 +266,7 @@ final class TransitionPurchaseInvoiceStatusAction
                         409,
                     );
                 }
+                WebhookEvents::enqueue($pdo, $supplierId, WebhookEvents::PURCHASE_CANCELLED, ['purchase_invoice_id' => $id]);
                 if ($ownTx) {
                     $pdo->commit();
                 }

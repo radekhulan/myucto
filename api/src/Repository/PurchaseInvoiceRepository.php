@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\ItemPostingAccounts;
@@ -3104,18 +3105,20 @@ final class PurchaseInvoiceRepository
 
         $sql = 'UPDATE purchase_invoices SET ' . implode(', ', $sets)
              . ' WHERE id = ? AND supplier_id = ?'
-             . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
+             . ($requireUnbooked ? ' AND booked_at IS NULL' : '')
+             . ($newStatus === 'cancelled' ? " AND status <> 'cancelled'" : '');
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
 
         if ($wasDraft && $stmt->rowCount() > 0) {
+            WebhookEvents::enqueue($this->db->pdo(), $supplierId, WebhookEvents::PURCHASE_RECEIVED, ['purchase_invoice_id' => $id]);
             (new \MyInvoice\Service\PurchaseInvoice\PurchaseReceivedPaymentStatus($this->db))
                 ->afterDraftReceived($supplierId, $id);
         }
 
         // State machine nezná no-op přechod (status se vždy mění), takže rowCount 0
         // při requireUnbooked = booked_at podmínka nesedla → doklad mezitím zaúčtován.
-        return !$requireUnbooked || $stmt->rowCount() > 0;
+        return (!$requireUnbooked && $newStatus !== 'cancelled') || $stmt->rowCount() > 0;
     }
 
     /** Aktivní posted zápis k PF (posted_at NOT NULL, reversed_by NULL) — drží zámek. */

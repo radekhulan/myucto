@@ -46,6 +46,8 @@ services:
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0,
       # jinak by plánované úlohy běžely v každé replice (duplicitní zálohy, recurring…).
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}
+      MYINVOICE_WEBHOOKS_MODE: ${MYINVOICE_WEBHOOKS_MODE:-}
+      MYINVOICE_WEBHOOKS_ALLOWED_HOSTS: ${MYINVOICE_WEBHOOKS_ALLOWED_HOSTS:-}
       # Prázdné hodnoty nepřebíjí cfg.docker.php; politiku lze nastavit v .env.
       MYINVOICE_AUTH_REQUIRE_MFA: ${MYINVOICE_AUTH_REQUIRE_MFA:-}
       MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}

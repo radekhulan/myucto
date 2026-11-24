@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { manualChapter } from '@/config/manualChapters'
+import { manualChapter, manualHelpHref } from '@/config/manualChapters'
 
 function menuPaths(): string[] {
   const source = readFileSync(
@@ -16,6 +16,13 @@ function menuPaths(): string[] {
 }
 
 describe('contextual manual for application menu', () => {
+  it('opens the concrete webhook section only on the webhook tab', () => {
+    const target = '/manual?ch=103_API#103927-odchozi-webhooky'
+    expect(manualHelpHref('/admin/integrations', 'webhooks')).toBe(target)
+    expect(manualHelpHref('/admin/integrations/', 'webhooks', 'https://accounting.example.test')).toBe(`https://accounting.example.test${target}`)
+    expect(manualHelpHref('/admin/integrations', 'ai')).toBe('/manual?ch=96_Nastaveni')
+  })
+
   it('maps every literal menu and create-action path to an existing chapter', () => {
     const manualDir = resolve(process.cwd(), '..', 'manual')
     const missing = menuPaths().filter(path => manualChapter(path) === undefined)

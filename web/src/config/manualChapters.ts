@@ -133,3 +133,18 @@ export function manualChapter(path: string): string | undefined {
 export function manualChapterPath(path: string, tab: unknown): string {
   return typeof tab === 'string' && /^[a-z_]+$/.test(tab) ? `${path}/${tab}` : path
 }
+
+export function manualHelpHref(path: string, tab: unknown, canonicalBaseUrl?: string | null): string {
+  const context = manualChapterPath(path.replace(/\/$/, '') || '/', tab)
+  const chapter = manualChapter(context)
+  const href = context === '/admin/integrations/webhooks'
+    ? '/manual?ch=103_API#103927-odchozi-webhooky'
+    : chapter ? `/manual?ch=${chapter}` : '/manual'
+  if (!canonicalBaseUrl) return href
+
+  try {
+    return `${new URL(canonicalBaseUrl).origin}${href}`
+  } catch {
+    return href
+  }
+}

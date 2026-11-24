@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
@@ -252,9 +253,35 @@ final class PurchaseInvoiceApprovalRepository
 
     public function setInvoiceStatus(int $supplierId, int $invoiceId, string $approvalStatus): void
     {
-        $this->db->pdo()->prepare(
-            'UPDATE purchase_invoices SET approval_status = ? WHERE id = ? AND supplier_id = ?'
-        )->execute([$approvalStatus, $invoiceId, $supplierId]);
+        $pdo = $this->db->pdo();
+        if ($approvalStatus !== 'approved') {
+            $pdo->prepare('UPDATE purchase_invoices SET approval_status = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([$approvalStatus, $invoiceId, $supplierId]);
+            return;
+        }
+
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $update = $pdo->prepare(
+                "UPDATE purchase_invoices SET approval_status = 'approved'
+                  WHERE id = ? AND supplier_id = ? AND status = 'draft' AND NOT (approval_status <=> 'approved')"
+            );
+            $update->execute([$invoiceId, $supplierId]);
+            if ($update->rowCount() === 1) {
+                WebhookEvents::enqueue($pdo, $supplierId, WebhookEvents::PURCHASE_APPROVED, ['purchase_invoice_id' => $invoiceId]);
+            }
+            if ($own) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function pendingCount(int $supplierId, int $invoiceId): int

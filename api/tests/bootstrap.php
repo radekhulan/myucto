@@ -29,6 +29,7 @@ require __DIR__ . '/../vendor/autoload.php';
 // createConfiguredMock|getMockBuilder` v `tests/` s `final class` v `src/`.
 \DG\BypassFinals::allowPaths([
     '*/api/src/Infrastructure/Database/ReadOnlySnapshot.php',
+    '*/api/src/Service/Http/OutboundUrlGuard.php',
     '*/api/src/Service/ActivityLogHashChain.php',
     '*/api/src/Service/Nonprofit/Membership/MembershipContactErasure.php',
     '*/api/src/Repository/BankEmailNoticeRepository.php',

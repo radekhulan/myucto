@@ -236,6 +236,32 @@ final class EmailNoticeReconcilerTest extends TestCase
 
     // ── Převzetí jednoduchého párování ───────────────────────────────────────
 
+    public function testWebhookFiresOnMatchedNoticeAndNotAgainOnStatement(): void
+    {
+        $webhooks = Bootstrap::buildContainer()->get(\MyInvoice\Service\Integration\WebhookEndpoints::class);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        $endpoint = $webhooks->create($this->supplierId, [
+            'name' => 'Bankovní avízo', 'url' => 'https://receiver.example.test/events',
+            'event_types' => ['invoice.paid'],
+        ]);
+        $pdo->commit();
+        try {
+            $invoice = $this->insertInvoice(self::VS_A, 1000.00);
+            [, $notice] = $this->insertStatementWithTx('email_notice', 1000.00, self::VS_A, 'notice-webhook');
+            self::assertSame('auto_exact', $this->matcher->match($notice)['status']);
+            self::assertSame('paid', $this->invoiceStatus($invoice));
+            $events = $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX);
+            self::assertCount(1, $events);
+
+            [, $statement] = $this->insertStatementWithTx('gpc', 1000.00, self::VS_A, 'gpc-webhook');
+            self::assertNotNull($this->reconciler->takeOverFromEmailNotice($statement));
+            self::assertSame($events, $webhooks->history($this->supplierId, $endpoint['id'], PHP_INT_MAX));
+        } finally {
+            $webhooks->delete($this->supplierId, $endpoint['id']);
+        }
+    }
+
     public function testTakeOverSingleMatch(): void
     {
         $invA = $this->insertInvoice(self::VS_A, 1000.00);
