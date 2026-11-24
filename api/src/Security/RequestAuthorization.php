@@ -310,6 +310,11 @@ final class RequestAuthorization
         return self::effectiveRole($request)->isSuperadmin();
     }
 
+    public static function canManageInvoiceWebhooks(Request $request): bool
+    {
+        return self::isSessionAuth($request) && self::isCompanyAdmin($request);
+    }
+
     public static function isCompanyAdmin(Request $request): bool
     {
         return self::effectiveRole($request)->isCompanyAdmin();

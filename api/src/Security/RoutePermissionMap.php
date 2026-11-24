@@ -1178,6 +1178,7 @@ final class RoutePermissionMap
         // Zahození importní dávky je MAZÁNÍ dokladů, ne import — proto právo mazat
         // faktury, ne `utilities.import`. Kdo smí nahrát, nesmí tím pádem i smazat.
         ['POST',   '#^/api/admin/import/batches/[A-Za-z0-9]+/delete$#', 'invoices.delete', AccessLevel::WRITE],
+        ['*', '#^/api/admin/invoice-webhooks(?:/|$)#', 'settings.company.write', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/imports/(idoklad|fakturoid)/start$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::READ],
         ['GET',    '#^/api/admin/imports/[0-9]+/report$#', 'utilities.import', AccessLevel::READ],

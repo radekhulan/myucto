@@ -32567,6 +32567,31 @@
     }
   },
   "integrations": {
+    "webhooks": {
+      "tab": "Webhooks",
+      "title": "Invoice payment webhook",
+      "template": "Subscribe to invoices generated from this template.",
+      "company": "Subscribe to all invoices and proformas issued by this company.",
+      "url": "Public HTTPS endpoint",
+      "advance": "Include final invoices fully covered by advances",
+      "register": "Register webhook",
+      "secret": "Save the signing key now. It is only displayed once.",
+      "history": "Deliveries",
+      "rotate": "Rotate key",
+      "rotateConfirm": "Replace the current signing key?",
+      "remove": "Remove",
+      "deleteConfirm": "Remove the webhook, pending messages and history?",
+      "empty": "No messages yet.",
+      "attempts": "Attempts: {n}",
+      "retry": "Retry delivery",
+      "more": "Older messages",
+      "states": {
+        "pending": "Pending",
+        "processing": "Processing",
+        "delivered": "Delivered",
+        "failed": "Failed"
+      }
+    },
     "title": "External integrations",
     "subtitle": "Connect external services — iDoklad, Fakturoid, Anthropic AI. BYOK (bring your own key), encrypted at-rest.",
     "coming_soon": "Coming soon",

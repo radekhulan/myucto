@@ -21,6 +21,7 @@ import { roundUnitPrice, unitPriceText } from '@/utils/unitPrice'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { usePaneDom } from '@/composables/usePaneDom'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import InvoicePaidWebhooks from '@/components/admin/InvoicePaidWebhooks.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
@@ -1734,6 +1735,8 @@ async function submit() {
         </button>
       </div>
     </form>
+
+    <InvoicePaidWebhooks v-if="tplId && auth.isCompanyAdminRole && auth.canWrite('settings.company.write')" :key="supplierStore.currentSupplierId + '-' + tplId" :template-id="tplId" />
 
     <!-- Inline create modaly — žádné opouštění editoru -->
     <ClientFormModal v-if="clientModalOpen"

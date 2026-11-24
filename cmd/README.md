@@ -60,6 +60,7 @@ má vždy přednost před oběma.
 | `cron-logbook-odometer-source.{cmd,sh}` | Denní stav tachometru z aut napojených na zdroj automatického stavu tachometru (BMW CarData, …) do Knihy jízd (podklad pro km k doplnění); zároveň udržuje přihlášení u služby, které by jinak propadlo (BMW po 14 dnech) |
 | `cron-bank-email-notices.{cmd,sh}` | IMAP polling bankovních e-mailových avíz, parsování plateb a matching na faktury (konfigurace v **Admin → Bankovní účty**) |
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
+| `cron-invoice-webhooks.{cmd,sh}` | Každou minutu doručí podepsané webhooky úhrad; přepínač `--watch` spustí trvalý worker |
 | `cron-payment-thanks.{cmd,sh}` | Každou minutu zpracuje poděkování za potvrzené úhrady a odložené e-maily; během otevřené účetní transakce se nic neodesílá |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |
 | `cron-scheduled-pohoda-export.{cmd,sh}` | Plánovaný export vydaných dokladů do Pohody e-mailem účetní (nastavení: Export → Automatický export do Pohody; `--dry-run`). Jen se zapnutou volbou instalace `export.scheduled_pohoda`, jinak skončí bez práce |

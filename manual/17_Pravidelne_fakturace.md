@@ -561,3 +561,7 @@ Podrobná schémata najdete v aplikačních rozhraních [`/api/reference`](/api/
 - [18. Klienti](18_Klienti.md) - klient a jeho kontakty
 - [19. Zakázky](19_Zakazky.md) - fakturace na zakázku
 - [45. OSS](45_OSS.md) - režim One Stop Shop
+
+## Webhook při úhradě
+
+V editoru uložené šablony může správce firmy zaregistrovat veřejnou HTTPS adresu příjemce. Tento odběr dostává události o úhradách faktur vygenerovaných z této šablony. Samotné vygenerování faktury zprávu neodešle. Odběr pro celou firmu je v **Externí integrace → Webhooky**. Každá registrace má vlastní podpisový klíč. Podrobnosti uvádí kapitola [API](103_API.md#webhook-pri-uhrade-faktury).

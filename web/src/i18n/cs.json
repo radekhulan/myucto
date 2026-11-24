@@ -32567,6 +32567,31 @@
     }
   },
   "integrations": {
+    "webhooks": {
+      "tab": "Webhooky",
+      "title": "Webhook při úhradě faktury",
+      "template": "Odběr platí pro faktury této šablony.",
+      "company": "Odběr platí pro všechny vydané a zálohové faktury firmy.",
+      "url": "Veřejná HTTPS adresa příjemce",
+      "advance": "Zahrnout konečné faktury plně kryté zálohou",
+      "register": "Zaregistrovat webhook",
+      "secret": "Podpisový klíč si nyní uložte. Znovu se nezobrazí.",
+      "history": "Doručení",
+      "rotate": "Změnit klíč",
+      "rotateConfirm": "Nahradit stávající podpisový klíč?",
+      "remove": "Odebrat",
+      "deleteConfirm": "Odebrat webhook včetně čekajících zpráv a historie?",
+      "empty": "Zatím žádné zprávy.",
+      "attempts": "Počet pokusů: {n}",
+      "retry": "Opakovat doručení",
+      "more": "Starší zprávy",
+      "states": {
+        "pending": "Čeká",
+        "processing": "Odesílá se",
+        "delivered": "Doručeno",
+        "failed": "Selhalo"
+      }
+    },
     "title": "Externí integrace",
     "subtitle": "Připojení k externím službám - iDoklad, Fakturoid, Anthropic AI. BYOK (přines si vlastní klíč), šifrované at-rest.",
     "coming_soon": "Připravujeme",

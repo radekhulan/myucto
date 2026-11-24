@@ -345,6 +345,29 @@ tags:
       koncept→finalizace→reopen, EPO XML, přehledy pro OSSZ/zdravotní
       pojišťovnu a zálohy na daň (§38a) vč. rozhodnutí FÚ (§174).
 
+webhooks:
+  invoicePaid:
+    post:
+      summary: Úplná úhrada vydané nebo zálohové faktury
+      operationId: receiveInvoicePaid
+      description: |
+        Odchozí zpráva na registrovanou veřejnou HTTPS adresu. Podpis Standard Webhooks
+        pokrývá id.timestamp.body; stejná událost se při opakování doručí se stejným ID.
+        Správce registruje odběr ve firmě nebo v pravidelné šabloně z přihlášené relace.
+      security: []
+      parameters:
+        - {name: Webhook-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Webhook-Timestamp, in: header, required: true, schema: {type: string}, description: Čas pokusu v sekundách Unix UTC}
+        - {name: Webhook-Signature, in: header, required: true, schema: {type: string}, description: Verze v1 a Base64 podpis HMAC-SHA-256 oddělené čárkou}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InvoicePaidEvent'}
+      responses:
+        '200': {description: Příjemce zprávu přijal nebo již eviduje její ID.}
+        default: {description: Po jakékoli jiné odpovědi následuje nejvýše pět opakování.}
+
 paths:
   /api/v1/accounting/catalog/context:
     get:
@@ -49001,6 +49024,22 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/CatalogChange' }
+    InvoicePaidEvent:
+      type: object
+      required: [type, version, event_id, occurred_at, supplier_id, invoice_id, invoice_type, varsymbol, paid_at, recurring_template_id, order_id, reason]
+      properties:
+        type: {type: string, const: invoice.paid}
+        version: {type: integer, const: 1}
+        event_id: {type: string, format: uuid}
+        occurred_at: {type: string, format: date-time}
+        supplier_id: {type: integer}
+        invoice_id: {type: integer}
+        invoice_type: {type: string, enum: [invoice, proforma]}
+        varsymbol: {type: [string, 'null']}
+        paid_at: {type: [string, 'null'], format: date}
+        recurring_template_id: {type: [integer, 'null']}
+        order_id: {type: [integer, 'null']}
+        reason: {type: string, enum: [payment, covered_by_advance]}
     IntegrationWebhookEvent:
       type: object
       description: |

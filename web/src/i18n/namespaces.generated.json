@@ -1495,6 +1495,7 @@
     "recurring-new": [
       "dimensions",
       "errors",
+      "integrations",
       "number_template",
       "payment_method",
       "project",
@@ -1511,6 +1512,7 @@
     "recurring-edit": [
       "dimensions",
       "errors",
+      "integrations",
       "number_template",
       "payment_method",
       "project",

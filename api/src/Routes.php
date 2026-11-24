@@ -926,6 +926,13 @@ final class Routes
         $app->post   ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/archive',  [PaymentOrderAction::class, 'archive']);
 
         // Pravidelné fakturace (recurring templates)
+        $app->get('/api/admin/invoice-webhooks', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+        $app->post('/api/admin/invoice-webhooks', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+        $app->delete('/api/admin/invoice-webhooks/{id:[0-9]+}', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+        $app->post('/api/admin/invoice-webhooks/{id:[0-9]+}/rotate', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+        $app->get('/api/admin/invoice-webhooks/{id:[0-9]+}/deliveries', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+        $app->post('/api/admin/invoice-webhooks/{id:[0-9]+}/deliveries/{deliveryId:[0-9]+}/retry', \MyInvoice\Action\Admin\InvoicePaidWebhookAction::class);
+
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);
         $app->post   ('/api/recurring',                       [RecurringTemplateAction::class, 'create']);
         $app->get    ('/api/recurring/{id:[0-9]+}',           [RecurringTemplateAction::class, 'get']);

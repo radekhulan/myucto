@@ -253,6 +253,16 @@ final class CronCatalog
                 'weekdays_only' => false,
                 'critical' => false,
             ],
+
+            [
+                'script' => 'cron-invoice-webhooks',
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
             [
                 'script' => 'cron-send-reminders',
                 'recommended' => 'weekdays_0900',

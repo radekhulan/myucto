@@ -54,6 +54,7 @@ final class CronDispatcherTest extends TestCase
         self::assertSame(
             [
                 'cron-payment-thanks',
+                'cron-invoice-webhooks',
                 'cron-eet-dispatch',
                 'cron-epo-status',
                 'cron-payroll-document-worker',

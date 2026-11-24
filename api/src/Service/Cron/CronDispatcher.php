@@ -46,6 +46,7 @@ final class CronDispatcher
      * @var array<string,callable(PDO):bool>
      */
     private const WORK_GATES = [
+        'cron-invoice-webhooks' => [CronPreflight::class, 'hasInvoiceWebhookWork'],
         'cron-epo-status' => [CronPreflight::class, 'hasEpoWork'],
         'cron-ai-worker'  => [CronPreflight::class, 'hasAiWork'],
         'cron-payroll-document-worker' => [CronPreflight::class, 'hasPayrollDocumentWork'],

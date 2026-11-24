@@ -14,20 +14,25 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
+import InvoicePaidWebhooks from '@/components/admin/InvoicePaidWebhooks.vue'
+import { useAuthStore } from '@/stores/auth'
 import OllamaProviderFields from '@/components/admin/OllamaProviderFields.vue'
 import ImportJobReport from '@/components/admin/ImportJobReport.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const suppliers = useSupplierStore()
+const auth = useAuthStore()
 
-type Tab = 'idoklad' | 'fakturoid' | 'ai'
+type Tab = 'idoklad' | 'fakturoid' | 'ai' | 'webhooks'
+const canManageWebhooks = computed(() => auth.isCompanyAdminRole && auth.canWrite('settings.company.write'))
+const tabs = computed<Tab[]>(() => canManageWebhooks.value ? ['idoklad', 'fakturoid', 'ai', 'webhooks'] : ['idoklad', 'fakturoid', 'ai'])
 // Tab z ?tab=... query (default idoklad). Watch pro proklik mezi sidebar položkami
 // "Externí integrace" (no query) ↔ "AI nastavení" (?tab=ai, sekce Firma).
 const route = useRoute()
 function readTabFromQuery(): Tab {
   const q = String(route.query.tab ?? '')
-  return q === 'fakturoid' || q === 'ai' ? q as Tab : 'idoklad'
+  return q === 'fakturoid' || q === 'ai' || q === 'webhooks' ? q as Tab : 'idoklad'
 }
 const tab = ref<Tab>(readTabFromQuery())
 watch(() => route.query.tab, () => {
@@ -667,7 +672,7 @@ onMounted(() => {
     <!-- Tabs: iDoklad / Fakturoid / AI -->
     <div class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button
-        v-for="tt in (['idoklad', 'fakturoid', 'ai'] as const)" :key="tt"
+        v-for="tt in tabs" :key="tt"
         @click="tab = tt"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
         :class="tab === tt
@@ -677,6 +682,8 @@ onMounted(() => {
         {{ t('integrations.' + tt + '.tab') }}
       </button>
     </div>
+
+    <InvoicePaidWebhooks v-if="tab === 'webhooks' && canManageWebhooks" :key="suppliers.currentSupplierId" />
 
     <!-- ════ iDoklad tab ════ -->
     <div v-if="tab === 'idoklad'" class="space-y-4">

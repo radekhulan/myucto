@@ -31,6 +31,12 @@ use Throwable;
  */
 final class CronPreflight
 {
+    public static function hasInvoiceWebhookWork(PDO $pdo): bool
+    {
+        return self::probe($pdo, "SELECT 1 FROM invoice_paid_deliveries
+            WHERE status IN ('pending','processing') AND available_at <= CURRENT_TIMESTAMP(6) LIMIT 1");
+    }
+
     /**
      * Je co pollovat u přímých podání EPO?
      *
