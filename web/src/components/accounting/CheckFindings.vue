@@ -207,9 +207,16 @@ function issueText(f: Finding): string {
       ? 'marked_paid_unposted_payable'
       : code
     const key = `checks.issue.${labelCode}`
+    const d = f.detail?.[code]
+    if (code === 'posting_period_after_horizon' && d) {
+      return t('checks.issue.posting_period_after_horizon', {
+        from: d.starts_on,
+        to: d.ends_on,
+        count: d.entry_count,
+      })
+    }
     const label = t(key)
     const base = label === key ? code : label
-    const d = f.detail?.[code]
     if (!d) return base
     if (code === 'amount_mismatch' && typeof d.diff === 'number') {
       // Rozdíl i očekávaná částka jsou v měně DOKLADU, kdežto sloupec Částka nese dopad

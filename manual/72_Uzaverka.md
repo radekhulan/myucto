@@ -51,6 +51,7 @@
 Aplikace kontroluje, že začátek je dřív než konec, že pro daný rok ještě jiné období není a že se období nepřekrývá s žádným existujícím obdobím firmy.
 
 Při běžném zaúčtování může aplikace založit první období firmy nebo další období po konci účetní řady. Pokud datum účetního případu předchází prvnímu období nebo spadá do mezery mezi obdobími, zkontrolujte datum dokladu. Pro správně datovaný doklad založte chybějící období ručně podle postupu výše.
+Pokud datum spadá do pozdějšího než příštího účetního roku firmy a období ještě neexistuje, zkontrolujte rok a po ověření založte období ručně.
 
 **Začátek prvního období.** První účetní období začíná dnem vzniku firmy (§ 3 zákona o účetnictví).
 Když aplikace založila období od 1. ledna a firma vznikla později, klikněte u prvního období na

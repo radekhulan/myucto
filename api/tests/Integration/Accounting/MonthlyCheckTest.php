@@ -17,6 +17,8 @@ use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Měsíční kontrola (audit 2026-07, D8): ClosingService::buildChecks nad
@@ -55,6 +57,7 @@ final class MonthlyCheckTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $container->set(ClockInterface::class, new MockClock(self::YEAR . '-06-15 12:00:00'));
             $this->db      = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->closing = $container->get(ClosingService::class);
@@ -153,6 +156,32 @@ final class MonthlyCheckTest extends TestCase
         self::assertSame($emptyId, $check['value']['findings'][0]['doc_id']);
         self::assertSame((string) $emptyYear, $check['value']['findings'][0]['doc_no']);
         self::assertSame('open', $this->periods->findById($this->supplierId, $emptyId)['status']);
+    }
+
+    public function testMonthlyCheckReportsFuturePostingPeriodsWithJournalEntryCounts(): void
+    {
+        $year = self::YEAR + 2;
+        $future = $this->periods->create($this->supplierId, $year, $year . '-01-01', $year . '-12-31', 'posting');
+        $next = self::YEAR + 1;
+        $this->periods->create($this->supplierId, $next, $next . '-01-01', $next . '-12-31', 'posting');
+        $manual = self::YEAR + 3;
+        $this->periods->create($this->supplierId, $manual, $manual . '-01-01', $manual . '-12-31');
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 100],
+        ], ['entry_date' => $year . '-06-15', 'user_id' => $this->userId]);
+
+        $key = 'posting_period_after_horizon';
+        $from = self::YEAR . '-06-01';
+        $to = self::YEAR . '-06-30';
+        $checks = array_column($this->closing->monthlyCheck($this->supplierId, $this->periodId, $from, $to)['checks'], null, 'key');
+        self::assertArrayHasKey($key, $checks);
+        self::assertFalse($checks[$key]['ok']);
+        self::assertSame('warning', $checks[$key]['severity']);
+        self::assertSame(1, $checks[$key]['value']['count']);
+        self::assertSame($future, $checks[$key]['value']['findings'][0]['doc_id']);
+        self::assertSame(1, $checks[$key]['value']['findings'][0]['detail'][$key]['entry_count']);
+        self::assertSame($checks[$key], $this->closing->checkFindings($this->supplierId, $this->periodId, $key, $from, $to));
     }
 
     public function testFlagsUnusualSideAndProcurementOpenBalances(): void

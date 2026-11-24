@@ -124,6 +124,10 @@ final class Bootstrap
             // a 2:00 posunul o den zpět. Autentizace na tom nestojí: bezpečnostní časy
             // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
             ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
+            \MyInvoice\Repository\AccountingPeriodRepository::class => fn (ContainerInterface $c) => new \MyInvoice\Repository\AccountingPeriodRepository(
+                $c->get(Connection::class),
+                $c->get(ClockInterface::class),
+            ),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
             // Limit souběžných relací a licenční brána tokenů jsou v konstruktoru
             // volitelné (přímo sestavené testy je nepotřebují), a PHP-DI volitelný

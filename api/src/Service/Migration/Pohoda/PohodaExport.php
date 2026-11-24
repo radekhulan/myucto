@@ -21,7 +21,9 @@ final class PohodaExport
 {
     private ?PohodaMdbAccounting $mdb = null;
     private array $warnings = [];
-    private bool $warningsScanned = false;
+    private ?PohodaPostingDates $postingDates = null;
+    private ?array $journalDateCorrections = null;
+    private array $accountingDateWarnings = [];
     private array $countsByPeriod = [];
     /** Osnova pro neziskové organizace ({@see hasNonprofitChart()}), spočtená při prvním dotazu. */
     private ?bool $nonprofitChart = null;
@@ -223,6 +225,18 @@ final class PohodaExport
      */
     public function records(string $key, string $tag): \Generator
     {
+        if ($key === 'journal') {
+            $this->scanAccountingDates();
+        }
+        foreach ($this->rawRecords($key, $tag) as $record) {
+            yield $key === 'journal'
+                ? $this->correctJournalDate($record)
+                : $this->correctDocumentDate($key, $record);
+        }
+    }
+
+    private function rawRecords(string $key, string $tag): \Generator
+    {
         if ($this->mdb !== null && $this->mdb->has($key)) {
             yield from $this->mdb->records($key);
             return;
@@ -285,19 +299,124 @@ final class PohodaExport
 
     public function sourceWarnings(): array
     {
-        if (!$this->warningsScanned) {
+        $this->scanAccountingDates();
+        if ($this->mdb !== null) {
+            $this->counts();
+        }
+        return array_merge(array_values($this->warnings), $this->mdb?->warnings() ?? [], $this->accountingDateWarnings);
+    }
+
+    /** @param list<int> $skipYears @param list<int>|null $selectedYears */
+    public function withPostingYears(FiscalCalendar $calendar, int $year, array $skipYears, ?array $selectedYears = null): self
+    {
+        $export = clone $this;
+        $export->postingDates = new PohodaPostingDates($calendar, $year, $skipYears, $selectedYears);
+        $export->journalDateCorrections = null;
+        $export->accountingDateWarnings = [];
+        $export->countsByPeriod = [];
+        return $export;
+    }
+
+    private static function documentHeaderName(string $key): ?string
+    {
+        return match ($key) {
+            'cash' => 'voucherHeader',
+            'bank' => 'bankHeader',
+            'internal' => 'intDocHeader',
+            default => str_contains(self::FILES[$key] ?? '', '_faktury_') ? 'invoiceHeader' : null,
+        };
+    }
+
+    private function scanAccountingDates(): void
+    {
+        if ($this->journalDateCorrections !== null) {
+            return;
+        }
+
+        $docs = (function (): \Generator {
             if ($this->mdb !== null) {
-                $this->counts();
-            } else {
-                foreach (self::FILES as $key => $file) {
-                    $tag = str_contains($file, '_faktury_') ? 'invoice'
-                        : match ($key) { 'cash' => 'voucher', 'bank' => 'bank', default => null };
-                    if ($tag !== null) foreach ($this->records($key, $tag) as $_) {}
+                yield from $this->mdb->postingDateCandidates();
+                return;
+            }
+            foreach (array_keys(self::FILES) as $key) {
+                if (self::documentHeaderName($key) === null) {
+                    continue;
+                }
+                $tag = match ($key) { 'cash' => 'voucher', 'bank' => 'bank', 'internal' => 'intDoc', default => 'invoice' };
+                foreach ($this->rawRecords($key, $tag) as $record) {
+                    yield $key => $record;
                 }
             }
-            $this->warningsScanned = true;
+        })();
+        $corrections = [];
+        foreach ($docs as $key => $record) {
+            $this->correctDocumentDate($key, $record, $corrections);
         }
-        return array_merge(array_values($this->warnings), $this->mdb?->warnings() ?? []);
+        $this->journalDateCorrections = $corrections;
+    }
+
+    private function correctDocumentDate(string $key, array $record, ?array &$corrections = null): array
+    {
+        $headerName = self::documentHeaderName($key);
+        if ($headerName === null) {
+            return $record;
+        }
+        $header = $record[$headerName] ?? null;
+        if (!is_array($header)) {
+            return $record;
+        }
+        $accounting = PohodaXml::date($header, 'dateAccounting');
+        $document = PohodaXml::date($header, 'date') ?? match ($key) {
+            'cash' => PohodaXml::date($header, 'datePayment'),
+            'bank' => PohodaXml::date($header, 'dateStatement') ?? PohodaXml::date($header, 'datePayment'),
+            default => null,
+        };
+        $this->postingDates ??= new PohodaPostingDates(FiscalCalendar::calendar(), $this->year);
+        if (!$this->postingDates->needsCorrection($accounting, $document)) {
+            return $record;
+        }
+        $record[$headerName]['sourceAccountingDate'] = $accounting;
+        $record[$headerName]['dateAccounting'] = $document;
+        if ($corrections !== null) {
+            $number = PohodaXml::text($header, 'number/numberRequested') ?: PohodaXml::text($header, 'number');
+            $id = PohodaXml::text($header, 'id');
+            $source = match ($key) {
+                'cash' => PohodaJournal::CASH,
+                'bank' => PohodaJournal::BANK,
+                'internal' => PohodaJournal::INTERNAL,
+                'receivable', 'penalty' => PohodaJournal::RECEIVABLE,
+                'commitment' => PohodaJournal::COMMITMENT,
+                default => str_starts_with($key, 'issued') ? PohodaJournal::ISSUED : PohodaJournal::RECEIVED,
+            };
+            if ($number !== '') {
+                $match = $source . '|' . $number . '|' . $accounting;
+                if ($id !== '') {
+                    $corrections[$match . '|' . $id] = $document;
+                }
+                $corrections[$match] = !array_key_exists($match, $corrections) || $corrections[$match] === $document
+                    ? $document : null;
+            }
+            $this->accountingDateWarnings[] = [
+                'level' => 'warning',
+                'code' => 'accounting_date_corrected',
+                'message' => "Doklad {$number}: datum zaúčtování {$accounting} převod nahradil datem dokladu {$document}.",
+                'context' => ['document_no' => $number, 'accounting_date' => $accounting, 'document_date' => $document],
+            ];
+        }
+        return $record;
+    }
+
+    private function correctJournalDate(array $item): array
+    {
+        $date = PohodaXml::date($item, 'date');
+        $key = PohodaJournal::source($item) . '|' . PohodaJournal::number($item) . '|' . $date;
+        $id = PohodaXml::text($item, 'sourceId');
+        $corrected = $this->journalDateCorrections[$id === '' ? $key : $key . '|' . $id] ?? null;
+        if ($corrected !== null) {
+            $item['sourceDate'] = $date;
+            $item['date'] = $corrected;
+        }
+        return $item;
     }
 
     /**
@@ -622,6 +741,7 @@ final class PohodaExport
         if (isset($this->countsByPeriod[$periodKey])) {
             return $this->countsByPeriod[$periodKey];
         }
+        $this->scanAccountingDates();
         $journal = 0;
         $opening = 0;
         $first = null;
@@ -655,11 +775,11 @@ final class PohodaExport
             ));
             foreach ($this->mdb->recordsOf($keys) as $key => $record) {
                 if ($key === 'journal') {
-                    yield $record;
+                    yield $this->correctJournalDate($record);
                     continue;
                 }
                 $tally[$key] = ($tally[$key] ?? 0) + 1;
-                foreach (self::documentDates($key, $record) as $date) {
+                foreach (self::documentDates($key, $this->correctDocumentDate($key, $record)) as $date) {
                     $rememberLaterYear($date);
                 }
             }
@@ -717,12 +837,11 @@ final class PohodaExport
 
     private static function documentDates(string $key, array $record): \Generator
     {
-        if (in_array($key, ['addressbook', 'contracts', 'activities'], true)) {
+        $headerName = self::documentHeaderName($key);
+        if ($headerName === null) {
             return;
         }
-        $header = PohodaXml::get($record, match ($key) {
-            'cash' => 'voucherHeader', 'bank' => 'bankHeader', 'internal' => 'intDocHeader', default => 'invoiceHeader',
-        });
+        $header = PohodaXml::get($record, $headerName);
         yield match ($key) {
             'cash' => PohodaXml::date($header, 'date') ?? PohodaXml::date($header, 'datePayment'),
             'bank' => PohodaXml::date($header, 'datePayment') ?? PohodaXml::date($header, 'dateStatement'),

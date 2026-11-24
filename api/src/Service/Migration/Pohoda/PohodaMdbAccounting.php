@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Support\CompanyIdNormalizer;
 
 final class PohodaMdbAccounting
@@ -79,16 +80,17 @@ final class PohodaMdbAccounting
     private array $indexes = [];
     private array $groups = [];
     private array $warnings = [];
+    private readonly array $postingDateCandidates;
 
     /**
      * Otevře XML převodu: úvodní průchod souborem ověří strukturu a zároveň sebere řádky
      * ke kontrole firmy a roku a dokladů ({@see checked()}), bez dalšího průchodu.
      *
-     * @return array{0:PohodaMdbTables,1:array{config:list<array<string,string>>,errors:array<string,PohodaException>}}
+     * @return array{0:PohodaMdbTables,1:array{config:list<array<string,string>>,errors:array<string,PohodaException>,posting_dates:list<array{string,string,string,string,string,string}>}}
      */
     public static function scan(string $path): array
     {
-        $checked = ['config' => [], 'errors' => []];
+        $checked = ['config' => [], 'errors' => [], 'posting_dates' => []];
         $tables = new PohodaMdbTables($path, ['sKonfig', ...self::VALIDATED], static function (string $table, array $r) use (&$checked): void {
             self::check($checked, $table, $r);
         });
@@ -96,7 +98,7 @@ final class PohodaMdbAccounting
     }
 
     /**
-     * @param array{config:list<array<string,string>>,errors:array<string,PohodaException>}|null $checked
+     * @param array{config:list<array<string,string>>,errors:array<string,PohodaException>,posting_dates:list<array{string,string,string,string,string,string}>}|null $checked
      *        řádky sebrané při otevření ({@see scan()}); bez nich se přečtou z tabulek
      */
     public function __construct(public readonly PohodaMdbTables $tables, ?array $checked = null)
@@ -107,7 +109,7 @@ final class PohodaMdbAccounting
             }
         }
         if ($checked === null) {
-            $checked = ['config' => [], 'errors' => []];
+            $checked = ['config' => [], 'errors' => [], 'posting_dates' => []];
             foreach ($tables->each(['sKonfig', ...self::VALIDATED]) as $table => $r) {
                 self::check($checked, $table, $r);
             }
@@ -123,10 +125,11 @@ final class PohodaMdbAccounting
                 throw $checked['errors'][$table];
             }
         }
+        $this->postingDateCandidates = $checked['posting_dates'];
     }
 
     /**
-     * @param array{config:list<array<string,string>>,errors:array<string,PohodaException>} $checked MĚNÍ SE
+     * @param array{config:list<array<string,string>>,errors:array<string,PohodaException>,posting_dates:list<array{string,string,string,string,string,string}>} $checked MĚNÍ SE
      * @param array<string,string> $r
      */
     private static function check(array &$checked, string $table, array $r): void
@@ -135,13 +138,43 @@ final class PohodaMdbAccounting
             $checked['config'][] = $r;
             return;
         }
-        if (isset($checked['errors'][$table])) {
+        $accountingDate = self::date($r, 'DatUcP');
+        $documentDate = self::date($r, 'Datum');
+        $candidate = $accountingDate !== '' && $documentDate !== '' && $accountingDate !== $documentDate
+            && ($r['Cislo'] ?? '') !== ''
+            && (substr($accountingDate, 0, 7) !== substr($documentDate, 0, 7) || !IsoDate::isValid($accountingDate));
+        if (isset($checked['errors'][$table]) && !$candidate) {
             return;
         }
         try {
             self::validate($table, $r);
         } catch (PohodaException $e) {
-            $checked['errors'][$table] = $e;
+            $checked['errors'][$table] ??= $e;
+            return;
+        }
+        if ($candidate) {
+            $target = match ($table) {
+                'FA' => [self::INVOICES[(int) $r['RelTpFak']], 'invoiceHeader'],
+                'HO' => ['cash', 'voucherHeader'],
+                'BV' => ['bank', 'bankHeader'],
+                'pINT' => ['internal', 'intDocHeader'],
+                default => null,
+            };
+            if ($target !== null) {
+                $checked['posting_dates'][] = [...$target, $r['ID'] ?? '', $r['Cislo'], $documentDate, $accountingDate];
+            }
+        }
+    }
+
+    public function postingDateCandidates(): \Generator
+    {
+        foreach ($this->postingDateCandidates as [$key, $header, $id, $number, $date, $accounting]) {
+            yield $key => [$header => [
+                'id' => $id,
+                'number' => ['numberRequested' => $number],
+                'date' => $date,
+                'dateAccounting' => $accounting,
+            ]];
         }
     }
 
@@ -434,12 +467,8 @@ final class PohodaMdbAccounting
     private function document(array $r, string $prefix, string $itemsTable): array
     {
         $payment = $this->lookup('sFormUh', $r['RelForUh'] ?? '');
-        $h = [
-            'id' => $r['ID'],
-            'number' => ['numberRequested' => $r['Cislo'] ?? ''],
-            'date' => $this->date($r, 'Datum'),
+        $h = self::documentDates($r) + [
             'dateTax' => $this->date($r, 'DatZdPln'),
-            'dateAccounting' => $this->date($r, 'DatUcP'),
             'dateDue' => $this->date($r, 'DatSplat'),
             'dateKHDPH' => $this->date($r, 'DatKHDPH'),
             'text' => $r['SText'] ?? '',
@@ -772,7 +801,17 @@ final class PohodaMdbAccounting
         }
     }
 
-    private function date(array $r, string $key): string
+    private static function documentDates(array $r): array
+    {
+        return [
+            'id' => $r['ID'],
+            'number' => ['numberRequested' => $r['Cislo'] ?? ''],
+            'date' => self::date($r, 'Datum'),
+            'dateAccounting' => self::date($r, 'DatUcP'),
+        ];
+    }
+
+    private static function date(array $r, string $key): string
     {
         $date = substr($r[$key] ?? '', 0, 10);
         // Prázdné datum Accessu (30. 12. 1899) není datum dokladu.

@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Nastavení „Účetní rok začíná" (migrace 2003) se zadává PŘEDEM. Proti použitým
@@ -92,7 +93,8 @@ final class FiscalYearStartSettingTest extends BankPostingTestCase
         $res = $this->update(['fiscal_year_start_month' => 8]);
 
         self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
-        $period = (new AccountingPeriodRepository($this->db))->ensureOpenPeriodFor($this->supplierId, '2099-03-10');
+        $period = (new AccountingPeriodRepository($this->db, new MockClock('2099-03-10')))
+            ->ensureOpenPeriodFor($this->supplierId, '2099-03-10');
         self::assertSame(['2098-08-01', '2099-07-31'], [(string) $period['starts_on'], (string) $period['ends_on']]);
     }
 
@@ -103,7 +105,7 @@ final class FiscalYearStartSettingTest extends BankPostingTestCase
         // berou kalendář i odpisy a karta majetku.
         $this->db->pdo()->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$this->supplierId]);
         $this->db->pdo()->prepare('UPDATE supplier SET fiscal_year_start_month = 8 WHERE id = ?')->execute([$this->supplierId]);
-        $repo = new AccountingPeriodRepository($this->db);
+        $repo = new AccountingPeriodRepository($this->db, new MockClock('2099-03-10'));
         $repo->create($this->supplierId, 2098, '2099-03-01', '2099-07-31');
 
         self::assertSame(8, $repo->fiscalCalendar($this->supplierId)->startMonth());
@@ -163,7 +165,7 @@ final class FiscalYearStartSettingTest extends BankPostingTestCase
 
     private function ensurePeriod(): void
     {
-        (new AccountingPeriodRepository($this->db))->ensureOpenPeriodFor($this->supplierId, self::YEAR . '-06-01');
+        (new AccountingPeriodRepository($this->db))->ensureOpenPeriodFor($this->supplierId, self::YEAR . '-06-01', forPosting: false);
     }
 
     /** Nová právnická osoba v podvojném účetnictví s kalendářním obdobím z průvodce. */

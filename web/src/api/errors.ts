@@ -24,6 +24,7 @@ export function apiErrorCode(err: any): string {
 
 export const POSTING_PERIOD_ERROR_KEYS = {
   period_before_start: 'accounting.posting_errors.period_before_start',
+  period_after_horizon: 'accounting.posting_errors.period_after_horizon',
   period_gap: 'accounting.posting_errors.period_gap',
 } as const
 

@@ -20392,6 +20392,7 @@
       "missing_exchange_rate": "The foreign-currency document has no exchange rate — fill in the rate for the accounting date.",
       "no_accounting_period": "No accounting period exists for the document date — create one first in Accounting → Closing.",
       "period_before_start": "The date is before the company started accounting in MyÚčto. Check the year for a typo. If you intended to post to an earlier year, create the period manually under Tools → Closing.",
+      "period_after_horizon": "The date is beyond the company's next fiscal year. Check the year for a typo. If you intended to post to that future year, create the period manually under Tools → Closing.",
       "period_gap": "The date falls in a gap between accounting periods. Check the date or create the missing period manually under Tools → Closing.",
       "period_missing": "The accounting period for the document year does not exist — create it first in Accounting → Closing.",
       "depreciation_journal_missing": "The asset card shows the year's accounting depreciation as posted, but its journal entry is missing. It was not posted again to avoid doubling it. Check the journal for another entry carrying the year's depreciation (e.g. taken over from the previous software) and post it manually if needed.",
@@ -22642,6 +22643,7 @@
       "checks": {
         "prior_period_open": "The previous period is not closed",
         "empty_period_before_accounting_start": "Open periods with no journal entries before accounting started",
+        "posting_period_after_horizon": "Periods created by posting that start too far in the future",
         "pl_balance_before_period": "Non-zero expense/revenue balances before the period start",
         "drafts_in_period": "Unposted journal drafts in the period",
         "journal_unbalanced": "The period journal is not balanced (Σ Dr ≠ Σ Cr)",
@@ -25472,6 +25474,7 @@
     "doc_date": "Date",
     "issue": {
       "amount_mismatch": "amount does not match",
+      "posting_period_after_horizon": "From {from} to {to}, journal entries {count}",
       "counterparty_mismatch": "counterparty does not match",
       "currency_mismatch": "currency does not match",
       "fx_on_czk_czk": "FX difference on a CZK payment",

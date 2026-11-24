@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Migration\Pohoda;
 
+use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaJournal;
 use MyInvoice\Service\Migration\Pohoda\PohodaVat;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
+use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -80,6 +82,58 @@ final class PohodaExportTest extends TestCase
         self::assertTrue($vat->forcesA5('UDA5'));
         self::assertFalse($vat->forcesA5('UD'));
         self::assertNull($vat->sale('NEZNAME', 21.0));
+    }
+
+    public function testAccountingDateTypoIsCorrectedInTheDocumentAndJournal(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $cash = $dir . '/' . PohodaExport::FILES['cash'];
+        file_put_contents($cash, '<root>'
+            . '<voucher><voucherHeader><number><numberRequested>TEST-POK-1</numberRequested></number><voucherType>receipt</voucherType>'
+            . '<date>2026-09-01</date><dateAccounting>6026-09-01</dateAccounting><dateTax>2026-08-31</dateTax></voucherHeader></voucher>'
+            . '<voucher><voucherHeader><number><numberRequested>TEST-POK-2</numberRequested></number><voucherType>receipt</voucherType>'
+            . '<date>2026-09-01</date><dateAccounting>2026-09-03</dateAccounting></voucherHeader></voucher></root>');
+        file_put_contents($dir . '/' . PohodaExport::FILES['journal'], '<responsePack ico="' . SyntheticPohodaExport::ICO . '" state="ok">'
+            . '<accountingItem><source>Pokladna</source><number><numberRequested>TEST-POK-1</numberRequested></number>'
+            . '<date>6026-09-01</date><dateTax>2026-08-31</dateTax></accountingItem>'
+            . '<accountingItem><source>Pokladna</source><number><numberRequested>TEST-POK-2</numberRequested></number>'
+            . '<date>2026-09-03</date></accountingItem></responsePack>');
+        $export = PohodaExport::open($dir);
+
+        $entries = iterator_to_array($export->records('journal', 'accountingItem'), false);
+        self::assertSame(['2026-09-01', '2026-09-03'], array_column($entries, 'date'));
+        self::assertSame('2026-08-31', $entries[0]['dateTax']);
+        self::assertSame([], $export->counts()['later_years']);
+        $headers = array_column(iterator_to_array($export->records('cash', 'voucher'), false), 'voucherHeader');
+        self::assertSame(['2026-09-01', '2026-09-03'], array_column($headers, 'dateAccounting'));
+        $warnings = $export->sourceWarnings();
+        self::assertSame(['accounting_date_corrected'], array_column($warnings, 'code'));
+        self::assertSame('TEST-POK-1', $warnings[0]['context']['document_no']);
+        self::assertSame('6026-09-01', $warnings[0]['context']['accounting_date']);
+        self::assertSame('2026-09-01', $warnings[0]['context']['document_date']);
+    }
+
+    public function testMdbAccountingDatesRespectTheTransferYearsAndTheDocumentId(): void
+    {
+        $dir = SyntheticPohodaMdbExport::write($this->tmp, [
+            'BV' => [
+                ['ID' => '11', 'Cislo' => 'TEST-BANK', 'RelTpBV' => '1', 'Datum' => '2026-12-31', 'DatUcP' => '2027-01-02'],
+                ['ID' => '12', 'Cislo' => 'TEST-BANK', 'RelTpBV' => '1', 'Datum' => '2027-01-02', 'DatUcP' => '2027-01-02'],
+            ],
+            'pUD' => [
+                ['ID' => '21', 'RelUdAg' => '28', 'RelAgID' => '11', 'Cislo' => 'TEST-BANK', 'Datum' => '2027-01-02'],
+                ['ID' => '22', 'RelUdAg' => '28', 'RelAgID' => '12', 'Cislo' => 'TEST-BANK', 'Datum' => '2027-01-02'],
+            ],
+        ]);
+        $allYears = PohodaExport::open($dir);
+        $entries = static fn (PohodaExport $export): array => array_column(iterator_to_array($export->records('journal', 'accountingItem'), false), 'date');
+        self::assertSame(['2027-01-02', '2027-01-02'], $entries($allYears));
+        self::assertSame([], $allYears->sourceWarnings());
+
+        $only2026 = $allYears->withPostingYears(FiscalCalendar::calendar(), 2026, [2027], [2026]);
+        self::assertSame(['2026-12-31', '2027-01-02'], $entries($only2026));
+        self::assertSame(['accounting_date_corrected'], array_column($only2026->sourceWarnings(), 'code'));
+        self::assertSame(['2027-01-02', '2027-01-02'], $entries($allYears));
     }
 
     public function testRepeatedElementsAndAttributes(): void

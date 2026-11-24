@@ -199,6 +199,7 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
    průvodcem. Zkontrolujte rekonciliaci: obratová předvaha MyÚčta proti
    předvaze z deníku POHODY na haléř, obraty MD = D, vyrovnané počáteční stavy,
    rozvaha, doklady proti deníku (321, 311, 211, 221).
+   Pokud se datum zaúčtování liší od data dokladu o víc než rok nebo spadá mimo vybrané období, zatímco datum dokladu do něj spadá, převod použije datum dokladu a v protokolu uvede číslo dokladu i obě data.
 2. Doklady označené jako **doklad bez zápisu** zaúčtujte v
    `Účetnictví → Doúčtovat doklady`.
 3. Koncepty k ruční kontrole (doklad s daní bez členění DPH, neznámé členění,
