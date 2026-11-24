@@ -478,15 +478,28 @@ final class AccountingPeriodRepository
      * Automaticky se zakládá první období firmy, období po konci řady, mezera uvnitř
      * řady (zapomenutý rok mezi převzatou historií a současností) a jeden účetní rok
      * bezprostředně před prvním obdobím (pozdní doklad nebo storno za loňský rok).
-     * Chybějící období starší než rok před začátkem nebo vzdálenější než příští
-     * účetní rok založí účetní ručně.
+     * Chybějící období starší než rok před začátkem nebo vzdálenější než rok po
+     * pozdějším z dnešního roku a posledního vědomě založeného období založí účetní ručně.
      */
     public function assertCanAutomaticallyOpenForPosting(int $supplierId, string $date): void
     {
         $calendar = $this->fiscalCalendar($supplierId);
         $year = $calendar->fiscalYearOfDate($date);
         $today = $this->clock->now()->format('Y-m-d');
-        if ($year > $calendar->fiscalYearOfDate($today) + self::POSTING_YEARS_AHEAD) {
+        // Horizont se měří od pozdějšího z dnešního roku a posledního období, které firma
+        // založila vědomě (ručně, uzávěrkou, převodem). Období založená samotným zaúčtováním
+        // horizont neposouvají, jinak by šlo řetězit rok za rokem do budoucna.
+        $deliberate = $this->db->pdo()->prepare(
+            "SELECT MAX(starts_on) FROM accounting_periods
+              WHERE supplier_id = ? AND (created_reason IS NULL OR created_reason <> 'posting')"
+        );
+        $deliberate->execute([$supplierId]);
+        $lastDeliberate = $deliberate->fetchColumn();
+        $baseYear = $calendar->fiscalYearOfDate($today);
+        if (is_string($lastDeliberate) && $lastDeliberate !== '') {
+            $baseYear = max($baseYear, $calendar->fiscalYearOfDate($lastDeliberate));
+        }
+        if ($year > $baseYear + self::POSTING_YEARS_AHEAD) {
             throw new PostingException(
                 'period_after_horizon',
                 'Datum je za příštím účetním rokem firmy. Zkontrolujte, zda nejde o překlep v roce. '

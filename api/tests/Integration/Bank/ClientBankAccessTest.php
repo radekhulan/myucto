@@ -602,6 +602,8 @@ final class ClientBankAccessTest extends TestCase
         self::assertSame(200, $this->call('manualMatch', $permissions, ['invoice_id' => $this->invoice])[0]);
         $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplier]);
         $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplier);
+        // Fiktivní rok 2099 je za horizontem automatického založení, období se zakládá vědomě.
+        $this->container->get(\MyInvoice\Repository\AccountingPeriodRepository::class)->create($this->supplier, 2099, '2099-01-01', '2099-12-31');
         $entry = $this->container->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'bank', $this->tx,
             [['account_code' => '221', 'side' => 'debit', 'amount' => 1000], ['account_code' => '311', 'side' => 'credit', 'amount' => 1000]],
             ['entry_date' => '2099-06-15', 'description' => 'Synthetic client bank', 'user_id' => $this->user]);
@@ -625,6 +627,8 @@ final class ClientBankAccessTest extends TestCase
     {
         $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplier]);
         $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplier);
+        // Fiktivní rok 2099 je za horizontem automatického založení, období se zakládá vědomě.
+        $this->container->get(\MyInvoice\Repository\AccountingPeriodRepository::class)->create($this->supplier, 2099, '2099-01-01', '2099-12-31');
         $suggestion = $this->suggestion([['type' => 'invoice', 'invoice_id' => $this->invoice, 'score' => 0.9]]);
         $entry = $this->container->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'bank', $this->tx,
             [['account_code' => '221', 'side' => 'debit', 'amount' => 1000], ['account_code' => '648', 'side' => 'credit', 'amount' => 1000]],
