@@ -46460,7 +46460,8 @@
       "purchase_invoice": "Received document",
       "bank_statement": "Bank statement",
       "account": "Account",
-      "other_item": "Other item"
+      "other_item": "Other item",
+      "asset": "Asset card"
     },
     "sources": {
       "pohoda": "POHODA",
@@ -46474,6 +46475,11 @@
       "include_uploaded": "Also switch statements uploaded after the migration that clearly belong to the account by their file to the account currency."
     },
     "checks": {
+      "asset_account_undetermined": {
+        "title": "Undetermined account for an asset migrated from POHODA",
+        "hint": "Asset cards flagged during POHODA migration because their asset account could not be determined.",
+        "description": "The check uses opening balances and the accumulated depreciation account to identify the asset account. The fix sets the account on the card if the opening balance covers the combined cost of the cards on that account within CZK 1."
+      },
       "settled_without_payment": {
         "title": "Paid amount of invoices without a payment record",
         "hint": "POHODA: prior-year payments, Money S3: offsets and payments without a payment document.",

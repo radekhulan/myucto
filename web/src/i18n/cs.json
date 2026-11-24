@@ -46460,7 +46460,8 @@
       "purchase_invoice": "Přijatý doklad",
       "bank_statement": "Bankovní výpis",
       "account": "Účet",
-      "other_item": "Ostatní položka"
+      "other_item": "Ostatní položka",
+      "asset": "Karta majetku"
     },
     "sources": {
       "pohoda": "POHODA",
@@ -46474,6 +46475,11 @@
       "include_uploaded": "Přepnout na měnu účtu i výpisy nahrané po převodu, které k účtu podle souboru jednoznačně patří."
     },
     "checks": {
+      "asset_account_undetermined": {
+        "title": "Neurčený majetkový účet karty z POHODY",
+        "hint": "Karty s poznámkou o neurčeném majetkovém účtu z převodu POHODY.",
+        "description": "Kontrola určí majetkový účet podle počátečních stavů a účtu oprávek. Oprava nastaví účet na kartě, pokud počáteční stav pokrývá součet cen karet na tomto účtu s tolerancí 1 Kč."
+      },
       "settled_without_payment": {
         "title": "Uhrazená částka faktur bez záznamu platby",
         "hint": "POHODA: úhrady minulých let, Money S3: zápočty a úhrady bez dokladu úhrady.",

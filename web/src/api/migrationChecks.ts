@@ -2,7 +2,7 @@ import { api } from './client'
 
 export type MigrationCheckStatus = 'ok' | 'fixable' | 'review' | 'error'
 export type MigrationCheckItemState = 'fixable' | 'locked' | 'review'
-export type MigrationCheckEntity = 'invoice' | 'purchase_invoice' | 'bank_statement' | 'account' | 'other_item'
+export type MigrationCheckEntity = 'invoice' | 'purchase_invoice' | 'bank_statement' | 'account' | 'other_item' | 'asset'
 
 export interface MigrationCheckSummary {
   key: string
@@ -94,6 +94,7 @@ export function migrationCheckItemLink(item: MigrationCheckItem): string | { pat
     case 'purchase_invoice': return `/purchase-invoices/${item.entity_id}`
     case 'bank_statement': return `/bank/${item.entity_id}`
     case 'other_item': return `/other-items/${item.entity_id}`
+    case 'asset': return `/accounting/assets/${item.entity_id}`
     default: return null
   }
 }

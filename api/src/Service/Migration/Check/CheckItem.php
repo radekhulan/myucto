@@ -18,7 +18,7 @@ final class CheckItem
     public const REVIEW = 'review';
 
     /** Druhy záznamů, na které umí rozhraní prokliknout. */
-    public const ENTITY_TYPES = ['invoice', 'purchase_invoice', 'bank_statement', 'account', 'other_item'];
+    public const ENTITY_TYPES = ['invoice', 'purchase_invoice', 'bank_statement', 'account', 'other_item', 'asset'];
 
     /** @param array<string,scalar|null> $details doplňující údaje nálezu (účet, rok, číslo zálohy …) */
     public function __construct(
