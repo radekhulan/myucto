@@ -127,6 +127,10 @@ final class PayrollRunReadinessImpact
         'dpc_weekly_average_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'dpc_weekly_average_manual_review_required' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'recurring_component_without_input' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Pravidelná základní mzda jiná než sjednaná měsíční mzda vztahu
+        // ({@see PayrollRunRecurringBaseWage}). Mzdu nezastaví, ale opravená
+        // po zamknutí vstupů stojí opravnou revizi.
+        PayrollRunRecurringBaseWage::CODE => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'payout_rule_missing' => [self::IMPACT_REVISION, self::SCOPE_PERSON],
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],

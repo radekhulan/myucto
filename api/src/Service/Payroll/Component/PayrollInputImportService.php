@@ -338,6 +338,9 @@ final class PayrollInputImportService
         if ($amount === false) {
             throw new \InvalidArgumentException('amount_minor je mimo podporovaný rozsah.');
         }
+        // Stejné pravidlo jako ruční zadání a zákonný výpočet: řádek se zápornou
+        // částkou u složky v základech by běh zastavil až po zamknutí vstupů.
+        PayrollNegativeAmountPolicy::assertAllowed($component, (int) $amount);
         $externalId = $this->rowString($row, 'external_id');
         if ($externalId === '' || mb_strlen($externalId) > 190
             || preg_match('/[\x00-\x1F\x7F]/u', $externalId) === 1

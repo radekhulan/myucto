@@ -211,6 +211,56 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Pravidelné základní mzdy pevnou částkou účinné v měsíci a sjednané
+     * měsíční mzdy podmínek vztahu, které platí aspoň část doby jejich
+     * účinnosti v měsíci ({@see PayrollRunRecurringBaseWage}). Řádek na
+     * dvojici předpis a podmínky; předpis bez podmínek má jeden řádek
+     * s prázdnými podmínkami.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function recurringBaseWageTerms(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        return $this->grouped($this->fetch(
+            'SELECT recurring.id AS recurring_id,
+                    recurring.amount_minor AS recurring_amount_minor,
+                    component.code AS component_code,
+                    employment.monthly_gross_minor AS employment_monthly_gross_minor,
+                    term.monthly_gross_minor AS term_monthly_gross_minor,
+                    term.remuneration_type AS term_remuneration_type,
+                    recurring.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_recurring_components recurring
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = recurring.supplier_id
+                AND component.id = recurring.component_id
+                AND component.component_kind = "base_wage"
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = recurring.supplier_id
+                AND employment.id = recurring.employment_id
+               LEFT JOIN payroll_employment_terms term
+                 ON term.supplier_id = recurring.supplier_id
+                AND term.employment_id = recurring.employment_id
+                AND term.effective_from <= LEAST(COALESCE(recurring.valid_to, ?), ?)
+                AND (term.effective_to IS NULL OR term.effective_to >= GREATEST(recurring.valid_from, ?))
+              WHERE recurring.supplier_id = ?
+                AND recurring.employment_id IN (%s)
+                AND recurring.is_active = 1
+                AND recurring.calculation_kind = "fixed_amount"
+                AND recurring.valid_from <= ?
+                AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+              ORDER BY recurring.employment_id, recurring.id, term.effective_from, term.id',
+            [$periodEnd, $periodEnd, $periodStart, $supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart],
+        ));
+    }
+
+    /**
      * Počty nerozhodnutých nepřítomností zasahujících do období podle pracovního
      * vztahu: žádost bez rozhodnutí a schválená nepřítomnost s rozpracovanou
      * opravou. Snímek běhu bere jen schválené ({@see self::absences()}), takže

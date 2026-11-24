@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollFoodServiceTipService;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory;
 use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
+use MyInvoice\Service\Payroll\Component\PayrollNegativeAmountPolicy;
 use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
@@ -2907,6 +2908,36 @@ final class PayrollInputRepository
         ) {
             throw new \InvalidArgumentException(self::IMPORT_ONLY_CODES[(string) $row['code']]);
         }
+    }
+
+    /**
+     * Záporná částka u složky, kterou by kvůli ní zastavil zákonný výpočet,
+     * se odmítne už při uložení ({@see PayrollNegativeAmountPolicy}).
+     *
+     * Volají ji cesty, kde částku zadává účetní (formulář vstupu, rychlé
+     * zadání, náhled). Převody z předchozího programu a vstupy odvozené
+     * z docházky nebo nepřítomností ji nevolají: nesou historii nebo rozdíl,
+     * který posoudí výpočet běhu.
+     *
+     * @param array<string,mixed> $data
+     */
+    public function assertNegativeAmountAllowed(int $supplierId, array $data): void
+    {
+        $amount = $data['amount_minor'] ?? null;
+        if (!is_int($amount) || $amount >= 0) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT code, name, tax_treatment, social_treatment, health_treatment
+               FROM payroll_component_definitions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $data['component_id'] ?? 0]);
+        $component = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($component)) {
+            return;
+        }
+        PayrollNegativeAmountPolicy::assertAllowed($component, $amount);
     }
 
     private function lockEmployee(PDO $pdo, int $supplierId, int $employeeId): void

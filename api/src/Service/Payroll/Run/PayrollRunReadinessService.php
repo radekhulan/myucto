@@ -96,6 +96,15 @@ final class PayrollRunReadinessService
         'payroll_component_missing',
     ];
 
+    /**
+     * Důvody výpočtu, které jen opakují jiný důvod téže osoby: čistá mzda se
+     * nespočítala, protože neprošla daň nebo pojistné.
+     */
+    private const CALCULATION_ECHO_CODES = [
+        'insurance_or_tax_result_requires_manual_review',
+        'statutory_input_incomplete',
+    ];
+
     /** Sekce zákonné evidence, které doplní hromadné výchozí údaje. */
     private const STATUTORY_DEFAULT_FIELDS = [
         'statutory.tax_residences',
@@ -271,7 +280,8 @@ final class PayrollRunReadinessService
                     array_slice($conflicts, 0, self::MAX_ENTITIES),
                 ), array_column($conflicts, 'employee_id'), $periodStart, $paymentDate);
             }
-            $payoutFinding = $this->payoutRuleFinding($supplierId, $periodStart, $snapshot->data);
+            $dryRun = $this->dryRunCalculation($supplierId, $periodStart, $snapshot->data);
+            $payoutFinding = $this->payoutRuleFinding($periodStart, $snapshot->data, $dryRun);
             if ($payoutFinding !== null) {
                 $findings[] = $payoutFinding;
             }
@@ -319,6 +329,7 @@ final class PayrollRunReadinessService
                 $periodStart,
                 $snapshot->data,
                 $this->statutoryIssuesBeforeRun($supplierId, $periodStart, $snapshot->data),
+                $dryRun,
             );
             if ($statutoryFinding !== null) {
                 $findings[] = $statutoryFinding;
@@ -853,12 +864,19 @@ final class PayrollRunReadinessService
         return $conflicts;
     }
 
-    private function peopleWithoutPayoutRule(int $supplierId, string $periodStart, array $snapshotData): array
+    /**
+     * Výpočet nasucho nad snímkem kontroly, jak ho uvidí založený běh.
+     *
+     * Založení běhu doplní nulové počáteční úhrny tam, kde je nula
+     * prokazatelná ({@see PayrollOpeningBalanceService::provableZeroOpeningEmployeeIds()}),
+     * proto se tu doplní stejně. Nic se neukládá. Když výpočet selže, vrátí
+     * `null` a nálezy, které na něm stojí, se vynechají (kontrola je fail-soft).
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private function dryRunCalculation(int $supplierId, string $periodStart, array $snapshotData): ?array
     {
-        if (PayrollRunPaymentPreparationService::missingPayoutRules($snapshotData) === []) {
-            return [];
-        }
-        $withoutPayout = [];
         try {
             $employeeIds = array_column(array_column($snapshotData['people'], 'employee'), 'id');
             $zeroOpenings = array_fill_keys(
@@ -887,24 +905,37 @@ final class PayrollRunReadinessService
                 }
             }
             unset($person);
-            $result = $this->calculation->calculate($snapshotData, $supplierId, persist: false);
-            foreach ($result['people'] as $person) {
-                $payable = $person['payable_after_enforcement_minor'] ?? null;
-                if (($person['statutory']['status'] ?? null) === 'calculated'
-                    && is_int($payable) && $payable <= 0
-                ) {
-                    $withoutPayout[$person['employee_id']] = true;
-                }
-            }
+
+            return $this->calculation->calculate($snapshotData, $supplierId, persist: false);
         } catch (\Throwable) {
-            $withoutPayout = [];
+            return null;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $snapshotData
+     * @param array<string,mixed>|null $dryRun {@see self::dryRunCalculation()}
+     */
+    private function peopleWithoutPayoutRule(array $snapshotData, ?array $dryRun): array
+    {
+        if (PayrollRunPaymentPreparationService::missingPayoutRules($snapshotData) === []) {
+            return [];
+        }
+        $withoutPayout = [];
+        foreach ((array) ($dryRun['people'] ?? []) as $person) {
+            $payable = $person['payable_after_enforcement_minor'] ?? null;
+            if (($person['statutory']['status'] ?? null) === 'calculated'
+                && is_int($payable) && $payable <= 0
+            ) {
+                $withoutPayout[$person['employee_id']] = true;
+            }
         }
         return PayrollRunPaymentPreparationService::missingPayoutRules($snapshotData, $withoutPayout);
     }
 
-    private function payoutRuleFinding(int $supplierId, string $periodStart, array $snapshotData): ?array
+    private function payoutRuleFinding(string $periodStart, array $snapshotData, ?array $dryRun): ?array
     {
-        $missing = $this->peopleWithoutPayoutRule($supplierId, $periodStart, $snapshotData);
+        $missing = $this->peopleWithoutPayoutRule($snapshotData, $dryRun);
         if ($missing === []) {
             return null;
         }
@@ -950,10 +981,20 @@ final class PayrollRunReadinessService
      * v `taxDeclarationFinding()` (vlastní hromadná oprava) a chybějící
      * podmínky vztahu ve validaci snímku, proto se tu nepočítají podruhé.
      *
+     * Sestavovač ale některé podmínky jen odloží na výpočet: chybějící
+     * počáteční roční úhrny (vadí, jen když se měsíční základ může dotknout
+     * ročního maxima) a chybějící příslušnost k sociálnímu pojištění u dohody
+     * (vadí, jen když dohoda založí účast). U prvního vlastního běhu firmy
+     * se proto ukázaly až po zamknutí vstupů, každá oprava znamenala novou
+     * revizi. Proto se k nim přidají důvody, které vrátí výpočet nasucho
+     * ({@see self::calculationOnlyDetails()}), složené týmž formátem jako
+     * uložená validace běhu.
+     *
      * @param array<string,mixed> $snapshotData
+     * @param array<string,mixed>|null $dryRun {@see self::dryRunCalculation()}
      * @return array<string,mixed>|null
      */
-    private function statutoryInputFinding(int $supplierId, string $periodStart, array $snapshotData, ?array $issues): ?array
+    private function statutoryInputFinding(int $supplierId, string $periodStart, array $snapshotData, ?array $issues, ?array $dryRun = null): ?array
     {
         if ($issues === null) {
             return null;
@@ -989,6 +1030,21 @@ final class PayrollRunReadinessService
             }
             if (in_array($issue->code, self::HEALTH_INSURER_ISSUE_CODES, true)) {
                 $insurerPeople[$detail['entity_id']] = true;
+            }
+        }
+        foreach (self::calculationOnlyDetails($dryRun) as $key => $detail) {
+            if (isset($details[$key])) {
+                continue;
+            }
+            $details[$key] = $detail;
+            if ($detail['entity_type'] === 'employee' && $detail['entity_id'] !== null) {
+                foreach (self::STATUTORY_DEFAULT_FIELDS as $field) {
+                    if (str_contains((string) $detail['remediation_path'], 'field=' . rawurlencode($field))
+                        || str_contains((string) $detail['remediation_path'], 'field=' . $field)
+                    ) {
+                        $statutoryPeople[$detail['entity_id']] = true;
+                    }
+                }
             }
         }
         if ($details === []) {
@@ -1075,6 +1131,43 @@ final class PayrollRunReadinessService
         ], 'bulk_ids' => [
             'statutory_defaults' => array_map('intval', array_keys($statutoryPeople)),
         ]];
+    }
+
+    /**
+     * Důvody ruční kontroly osob z výpočtu nasucho, ve tvaru uložené validace
+     * běhu ({@see PayrollRunValidationMessageFormatter::statutoryDetails()},
+     * tatáž cesta jako {@see \MyInvoice\Repository\Payroll\PayrollRunRepository::replaceStatutoryValidations()}).
+     *
+     * Bere jen důvody u osob: globální blokaci výpočtu (chybějící sada
+     * pravidel) hlásí jiné nálezy. Vynechá ozvěny (čistá mzda nespočítaná
+     * kvůli dani nebo pojistnému) a kódy, které hlásí jiný nález.
+     *
+     * @param array<string,mixed>|null $dryRun
+     * @return array<string,array<string,mixed>> klíč = osoba, odkaz a hláška
+     */
+    private static function calculationOnlyDetails(?array $dryRun): array
+    {
+        $statutory = $dryRun['statutory'] ?? null;
+        if (!is_array($statutory)
+            || ($statutory['status'] ?? null) === 'calculated'
+            || !is_array($statutory['people'] ?? null)
+            || $statutory['people'] === []
+        ) {
+            return [];
+        }
+        $skipped = [];
+        foreach ([...self::STATUTORY_ISSUES_REPORTED_ELSEWHERE, ...self::CALCULATION_ECHO_CODES] as $code) {
+            $skipped[PayrollRunIssueGuidance::describe($code)['message']] = true;
+        }
+        $details = [];
+        foreach (PayrollRunValidationMessageFormatter::statutoryDetails(['people' => $statutory['people']]) as $detail) {
+            if (isset($skipped[$detail['message']])) {
+                continue;
+            }
+            $details[$detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'] . ':' . $detail['message']] = $detail;
+        }
+
+        return $details;
     }
 
     /**
@@ -1830,7 +1923,12 @@ final class PayrollRunReadinessService
                 return $ids;
             }
             if ($code === 'payout_rule_missing') {
-                $ids = array_column($this->peopleWithoutPayoutRule($supplierId, $periodStart, $snapshot->data), 'entity_id');
+                $ids = array_column($this->peopleWithoutPayoutRule(
+                    $snapshot->data,
+                    PayrollRunPaymentPreparationService::missingPayoutRules($snapshot->data) === []
+                        ? null
+                        : $this->dryRunCalculation($supplierId, $periodStart, $snapshot->data),
+                ), 'entity_id');
                 sort($ids, SORT_NUMERIC);
 
                 return $ids;

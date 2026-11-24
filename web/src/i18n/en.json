@@ -6168,6 +6168,8 @@
         "clear_selection": "Clear selection",
         "select_page": "Select all drafts on this page",
         "select_row": "Select input",
+        "time_delta": "Difference after attendance recalculation",
+        "time_delta_hint": "Attendance was recalculated after approval and only the difference against the earlier inputs of the same component was recorded. Payroll uses the sum of all these inputs for the month, rounded once per month and surcharge type.",
         "group_count": "{count} inputs",
         "group_drafts": "{count} drafts",
         "group_all_approved": "All approved",
