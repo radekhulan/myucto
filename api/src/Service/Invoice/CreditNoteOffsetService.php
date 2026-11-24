@@ -27,7 +27,8 @@ use PDO;
  *
  * Peněžní deník zápočet nezná: dobropis jen snižuje tutéž pohledávku, žádné peníze ani
  * jiná pohledávka se nevyrovnávají. Příjem/výdaj vzniká až úhradou zbytku. DPH se
- * nemění, dobropis je v evidenci DPH sám za sebe.
+ * nemění, dobropis je v evidenci DPH sám za sebe. V podvojném účetnictví tato vazba
+ * eviduje úhradu a její rozsah. Účetní zápisy nesou vlastní předpisy faktury a dobropisu.
  */
 final class CreditNoteOffsetService
 {

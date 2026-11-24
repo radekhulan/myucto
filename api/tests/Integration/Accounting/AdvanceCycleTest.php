@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\AdvanceSettlementSync;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 
 /**
  * Zálohový cyklus 314/324 (Fáze B, B5): proforma → DDKP → vyúčtování na vydané straně
@@ -26,6 +29,8 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class AdvanceCycleTest extends BankPostingTestCase
 {
+    use AnalyticAccountFixture;
+
     private int $vatRateId = 0;
     private SaldoService $saldo;
 
@@ -133,9 +138,116 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
-    // (d) — přijatá strana: platba zálohové PF 314/221, finální PF zúčtování 321/314.
-    public function testPaidAdvanceCycle314(): void
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function testFullSaleAdvanceUsesFinalReceivable(bool $advanceOnSaldo): void
     {
+        $this->useAnalyticSaleRule();
+        if ($advanceOnSaldo) {
+            $this->setPostingRule('advance.received.collection', '221', '311');
+            $this->setPostingRule('advance.received.settlement', '311', '311');
+        }
+
+        $client = $this->client('Odběratel vyúčtování');
+        $advance = $this->saleWithItem('PRO-SALDO-AN', $client, 1000.00, 210.00, 'proforma');
+        $tx = $this->payProformaViaBank($advance, 1210.00);
+        $final = $this->saleWithItem('FV-SALDO-AN', $client, 1000.00, 210.00, 'invoice', $advance);
+        $entry = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $byAccount = $this->linesByAccountCode($entry);
+
+        self::assertSame(121000, self::cents($byAccount['311.300']['debit'] ?? 0));
+        self::assertSame(100000, self::cents($byAccount['601.400']['credit'] ?? 0));
+        self::assertArrayNotHasKey('311', $byAccount);
+        self::assertSame($advanceOnSaldo ? 0 : 121000, self::cents($byAccount['311.300']['credit'] ?? 0));
+        self::assertSame($advanceOnSaldo ? 0 : 121000, self::cents($byAccount['324']['debit'] ?? 0));
+        if ($advanceOnSaldo) {
+            $result = $this->container->get(AdvanceSettlementSync::class)->syncAdvance($this->supplierId, 'sale', $advance);
+            self::assertSame('settlement_on_same_account', $result['reason'] ?? null);
+        } else {
+            $sum = $this->accountSums([$this->entryIdForBankTx($tx), $entry]);
+            self::assertSame(0, self::cents($sum['311.300']));
+            self::assertSame(0, self::cents($sum['324']));
+            self::assertArrayNotHasKey('311', $sum);
+        }
+    }
+
+    public function testLateSaleAdvancePaymentUpdatesOnlySettlementAndIsIdempotent(): void
+    {
+        $this->useAnalyticSaleRule();
+        $client = $this->client('Odběratel s pozdější úhradou');
+        $advance = $this->saleWithItem('PRO-SALDO-LATE', $client, 1000.00, 210.00, 'proforma');
+        $final = $this->saleWithItem('FV-SALDO-LATE', $client, 1000.00, 210.00, 'invoice', $advance);
+        $entry = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $before = $this->journal->linesForEntry($entry, $this->supplierId);
+        self::assertArrayNotHasKey('324', $this->linesByAccountCode($entry));
+
+        $this->payProformaViaBank($advance, 1210.00, self::YEAR . '-06-21');
+
+        $byAccount = $this->linesByAccountCode($entry);
+        self::assertSame(121000, self::cents($byAccount['311.300']['credit'] ?? 0));
+        self::assertSame(121000, self::cents($byAccount['324']['debit'] ?? 0));
+        self::assertArrayNotHasKey('311', $byAccount);
+        $after = $this->journal->linesForEntry($entry, $this->supplierId);
+        $afterById = array_column($after, null, 'id');
+        self::assertCount(count($before) + 2, $after);
+        foreach ($before as $line) {
+            self::assertSame($line, $afterById[$line['id']] ?? null);
+        }
+
+        $sync = $this->container->get(AdvanceSettlementSync::class);
+        self::assertSame('in_sync', $sync->syncAdvance($this->supplierId, 'sale', $advance)['action']);
+        self::assertSame($after, $this->journal->linesForEntry($entry, $this->supplierId));
+    }
+
+    public function testAdvanceSyncReplacesLegacySyntheticSettlement(): void
+    {
+        $this->useAnalyticSaleRule();
+        $client = $this->client('Odběratel se starším vyúčtováním');
+        $advance = $this->saleWithItem('PRO-SALDO-LEGACY', $client, 1000.00, 210.00, 'proforma');
+        $this->payProformaViaBank($advance, 1210.00);
+        $final = $this->saleWithItem('FV-SALDO-LEGACY', $client, 1000.00, 210.00, 'invoice', $advance);
+        $entry = $this->posting->postDocument($this->supplierId, 'invoice', $final, [
+            ['account_code' => '311.300', 'side' => 'debit', 'amount' => 1210.00],
+            ['account_code' => '601.400', 'side' => 'credit', 'amount' => 1000.00],
+            ['account_code' => '343.200', 'side' => 'credit', 'amount' => 210.00],
+            ['account_code' => '324', 'side' => 'debit', 'amount' => 1210.00],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 1210.00],
+        ], ['entry_date' => self::YEAR . '-06-20']);
+
+        $sync = $this->container->get(AdvanceSettlementSync::class);
+        $result = $sync->syncAdvance($this->supplierId, 'sale', $advance);
+        self::assertSame('synced', $result['action']);
+        self::assertSame(121000, self::cents($result['before']));
+        $byAccount = $this->linesByAccountCode($entry);
+        self::assertSame(121000, self::cents($byAccount['311.300']['credit'] ?? 0));
+        self::assertArrayNotHasKey('311', $byAccount);
+        self::assertSame('in_sync', $sync->syncAdvance($this->supplierId, 'sale', $advance)['action']);
+    }
+
+    public function testAdvanceSyncSkipsNegativeFinalInvoice(): void
+    {
+        $this->useAnalyticSaleRule();
+        $client = $this->client('Odběratel se záporným vyúčtováním');
+        $advance = $this->saleWithItem('PRO-SALDO-NEG', $client, 1000.00, 210.00, 'proforma');
+        $final = $this->saleWithItem('FV-SALDO-NEG', $client, -100.00, -21.00, 'invoice', $advance);
+        $entry = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $before = $this->journal->linesForEntry($entry, $this->supplierId);
+
+        $result = $this->container->get(AdvanceSettlementSync::class)->syncAdvance($this->supplierId, 'sale', $advance);
+
+        self::assertSame('negative_final', $result['reason'] ?? null);
+        self::assertSame($before, $this->journal->linesForEntry($entry, $this->supplierId));
+    }
+
+    // (d) — přijatá strana: platba zálohové PF 314/221, finální PF zúčtování 321/314.
+    #[TestWith(['321'])]
+    #[TestWith(['321.200'])]
+    public function testPaidAdvanceCycle314(string $payable): void
+    {
+        if ($payable !== '321') {
+            $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, $payable, '321.201');
+            $this->setPostingRule('invoice.services.received', '518', $payable);
+        }
         $vendor = $this->client('Dodavatel s.r.o.');
         // Zálohová PF (document_kind=advance) 605 Kč, uhrazená z banky → 314/221.
         $advPf = $this->purchaseInvoice('ZPF-D', $vendor, 605.00, 'advance');
@@ -152,8 +264,8 @@ final class AdvanceCycleTest extends BankPostingTestCase
 
         self::assertEqualsWithDelta(1000.00, $byAcc['518']['debit'], 0.001, '518 MD = náklad.');
         self::assertEqualsWithDelta(210.00, $byAcc['343.100']['debit'], 0.001, '343 MD = odpočet DPH.');
-        self::assertEqualsWithDelta(1210.00, $byAcc['321']['credit'], 0.001, '321 D = závazek.');
-        self::assertEqualsWithDelta(605.00, $byAcc['321']['debit'], 0.001, '321 MD = zúčtování zaplacené zálohy.');
+        self::assertEqualsWithDelta(1210.00, $byAcc[$payable]['credit'], 0.001, '321 D = závazek.');
+        self::assertEqualsWithDelta(605.00, $byAcc[$payable]['debit'], 0.001, '321 MD = zúčtování zaplacené zálohy.');
         self::assertEqualsWithDelta(605.00, $byAcc['314']['credit'], 0.001, '314 D = zúčtování poskytnuté zálohy.');
         $this->assertBalancedEntry($entryId);
     }
@@ -387,8 +499,13 @@ final class AdvanceCycleTest extends BankPostingTestCase
     // (f4) — postupné čerpání zálohy fakturami za milníky: každá zúčtuje 324/311 jen základ,
     //        který sama odečetla. Po poslední je 324 na nule, 343 nese daň z celého plnění
     //        právě jednou a na 311 zůstává jen doplatek milníků.
-    public function testMilestoneInvoicesDrawAdvanceStepByStep(): void
+    #[TestWith(['311', '602'])]
+    #[TestWith(['311.300', '601.400'])]
+    public function testMilestoneInvoicesDrawAdvanceStepByStep(string $receivable, string $revenue): void
     {
+        if ($receivable !== '311') {
+            $this->useAnalyticSaleRule();
+        }
         $client   = $this->client('Odběratel s.r.o.');
         $proforma = $this->saleWithItem('PRO-F4', $client, 1000.00, 210.00, 'proforma');
         $tx = $this->payProformaViaBank($proforma, 1210.00);
@@ -398,11 +515,11 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $first = $this->finalWithDeduction('FV-F4a', $client, $proforma, 1000.00, 210.00, 300.00, 63.00);
         $firstEntry = $this->postInvoiceEntry($first, self::YEAR . '-06-20');
         $byAcc = $this->linesByAccountCode($firstEntry);
-        self::assertEqualsWithDelta(1147.00, $byAcc['311']['debit'] ?? 0.0, 0.001, '311 MD = faktura 847 + vrácený základ odpočtu 300.');
-        self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'] ?? 0.0, 0.001, '602 D = výnos za celý milník.');
+        self::assertEqualsWithDelta(1147.00, $byAcc[$receivable]['debit'] ?? 0.0, 0.001, '311 MD = faktura 847 + vrácený základ odpočtu 300.');
+        self::assertEqualsWithDelta(1000.00, $byAcc[$revenue]['credit'] ?? 0.0, 0.001, '602 D = výnos za celý milník.');
         self::assertEqualsWithDelta(147.00, $byAcc['343.200']['credit'] ?? 0.0, 0.001, '343 D = daň milníku po odpočtu daně zálohy.');
         self::assertEqualsWithDelta(300.00, $byAcc['324']['debit'] ?? 0.0, 0.001, '324 MD = jen základ, který faktura odečetla.');
-        self::assertEqualsWithDelta(300.00, $byAcc['311']['credit'] ?? 0.0, 0.001, '311 D = vyrovnání odečtené části zálohy.');
+        self::assertEqualsWithDelta(300.00, $byAcc[$receivable]['credit'] ?? 0.0, 0.001, '311 D = vyrovnání odečtené části zálohy.');
         $this->assertBalancedEntry($firstEntry);
 
         $afterFirst = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $firstEntry]);
@@ -414,9 +531,25 @@ final class AdvanceCycleTest extends BankPostingTestCase
 
         $sum = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $firstEntry, $secondEntry]);
         self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyčerpání zálohy na nule.');
-        self::assertSame(242000, self::cents($sum['311'] ?? 0), 'Na 311 zůstává doplatek milníků 847 + 1573.');
-        self::assertSame(-300000, self::cents($sum['602'] ?? 0), 'Výnos za oba milníky.');
+        self::assertSame(242000, self::cents($sum[$receivable] ?? 0), 'Na 311 zůstává doplatek milníků 847 + 1573.');
+        self::assertSame(-300000, self::cents($sum[$revenue] ?? 0), 'Výnos za oba milníky.');
         self::assertSame(-63000, self::cents($sum['343.200'] ?? 0), 'Daň 21 % z 3000 právě jednou.');
+
+        if ($receivable !== '311') {
+            $payments = [];
+            foreach ([[$first, 847.00], [$second, 1573.00]] as [$invoice, $amount]) {
+                $payment = $this->transaction($this->statement(), $amount, [
+                    'match_status' => 'manual', 'matched_invoice_id' => $invoice, 'posted_at' => self::YEAR . '-07-21',
+                ]);
+                $this->invoicePayment($invoice, $payment, $amount);
+                $result = $this->service->handleTransaction($payment, $this->userId);
+                self::assertSame('posted', $result['action'], (string) ($result['reason'] ?? ''));
+                $payments[] = $this->entryIdForBankTx($payment);
+            }
+            $settled = $this->accountSums([$firstEntry, $secondEntry, ...$payments]);
+            self::assertSame(0, self::cents($settled[$receivable]));
+            self::assertArrayNotHasKey('311', $settled);
+        }
     }
 
     // (f4a) — postupné čerpání nad částku DDKP: faktura, která by zálohu přečerpala → hlasitá chyba.
@@ -1084,11 +1217,33 @@ final class AdvanceCycleTest extends BankPostingTestCase
         return $id;
     }
 
-    private function payProformaViaBank(int $proformaId, float $amount): int
+    private function useAnalyticSaleRule(): void
+    {
+        $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, '311.300', '311.301', '601.400');
+        $this->setPostingRule('invoice.services.issued', '311.300', '601.400');
+    }
+
+    private function setPostingRule(string $key, string $debit, string $credit): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+             VALUES (?, ?, ?, ?, ?, 0, 1)
+             ON DUPLICATE KEY UPDATE debit_account_code = VALUES(debit_account_code),
+                                     credit_account_code = VALUES(credit_account_code), is_active = 1'
+        )->execute([$this->supplierId, $key, 'Testovací kontace', $debit, $credit]);
+    }
+
+    private function payProformaViaBank(int $proformaId, float $amount, ?string $date = null): int
     {
         $stmt = $this->statement();
-        $tx = $this->transaction($stmt, $amount, ['match_status' => 'auto_exact', 'matched_invoice_id' => $proformaId]);
+        $tx = $this->transaction($stmt, $amount, [
+            'match_status' => 'auto_exact', 'matched_invoice_id' => $proformaId, 'posted_at' => $date ?? self::YEAR . '-06-15',
+        ]);
         $this->invoicePayment($proformaId, $tx, $amount);
+        if ($date !== null) {
+            $this->db->pdo()->prepare('UPDATE invoice_payments SET paid_on = ? WHERE supplier_id = ? AND bank_transaction_id = ?')
+                ->execute([$date, $this->supplierId, $tx]);
+        }
         $res = $this->service->handleTransaction($tx, $this->userId);
         self::assertSame('posted', $res['action'], 'Inkaso zálohy se má zaúčtovat: ' . ($res['reason'] ?? ''));
         return $tx;

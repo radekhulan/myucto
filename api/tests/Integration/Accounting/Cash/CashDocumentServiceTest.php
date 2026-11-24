@@ -21,7 +21,9 @@ use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -33,6 +35,8 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class CashDocumentServiceTest extends TestCase
 {
+    use AnalyticAccountFixture;
+
     use IsolatedSupplierTrait;
 
     private const YEAR = 2099;
@@ -472,6 +476,37 @@ final class CashDocumentServiceTest extends TestCase
         $inv = $this->invoiceRow($invoiceId);
         self::assertEqualsWithDelta(10000.00, (float) $inv['paid_total'], 0.001);
         self::assertSame('paid', $inv['status']);
+    }
+
+    #[TestWith(['in', '311.300'])]
+    #[TestWith(['out', '311.300'])]
+    #[TestWith(['in', null])]
+    public function testCzkInvoicePaymentUsesPredpisAccountOrRule(string $direction, ?string $predpisAccount): void
+    {
+        $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, '311.300', '311.301');
+        $register = $this->makeRegister();
+        $client = $this->client('Odběratel saldokonto hotově', true, false);
+        $refund = $direction === 'out';
+        if ($refund) {
+            $this->db->pdo()->prepare('UPDATE supplier SET allow_refund_invoices = 1 WHERE id = ?')->execute([$this->supplierId]);
+        }
+        $invoice = $this->saleInvoice('FV-SALDO-CASH', $client, $refund ? -1000.00 : 1000.00, $this->currencyId);
+        if ($predpisAccount !== null) {
+            $this->posting->postDocument($this->supplierId, 'invoice', $invoice, [
+                ['account_code' => $predpisAccount, 'side' => $refund ? 'credit' : 'debit', 'amount' => 1000.00],
+                ['account_code' => '602', 'side' => $refund ? 'debit' : 'credit', 'amount' => 1000.00],
+            ], ['entry_date' => self::YEAR . '-06-10']);
+        }
+
+        $cash = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'invoice_payment', 'doc_type' => $direction, 'total_amount' => 1000.00, 'invoice_id' => $invoice,
+        ], $register), $this->userId);
+        $lines = $this->linesByAccountCode($cash['journal_entry_id']);
+        self::assertSame(1000.00, $lines[$predpisAccount ?? '311'][$refund ? 'debit' : 'credit'] ?? null);
+        self::assertSame(1000.00, $lines['211'][$refund ? 'credit' : 'debit'] ?? null);
+        if ($predpisAccount !== null) {
+            self::assertArrayNotHasKey('311', $lines);
+        }
     }
 
     /**
@@ -1493,16 +1528,28 @@ final class CashDocumentServiceTest extends TestCase
      * Peněžní deník s tímhle scénářem počítal odjakživa (snižuje daňový výdaj), ale
      * PURPOSE_MATRIX ho zakazovala, takže vzniknout mohl jen mimo aplikaci.
      */
-    public function testPurchaseRefundIsPostedInReverseAndReopensInvoice(): void
+    #[TestWith(['321'])]
+    #[TestWith(['321.200'])]
+    public function testPurchaseRefundIsPostedInReverseAndReopensInvoice(string $payable): void
     {
         $reg = $this->makeRegister('211');
         $pf = $this->purchaseInvoice('PF-2099-900', $this->client('Dodavatel vratka a.s.', false, true), 5000.00, $this->currencyId);
+
+        if ($payable !== '321') {
+            $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, $payable, '321.201');
+            $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pf, [
+                ['account_code' => '518', 'side' => 'debit', 'amount' => 5000.00],
+                ['account_code' => $payable, 'side' => 'credit', 'amount' => 5000.00],
+            ], ['entry_date' => self::YEAR . '-06-10']);
+        }
 
         $payment = $this->service->create($this->supplierId, $this->doc([
             'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 5000.0,
             'purchase_invoice_id' => $pf,
         ], $reg), $this->userId);
         self::assertSame('posted', $payment['status']);
+        $paymentLines = $this->linesByAccountCode($payment['journal_entry_id']);
+        self::assertSame(5000.00, $paymentLines[$payable]['debit'] ?? null);
         self::assertSame('paid', $this->purchaseStatus($pf));
 
         $refund = $this->service->create($this->supplierId, $this->doc([
@@ -1512,7 +1559,7 @@ final class CashDocumentServiceTest extends TestCase
 
         $byAcc = $this->linesByAccountCode($refund['journal_entry_id']);
         self::assertEqualsWithDelta(2000.00, $byAcc['211']['debit'], 0.001, 'Vrácená hotovost jde do pokladny.');
-        self::assertEqualsWithDelta(2000.00, $byAcc['321']['credit'], 0.001, 'Závazek se o vrácenou částku obnoví.');
+        self::assertEqualsWithDelta(2000.00, $byAcc[$payable]['credit'], 0.001, 'Závazek se o vrácenou částku obnoví.');
         self::assertNotSame('paid', $this->purchaseStatus($pf), 'Po vratce už faktura není uhrazená v plné výši.');
     }
 

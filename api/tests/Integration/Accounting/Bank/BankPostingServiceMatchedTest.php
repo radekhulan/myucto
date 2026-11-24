@@ -8,7 +8,9 @@ use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\StaleSuggestionSweep;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Import\ImportedPaidInvoicePayment;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 
 /**
  * Spárované platby FV/PF → přímý zápis (guard předpisu H1 + M1). §8.
@@ -16,6 +18,8 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class BankPostingServiceMatchedTest extends BankPostingTestCase
 {
+    use AnalyticAccountFixture;
+
     public function testIncomingFvPosts221Over311(): void
     {
         $client = $this->client('Odběratel s.r.o.');
@@ -295,11 +299,16 @@ final class BankPostingServiceMatchedTest extends BankPostingTestCase
         return $value === null ? null : (int) $value;
     }
 
-    public function testOutgoingIssuedCreditNoteRefundPosts311Over221(): void
+    #[TestWith(['311'])]
+    #[TestWith(['311.300'])]
+    public function testOutgoingIssuedCreditNoteRefundPosts311Over221(string $saldo): void
     {
+        if ($saldo !== '311') {
+            $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, $saldo, '311.301');
+        }
         $client = $this->client('Odběratel dobropisu');
         $credit = $this->saleInvoice('ODD-2099-EP8', $client, -1000.00, 'credit_note');
-        $this->postPredpis('invoice', $credit, '602', '311', 1000.00);
+        $this->postPredpis('invoice', $credit, '602', $saldo, 1000.00);
 
         $stmt = $this->statement();
         $tx = $this->transaction($stmt, -1000.00, ['match_status' => 'manual', 'matched_invoice_id' => $credit]);
@@ -311,15 +320,20 @@ final class BankPostingServiceMatchedTest extends BankPostingTestCase
         $res = $this->service->handleTransaction($tx, $this->userId);
         self::assertSame('posted', $res['action']);
         $byAcc = $this->linesByAccountCode((int) $res['entry_id']);
-        self::assertEqualsWithDelta(1000.00, $byAcc['311']['debit'], 0.001);
+        self::assertEqualsWithDelta(1000.00, $byAcc[$saldo]['debit'], 0.001);
         self::assertEqualsWithDelta(1000.00, $byAcc['221']['credit'], 0.001);
     }
 
-    public function testIncomingPurchaseCreditNoteRefundPosts221Over321(): void
+    #[TestWith(['321'])]
+    #[TestWith(['321.200'])]
+    public function testIncomingPurchaseCreditNoteRefundPosts221Over321(string $saldo): void
     {
+        if ($saldo !== '321') {
+            $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, $saldo, '321.201');
+        }
         $vendor = $this->client('Dodavatel dobropisu');
         $credit = $this->purchaseInvoice('ODD-PF-2099-EP8', $vendor, -800.00, 'credit_note');
-        $this->postPredpis('purchase_invoice', $credit, '321', '501', 800.00);
+        $this->postPredpis('purchase_invoice', $credit, $saldo, '501', 800.00);
 
         $stmt = $this->statement();
         $tx = $this->transaction($stmt, 800.00, ['match_status' => 'manual']);
@@ -332,7 +346,7 @@ final class BankPostingServiceMatchedTest extends BankPostingTestCase
         self::assertSame('posted', $res['action']);
         $byAcc = $this->linesByAccountCode((int) $res['entry_id']);
         self::assertEqualsWithDelta(800.00, $byAcc['221']['debit'], 0.001);
-        self::assertEqualsWithDelta(800.00, $byAcc['321']['credit'], 0.001);
+        self::assertEqualsWithDelta(800.00, $byAcc[$saldo]['credit'], 0.001);
     }
 
     public function testForeignRuleSuggestionApprovalUsesCzkRateAndFxTrace(): void

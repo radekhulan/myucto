@@ -16,7 +16,7 @@ Kapitolu otevřete, když:
 - potřebujete potvrzený zápočet zrušit.
 
 Zápočet vyrovná pohledávky a závazky vůči **jednomu stejnému partnerovi**. Aplikace sestaví dohodu, po
-potvrzení vytvoří účetní zápis **321 / 311** a sníží otevřené částky vybraných vydaných i přijatých faktur.
+potvrzení vytvoří účetní zápis na účtech předpisů a sníží otevřené částky vybraných vydaných i přijatých faktur.
 Funguje jen s doklady v **CZK** a jen v podvojném účetnictví.
 
 > [!TIP]
@@ -31,7 +31,7 @@ Funguje jen s doklady v **CZK** a jen v podvojném účetnictví.
 1. **Podvojné účetnictví.** Stránka `Nástroje → Zápočty` je dostupná jen firmě v podvojném účetnictví.
 2. **Oprávnění.** Zobrazení vyžaduje oprávnění k zápočtům, vytvoření, potvrzení a zrušení jeho zápisovou variantu.
 3. **Partner s oběma otevřenými částkami.** Partner musí mít současně otevřenou pohledávku i závazek, oba v CZK.
-4. **Předkontace.** Účty zápočtu jsou v předkontacích (výchozí MD 321 / Dal 311). Můžete je firemně změnit, ale musí zůstat věcně správné a aktivní (viz [Nástroje](73_Ucetni_nastroje.md)).
+4. **Předkontace.** Výchozí účty zápočtu určuje předkontace (MD 321 / Dal 311). U zaúčtovaných faktur se použijí jejich saldokontní účty z předpisu, včetně analytik (viz [Nástroje](73_Ucetni_nastroje.md)).
 5. **Otevřené období.** Datum zápočtu musí ležet v otevřeném účetním období a za zámkem účtování.
 
 ## 67.3 Krok za krokem: sestavit a potvrdit zápočet
@@ -150,17 +150,16 @@ Potvrzením se v jedné databázové transakci:
 
 1. zamkne řádek dohody,
 2. znovu zamknou a zkontrolují všechny dotčené doklady,
-3. načte předkontace zápočtu (výchozí MD 321 / Dal 311),
+3. určí saldokontní účty jednotlivých dokladů z jejich předpisů a předkontace zápočtu,
 4. vytvoří nebo aktualizuje jediný účetní zápis se zdrojem zápočet,
 5. u vydaných faktur založí evidovanou platbu,
 6. u přijaté faktury nastaví stav uhrazeno, jen pokud zápočet pokryl celý aktuální zbytek,
 7. dohodu označí jako potvrzenou.
 
-Částečně započtená přijatá faktura zůstává ve stavu přijato/zaúčtováno, ale účetní saldo 321 je o zápočet
+Částečně započtená přijatá faktura zůstává ve stavu přijato/zaúčtováno a účetní saldo závazku je o zápočet
 snížené. V přehledu proto vždy posuzujte i skutečný otevřený zbytek, ne jen textový stav.
 
-Účty lze firemně změnit v předkontacích, ale musí zůstat věcně správné. DPH se zápočtem znovu neúčtuje:
-vznikla už při zaúčtování faktur.
+Při zápočtu proti zvolenému účtu se také vyrovná saldokontní účet předpisu faktury. DPH vznikla při zaúčtování faktur, takže samotný zápočet ji nemění.
 
 ### 67.7.5 Idempotence a souběh
 

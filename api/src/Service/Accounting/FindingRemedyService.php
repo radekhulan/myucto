@@ -17,7 +17,7 @@ use MyInvoice\Repository\PostingRuleRepository;
  *   `amount_mismatch` u CZK úhrady cizoměnového dokladu, kde na bankovním zápisu CHYBÍ
  *   563/663 → doúčtovat kurzový rozdíl. Očekávaná částka se počítá kurzem DOKLADU,
  *   platí se kurzem dne úhrady a rozdíl JE kurzový; účty vezme z kontací fx.loss /
- *   fx.gain, protiúčet je saldo dodavatele (321) nebo odběratele (311).
+ *   fx.gain, protiúčet je saldokontní účet z předpisu dokladu.
  *
  *   `fx_on_czk_czk` → opak: zaúčtovaný kurzový rozdíl na CZK↔CZK transakci vzniknout
  *   NEMĚL. Návrhem je jeho STORNO, ne další zápis.
@@ -43,6 +43,7 @@ final class FindingRemedyService
     public function __construct(
         private readonly Connection $db,
         private readonly PostingRuleRepository $postingRules,
+        private readonly FxSettlementPosting $settlementPosting,
     ) {}
 
     /**
@@ -82,12 +83,21 @@ final class FindingRemedyService
         if ((int) round(((float) ($detail['fx_booked'] ?? 0)) * 100) !== 0) {
             return null;
         }
-        if (!$this->documentIsForeignCurrency($docType, $docId)) {
+        if (!$this->documentIsForeignCurrency($supplierId, $docType, $docId)) {
             return null;
         }
 
         [$loss, $gain] = $this->fxResultAccounts($supplierId);
-        $settlement = $docType === 'purchase_invoice' ? '321' : '311';
+        try {
+            $settlement = $this->settlementPosting->saldoAccountOrFallback(
+                $supplierId, $docType, $docId, $docType === 'purchase_invoice' ? '321' : '311',
+            );
+        } catch (PostingException $e) {
+            if (!in_array($e->errorCode, ['opening_saldo_ambiguous', 'posting_group_saldo_ambiguous'], true)) {
+                throw $e;
+            }
+            return null;
+        }
         $amount = abs($diff);
 
         // Zaplaceno MÍŇ, než činil předpis v CZK → závazek se vypořádal levněji, tedy
@@ -141,13 +151,13 @@ final class FindingRemedyService
         ];
     }
 
-    private function documentIsForeignCurrency(string $docType, int $docId): bool
+    private function documentIsForeignCurrency(int $supplierId, string $docType, int $docId): bool
     {
         $table = $docType === 'purchase_invoice' ? 'purchase_invoices' : 'invoices';
         $stmt = $this->db->pdo()->prepare(
-            "SELECT cur.code FROM {$table} d JOIN currencies cur ON cur.id = d.currency_id WHERE d.id = ?"
+            "SELECT cur.code FROM {$table} d JOIN currencies cur ON cur.id = d.currency_id WHERE d.supplier_id = ? AND d.id = ?"
         );
-        $stmt->execute([$docId]);
+        $stmt->execute([$supplierId, $docId]);
         $code = $stmt->fetchColumn();
 
         return $code !== false && (string) $code !== 'CZK';

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\FindingRemedyService;
+use MyInvoice\Service\Accounting\FxSettlementPosting;
+use MyInvoice\Service\ActivityLogger;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -18,13 +21,26 @@ use PHPUnit\Framework\TestCase;
  */
 final class FindingRemedyServiceTest extends TestCase
 {
-    private function service(string $documentCurrency): FindingRemedyService
+    private function service(string $documentCurrency, ?string $saldo = null): FindingRemedyService
     {
-        $stmt = $this->createStub(\PDOStatement::class);
-        $stmt->method('fetchColumn')->willReturn($documentCurrency);
-
         $pdo = $this->createStub(\PDO::class);
-        $pdo->method('prepare')->willReturn($stmt);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) use ($documentCurrency, $saldo): \PDOStatement {
+            $stmt = $this->createStub(\PDOStatement::class);
+            $stmt->method('fetchColumn')->willReturn($documentCurrency);
+            $stmt->method('fetch')->willReturn(false);
+            $rows = match (true) {
+                $saldo === null => [],
+                str_contains($sql, 'FROM journal_document_postings jdp') => [
+                    ['posting_doc_id' => 42, 'id' => 1, 'grouped' => true, 'source_type' => 'manual', 'source_id' => null],
+                ],
+                str_contains($sql, 'FROM journal_entry_lines l') => [
+                    ['entry_id' => 1, 'account_code' => $saldo, 'currency_code' => null, 'fx_rate' => null],
+                ],
+                default => [],
+            };
+            $stmt->method('fetchAll')->willReturn($rows);
+            return $stmt;
+        });
 
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
@@ -36,7 +52,9 @@ final class FindingRemedyServiceTest extends TestCase
             default   => null,
         });
 
-        return new FindingRemedyService($db, $rules);
+        $journal = new JournalEntryRepository($db, new ActivityLogger($db));
+        $settlement = new FxSettlementPosting($db, $rules, $journal);
+        return new FindingRemedyService($db, $rules, $settlement);
     }
 
     /**
@@ -87,6 +105,21 @@ final class FindingRemedyServiceTest extends TestCase
         self::assertNotNull($p);
         self::assertSame('311', $p['lines'][0]['account_code']);
         self::assertSame('663', $p['lines'][1]['account_code']);
+    }
+
+    public function testFxRemedyUsesPredpisAnalytic(): void
+    {
+        $proposal = $this->service('EUR', '321.200')->propose(1, 'purchase_invoice', 42, 'amount_mismatch', [
+            'diff' => -10.0, 'fx_booked' => 0,
+        ]);
+
+        self::assertSame('321.200', $proposal['lines'][0]['account_code'] ?? null);
+    }
+
+    public function testNoProposalForAmbiguousPredpisAccount(): void
+    {
+        $service = $this->service('EUR', '325');
+        self::assertNull($service->propose(1, 'purchase_invoice', 42, 'amount_mismatch', ['diff' => -10.0]));
     }
 
     /**

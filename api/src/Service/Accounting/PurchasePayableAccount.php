@@ -119,7 +119,11 @@ final class PurchasePayableAccount
      */
     public function forPayment(int $supplierId, int $purchaseInvoiceId, string $fallback): string
     {
-        $posted = $this->postedPayable($supplierId, $purchaseInvoiceId);
+        return self::paymentCode($this->postedPayable($supplierId, $purchaseInvoiceId), $fallback);
+    }
+
+    public static function paymentCode(?string $posted, string $fallback): string
+    {
         if ($posted === null || substr($posted, 0, 3) === substr($fallback, 0, 3)) {
             return $fallback;
         }
@@ -149,10 +153,17 @@ final class PurchasePayableAccount
                 AND a.account_code LIKE '3%'"
         );
         $stmt->execute([$supplierId, $purchaseInvoiceId]);
-        $codes = array_values(array_filter(
-            array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []),
-            static fn (string $code): bool => !in_array(substr($code, 0, 3), self::NON_PAYABLE_SYNTHETICS, true),
+        return self::payableFromCodes($stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** @param list<string> $codes */
+    public static function payableFromCodes(array $codes): ?string
+    {
+        $payables = array_values(array_filter(
+            $codes,
+            static fn (string $code): bool => str_starts_with($code, '3')
+                && !in_array(substr($code, 0, 3), self::NON_PAYABLE_SYNTHETICS, true),
         ));
-        return count($codes) === 1 ? $codes[0] : null;
+        return count($payables) === 1 ? $payables[0] : null;
     }
 }

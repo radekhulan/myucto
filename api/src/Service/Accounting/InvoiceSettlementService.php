@@ -19,7 +19,7 @@ use MyInvoice\Support\Sql\PurchaseSettledExpr;
  * závazku za společníkem (355 / 365). Protistranou tedy není jiný doklad (to řeší
  * {@see OffsetService} pro dvojice FV↔PF), ale JEDEN účet, který si účetní zvolí.
  * Posting rules `payment.receivable.settlement` / `payment.payable.settlement`
- * dávají jen PŘEDVOLBU protiúčtu do UI — závazný je účet z požadavku.
+ * dávají předvolbu protiúčtu do UI a výchozí saldokonto pro doklad bez předpisu.
  *
  * Kontace:
  *   vydaná faktura  → <zvolený účet> MD / 311 D   (zálohová proforma → 324)
@@ -51,6 +51,7 @@ final class InvoiceSettlementService
         private readonly PurchaseInvoiceRepository $purchaseInvoices,
         private readonly PostingRuleRepository $rules,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly FxSettlementPosting $settlementPosting,
     ) {}
 
     /**
@@ -119,7 +120,10 @@ final class InvoiceSettlementService
             // Protiúčet nesmí být tatáž strana, kterou zápočet uzavírá — vznikl by
             // zápis "311 MD / 311 D", který nic nevyrovná.
             $docAccount = $doc['doc_account'];
-            if ($accountCode === $docAccount || str_starts_with($accountCode, $docAccount . '.')) {
+            if ($accountCode === $docAccount || str_starts_with($accountCode, $docAccount . '.')
+                || $this->posting->redirectedAccountCode($supplierId, $accountCode, $settledOn)
+                    === $this->posting->redirectedAccountCode($supplierId, $docAccount, $settledOn)
+            ) {
                 throw new SettlementException(
                     'account_same_as_document',
                     'Protiúčet nemůže být tentýž účet, na kterém doklad visí (' . $docAccount . ').',
@@ -408,26 +412,26 @@ final class InvoiceSettlementService
      */
     private function documentAccount(int $supplierId, string $docType, int $docId): string
     {
-        if ($docType === 'invoice') {
-            $isProforma = $this->repo->invoiceIsProforma($supplierId, $docId);
-            return $isProforma
-                ? $this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324')
-                : $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
-        }
-        $isAdvance = $this->repo->purchaseIsAdvance($supplierId, $docId);
-        return $isAdvance
-            ? $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314')
-            : $this->purchasePayable($supplierId, $docId);
+        $isAdvance = $docType === 'invoice'
+            ? $this->repo->invoiceIsProforma($supplierId, $docId)
+            : $this->repo->purchaseIsAdvance($supplierId, $docId);
+        return $this->settlementAccount($supplierId, $docType, $docId, $isAdvance);
     }
 
-    /** Závazek přijatého dokladu, na kterém doklad vznikl ({@see PurchasePayableAccount::forPayment}). */
-    private function purchasePayable(int $supplierId, int $docId): string
+    private function settlementAccount(int $supplierId, string $docType, int $docId, bool $isAdvance): string
     {
-        return (new PurchasePayableAccount($this->db))->forPayment(
-            $supplierId,
-            $docId,
-            $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321'),
-        );
+        if ($docType === 'invoice') {
+            if ($isAdvance) {
+                return $this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324');
+            }
+            $fallback = $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
+        } else {
+            if ($isAdvance) {
+                return $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314');
+            }
+            $fallback = $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321');
+        }
+        return $this->settlementPosting->saldoAccountOrFallback($supplierId, $docType, $docId, $fallback);
     }
 
     /** @return array<string,mixed> */
@@ -472,10 +476,7 @@ final class InvoiceSettlementService
                 sprintf('Částka zápočtu (%.2f Kč) převyšuje zbytek k úhradě (%.2f Kč).', $amount, $inv['remaining']),
             );
         }
-        // Zálohová proforma visí na přijatých zálohách (324), běžná faktura na 311.
-        $counter = $inv['kind'] === 'proforma'
-            ? $this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324')
-            : $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
+        $counter = $this->settlementAccount($supplierId, 'invoice', $docId, $inv['kind'] === 'proforma');
         return ['number' => $inv['number'], 'doc_account' => $counter, 'counter_account' => $counter];
     }
 
@@ -527,10 +528,7 @@ final class InvoiceSettlementService
                 sprintf('Částka zápočtu (%.2f %s) převyšuje zbytek k úhradě (%.2f %s).', $amount, $currency, $remaining, $currency),
             );
         }
-        // Zálohová PF visí na poskytnutých zálohách (314), běžná na svém závazku (321, 325 …).
-        $counter = $pf['kind'] === 'advance'
-            ? $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314')
-            : $this->purchasePayable($supplierId, $docId);
+        $counter = $this->settlementAccount($supplierId, 'purchase_invoice', $docId, $pf['kind'] === 'advance');
         return [
             'number'          => $pf['number'],
             'doc_account'     => $counter,

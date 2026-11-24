@@ -360,6 +360,8 @@ Firmy s analytikami DPH ([§ 66.8.5](66_Ucetni_osnova.md#6685-analytiky-dph-3431
 
 Strana účtu 211 v zápisu vždy odpovídá konkrétní analytice zvolené pokladny. Z detailu dokladu i z řádku pokladní knihy lze prokliknout přímo na odpovídající zápis v deníku. V daňové evidenci žádný deníkový zápis nevzniká, pokladní pohyb se eviduje jen v rámci pokladny samotné (kasová báze).
 
+**Úhrada nebo vratka faktury v Kč.** Pokladní doklad vyrovná saldokontní účet z předpisu faktury. Má-li vydaná faktura předpis například na 311.300, použije se tato analytika i při úhradě. U dokladu bez předpisu se použije účet z předkontace úhrady. Proforma se účtuje jako přijatá záloha.
+
 **Úhrada cizoměnového dokladu z korunové pokladny.** Saldokonto se odúčtuje v účetní hodnotě dokladu, tedy uhrazenou částkou v měně dokladu krát kurz, kterým byl doklad zaúčtovaný. Pokladna 211 nese skutečně přijaté nebo vydané koruny a rozdíl je realizovaný kurzový rozdíl: **563 Kurzové ztráty** nebo **663 Kurzové zisky** (účty z kontací kurzových rozdílů). Je to stejné zaúčtování jako u korunové bankovní platby cizoměnové faktury. Saldokontní řádek nese měnu, kurz a částku v cizí měně, takže závěrkové přecenění s uhrazenou částkou počítá správně. Příklad: přijatá faktura 1 000 EUR zaúčtovaná kurzem 24 (závazek 24 000 Kč) uhrazená 24 500 Kč:
 
 | MD | D | Částka |

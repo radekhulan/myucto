@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Service\Accounting\FxSettlementPosting;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
@@ -27,6 +28,7 @@ final class GoPayMovementPoster
         private readonly Connection $db,
         private readonly PostingService $posting,
         private readonly JournalEntryRepository $journal,
+        private readonly FxSettlementPosting $settlementPosting,
     ) {}
 
     /**
@@ -312,6 +314,7 @@ final class GoPayMovementPoster
         $this->assertPaymentNotPostedElsewhere($supplierId, (int) $match['payment_id'], (int) $movement['id']);
         $links['invoice_id'] = (int) $match['invoice_id'];
         $links['invoice_payment_id'] = (int) $match['payment_id'];
+        $receivable = $this->settlementPosting->saldoAccountOrFallback($supplierId, 'invoice', (int) $match['invoice_id'], $receivable);
         $reference = trim((string) ($movement['order_id'] ?? '')) !== ''
             ? (string) $movement['order_id'] : (string) $movement['payment_session_id'];
         return [$gopay, $receivable, 'GoPay úhrada faktury ' . (string) $match['varsymbol'] . ' (' . $reference . ')'];
@@ -343,6 +346,7 @@ final class GoPayMovementPoster
     {
         $match = $this->matchCreditNote($supplierId, $movement);
         $links['credit_note_id'] = (int) $match['id'];
+        $receivable = $this->settlementPosting->saldoAccountOrFallback($supplierId, 'invoice', (int) $match['id'], $receivable);
         return [$receivable, $gopay, 'GoPay vratka k dobropisu ' . (string) $match['varsymbol'] . ' (' . (string) $movement['order_id'] . ')'];
     }
 

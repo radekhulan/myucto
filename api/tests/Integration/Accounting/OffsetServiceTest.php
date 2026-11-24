@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\OffsetException;
 use MyInvoice\Service\Accounting\OffsetService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use PDO;
@@ -30,6 +31,8 @@ use PDO;
 #[Group('integration')]
 final class OffsetServiceTest extends TestCase
 {
+    use AnalyticAccountFixture;
+
     private const YEAR = 2099;
 
     private Connection $db;
@@ -97,6 +100,42 @@ final class OffsetServiceTest extends TestCase
             }
             $this->db->close();
         }
+    }
+
+    public function testMutualOffsetDistributesAmountsByPredpisAccount(): void
+    {
+        $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, '311.300', '311.301', '321.200', '321.201');
+        $partner = $this->client('Protistrana vzájemného zápočtu');
+        $date = self::YEAR . '-03-10';
+        $due = self::YEAR . '-03-24';
+        $first = $this->invoice($partner, 500.00, $date, $due);
+        $second = $this->invoice($partner, 1000.00, $date, $due);
+        $purchase = $this->purchaseInvoice($partner, 1500.00, $date, $due);
+        $this->posting->postDocument($this->supplierId, 'invoice', $first, [
+            self::l('311.300', 'debit', 500.00), self::l('602', 'credit', 500.00),
+        ], $this->meta($date));
+        $this->posting->postDocument($this->supplierId, 'invoice', $second, [
+            self::l('311.301', 'debit', 1000.00), self::l('602', 'credit', 1000.00),
+        ], $this->meta($date));
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $purchase, [
+            self::l('518', 'debit', 1500.00), self::l('321.200', 'credit', 1500.00),
+        ], $this->meta($date));
+
+        $created = $this->offsets->create($this->supplierId, $partner, $due, [
+            ['doc_type' => 'invoice', 'doc_id' => $first, 'amount' => 500.00],
+            ['doc_type' => 'invoice', 'doc_id' => $second, 'amount' => 1000.00],
+            ['doc_type' => 'purchase_invoice', 'doc_id' => $purchase, 'amount' => 1500.00],
+        ], null, $this->userId);
+        $confirmed = $this->offsets->confirm($this->supplierId, (int) $created['agreement']['id'], $this->meta($due));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT CONCAT(l.side, ?, a.account_code), l.amount
+               FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? ORDER BY l.side, a.account_code'
+        );
+        $stmt->execute(['|', $confirmed['agreement']['journal_entry_id']]);
+        $lines = array_map(self::cents(...), $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+        ksort($lines);
+        self::assertSame(['credit|311.300' => 50000, 'credit|311.301' => 100000, 'debit|321.200' => 150000], $lines);
     }
 
     public function testOffsetSettlesBothSidesAndPostsBalancedEntry(): void

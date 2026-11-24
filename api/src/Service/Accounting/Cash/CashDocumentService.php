@@ -1376,30 +1376,24 @@ final class CashDocumentService
      */
     private function buildInvoicePayment(int $supplierId, array $doc, string $cashAccount, float $total): array
     {
-        if ($doc['doc_type'] === 'out') {
-            // Výplata dokladu k vyplacení: předpis na 311 je dal (záporná pohledávka),
-            // výplata ho vyrovná 311 MD / 211 D. Zrcadlo bankovní vratky dobropisu.
-            return [
-                $this->line($this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311'), 'debit', $total),
-                $this->line($cashAccount, 'credit', $total),
-            ];
+        $invoiceId = $doc['invoice_id'] !== null ? (int) $doc['invoice_id'] : null;
+        $refund = $doc['doc_type'] === 'out';
+        $receivable = $this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311');
+        if (!$refund && ($doc['settled_document_amount'] ?? null) !== null && $invoiceId !== null) {
+            return $this->buildForeignSettlement($supplierId, $doc, $cashAccount, $total, 'invoice', $invoiceId, $receivable);
         }
-        if (($doc['settled_document_amount'] ?? null) !== null && $doc['invoice_id'] !== null) {
-            return $this->buildForeignSettlement(
-                $supplierId, $doc, $cashAccount, $total, 'invoice', (int) $doc['invoice_id'],
-                $this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311'),
-            );
-        }
-        if ($doc['invoice_id'] !== null && $this->invoiceType($supplierId, (int) $doc['invoice_id']) === 'proforma') {
+        if (!$refund && $invoiceId !== null && $this->invoiceType($supplierId, $invoiceId) === 'proforma') {
             return [
                 $this->line($cashAccount, 'debit', $total),
                 $this->line($this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324'), 'credit', $total),
             ];
         }
-        return [
-            $this->line($cashAccount, 'debit', $total),
-            $this->line($this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311'), 'credit', $total),
-        ];
+        if ($invoiceId !== null) {
+            $receivable = $this->fxSettlement()->saldoAccountOrFallback($supplierId, 'invoice', $invoiceId, $receivable);
+        }
+        return $refund
+            ? [$this->line($receivable, 'debit', $total), $this->line($cashAccount, 'credit', $total)]
+            : [$this->line($cashAccount, 'debit', $total), $this->line($receivable, 'credit', $total)];
     }
 
     /**
@@ -1445,13 +1439,14 @@ final class CashDocumentService
                 ];
         }
         $payable = $this->ruleAccount($supplierId, 'payment.payable.cash', 'debit', '321');
-        if ($doc['purchase_invoice_id'] !== null) {
-            $payable = (new PurchasePayableAccount($this->db))->forPayment($supplierId, (int) $doc['purchase_invoice_id'], $payable);
-        }
         if (!$refund && ($doc['settled_document_amount'] ?? null) !== null && $doc['purchase_invoice_id'] !== null) {
+            $payable = (new PurchasePayableAccount($this->db))->forPayment($supplierId, (int) $doc['purchase_invoice_id'], $payable);
             return $this->buildForeignSettlement(
                 $supplierId, $doc, $cashAccount, $total, 'purchase_invoice', (int) $doc['purchase_invoice_id'], $payable,
             );
+        }
+        if ($doc['purchase_invoice_id'] !== null) {
+            $payable = $this->fxSettlement()->saldoAccountOrFallback($supplierId, 'purchase_invoice', (int) $doc['purchase_invoice_id'], $payable);
         }
         return $refund
             ? [

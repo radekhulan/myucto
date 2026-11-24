@@ -43,8 +43,7 @@ final class FxSettlementPosting
      *
      * Platí i pro cizoměnové větve: převod z cizího programu zakládá doklad v cizí měně
      * s předpisem na analytice ze zdroje ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
-     * Kurzový rozdíl jde na 563/663, saldokonto se odúčtuje na účtu předpisu. Vratky
-     * dobropisů zůstávají u kódu z pravidla.
+     * Kurzový rozdíl jde na 563/663, saldokonto se odúčtuje na účtu předpisu.
      */
     private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
     {
@@ -58,8 +57,7 @@ final class FxSettlementPosting
               WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code LIKE CONCAT(?, '.%')"
         );
         $stmt->execute([$supplierId, $entryId, $code]);
-        $codes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        return count($codes) === 1 ? (string) $codes[0] : $code;
+        return self::singleAnalyticCode($code, $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
@@ -80,7 +78,21 @@ final class FxSettlementPosting
               WHERE l.supplier_id = ? AND l.entry_id = ? AND (a.account_code = ? OR a.account_code LIKE CONCAT(?, '.%'))"
         );
         $stmt->execute([$supplierId, $predpis['entry_ids'][0], $code, $code]);
-        $codes = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        return self::openingCode($predpis, $code, $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** @param list<string> $analytics */
+    private static function singleAnalyticCode(string $code, array $analytics): string
+    {
+        return preg_match('/^\d{3}$/', $code) === 1 && count($analytics) === 1 ? $analytics[0] : $code;
+    }
+
+    /**
+     * @param array{doc_type:string, doc_id:int} $predpis
+     * @param list<string> $codes
+     */
+    private static function openingCode(array $predpis, string $code, array $codes): string
+    {
         if (count($codes) === 1) {
             return $codes[0];
         }
@@ -104,28 +116,47 @@ final class FxSettlementPosting
     public function predpis(int $supplierId, string $docType, int $docId, bool $requirePosted, string $notPostedMessage): array
     {
         $group = (new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId);
-        if (DocumentPostingGroup::hasOwnedEntries($group) && !DocumentPostingGroup::isSingleDirectEntry($group, $docType, $docId)) {
-            return [
-                'grouped' => true,
-                'entry_ids' => array_map(static fn (array $entry): int => (int) $entry['id'], $group),
-                'doc_type' => $docType,
-                'doc_id' => $docId,
-            ];
+        $groupPredpis = self::predpisFromGroup($docType, $docId, $group);
+        if ($groupPredpis !== null) {
+            return $groupPredpis;
         }
         $entry = $this->journal->findBySource($supplierId, $docType, $docId);
-        if ($entry === null) {
-            $opening = $this->openingEntryId($supplierId, $docType, $docId);
-            if ($opening !== null) {
-                return ['grouped' => false, 'entry_ids' => [$opening], 'doc_type' => $docType, 'doc_id' => $docId, 'opening' => true];
-            }
+        $opening = $entry === null ? ($this->openingEntryIds($supplierId, $docType, [$docId])[$docId] ?? null) : null;
+        return self::directPredpis($docType, $docId, $entry, $opening, $requirePosted)
+            ?? throw new PostingException('document_not_posted', $notPostedMessage);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $group
+     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int}|null
+     */
+    private static function predpisFromGroup(string $docType, int $docId, array $group): ?array
+    {
+        if (!DocumentPostingGroup::hasOwnedEntries($group) || DocumentPostingGroup::isSingleDirectEntry($group, $docType, $docId)) {
+            return null;
         }
-        if ($entry === null
-            || ($requirePosted && ($entry['posted_at'] ?? null) === null)
-            || ($entry['reversed_by'] ?? null) !== null
-        ) {
-            throw new PostingException('document_not_posted', $notPostedMessage);
+        return [
+            'grouped' => true,
+            'entry_ids' => array_map(static fn (array $entry): int => (int) $entry['id'], $group),
+            'doc_type' => $docType,
+            'doc_id' => $docId,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed>|null $entry
+     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool}|null
+     */
+    private static function directPredpis(string $docType, int $docId, ?array $entry, ?int $opening, bool $requirePosted): ?array
+    {
+        $document = ['doc_type' => $docType, 'doc_id' => $docId, 'grouped' => false];
+        if ($entry === null && $opening !== null) {
+            return $document + ['entry_ids' => [$opening], 'opening' => true];
         }
-        return ['grouped' => false, 'entry_ids' => [(int) $entry['id']], 'doc_type' => $docType, 'doc_id' => $docId];
+        if ($entry === null || ($requirePosted && ($entry['posted_at'] ?? null) === null) || ($entry['reversed_by'] ?? null) !== null) {
+            return null;
+        }
+        return $document + ['entry_ids' => [(int) $entry['id']]];
     }
 
     /**
@@ -135,24 +166,28 @@ final class FxSettlementPosting
      * ({@see \MyInvoice\Repository\SaldoRepository} fetchOpeningDocuments), úhrada z banky
      * nebo pokladny ji musí umět odúčtovat stejně jako fakturu s vlastním zápisem.
      * Bere se jen zaúčtovaný a nestornovaný otevírací zápis.
+     *
+     * @param list<int> $docIds
+     * @return array<int,int>
      */
-    private function openingEntryId(int $supplierId, string $docType, int $docId): ?int
+    private function openingEntryIds(int $supplierId, string $docType, array $docIds): array
     {
-        if (!in_array($docType, ['invoice', 'purchase_invoice'], true)) {
-            return null;
+        if ($docIds === [] || !in_array($docType, ['invoice', 'purchase_invoice'], true)) {
+            return [];
         }
+        $in = implode(',', array_fill(0, count($docIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT e.id
-               FROM journal_entry_document_links l
-               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id = ?
-                AND e.source_type = 'opening' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
-              ORDER BY e.entry_date DESC, e.id DESC
-              LIMIT 1"
+            "WITH ranked AS (
+                SELECT l.doc_id, e.id, ROW_NUMBER() OVER (PARTITION BY l.doc_id ORDER BY e.entry_date DESC, e.id DESC) AS position
+                  FROM journal_entry_document_links l
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                 WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id IN ({$in})
+                   AND e.source_type = 'opening' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+             )
+             SELECT doc_id, id FROM ranked WHERE position = 1"
         );
-        $stmt->execute([$supplierId, $docType, $docId]);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        $stmt->execute([$supplierId, $docType, ...$docIds]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     /**
@@ -183,8 +218,18 @@ final class FxSettlementPosting
                 'fx_rate' => null,
             ];
         }
+        return self::groupedSaldo($predpis, $code, (new DocumentPostingGroup($this->db))->lines($supplierId, $predpis['entry_ids']));
+    }
+
+    /**
+     * @param array{doc_type:string, doc_id:int} $predpis
+     * @param list<array<string,mixed>> $lines
+     * @return array{code:string, entry_ids:list<int>, fx_rate:?float}
+     */
+    private static function groupedSaldo(array $predpis, string $code, array $lines): array
+    {
         $byEntry = [];
-        foreach ((new DocumentPostingGroup($this->db))->lines($supplierId, $predpis['entry_ids']) as $line) {
+        foreach ($lines as $line) {
             $account = (string) $line['account_code'];
             if ($account === $code || str_starts_with($account, $code . '.')) {
                 $byEntry[(int) $line['entry_id']][] = $line;
@@ -205,7 +250,7 @@ final class FxSettlementPosting
                 array_map(static fn (array $line): string => (string) $line['account_code'], $lines),
                 static fn (string $account): bool => str_starts_with($account, $code . '.'),
             )));
-            $codes[] = preg_match('/^\d{3}$/', $code) === 1 && count($analytics) === 1 ? $analytics[0] : $code;
+            $codes[] = self::singleAnalyticCode($code, $analytics);
             foreach ($lines as $line) {
                 if ($line['currency_code'] !== null && $line['fx_rate'] !== null && (float) $line['fx_rate'] > 0) {
                     $rates[] = (string) (float) $line['fx_rate'];
@@ -226,6 +271,79 @@ final class FxSettlementPosting
             'entry_ids' => array_keys($byEntry),
             'fx_rate' => $rates === [] ? null : (float) $rates[0],
         ];
+    }
+
+    /** Účet pro úhradu, kterou lze evidovat i bez předpisu. */
+    public function saldoAccountOrFallback(int $supplierId, string $docType, int $docId, string $fallback): string
+    {
+        try {
+            $predpis = $this->predpis($supplierId, $docType, $docId, false, 'Doklad nemá zaúčtovaný předpis.');
+        } catch (PostingException $e) {
+            if ($e->errorCode !== 'document_not_posted') {
+                throw $e;
+            }
+            return $fallback;
+        }
+        if ($docType === 'purchase_invoice' && !$predpis['grouped'] && !($predpis['opening'] ?? false)) {
+            $fallback = (new PurchasePayableAccount($this->db))->forPayment($supplierId, $docId, $fallback);
+        }
+        return $this->predpisSaldo($supplierId, $predpis, $fallback)['code'];
+    }
+
+    /**
+     * Saldokonta dokladů v jedné dohodě o zápočtu. Předpisy i řádky načte dávkově.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param list<int> $docIds
+     * @return array<int,string>
+     */
+    public function saldoAccountsOrFallback(int $supplierId, string $docType, array $docIds, string $fallback): array
+    {
+        $groups = new DocumentPostingGroup($this->db);
+        $active = $groups->activeMany($supplierId, $docType, $docIds);
+        $direct = $this->journal->latestBySourceIds($supplierId, $docType, $docIds);
+        $opening = $this->openingEntryIds($supplierId, $docType, array_values(array_diff($docIds, array_keys($direct))));
+
+        $predpisy = [];
+        $entryIds = [];
+        foreach ($docIds as $docId) {
+            $predpis = self::predpisFromGroup($docType, $docId, $active[$docId] ?? [])
+                ?? self::directPredpis($docType, $docId, $direct[$docId] ?? null, $opening[$docId] ?? null, false);
+            if ($predpis !== null) {
+                $predpisy[$docId] = $predpis;
+                foreach ($predpis['entry_ids'] as $entryId) {
+                    $entryIds[$entryId] = $entryId;
+                }
+            }
+        }
+        $byEntry = [];
+        foreach ($groups->lines($supplierId, array_values($entryIds)) as $line) {
+            $byEntry[(int) $line['entry_id']][] = $line;
+        }
+
+        $accounts = array_fill_keys($docIds, $fallback);
+        foreach ($predpisy as $docId => $predpis) {
+            if ($predpis['grouped']) {
+                $lines = [];
+                foreach ($predpis['entry_ids'] as $entryId) {
+                    array_push($lines, ...($byEntry[$entryId] ?? []));
+                }
+                $accounts[$docId] = self::groupedSaldo($predpis, $fallback, $lines)['code'];
+                continue;
+            }
+            $codes = array_values(array_unique(array_column($byEntry[$predpis['entry_ids'][0]] ?? [], 'account_code')));
+            if ($predpis['opening'] ?? false) {
+                $matches = array_values(array_filter($codes, static fn (string $code): bool => $code === $fallback || str_starts_with($code, $fallback . '.')));
+                $accounts[$docId] = self::openingCode($predpis, $fallback, $matches);
+                continue;
+            }
+            $code = $docType === 'purchase_invoice'
+                ? PurchasePayableAccount::paymentCode(PurchasePayableAccount::payableFromCodes($codes), $fallback)
+                : $fallback;
+            $analytics = array_values(array_filter($codes, static fn (string $account): bool => str_starts_with($account, $code . '.')));
+            $accounts[$docId] = self::singleAnalyticCode($code, $analytics);
+        }
+        return $accounts;
     }
 
     /**

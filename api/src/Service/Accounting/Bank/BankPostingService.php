@@ -1321,9 +1321,9 @@ final class BankPostingService
         if ((string) $pf['currency'] !== 'CZK') {
             throw new PostingException('fx_not_supported', 'Cizoměnová refundace dobropisu se zatím neúčtuje automaticky.');
         }
-        $this->predpis($supplierId, 'purchase_invoice', $pfId, true, 'Přijatý dobropis #' . $pfId . ' nemá zaúčtovaný předpis.');
+        $predpis = $this->predpis($supplierId, 'purchase_invoice', $pfId, true, 'Přijatý dobropis #' . $pfId . ' nemá zaúčtovaný předpis.');
         $rule = $this->postingRules->resolve($supplierId, 'payment.payable.bank');
-        return $this->purchasePayable($supplierId, $pfId, ($rule['debit_account_code'] ?? null) ?: '321');
+        return $this->predpisSaldo($supplierId, $predpis, $this->purchasePayable($supplierId, $pfId, ($rule['debit_account_code'] ?? null) ?: '321'))['code'];
     }
 
     /**
@@ -1348,9 +1348,9 @@ final class BankPostingService
         if ((string) $inv['currency'] !== 'CZK') {
             throw new PostingException('fx_not_supported', 'Cizoměnová refundace dobropisu se zatím neúčtuje automaticky.');
         }
-        $this->predpis($supplierId, 'invoice', $invoiceId, true, 'Vydaný dobropis #' . $invoiceId . ' nemá zaúčtovaný předpis.');
+        $predpis = $this->predpis($supplierId, 'invoice', $invoiceId, true, 'Vydaný dobropis #' . $invoiceId . ' nemá zaúčtovaný předpis.');
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
-        return ($rule['credit_account_code'] ?? null) ?: '311';
+        return $this->predpisSaldo($supplierId, $predpis, ($rule['credit_account_code'] ?? null) ?: '311')['code'];
     }
 
     // ── cizoměnové spárované úhrady (B6 — kurzový rozdíl 563/663) ────────────────
@@ -1996,6 +1996,8 @@ final class BankPostingService
      */
     private function paymentMatchSuggestion(int $supplierId, array $tx, string $note): array
     {
+        // Náhradní kontace pro návrh, když sestavení zápisu selhalo. Při schválení
+        // se řádky znovu sestaví podle aktuálního párování a předpisů.
         $rule = $this->postingRules->resolve($supplierId, (float) $tx['amount'] > 0 ? 'payment.receivable.bank' : 'payment.payable.bank');
         $debit = $rule['debit_account_code'] ?? ((float) $tx['amount'] > 0 ? '221' : '321');
         $credit = $rule['credit_account_code'] ?? ((float) $tx['amount'] > 0 ? '311' : '221');

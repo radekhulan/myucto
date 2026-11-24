@@ -12,10 +12,13 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\InvoiceSettlementService;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SettlementException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -26,11 +29,14 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class InvoiceSettlementServiceTest extends TestCase
 {
+    use AnalyticAccountFixture;
+
     use IsolatedSupplierTrait;
 
     private const YEAR = 2099;
 
     private Connection $db;
+    private PostingService $posting;
     private InvoiceSettlementService $service;
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
@@ -51,6 +57,7 @@ final class InvoiceSettlementServiceTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $this->posting = $container->get(PostingService::class);
             $this->db       = $container->get(Connection::class);
             $this->service  = $container->get(InvoiceSettlementService::class);
             $this->journal  = $container->get(JournalEntryRepository::class);
@@ -119,6 +126,33 @@ final class InvoiceSettlementServiceTest extends TestCase
         $payments = $this->paymentRows($invoiceId);
         self::assertCount(1, $payments);
         self::assertSame('settlement', $payments[0]['source']);
+    }
+
+    #[TestWith(['invoice', '311.300', '355'])]
+    #[TestWith(['purchase_invoice', '321.200', '365'])]
+    public function testSettlementAndRepostUsePredpisAnalytic(string $type, string $saldo, string $counter): void
+    {
+        $sale = $type === 'invoice';
+        $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, $saldo, $sale ? '311.301' : '321.201');
+        $partner = $this->client('Protistrana zápočtu', $sale, !$sale);
+        $id = $sale ? $this->saleInvoice('FV-SALDO-ZAP', $partner, 1500.00) : $this->purchaseInvoice('PF-SALDO-ZAP', $partner, 1500.00);
+        $this->posting->postDocument($this->supplierId, $type, $id, [
+            ['account_code' => $sale ? $saldo : '518', 'side' => 'debit', 'amount' => 1500.00],
+            ['account_code' => $sale ? '602' : $saldo, 'side' => 'credit', 'amount' => 1500.00],
+        ], ['entry_date' => self::YEAR . '-06-10']);
+
+        $settlement = $this->service->create($this->supplierId, $type, $id, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 1500.00, 'account_id' => $this->accountId($counter),
+        ], $this->userId);
+        $entryId = (int) $settlement['journal_entry_id'];
+        $side = $sale ? 'credit' : 'debit';
+        self::assertSame(1500.00, $this->linesByAccountCode($entryId)[$saldo][$side] ?? null);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$entryId]);
+        $pdo->prepare('DELETE FROM journal_entries WHERE id = ?')->execute([$entryId]);
+        $reposted = $this->service->postMissingEntry($this->supplierId, (int) $settlement['id'], $this->userId);
+        self::assertSame(1500.00, $this->linesByAccountCode((int) $reposted['journal_entry_id'])[$saldo][$side] ?? null);
     }
 
     public function testPartialSettlementOfSaleInvoice(): void

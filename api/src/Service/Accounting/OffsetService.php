@@ -46,6 +46,7 @@ final class OffsetService
         private readonly PurchaseInvoiceRepository $purchaseInvoices,
         private readonly DocumentSeriesService $series,
         private readonly PostingRuleRepository $rules,
+        private readonly FxSettlementPosting $settlementPosting,
     ) {}
 
     /**
@@ -392,40 +393,46 @@ final class OffsetService
     }
 
     /**
-     * Strana závazků se rozpadne podle účtu, na kterém závazek každé přijaté faktury
-     * vznikl ({@see PurchasePayableAccount::forPayment}) — účtenka na 325 se odúčtuje z 325.
-     * Leží-li všechny na účtu z kontace, zůstává jeden řádek jako dosud.
+     * Obě strany dohody se rozpadnou podle saldokontních účtů jednotlivých předpisů.
+     * Haléřový rozdíl povolený při sestavení dohody se vyrovná na výchozím závazku.
      *
-     * @param list<array<string,mixed>> $items položky dohody (doc_type, doc_id, amount)
+     * @param list<array<string,mixed>> $items
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    private function buildLines(int $supplierId, float $total, array $items = []): array
+    private function buildLines(int $supplierId, float $total, array $items): array
     {
         $rule = $this->rules->resolve($supplierId, 'offset.mutual');
-        $debit  = (string) ($rule['debit_account_code'] ?? '321');
-        $credit = $rule['credit_account_code'] ?? '311';
-
-        $payables = new PurchasePayableAccount($this->db);
-        $byAccount = [];
+        $byType = ['purchase_invoice' => [], 'invoice' => []];
         foreach ($items as $item) {
-            if (($item['doc_type'] ?? '') !== 'purchase_invoice') {
-                continue;
-            }
-            $account = $payables->forPayment($supplierId, (int) $item['doc_id'], $debit);
-            if ($account !== $debit) {
-                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + (float) $item['amount'], 2);
-            }
+            $byType[$item['doc_type']][(int) $item['doc_id']] =
+                ($byType[$item['doc_type']][(int) $item['doc_id']] ?? 0) + self::cents((float) $item['amount']);
+        }
+
+        $debit = $this->offsetSide($supplierId, 'purchase_invoice', $byType['purchase_invoice'], $rule['debit_account_code'] ?? '321', self::cents($total));
+        $credit = $this->offsetSide($supplierId, 'invoice', $byType['invoice'], $rule['credit_account_code'] ?? '311', self::cents($total));
+        return [...$debit, ...$credit];
+    }
+
+    /**
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param array<int,int> $amounts částky v haléřích podle ID dokladu
+     * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
+     */
+    private function offsetSide(int $supplierId, string $docType, array $amounts, string $fallback, int $total): array
+    {
+        $side = $docType === 'purchase_invoice' ? 'debit' : 'credit';
+        $accounts = $this->settlementPosting->saldoAccountsOrFallback($supplierId, $docType, array_keys($amounts), $fallback);
+        $byAccount = [$fallback => $total - array_sum($amounts)];
+        foreach ($amounts as $docId => $cents) {
+            $code = $accounts[$docId];
+            $byAccount[$code] = ($byAccount[$code] ?? 0) + $cents;
         }
         $lines = [];
-        $rest = round($total, 2);
-        foreach ($byAccount as $account => $amount) {
-            $lines[] = ['account_code' => (string) $account, 'side' => 'debit', 'amount' => $amount];
-            $rest = round($rest - $amount, 2);
+        foreach ($byAccount as $code => $cents) {
+            if ($cents !== 0) {
+                $lines[] = ['account_code' => (string) $code, 'side' => $side, 'amount' => $cents / 100.0];
+            }
         }
-        if ($byAccount === [] || self::cents($rest) !== 0) {
-            array_unshift($lines, ['account_code' => $debit, 'side' => 'debit', 'amount' => $rest]);
-        }
-        $lines[] = ['account_code' => (string) $credit, 'side' => 'credit', 'amount' => round($total, 2)];
         return $lines;
     }
 

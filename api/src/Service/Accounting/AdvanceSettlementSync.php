@@ -202,11 +202,26 @@ final class AdvanceSettlementSync
             return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'posting_group_requires_repost', $userId);
         }
 
-        ['debit' => $debitCode, 'credit' => $creditCode] = $this->posting->advanceSettlementAccounts($supplierId, $side);
-        $debitCode = $this->posting->redirectedAccountCode($supplierId, $debitCode);
-        $creditCode = $this->posting->redirectedAccountCode($supplierId, $creditCode);
+        $entryDate = (string) $entry['entry_date'];
+        $redirect = fn (string $code): string => $this->posting->redirectedAccountCode($supplierId, $code, $entryDate);
+        $ruleAccounts = $this->posting->advanceSettlementAccounts($supplierId, $side);
+        if ($ruleAccounts['on_saldo']) {
+            return ['action' => 'none', 'reason' => 'settlement_on_same_account', 'entry_id' => $entryId];
+        }
+
+        // Záporná konečná faktura má předpis na stejné straně jako odpočet.
+        if ($this->documentTotal($supplierId, $side, $finalId) < 0.0) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'negative_final', $userId);
+        }
+
+        try {
+            $rebuilt = $this->posting->buildFinalAdvanceSettlement($supplierId, $side, $finalId, $entryDate);
+        } catch (PostingException $e) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, $e->errorCode, $userId);
+        }
+        $debitCode = $redirect($rebuilt['accounts']['debit']);
+        $creditCode = $redirect($rebuilt['accounts']['credit']);
         if ($debitCode === $creditCode) {
-            // Záloha vedená přímo na saldokontu: pár se nezapisuje, není co dorovnávat.
             return ['action' => 'none', 'reason' => 'settlement_on_same_account', 'entry_id' => $entryId];
         }
         $isSettlement = static fn (string $code, array $line): bool =>
@@ -214,39 +229,38 @@ final class AdvanceSettlementSync
             || ($code === $creditCode && $line['side'] === 'credit')
             || ($line['line_text'] ?? null) === PostingService::ADVANCE_FX_LINE_TEXT;
 
-        // Záporná konečná faktura (vyúčtování k vyplacení) má saldokonto na opačné straně,
-        // takže by se předpis nedal od páru zúčtování odlišit. Taková se dorovná ručně.
-        if ($this->documentTotal($supplierId, $side, $finalId) < 0.0) {
-            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'negative_final', $userId);
-        }
-
-        try {
-            $rebuilt = $side === 'sale'
-                ? $this->posting->buildFromInvoice($supplierId, $finalId, ['entry_date' => (string) $entry['entry_date']])
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $finalId, ['entry_date' => (string) $entry['entry_date']]);
-        } catch (PostingException $e) {
-            return $this->stale($supplierId, $sourceType, $finalId, $entryId, $e->errorCode, $userId);
-        }
         $expected = [];
-        foreach ($rebuilt as $line) {
-            $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code'], (string) $entry['entry_date']);
+        foreach ($rebuilt['lines'] as $line) {
+            $code = $redirect((string) $line['account_code']);
             if ($isSettlement($code, $line)) {
                 $expected[] = ['account_code' => $code] + $line;
             }
         }
 
-        $accountMap = $this->accounts->idToAccountMap($supplierId, (string) $entry['entry_date']);
+        $accountMap = $this->accounts->idToAccountMap($supplierId, $entryDate);
+        $settlementSide = $side === 'sale' ? 'credit' : 'debit';
+        $saldoCode = $side === 'sale' ? $creditCode : $debitCode;
+        $oldSaldoCode = $redirect($ruleAccounts[$settlementSide]);
+        $hasPredpisSaldo = false;
         $current = [];
         $currentIds = [];
         foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
             $code = (string) ($accountMap[(int) $line['account_id']]['code'] ?? '');
-            if ($isSettlement($code, $line)) {
+            if ($code === $saldoCode && $line['side'] !== $settlementSide) {
+                $hasPredpisSaldo = true;
+            }
+            // Starší zápisy mají druhou stranu páru z předkontace zúčtování.
+            if ($isSettlement($code, $line) || ($code === $oldSaldoCode && $line['side'] === $settlementSide)) {
                 $current[] = ['account_code' => $code, 'side' => (string) $line['side'], 'amount' => (float) $line['amount']];
                 $currentIds[] = (int) $line['id'];
             }
         }
+        if (!$hasPredpisSaldo && ($expected !== [] || $current !== [])) {
+            // Po změně kontace může mít živý předpis jiné saldokonto než nový výpočet.
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'final_saldo_changed', $userId);
+        }
 
-        $before = self::pairAmount($current, $creditCode);
+        $before = self::pairAmount($current, $creditCode, $side === 'sale' ? $oldSaldoCode : null);
         $after = self::pairAmount($expected, $creditCode);
         if (self::signature($current) === self::signature($expected)) {
             return ['action' => 'in_sync', 'entry_id' => $entryId, 'before' => $before, 'after' => $after];
@@ -394,11 +408,11 @@ final class AdvanceSettlementSync
     }
 
     /** @param list<array<string,mixed>> $lines */
-    private static function pairAmount(array $lines, string $creditCode): float
+    private static function pairAmount(array $lines, string $creditCode, ?string $oldCreditCode = null): float
     {
         $sum = 0;
         foreach ($lines as $l) {
-            if ((string) $l['account_code'] === $creditCode && (string) $l['side'] === 'credit') {
+            if ($l['side'] === 'credit' && in_array($l['account_code'], [$creditCode, $oldCreditCode], true)) {
                 $sum += (int) round((float) $l['amount'] * 100.0);
             }
         }

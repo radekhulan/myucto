@@ -9,12 +9,16 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\FxSettlementEvidenceRepository;
+use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\{ChartOfAccountsSeeder, PostingService};
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\TestCase;
 
 final class FxSettlementChannelsTest extends TestCase
 {
+    use AnalyticAccountFixture;
+
     private Connection $db;
     private int $sid;
     private int $pid;
@@ -365,6 +369,8 @@ final class FxSettlementChannelsTest extends TestCase
 
     #[\PHPUnit\Framework\Attributes\TestWith(['invoice', '324', '311', '663', 'credit'])]
     #[\PHPUnit\Framework\Attributes\TestWith(['purchase_invoice', '314', '321', '563', 'debit'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['invoice', '324', '311.300', '663', 'credit'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['purchase_invoice', '314', '321.200', '563', 'debit'])]
     public function testFinalInvoiceRecognizesBankAdvanceRateDifferenceOnce(
         string $type, string $advanceAccount, string $saldo, string $fxAccount, string $fxSide,
     ): void {
@@ -373,6 +379,16 @@ final class FxSettlementChannelsTest extends TestCase
         $pdo->exec("UPDATE exchange_rates SET rate=26 WHERE rate_date='2098-09-15' AND currency_code='EUR'");
         $pdo->prepare("UPDATE supplier SET proforma_payment_document='manual' WHERE id=?")->execute([$this->sid]);
         $isSale = $type === 'invoice';
+        if (str_contains($saldo, '.')) {
+            $this->seedAnalyticAccounts($pdo, $this->sid, $saldo, $isSale ? '311.301' : '321.201');
+            $c->get(PostingRuleRepository::class)->upsertOverride(
+                $this->sid,
+                $isSale ? 'invoice.services.issued' : 'invoice.services.received',
+                $isSale ? $saldo : '518',
+                $isSale ? '602' : $saldo,
+                'Testovací saldokonto',
+            );
+        }
         if ($isSale) {
             $parent = $this->invoice($this->sid, 24, '2098-06-15', '2098000981', false, 'proforma');
             $final = $this->invoice($this->sid, 25, '2098-10-15', '2098000982', false);
@@ -414,7 +430,7 @@ final class FxSettlementChannelsTest extends TestCase
             $totals[$key] = ($totals[$key] ?? 0.0) + (float) $line['amount'];
         }
         self::assertSame(13000.00, $totals[$advanceAccount . ':' . ($isSale ? 'debit' : 'credit')]);
-        self::assertSame(12500.00, $totals[$saldo . ':' . ($isSale ? 'credit' : 'debit')]);
+        self::assertSame(12500.00, $totals[$saldo . ':' . ($isSale ? 'credit' : 'debit')] ?? null);
         $evidence = $this->evidence($type, $final, '2098-12-31');
         self::assertTrue($evidence['complete'], json_encode($evidence));
         self::assertSame('500.00', $evidence['remaining_foreign']);

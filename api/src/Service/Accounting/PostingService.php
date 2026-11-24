@@ -1862,8 +1862,9 @@ final class PostingService
      * @param array{rule_key?:string, cost_center?:?string, item_classification_overrides?:array<int,array{expense_kind:string,expense_account_code:?string}>} $opts
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}>
      */
-    public function buildFromInvoice(int $supplierId, int $invoiceId, array $opts = []): array
+    public function buildFromInvoice(int $supplierId, int $invoiceId, array $opts = [], ?string &$documentSaldo = null): array
     {
+        $documentSaldo = null;
         unset($this->itemAccountTrace['invoice|' . $invoiceId]);
         $inv = $this->fetchDocHeader('invoices', $supplierId, $invoiceId);
         if ($inv === null) {
@@ -2035,7 +2036,8 @@ final class PostingService
         // Vyúčtovací faktura z proformy (parent_invoice_id → proforma): DOPLŇ zúčtování
         // skutečně přijaté zálohy 324 MD / 311 D (self-balanced pár — nemění vyváženost
         // vlastní faktury). Běžná faktura bez proformy zůstává beze změny.
-        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines, abs($totalCzk), $deduction, $entryDate);
+        $documentSaldo = $receivable;
+        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines, $receivable, abs($totalCzk), $deduction, $entryDate);
 
         return $lines;
     }
@@ -2217,8 +2219,9 @@ final class PostingService
         return VatStatusService::payerAt($this->db->pdo(), $supplierId, $date) ? $stored : 'none';
     }
 
-    public function buildFromPurchaseInvoice(int $supplierId, int $purchaseInvoiceId, array $opts = []): array
+    public function buildFromPurchaseInvoice(int $supplierId, int $purchaseInvoiceId, array $opts = [], ?string &$documentSaldo = null): array
     {
+        $documentSaldo = null;
         unset($this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId]);
         $pi = $this->fetchDocHeader('purchase_invoices', $supplierId, $purchaseInvoiceId);
         if ($pi === null) {
@@ -2299,7 +2302,7 @@ final class PostingService
                         . 'rozúčtování DPH podle druhu plnění. Takové vyúčtování zálohy se automaticky neúčtuje, zaúčtujte ho ručně.',
                 );
             }
-            return $this->buildAllocatedPurchaseInvoiceLines($supplierId, $pi, $allocations, $opts);
+            return $this->buildAllocatedPurchaseInvoiceLines($supplierId, $pi, $allocations, $opts, $documentSaldo);
         }
 
         if ($vatDeduction === 'full' || $isRc) {
@@ -2439,7 +2442,8 @@ final class PostingService
 
         // Finální PF navázaná na zaplacenou zálohu (advance_purchase_invoice_id): DOPLŇ
         // zúčtování skutečně zaplacené zálohy 321 MD / 314 D (self-balanced pár).
-        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $entryDate, $deduction);
+        $documentSaldo = $payable;
+        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $payable, $entryDate, $deduction);
 
         return $lines;
     }
@@ -3296,7 +3300,7 @@ final class PostingService
      * @param array{cost_center?:?string} $opts
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}>
      */
-    private function buildAllocatedPurchaseInvoiceLines(int $supplierId, array $pi, array $allocations, array $opts): array
+    private function buildAllocatedPurchaseInvoiceLines(int $supplierId, array $pi, array $allocations, array $opts, ?string &$documentSaldo): array
     {
         $entryDate = self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
         $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
@@ -3342,7 +3346,8 @@ final class PostingService
             ?? $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
-        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $entryDate);
+        $documentSaldo = $payable;
+        $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines, $payable, $entryDate);
         return $lines;
     }
 
@@ -3381,9 +3386,8 @@ final class PostingService
      *
      * Explicitní `rule_key` od volajícího je pokyn pro celý doklad (ruční zaúčtování
      * s vybranou předkontací), proto protiúčet řádků přebíjí — stejně jako rozpad účtů.
-     * U dokladu, který zúčtovává zálohu, se protiúčet z řádků nepřipouští: pár zúčtování
-     * zálohy (321/314, 324/311) bere saldokonto z vlastní předkontace a dva různé
-     * závazky by úhrada ani zúčtování neuzavřely.
+     * U dokladu, který zúčtovává zálohu, určuje saldokonto pro celý doklad i zúčtování
+     * jeho hlavičková předkontace.
      *
      * @param 'purchase'|'sale' $direction
      * @param array<string,mixed> $doc hlavička z {@see fetchDocHeader}
@@ -3492,7 +3496,7 @@ final class PostingService
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
      * @param array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>, groups:list<array<string,mixed>>} $deduction
      */
-    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction, string $entryDate): void
+    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, string $documentSaldo, float $receivable, array $deduction, string $entryDate): void
     {
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return; // jen finální vyúčtovací faktura (ne dobropis/proforma/DDKP)
@@ -3515,7 +3519,7 @@ final class PostingService
                 );
             }
             foreach ($deduction['groups'] as $group) {
-                $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $group['advance_id'], $group['parent'], $lines, $receivable, $group);
+                $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $group['advance_id'], $group['parent'], $lines, $documentSaldo, $receivable, $group);
             }
             return;
         }
@@ -3529,7 +3533,7 @@ final class PostingService
         }
 
         if ($deduction['partial']) {
-            $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $parentId, $parent, $lines, $receivable, $deduction);
+            $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $parentId, $parent, $lines, $documentSaldo, $receivable, $deduction);
             return;
         }
 
@@ -3541,7 +3545,7 @@ final class PostingService
             );
         }
 
-        if (!$deduction['active'] && $this->appendTracedBankAdvanceSettlement($supplierId, 'sale', $parent, $inv, $lines, $entryDate)) {
+        if (!$deduction['active'] && $this->appendTracedBankAdvanceSettlement($supplierId, 'sale', $parent, $inv, $lines, $documentSaldo, $entryDate)) {
             return;
         }
         $received = $this->receivedAdvanceCzk($supplierId, $parent);
@@ -3566,8 +3570,8 @@ final class PostingService
             return; // proforma nezaplacena / žádné inkaso na 324 → běžná faktura beze změny
         }
 
-        ['debit' => $draw, 'credit' => $recv] = $this->advanceSettlementAccounts($supplierId, 'sale');
-        if ($draw === $recv) {
+        ['debit' => $draw, 'credit' => $recv, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'sale', $documentSaldo);
+        if ($onSaldo) {
             // Záloha vedená přímo na pohledávce (předkontace 311/311): pár MD 311 / D 311
             // se vyruší, na saldo ani výsledek nemá vliv a jen zdvojí obrat zápisu.
             // Vyrovnání zálohy tu nese sám předpis na 311 proti inkasu zálohy.
@@ -3597,6 +3601,7 @@ final class PostingService
         int $parentId,
         array $parent,
         array &$lines,
+        string $documentSaldo,
         float $receivable,
         array $deduction,
     ): void {
@@ -3619,8 +3624,8 @@ final class PostingService
         if (self::cents($amount) <= 0) {
             return;
         }
-        ['debit' => $draw, 'credit' => $recv] = $this->advanceSettlementAccounts($supplierId, 'sale');
-        if ($draw === $recv) {
+        ['debit' => $draw, 'credit' => $recv, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'sale', $documentSaldo);
+        if ($onSaldo) {
             return;
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $amount, null), 'pair_group', 'advance');
@@ -3667,7 +3672,7 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>}|null $deduction
      */
-    private function appendAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, string $entryDate, ?array $deduction = null): void
+    private function appendAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, string $documentSaldo, string $entryDate, ?array $deduction = null): void
     {
         $deduction ??= self::noPurchaseDeduction();
         if ((string) ($pi['document_kind'] ?? 'invoice') !== 'invoice') {
@@ -3675,7 +3680,7 @@ final class PostingService
         }
         $advId = (int) ($pi['advance_purchase_invoice_id'] ?? 0);
         if ($advId <= 0) {
-            $this->appendMultiAdvanceSettlementPurchase($supplierId, $pi, $lines, $deduction);
+            $this->appendMultiAdvanceSettlementPurchase($supplierId, $pi, $lines, $documentSaldo, $deduction);
             return;
         }
         $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
@@ -3703,11 +3708,11 @@ final class PostingService
         // odhad z částek. Faktura bez něj nese daň zálohy v plné výši: v evidenci DPH by
         // se uplatnila podruhé a zúčtování nejde určit. Hláška spočítá, o kolik.
         if ($this->purchaseTaxDocumentIds($supplierId, $advId, $advIsStandaloneDdkp) !== []) {
-            $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $deduction);
+            $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $documentSaldo, $deduction);
             return;
         }
         if ((new PurchaseAdvanceDeduction($this->db))->isOpeningAdvance($supplierId, $advId)) {
-            $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $deduction);
+            $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $documentSaldo, $deduction);
             return;
         }
         if ($deduction['active']) {
@@ -3719,7 +3724,7 @@ final class PostingService
             );
         }
 
-        if ($this->appendTracedBankAdvanceSettlement($supplierId, 'purchase', $adv, $pi, $lines, $entryDate)) {
+        if ($this->appendTracedBankAdvanceSettlement($supplierId, 'purchase', $adv, $pi, $lines, $documentSaldo, $entryDate)) {
             return;
         }
         $paid = min(
@@ -3730,8 +3735,8 @@ final class PostingService
             return;
         }
 
-        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
-        if ($draw === $advAcc) {
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        if ($onSaldo) {
             // Zrcadlo vydané strany: záloha vedená přímo na závazku, pár se vyruší.
             return;
         }
@@ -3750,7 +3755,7 @@ final class PostingService
      * @param list<array<string,mixed>> $lines
      */
     private function appendTracedBankAdvanceSettlement(
-        int $supplierId, string $side, array $advance, array $final, array &$lines, string $entryDate,
+        int $supplierId, string $side, array $advance, array $final, array &$lines, string $documentSaldo, string $entryDate,
     ): bool {
         $currency = (string) ($advance['currency_code'] ?? 'CZK');
         $deducted = min((float) ($final['advance_paid_amount'] ?? 0), (float) $final['total_with_vat']);
@@ -3778,8 +3783,8 @@ final class PostingService
         $foreign = min($deducted, $receipt['foreign']);
         $historical = round($foreign / $receipt['foreign'] * $receipt['czk'], 2);
         $nominal = round($foreign * $this->fxRate($final), 2);
-        ['debit' => $debit, 'credit' => $credit] = $this->advanceSettlementAccounts($supplierId, $side);
-        if ($debit === $credit) {
+        ['debit' => $debit, 'credit' => $credit, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, $side, $documentSaldo);
+        if ($onSaldo) {
             if (self::cents($historical - $nominal) !== 0) {
                 throw new PostingException(
                     'advance_settlement_ambiguous',
@@ -3832,7 +3837,7 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>} $deduction odpočet této zálohy
      */
-    private function appendOpeningAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, array &$lines, array $deduction, bool $headerHoldsOtherAdvances = false): void
+    private function appendOpeningAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, array &$lines, string $documentSaldo, array $deduction, bool $headerHoldsOtherAdvances = false): void
     {
         $advId = (int) $adv['id'];
         $finalId = (int) $pi['id'];
@@ -3870,8 +3875,8 @@ final class PostingService
         if (self::cents($deduction['base']) <= 0) {
             return;
         }
-        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
-        if ($draw === $advAcc) {
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        if ($onSaldo) {
             return;
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $deduction['base'], null), 'pair_group', 'advance');
@@ -3896,13 +3901,13 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>, by_advance?:array<int,array<string,mixed>>} $deduction
      */
-    private function appendMultiAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, array $deduction): void
+    private function appendMultiAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, string $documentSaldo, array $deduction): void
     {
         $advanceIds = (new PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, (int) $pi['id']);
         if ($advanceIds === []) {
             return;
         }
-        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
         foreach ($advanceIds as $advId) {
             $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
             if ($adv === null) {
@@ -3915,11 +3920,11 @@ final class PostingService
             }
             $own = $deduction['by_advance'][$advId] ?? self::noPurchaseDeduction();
             if ($this->purchaseTaxDocumentIds($supplierId, $advId, $advIsStandaloneDdkp) !== []) {
-                $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $own, true);
+                $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $documentSaldo, $own, true);
                 continue;
             }
             if ((new PurchaseAdvanceDeduction($this->db))->isOpeningAdvance($supplierId, $advId)) {
-                $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $own, true);
+                $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $documentSaldo, $own, true);
                 continue;
             }
             if ($own['active']) {
@@ -3931,7 +3936,7 @@ final class PostingService
                 );
             }
             $paid = $this->postedAdvancePaid($supplierId, $adv);
-            if (self::cents($paid) <= 0 || $draw === $advAcc) {
+            if (self::cents($paid) <= 0 || $onSaldo) {
                 continue;
             }
             $lines[] = $this->pairHint($this->line($draw, 'debit', $paid, null), 'pair_group', 'advance');
@@ -3940,17 +3945,16 @@ final class PostingService
     }
 
     /**
-     * Účty páru zúčtování zálohy na konečné faktuře: přijatá záloha 324 MD / 311 D
-     * (`sale`), poskytnutá záloha 321 MD / 314 D (`purchase`). Jediné místo, které je
-     * určuje: čte ho zápis konečné faktury i {@see AdvanceSettlementSync}, který pár
-     * dorovnává po pozdější změně úhrady zálohy.
+     * Účet zálohy dává předkontace, účet saldokonta dává předpis konečné faktury.
+     * Shodné účty v předkontaci znamenají zálohu vedenou přímo na saldokontu.
+     * V takovém případě necháváme oba kódy z pravidla, aby se pár vynechal.
      *
      * @param 'sale'|'purchase' $side
-     * @return array{debit:string, credit:string}
+     * @return array{debit:string, credit:string, on_saldo:bool}
      */
-    public function advanceSettlementAccounts(int $supplierId, string $side): array
+    public function advanceSettlementAccounts(int $supplierId, string $side, ?string $documentSaldo = null): array
     {
-        return $side === 'sale'
+        $accounts = $side === 'sale'
             ? [
                 'debit'  => $this->ruleCode($supplierId, 'advance.received.settlement', 'debit', '324'),
                 'credit' => $this->ruleCode($supplierId, 'advance.received.settlement', 'credit', '311'),
@@ -3959,6 +3963,27 @@ final class PostingService
                 'debit'  => $this->ruleCode($supplierId, 'advance.paid.settlement', 'debit', '321'),
                 'credit' => $this->ruleCode($supplierId, 'advance.paid.settlement', 'credit', '314'),
             ];
+        $accounts['on_saldo'] = $accounts['debit'] === $accounts['credit'];
+        if ($documentSaldo !== null && !$accounts['on_saldo']) {
+            $accounts[$side === 'sale' ? 'credit' : 'debit'] = $documentSaldo;
+        }
+        return $accounts;
+    }
+
+    /**
+     * Sestaví konečnou fakturu a vrátí účty zúčtování i v případě, kdy zatím nemá žádný pár.
+     *
+     * @param 'sale'|'purchase' $side
+     * @return array{lines:list<array<string,mixed>>, accounts:array{debit:string, credit:string, on_saldo:bool}}
+     */
+    public function buildFinalAdvanceSettlement(int $supplierId, string $side, int $finalId, string $entryDate): array
+    {
+        $saldo = null;
+        $opts = ['entry_date' => $entryDate];
+        $lines = $side === 'sale'
+            ? $this->buildFromInvoice($supplierId, $finalId, $opts, $saldo)
+            : $this->buildFromPurchaseInvoice($supplierId, $finalId, $opts, $saldo);
+        return ['lines' => $lines, 'accounts' => $this->advanceSettlementAccounts($supplierId, $side, $saldo)];
     }
 
     /**
@@ -4592,7 +4617,7 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>} $deduction
      */
-    private function appendDeductedAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, bool $advIsStandaloneDdkp, array &$lines, array $deduction, bool $headerHoldsOtherAdvances = false): void
+    private function appendDeductedAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, bool $advIsStandaloneDdkp, array &$lines, string $documentSaldo, array $deduction, bool $headerHoldsOtherAdvances = false): void
     {
         $advId = (int) $adv['id'];
         $finalId = (int) $pi['id'];
@@ -4686,8 +4711,8 @@ final class PostingService
             );
         }
 
-        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
-        if ($draw === $advAcc) {
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        if ($onSaldo) {
             return; // záloha vedená přímo na závazku, pár se vyruší
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $remaining, null), 'pair_group', 'advance');

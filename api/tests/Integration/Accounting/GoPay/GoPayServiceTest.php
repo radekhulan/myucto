@@ -18,6 +18,7 @@ use MyInvoice\Service\Bank\EmailNoticeReconciler;
 use MyInvoice\Service\Export\ExportPeriod;
 use MyInvoice\Service\Export\MonthlyExportService;
 use PDO;
+use MyInvoice\Tests\Support\AnalyticAccountFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use ZipArchive;
@@ -25,6 +26,8 @@ use ZipArchive;
 #[Group('integration')]
 final class GoPayServiceTest extends TestCase
 {
+    use AnalyticAccountFixture;
+
     private const YEAR = 2098;
 
     private Connection $db;
@@ -92,6 +95,23 @@ final class GoPayServiceTest extends TestCase
             }
             $this->db->close();
         }
+    }
+
+    public function testGoPayPaymentAndRefundUseTheirOwnPredpisAccounts(): void
+    {
+        $ids = $this->configureAccounts();
+        $this->seedAnalyticAccounts($this->db->pdo(), $this->supplierId, '311.300', '311.301');
+        [$invoice, $creditNote] = $this->documents();
+        $this->postDocuments($invoice, $creditNote, '311.300', '311.301');
+        $this->payment($invoice);
+        $this->bankPayout();
+
+        $result = $this->service->import($this->supplierId, $this->userId, 'synthetic.xml', $this->xml());
+        $movements = $result['clearing']['movements'];
+        self::assertSame('posted', $movements[0]['status']);
+        self::assertSame('posted', $movements[1]['status']);
+        $this->assertPair((int) $movements[0]['journal_entry_id'], $ids['gopay'], '311.300', 1000.00);
+        $this->assertPair((int) $movements[1]['journal_entry_id'], '311.301', $ids['gopay'], 100.00);
     }
 
     public function testXmlImportMatchesPostsAndDeduplicatesWholeClearing(): void
@@ -490,15 +510,15 @@ final class GoPayServiceTest extends TestCase
     }
 
     /** @return array{int,int} */
-    private function postDocuments(int $invoiceId, int $creditNoteId): array
+    private function postDocuments(int $invoiceId, int $creditNoteId, string $invoiceSaldo = '311', string $creditNoteSaldo = '311'): array
     {
         $invoiceEntryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
-            ['account_code' => '311', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => $invoiceSaldo, 'side' => 'debit', 'amount' => 1000],
             ['account_code' => '602', 'side' => 'credit', 'amount' => 1000],
         ], ['entry_date' => self::YEAR . '-01-10', 'document_no' => 'FV-TEST', 'description' => 'Test faktura', 'posted_by' => $this->userId]);
         $creditNoteEntryId = $this->posting->postDocument($this->supplierId, 'invoice', $creditNoteId, [
             ['account_code' => '602', 'side' => 'debit', 'amount' => 100],
-            ['account_code' => '311', 'side' => 'credit', 'amount' => 100],
+            ['account_code' => $creditNoteSaldo, 'side' => 'credit', 'amount' => 100],
         ], ['entry_date' => self::YEAR . '-01-20', 'document_no' => 'DB-TEST', 'description' => 'Test dobropis', 'posted_by' => $this->userId]);
         return [$invoiceEntryId, $creditNoteEntryId];
     }
