@@ -31348,7 +31348,7 @@
         "trg_integration_stock_price_insert": "AFTER INSERT ON stock_item_prices #fe01f703289bceddd89de77232c4977501f66e5b",
         "trg_integration_stock_price_update": "AFTER UPDATE ON stock_item_prices #fe01f703289bceddd89de77232c4977501f66e5b",
         "trg_internal_documents_drop_document_links": "AFTER DELETE ON internal_documents #19a5dbc988568fb3d6516264cf50f7c8796fb525",
-        "trg_invoice_paid_webhook": "AFTER UPDATE ON invoices #0ab22e048491f1b38d37d25911780ee041e781ee",
+        "trg_invoice_paid_webhook": "AFTER UPDATE ON invoices #f190c540f4c4ab320c77ba24bdf170fa83cb9c42",
         "trg_invoice_payment_payroll_evidence_insert": "BEFORE INSERT ON invoice_payments #281869b4a35b8a90f2491c234d855e4411e1b120",
         "trg_invoice_payment_payroll_evidence_update": "BEFORE UPDATE ON invoice_payments #8d2804bde45112884acc30c49e73a19d0d60061a",
         "trg_isds_gateway_sessions_no_delete": "BEFORE DELETE ON isds_gateway_sessions #3addbc31c61f37ce8b5d53c9ce2c43da041b07de",

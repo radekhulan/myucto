@@ -559,6 +559,7 @@ final class GlobalSeedTables
         'purchase_invoices', 'purchase_order_invoice_links', 'purchase_order_lines', 'purchase_orders',
         'rate_limit_counters',
         'recurring_invoice_template_items', 'recurring_invoice_templates',
+        'invoice_paid_deliveries', 'invoice_paid_webhooks',
         'retention_holds',
         'sales_order_fulfillment_links', 'sales_order_invoice_links', 'sales_order_lines',
         'sales_order_operation_keys', 'sales_order_reservations', 'sales_order_returns', 'sales_orders',
@@ -627,6 +628,8 @@ final class GlobalSeedTables
      * @var array<string, string>
      */
     public const RESET_KEEP_USERS_SUPPLIER_PARTIAL = [
+        // Firemní webhooky zůstávají. Odběry jednotlivých šablon se smažou spolu se šablonami.
+        'invoice_paid_webhooks' => 'template_id IS NOT NULL',
         // Výchozí dimenze vlastního bankovního účtu: účet, typy i hodnoty dimenzí zůstávají.
         'dimension_defaults' => 'supplier_bank_account_id IS NULL',
     ];

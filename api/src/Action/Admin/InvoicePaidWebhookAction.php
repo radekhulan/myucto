@@ -25,7 +25,6 @@ final class InvoicePaidWebhookAction
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
         $supplierId = SupplierGuard::currentId($request);
         if ($supplierId < 1 || !RequestAuthorization::canManageInvoiceWebhooks($request)) {
             return Json::error($response, 'forbidden', 'Správa webhooků vyžaduje správce firmy.', 403);

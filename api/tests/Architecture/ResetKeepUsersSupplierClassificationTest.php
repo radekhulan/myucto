@@ -117,6 +117,15 @@ final class ResetKeepUsersSupplierClassificationTest extends TestCase
         self::assertStringNotContainsString('array_merge($keep, [', $source, 'reset.php nesmí mít vlastní keep-list režimu.');
     }
 
+    public function testKeepModePreservesOnlySupplierWideWebhooks(): void
+    {
+        $mode = GlobalSeedTables::resetKeepUsersSupplier(false);
+        self::assertNotContains('invoice_paid_webhooks', $mode['keep']);
+        self::assertSame('template_id IS NOT NULL', $mode['partial']['invoice_paid_webhooks']);
+        self::assertNotContains('invoice_paid_deliveries', $mode['keep']);
+        self::assertArrayNotHasKey('invoice_paid_deliveries', $mode['partial']);
+    }
+
     /** @return array<string, mixed> */
     private static function tables(): array
     {

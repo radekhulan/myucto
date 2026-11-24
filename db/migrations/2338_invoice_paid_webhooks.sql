@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS invoice_paid_deliveries (
 DELIMITER //
 CREATE OR REPLACE TRIGGER trg_invoice_paid_webhook AFTER UPDATE ON invoices FOR EACH ROW
 BEGIN
-    DECLARE event_uuid CHAR(36);
+    DECLARE event_uuid CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     DECLARE covered_by_advance BOOLEAN;
     DECLARE origin_template_id BIGINT UNSIGNED;
     IF OLD.status <> 'paid' AND NEW.status = 'paid' AND NEW.invoice_type IN ('invoice','proforma') THEN
