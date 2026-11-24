@@ -1244,6 +1244,86 @@ final class SyntheticPohodaExport
     public const FOREIGN_PURCHASE_BANK = 'BAN0010021';
     public const FOREIGN_RECEIPT = 'BAN0010020';
     public const FOREIGN_RATE = 25.12;
+    public const FOREIGN_ADVANCE = '26ZL0301';
+    public const FOREIGN_ADVANCE_FINAL = '26FV0301';
+    public const FOREIGN_ADVANCE_DDKP = '26DD0301';
+
+    public static function withForeignIssuedAdvancePair(
+        string $dir,
+        float $drawCzk = 2420.0,
+        bool $matchingProforma = false,
+        bool $withDdkp = false,
+        ?float $drawForeign = null,
+    ): void {
+        $header = static function (string $ns, string $tag, string $number, string $vs, string $date, string $type, string $extra): string {
+            return "<{$ns}:{$tag}Header>{$type}<{$ns}:number><typ:numberRequested>{$number}</typ:numberRequested></{$ns}:number>"
+                . "<{$ns}:symVar>{$vs}</{$ns}:symVar><{$ns}:date>{$date}</{$ns}:date><{$ns}:dateTax>{$date}</{$ns}:dateTax>"
+                . "<{$ns}:dateAccounting>{$date}</{$ns}:dateAccounting><{$ns}:dateDue>{$date}</{$ns}:dateDue>"
+                . "<{$ns}:classificationVAT><typ:ids>UD</typ:ids></{$ns}:classificationVAT><{$ns}:text>Služby</{$ns}:text>"
+                . self::partner($ns, 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO)
+                . $extra . "</{$ns}:{$tag}Header>";
+        };
+        $amount = static function (string $ns, string $type, float $base, float $vat): string {
+            $total = round($base + $vat, 2);
+            return "<{$ns}:{$type}Currency><typ:unitPrice>{$base}</typ:unitPrice><typ:price>{$base}</typ:price>"
+                . "<typ:priceVAT>{$vat}</typ:priceVAT><typ:priceSum>{$total}</typ:priceSum></{$ns}:{$type}Currency>";
+        };
+        $item = static fn (string $ns, string $tag, string $text, float $base, float $vat, float $fxBase, float $fxVat): string =>
+            "<{$ns}:{$tag}Item><{$ns}:text>{$text}</{$ns}:text><{$ns}:quantity>1</{$ns}:quantity><{$ns}:rateVAT value=\"21\">high</{$ns}:rateVAT>"
+            . $amount($ns, 'home', $base, $vat) . $amount($ns, 'foreign', $fxBase, $fxVat) . "</{$ns}:{$tag}Item>";
+        $summary = static function (string $ns, string $tag, float $base, float $vat, float $rate, float $total): string {
+            $home = str_replace('invoiceSummary', $tag . 'Summary', self::summary($ns, $base, $vat));
+            $foreign = "<{$ns}:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>{$rate}</typ:rate>"
+                . "<typ:amount>1</typ:amount><typ:priceSum>{$total}</typ:priceSum></{$ns}:foreignCurrency>";
+            return str_replace("</{$ns}:{$tag}Summary>", $foreign . "</{$ns}:{$tag}Summary>", $home);
+        };
+
+        $advanceNumber = self::FOREIGN_ADVANCE;
+        $advance = '<lst:invoice version="2.0">'
+            . $header('inv', 'invoice', $advanceNumber, '260301', '2026-02-10', '<inv:invoiceType>issuedProformaInvoice</inv:invoiceType>',
+                '<inv:accounting><typ:accountingType>withoutAccounting</typ:accountingType></inv:accounting>'
+                . '<inv:liquidation><typ:amountHome>2420</typ:amountHome></inv:liquidation>')
+            . '<inv:invoiceDetail>' . $item('inv', 'invoice', 'Záloha', 2000, 420, $matchingProforma ? 80 : 81, $matchingProforma ? 16.8 : 15.8)
+            . '</inv:invoiceDetail>' . $summary('inv', 'invoice', 2000, 420, 25, 96.80) . '</lst:invoice>';
+        self::file($dir . '/16_faktury_issuedProformaInvoice.xml', '<lst:listInvoice version="2.0" state="ok">' . $advance . '</lst:listInvoice>');
+
+        $finalNumber = self::FOREIGN_ADVANCE_FINAL;
+        $rate = $withDdkp ? 25 : 26;
+        $base = 200 * $rate;
+        $vat = 42 * $rate;
+        $remaining = $base + $vat - $drawCzk;
+        $advanceReference = "<typ:sourceDocument><typ:number>{$advanceNumber}</typ:number></typ:sourceDocument>";
+        $deduction = '<inv:invoiceAdvancePaymentItem><inv:quantity>1</inv:quantity>'
+            . ($withDdkp
+                ? '<inv:rateVAT value="21">high</inv:rateVAT>' . $amount('inv', 'home', -2000, -420) . $amount('inv', 'foreign', -80, -16.80)
+                : '<inv:rateVAT value="0">none</inv:rateVAT>' . $amount('inv', 'home', -$drawCzk, 0)
+                    . ($drawForeign === null ? '' : $amount('inv', 'foreign', -$drawForeign, 0)))
+            . str_replace('typ:sourceDocument', 'inv:sourceDocument', $advanceReference) . '</inv:invoiceAdvancePaymentItem>';
+        $final = '<lst:invoice version="2.0">'
+            . $header('inv', 'invoice', $finalNumber, '260302', '2026-02-27', '<inv:invoiceType>issuedInvoice</inv:invoiceType>',
+                "<inv:liquidation><typ:amountHome>{$remaining}</typ:amountHome></inv:liquidation>")
+            . '<inv:invoiceDetail>' . $item('inv', 'invoice', 'Služby', $base, $vat, 200, 42) . $deduction . '</inv:invoiceDetail>'
+            . $summary('inv', 'invoice', $base, $vat, $rate, 242) . '</lst:invoice>';
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $final);
+        self::append($dir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="324000" code="324000" name="Přijaté zálohy"/>');
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', $finalNumber, 'Služby', $base, '311001', '602000', '2026-02-27')
+            . self::entry('Vydané faktury', $finalNumber, 'DPH', $vat - ($withDdkp ? 420 : 0), '311001', '343021', '2026-02-27')
+            . self::entry('Vydané faktury', $finalNumber, 'Vyúčtování zálohy', $withDdkp ? 2000 : $drawCzk, '324000', '311001', '2026-02-27'));
+
+        if ($withDdkp) {
+            $number = self::FOREIGN_ADVANCE_DDKP;
+            $tax = '<lst:intDoc version="2.0">'
+                . $header('int', 'intDoc', $number, '260303', '2026-02-25', '', '')
+                . '<int:intDocDetail>' . $item('int', 'intDoc', 'Přijatá záloha', 2000, 420, 80, 16.80) . '</int:intDocDetail>'
+                . $summary('int', 'intDoc', 2000, 420, 25, 96.80)
+                . '<int:linkedDocuments><typ:link><typ:sourceAgenda>issuedAdvanceInvoice</typ:sourceAgenda>' . $advanceReference . '</typ:link></int:linkedDocuments>'
+                . '</lst:intDoc>';
+            self::file($dir . '/27_interni_doklady.xml', '<lst:listIntDoc version="2.0" state="ok">' . $tax . '</lst:listIntDoc>');
+            self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+                self::entry('Interní doklady', $number, 'DPH z přijaté zálohy', 420, '324000', '343021', '2026-02-25'));
+        }
+    }
 
     /**
      * Agenda z {@see write()} s doklady v EUR tak, jak je vede POHODA: částky položek v EUR

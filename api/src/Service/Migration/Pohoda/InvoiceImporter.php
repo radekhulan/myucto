@@ -837,7 +837,7 @@ final class InvoiceImporter
      * Položky a součty dokladu v Kč.
      *
      * @param array<string,mixed> $doc
-     * @return array{items:list<array<string,mixed>>,base:float,vat:float,total:float,gross_total:float,rounding:float,advance:float,advance_items:int,source:string}
+     * @return array{items:list<array<string,mixed>>,base:float,vat:float,total:float,gross_total:float,rounding:float,advance:float,advance_items:int,advance_rows:list<array>,source:string}
      */
     private function amounts(PohodaContext $ctx, string $step, array $doc, array $r, string $prefix): array
     {
@@ -932,13 +932,17 @@ final class InvoiceImporter
         $hasForeignAdvance = true;
         $foreignTaxAdvance = 0.0;
         $advanceItems = 0;
+        $advanceRows = [];
         foreach (PohodaXml::all($r, $prefix . 'Detail/invoiceAdvancePaymentItem') as $a) {
             $vat = round(PohodaXml::num($a, 'homeCurrency/priceVAT'), 2);
+            $number = PohodaXml::text($a, 'sourceDocument/number');
+            $currency = strtoupper(PohodaXml::text($a, 'foreignCurrency/currency/ids'));
             if (abs($vat) < 0.005) {
                 $home = PohodaXml::num($a, 'homeCurrency/priceSum');
                 $advance += $home;
                 $foreign = PohodaXml::text($a, 'foreignCurrency/priceSum');
-                $currency = PohodaXml::text($a, 'foreignCurrency/currency/ids');
+                $advanceRows[] = ['number' => $number, 'currency' => $currency, 'home' => round(-$home, 2),
+                    'foreign' => is_numeric($foreign) && (float) $foreign !== 0.0 ? round(-(float) $foreign, 2) : null, 'item_index' => null];
                 if (abs($home) >= 0.005 && (!is_numeric($foreign) || (float) $foreign === 0.0
                     || ($currency !== '' && strcasecmp($currency, $doc['foreign']) !== 0))) {
                     $hasForeignAdvance = false;
@@ -948,8 +952,11 @@ final class InvoiceImporter
                 continue;
             }
             $base = round(PohodaXml::num($a, 'homeCurrency/price'), 2);
-            $ref = PohodaXml::text($a, 'note') ?: PohodaXml::text($a, 'sourceDocument/number');
+            $ref = PohodaXml::text($a, 'note') ?: $number;
             $foreignItem = self::foreignAmounts($a);
+            $advanceRows[] = ['number' => $number, 'currency' => $currency, 'home' => round(-($base + $vat), 2),
+                'foreign' => $foreignItem === [] ? null : round(-($foreignItem['foreign_base'] + $foreignItem['foreign_vat']), 2),
+                'item_index' => count($items)];
             $foreignTaxAdvance += ($foreignItem['foreign_base'] ?? 0.0) + ($foreignItem['foreign_vat'] ?? 0.0);
             $items[] = [
                 'description' => 'Odpočet zálohy' . ($ref !== '' ? ' ' . $ref : ''),
@@ -980,6 +987,7 @@ final class InvoiceImporter
             'foreign_tax_advance' => round($foreignTaxAdvance, 2),
             'summary_mismatch' => $summaryMismatch,
             'advance_items' => $advanceItems,
+            'advance_rows' => $advanceRows,
             'source' => $source,
         ];
     }

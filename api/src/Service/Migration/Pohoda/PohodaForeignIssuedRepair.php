@@ -6,7 +6,9 @@ namespace MyInvoice\Service\Migration\Pohoda;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CashJournalRepository;
+use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\PohodaImportRepository;
+use MyInvoice\Service\Accounting\Closing\FxRevaluationService;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\IssuedCzkAmounts;
@@ -25,6 +27,7 @@ final class PohodaForeignIssuedRepair
 {
     public const AUDIT_ACTION = 'invoice.pohoda_foreign_currency_repaired';
     public const PAYMENT_PENDING = 'převod měny po doložení úhrad a vazeb';
+    public const PAST_PERIOD = 'past_period';
 
     private const NOTE_SQL = '%doklad v ___, převzat v Kč (%';
     private const NOTE_PATTERN = '/doklad v ([A-Z]{3}), převzat v Kč \(([^\r\n;]*)\)(?=;|\. K ruční kontrole:|$)/u';
@@ -43,6 +46,8 @@ final class PohodaForeignIssuedRepair
         private readonly CashJournalRepository $cashJournal,
         private readonly StatsRecomputer $stats,
         private readonly PohodaIssuedPaymentConversion $payments,
+        private readonly PohodaIssuedAdvanceGroups $advances,
+        private readonly ClosingRepository $closing,
     ) {
         $this->currencies = new ForeignCurrencyTakeover($db, createMissingCurrency: true);
     }
@@ -70,21 +75,30 @@ final class PohodaForeignIssuedRepair
     }
 
     /**
+     * @param PohodaExport|array<int,PohodaExport>|null $export Export, nebo exporty podle roku agendy.
      * @param list<int>|null $onlyIds Právě založené doklady při novém převodu.
      * @return list<array{id:int,document_no:string,issue_date:string,currency:string,status:string,reason:?string,
      *                    source_reason:string,source_year:?int,total_czk:float,rate:?float,total_foreign:?float,payments_converted:int}>
      */
-    public function run(int $supplierId, ?PohodaExport $export, bool $commit, ?int $userId = null, ?array $onlyIds = null): array
+    public function run(int $supplierId, PohodaExport|array|null $export, bool $commit, ?int $userId = null, ?array $onlyIds = null): array
     {
         $docs = $this->candidates($supplierId, $onlyIds);
         if ($docs === []) {
             return [];
         }
         $this->locks->reset();
-        $problem = $export === null ? null : $this->exportProblem($supplierId, $export);
+        $start = $this->accountingStart($supplierId);
+        $exports = [];
+        foreach ($export instanceof PohodaExport ? [$export] : ($export ?? []) as $agenda) {
+            $exports[$agenda->year] = $agenda;
+        }
+        $fallback = reset($exports) ?: null;
+        $problems = array_map(fn (PohodaExport $e): ?string => $this->exportProblem($supplierId, $e), $exports);
+        $exportFor = static fn (array $doc): ?PohodaExport => $exports[(int) $doc['agenda_year']] ?? $fallback;
         $pending = $out = [];
         foreach ($docs as $id => $doc) {
-            [$status, $reason] = $this->eligibility($supplierId, $doc, $export, $problem, $onlyIds !== null);
+            $agenda = $exportFor($doc);
+            [$status, $reason] = $this->eligibility($supplierId, $doc, $agenda, $agenda === null ? null : $problems[$agenda->year], $onlyIds !== null, $start);
             $out[$id] = [
                 'id' => $id, 'document_no' => (string) $doc['varsymbol'], 'issue_date' => (string) $doc['issue_date'],
                 'currency' => $doc['currency'], 'status' => $status, 'reason' => $reason, 'source_reason' => $doc['source_reason'],
@@ -92,12 +106,33 @@ final class PohodaForeignIssuedRepair
                 'total_czk' => (float) $doc['total_with_vat'], 'rate' => null, 'total_foreign' => null, 'payments_converted' => 0,
             ];
             if ($status === 'convert') {
-                $pending[$id] = $doc;
+                $pending[$id] = $doc + ['export' => $agenda];
             }
         }
-        if ($export !== null && $pending !== []) {
-            $sources = $this->sources($supplierId, $export, array_column($pending, 'pohoda_key'));
-            foreach ($this->apply($supplierId, $export, $pending, $sources, $commit, $userId, $onlyIds !== null) as $id => $result) {
+        if ($pending !== []) {
+            $keys = [];
+            foreach ($pending as $id => $doc) {
+                $keys[$doc['export']->year][$id] = $doc['pohoda_key'];
+            }
+            foreach ($this->advances->families($supplierId, $pending) as $members) {
+                foreach (array_diff_key($members, $pending) as $id => $doc) {
+                    $year = (int) $doc['agenda_year'];
+                    if ($doc['pohoda_key'] !== null && isset($exports[$year]) && $problems[$year] === null
+                        && PartnerImporter::ico((string) $doc['agenda_ico']) === $exports[$year]->ico) {
+                        $keys[$year][$id] = $doc['pohoda_key'];
+                    }
+                }
+            }
+            $sources = [];
+            foreach ($keys as $year => $byId) {
+                $records = $this->sources($supplierId, $exports[$year], array_values($byId));
+                foreach ($byId as $id => $key) {
+                    if (isset($records[$key])) {
+                        $sources[$id] = $records[$key] + ['export' => $exports[$year], 'key' => $key];
+                    }
+                }
+            }
+            foreach ($this->apply($supplierId, $pending, $sources, $out, $commit, $userId, $onlyIds !== null) as $id => $result) {
                 $out[$id] = array_replace($out[$id], $result);
             }
         }
@@ -111,6 +146,7 @@ final class PohodaForeignIssuedRepair
             return [];
         }
         $scope = $onlyIds === null ? '' : ' AND i.id IN (' . implode(',', array_map('intval', $onlyIds)) . ')';
+        $unsupported = PohodaIssuedAdvanceGroups::unsupportedLinksSql();
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, i.varsymbol, i.client_id, i.project_id, i.invoice_type, i.issue_date, i.tax_date, i.effective_tax_date, i.due_date,
                     i.status, i.total_without_vat, i.total_vat, i.total_with_vat, i.rounding, i.advance_paid_amount,
@@ -136,14 +172,7 @@ final class PohodaForeignIssuedRepair
                      OR EXISTS (SELECT 1 FROM credit_note_offsets p WHERE p.doc_type = 'invoice' AND p.credit_note_id = i.id AND p.supplier_id = i.supplier_id)
                      OR EXISTS (SELECT 1 FROM journal_settlement_allocations p WHERE p.supplier_id = i.supplier_id AND p.doc_type = 'invoice'
                                  AND p.doc_id = i.id AND p.kind = 'settlement')) AS has_settlement,
-                    (EXISTS (SELECT 1 FROM invoices ch WHERE ch.parent_invoice_id = i.id AND ch.supplier_id = i.supplier_id AND ch.invoice_type <> 'tax_document')
-                     OR EXISTS (SELECT 1 FROM invoice_items it WHERE it.advance_invoice_id = i.id)
-                     OR EXISTS (SELECT 1 FROM invoice_advance_deductions a WHERE a.supplier_id = i.supplier_id AND a.advance_invoice_id = i.id)
-                     OR EXISTS (SELECT 1 FROM invoice_advance_deductions a WHERE a.supplier_id = i.supplier_id AND a.final_invoice_id = i.id)) AS has_child,
-                    (SELECT GROUP_CONCAT(ch.id ORDER BY ch.id) FROM invoices ch WHERE ch.parent_invoice_id = i.id
-                       AND ch.supplier_id = i.supplier_id AND ch.invoice_type = 'tax_document') AS tax_documents,
-                    EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.tax_document_invoice_id = i.id
-                              AND (ip.supplier_id <> i.supplier_id OR NOT (ip.invoice_id <=> i.parent_invoice_id))) AS has_other_advance_payment,
+                    {$unsupported} AS has_unsupported_link,
                     (SELECT GROUP_CONCAT(DISTINCT e.entry_date) FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                       WHERE e.supplier_id = i.supplier_id AND e.source_type = 'invoice' AND e.source_id = i.id) AS journal_dates,
                     (SELECT GROUP_CONCAT(DISTINCT e.entry_date) FROM journal_entry_document_links l FORCE INDEX (idx_jedl_doc)
@@ -168,9 +197,26 @@ final class PohodaForeignIssuedRepair
         return $out;
     }
 
-    /** @return array{string,?string} */
-    private function eligibility(int $supplierId, array $doc, ?PohodaExport $export, ?string $exportProblem, bool $newImport): array
+    private function accountingStart(int $supplierId): ?string
     {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(
+                (SELECT MIN(starts_on) FROM accounting_periods WHERE supplier_id = ?),
+                (SELECT MIN(entry_date) FROM journal_entries FORCE INDEX (idx_je_supplier_source)
+                  WHERE supplier_id = ? AND source_type = 'opening' AND posted_at IS NOT NULL AND reversed_by IS NULL),
+                (SELECT CONCAT(MIN(pohoda_key), '-01-01') FROM pohoda_import_map WHERE supplier_id = ? AND kind = ?)
+            )"
+        );
+        $stmt->execute([$supplierId, $supplierId, $supplierId, PohodaImportRepository::KIND_TAX_EVIDENCE_YEAR]);
+        return $stmt->fetchColumn() ?: null;
+    }
+
+    /** @return array{string,?string} */
+    private function eligibility(int $supplierId, array $doc, ?PohodaExport $export, ?string $exportProblem, bool $newImport, ?string $start): array
+    {
+        if ($start !== null && max($doc['issue_date'], $doc['tax_date'] ?? '', $doc['effective_tax_date'] ?? '') < $start) {
+            return [self::PAST_PERIOD, sprintf('Rozhodná data dokladu jsou před začátkem účetnictví (%s).', $start)];
+        }
         $dates = array_unique(array_filter([
             $doc['issue_date'], $doc['tax_date'], $doc['effective_tax_date'], $doc['booked_at'], $doc['paid_at'],
             ...explode(',', (string) $doc['journal_dates']), ...explode(',', (string) $doc['linked_dates']),
@@ -192,7 +238,7 @@ final class PohodaForeignIssuedRepair
             $doc['sent_at'] !== null || $doc['last_reminder_at'] !== null || (int) $doc['reminder_count'] > 0 || $doc['status'] === 'reminded'
                 => 'Doklad nebo upomínka už byly odeslány odběrateli.',
             $doc['pdf_generated_at'] !== null || $doc['pdf_path'] !== null || $doc['imported_pdf_path'] !== null => 'Doklad už má vystavené PDF.',
-            ($doc['parent_invoice_id'] !== null && $doc['invoice_type'] !== 'tax_document') || (bool) $doc['has_child']
+            ($doc['parent_invoice_id'] !== null && !in_array($doc['invoice_type'], ['invoice', 'tax_document'], true)) || (bool) $doc['has_unsupported_link']
                 => 'Doklad má vazbu na jiný doklad nebo čerpání zálohy, které nelze bezpečně převést.',
             $doc['status'] === 'cancelled' || (bool) $doc['prices_include_vat'] => 'Doklad je stornovaný nebo používá ceny s DPH.',
             default => $exportProblem,
@@ -272,7 +318,7 @@ final class PohodaForeignIssuedRepair
     }
 
     /** @return array{amounts:array,rate:float,items:array,source:array}|string */
-    private static function plan(array $doc, array $items, ?array $source): array|string
+    private static function plan(array $doc, array $items, ?array $source, ?array $advance, bool $linkedProforma): array|string
     {
         if ($source === null) {
             return 'Doklad v exportu chybí nebo se v něm vyskytuje vícekrát.';
@@ -281,6 +327,22 @@ final class PohodaForeignIssuedRepair
         $amounts = $source['amounts'];
         if (strtoupper(trim($header['foreign'])) !== $doc['currency']) {
             return 'Měna dokladu v exportu se liší od měny v poznámce převodu.';
+        }
+        $deduction = null;
+        $deductionItems = [];
+        if ($advance !== null) {
+            if ($doc['currency'] !== $advance['currency']) {
+                return 'Konečná faktura a záloha mají jinou měnu.';
+            }
+            $deduction = PohodaIssuedAdvanceGroups::deduction($amounts, $advance);
+            if (is_string($deduction)) {
+                return $deduction;
+            }
+            foreach ($amounts['advance_rows'] as $row) {
+                if ($row['item_index'] !== null) {
+                    $deductionItems[$row['item_index']] = true;
+                }
+            }
         }
         $sourceTax = $doc['invoice_type'] === 'proforma' ? $header['tax'] : ($header['tax'] ?? $header['issue']);
         if ($doc['issue_date'] !== $header['issue'] || $doc['tax_date'] !== $sourceTax || $doc['due_date'] !== $header['due']
@@ -293,7 +355,9 @@ final class PohodaForeignIssuedRepair
             if ((bool) $item['oss_applicable']) {
                 return 'Doklad má položky OSS. Výsledek původního OSS podání vyžaduje samostatné ověření.';
             }
-            if ($item['advance_invoice_id'] !== null || $item['import_tax_base_czk'] !== null || $item['import_tax_vat_czk'] !== null) {
+            if (($item['advance_invoice_id'] !== null && (!isset($deductionItems[$index])
+                    || (int) $item['advance_invoice_id'] !== (int) $doc['parent_invoice_id']))
+                || $item['import_tax_base_czk'] !== null || $item['import_tax_vat_czk'] !== null) {
                 return 'Položka už má vazbu na zálohu nebo korunové částky ze zdroje.';
             }
             $original = $amounts['items'][$index];
@@ -304,7 +368,7 @@ final class PohodaForeignIssuedRepair
             }
         }
         $rate = ForeignCurrencyTakeover::rate($header['foreign_rate'], $header['foreign_units']);
-        $converted = IssuedCurrencySnapshot::prepare($amounts, $rate, $header['foreign_total']);
+        $converted = IssuedCurrencySnapshot::prepare($amounts, $rate, $header['foreign_total'], $deduction, $linkedProforma);
         return is_array($converted) && $rate !== null
             ? ['amounts' => $converted, 'rate' => $rate, 'items' => $items, 'source' => $source]
             : (is_string($converted) ? ucfirst($converted) . '.' : 'Doklad nemá kurz.');
@@ -316,7 +380,7 @@ final class PohodaForeignIssuedRepair
      *
      * @return array<int,array<string,mixed>>
      */
-    private function apply(int $supplierId, PohodaExport $export, array $pending, array $sources, bool $commit, ?int $userId, bool $newImport): array
+    private function apply(int $supplierId, array $pending, array $sources, array $initial, bool $commit, ?int $userId, bool $newImport): array
     {
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
@@ -328,6 +392,7 @@ final class PohodaForeignIssuedRepair
             $pdo->beginTransaction();
             try {
                 $this->lockPeriodState($supplierId);
+                $families = $this->advances->families($supplierId, $pending, true);
                 $ids = array_keys($pending);
                 $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id IN ('
                     . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id FOR UPDATE');
@@ -335,35 +400,63 @@ final class PohodaForeignIssuedRepair
                 $stmt->closeCursor();
                 $items = $this->items($ids);
                 $this->locks->reset();
+                $start = $this->accountingStart($supplierId);
                 $docs = $this->candidates($supplierId, $ids);
-                $plans = [];
-                foreach ($pending as $id => $priorDoc) {
+                [$groups, $roots, $unchanged, $problems] = PohodaIssuedAdvanceGroups::scope($families, $pending, $sources, $initial);
+                $plans = $outcomes = [];
+                $proformas = array_filter($pending, static fn (array $doc): bool => $doc['invoice_type'] === 'proforma');
+                foreach ($proformas + $pending as $id => $priorDoc) {
+                    if (isset($problems[$id])) {
+                        continue;
+                    }
                     $doc = $docs[$id] ?? null;
-                    if ($doc === null || $doc['pohoda_key'] !== $priorDoc['pohoda_key']) {
-                        $out[$id] = ['status' => 'review', 'reason' => 'Doklad se mezitím změnil.'];
+                    if ($doc === null || $doc['pohoda_key'] !== $priorDoc['pohoda_key']
+                        || $doc['parent_invoice_id'] !== $priorDoc['parent_invoice_id']) {
+                        $problems[$id] = 'Doklad nebo jeho vazba se mezitím změnily.';
                         continue;
                     }
-                    [$status, $reason] = $this->eligibility($supplierId, $doc, $export, null, $newImport);
+                    [$status, $reason] = $this->eligibility($supplierId, $doc, $priorDoc['export'], null, $newImport, $start);
                     if ($status !== 'convert') {
-                        $out[$id] = ['status' => $status, 'reason' => $reason];
+                        $outcomes[$id] = $status;
+                        $problems[$id] = $reason;
                         continue;
                     }
-                    $plan = self::plan($doc, $items[$id] ?? [], $sources[$doc['pohoda_key']] ?? null);
+                    $root = $roots[$id] ?? null;
+                    $advance = null;
+                    if ($doc['invoice_type'] === 'invoice' && $doc['parent_invoice_id'] !== null) {
+                        $parent = $families[$root][$root] ?? null;
+                        $advance = $parent === null ? null : PohodaIssuedAdvanceGroups::advance(
+                            $parent, $plans[$root] ?? null, $unchanged[$root]['source'] ?? null,
+                        );
+                        if ($advance === null) {
+                            $problems[$id] = $problems[$root] ?? 'Konečnou fakturu nelze převést bez doložené zálohy ve stejné měně.';
+                            continue;
+                        }
+                    }
+                    $linkedProforma = $root === $id && in_array('invoice', array_column($families[$root], 'invoice_type'), true);
+                    $plan = self::plan($doc, $items[$id] ?? [], $sources[$id] ?? null, $advance, $linkedProforma);
                     if (is_string($plan)) {
-                        $out[$id] = ['status' => 'review', 'reason' => $plan];
+                        $problems[$id] = $plan;
                         continue;
                     }
-                    $plans[$id] = $plan + ['doc' => $doc];
+                    $plans[$id] = $plan + ['doc' => $doc, 'advance_group' => $root];
                 }
-                $groups = [];
+                foreach (self::relatedProblems($problems, $groups) as $id => $reason) {
+                    if (isset($pending[$id])) {
+                        $out[$id] = ['status' => $outcomes[$id] ?? 'review', 'reason' => $reason];
+                    }
+                    unset($plans[$id], $unchanged[$id]);
+                }
                 if ($plans !== []) {
-                    [$payments, $problems, $banks] = $this->payments->plan($supplierId, $plans);
-                    [$linkProblems, $links] = self::advanceLinks($export, $plans, $payments);
-                    $groups = [...array_values($banks), ...$links];
+                    [$payments, $problems, $banks] = $this->payments->plan($supplierId, $plans, array_map(static fn (array $p): array => $p['doc'], $unchanged));
+                    $linkProblems = PohodaIssuedAdvanceGroups::taxDocumentProblems($plans + $unchanged, $payments);
+                    $groups = [...array_values($banks), ...$groups];
                     $problems = self::relatedProblems($problems + $linkProblems, $groups);
                     foreach ($problems as $id => $reason) {
-                        $out[$id] = ['status' => 'review', 'reason' => $reason];
-                        unset($plans[$id]);
+                        if (isset($pending[$id])) {
+                            $out[$id] = ['status' => 'review', 'reason' => $reason];
+                        }
+                        unset($plans[$id], $unchanged[$id]);
                     }
                     foreach ($plans as $id => &$plan) {
                         $plan['payment'] = $payments[$id];
@@ -375,12 +468,18 @@ final class PohodaForeignIssuedRepair
                     $pdo->rollBack();
                     break;
                 }
-                $before = $this->snapshot($supplierId, $plans);
+                $snapshotPlans = $plans;
+                foreach ($unchanged as $id => $plan) {
+                    $snapshotPlans[$id] = $plan + ['payment' => $payments[$id]];
+                }
+                $before = $this->snapshot($supplierId, $snapshotPlans);
                 $this->write($supplierId, $plans);
-                $changed = self::changed($before, $this->snapshot($supplierId, $plans), array_keys($plans));
+                $changed = self::changed($before, $this->snapshot($supplierId, $snapshotPlans), array_keys($snapshotPlans));
                 if ($changed !== []) {
                     $pdo->rollBack();
-                    $reasons = array_map(static fn (string $area): string => sprintf('Změna měny by změnila %s v Kč. Zápis byl vrácen.', $area), $changed);
+                    $reasons = array_map(static fn (string $area): string => $area === 'kurzový rozdíl'
+                        ? 'Změna měny by změnila návrh kurzového rozdílu nebo podklady k němu. Zápis byl vrácen.'
+                        : sprintf('Změna měny by změnila %s v Kč. Zápis byl vrácen.', $area), $changed);
                     foreach (self::relatedProblems($reasons, $groups) as $id => $reason) {
                         if (!isset($pending[$id])) {
                             continue;
@@ -413,49 +512,6 @@ final class PohodaForeignIssuedRepair
             break;
         }
         return $out;
-    }
-
-    /** @return array{array<int,string>,list<list<int>>} */
-    private static function advanceLinks(PohodaExport $export, array $plans, array $payments): array
-    {
-        $refs = null;
-        $groups = $problems = [];
-        foreach ($plans as $id => $plan) {
-            $doc = $plan['doc'];
-            $children = array_map('intval', array_filter(explode(',', (string) $doc['tax_documents'])));
-            foreach (array_unique([...$children, ...array_map('intval', $payments[$id]['links'] ?? [])]) as $child) {
-                if (!isset($plans[$child]) || (int) $plans[$child]['doc']['parent_invoice_id'] !== $id) {
-                    $problems[$id] = 'Vazba zálohy na DDKP vyžaduje společný převod doložený exportem.';
-                }
-            }
-            if ($doc['invoice_type'] !== 'tax_document') {
-                continue;
-            }
-            $parentId = (int) $doc['parent_invoice_id'];
-            $parent = $plans[$parentId] ?? null;
-            if ($parent !== null) {
-                $groups[] = [$id, $parentId];
-            }
-            $source = $plan['source'];
-            $refs ??= $export->taxDocumentPaymentRefs();
-            $targets = $refs[$source['id']] ?? [];
-            $parentNumber = $parent['source']['doc']['number'] ?? null;
-            $sourceMatches = $targets === []
-                ? $source['advance_links'] !== [] && array_values(array_unique($source['advance_links'])) === [$parentNumber]
-                : count(array_unique(array_column($targets, 'advance'))) === 1
-                    && array_unique(array_column($targets, 'doc')) === ['invoice']
-                    && array_unique(array_column($targets, 'number')) === [$parentNumber];
-            $linkedPayments = array_keys(array_filter($payments[$parentId]['links'] ?? [], static fn (mixed $linkedId): bool => (int) $linkedId === $id));
-            $paymentMatches = count($linkedPayments) === 1
-                && $payments[$parentId]['rows'][$linkedPayments[0]] === $plan['amounts']['total'];
-            if ($parent === null || $parent['doc']['invoice_type'] !== 'proforma'
-                || $doc['currency'] !== $parent['doc']['currency'] || !$sourceMatches || (bool) $doc['has_other_advance_payment']
-                || (($targets !== [] || $linkedPayments !== []) && !$paymentMatches)
-                || ($linkedPayments === [] && $plan['amounts']['total'] !== $parent['amounts']['total'])) {
-                $problems[$id] = 'Vazbu DDKP na zálohu a její úhradu v měně dokladu nelze doložit z exportu.';
-            }
-        }
-        return [$problems, $groups];
     }
 
     /** @param list<list<int>> $groups */
@@ -675,12 +731,21 @@ final class PohodaForeignIssuedRepair
         $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
         $mode->execute([$supplierId]);
         if ($mode->fetchColumn() === 'double_entry') {
+            $advanceIds = array_keys(array_filter($plans, static fn (array $plan): bool => $plan['advance_group'] !== null));
             $stmt = $this->db->pdo()->prepare(
                 'SELECT id, ends_on FROM accounting_periods WHERE supplier_id = ? AND ends_on >= ? AND starts_on <= ? ORDER BY starts_on'
             );
             $stmt->execute([$supplierId, $from, $to]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $period) {
                 $asOf = min($period['ends_on'], $to);
+                foreach ($this->closing->openFxItems($supplierId, $period['ends_on'], issuedIds: $advanceIds) as $item) {
+                    if (FxRevaluationService::isNonMonetaryAdvanceAccount((string) $item['account_code'])) {
+                        continue;
+                    }
+                    $evidence = $this->closing->fxSettlementEvidence($supplierId, $item, $period['ends_on']);
+                    $out[$item['doc_id']]['kurzový rozdíl'][] = serialize([$period['ends_on'], $item['source_line_id'],
+                        $evidence['complete'], $evidence['remaining_foreign'], $evidence['booked_czk']]);
+                }
                 foreach ($this->saldo->build($supplierId, (int) $period['id'], $asOf)['accounts'] as $block) {
                     $account = $block['account']['code'] ?? '';
                     foreach ($block['partners'] as $partner) {
@@ -726,7 +791,7 @@ final class PohodaForeignIssuedRepair
     {
         $out = [];
         foreach ([...$ids, 0] as $id) {
-            foreach (['evidenci DPH', 'kontrolní hlášení', 'saldo dokladu', 'saldokonto', 'peněžní deník'] as $area) {
+            foreach (['evidenci DPH', 'kontrolní hlášení', 'saldo dokladu', 'saldokonto', 'peněžní deník', 'kurzový rozdíl'] as $area) {
                 $a = $before[$id][$area] ?? [];
                 $b = $after[$id][$area] ?? [];
                 sort($a, SORT_STRING);

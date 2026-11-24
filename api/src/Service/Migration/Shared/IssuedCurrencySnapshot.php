@@ -13,7 +13,13 @@ final class IssuedCurrencySnapshot
      * @param array<string,mixed> $amounts Částky v Kč před převzetím, případně výslovný odpočet zálohy v měně.
      * @return array<string,mixed>|string Částky v měně a korunový otisk, nebo důvod pro převzetí v Kč.
      */
-    public static function prepare(array $amounts, ?float $rate, ?float $foreignTotal): array|string
+    public static function prepare(
+        array $amounts,
+        ?float $rate,
+        ?float $foreignTotal,
+        ?float $linkedAdvance = null,
+        bool $linkedProforma = false,
+    ): array|string
     {
         if ($rate === null || !is_finite($rate) || $rate <= 0.0) {
             return 'doklad nemá kurz';
@@ -26,9 +32,10 @@ final class IssuedCurrencySnapshot
         }
 
         $advance = (float) ($amounts['advance'] ?? 0.0);
-        $foreignAdvance = round((float) ($amounts['foreign_advance'] ?? 0.0), 2);
+        $foreignAdvance = $linkedAdvance ?? round((float) ($amounts['foreign_advance'] ?? 0.0), 2);
         if (!is_finite($advance) || !is_finite($foreignAdvance) || !self::sameSign($foreignAdvance, $advance)
-            || ($foreignAdvance !== 0.0 && ($foreignTotal === null || self::difference($foreignAdvance, $rate, $advance) > self::ITEM_TOLERANCE_CENTS))) {
+            || ($linkedAdvance === null && $foreignAdvance !== 0.0
+                && ($foreignTotal === null || self::difference($foreignAdvance, $rate, $advance) > self::ITEM_TOLERANCE_CENTS))) {
             return 'odpočet nedaňové zálohy - zdroj ho vede v Kč nebo nemá doloženou odpovídající částku v měně dokladu';
         }
 
@@ -42,12 +49,20 @@ final class IssuedCurrencySnapshot
                     return 'položky dokladu nemají částky v měně dokladu';
                 }
                 $lineDeviation += self::difference((float) $foreign, $rate, $home);
-                if (!self::sameSign((float) $foreign, $home) || $lineDeviation > self::ITEM_TOLERANCE_CENTS) {
+                if (!$linkedProforma && (!self::sameSign((float) $foreign, $home) || $lineDeviation > self::ITEM_TOLERANCE_CENTS)) {
                     return sprintf('%s %d. položky %s × kurz %s dává %s Kč, zdroj má %s Kč, odchylka položky je mimo toleranci',
                         $label, $i + 1, number_format((float) $foreign, 2, ',', ' '),
                         rtrim(rtrim(number_format($rate, 6, ',', ''), '0'), ','),
                         number_format(ForeignCurrencyTakeover::toHome((float) $foreign, $rate), 2, ',', ' '),
                         number_format($home, 2, ',', ' '));
+                }
+            }
+            if ($linkedProforma) {
+                $foreignGross = (float) $item['foreign_base'] + (float) $item['foreign_vat'];
+                $homeGross = (float) $item['base'] + (float) $item['vat'];
+                $lineDeviation = self::difference($foreignGross, $rate, $homeGross);
+                if (!self::sameSign($foreignGross, $homeGross) || $lineDeviation > self::ITEM_TOLERANCE_CENTS) {
+                    return sprintf('celkem %d. položky zálohy nesouhlasí s Kč ze zdroje', $i + 1);
                 }
             }
             $deviation += $lineDeviation;
@@ -78,10 +93,10 @@ final class IssuedCurrencySnapshot
         }
         $homeDue = round($homeTotal - $advance, 2);
         $due = round($gross - $foreignAdvance, 2);
-        foreach ([[$gross, $homeTotal], [$due, $homeDue]] as [$foreign, $home]) {
-            if (!self::sameSign($foreign, $home) || self::difference($foreign, $rate, $home) > $limit) {
-                return 'celkem v měně po přepočtu neodpovídá Kč ze zdroje v toleranci dokladu';
-            }
+        if (!self::sameSign($gross, $homeTotal) || self::difference($gross, $rate, $homeTotal) > $limit
+            || !self::sameSign($due, $homeDue)
+            || ($linkedAdvance === null && self::difference($due, $rate, $homeDue) > $limit)) {
+            return 'celkem v měně po přepočtu neodpovídá Kč ze zdroje v toleranci dokladu';
         }
 
         return [

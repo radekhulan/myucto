@@ -41,10 +41,10 @@ final class PohodaIssuedPaymentConversion
     }
 
     /** @return array{array<int,array>,array<int,string>,array<int,list<int>>} */
-    public function plan(int $supplierId, array $plans): array
+    public function plan(int $supplierId, array $plans, array $unchanged = []): array
     {
         $pdo = $this->db->pdo();
-        $ids = implode(',', array_map('intval', array_keys($plans)));
+        $ids = implode(',', array_map('intval', array_keys($plans + $unchanged)));
         $rows = $pdo->query(
             "SELECT p.id, p.invoice_id, p.amount, p.currency, p.source, p.note, p.paid_on,
                     p.bank_transaction_id, p.tax_document_invoice_id
@@ -55,7 +55,7 @@ final class PohodaIssuedPaymentConversion
         $payments = $byBank = [];
         foreach ($rows as $row) {
             $payments[(int) $row['invoice_id']][] = $row;
-            if ($row['bank_transaction_id'] !== null) {
+            if ($row['bank_transaction_id'] !== null && isset($plans[$row['invoice_id']])) {
                 $byBank[(int) $row['bank_transaction_id']][(int) $row['id']] = $row;
             }
         }
@@ -93,6 +93,15 @@ final class PohodaIssuedPaymentConversion
                 }
                 $out[$id] = $result;
             }
+        }
+        foreach ($unchanged as $id => $doc) {
+            $rows = $payments[$id] ?? [];
+            $out[$id] = [
+                'links' => array_filter(array_column($rows, 'tax_document_invoice_id', 'id')),
+                'rows' => array_map('floatval', array_column(array_filter($rows, static fn (array $row): bool => $row['currency'] === $doc['currency']), 'amount', 'id')),
+                'dates' => array_column($rows, 'paid_on'),
+                'bank_ids' => array_values(array_unique(array_map('intval', array_filter(array_column($rows, 'bank_transaction_id'))))),
+            ];
         }
         return [$out, $problems, $groups];
     }
@@ -193,7 +202,14 @@ final class PohodaIssuedPaymentConversion
         }
         $paid = round($sign * array_sum($changed) + self::proportional($unrecorded, $dueCzk, $dueForeign), 2);
         if ($paidCzk === $dueCzk && $paid !== $dueForeign) {
-            return 'Plná úhrada v Kč a částka bankovní úhrady v měně dokladu se rozcházejí.';
+            $bankPaid = round($sign * array_sum(array_intersect_key($changed, $bankAmounts)), 2);
+            $currency = $doc['currency'];
+            $reason = sprintf('Plná úhrada v Kč a částka bankovní úhrady v měně dokladu se rozcházejí. Celkem k úhradě %s %s, bankovní úhrada %s %s.',
+                number_format($dueForeign, 2, ',', ' '), $currency, number_format($bankPaid, 2, ',', ' '), $currency);
+            if ($amounts['total'] !== $dueForeign) {
+                $reason .= sprintf(' Celkem dokladu %s %s.', number_format($amounts['total'], 2, ',', ' '), $currency);
+            }
+            return $reason;
         }
         return ['paid' => $paid, 'rows' => $changed, 'links' => array_filter(array_column($rows, 'tax_document_invoice_id', 'id')),
             'dates' => array_column($rows, 'paid_on'),

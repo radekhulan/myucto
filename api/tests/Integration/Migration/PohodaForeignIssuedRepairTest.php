@@ -8,9 +8,11 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankPostingSuggestionRepository;
+use MyInvoice\Repository\CashJournalRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Migration\Check\Checks\ForeignIssuedInCzkCheck;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckRegistry;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
@@ -20,6 +22,7 @@ use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
 use MyInvoice\Tests\Support\OwnedSandboxDatabase;
 use PDO;
@@ -300,8 +303,238 @@ final class PohodaForeignIssuedRepairTest extends TestCase
         self::assertSame(1, $this->auditCount($supplierId, $id));
     }
 
+    public function testCrownAdvanceAndFinalInvoiceAreConvertedWithFullDeduction(): void
+    {
+        [$supplierId, $advance, $final, $export, $bankEntry] = $this->legacyPair();
+        $before = $this->groupReports($supplierId, $final, $bankEntry);
+        $repair = $this->container->get(PohodaForeignIssuedRepair::class);
+
+        self::assertSame(['convert', 'convert'], array_column($repair->run($supplierId, $export, false), 'status'));
+        self::assertSame('CZK', $this->invoice($advance)['code']);
+        self::assertSame('CZK', $this->invoice($final)['code']);
+        self::assertSame('CZK', $this->payments($advance)[0]['currency']);
+
+        $result = $repair->run($supplierId, $export, true);
+
+        self::assertSame(['converted', 'converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame('96.80', $this->invoice($advance)['total_with_vat']);
+        self::assertSame('96.80', $this->payments($advance)[0]['amount']);
+        self::assertSame('EUR', $this->payments($advance)[0]['currency']);
+        self::assertSame(['96.80', '2420.00', '145.20', '3872.00'], $this->deductionState($final));
+        self::assertSame($before, $this->groupReports($supplierId, $final, $bankEntry));
+        self::assertSame([], $repair->run($supplierId, $export, true));
+    }
+
+    public function testOnlyFinalInvoiceChangesWhenAdvanceIsAlreadyInTheDocumentCurrency(): void
+    {
+        [$supplierId, $advance, $final, $export, $bankEntry] = $this->legacyPair(advanceInForeign: true);
+        $before = $this->groupReports($supplierId, $final, $bankEntry);
+        $advanceBefore = $this->invoice($advance);
+        $paymentsBefore = $this->payments($advance);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame([$final], array_column($result, 'id'));
+        self::assertSame(['converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame($advanceBefore, $this->invoice($advance));
+        self::assertSame($paymentsBefore, $this->payments($advance));
+        self::assertSame(['96.80', '2420.00', '145.20', '3872.00'], $this->deductionState($final));
+        self::assertSame($before, $this->groupReports($supplierId, $final, $bankEntry));
+    }
+
+    public function testPartialDeductionUsesTheShareOfTheOriginalAdvance(): void
+    {
+        [$supplierId, , $final, $export, $bankEntry] = $this->legacyPair(drawCzk: 1000.0);
+        $before = $this->groupReports($supplierId, $final, $bankEntry);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted', 'converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['40.00', '1000.00', '202.00', '5292.00'], $this->deductionState($final));
+        self::assertSame($before, $this->groupReports($supplierId, $final, $bankEntry));
+    }
+
+    public function testPartialDeductionPrefersExplicitAmountInTheExport(): void
+    {
+        [$supplierId, , $final, $export] = $this->legacyPair(drawCzk: 1000.0, drawForeign: 39.99);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted', 'converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['39.99', '1000.00', '202.01', '5292.00'], $this->deductionState($final));
+    }
+
+    public function testPartialDeductionMustRoundBackToTheSourceCent(): void
+    {
+        [$supplierId, $advance, $final, $export] = $this->legacyPair(drawCzk: 1000.01);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['review', 'review'], array_column($result, 'status'));
+        self::assertStringContainsString('na haléř', $result[0]['reason']);
+        self::assertSame('CZK', $this->invoice($advance)['code']);
+        self::assertSame('CZK', $this->invoice($final)['code']);
+    }
+
+    public function testTaxDocumentAndTaxedDeductionAreConvertedWithTheAdvance(): void
+    {
+        [$supplierId, $advance, $final, $export, $bankEntry, $tax] = $this->legacyPair(withDdkp: true);
+        $before = $this->groupReports($supplierId, $final, $bankEntry);
+        $taxJournal = $this->journal($supplierId, $tax);
+        self::assertNotEmpty($taxJournal);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['converted', 'converted', 'converted'], array_column($result, 'status'), json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['EUR', 'EUR', 'EUR'], array_map(fn (int $id): string => $this->invoice($id)['code'], [$advance, $final, $tax]));
+        self::assertSame($tax, (int) $this->payments($advance)[0]['tax_document_invoice_id']);
+        $stmt = $this->db->pdo()->prepare('SELECT total_without_vat, total_vat, import_tax_base_czk, import_tax_vat_czk
+            FROM invoice_items WHERE invoice_id = ? AND advance_invoice_id = ?');
+        $stmt->execute([$final, $advance]);
+        self::assertSame(['-80.00', '-16.80', '-2000.00', '-420.00'], $stmt->fetch(PDO::FETCH_NUM));
+        self::assertSame($before, $this->groupReports($supplierId, $final, $bankEntry));
+        self::assertSame($taxJournal, $this->journal($supplierId, $tax));
+    }
+
+    public function testUndocumentedTaxDocumentBlocksTheWholeGroup(): void
+    {
+        [$supplierId, $advance, $final, $export, , $tax] = $this->legacyPair(withDdkp: true);
+        $path = $export->dir . '/27_interni_doklady.xml';
+        $xml = (string) file_get_contents($path);
+        file_put_contents($path, str_replace('<typ:sourceAgenda>issuedAdvanceInvoice</typ:sourceAgenda>', '', $xml, $count));
+        self::assertSame(1, $count);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, PohodaExport::open($export->dir), true);
+
+        self::assertSame(['review', 'review', 'review'], array_column($result, 'status'));
+        self::assertStringContainsString('Vazbu DDKP', $result[0]['reason']);
+        self::assertSame(['CZK', 'CZK', 'CZK'], array_map(fn (int $id): string => $this->invoice($id)['code'], [$advance, $final, $tax]));
+    }
+
+    public function testVatDifferenceOfOneCentRollsBackTheEntireGroupAndTheBankPayment(): void
+    {
+        [$supplierId, $advance, $final, $export, $bankEntry, $tax] = $this->legacyPair(withDdkp: true);
+        $ids = [$advance, $final, $tax];
+        $invoices = array_map($this->invoice(...), $ids);
+        $payments = $this->payments($advance);
+        $before = $this->groupReports($supplierId, $final, $bankEntry);
+        $pdo = $this->db->pdo();
+        $pdo->exec("CREATE TRIGGER test_advance_fx_vat_difference BEFORE UPDATE ON invoice_items FOR EACH ROW
+            SET NEW.import_tax_vat_czk = IF(NEW.invoice_id = {$tax}, NEW.import_tax_vat_czk + 0.01, NEW.import_tax_vat_czk)");
+        try {
+            $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+            self::assertSame(['review', 'review', 'review'], array_column($result, 'status'));
+            foreach ($result as $row) {
+                self::assertStringContainsString('Zápis byl vrácen', $row['reason']);
+                self::assertSame(0, $this->auditCount($supplierId, $row['id']));
+            }
+            self::assertSame($invoices, array_map($this->invoice(...), $ids));
+            self::assertSame($payments, $this->payments($advance));
+            self::assertSame($before, $this->groupReports($supplierId, $final, $bankEntry));
+        } finally {
+            $pdo->exec('DROP TRIGGER test_advance_fx_vat_difference');
+        }
+    }
+
+    public function testDocumentBeforeAccountingStartIsNotReportedInMigrationCheck(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $this->db->pdo()->prepare("UPDATE invoices SET issue_date = '2025-12-15', tax_date = '2025-12-15' WHERE id = ?")->execute([$id]);
+        $before = $this->invoice($id);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame([PohodaForeignIssuedRepair::PAST_PERIOD], array_column($result, 'status'));
+        self::assertSame($before, $this->invoice($id));
+        self::assertSame(0, $this->auditCount($supplierId, $id));
+        self::assertSame([], $this->container->get(ForeignIssuedInCzkCheck::class)->detect($supplierId)->items);
+    }
+
+    public function testFullPaymentMismatchShowsInvoiceAndBankAmounts(): void
+    {
+        [$supplierId, $id, $export] = $this->legacyInvoice();
+        $this->bankPayment($supplierId, 'EUR', 399.0, [$id => 10000.0]);
+
+        $result = $this->container->get(PohodaForeignIssuedRepair::class)->run($supplierId, $export, true);
+
+        self::assertSame(['review'], array_column($result, 'status'));
+        self::assertStringContainsString('398,09 EUR', $result[0]['reason']);
+        self::assertStringContainsString('399,00 EUR', $result[0]['reason']);
+    }
+
+    /** @return array{int,int,int,PohodaExport,int,?int} */
+    private function legacyPair(float $drawCzk = 2420.0, bool $advanceInForeign = false, bool $withDdkp = false, ?float $drawForeign = null): array
+    {
+        [$supplierId, , $export] = $this->legacyInvoice(restoreLegacy: false,
+            addDocuments: static fn (string $dir) => SyntheticPohodaExport::withForeignIssuedAdvancePair($dir, $drawCzk, $advanceInForeign, $withDdkp, $drawForeign));
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ?');
+        $stmt->execute([$supplierId, SyntheticPohodaExport::FOREIGN_ADVANCE]);
+        $advance = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $advance);
+        self::assertSame($advanceInForeign ? 'EUR' : 'CZK', $this->invoice($advance)['code']);
+        $stmt->execute([$supplierId, SyntheticPohodaExport::FOREIGN_ADVANCE_FINAL]);
+        $final = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $final);
+        $tax = null;
+        if ($withDdkp) {
+            $stmt->execute([$supplierId, SyntheticPohodaExport::FOREIGN_ADVANCE_DDKP]);
+            $tax = (int) $stmt->fetchColumn();
+            self::assertGreaterThan(0, $tax);
+            self::assertSame('CZK', $this->invoice($tax)['code']);
+            $this->makeLegacy($supplierId, SyntheticPohodaExport::FOREIGN_ADVANCE_FINAL, 3000.0, 630.0);
+        }
+        self::assertSame('CZK', $this->invoice($final)['code']);
+        $link = $pdo->prepare('SELECT parent_invoice_id FROM invoices WHERE id = ?');
+        $link->execute([$final]);
+        self::assertSame($advance, (int) $link->fetchColumn());
+        $txId = $this->bankPayment($supplierId, 'EUR', 96.80, [$advance => 2420.0], 25.0);
+        $bankEntry = $this->takeOverBankEntry($supplierId, $final, $txId, 2420.0, '324');
+        if ($advanceInForeign) {
+            $pdo->prepare('UPDATE invoice_payments SET amount = 96.80, currency = ? WHERE invoice_id = ?')->execute(['EUR', $advance]);
+            $pdo->prepare('UPDATE invoices SET paid_total = 96.80 WHERE id = ?')->execute([$advance]);
+        }
+        if ($tax !== null) {
+            $link->execute([$tax]);
+            self::assertSame($advance, (int) $link->fetchColumn());
+            $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE invoice_id = ?')->execute([$tax, $advance]);
+            $pdo->prepare("UPDATE invoice_items SET advance_invoice_id = ? WHERE invoice_id = ? AND total_with_vat < 0")->execute([$advance, $final]);
+        }
+        return [$supplierId, $advance, $final, $export, $bankEntry, $tax];
+    }
+
+    private function deductionState(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT advance_paid_amount, import_advance_paid_czk, amount_to_pay, import_amount_to_pay_czk FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        return $stmt->fetch(PDO::FETCH_NUM);
+    }
+
+    private function groupReports(int $supplierId, int $final, int $bankEntry): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT period_id FROM journal_entries WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $bankEntry]);
+        $periodId = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $periodId);
+        $saldo = $this->container->get(SaldoService::class)->build($supplierId, $periodId, '2026-02-28')['accounts'];
+        $balances = array_map(static fn (array $account): array => [$account['gl_balance'], $account['open_items_total'], $account['difference']], $saldo);
+        $cash = $this->container->get(CashJournalRepository::class)->movements($supplierId, '2026-02-01', '2026-02-28', true);
+        foreach ($cash as &$movement) {
+            if ($movement['source_type'] === 'bank' && $movement['bank_class'] === 'income' && empty($movement['override_bucket'])) {
+                $buckets = CashJournalService::bankIncomeAllocation($movement);
+                unset($buckets['ratio'], $movement['bank_income_base'], $movement['bank_income_exempt'],
+                    $movement['bank_alloc_czk'], $movement['bank_alloc_native'], $movement['bank_alloc_cross_ccy']);
+                $movement['bank_allocation'] = $buckets;
+            }
+        }
+        unset($movement);
+        return [$this->container->get(KontrolniHlaseniBuilder::class)->sectionDocuments($supplierId, 2026, 2)['sections'],
+            $balances, $cash, $this->journal($supplierId, $final), $this->bankJournal($bankEntry)];
+    }
+
     /** @return array{int,int,PohodaExport} */
-    private function legacyInvoice(bool $paidInExport = false, bool $restoreLegacy = true): array
+    private function legacyInvoice(bool $paidInExport = false, bool $restoreLegacy = true, ?\Closure $addDocuments = null): array
     {
         $pdo = $this->db->pdo();
         $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
@@ -330,6 +563,7 @@ final class PohodaForeignIssuedRepairTest extends TestCase
 
         $dir = SyntheticPohodaExport::write($this->tmp);
         SyntheticPohodaExport::withForeignCurrencyDocuments($dir);
+        $addDocuments?->__invoke($dir);
         if ($paidInExport) {
             $path = $dir . '/12_faktury_issuedInvoice.xml';
             $xml = file_get_contents($path);
@@ -403,7 +637,7 @@ final class PohodaForeignIssuedRepairTest extends TestCase
         return $txId;
     }
 
-    private function takeOverBankEntry(int $supplierId, int $invoiceId, int $txId): int
+    private function takeOverBankEntry(int $supplierId, int $invoiceId, int $txId, float $amount = 14255.33, string $counter = '311.001'): int
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare("SELECT period_id FROM journal_entries WHERE supplier_id = ? AND source_type = 'invoice' AND source_id = ?");
@@ -411,8 +645,8 @@ final class PohodaForeignIssuedRepairTest extends TestCase
         $periodId = (int) $stmt->fetchColumn();
         self::assertGreaterThan(0, $periodId);
         $entry = $this->container->get(PostingService::class)->postDocument($supplierId, 'bank', $txId, [
-            ['account_code' => '221.001', 'side' => 'debit', 'amount' => 14255.33],
-            ['account_code' => '311.001', 'side' => 'credit', 'amount' => 14255.33],
+            ['account_code' => '221.001', 'side' => 'debit', 'amount' => $amount],
+            ['account_code' => $counter, 'side' => 'credit', 'amount' => $amount],
         ], ['entry_date' => '2026-02-25', 'description' => 'Převzatá úhrada']);
         $this->container->get(PohodaImportRepository::class)->put($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY, 'test-eur-bank', $entry, null);
         return $entry;

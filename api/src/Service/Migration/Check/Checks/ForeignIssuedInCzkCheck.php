@@ -45,6 +45,9 @@ final class ForeignIssuedInCzkCheck extends SourceScopedCheck
     {
         $items = [];
         foreach ($this->repair->run($supplierId, null, false) as $row) {
+            if ($row['status'] === PohodaForeignIssuedRepair::PAST_PERIOD) {
+                continue;
+            }
             $items[] = new CheckItem(
                 'invoice', $row['id'], $row['document_no'], $row['issue_date'], $row['total_czk'],
                 $row['status'] === 'locked' ? CheckItem::LOCKED : CheckItem::REVIEW,

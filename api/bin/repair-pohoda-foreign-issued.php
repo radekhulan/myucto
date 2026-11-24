@@ -83,6 +83,7 @@ foreach ($ids as $id) {
     $byIco[$repair->supplierIco($id)][] = $id;
 }
 $labels = ['needs_export' => 'potřebuje export', 'locked' => 'chráněné období', 'review' => 'ke kontrole',
+    PohodaForeignIssuedRepair::PAST_PERIOD => 'minulé období, ponecháno v Kč',
     'convert' => 'lze převést', 'converted' => 'převedeno'];
 $countText = static function (array $counts) use ($labels): string {
     return implode(', ', array_map(static fn (string $status, int $n): string => $labels[$status] . ' ' . $n, array_keys($counts), $counts));
@@ -92,29 +93,22 @@ echo ($commit ? '' : '[NANEČISTO] ') . 'Vydané doklady v cizí měně převzat
 $failed = false;
 $totals = [];
 foreach ($byIco as $ico => $supplierIds) {
-    $exports = $opened[$ico] ?? [null];
-    if (!$all && $exports === [null] && count($opened) === 1) {
+    $exports = $opened[$ico] ?? [];
+    if (!$all && $exports === [] && count($opened) === 1) {
         $exports = reset($opened);
     }
-    if ($all && $exports !== [null] && count($supplierIds) > 1) {
+    if ($all && $exports !== [] && count($supplierIds) > 1) {
         fwrite(STDERR, sprintf('IČO %s mají firmy %s. Export přiřaďte výslovně pomocí --supplier.', $ico, implode(', ', $supplierIds)) . PHP_EOL);
-        $exports = [null];
+        $exports = [];
         $failed = true;
     }
     foreach ($supplierIds as $id) {
-        $rows = [];
-        foreach ($exports as $export) {
-            try {
-                foreach ($repair->run($id, $export, $commit && $export !== null) as $row) {
-                    $prior = $rows[$row['id']] ?? null;
-                    if ($prior === null || ($export?->year === $row['source_year'] && $prior['status'] !== 'converted')) {
-                        $rows[$row['id']] = $row;
-                    }
-                }
-            } catch (Throwable $e) {
-                $failed = true;
-                fwrite(STDERR, sprintf('Firma %d: %s', $id, $e->getMessage()) . PHP_EOL);
-            }
+        try {
+            $rows = $repair->run($id, $exports, $commit && $exports !== []);
+        } catch (Throwable $e) {
+            $failed = true;
+            fwrite(STDERR, sprintf('Firma %d: %s', $id, $e->getMessage()) . PHP_EOL);
+            continue;
         }
         if ($rows === []) {
             continue;

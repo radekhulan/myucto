@@ -1029,9 +1029,14 @@ final class ClosingRepository
      *                    account_id:int, account_code:string, currency_code:string, fx_rate:float,
      *                    amount_foreign:float, total_with_vat:float, paid_at:?string, status:string}>
      */
-    public function openFxItems(int $supplierId, string $asOf, bool $currentRead = false): array
+    public function openFxItems(int $supplierId, string $asOf, bool $currentRead = false, ?array $issuedIds = null): array
     {
+        if ($issuedIds === []) {
+            return [];
+        }
         $lock = $currentRead ? ' FOR UPDATE' : '';
+        $issuedScope = $issuedIds === null ? '' : ' AND i.id IN (' . implode(',', array_map('intval', $issuedIds)) . ')';
+        $purchaseScope = $issuedIds === null ? '' : ' AND 1 = 0';
         if ($currentRead) (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
         $stmt = $this->db->pdo()->prepare(
             "(SELECT 'invoice' AS doc_type, i.id AS doc_id, i.varsymbol,
@@ -1049,7 +1054,7 @@ final class ClosingRepository
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                 AND e.entry_date <= ?
                 AND i.status <> 'draft'
-                AND (i.status <> 'cancelled' OR i.cancelled_at IS NULL OR DATE(i.cancelled_at) > ?){$lock})
+                AND (i.status <> 'cancelled' OR i.cancelled_at IS NULL OR DATE(i.cancelled_at) > ?){$issuedScope}{$lock})
              UNION ALL
              (SELECT 'purchase_invoice' AS doc_type, pi.id AS doc_id, pi.varsymbol,
                     pi.issue_date AS doc_date, vn.company_name AS partner_name,
@@ -1066,7 +1071,7 @@ final class ClosingRepository
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                 AND e.entry_date <= ?
                 AND pi.status <> 'draft'
-                AND (pi.status <> 'cancelled' OR pi.cancelled_at IS NULL OR DATE(pi.cancelled_at) > ?){$lock})
+                AND (pi.status <> 'cancelled' OR pi.cancelled_at IS NULL OR DATE(pi.cancelled_at) > ?){$purchaseScope}{$lock})
               ORDER BY doc_type, doc_id"
         );
         $stmt->execute([$supplierId, $asOf, $asOf, $asOf, $supplierId, $asOf, $asOf, $asOf]);

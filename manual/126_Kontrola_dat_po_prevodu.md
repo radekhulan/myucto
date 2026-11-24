@@ -269,9 +269,12 @@ Kontrola ukáže vydané faktury, zálohové faktury, dobropisy a daňové dokla
 „doklad v EUR, převzat v Kč" (případně jinou měnu). Počet dokladů, které čekají na původní export,
 najdete v detailu kontroly. Při novém převodu se drobné rozdíly zaokrouhlení ukládají jako částky
 v Kč ze zdroje vedle částek v měně dokladu.
+Doklady s datem vystavení i DUZP před začátkem účetnictví firma najde ve výpisu příkazu
+pod označením „minulé období, ponecháno v Kč".
 
 Opravu spouští správce instalace. Použijte původní ZIP z exportního nástroje nebo rozbalenou složku
 agendy. IČO firmy, IČO souborů exportu a rok agendy musí odpovídat běhu převodu, který doklad založil.
+Pokud skupina dokladů pochází z více agend, zadejte všechny odpovídající exporty opakováním volby `--export`.
 
 ```bash
 php api/bin/repair-pohoda-foreign-issued.php --all-pohoda
@@ -287,13 +290,20 @@ Oprava převede úhradu z bankovního pohybu ve stejné měně jako doklad. U ro
 převede všechny jeho alokace společně a jejich součet dorovná na částku pohybu. Úhrady minulých
 let a částku uhrazenou bez řádku úhrady přepočte poměrem k částce k úhradě. Převzaté účetní
 zápisy v bance zůstanou stejné. Výpis u dokladu uvádí počet převedených úhrad, souhrn za firmu
-ukazuje i důvody ruční kontroly a počet dokladů, u kterých chybí export.
+ukazuje i důvody ruční kontroly a počet dokladů, u kterých chybí export. Při nesouladu plné úhrady
+výpis uvede částku k úhradě i bankovní úhradu v měně dokladu.
+
+Zálohová faktura, konečná faktura a případný daňový doklad k přijaté platbě se ověřují společně.
+U nedaňové zálohy se použije částka odpočtu v měně z exportu. Pokud export uvádí jen Kč, plný
+odpočet převezme celkovou částku zálohy v její měně. Částečný odpočet se vypočte poměrem a musí
+se zpětně shodovat na haléř s částkou v Kč. Pokud už je zálohová faktura ve správné měně, její
+částky a úhrady zůstanou stejné.
 
 Doklady v chráněném období se pouze ohlásí. Ke kontrole patří platby v Kč nebo v jiné měně
 než doklad, zápočty, doklady odeslané z MyÚčta, upomínky, uložená PDF a položky OSS.
-Vazbu DDKP na zálohu a odpočet nedaňové zálohy v měně dokladu musí doložit původní export.
-Oprava ponechá v Kč i doklad, u kterého export nesouhlasí, částky v měně překračují toleranci
-nebo by se po převodu změnil byť jen haléř v Kč.
+Původní export musí doložit vazbu daňového dokladu k přijaté platbě na zálohu. Pokud podklady
+chybí, částky překračují toleranci, vznikl by nový návrh kurzového rozdílu nebo by se v účetních
+výstupech změnil byť jen haléř v Kč, oprava vrátí převod celé skupiny.
 
 ## 126.16 Související kapitoly
 
