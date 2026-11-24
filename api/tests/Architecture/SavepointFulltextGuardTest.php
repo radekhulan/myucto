@@ -34,6 +34,10 @@ final class SavepointFulltextGuardTest extends TestCase
             => 'Oprava mění na položkách jen vat_classification_code. Popis zůstává nedotčený.',
         'MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction::__invoke'
             => 'Přiřazuje zakázku v hlavičce a upravuje dimenze deníku.',
+        'MyInvoice\Repository\InvoiceRepository::createDraft'
+            => 'Savepoint vkládá hlavičku faktury a přiřazuje štítky. Položky s FULLTEXT indexem vytváří volající až mimo tento savepoint.',
+        'MyInvoice\Repository\InvoiceRepository::updateDraft'
+            => 'Savepoint upravuje hlavičku faktury a přiřazení štítků. Přepis položek s FULLTEXT indexem provádí volající mimo tento savepoint.',
         'MyInvoice\Repository\PurchaseInvoiceRepository::updateDraft'
             => 'Upravuje hlavičku a případně pomocné sloupce import_tax_* v položkách. Přepis položek provádí až volající mimo tento savepoint.',
         'MyInvoice\Repository\PurchaseInvoiceRepository::setStatus'

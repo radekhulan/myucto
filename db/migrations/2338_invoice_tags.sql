@@ -6,4 +6,4 @@ CREATE TABLE IF NOT EXISTS invoice_tags (
   KEY idx_invoice_tag_entity (tag_id, entity_id),
   CONSTRAINT fk_invoice_tag_invoice FOREIGN KEY (entity_id) REFERENCES invoices(id) ON DELETE CASCADE,
   CONSTRAINT fk_invoice_tag_tag FOREIGN KEY (tag_id) REFERENCES entity_tags(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
