@@ -18,7 +18,6 @@ final class DashboardWidgetQueryAction
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
         $body = $request->getParsedBody();
         if (!is_array($body) || !is_string($body['board'] ?? null) || !in_array($body['board'], ['home', 'portal'], true)) {
             return Json::error($response, 'invalid_dashboard_query', 'Neplatný požadavek přehledu.', 422);
