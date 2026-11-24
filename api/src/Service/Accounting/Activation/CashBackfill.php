@@ -91,7 +91,7 @@ final class CashBackfill
                 }
                 $yearKey = (int) substr($entryDate, 0, 4);
                 if (!isset($ensuredYears[$yearKey])) {
-                    $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
+                    $this->periods->ensureOpenPeriodFor($supplierId, $entryDate, forPosting: false);
                     $ensuredYears[$yearKey] = true;
                 }
                 $result = $this->cash->backfillJournal($supplierId, $id);

@@ -212,12 +212,12 @@ final class PurchaseAdvanceDeduction
      * Odpočtové řádky přijaté faktury (všechny označené, i ty, jejichž záloha nesedí
      * s hlavičkou; to posoudí volající).
      *
-     * @return list<array{id:int, advance_purchase_invoice_id:int, total_without_vat:float, total_vat:float, total_with_vat:float}>
+     * @return list<array{id:int, advance_purchase_invoice_id:int, total_without_vat:float, total_vat:float, total_with_vat:float, vat_rate_snapshot:float}>
      */
     public function deductionRows(int $purchaseInvoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pii.advance_purchase_invoice_id, pii.total_without_vat, pii.total_vat, pii.total_with_vat
+            'SELECT pii.id, pii.advance_purchase_invoice_id, pii.total_without_vat, pii.total_vat, pii.total_with_vat, pii.vat_rate_snapshot
                FROM purchase_invoice_items pii
               WHERE pii.purchase_invoice_id = ? AND ' . self::deductionLineSql('pii') . '
               ORDER BY pii.order_index, pii.id'
@@ -228,6 +228,7 @@ final class PurchaseAdvanceDeduction
             'advance_purchase_invoice_id' => (int) $r['advance_purchase_invoice_id'],
             'total_without_vat'           => (float) $r['total_without_vat'],
             'total_vat'                   => (float) $r['total_vat'],
+            'vat_rate_snapshot'           => (float) $r['vat_rate_snapshot'],
             'total_with_vat'              => (float) $r['total_with_vat'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }

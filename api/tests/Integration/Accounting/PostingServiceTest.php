@@ -7,15 +7,19 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\InvoicePostingProposal;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -34,6 +38,8 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class PostingServiceTest extends TestCase
 {
+    use IsolatedSupplierTrait;
+
     private const YEAR = 2099;
 
     private Connection $db;
@@ -45,6 +51,8 @@ final class PostingServiceTest extends TestCase
     private JournalEntryRepository $journal;
     private PurchaseInvoiceRepository $purchaseInvoices;
     private AccountingPeriodRepository $periods;
+    private InvoicePostingProposal $proposal;
+    private ChartOfAccountsSeeder $seeder;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -71,7 +79,8 @@ final class PostingServiceTest extends TestCase
             $this->journal = $container->get(JournalEntryRepository::class);
             $this->purchaseInvoices = $container->get(PurchaseInvoiceRepository::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);
-            $seeder        = $container->get(ChartOfAccountsSeeder::class);
+            $seeder        = $this->seeder = $container->get(ChartOfAccountsSeeder::class);
+            $this->proposal = $container->get(InvoicePostingProposal::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -136,6 +145,64 @@ final class PostingServiceTest extends TestCase
         $this->assertBalanced($entry['lines']);
         foreach ($entry['lines'] as $l) {
             self::assertSame($this->supplierId, (int) $l['supplier_id'], 'Každý řádek nese supplier_id.');
+        }
+    }
+
+    public function testVatRateAccountsInInvoiceProposalAndJournal(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->supplierId = $this->createIsolatedSupplier($pdo, $this->supplierId);
+        $this->setVatPayerAt($pdo, $this->supplierId, '1900-01-01', true);
+        $this->seeder->seedForSupplier($this->supplierId);
+        $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
+        $party = $this->client('Vzorová protistrana', true, true);
+        $sale = $this->sale('DPH-SAZBA-V', $party, '1', 2000, 330, 21);
+        $purchase = $this->purchase('DPH-SAZBA-P', $party, '40', false, 2000, 330, 21);
+        $credit = $this->sale('DPH-SAZBA-D', $party, '1', -2000, -330, 21);
+        $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'credit_note' WHERE id = ?")->execute([$credit]);
+        foreach ([$sale, $credit] as $id) {
+            $sign = $id === $credit ? -1 : 1;
+            $this->db->pdo()->prepare('UPDATE invoice_items SET total_without_vat = ?, total_vat = ?, total_with_vat = ? WHERE invoice_id = ?')
+                ->execute([$sign * 1000, $sign * 210, $sign * 1210, $id]);
+            $this->insertItem('invoice_items', 'invoice_id', $id, $sign * 1000, $sign * 120, 12);
+        }
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET total_without_vat = 1000, total_vat = 210, total_with_vat = 1210 WHERE purchase_invoice_id = ?')
+            ->execute([$purchase]);
+        $this->insertItem('purchase_invoice_items', 'purchase_invoice_id', $purchase, 1000, 120, 12);
+
+        $date = self::YEAR . '-06-15';
+        $cases = [
+            ['invoice', $sale, 'credit', '343.200', '343.310', '343.320'],
+            ['purchase_invoice', $purchase, 'debit', '343.100', '343.110', '343.120'],
+            ['invoice', $credit, 'debit', '343.200', '343.310', '343.320'],
+        ];
+        foreach ($cases as [$source, $id, $side, $common]) {
+            $lines = $this->proposal->lines($this->supplierId, $source, $id, $date);
+            self::assertSame(330.0, array_column($lines, 'amount', 'account_code')[$common]);
+        }
+
+        $accounts = new ChartOfAccountsRepository($this->db);
+        $rules = new PostingRuleRepository($this->db);
+        foreach (['output.21' => '343.310', 'output.12' => '343.320', 'input.21' => '343.110', 'input.12' => '343.120'] as $key => $code) {
+            $accounts->insert($this->supplierId, [
+                'account_code' => $code, 'name' => 'Vzorová analytika DPH', 'account_type' => 'liability',
+                'normal_side' => null, 'parent_id' => $accounts->findByCode($this->supplierId, '343')['id'],
+            ]);
+            $input = str_starts_with($key, 'input.');
+            $rules->upsertOverride($this->supplierId, 'invoice.vat.' . $key, $input ? $code : null, $input ? null : $code, 'Vzorová DPH');
+        }
+        foreach ($cases as [$source, $id, $side, $common, $standard, $reduced]) {
+            $lines = $this->proposal->lines($this->supplierId, $source, $id, $date);
+            $expected = array_column($lines, 'amount', 'account_code');
+            self::assertSame(210.0, $expected[$standard]);
+            self::assertSame(120.0, $expected[$reduced]);
+            self::assertArrayNotHasKey($common, $expected);
+            $entry = $this->posting->postDocument($this->supplierId, $source, $id, $lines, ['entry_date' => $date]);
+            $posted = $this->journal->linesForEntry($entry, $this->supplierId);
+            $byAccount = $this->linesByAccountCode($posted);
+            self::assertSame(210.0, $byAccount[$standard][$side]);
+            self::assertSame(120.0, $byAccount[$reduced][$side]);
+            $this->assertBalanced($posted);
         }
     }
 

@@ -23,6 +23,7 @@ use Psr\Log\LoggerInterface;
  * Vše účetní|admin; byznys pravidla (stavy, zámky, období) vynucuje AssetService.
  *
  *   POST   /api/accounting/assets/{id}/put-into-use          — zařazení do užívání (MD 02x / D 042)
+ *   POST   /api/accounting/assets/{id}/put-into-use/revert   — vrácení zařazené karty bez odpisů do konceptu
  *   POST   /api/accounting/assets/{id}/improvements          — technické zhodnocení §33
  *   DELETE /api/accounting/assets/{id}/improvements/{impId}  — smazání TZ (jen nepotvrzený rok)
  *   POST   /api/accounting/assets/{id}/dispose               — vyřazení (prodej/likvidace/dar/škoda)
@@ -68,6 +69,27 @@ final class AssetLifecycleAction
         }
 
         $this->logEvent($request, 'asset.put_into_use', $id, ['date' => $date, 'book_entry' => $bookEntry]);
+        return Json::ok($response, $result);
+    }
+
+    public function revertPutIntoUse(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+
+        try {
+            $result = $this->service->revertPutIntoUse($supplierId, $id, $this->auditMeta($request));
+        } catch (AssetException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (UnbalancedEntryException | PostingException $e) {
+            return $this->mapPostingError($response, $e);
+        } catch (\Throwable $e) {
+            return $this->serverError($response, $e, 'Vrácení majetku do konceptu selhalo');
+        }
+
+        $this->logEvent($request, 'asset.put_into_use_reverted', $id, ['activation_entry_id' => $result['activation_entry_id']]);
         return Json::ok($response, $result);
     }
 

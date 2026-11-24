@@ -5910,6 +5910,21 @@ final class ClosingService
             ? $this->buildErrorChecks($supplierId, $period, false, $rangeTo)
             : [];
 
+        if ($wants('empty_period_before_accounting_start')) {
+            $items = array_map(static fn (array $row): array => [
+                'doc_type' => 'accounting_period',
+                'doc_id' => (int) $row['id'],
+                'doc_no' => (string) $row['fiscal_year'],
+                'note' => $row['starts_on'] . ' až ' . $row['ends_on'],
+            ], $this->periods->emptyBeforeAccountingStart($supplierId));
+            $checks[] = [
+                'key' => 'empty_period_before_accounting_start',
+                'severity' => 'warning',
+                'ok' => $items === [],
+                'value' => ['items' => $items],
+            ];
+        }
+
         $balanceCodes = [];
         foreach ([
             'transit_261_open' => ['261'],

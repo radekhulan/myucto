@@ -20391,6 +20391,8 @@
       "advance_payment_only": "Zálohový doklad se neúčtuje jako předpis. Zaúčtujte jeho úhradu z banky nebo pokladny na účet 314.",
       "missing_exchange_rate": "Doklad v cizí měně nemá vyplněný směnný kurz - doplňte kurz k datu účetního případu.",
       "no_accounting_period": "Pro datum dokladu neexistuje účetní období - nejdřív ho založte v Účetnictví → Uzávěrka.",
+      "period_before_start": "Datum je před začátkem účetnictví firmy v MyÚčtu. Zkontrolujte, zda nejde o překlep v roce. Pokud jde opravdu o starší rok, založte období ručně v Nástroje → Uzávěrka.",
+      "period_gap": "Datum spadá do mezery mezi účetními obdobími. Zkontrolujte datum, nebo chybějící období založte ručně v Nástroje → Uzávěrka.",
       "period_missing": "Účetní období pro rok dokladu není založené - nejdřív ho vytvořte v Účetnictví → Uzávěrka.",
       "depreciation_journal_missing": "Účetní odpis roku je u karty vedený jako zaúčtovaný, ale jeho zápis v deníku chybí. Znovu se neúčtoval, aby se nezdvojil. Ověřte v deníku, zda odpis roku nese jiný zápis (např. převzatý z původního programu), a případně ho zaúčtujte ručně.",
       "open_periods_action": "Založit období",
@@ -20719,6 +20721,11 @@
       "global": "Globální",
       "edit_title": "Úprava předkontace",
       "at_least_one": "Zadejte alespoň MD nebo Dal účet.",
+      "vat_rates_title": "Účty DPH podle sazby",
+      "vat_common": "Společný účet {account}",
+      "vat_use_common": "Použít společný účet",
+      "vat_output": "Daň na výstupu",
+      "vat_input": "Daň na vstupu",
       "alignment": {
         "button": "Doplnit podle osnovy",
         "title": "Doplnit předkontace podle osnovy",
@@ -21793,6 +21800,7 @@
         "put_into_use_date": "Datum zařazení",
         "put_into_use_book": "Zaúčtovat zařazení (02x / 04x)",
         "put_into_use_no_book_hint": "Bez zaúčtování - zůstatky majetku musí být v účetnictví (počáteční stavy, historický majetek).",
+        "put_into_use_opening_hint": "Karta má počáteční oprávky, majetek je tedy už v počátečních stavech. Zařadí se bez zápisu o zařazení.",
         "put_into_use_done": "Majetek byl zařazen do užívání.",
         "improvement": "Technické zhodnocení",
         "dispose": "Vyřadit",
@@ -21814,7 +21822,10 @@
         "delete_confirm": "Opravdu smazat kartu majetku? Akce je nevratná.",
         "delete_in_use_confirm": "Opravdu smazat kartu majetku v užívání? Smaže se také účetní zápis zařazení. Akce je nevratná a projde jen bez potvrzených odpisů a technických zhodnocení.",
         "download_card": "Stáhnout inventární kartu",
-        "download_card_error": "Inventární kartu se nepodařilo stáhnout."
+        "download_card_error": "Inventární kartu se nepodařilo stáhnout.",
+        "revert_put_into_use": "Vrátit do konceptu",
+        "revert_put_into_use_confirm": "Vrátit kartu do konceptu? Zápis o zařazení se smaže a kartu půjde upravit (včetně data zařazení) a zařadit znovu. Jde to jen u karty bez potvrzených nebo zaúčtovaných odpisů a technického zhodnocení.",
+        "revert_put_into_use_done": "Karta je zpět v konceptu."
       },
       "improvement": {
         "list_title": "Technická zhodnocení (§33)",
@@ -22630,6 +22641,7 @@
       },
       "checks": {
         "prior_period_open": "Předchozí období není uzavřené",
+        "empty_period_before_accounting_start": "Otevřená období bez zápisů před začátkem účetnictví",
         "pl_balance_before_period": "Nenulové zůstatky nákladů/výnosů před začátkem období",
         "drafts_in_period": "Nezaúčtované koncepty v deníku období",
         "journal_unbalanced": "Deník období není vyrovnaný (Σ MD ≠ Σ Dal)",
@@ -31953,6 +31965,7 @@
           "manual": "ruční spuštění",
           "cron": "automatická úloha"
         },
+        "stale_accounts_hint": "Celková částka sedí, zaúčtovaný rozpis po účtech se liší od aktuálního obratu.",
         "stale_hint": "Doklad byl zaúčtovaný na {posted}, ale z dnešních dat vychází {fresh} - do období po zúčtování přibyl nebo se změnil doklad. Přepočítejte, ať hlavní kniha ukazuje skutečnou daň.",
         "missing_hint": "Za období zůstává na účtech daně nepřevedený zůstatek - zúčtovací doklad chybí.",
         "last_run": "Naposledy přepočteno: {trigger}, {at}",
@@ -46456,7 +46469,8 @@
       "purchase_invoice": "Přijatý doklad",
       "bank_statement": "Bankovní výpis",
       "account": "Účet",
-      "other_item": "Ostatní položka"
+      "other_item": "Ostatní položka",
+      "asset": "Karta majetku"
     },
     "sources": {
       "pohoda": "POHODA",
@@ -46470,6 +46484,11 @@
       "include_uploaded": "Přepnout na měnu účtu i výpisy nahrané po převodu, které k účtu podle souboru jednoznačně patří."
     },
     "checks": {
+      "asset_account_undetermined": {
+        "title": "Neurčený majetkový účet karty z POHODY",
+        "hint": "Karty s poznámkou o neurčeném majetkovém účtu z převodu POHODY.",
+        "description": "Kontrola určí majetkový účet podle počátečních stavů a účtu oprávek. Oprava nastaví účet na kartě, pokud počáteční stav pokrývá součet cen karet na tomto účtu s tolerancí 1 Kč."
+      },
       "settled_without_payment": {
         "title": "Uhrazená částka faktur bez záznamu platby",
         "hint": "POHODA: úhrady minulých let, Money S3: zápočty a úhrady bez dokladu úhrady.",

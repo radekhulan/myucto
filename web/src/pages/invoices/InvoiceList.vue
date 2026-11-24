@@ -1064,6 +1064,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'client_ic', labelKey: 'common.ic', defaultHidden: true },
   { key: 'client_dic', labelKey: 'common.dic', defaultHidden: true },
   { key: 'type', labelKey: 'invoice.type' },
+  { key: 'issue_date', labelKey: 'invoice.issue_date', defaultHidden: true },
   { key: 'issued', labelKey: 'invoice.tax_date' },
   { key: 'due', labelKey: 'invoice.due_date' },
   { key: 'amount', labelKey: 'invoice.amount_to_pay', required: true },
@@ -1135,6 +1136,7 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
     note: [inv.note_above_items, inv.note_below_items].filter(Boolean).join(' · ') || '—',
     journal_notes: inv.journal_notes?.join(' · ') || '—',
 
+    issue_date: inv.issue_date ? formatDate(inv.issue_date) : '—',
     payment_vs: inv.payment_varsymbol || '—',
     order_number: inv.supplier_order_number || '—',
     paid_at: inv.paid_at ? formatDate(inv.paid_at) : '—',
@@ -1779,6 +1781,7 @@ useWindowRefresh(refreshLoadedPages,
                 <td v-else-if="c.key === 'client_ic'" :data-custom-color="!!colors.color('client_ic')" :style="colors.cellStyle('client_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.client_ic || '—' }}</td>
                 <td v-else-if="c.key === 'client_dic'" :data-custom-color="!!colors.color('client_dic')" :style="colors.cellStyle('client_dic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.client_dic || '—' }}</td>
                 <td v-else-if="c.key === 'type'" :data-custom-color="!!colors.color('type')" :style="colors.cellStyle('type')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
+                <td v-else-if="c.key === 'issue_date'" :data-custom-color="!!colors.color('issue_date')" :style="colors.cellStyle('issue_date')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ formatDate(inv.issue_date) }}</td>
                 <td v-else-if="c.key === 'issued'" :data-custom-color="!!colors.color('issued')" :style="colors.cellStyle('issued')" class="px-3 py-2.5 text-center text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                 </td>

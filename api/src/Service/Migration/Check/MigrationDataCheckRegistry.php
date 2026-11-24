@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Check;
 
+use MyInvoice\Service\Migration\Check\Checks\AssetAccountUndeterminedCheck;
 use MyInvoice\Service\Migration\Check\Checks\FinalInvoiceAdvanceVatCheck;
 use MyInvoice\Service\Migration\Check\Checks\ForeignBankInCzkCheck;
 use MyInvoice\Service\Migration\Check\Checks\ForeignPurchaseInCzkCheck;
@@ -34,6 +35,7 @@ final class MigrationDataCheckRegistry
         TaxDocumentAdvanceLinkCheck $taxDocumentLink,
         FinalInvoiceAdvanceVatCheck $finalInvoiceVat,
         ForeignPurchaseInCzkCheck $foreignPurchase,
+        AssetAccountUndeterminedCheck $assetAccount,
     ) {
         foreach (func_get_args() as $check) {
             $this->checks[$check->key()] = $check;

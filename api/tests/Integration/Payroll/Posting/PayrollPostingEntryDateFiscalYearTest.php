@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll\Posting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPostingBatchRepository;
+use MyInvoice\Service\Accounting\PostingException;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -97,6 +98,22 @@ final class PayrollPostingEntryDateFiscalYearTest extends TestCase
         $this->expectException(\DomainException::class);
         $this->expectExceptionMessage('jiného účetního roku');
         $this->batches->resolveEntryDate($this->supplierId, self::YEAR . '-12-31');
+    }
+
+    public function testRefusesToCreatePeriodBeforeFirstAccountingPeriod(): void
+    {
+        $this->createPeriod(self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31', 'closed');
+
+        try {
+            $this->batches->resolveEntryDate($this->supplierId, (self::YEAR - 3) . '-12-31');
+            self::fail('Mzdy nesmí založit období dávno před prvním obdobím firmy.');
+        } catch (PostingException $e) {
+            self::assertSame('period_before_start', $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+        }
+        $statement = $this->db->pdo()->prepare('SELECT COUNT(*) FROM accounting_periods WHERE supplier_id = ?');
+        $statement->execute([$this->supplierId]);
+        self::assertSame(1, (int) $statement->fetchColumn());
     }
 
     /** Posun UVNITŘ roku je legitimní — mění se den, ne účetní období. */

@@ -416,8 +416,7 @@ onMounted(() => { void initialize() })
         {{ t('reports.dph.post_filing.legacy_snapshot_warning') }}
       </div>
 
-      <!-- Interní doklad zúčtování DPH (migrace 1332) — 343.100/343.200 → 343.900.
-           Primární spouštěč je PODÁNÍ přiznání; tady je náhled a ruční přepočet. -->
+      <!-- Náhled a ruční přepočet interního dokladu zúčtování DPH. -->
       <div v-if="clearing && clearing.freshness !== 'not_applicable'"
         class="rounded-md border p-3 text-sm space-y-2"
         :class="clearing.freshness === 'ok'
@@ -435,13 +434,21 @@ onMounted(() => { void initialize() })
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs">
-          <div>{{ t('reports.dph.clearing.output_vat') }} ({{ clearing.accounts.output }}): {{ formatMoney(clearing.output_vat, 'CZK') }}</div>
-          <div>{{ t('reports.dph.clearing.input_vat') }} ({{ clearing.accounts.input }}): {{ formatMoney(clearing.input_vat, 'CZK') }}</div>
+          <div v-for="direction in (['output', 'input'] as const)" :key="direction">
+            {{ direction === 'output' ? t('reports.dph.clearing.output_vat') : t('reports.dph.clearing.input_vat') }}:
+            {{ formatMoney(direction === 'output' ? clearing.output_vat : clearing.input_vat, 'CZK') }}
+            <dl class="mt-1">
+              <div v-for="account in clearing.accounts_detail.filter(account => account.direction === direction)" :key="account.account_code" class="flex flex-wrap gap-x-2">
+                <dt>{{ account.account_code }}</dt>
+                <dd>{{ formatMoney(account.amount, 'CZK') }}</dd>
+              </div>
+            </dl>
+          </div>
           <div class="font-semibold">{{ t('reports.dph.clearing.settlement') }} ({{ clearing.accounts.settlement }}): {{ formatMoney(clearing.settlement, 'CZK') }}</div>
         </div>
 
         <p v-if="clearing.freshness === 'stale' && clearing.posted" class="text-xs">
-          {{ t('reports.dph.clearing.stale_hint', {
+          {{ clearing.posted.settlement === clearing.settlement ? t('reports.dph.clearing.stale_accounts_hint') : t('reports.dph.clearing.stale_hint', {
             posted: formatMoney(clearing.posted.settlement, 'CZK'),
             fresh: formatMoney(clearing.settlement, 'CZK'),
           }) }}

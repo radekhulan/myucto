@@ -101,8 +101,7 @@ final class StereoNxLegacyAccountMappingTest extends TestCase
             WHERE l.supplier_id=? AND l.side='debit'");
         $query->execute([$this->supplierId]);
         self::assertSame([$nativeInput], $query->fetchAll(\PDO::FETCH_COLUMN));
-        $inputResolver = new \ReflectionMethod(PostingService::class, 'inputVatAccount');
-        self::assertSame($nativeInput, $inputResolver->invoke($this->posting, $this->supplierId));
+        self::assertSame($nativeInput, $this->posting->vatPostingCodes($this->supplierId, 'input')['common']);
 
         $repeat = $this->service->resolveExistingTargets($mapped, $this->supplierId, $this->ico, 0);
         self::assertSame($resolved, $repeat);

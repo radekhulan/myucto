@@ -158,12 +158,27 @@ const putIntoUseDate = ref(appIsoDate())
 const putIntoUseBook = ref(true)
 const acting = ref(false)
 
+// Karta s počátečními oprávkami (převod, historický majetek) má cenu na 02x už v počátečních
+// stavech: zápis o zařazení by ji zaúčtoval podruhé, server ho odmítne.
+const hasOpeningState = computed(() => {
+  const a = asset.value
+  return !!a && (num(a.opening_tax_years) > 0 || num(a.opening_tax_amount) > 0 || num(a.opening_acc_months) > 0 || num(a.opening_acc_amount) > 0)
+})
+
 function openPutIntoUse() {
-  if (importedPlan.value) {
-    putIntoUseDate.value = asset.value?.put_into_use_date ?? ''
-    putIntoUseBook.value = false
-  }
+  putIntoUseDate.value = asset.value?.put_into_use_date || appIsoDate()
+  putIntoUseBook.value = !importedPlan.value && !hasOpeningState.value
   showPutIntoUse.value = true
+}
+
+async function runRevertPutIntoUse() {
+  if (!confirm(t('accounting.assets.lifecycle.revert_put_into_use_confirm'))) return
+  acting.value = true
+  try {
+    await assetsApi.revertPutIntoUse(assetId.value)
+    toast.success(t('accounting.assets.lifecycle.revert_put_into_use_done'))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
 }
 
 async function runPutIntoUse() {
@@ -406,6 +421,15 @@ const assetActions = computed<ActionItem[]>(() => {
       tier: 'secondary',
       show: canWrite && inUse && canPause.value,
       run: () => { showPause.value = true },
+    },
+    {
+      key: 'revert_put_into_use',
+      label: t('accounting.assets.lifecycle.revert_put_into_use'),
+      icon: 'uturn',
+      tier: 'overflow',
+      show: canWrite && inUse,
+      disabled: acting.value,
+      run: () => { void runRevertPutIntoUse() },
     },
     {
       key: 'dispose',
@@ -786,10 +810,11 @@ const yearOptions = computed(() => {
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.lifecycle.put_into_use_date') }}</label>
         <DateInput v-model="putIntoUseDate" :disabled="!!importedPlan" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
         <label v-if="!isTaxEvidence" class="inline-flex items-center gap-2 text-sm mb-4">
-          <input v-model="putIntoUseBook" :disabled="!!importedPlan" type="checkbox" class="rounded border-neutral-300" />
+          <input v-model="putIntoUseBook" :disabled="!!importedPlan || hasOpeningState" type="checkbox" class="rounded border-neutral-300" />
           {{ t('accounting.assets.lifecycle.put_into_use_book') }}
         </label>
-        <p v-if="!putIntoUseBook && !isTaxEvidence" class="text-xs text-warning-600 mb-3">{{ t('accounting.assets.lifecycle.put_into_use_no_book_hint') }}</p>
+        <p v-if="hasOpeningState && !isTaxEvidence" class="text-xs text-neutral-500 mb-3" data-test="put-into-use-opening-hint">{{ t('accounting.assets.lifecycle.put_into_use_opening_hint') }}</p>
+        <p v-else-if="!putIntoUseBook && !isTaxEvidence" class="text-xs text-warning-600 mb-3">{{ t('accounting.assets.lifecycle.put_into_use_no_book_hint') }}</p>
         <div class="flex justify-end gap-2">
           <button @click="showPutIntoUse = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
           <button :disabled="acting || !putIntoUseDate" @click="runPutIntoUse" :class="btnFilled('success')">
