@@ -20719,6 +20719,11 @@
       "global": "Global",
       "edit_title": "Edit posting rule",
       "at_least_one": "Enter at least a debit or credit account.",
+      "vat_rates_title": "VAT accounts by rate",
+      "vat_common": "Shared account {account}",
+      "vat_use_common": "Use shared account",
+      "vat_output": "Output VAT",
+      "vat_input": "Input VAT",
       "alignment": {
         "button": "Align with chart",
         "title": "Align posting rules with the chart of accounts",
@@ -31957,6 +31962,7 @@
           "manual": "manual run",
           "cron": "scheduled task"
         },
+        "stale_accounts_hint": "The total matches. The posted breakdown by account differs from the current turnover.",
         "stale_hint": "The document was posted at {posted}, but today's data gives {fresh} — a document was added or changed in the period after it was cleared. Recompute so the general ledger shows the real liability.",
         "missing_hint": "The period still has an untransferred balance on the VAT accounts — the clearing document is missing.",
         "last_run": "Last recomputed: {trigger}, {at}",

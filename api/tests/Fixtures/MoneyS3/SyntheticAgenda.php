@@ -877,6 +877,52 @@ final class SyntheticAgenda
     }
 
     /** @return array<string,string> */
+    public static function filesWithVatRateAccounts(): array
+    {
+        $files = self::files();
+        $path = 'ROK.002/';
+        $chart = iterator_to_array(Ms3Table::fromString($files[$path . 'UcOsnova.DAT'], 'UcOsnova')->rows(), false);
+        foreach (['343310', '343320', '343110', '343120'] as $code) {
+            $chart[] = ['Ucet' => $code, 'Nazev' => 'Vzorová analytika DPH ' . $code];
+        }
+        $files[$path . 'UcOsnova.DAT'] = Ms3FixtureWriter::table(self::CHART_FIELDS, $chart);
+        $rules = iterator_to_array(Ms3Table::fromString($files[$path . 'UcPrKont.DAT'], 'UcPrKont')->rows(), false);
+        $files[$path . 'UcPrKont.DAT'] = Ms3FixtureWriter::table(
+            [...self::RULE_FIELDS, ['ZauctDPH', 'C', 10]],
+            [
+                ...$rules,
+                ['Zkrat' => 'VYS', 'Popis' => 'Vzorový výnos', 'UcMD' => '311000', 'UcD' => '602000', 'ZauctDPH' => 'DANVYS'],
+                ['Zkrat' => 'VYSP', 'Popis' => 'Vzorový výnos položky', 'UcMD' => '311000', 'UcD' => '602000', 'ZauctDPH' => 'DANPOL'],
+                ['Zkrat' => 'NAK', 'Popis' => 'Vzorový náklad', 'UcMD' => '518000', 'UcD' => '321000', 'ZauctDPH' => 'DANVST'],
+            ],
+        );
+        $files[$path . 'UcPrDPH.DAT'] = Ms3FixtureWriter::table(
+            [['Zkratka', 'C', 10], ['SDUcD', 'C', 6], ['ZDUcD', 'C', 6], ['SDUcMD', 'C', 6], ['ZDUcMD', 'C', 6]],
+            [
+                ['Zkratka' => 'DANVYS', 'SDUcD' => '343320', 'ZDUcD' => '343350'],
+                ['Zkratka' => 'DANPOL', 'ZDUcD' => '343310'],
+                ['Zkratka' => 'DANVST', 'SDUcMD' => '343120', 'ZDUcMD' => '343110'],
+            ],
+        );
+        $files[$path . 'VFaktPol.DAT'] = Ms3FixtureWriter::table(
+            [['Cislo', 'L', 4], ['SazbaDPH', 'E', 10], ['PredKontac', 'C', 6], ['Cena', 'E', 10]],
+            [['Cislo' => 1, 'SazbaDPH' => 21.0, 'PredKontac' => 'VYSP', 'Cena' => 1000.0]],
+        );
+        foreach (['VFaktury' => [self::ISSUED_FIELDS, 'VYS', self::KOD_DPH_SALE], 'PFaktury' => [self::PURCHASE_FIELDS, 'NAK', self::KOD_DPH_PURCHASE]] as $table => [$fields, $key, $vatCode]) {
+            $rows = iterator_to_array(Ms3Table::fromString($files[$path . $table . '.DAT'], $table)->rows(), false);
+            $files[$path . $table . '.DAT'] = Ms3FixtureWriter::table(
+                [...$fields, ['Cislo', 'L', 4], ['PredKontac', 'C', 6]],
+                [...$rows, [
+                    'Cislo' => 1, 'Doklad' => $key . '25001', 'PredKontac' => $key, 'Druh' => 'N', 'KodDPH' => $vatCode,
+                    'Vystaveno' => '2025-05-10', 'DatUcPr' => '2025-05-10', 'PlnenoDPH' => '2025-05-10', 'Splatno' => '2025-05-24',
+                    'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Zaklad_1' => 1000.0, 'Zaklad_2' => 1000.0,
+                    'DPH_1' => 120.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 2330.0,
+                ]],
+            );
+        }
+        return $files;
+    }
+
     public static function filesWithInvoiceItemDescriptions(): array
     {
         $files = self::files();

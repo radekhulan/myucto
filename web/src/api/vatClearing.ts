@@ -1,8 +1,8 @@
 import { api } from './client'
 
 /**
- * Interní doklad zúčtování DPH (migrace 1332) — převod daně období z analytik
- * 343.100/343.200 na zúčtovací účet 343.900.
+ * Interní doklad zúčtování DPH převádí daň období z účtů vstupu a výstupu
+ * na zúčtovací účet 343.900.
  *
  * Primární spouštěč je PODÁNÍ přiznání (backend, VatClearingTrigger); tenhle klient
  * obsluhuje RUČNÍ cestu z agendy DPH — náhled a spuštění přepočtu.
@@ -41,6 +41,7 @@ export interface VatClearingStatus {
   output_vat: number
   settlement: number
   accounts: { input: string; output: string; settlement: string }
+  accounts_detail: { account_code: string; direction: 'input' | 'output'; amount: number }[]
   status: string | null
   entry_id: number | null
   /** Co je na dokladu zaúčtované teď (null = doklad neexistuje). */

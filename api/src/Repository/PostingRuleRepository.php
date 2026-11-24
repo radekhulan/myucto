@@ -43,16 +43,17 @@ final class PostingRuleRepository
      *
      * @return array<string,array<string,mixed>>
      */
-    public function effectiveMap(int $supplierId): array
+    public function effectiveMap(int $supplierId, ?string $prefix = null): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, rule_key, description, debit_account_code, credit_account_code,
                     priority, is_active
                FROM posting_rules
-              WHERE is_active = 1 AND (supplier_id = ? OR supplier_id IS NULL)
-              ORDER BY (supplier_id IS NULL) DESC, priority ASC'
+              WHERE is_active = 1 AND (supplier_id = ? OR supplier_id IS NULL)'
+            . ($prefix === null ? '' : ' AND rule_key LIKE ?') .
+            ' ORDER BY (supplier_id IS NULL) DESC, priority ASC'
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute($prefix === null ? [$supplierId] : [$supplierId, $prefix . '%']);
         // Globální jdou první → per-tenant je přepíší (poslední zápis vyhrává).
         $map = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -103,7 +104,7 @@ final class PostingRuleRepository
      * důvod k opakovanému načítání jejich ID.
      * @param list<array{rule_key:string,debit_account_code:?string,credit_account_code:?string,description:string}> $rules
      */
-    public function upsertOverrides(int $supplierId, array $rules): void
+    public function upsertOverrides(int $supplierId, array $rules, bool $replace = true): void
     {
         if ($rules === []) return;
         $params = [];
@@ -114,8 +115,10 @@ final class PostingRuleRepository
         $this->db->pdo()->prepare('INSERT INTO posting_rules
             (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
             VALUES ' . implode(', ', array_fill(0, count($rules), '(?, ?, ?, ?, ?, ?, 1)')) . '
-            ON DUPLICATE KEY UPDATE description=VALUES(description),
-            debit_account_code=VALUES(debit_account_code), credit_account_code=VALUES(credit_account_code), is_active=1')
+            ON DUPLICATE KEY UPDATE ' . ($replace
+                ? 'description=VALUES(description), debit_account_code=VALUES(debit_account_code),
+                   credit_account_code=VALUES(credit_account_code), is_active=1'
+                : 'id=id'))
             ->execute($params);
     }
 
