@@ -6,11 +6,11 @@ import AssetDetailPage from '../AssetDetail.vue'
 import AssetPlanRevisionModal from '@/components/accounting/AssetPlanRevisionModal.vue'
 
 const m = vi.hoisted(() => ({
-  previewRevision: vi.fn(), revise: vi.fn(), assetWrite: true, depreciationLevel: 2, get: vi.fn(), plan: vi.fn(), update: vi.fn(), create: vi.fn(), putIntoUse: vi.fn(),
+  previewRevision: vi.fn(), revise: vi.fn(), assetWrite: true, depreciationLevel: 2, get: vi.fn(), plan: vi.fn(), update: vi.fn(), create: vi.fn(), putIntoUse: vi.fn(), revertPutIntoUse: vi.fn(),
   push: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn(),
   mode: 'double_entry', loadDimensions: vi.fn(), saveDimensions: vi.fn(),
 }))
-vi.mock('@/api/assets', () => ({ assetsApi: { previewRevision: m.previewRevision, revise: m.revise, get: m.get, plan: m.plan, update: m.update, create: m.create, putIntoUse: m.putIntoUse } }))
+vi.mock('@/api/assets', () => ({ assetsApi: { previewRevision: m.previewRevision, revise: m.revise, get: m.get, plan: m.plan, update: m.update, create: m.create, putIntoUse: m.putIntoUse, revertPutIntoUse: m.revertPutIntoUse } }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: async () => [] } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (permission: string) => permission === 'assets.write' ? m.assetWrite : permission === 'assets.depreciation' ? m.depreciationLevel >= 2 : true }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.mode } }) }))
@@ -359,6 +359,35 @@ describe('Imported asset plan UI', () => {
     await confirm!.trigger('click')
     await flushPromises()
     expect(m.putIntoUse).toHaveBeenCalledWith(9, { date: '2030-01-01', book_entry: false })
+    wrapper.unmount()
+  })
+  it('activates a migrated card with opening depreciation on its own date without an acquisition entry', async () => {
+    m.get.mockResolvedValue(asset({ status: 'draft', imported_depreciation_plan: null, kind: 'tangible', tax_method: 'straight', tax_group: 5,
+      acc_method: 'by_tax', put_into_use_date: '2022-04-01', opening_tax_years: 4, opening_tax_amount: 696000, opening_acc_months: 56, opening_acc_amount: 900000 }))
+    const wrapper = await detail()
+    await wrapper.get('[data-action="put_into_use"]').trigger('click')
+    const date = wrapper.get('[data-test="date-input"]')
+    expect(date.attributes('disabled')).toBeUndefined()
+    expect((date.element as HTMLInputElement).value).toBe('2022-04-01')
+    const checkbox = wrapper.findAll('input[type="checkbox"]').find(control => control.attributes('disabled') !== undefined)
+    expect((checkbox!.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-test="put-into-use-opening-hint"]').exists()).toBe(true)
+    await wrapper.findAll('button').find(button => button.text().includes('common.confirm'))!.trigger('click')
+    await flushPromises()
+    expect(m.putIntoUse).toHaveBeenCalledWith(9, { date: '2022-04-01', book_entry: false })
+    wrapper.unmount()
+  })
+
+  it('returns a card in use back to draft after confirmation', async () => {
+    m.get.mockResolvedValue(asset({ imported_depreciation_plan: null }))
+    m.revertPutIntoUse.mockResolvedValue({ asset: asset({ status: 'draft' }), warnings: [] })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = await detail()
+    await wrapper.get('[data-action="revert_put_into_use"]').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(m.revertPutIntoUse).toHaveBeenCalledWith(9)
+    confirmSpy.mockRestore()
     wrapper.unmount()
   })
 })

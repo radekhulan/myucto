@@ -21793,6 +21793,7 @@
         "put_into_use_date": "Put-into-use date",
         "put_into_use_book": "Post the entry (02x / 04x)",
         "put_into_use_no_book_hint": "Without posting — asset balances must already be in the books (opening balances, historical assets).",
+        "put_into_use_opening_hint": "The card has opening accumulated depreciation, so the asset is already in the opening balances. It is put into use without a journal entry.",
         "put_into_use_done": "The asset has been put into use.",
         "improvement": "Technical improvement",
         "dispose": "Dispose",
@@ -21814,7 +21815,10 @@
         "delete_confirm": "Really delete the asset card? This action cannot be undone.",
         "delete_in_use_confirm": "Really delete the asset card in use? Its put-into-use journal entry will also be deleted. This cannot be undone and is allowed only without confirmed depreciation or technical improvements.",
         "download_card": "Download asset card",
-        "download_card_error": "Could not download the asset card."
+        "download_card_error": "Could not download the asset card.",
+        "revert_put_into_use": "Return to draft",
+        "revert_put_into_use_confirm": "Return the card to draft? The put-into-use journal entry will be deleted and the card can be edited (including the put-into-use date) and put into use again. Allowed only without confirmed or posted depreciation and technical improvements.",
+        "revert_put_into_use_done": "The card is back in draft."
       },
       "improvement": {
         "list_title": "Technical improvements (§33)",

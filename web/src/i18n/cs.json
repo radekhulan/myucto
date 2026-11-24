@@ -21793,6 +21793,7 @@
         "put_into_use_date": "Datum zařazení",
         "put_into_use_book": "Zaúčtovat zařazení (02x / 04x)",
         "put_into_use_no_book_hint": "Bez zaúčtování - zůstatky majetku musí být v účetnictví (počáteční stavy, historický majetek).",
+        "put_into_use_opening_hint": "Karta má počáteční oprávky, majetek je tedy už v počátečních stavech. Zařadí se bez zápisu o zařazení.",
         "put_into_use_done": "Majetek byl zařazen do užívání.",
         "improvement": "Technické zhodnocení",
         "dispose": "Vyřadit",
@@ -21814,7 +21815,10 @@
         "delete_confirm": "Opravdu smazat kartu majetku? Akce je nevratná.",
         "delete_in_use_confirm": "Opravdu smazat kartu majetku v užívání? Smaže se také účetní zápis zařazení. Akce je nevratná a projde jen bez potvrzených odpisů a technických zhodnocení.",
         "download_card": "Stáhnout inventární kartu",
-        "download_card_error": "Inventární kartu se nepodařilo stáhnout."
+        "download_card_error": "Inventární kartu se nepodařilo stáhnout.",
+        "revert_put_into_use": "Vrátit do konceptu",
+        "revert_put_into_use_confirm": "Vrátit kartu do konceptu? Zápis o zařazení se smaže a kartu půjde upravit (včetně data zařazení) a zařadit znovu. Jde to jen u karty bez potvrzených nebo zaúčtovaných odpisů a technického zhodnocení.",
+        "revert_put_into_use_done": "Karta je zpět v konceptu."
       },
       "improvement": {
         "list_title": "Technická zhodnocení (§33)",

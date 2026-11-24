@@ -352,78 +352,7 @@ final class AssetService
                 );
             }
 
-            $activation = $pdo->prepare(
-                "SELECT id, period_id, entry_date, reversed_by
-                   FROM journal_entries
-                  WHERE supplier_id = ? AND source_type = 'asset' AND source_id = ?
-                  ORDER BY id DESC
-                  LIMIT 1
-                  FOR UPDATE"
-            );
-            $activation->execute([$supplierId, $id]);
-            $activationEntry = $activation->fetch(\PDO::FETCH_ASSOC);
-            $activationEntryId = null;
-
-            if ($activationEntry !== false) {
-                $activationEntryId = (int) $activationEntry['id'];
-                (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$activationEntryId]);
-                (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$activationEntryId]);
-                $period = $this->periods->findForUpdate((int) $activationEntry['period_id'], $supplierId);
-                if ($period === null || $period['status'] !== 'open') {
-                    throw new AssetException(
-                        'period_not_open',
-                        'Zařazení je v uzavřeném účetním období — kartu nelze smazat.',
-                        409,
-                    );
-                }
-                if ($activationEntry['reversed_by'] !== null) {
-                    throw new AssetException(
-                        'entry_has_reversal',
-                        'Zápis zařazení už byl stornován — kartu nelze smazat bez porušení účetní historie.',
-                        409,
-                    );
-                }
-                // Okruh párování a rozpad saldokonta jako mazání v deníku ({@see translate()} převede kód).
-                (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
-                (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
-
-                $lock = $pdo->prepare(
-                    'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE'
-                );
-                $lock->execute([$supplierId]);
-                $lockedUntil = $lock->fetchColumn();
-                if ($lockedUntil !== false && $lockedUntil !== null
-                    && (string) $activationEntry['entry_date'] <= (string) $lockedUntil
-                ) {
-                    throw new AssetException(
-                        'date_locked',
-                        'Datum zařazení spadá do uzamčené části účetnictví.',
-                        409,
-                    );
-                }
-
-                $attachments = $pdo->prepare(
-                    'SELECT id FROM journal_entry_attachments
-                      WHERE supplier_id = ? AND entry_id = ?
-                      LIMIT 1 FOR UPDATE'
-                );
-                $attachments->execute([$supplierId, $activationEntryId]);
-                if ($attachments->fetchColumn() !== false) {
-                    throw new AssetException(
-                        'entry_has_attachments',
-                        'Zápis zařazení má přílohy — před smazáním je odeberte v účetním deníku.',
-                        409,
-                    );
-                }
-
-                $deletedEntry = $pdo->prepare(
-                    'DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?'
-                );
-                $deletedEntry->execute([$activationEntryId, $supplierId]);
-                if ($deletedEntry->rowCount() !== 1) {
-                    throw new \RuntimeException('Zápis zařazení se nepodařilo smazat.');
-                }
-            }
+            $activationEntryId = $this->removeActivationEntry($supplierId, $id, 'kartu nelze smazat');
 
             $this->assets->delete($supplierId, $id);
             $pdo->prepare(
@@ -445,6 +374,90 @@ final class AssetService
             }
             throw $this->translate($e);
         }
+    }
+
+    /**
+     * Odstraní zápis zařazení karty (MD 02x / D 042), pokud existuje. Volá se v transakci
+     * se zamčenou kartou (smazání karty, vrácení zařazení do konceptu). Uzavřené či
+     * uzamčené období, storno, přílohy a navazující párování zápis chrání.
+     */
+    private function removeActivationEntry(int $supplierId, int $id, string $blocked): ?int
+    {
+        $pdo = $this->db->pdo();
+        $activation = $pdo->prepare(
+            "SELECT id, period_id, entry_date, reversed_by
+               FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'asset' AND source_id = ?
+              ORDER BY id DESC
+              LIMIT 1
+              FOR UPDATE"
+        );
+        $activation->execute([$supplierId, $id]);
+        $activationEntry = $activation->fetch(\PDO::FETCH_ASSOC);
+        $activationEntryId = null;
+
+        if ($activationEntry !== false) {
+            $activationEntryId = (int) $activationEntry['id'];
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$activationEntryId]);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$activationEntryId]);
+            $period = $this->periods->findForUpdate((int) $activationEntry['period_id'], $supplierId);
+            if ($period === null || $period['status'] !== 'open') {
+                throw new AssetException(
+                    'period_not_open',
+                    'Zařazení je v uzavřeném účetním období, ' . $blocked . '.',
+                    409,
+                );
+            }
+            if ($activationEntry['reversed_by'] !== null) {
+                throw new AssetException(
+                    'entry_has_reversal',
+                    'Zápis zařazení už byl stornován, ' . $blocked . ' bez porušení účetní historie.',
+                    409,
+                );
+            }
+            // Okruh párování a rozpad saldokonta jako mazání v deníku ({@see translate()} převede kód).
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
+
+            $lock = $pdo->prepare(
+                'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE'
+            );
+            $lock->execute([$supplierId]);
+            $lockedUntil = $lock->fetchColumn();
+            if ($lockedUntil !== false && $lockedUntil !== null
+                && (string) $activationEntry['entry_date'] <= (string) $lockedUntil
+            ) {
+                throw new AssetException(
+                    'date_locked',
+                    'Datum zařazení spadá do uzamčené části účetnictví.',
+                    409,
+                );
+            }
+
+            $attachments = $pdo->prepare(
+                'SELECT id FROM journal_entry_attachments
+                  WHERE supplier_id = ? AND entry_id = ?
+                  LIMIT 1 FOR UPDATE'
+            );
+            $attachments->execute([$supplierId, $activationEntryId]);
+            if ($attachments->fetchColumn() !== false) {
+                throw new AssetException(
+                    'entry_has_attachments',
+                    'Zápis zařazení má přílohy, ' . $blocked . '. Přílohy odeberte v účetním deníku.',
+                    409,
+                );
+            }
+
+            $deletedEntry = $pdo->prepare(
+                'DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?'
+            );
+            $deletedEntry->execute([$activationEntryId, $supplierId]);
+            if ($deletedEntry->rowCount() !== 1) {
+                throw new \RuntimeException('Zápis zařazení se nepodařilo smazat.');
+            }
+        }
+
+        return $activationEntryId;
     }
 
     // ── lifecycle ─────────────────────────────────────────────────────────────
@@ -496,6 +509,9 @@ final class AssetService
                 ];
             }
         }
+        if ($bookEntry) {
+            $this->assertActivationBookable($supplierId, $asset, $date);
+        }
 
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -546,6 +562,97 @@ final class AssetService
         }
 
         return ['asset' => $this->get($supplierId, $id), 'warnings' => $warnings];
+    }
+
+    /**
+     * Zápis o zařazení (MD 02x / D 042) jen u majetku pořízeného v účetnictví vedeném
+     * v MyÚčtu. Karta s počátečními oprávkami (převod z jiného programu, historický
+     * majetek) má cenu na 02x už v počátečních stavech, zápis by ji zaúčtoval podruhé.
+     * Datum před prvním účetním obdobím firmy by navíc založilo dávno minulé období.
+     *
+     * @param array<string,mixed> $asset
+     */
+    private function assertActivationBookable(int $supplierId, array $asset, string $date): void
+    {
+        if ((int) $asset['opening_tax_years'] > 0 || (float) $asset['opening_tax_amount'] > 0.0
+            || (int) $asset['opening_acc_months'] > 0 || (float) $asset['opening_acc_amount'] > 0.0) {
+            throw new AssetException(
+                'opening_state_entry',
+                'Karta má počáteční oprávky, majetek je tedy už v počátečních stavech účtu '
+                    . $asset['asset_account_code'] . '. Zařaďte ji bez zápisu o zařazení, jinak by se pořizovací cena zaúčtovala podruhé.',
+            );
+        }
+        if ($this->periods->findForDate($supplierId, $date) !== null) {
+            return;
+        }
+        $later = $this->db->pdo()->prepare('SELECT 1 FROM accounting_periods WHERE supplier_id = ? AND starts_on > ? LIMIT 1');
+        $later->execute([$supplierId, $date]);
+        if ($later->fetchColumn() !== false) {
+            throw new AssetException(
+                'period_before_start',
+                'Datum zařazení je před prvním účetním obdobím firmy. Majetek pořízený před začátkem účetnictví v MyÚčtu patří do počátečních stavů, zařaďte ho bez zápisu o zařazení.',
+            );
+        }
+    }
+
+    /**
+     * Vrátí zařazenou kartu do konceptu, dokud z ní nic nenavazuje: bez odpisů,
+     * technického zhodnocení a vyřazení. Zápis o zařazení se smaže (jen v otevřeném,
+     * neuzamčeném období), datum zařazení zůstane na kartě. Koncept pak jde opravit
+     * (datum zařazení, počáteční stavy) a zařadit znovu.
+     *
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array{asset: array<string,mixed>, activation_entry_id: ?int}
+     */
+    public function revertPutIntoUse(int $supplierId, int $id, array $meta = []): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
+            $asset = $this->assets->findForUpdate($supplierId, $id);
+            if ($asset === null) {
+                throw new AssetException('not_found', 'Majetek nenalezen.', 404);
+            }
+            if ($asset['status'] !== 'in_use') {
+                throw new AssetException('invalid_status', 'Do konceptu lze vrátit jen kartu zařazenou do užívání.', 409);
+            }
+            (new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this->journal))->assertAssetChange($supplierId, $id, null);
+            (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this->journal))->assertAssetChange($supplierId, $id, null);
+
+            $depreciation = $pdo->prepare('SELECT id FROM depreciation_entries WHERE supplier_id = ? AND asset_id = ? LIMIT 1 FOR UPDATE');
+            $depreciation->execute([$supplierId, $id]);
+            if ($depreciation->fetchColumn() !== false) {
+                throw new AssetException(
+                    'asset_has_depreciation',
+                    'Karta má potvrzené nebo zaúčtované odpisy, do konceptu ji nelze vrátit. Nejdřív smažte zaúčtování odpisů odzadu a zrušte případná přerušení.',
+                    409,
+                );
+            }
+            $improvements = $pdo->prepare('SELECT id FROM asset_improvements WHERE supplier_id = ? AND asset_id = ? LIMIT 1 FOR UPDATE');
+            $improvements->execute([$supplierId, $id]);
+            if ($improvements->fetchColumn() !== false) {
+                throw new AssetException('asset_has_improvements', 'Karta má technická zhodnocení, do konceptu ji nelze vrátit.', 409);
+            }
+
+            $activationEntryId = $this->removeActivationEntry($supplierId, $id, 'kartu nelze vrátit do konceptu');
+            $this->assets->update($supplierId, $id, ['status' => 'draft']);
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+
+        return ['asset' => $this->get($supplierId, $id), 'activation_entry_id' => $activationEntryId];
     }
 
     /**

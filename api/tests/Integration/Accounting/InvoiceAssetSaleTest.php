@@ -138,6 +138,9 @@ final class InvoiceAssetSaleTest extends BankPostingTestCase
         // Reálný spouštěč: majetek zařazený vloni, jehož loňský daňový odpis nikdo nepotvrdil.
         // assertDisposalChronology vyřazení odmítne — faktura zůstává vystavená a zaúčtovaná,
         // ale volající musí dostat adresný důvod, aby ho uživatel viděl hned po vystavení.
+        // Firma vedla účetnictví už vloni, zápis o zařazení do roku bez období se neúčtuje.
+        $this->container->get(\MyInvoice\Repository\AccountingPeriodRepository::class)
+            ->ensureOpenPeriodFor($this->supplierId, (self::YEAR - 1) . '-03-10');
         $assetId   = $this->assetInUse('INV-WARN-1', (self::YEAR - 1) . '-03-10', 600000.00);
         $invoiceId = $this->invoice('FV-WARN-1', [['net' => 500000.00, 'asset_id' => $assetId]]);
 
