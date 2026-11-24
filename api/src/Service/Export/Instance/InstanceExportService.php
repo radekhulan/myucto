@@ -1318,7 +1318,7 @@ final class InstanceExportService
                 }
             }
             try {
-                $invoice = $this->invoiceRepo->find($id);
+                $invoice = $this->invoiceRepo->find($id, includeImportedCzk: true);
                 if ($invoice !== null) {
                     $archive->addString("doklady/{$year}/vydane-faktury-isdoc/{$base}.isdoc", $this->isdoc->buildXml($invoice));
                     $summary['vydane_isdoc']++;

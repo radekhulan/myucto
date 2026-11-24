@@ -502,12 +502,14 @@ final class ScheduledPohodaExportService
             "SELECT i.id, i.varsymbol, i.status = 'cancelled' AS cancelled,
                     MD5(CONCAT_WS('|', i.invoice_type, i.varsymbol, i.issue_date, i.tax_date, i.due_date, i.client_id,
                         i.status = 'cancelled', i.total_without_vat, i.total_vat, i.total_with_vat,
+                        i.import_total_without_vat_czk, i.import_total_vat_czk, i.import_total_with_vat_czk,
                         i.currency_id, COALESCE(i.exchange_rate, ''), COALESCE(i.vat_classification_code, ''),
                         i.prices_include_vat, i.reverse_charge, COALESCE(i.rounding, ''), COALESCE(i.client_snapshot, ''),
                         CONCAT_WS(',', c.company_name, c.ic, c.dic, c.street, c.city, c.zip, c.country_id, c.main_email, c.phone),
                         COALESCE((SELECT GROUP_CONCAT(CONCAT_WS(',', it.description, it.quantity, it.unit, it.unit_price_without_vat,
                                                                 it.vat_rate_snapshot, COALESCE(it.vat_classification_code, ''),
-                                                                it.total_without_vat, it.total_vat, it.total_with_vat) ORDER BY it.id SEPARATOR ';')
+                                                                it.total_without_vat, it.total_vat, it.total_with_vat,
+                                                                it.import_tax_base_czk, it.import_tax_vat_czk) ORDER BY it.id SEPARATOR ';')
                                     FROM invoice_items it WHERE it.invoice_id = i.id), ''))) AS fp
                FROM invoices i
           LEFT JOIN clients c ON c.id = i.client_id

@@ -114,7 +114,7 @@ final class IsdocExporter
 
         $invoices = [];
         foreach ($invoiceIds as $id) {
-            $inv = $this->repo->find((int) $id);
+            $inv = $this->repo->find((int) $id, includeImportedCzk: true);
             if ($inv !== null) $invoices[] = $inv;
         }
 
@@ -253,6 +253,7 @@ final class IsdocExporter
             $this->el($dom, $root, 'Note', implode("\n", $textNotes));
         }
         $lineItems = InvoiceItemKind::amountLines($allItems);
+        $hasImportedCzk = $isForeign && isset($invoice['import_total_with_vat_czk']);
         $this->el($dom, $root, 'LocalCurrencyCode', $localCurrency);
         if ($isForeign) {
             // Schema používá <ForeignCurrencyCode> (ne <CurrencyCode>) pro měnu faktury,
@@ -372,11 +373,16 @@ final class IsdocExporter
             $unitPriceInclVat = $qtyItem != 0.0
                 ? round($tot / $qtyItem, $preciseUnitPrice ? 6 : 2)
                 : $unitPrice;
-            $this->elAmountCurr($dom, $line, 'LineExtensionAmount', $base, true);
-            $this->elAmountCurr($dom, $line, 'LineExtensionAmountTaxInclusive', $tot, true);
-            $this->elAmount($dom, $line, 'LineExtensionTaxAmount', $vat);
-            $this->elUnitPrice($dom, $line, 'UnitPrice', $unitPrice, $item);
-            $this->elUnitPrice($dom, $line, 'UnitPriceTaxInclusive', $unitPriceInclVat, $item);
+            $baseCzk = $isForeign && isset($item['import_tax_base_czk']) ? (float) $item['import_tax_base_czk'] : null;
+            $vatCzk = $isForeign && isset($item['import_tax_vat_czk']) ? (float) $item['import_tax_vat_czk'] : null;
+            $totalCzk = $baseCzk !== null && $vatCzk !== null ? $baseCzk + $vatCzk : null;
+            $this->elAmountCurr($dom, $line, 'LineExtensionAmount', $base, true, $baseCzk);
+            $this->elAmountCurr($dom, $line, 'LineExtensionAmountTaxInclusive', $tot, true, $totalCzk);
+            $this->elAmount($dom, $line, 'LineExtensionTaxAmount', $vat, $vatCzk);
+            $this->elUnitPrice($dom, $line, 'UnitPrice', $unitPrice, $item,
+                $baseCzk !== null && $qtyItem != 0.0 ? $baseCzk / $qtyItem : null);
+            $this->elUnitPrice($dom, $line, 'UnitPriceTaxInclusive', $unitPriceInclVat, $item,
+                $totalCzk !== null && $qtyItem != 0.0 ? $totalCzk / $qtyItem : null);
 
             // Na úrovni řádky je správný název <ClassifiedTaxCategory>
             // (na úrovni TaxSubTotal se používá <TaxCategory> — pozor na rozdíl).
@@ -402,25 +408,29 @@ final class IsdocExporter
         // VAT breakdown
         $taxTotal = $dom->createElementNS(self::NS, 'TaxTotal');
         $vatBreakdown = $invoice['vat_breakdown'] ?? [];
+        $czkBreakdown = $hasImportedCzk ? ($invoice['czk_recap']['breakdown'] ?? []) : [];
         $totalVat = 0.0;
-        foreach ($vatBreakdown as $row) {
+        foreach ($vatBreakdown as $idx => $row) {
             $rate = (float) $row['rate'];
             $base = (float) $row['base'];
             $vat  = (float) $row['vat'];
             $totalVat += $vat;
+            $baseCzk = $czkBreakdown[$idx]['base_czk'] ?? null;
+            $vatCzk = $czkBreakdown[$idx]['vat_czk'] ?? null;
+            $totalCzk = $czkBreakdown[$idx]['with_vat_czk'] ?? null;
 
             // TaxSubTotal řadí <…Curr> PŘED base sourozence (viz XSD sekvence).
             $sub = $dom->createElementNS(self::NS, 'TaxSubTotal');
-            $this->elAmountCurr($dom, $sub, 'TaxableAmount', $base, true);
-            $this->elAmountCurr($dom, $sub, 'TaxAmount', $vat, true);
-            $this->elAmountCurr($dom, $sub, 'TaxInclusiveAmount', $base + $vat, true);
+            $this->elAmountCurr($dom, $sub, 'TaxableAmount', $base, true, $baseCzk);
+            $this->elAmountCurr($dom, $sub, 'TaxAmount', $vat, true, $vatCzk);
+            $this->elAmountCurr($dom, $sub, 'TaxInclusiveAmount', $base + $vat, true, $totalCzk);
             // Required by ISDOC schema (zálohové odpočty — pro běžnou fakturu = 0)
             $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxableAmount', 0.0, true);
             $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxAmount', 0.0, true);
             $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxInclusiveAmount', 0.0, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxableAmount', $base, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxAmount', $vat, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxInclusiveAmount', $base + $vat, true);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxableAmount', $base, true, $baseCzk);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxAmount', $vat, true, $vatCzk);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxInclusiveAmount', $base + $vat, true, $totalCzk);
 
             // V TaxSubTotal se používá <TaxCategory> (ne <ClassifiedTaxCategory>!) —
             // sekvence: Percent + TaxScheme? + VATApplicable? + LocalReverseChargeFlag?
@@ -436,7 +446,8 @@ final class IsdocExporter
             $taxTotal->appendChild($sub);
         }
         // TaxTotal: TaxAmountCurr PŘED TaxAmount (viz XSD sekvence).
-        $this->elAmountCurr($dom, $taxTotal, 'TaxAmount', $totalVat, true);
+        $invoiceVatCzk = $hasImportedCzk ? (float) $invoice['import_total_vat_czk'] : null;
+        $this->elAmountCurr($dom, $taxTotal, 'TaxAmount', $totalVat, true, $invoiceVatCzk);
         $root->appendChild($taxTotal);
 
         // Monetary total
@@ -447,12 +458,17 @@ final class IsdocExporter
         $payable = (float) ($invoice['amount_to_pay'] ?? $tot);
         $rounding = (float) ($totals['rounding'] ?? 0);
         $taxInclusive = ($invoice['_direction'] ?? 'sale') === 'purchase' ? $tot : round($tot - $rounding, 2);
+        $invoiceBaseCzk = $hasImportedCzk ? (float) $invoice['import_total_without_vat_czk'] : null;
+        $taxInclusiveCzk = $hasImportedCzk ? $invoiceBaseCzk + $invoiceVatCzk : null;
+        $roundingCzk = $hasImportedCzk ? (float) $invoice['import_total_with_vat_czk'] - $taxInclusiveCzk : null;
+        $advanceCzk = $hasImportedCzk ? (float) $invoice['import_advance_paid_czk'] : null;
+        $payableCzk = $hasImportedCzk ? (float) $invoice['import_amount_to_pay_czk'] : null;
 
         // LegalMonetaryTotal řadí <…Curr> AŽ ZA base sourozence (opačně než
         // InvoiceLine / TaxTotal — viz XSD sekvence).
         $mon = $dom->createElementNS(self::NS, 'LegalMonetaryTotal');
-        $this->elAmountCurr($dom, $mon, 'TaxExclusiveAmount', $base, false);
-        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $taxInclusive, false);
+        $this->elAmountCurr($dom, $mon, 'TaxExclusiveAmount', $base, false, $invoiceBaseCzk);
+        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $taxInclusive, false, $taxInclusiveCzk);
         // Záloha je NEDAŇOVÁ proforma — DPH se přiznává až na tomto konečném dokladu,
         // takže `AlreadyClaimed*` (= již daňově zúčtováno z daňových záloh) jsou 0 a
         // `Difference*` = plná hodnota dokladu. Odečtení uhrazené zálohy se komunikuje
@@ -461,11 +477,11 @@ final class IsdocExporter
         // ale částka s DPH = celá záloha → nesmyslná implikovaná DPH).
         $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxExclusiveAmount', 0.0, false);
         $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxInclusiveAmount', 0.0, false);
-        $this->elAmountCurr($dom, $mon, 'DifferenceTaxExclusiveAmount', $base, false);
-        $this->elAmountCurr($dom, $mon, 'DifferenceTaxInclusiveAmount', $taxInclusive, false);
-        $this->elAmountCurr($dom, $mon, 'PayableRoundingAmount', $rounding, false);
-        $this->elAmountCurr($dom, $mon, 'PaidDepositsAmount', $advance, false);
-        $this->elAmountCurr($dom, $mon, 'PayableAmount', $payable, false);
+        $this->elAmountCurr($dom, $mon, 'DifferenceTaxExclusiveAmount', $base, false, $invoiceBaseCzk);
+        $this->elAmountCurr($dom, $mon, 'DifferenceTaxInclusiveAmount', $taxInclusive, false, $taxInclusiveCzk);
+        $this->elAmountCurr($dom, $mon, 'PayableRoundingAmount', $rounding, false, $roundingCzk);
+        $this->elAmountCurr($dom, $mon, 'PaidDepositsAmount', $advance, false, $advanceCzk);
+        $this->elAmountCurr($dom, $mon, 'PayableAmount', $payable, false, $payableCzk);
         $root->appendChild($mon);
 
         // Payment means (bank transfer) — Details má xs:choice mezi Cash a Money transfer
@@ -481,7 +497,7 @@ final class IsdocExporter
             $pm = $dom->createElementNS(self::NS, 'PaymentMeans');
             $payment = $dom->createElementNS(self::NS, 'Payment');
             // PaidAmount nemá v ISDOC Curr variantu → lokální měna (CZK).
-            $this->elAmount($dom, $payment, 'PaidAmount', $payable);
+            $this->elAmount($dom, $payment, 'PaidAmount', $payable, $payableCzk);
             $this->el($dom, $payment, 'PaymentMeansCode', $currencyCode === 'CZK' ? '42' : '31');
 
             $details = $dom->createElementNS(self::NS, 'Details');
@@ -615,15 +631,15 @@ final class IsdocExporter
      * (v měně faktury) převedeme kurzem: CZK = $value × kurz. Pro CZK fakturu je
      * kurz 1, výstup tedy beze změny.
      */
-    private function elAmount(\DOMDocument $dom, \DOMElement $parent, string $name, float $value): void
+    private function elAmount(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, ?float $local = null): void
     {
-        $this->el($dom, $parent, $name, $this->fmt($value * $this->exportRate));
+        $this->el($dom, $parent, $name, $this->fmt($local ?? $value * $this->exportRate));
     }
 
     /** @param array<string,mixed> $item */
-    private function elUnitPrice(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, array $item): void
+    private function elUnitPrice(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, array $item, ?float $local = null): void
     {
-        $localValue = $value * $this->exportRate;
+        $localValue = $local ?? $value * $this->exportRate;
         $formatted = TimeBillingExport::usesPreciseUnitPrice($item)
             ? TimeBillingExport::formatRate($localValue)
             : $this->fmt($localValue);
@@ -638,12 +654,12 @@ final class IsdocExporter
      * $currFirst řídí pořadí v sekvenci: ISDOC řadí <…Curr> PŘED base v InvoiceLine
      * a TaxTotal/TaxSubTotal, ale ZA base v LegalMonetaryTotal.
      */
-    private function elAmountCurr(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, bool $currFirst): void
+    private function elAmountCurr(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, bool $currFirst, ?float $local = null): void
     {
         if ($this->exportForeign && $currFirst) {
             $this->el($dom, $parent, $name . 'Curr', $this->fmt($value));
         }
-        $this->el($dom, $parent, $name, $this->fmt($value * $this->exportRate));
+        $this->elAmount($dom, $parent, $name, $value, $local);
         if ($this->exportForeign && !$currFirst) {
             $this->el($dom, $parent, $name . 'Curr', $this->fmt($value));
         }

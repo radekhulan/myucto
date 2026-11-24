@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -294,7 +295,7 @@ final class CashSettlementService
      */
     public function syncInvoice(int $supplierId, int $invoiceId, ?int $userId, ?int $eetDeviceId = null): array
     {
-        $invoice = $this->invoices->find($invoiceId);
+        $invoice = $this->invoices->find($invoiceId, includeImportedCzk: true);
         if ($invoice === null || (int) $invoice['supplier_id'] !== $supplierId) {
             return self::result(self::NOOP);
         }
@@ -339,11 +340,11 @@ final class CashSettlementService
             $ownPaid = $existing !== null
                 ? round((float) ($existing['settled_document_amount'] ?? $existing['total_amount']), 2)
                 : 0.0;
-            $remaining = self::localAmount(
-                round((float) $invoice['amount_to_pay'] - (float) $invoice['paid_total'] + $ownPaid, 2),
-                (string) ($invoice['currency'] ?? 'CZK'),
-                (float) ($invoice['exchange_rate'] ?? 0),
-            );
+            $previous = round((float) $invoice['paid_total'] - $ownPaid, 2);
+            $foreign = round((float) $invoice['amount_to_pay'] - $previous, 2);
+            $remaining = ($invoice['import_amount_to_pay_czk'] ?? null) === null
+                ? self::localAmount($foreign, (string) ($invoice['currency'] ?? 'CZK'), (float) ($invoice['exchange_rate'] ?? 0))
+                : IssuedCzkAmounts::allocated($invoice, $foreign, (float) $invoice['exchange_rate'], $previous);
         }
 
         if (self::cents($remaining) <= 0) {

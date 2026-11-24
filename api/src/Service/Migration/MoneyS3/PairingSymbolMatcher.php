@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
+
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use PDO;
@@ -1451,7 +1453,7 @@ final class PairingSymbolMatcher
             'booked' => [], 'manualLinks' => [], 'manualLinked' => [], 'settledEntries' => [], 'own' => [], 'ownPm' => []];
 
         foreach ([
-            'invoice' => 'SELECT d.id, d.invoice_type AS kind, d.exchange_rate, d.varsymbol, d.total_with_vat, cur.code FROM invoices d JOIN currencies cur ON cur.id = d.currency_id WHERE d.supplier_id = ?',
+            'invoice' => 'SELECT d.id, d.invoice_type AS kind, d.exchange_rate, d.amount_to_pay, d.import_amount_to_pay_czk, d.varsymbol, d.total_with_vat, cur.code FROM invoices d JOIN currencies cur ON cur.id = d.currency_id WHERE d.supplier_id = ?',
             'purchase_invoice' => 'SELECT d.id, d.document_kind AS kind, d.exchange_rate, d.varsymbol, d.total_with_vat, cur.code FROM purchase_invoices d JOIN currencies cur ON cur.id = d.currency_id WHERE d.supplier_id = ?',
         ] as $type => $sql) {
             $stmt = $pdo->prepare($sql);
@@ -1460,7 +1462,7 @@ final class PairingSymbolMatcher
                 $state['info'][$type][(int) $r['id']] = [
                     'kind' => (string) $r['kind'], 'currency' => (string) $r['code'], 'number' => (string) $r['varsymbol'],
                     'negative' => (float) $r['total_with_vat'] < 0, 'total' => abs((float) $r['total_with_vat']),
-                    'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
+                    'rate' => IssuedCzkAmounts::settlementRate($r) ?: null,
                 ];
             }
         }

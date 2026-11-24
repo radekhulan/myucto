@@ -13,12 +13,14 @@ namespace MyInvoice\Service\Invoice;
  * teprve potom se sčítají do `total_without_vat_czk` / `total_vat_czk`.
  * Tím se vyhneme drobným rozdílům 0,01 CZK způsobeným násobnými přepočty.
  *
- * Položky (line items) se NEPŘEPOČÍTÁVAJÍ — viz spec.
+ * Převzaté částky v Kč se v příslušné skupině přičtou přímo. Kurzem se násobí
+ * pouze zbytek skupiny.
  */
 final class CzkRecap
 {
     /**
      * @param list<array{rate: float, base: float, vat: float}> $vatBreakdown
+     * @param list<array<string,mixed>> $items
      * @return array{
      *   rate: float,
      *   rate_date: string,
@@ -34,14 +36,18 @@ final class CzkRecap
         float $exchangeRate,
         string $rateDate,
         bool $fallbackUsed = false,
+        array $items = [],
+        ?float $sourceTotal = null,
     ): array {
         $rows = [];
         $totalBase = 0.0;
         $totalVat  = 0.0;
+        $imported = self::importedByRate($items);
 
         foreach ($vatBreakdown as $b) {
-            $baseCzk = self::multiplyHalfUp((float) $b['base'], $exchangeRate);
-            $vatCzk  = self::multiplyHalfUp((float) $b['vat'],  $exchangeRate);
+            $source = $imported[self::vatKey((float) $b['rate'])] ?? [];
+            $baseCzk = self::groupAmount((float) $b['base'], $exchangeRate, $source['base'] ?? []);
+            $vatCzk = self::groupAmount((float) $b['vat'], $exchangeRate, $source['vat'] ?? []);
             $rows[] = [
                 'rate'         => (float) $b['rate'],
                 'base_czk'     => $baseCzk,
@@ -63,7 +69,7 @@ final class CzkRecap
             'breakdown'             => $rows,
             'total_without_vat_czk' => $totalBase,
             'total_vat_czk'         => $totalVat,
-            'total_with_vat_czk'    => self::roundHalfUp($totalBase + $totalVat),
+            'total_with_vat_czk'    => $sourceTotal ?? self::roundHalfUp($totalBase + $totalVat),
         ];
     }
 
@@ -87,32 +93,59 @@ final class CzkRecap
     {
         if ($exchangeRate <= 0) return [];
 
+        $items = array_filter($items, static fn (array $item): bool => empty($item['oss_applicable']));
+        $imported = self::importedByRate($items);
         $groups = [];
         foreach ($items as $item) {
-            if (!empty($item['oss_applicable'])) continue;
-
-            $vat = (float) ($item['total_vat'] ?? 0);
-            if (abs($vat) < 0.000001) continue;
-
             $rate = (float) ($item['vat_rate_snapshot'] ?? 0);
-            $key = number_format($rate, 2, '.', '');
+            $key = self::vatKey($rate);
             if (!isset($groups[$key])) {
                 $groups[$key] = ['rate' => $rate, 'vat' => 0.0];
             }
-            $groups[$key]['vat'] += $vat;
+            $groups[$key]['vat'] += (float) ($item['total_vat'] ?? 0);
         }
 
         $rows = [];
-        foreach ($groups as $group) {
-            $vat = round((float) $group['vat'], 2);
+        foreach ($groups as $key => $group) {
+            $vat = self::groupAmount(self::roundHalfUp($group['vat']), $exchangeRate, $imported[$key]['vat'] ?? []);
             if (abs($vat) < 0.000001) continue;
             $rows[] = [
                 'rate'    => (float) $group['rate'],
-                'vat_czk' => self::multiplyHalfUp($vat, $exchangeRate),
+                'vat_czk' => $vat,
             ];
         }
         usort($rows, static fn (array $a, array $b) => $b['rate'] <=> $a['rate']);
         return $rows;
+    }
+
+    /** @param list<array<string,mixed>> $items */
+    private static function importedByRate(array $items): array
+    {
+        $groups = [];
+        foreach (InvoiceItemKind::amountLines($items) as $item) {
+            $key = self::vatKey((float) ($item['vat_rate_snapshot'] ?? 0));
+            foreach (['base' => 'total_without_vat', 'vat' => 'total_vat'] as $kind => $field) {
+                $source = $item["import_tax_{$kind}_czk"] ?? null;
+                if ($source !== null) {
+                    $groups[$key][$kind] ??= ['foreign' => 0.0, 'czk' => 0.0];
+                    $groups[$key][$kind]['foreign'] += (float) $item[$field];
+                    $groups[$key][$kind]['czk'] += (float) $source;
+                }
+            }
+        }
+        return $groups;
+    }
+
+    private static function vatKey(float $rate): string
+    {
+        return number_format($rate, 2, '.', '');
+    }
+
+    private static function groupAmount(float $value, float $exchangeRate, array $source): float
+    {
+        return self::roundHalfUp(
+            ($source['czk'] ?? 0.0) + self::multiplyHalfUp($value - ($source['foreign'] ?? 0.0), $exchangeRate),
+        );
     }
 
     /**

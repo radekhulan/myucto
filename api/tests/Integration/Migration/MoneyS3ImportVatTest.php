@@ -343,21 +343,27 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
     /**
      * Doklad v cizí měně FP25004 (100 + 21 EUR, kurz 25 = 2 500 + 525 Kč z Money) se ve firmě
      * s eurem v číselníku měn převezme v EUR; firma bez eura ho převezme v Kč jako dřív.
-     * Přiznání DPH, KH, rekonciliace i deník obou firem se musí shodovat na haléř.
+     * Vydaná FV25001 má daň 8,39 EUR a 210 Kč (rozdíl 0,25 Kč). Přiznání DPH, KH,
+     * rekonciliace i deník obou firem se musí shodovat na haléř.
      */
     public function testForeignCurrencyDocumentIsTakenOverInItsCurrencyWithIdenticalReturn(): void
     {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/issued-fx.lz', SyntheticAgenda::files(issuedCurrencyRounding: true));
+        $backup = Ms3Backup::extract($this->tmp . '/issued-fx.lz', $this->tmp . '/issued-fx');
+        $import = fn (int $supplierId): ImportProtocol => $this->importer->run(
+            $supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], []),
+        );
         $foreign = $this->supplier();
         $this->db->pdo()->prepare(
             "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'EUR', 'EUR', '€', 'Euro', 'Euro', 2, 1, 0)"
         )->execute([$foreign]);
-        $protocol = $this->import($foreign);
+        $protocol = $import($foreign);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         foreach ($protocol->get('reconciliation') as $year) {
             self::assertTrue($year['ok'], json_encode($year, JSON_UNESCAPED_UNICODE) ?: '');
         }
         $home = $this->supplier();
-        $inCrowns = $this->import($home);
+        $inCrowns = $import($home);
         self::assertFalse($inCrowns->hasErrors(), $this->explain($inCrowns));
 
         $doc = static fn (Connection $db, int $supplierId): array => (function () use ($db, $supplierId): array {
@@ -373,9 +379,17 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         self::assertSame(['CZK', null, '2500.00', '525.00', '3025.00'], array_slice($czk, 0, 5));
         self::assertStringContainsString('doklad v EUR, převzat v Kč (měna EUR není v číselníku měn firmy)', (string) $czk[5]);
 
+        $issued = $this->db->pdo()->prepare(
+            "SELECT c.code, i.total_with_vat, i.import_amount_to_pay_czk, ii.total_vat, ii.import_tax_vat_czk
+               FROM invoices i JOIN currencies c ON c.id = i.currency_id JOIN invoice_items ii ON ii.invoice_id = i.id
+              WHERE i.supplier_id = ? AND i.varsymbol = 'FV25001'"
+        );
+        $issued->execute([$foreign]);
+        self::assertSame([['EUR', '48.39', '1210.00', '8.39', '210.00']], $issued->fetchAll(PDO::FETCH_NUM));
+
         $dph = $this->container(DphPriznaniBuilder::class);
         $kh = $this->container(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
-        foreach ([4] as $month) {
+        foreach ([4, 5] as $month) {
             self::assertSame($dph->build($home, 2025, $month, 'monthly')['summary']['lines'], $dph->build($foreign, 2025, $month, 'monthly')['summary']['lines']);
             $khHome = $kh->build($home, 2025, $month);
             $khForeign = $kh->build($foreign, 2025, $month);
@@ -394,7 +408,7 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         self::assertSame($homeJournal, $journal->fetchAll(PDO::FETCH_KEY_PAIR));
 
         // Opakovaný převod porovná doklad v EUR s Money v Kč - změna to není.
-        $again = $this->import($foreign);
+        $again = $import($foreign);
         self::assertNotContains('changed_in_money', array_column(array_merge(...array_map(static fn (array $s): array => $s['messages'] ?? [], $again->toArray()['steps'])), 'code'));
     }
 }

@@ -114,7 +114,7 @@ final class PaymentMatchAuditChecker
                     bt.currency AS tx_currency, bs.currency AS stmt_currency,
                     bt.counterparty_name AS counterparty_name, bt.card_last4 AS card_last4,
                     i.id AS doc_id, i.varsymbol AS doc_no, i.exchange_rate AS doc_rate,
-                    i.amount_to_pay AS doc_amount_to_pay, i.status AS doc_status,
+                    i.amount_to_pay AS doc_amount_to_pay, i.import_amount_to_pay_czk, i.status AS doc_status,
                     cur.code AS doc_currency, cl.company_name AS partner_name,
                     (SELECT COUNT(*) FROM invoice_payments ip WHERE ip.invoice_id = i.id) AS payment_count,
                     (SELECT SUM(ip2.amount) FROM invoice_payments ip2
@@ -237,7 +237,7 @@ final class PaymentMatchAuditChecker
             } else {
                 // CZK tx hradí cizoměnový doklad — očekávaná CZK hodnota = doc × kurz dokladu.
                 $rate = $docRate > 0 ? $docRate : 1.0;
-                $expected = $docAmountToPay * $rate;
+                $expected = (float) ($row['import_amount_to_pay_czk'] ?? $docAmountToPay * $rate);
                 $tolerance = max(self::CZK_TOLERANCE, $expected * self::FX_TOLERANCE_PCT);
             }
             // Dobropis/vratka má `amount_to_pay` ZÁPORNÉ, kdežto částka transakce se sem

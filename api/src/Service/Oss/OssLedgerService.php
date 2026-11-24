@@ -86,7 +86,8 @@ final class OssLedgerService
         // Vypnutý OSS sem už nedojde — OssReportAction vrací 409 dřív, než se preview zavolá,
         // a UI stránku bez zapnutého režimu vůbec nezpřístupní. Varování proto odpadlo.
 
-        $rows = $this->vatLedger->ossRows($supplierId, $start, $end);
+        $returnCurrency = strtoupper((string) ($settings['oss_return_currency'] ?? 'EUR'));
+        $rows = $this->vatLedger->ossRows($supplierId, $start, $end, returnInCzk: $returnCurrency === 'CZK');
         $countries = [];
         $corrections = [];
         $invoiceIds = [];
@@ -97,7 +98,6 @@ final class OssLedgerService
         $invalidCorrectionCount = 0;
         $conversionMissingCount = 0;
         $manualReviewCount = 0;
-        $returnCurrency = strtoupper((string) ($settings['oss_return_currency'] ?? 'EUR'));
         $currentPeriod = sprintf('%04dQ%d', $year, $quarter);
 
         // Kurz se zjišťuje JEDNOU za období, ne per doklad — viz docblock třídy.

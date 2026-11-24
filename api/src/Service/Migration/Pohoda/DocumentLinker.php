@@ -8,11 +8,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
+use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
@@ -807,7 +809,7 @@ final class DocumentLinker
     {
         $pdo = $this->db->pdo();
         $invoice = $pdo->prepare(
-            "SELECT i.id, i.status, i.paid_total, i.exchange_rate, cur.code AS currency,
+            "SELECT i.id, i.status, i.paid_total, i.amount_to_pay, i.import_amount_to_pay_czk, i.exchange_rate, cur.code AS currency,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = i.id) AS recorded
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?"
@@ -830,9 +832,9 @@ final class DocumentLinker
             $this->linkIssuedPaymentTaxDocument($ctx, $l, (int) $existingId, $kind, $txId, $cashId);
             return;
         }
-        $rate = $row['exchange_rate'] !== null && (float) $row['exchange_rate'] > 0 ? (float) $row['exchange_rate'] : null;
+        $rate = IssuedCzkAmounts::settlementRate($row);
         $amount = abs((float) $l['amount']);
-        if ((string) $row['currency'] !== 'CZK' && $rate !== null) {
+        if ((string) $row['currency'] !== 'CZK' && $rate > 0) {
             $amount = $amount / $rate;
         }
         $amount = round(min($amount, (float) $row['paid_total'] - (float) $row['recorded']), 2);
@@ -1284,20 +1286,26 @@ final class DocumentLinker
         $pdo = $this->db->pdo();
         $s = $ctx->supplierId;
         $account = "(ca.account_code LIKE '324%' OR COALESCE(pa.account_code, '') LIKE '324%')";
+        $advanceAccount = "fca.account_code LIKE '324%'";
+        $bankReceipt = AdvanceSettlementEvidenceReader::proformaBankReceiptCzkSql($advanceAccount);
+        $cashReceipt = AdvanceSettlementEvidenceReader::proformaCashReceiptCzkSql($advanceAccount);
+        $fallback = IssuedCzkAmounts::allocationSql('ipf', 'ip.amount', 'ip.amount');
         $advances = [];
         $bySymbol = [];
         foreach ($pdo->query(
-            "SELECT a.id, a.client_id, a.varsymbol,
-                    (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.supplier_id = a.supplier_id AND ip.invoice_id = a.id) AS paid,
+            "SELECT ipf.id, ipf.client_id, ipf.varsymbol,
+                    (SELECT COALESCE(SUM(CASE WHEN ipf.import_amount_to_pay_czk IS NULL THEN ip.amount
+                                             ELSE COALESCE({$bankReceipt}, {$cashReceipt}, {$fallback}) END), 0)
+                       FROM invoice_payments ip WHERE ip.supplier_id = ipf.supplier_id AND ip.invoice_id = ipf.id) AS paid,
                     (SELECT COALESCE(SUM(l.signed_amount), 0) FROM invoices ch
                        JOIN journal_entries e ON e.supplier_id = ch.supplier_id AND e.source_type = 'invoice' AND e.source_id = ch.id AND e.reversed_by IS NULL
                        JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'debit'
                        JOIN chart_of_accounts ca ON ca.id = l.account_id LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
-                      WHERE ch.supplier_id = a.supplier_id AND ch.parent_invoice_id = a.id AND {$account}) AS linked,
-                    (SELECT COALESCE(SUM(iad.amount), 0) FROM invoice_advance_deductions iad WHERE iad.supplier_id = a.supplier_id AND iad.advance_invoice_id = a.id) AS deducted
-               FROM invoices a
-              WHERE a.supplier_id = {$s} AND a.invoice_type = 'proforma' AND a.status NOT IN ('draft', 'cancelled')
-              ORDER BY a.issue_date, a.id"
+                      WHERE ch.supplier_id = ipf.supplier_id AND ch.parent_invoice_id = ipf.id AND {$account}) AS linked,
+                    (SELECT COALESCE(SUM(iad.amount), 0) FROM invoice_advance_deductions iad WHERE iad.supplier_id = ipf.supplier_id AND iad.advance_invoice_id = ipf.id) AS deducted
+               FROM invoices ipf
+              WHERE ipf.supplier_id = {$s} AND ipf.invoice_type = 'proforma' AND ipf.status NOT IN ('draft', 'cancelled')
+              ORDER BY ipf.issue_date, ipf.id"
         )->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $advances[(int) $r['id']] = ['client' => (int) $r['client_id'], 'left' => round((float) $r['paid'] - (float) $r['linked'] - (float) $r['deducted'], 2)];
             $symbol = preg_replace('/\D+/', '', (string) $r['varsymbol']) ?? '';

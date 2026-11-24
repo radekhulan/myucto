@@ -14,10 +14,12 @@ vi.mock('@/api/pamicaPosting', () => ({
   payrollPostingImportsApi: { preview: m.preview, apply: m.apply, saveCodeMap: m.saveCodeMap, codeMap: m.codeMap },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: () => Promise.resolve([
-  { account_code: '331', name: 'Zaměstnanci', is_active: true },
-  { account_code: '331.000', name: 'Zaměstnanci - analytika', is_active: true },
-  { account_code: '521', name: 'Mzdové náklady', is_active: true },
-  { account_code: '524', name: 'Zákonné pojištění', is_active: true },
+  { id: 1, parent_id: null, account_code: '331', name: 'Zaměstnanci', is_active: true },
+  { id: 2, parent_id: 1, account_code: '331.000', name: 'Zaměstnanci - analytika', is_active: true },
+  { id: 3, parent_id: null, account_code: '521', name: 'Mzdové náklady', is_active: true },
+  { id: 4, parent_id: null, account_code: '524', name: 'Zákonné pojištění', is_active: true },
+  { id: 5, parent_id: null, account_code: '379', name: 'Jiné závazky', is_active: true },
+  { id: 6, parent_id: 5, account_code: '379.100', name: 'Srážky ze mzdy', is_active: true },
 ]) } }))
 vi.mock('@/composables/useToast',() => ({ useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
@@ -71,7 +73,7 @@ function wizard(file: File | null) {
 const stubs = { RouterLink: { props: ['to'], template: '<a><slot /></a>' } }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('Průvodce PAMICA: zaúčtování mezd z XML', () => {
@@ -210,5 +212,68 @@ describe('Náhled zaúčtování mezd', () => {
     expect(wrapper.find('[data-testid="payroll-posting-error"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="payroll-posting-code-map"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="action-apply"]').exists()).toBe(true)
+  })
+
+  it('prázdné předkontace mají vlastní záložku a návrh se použije až po uložení', async () => {
+    const saved = [
+      { code: '7Int', debit_account_code: '521', credit_account_code: '331.000' },
+      { code: '@EMPTY_COMMITMENT', debit_account_code: '331.000', credit_account_code: '379.100' },
+      { code: '@EMPTY_INTERNAL', debit_account_code: '521', credit_account_code: '331.000' },
+    ]
+    m.preview.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'unmapped_accounting_codes', can_write: true,
+      unmapped_codes: [
+        { code: '7Int', usage: ['internal'], count: 1, samples: [] },
+        { code: '@EMPTY_COMMITMENT', usage: ['commitment'], count: 1, suggested_accounts: { debit: '331', credit: '379.100' },
+          samples: [{ document: 'Závazek 005', text: 'Srážka ze mzdy', amount: 580 }] },
+        { code: '@EMPTY_INTERNAL', usage: ['internal'], count: 1, suggested_accounts: null, samples: [] },
+      ],
+    } } } })
+    m.preview.mockResolvedValueOnce(preview({ code_map: saved, accounts: [], checks: [], can_apply: true }))
+    m.saveCodeMap.mockResolvedValue({ code_map: saved })
+    const wrapper = mount(PayrollPostingImport, { props: { file: new File(['<xml/>'], 'mzdy.xml') }, global: { stubs } })
+    await flushPromises()
+
+    const tab = (value: string) => wrapper.get(`[data-testid="payroll-posting-code-tab-${value}"]`)
+    const inputs = (code: string) => wrapper.get(`[data-testid="payroll-posting-code-${code}"]`).findAll('input')
+    const save = wrapper.get('[data-testid="payroll-posting-code-map-save"]')
+    expect(tab('missing').attributes('aria-selected')).toBe('true')
+    const deduction = wrapper.get('[data-testid="payroll-posting-code-@EMPTY_COMMITMENT"]')
+    expect(deduction.text()).toContain('payroll_posting_import.code_map.missing_commitment')
+    expect(deduction.text()).toContain('Srážka ze mzdy')
+    expect(deduction.text()).not.toContain('@EMPTY_COMMITMENT')
+    expect(inputs('@EMPTY_COMMITMENT').map(i => (i.element as HTMLInputElement).value)).toEqual(['331.000', '379.100'])
+    expect(inputs('@EMPTY_INTERNAL').map(i => (i.element as HTMLInputElement).value)).toEqual(['', ''])
+    expect(wrapper.find('[data-testid="action-apply"]').exists()).toBe(false)
+    expect(m.saveCodeMap).not.toHaveBeenCalled()
+
+    await inputs('@EMPTY_INTERNAL')[0].setValue('521')
+    await tab('codes').trigger('click')
+    await inputs('7Int')[0].setValue('521')
+    await inputs('7Int')[1].setValue('331.000')
+    expect(save.attributes('disabled')).toBeDefined()
+    await tab('missing').trigger('click')
+    expect((inputs('@EMPTY_INTERNAL')[0].element as HTMLInputElement).value).toBe('521')
+    await inputs('@EMPTY_INTERNAL')[1].setValue('331.000')
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(m.saveCodeMap).toHaveBeenCalledWith(saved)
+    expect(m.preview).toHaveBeenCalledTimes(2)
+    expect(m.apply).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="action-codes"]').trigger('click')
+    expect(inputs('@EMPTY_COMMITMENT').map(i => (i.element as HTMLInputElement).value)).toEqual(['331.000', '379.100'])
+  })
+
+  it('uživateli s právem číst zobrazí chybějící předkontaci bez možnosti ji uložit', async () => {
+    m.preview.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'unmapped_accounting_codes', can_write: false,
+      unmapped_codes: [{ code: '@EMPTY_COMMITMENT', usage: ['commitment'], count: 1, samples: [],
+        suggested_accounts: { debit: '331', credit: '379.100' } }],
+    } } } })
+    const wrapper = mount(PayrollPostingImport, { props: { file: new File(['<xml/>'], 'mzdy.xml') }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="payroll-posting-code-map"]').text()).toContain('payroll_posting_import.rights_missing')
+    expect(wrapper.get('[data-testid="payroll-posting-code-map-save"]').attributes('disabled')).toBeDefined()
   })
 })

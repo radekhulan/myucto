@@ -10,6 +10,7 @@ use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -137,7 +138,7 @@ final class MatchCandidateProvider
         $to = $day->modify('+' . self::FALLBACK_DAY_WINDOW . ' days')->format('Y-m-d');
         $base = "SELECT 'invoice' AS candidate_type, i.id, i.client_id, i.varsymbol AS ref, i.payment_variable_symbol AS payment_vs,
                         i.amount_to_pay, i.paid_total, i.invoice_type, i.status,
-                        i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
+                        i.exchange_rate, i.import_amount_to_pay_czk, i.issue_date, i.due_date, cur.code AS currency,
                         c.company_name AS party, i.parent_invoice_id
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
@@ -195,7 +196,7 @@ final class MatchCandidateProvider
         $stmt = $this->db->pdo()->prepare(
             "SELECT 'invoice' AS candidate_type, i.id, i.client_id, i.varsymbol AS ref, i.payment_variable_symbol AS payment_vs,
                     i.amount_to_pay, i.paid_total, i.invoice_type, i.status,
-                    i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
+                    i.exchange_rate, i.import_amount_to_pay_czk, i.issue_date, i.due_date, cur.code AS currency,
                     c.company_name AS party, i.parent_invoice_id
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -268,7 +269,7 @@ final class MatchCandidateProvider
         $remaining = round((float) $row['amount_to_pay'] - (float) ($row['paid_total'] ?? 0.0), 2);
         if ($remaining <= 0.0) return null;
         $invoiceCurrency = strtoupper((string) $row['currency']);
-        $converted = $this->toTransactionCurrency($remaining, $invoiceCurrency, (float) ($row['exchange_rate'] ?? 0.0), $txCurrency);
+        $converted = $this->toTransactionCurrency($remaining, $invoiceCurrency, IssuedCzkAmounts::settlementRate($row), $txCurrency);
         if ($converted === null) return null;
         $converted = round($converted, 2);
         $fx = $invoiceCurrency !== $txCurrency;

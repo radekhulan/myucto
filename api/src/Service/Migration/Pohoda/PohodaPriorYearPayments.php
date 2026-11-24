@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
@@ -77,7 +78,7 @@ final class PohodaPriorYearPayments
         foreach (array_chunk(array_keys($amounts), 500) as $chunk) {
             $in = implode(',', array_map('intval', $chunk));
             $rows = $pdo->prepare(
-                "SELECT i.id, cur.code AS currency, i.exchange_rate, i.paid_total,
+                "SELECT i.id, cur.code AS currency, i.exchange_rate, i.amount_to_pay, i.import_amount_to_pay_czk, i.paid_total,
                         ABS(i.total_with_vat) - i.advance_paid_amount AS to_pay,
                         own.id AS payment_id, own.amount AS payment_amount,
                         COALESCE(other.total, 0) AS other_total, COALESCE(other.earlier, 0) AS other_earlier
@@ -93,9 +94,9 @@ final class PohodaPriorYearPayments
             $rows->execute([self::SOURCE, self::NOTE, $periodStart, self::SOURCE, self::NOTE, $supplierId]);
             foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $amount = (float) $amounts[(int) $r['id']];
-                $rate = $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null;
+                $rate = IssuedCzkAmounts::settlementRate($r);
                 if ((string) $r['currency'] !== 'CZK') {
-                    if ($rate === null) {
+                    if ($rate <= 0) {
                         continue;
                     }
                     $amount /= $rate;

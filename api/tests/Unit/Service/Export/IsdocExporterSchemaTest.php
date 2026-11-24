@@ -368,6 +368,43 @@ final class IsdocExporterSchemaTest extends TestCase
         self::assertSame('3049.20',  $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableAmountCurr'));
     }
 
+    public function testForeignImportUsesSourceAmountsInLocalIsdocFields(): void
+    {
+        $invoice = $this->invoice([
+            'currency' => 'EUR',
+            'exchange_rate' => 25.12,
+            'amount_to_pay' => 8.10,
+            'advance_paid_amount' => 4.0,
+            'import_total_without_vat_czk' => 251.21,
+            'import_total_vat_czk' => 52.76,
+            'import_total_with_vat_czk' => 304.0,
+            'import_advance_paid_czk' => 100.0,
+            'import_amount_to_pay_czk' => 204.0,
+            'items' => [[
+                'quantity' => 1.0,
+                'unit_price_without_vat' => 10.0,
+                'vat_rate_snapshot' => 21.0,
+                'total_without_vat' => 10.0,
+                'total_vat' => 2.10,
+                'total_with_vat' => 12.10,
+                'import_tax_base_czk' => 251.21,
+                'import_tax_vat_czk' => 52.76,
+            ]],
+            'vat_breakdown' => [['rate' => 21.0, 'base' => 10.0, 'vat' => 2.10]],
+            'totals' => ['without_vat' => 10.0, 'with_vat' => 12.10, 'rounding' => 0.0],
+            'czk_recap' => ['breakdown' => [['rate' => 21.0, 'base_czk' => 251.21, 'vat_czk' => 52.76, 'with_vat_czk' => 303.97]]],
+        ]);
+        $xml = $this->exporter->buildXml($invoice);
+
+        $this->assertValidIsdoc($xml);
+        self::assertSame('251.21', $this->xpathOne($xml, '//i:InvoiceLine/i:LineExtensionAmount'));
+        self::assertSame('52.76', $this->xpathOne($xml, '//i:InvoiceLine/i:LineExtensionTaxAmount'));
+        self::assertSame('52.76', $this->xpathOne($xml, '//i:TaxSubTotal/i:TaxAmount'));
+        self::assertSame('204.00', $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableAmount'));
+        self::assertSame('8.10', $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableAmountCurr'));
+        self::assertSame('0.03', $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableRoundingAmount'));
+    }
+
     public function testDomesticInvoiceEmitsNoCurrElementsAndIsUnchanged(): void
     {
         $xml = $this->exporter->buildXml($this->invoice(['amount_to_pay' => 3049.2]));

@@ -370,7 +370,7 @@ Po nahrání originálního GPC se jeho pohyby propojí s již evidovanými pohy
 
 ### 29.13.6 Detail pohybu, zaúčtování a mzdy
 
-Dialog **Zaúčtovat** předvyplňuje analytiku vlastního bankovního účtu a u spárované úhrady kontaci podle faktury. Používá stejný výpočet jako účetní zpracování, včetně víceřádkového rozúčtování. Pokud nelze kontaci bezpečně připravit, zobrazí důvod a odeslání zablokuje. Po ručním zrušení zaúčtování zůstává faktura spárovaná a kontaci lze znovu nabídnout; zápis se neobnoví samotným otevřením dialogu.
+Dialog **Zaúčtovat** předvyplňuje analytiku vlastního bankovního účtu a u spárované úhrady kontaci podle faktury. Používá stejný výpočet jako účetní zpracování, včetně víceřádkového rozúčtování. Pokud nelze kontaci bezpečně připravit, zobrazí důvod a odeslání zablokuje. Při chybě ukládání zobrazí v dialogu kód a hlášku serveru. Po ručním zrušení zaúčtování zůstává faktura spárovaná a kontaci lze znovu nabídnout. Zápis se otevřením dialogu nevytváří.
 
 U cizoměnového pohybu lze rozúčtování na víc řádků zadat i v měně pohybu: zaškrtněte **Zadávat částky v EUR** (podle měny pohybu) a opište částky z podkladu, například z rozpisu věřitele. Na koruny je přepočte týž kurz ČNB, jakým se zaúčtuje banka. Bankovní řádek dostane přesně korunovou částku z výpisu a haléřový rozdíl po zaokrouhlení jednotlivých řádků se vyrovná na řádku s největší částkou; dialog u každého řádku ukáže výslednou korunovou částku. Saldokonta (311, 321, 314, 324, 325) takhle zadat nejde, protože pohledávka i závazek se odúčtovávají kurzem předpisu. Ty rozúčtujte v korunách včetně kurzového rozdílu 563/663.
 
@@ -548,7 +548,9 @@ Faktura v cizí měně (EUR, USD …) placená **stejnou cizí měnou** bankovn�
 - banka (**221**) se zaúčtuje v **CZK hodnotě skutečné úhrady**, tedy cizí částka přepočtená pevným měsíčním nebo ročním kurzem firmy, pokud je zvolený, jinak kurzem ČNB ke dni bankovní transakce,
 - rozdíl mezi oběma jde na **563** (kurzová ztráta) nebo **663** (kurzový zisk), stejné účty jako u ročního [kurzového přecenění](52_Ucetni_denik.md).
 
-U platby stejnou cizí měnou fungují i částečné a sloučené úhrady (poměrná část na alokaci). CZK karetní platba za cizoměnový doklad se automaticky účtuje jen při jednoznačné vazbě 1:1 na celý doklad. Drobný nealokovaný zbytek do jedné jednotky cizí měny se vede odděleně jako provozní vyrovnání na **548/648**, nikoli jako kurzový rozdíl. Mimo automatiku zůstává: **křížová cizí měna** (faktura v EUR placená v USD), **CZK doklad placený cizí měnou** a **zálohová (proforma) faktura / zálohová přijatá faktura v cizí měně**. Valutová pokladna umí samostatné hotovostní prodeje, nákupy a ostatní pohyby, ale úhradu cizoměnové faktury z pokladny záměrně blokuje; viz [Pokladna](32_Pokladna.md).
+U platby stejnou cizí měnou fungují i částečné a sloučené úhrady (poměrná část na alokaci). Drobný nealokovaný zbytek do jedné jednotky cizí měny se vede odděleně jako provozní vyrovnání na **548/648**. Křížová úhrada běžné faktury se automaticky zaúčtuje jen tehdy, pokud lze jednoznačně doložit částku odúčtovaného saldokonta.
+
+Spárovaná **zálohová faktura placená ve stejné měně** se zaúčtuje kurzem platby na **221 MD / 324 Dal** u přijaté zálohy nebo **314 MD / 221 Dal** u poskytnuté zálohy. Oba řádky nesou měnu, kurz a částku v měně. Při platbě zálohy nevzniká kurzový rozdíl. Při odpočtu bankovní zálohy v hlavičce konečné faktury se případný rozdíl mezi hodnotou úhrady a hodnotou odpočtu účtuje na konečné faktuře. Platba zálohy v jiné měně zůstává v návrzích k ručnímu ověření.
 
 Historické spárované transakce zaúčtuje správce příkazem `php api/bin/backfill-bank-posting.php --supplier=<ID> --apply`. Bez `--apply` se vypíše pouze dry-run. Back-fill respektuje existující párování i bez VS, bezpečně naváže jedinou odpovídající starší platbu a plně kryté položky označené jako částečné uzavře jako plné. Nejednoznačné nebo skutečně částečné vazby nechá k ruční kontrole.
 

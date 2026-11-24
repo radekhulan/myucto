@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import type { BankTransaction } from '@/api/bank'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   bankPostingApi, bankPostingErrorMessage,
   type AiManualPostingSuggestion, type BankPostingRule, type BankPostingRulePayload, type PostResult,
@@ -266,7 +267,15 @@ function toggleRule() {
 watch(counterIsSaldo, (saldo) => { if (saldo) withRule.value = false })
 
 const saving = ref(false)
+const submitError = ref<string | null>(null)
 useHotkey('escape', () => { if (!saving.value) emit('close') })
+
+function postingError(e: unknown): string {
+  const code = apiErrorCode(e)
+  if (!code) return bankPostingErrorMessage(e, t)
+  const message = apiErrorMessage(e, '') || bankPostingErrorMessage(e, t)
+  return `${message} (${code})`
+}
 
 async function requestAiSuggestion() {
   const query = aiQuery.value.trim()
@@ -310,6 +319,7 @@ function onTemplateApplied(rule: BankPostingRule) {
 async function submit() {
   if (!canSubmit.value || saving.value) return
   saving.value = true
+  submitError.value = null
   try {
     const payload = splitMode.value
       ? {
@@ -344,7 +354,7 @@ async function submit() {
       : { debit: debit.value, credit: credit.value }
     emit('posted', { result: res, ...primary })
   } catch (e) {
-    toast.error(bankPostingErrorMessage(e, t))
+    submitError.value = postingError(e)
   } finally {
     saving.value = false
   }
@@ -354,7 +364,7 @@ async function loadPreview() {
   try {
     const preview = await bankPostingApi.previewTransaction(props.tx.id)
     if (preview.reason || (preview.matched && preview.lines.length === 0)) {
-      previewError.value = bankPostingErrorMessage({ response: { data: { error: { code: preview.reason } } } }, t)
+      previewError.value = postingError({ response: { data: { error: { code: preview.reason, message: preview.message } } } })
       return
     }
     const debitLine = preview.lines.find(l => l.side === 'debit')
@@ -362,7 +372,11 @@ async function loadPreview() {
     const simple = preview.lines.length === 2 && debitLine && creditLine
       && Math.abs(debitLine.amount - creditLine.amount) < 0.005
       && absAmountCzk.value != null && Math.abs(debitLine.amount - absAmountCzk.value) < 0.005
-    if (preview.lines.some(line => line.currency_code != null || line.fx_rate != null || line.amount_foreign != null)
+    const hasTrace = preview.lines.some(line => line.currency_code != null || line.fx_rate != null || line.amount_foreign != null)
+    const samePaymentTrace = simple && isForeign.value && fxRate.value != null
+      && preview.lines.every(line => line.currency_code === props.currency
+        && line.fx_rate === fxRate.value && line.amount_foreign === absAmount.value)
+    if ((hasTrace && !samePaymentTrace)
       || (preview.lines.length && !simple && isForeign.value)) {
       previewError.value = bankPostingErrorMessage({ response: { data: { error: { code: 'cross_currency_manual_only' } } } }, t)
       return
@@ -381,7 +395,7 @@ async function loadPreview() {
       splitMode.value = true
     }
   } catch (e) {
-    previewError.value = bankPostingErrorMessage(e, t)
+    previewError.value = postingError(e)
   } finally {
     applyingPreview = false
     previewLoading.value = false
@@ -595,7 +609,7 @@ onMounted(async () => {
               <td class="py-0.5 font-mono text-left" :class="accountByCode[line.account_code] ? 'text-neutral-700' : 'text-danger-500'">
                 {{ t(line.side === 'debit' ? 'bank.posting.debit' : 'bank.posting.credit') }} {{ line.account_code || '—' }}
               </td>
-              <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(line.amount ?? 0, 'CZK') }}</td>
+              <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(line.amount ?? 0, splitUnit) }}</td>
             </tr>
           </tbody>
           <tbody v-else>
@@ -627,6 +641,7 @@ onMounted(async () => {
         <RuleForm :model-value="rulePayload" :accounts="accounts" mode="create" :base-amount="absAmount" @update:model-value="Object.assign(rulePayload, $event)" />
       </div>
 
+      <p v-if="submitError" role="alert" class="mt-3 text-sm text-danger-600 break-words">{{ submitError }}</p>
       <div class="flex flex-wrap justify-end gap-2 pt-4">
         <button @click="emit('close')" :disabled="saving"
           :class="btnOutline('neutral')">

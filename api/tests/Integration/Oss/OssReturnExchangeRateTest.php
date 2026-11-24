@@ -213,6 +213,21 @@ final class OssReturnExchangeRateTest extends TestCase
         self::assertSame(0, $preview['summary']['conversion_missing_count']);
     }
 
+    public function testImportedForeignInvoiceKeepsSourceCzkInCzkOssReturn(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET oss_return_currency = 'CZK' WHERE id = ?")->execute([$this->supplierId]);
+        $invoiceId = $this->ossSale('2096-05-15', 100.0, currencyId: $this->eurId);
+        $pdo->prepare('UPDATE invoices SET exchange_rate = 25.12 WHERE id = ?')->execute([$invoiceId]);
+        $pdo->prepare('UPDATE invoice_items SET import_tax_base_czk = 2512.01, import_tax_vat_czk = 477.28 WHERE invoice_id = ?')
+            ->execute([$invoiceId]);
+
+        $preview = $this->oss->preview($this->supplierId, self::YEAR, 2);
+        self::assertSame(2512.01, $preview['summary']['total_base']);
+        self::assertSame(477.28, $preview['summary']['total_vat']);
+        self::assertSame(0, $preview['summary']['conversion_missing_count']);
+    }
+
     // ── opravy minulých období (VetaO) ───────────────────────────────────────
 
     /**

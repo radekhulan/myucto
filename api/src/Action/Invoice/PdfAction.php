@@ -35,7 +35,7 @@ final class PdfAction
         ini_set('html_errors', '0');
 
         $id = (int) ($args['id'] ?? 0);
-        $invoice = $this->repo->find($id);
+        $invoice = $this->repo->find($id, includeImportedCzk: true);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         }

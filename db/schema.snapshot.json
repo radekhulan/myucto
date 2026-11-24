@@ -1240,8 +1240,9 @@
         "2334_money_s3_import_fingerprint.sql",
         "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql",
-        "2337_entity_tags_recurring_templates.sql",
-        "2338_invoice_tags.sql"
+        "2337_imported_issued_tax_snapshot.sql",
+        "2338_entity_tags_recurring_templates.sql",
+        "2339_invoice_tags.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7582,6 +7583,8 @@
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "import_tax_base_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_tax_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "item_kind": "enum('standard','discount','text') NOT NULL DEFAULT 'standard'",
                 "line_discount_pct": "decimal(7,3) NULL DEFAULT NULL",
@@ -7842,8 +7845,13 @@
                 "hide_customer_on_pdf": "tinyint(1) NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idoklad_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "import_advance_paid_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_amount_to_pay_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "import_batch_id": "varchar(32) NULL DEFAULT NULL",
                 "import_tax_sign": "tinyint(4) NULL DEFAULT NULL",
+                "import_total_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_total_with_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_total_without_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "imported_pdf_hash": "char(64) NULL DEFAULT NULL",
                 "imported_pdf_original_name": "varchar(255) NULL DEFAULT NULL",
                 "imported_pdf_path": "varchar(255) NULL DEFAULT NULL",

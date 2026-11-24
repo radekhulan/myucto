@@ -249,6 +249,17 @@ final class IntrastatServiceTest extends TestCase
         self::assertSame(101, $result['preview']['rows'][0]['invoiced_value']);
     }
 
+    public function testAllocatesSourceCzkValueForImportedForeignInvoice(): void
+    {
+        $row = $this->row();
+        $row['invoice_item_source_czk'] = '2500.02';
+
+        $result = (new IntrastatService($this->source([$row])))
+            ->prepare(7, ['period' => '2026-09', 'direction' => 'dispatch']);
+
+        self::assertSame(1251, $result['preview']['rows'][0]['invoiced_value']);
+    }
+
     public function testUnmappedInvoiceValueIsNotGuessedAndBlocksExport(): void
     {
         $row = $this->row();

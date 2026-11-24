@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use PDO;
 
 /**
@@ -675,13 +676,16 @@ final class JournalIntegrityService
         string $invoiceFilter = '',
         string $purchaseFilter = '',
     ): string {
+        $issuedRate = "(CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END)";
+        $gross = IssuedCzkAmounts::grossSql('i', "i.total_with_vat * {$issuedRate}");
+        $vat = IssuedCzkAmounts::vatSql('i', "i.total_vat * {$issuedRate}");
+        $unsettled = IssuedCzkAmounts::dueSql('i', 'ABS(COALESCE(i.total_with_vat, 0)) - ABS(COALESCE(i.advance_paid_amount, 0))');
         return
             "SELECT 'invoice' AS source_type, i.id AS source_id,
-                    (CASE WHEN i.invoice_type = 'tax_document' THEN i.total_vat ELSE i.total_with_vat END)
-                    * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS expected,
+                    (CASE WHEN i.invoice_type = 'tax_document' THEN {$vat} ELSE {$gross} END) AS expected,
                     " . self::AMOUNT_TOLERANCE . " + ABS(COALESCE(i.rounding, 0))
                     * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS tol,
-                    ABS(COALESCE(i.total_with_vat, 0)) - ABS(COALESCE(i.advance_paid_amount, 0)) AS unsettled
+                    ABS({$unsettled}) AS unsettled
                FROM invoices i
                LEFT JOIN currencies ci ON ci.id = i.currency_id
               WHERE i.supplier_id = {$invoiceSupplierSql}{$invoiceFilter}

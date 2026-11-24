@@ -108,9 +108,12 @@ function tx(amount: number): BankTransaction {
   } as BankTransaction
 }
 
-async function open(amount: number) {
+async function open(amount: number, currency = 'CZK') {
+  const movement = currency === 'EUR'
+    ? { ...tx(amount), currency, amount_czk: amount * 25, fx_rate: 25 }
+    : tx(amount)
   const wrapper = mount(PostTransactionModal, {
-    props: { tx: tx(amount), currency: 'CZK' },
+    props: { tx: movement, currency },
     global: { stubs: { AutomationBadge: true, ConfidenceLabel: true, RuleForm: true, RuleTemplatesModal: true } },
   })
   await flushPromises()
@@ -190,6 +193,66 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     expect(submit.attributes('disabled')).toBeUndefined()
     await submit.trigger('click')
     expect(m.postTransaction).toHaveBeenCalledWith(1, expect.objectContaining({ debit_account_code: '221', credit_account_code: '518' }))
+  })
+
+  it('zobrazí kód i hlášku API při chybě ručního zaúčtování EUR', async () => {
+    const error = { code: 'same_account', message: 'Účet MD a účet Dal se musí lišit.' }
+    m.postTransaction.mockRejectedValue({ response: { data: { error } } })
+    const wrapper = await open(10, 'EUR')
+    await wrapper.get('[data-test="posting-credit"]').setValue('518')
+    await wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain(error.code)
+    expect(wrapper.get('[role="alert"]').text()).toContain(error.message)
+    expect(wrapper.emitted('posted')).toBeUndefined()
+  })
+
+  it('zobrazí důvod selhání automatické kontace z náhledu', async () => {
+    m.previewTransaction.mockResolvedValue({
+      bank_account_code: '221', matched: true, lines: [], resolved: true,
+      reason: 'missing_exchange_rate', message: 'Pro EUR chybí kurz k datu pohybu.',
+    })
+    const wrapper = await open(10, 'EUR')
+    expect(wrapper.get('[role="alert"]').text()).toContain('missing_exchange_rate')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Pro EUR chybí kurz k datu pohybu.')
+  })
+
+  it('předvyplní dvojici, pokud oba řádky nesou stejný kurz a nominál jako pohyb', async () => {
+    const trace = { amount: 250, currency_code: 'EUR', fx_rate: 25, amount_foreign: 10 }
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
+      { ...trace, account_code: '221.400', side: 'debit' },
+      { ...trace, account_code: '324', side: 'credit' },
+    ] })
+    m.listAccounts.mockResolvedValue([...CHART, account(324, '324', 'Přijaté zálohy', null)])
+    m.postTransaction.mockResolvedValue({ journal_entry_id: 1, document_no: 'TEST' })
+    const wrapper = await open(10, 'EUR')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    await wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.trigger('click')
+    expect(m.postTransaction).toHaveBeenCalledWith(1, expect.objectContaining({
+      debit_account_code: '221.400', credit_account_code: '324',
+    }))
+  })
+
+  it.each([true, false])('odesílá příznak cizí měny podle jednotky rozpisu (%s)', async (foreign) => {
+    m.postTransaction.mockResolvedValue({ journal_entry_id: 1, document_no: 'TEST' })
+    const wrapper = await open(10, 'EUR')
+    const button = (key: string) => wrapper.findAll('button').find(b => b.text().includes(key))!
+    await button('bank.posting.split_on').trigger('click')
+    await wrapper.get('[data-test="posting-split-foreign"]').setValue(foreign)
+    await button('bank.posting.split_add_line').trigger('click')
+    const accounts = wrapper.findAll('[data-test="posting-split"]')
+    const amounts = wrapper.findAll('input[type="number"]')
+    const factor = foreign ? 1 : 25
+    await accounts[1].setValue('518')
+    await accounts[2].setValue('518')
+    await amounts[1].setValue(6 * factor)
+    await amounts[2].setValue(4 * factor)
+    await button('bank.posting.action_post').trigger('click')
+    await flushPromises()
+    expect(m.postTransaction).toHaveBeenCalledOnce()
+    const payload = m.postTransaction.mock.calls[0][1]
+    expect(payload.lines.map((line: { amount: number }) => line.amount)).toEqual([10 * factor, 6 * factor, 4 * factor])
+    expect(payload.amounts_in_foreign).toBe(foreign ? true : undefined)
   })
 
   it('uloží poznámku k novému zápisu až po zaúčtování, prázdnou neposílá', async () => {

@@ -83,10 +83,37 @@ final class ForeignCurrencyTakeover
         if ($currency === '' || $currency === self::HOME) {
             return ForeignCurrencyDecision::home();
         }
-        $reason = $blocked ?? self::check(self::rate($rate, $units), $items, $homeTotal);
+        $perUnit = self::rate($rate, $units);
+        $reason = $blocked ?? self::check($perUnit, $items, $homeTotal);
         if ($reason !== null) {
             return ForeignCurrencyDecision::keptInHome($currency, $reason);
         }
+        return $this->resolveCurrency($supplierId, $currency, (float) $perUnit);
+    }
+
+    /**
+     * @param array<string,mixed> $amounts Částky vydaného dokladu, při úspěchu se přepíšou na měnu dokladu.
+     */
+    public function decideIssued(int $supplierId, string $currency, float $rate, float $units, array &$amounts, ?float $foreignTotal = null, ?string $blocked = null): ForeignCurrencyDecision
+    {
+        $currency = strtoupper(trim($currency));
+        if ($currency === '' || $currency === self::HOME) {
+            return ForeignCurrencyDecision::home();
+        }
+        $perUnit = self::rate($rate, $units);
+        $prepared = $blocked ?? IssuedCurrencySnapshot::prepare($amounts, $perUnit, $foreignTotal);
+        if (is_string($prepared)) {
+            return ForeignCurrencyDecision::keptInHome($currency, $prepared);
+        }
+        $decision = $this->resolveCurrency($supplierId, $currency, (float) $perUnit);
+        if ($decision->inForeignCurrency()) {
+            $amounts = $prepared;
+        }
+        return $decision;
+    }
+
+    public function resolveCurrency(int $supplierId, string $currency, float $rate): ForeignCurrencyDecision
+    {
         $currencyId = $this->currencyId($supplierId, $currency);
         $created = false;
         if ($currencyId === null && $this->createMissingCurrency && preg_match('/^[A-Z]{3}$/', $currency) === 1) {
@@ -96,7 +123,7 @@ final class ForeignCurrencyTakeover
         if ($currencyId === null) {
             return ForeignCurrencyDecision::keptInHome($currency, 'měna ' . $currency . ' není v číselníku měn firmy');
         }
-        return ForeignCurrencyDecision::foreign($currency, $currencyId, (float) self::rate($rate, $units), $created);
+        return ForeignCurrencyDecision::foreign($currency, $currencyId, $rate, $created);
     }
 
     /**
@@ -241,11 +268,11 @@ final class ForeignCurrencyTakeover
     /** Kurz za 1 jednotku měny s přesností sloupce `exchange_rate`; `null` = kurz chybí. */
     public static function rate(float $rate, float $units): ?float
     {
-        if ($rate <= 0.0 || $units <= 0.0) {
+        if (!is_finite($rate) || !is_finite($units) || $rate <= 0.0 || $units <= 0.0) {
             return null;
         }
         $perUnit = round($rate / $units, 6);
-        return $perUnit > 0.0 ? $perUnit : null;
+        return is_finite($perUnit) && $perUnit > 0.0 ? $perUnit : null;
     }
 
     /** Částka v měně dokladu převedená na Kč kurzem dokladu (HALF_UP, jako rekapitulace i SQL). */

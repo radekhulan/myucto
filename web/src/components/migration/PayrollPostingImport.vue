@@ -9,6 +9,7 @@ import {
   type PayrollPostingCheck, type PayrollPostingCodeMapRow, type PayrollPostingPreview, type PayrollPostingResult, type PayrollPostingUnmappedCode,
 } from '@/api/pamicaPosting'
 import PayrollPostingCodeMap from './PayrollPostingCodeMap.vue'
+import { payrollPostingCodeLabel } from './payrollPostingCodeLabel'
 
 /**
  * Náhled a načtení měsíčního zaúčtování mezd z PAMICY. Sdílí ho průvodce PAMICA
@@ -30,14 +31,15 @@ const result = ref<PayrollPostingResult | null>(null)
 const createAccounts = ref(false)
 // Zkratky předkontací bez přiřazených účtů: náhled nejde sestavit, dokud je účetní nepřiřadí.
 const unmappedCodes = ref<PayrollPostingUnmappedCode[]>([])
+const unmappedCanWrite = ref(true)
 const editingCodes = ref(false)
 // Řádky editoru přiřazení: zkratky z náhledu, nebo (když náhled nejde sestavit, třeba kvůli
 // chybně přiřazeným účtům) všechna uložená přiřazení firmy.
 const codeRows = ref<PayrollPostingCodeMapRow[]>([])
 const codeRowsAll = ref(false)
 const loadingCodes = ref(false)
-// Uložit mapování smí, kdo smí zaúčtování načíst; bez náhledu to server ověří až při uložení.
-const canEditCodes = computed(() => preview.value?.can_write ?? true)
+const canEditCodes = computed(() => preview.value?.can_write ?? unmappedCanWrite.value)
+const codeLabel = (code: string): string => payrollPostingCodeLabel(code, t)
 
 async function openCodeMap(): Promise<void> {
   if (preview.value && preview.value.code_map.length > 0) {
@@ -70,6 +72,7 @@ async function load(): Promise<void> {
   result.value = null
   createAccounts.value = false
   unmappedCodes.value = []
+  unmappedCanWrite.value = true
   editingCodes.value = false
   try {
     preview.value = await payrollPostingImportsApi.preview(props.file)
@@ -81,6 +84,7 @@ async function load(): Promise<void> {
     }
     if (apiError?.code === UNMAPPED_ACCOUNTING_CODES && Array.isArray(apiError.unmapped_codes)) {
       unmappedCodes.value = apiError.unmapped_codes
+      unmappedCanWrite.value = apiError.can_write !== false
       return
     }
     loadError.value = apiErrorMessage(error, t('payroll_posting_import.preview_failed'))
@@ -143,7 +147,7 @@ const actions = computed<ActionItem[]>(() => result.value
       { key: 'close', label: t('payroll_posting_import.close'), icon: 'x', tier: 'secondary', variant: 'neutral', run: () => emit('close') },
     ]
   : [
-      { key: 'apply', label: t('payroll_posting_import.apply'), icon: 'check', tier: 'primary', variant: 'success', show: !!preview.value,
+      { key: 'apply', label: t('payroll_posting_import.apply'), icon: 'check', tier: 'primary', variant: 'success', show: !!preview.value && !editingCodes.value,
         disabled: !canApply.value || applying.value, disabledReason: disabledReason.value, loading: applying.value, run: () => { void apply() } },
       // Cesta ven i z chyby náhledu: chybné přiřazení zkratek (různé účty Dal v závazku,
       // prohozené MD a Dal) jde opravit jen v editoru přiřazení.
@@ -204,7 +208,7 @@ const actions = computed<ActionItem[]>(() => result.value
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="(line, i) in doc.lines" :key="i">
                 <td class="px-3 py-2">{{ line.text }} <span v-if="line.note" class="text-neutral-500">{{ line.note }}</span>
-                  <span v-if="line.code" class="ml-1 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-600">{{ line.code }}</span></td>
+                  <span v-if="line.code" class="ml-1 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-600">{{ codeLabel(line.code) }}</span></td>
                 <td class="px-3 py-2 font-mono">{{ line.debit }}</td>
                 <td class="px-3 py-2 font-mono">{{ line.credit }}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">{{ money(line.amount) }}</td>
@@ -249,7 +253,7 @@ const actions = computed<ActionItem[]>(() => result.value
                 <td class="px-3 py-2">
                   <span v-if="c.posting === 'without_posting'" class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs whitespace-nowrap text-neutral-600">{{ t('payroll_posting_import.without_posting', { account: c.credit }) }}</span>
                   <div v-else class="space-y-0.5 font-mono text-xs">
-                    <div v-for="(line, i) in c.lines" :key="i" class="whitespace-nowrap"><span v-if="line.code" class="text-neutral-500">{{ line.code }}: </span>{{ line.debit }} / {{ line.credit }} · {{ money(line.amount) }}</div>
+                    <div v-for="(line, i) in c.lines" :key="i" class="whitespace-nowrap"><span v-if="line.code" class="text-neutral-500">{{ codeLabel(line.code) }}: </span>{{ line.debit }} / {{ line.credit }} · {{ money(line.amount) }}</div>
                   </div>
                 </td>
                 <td class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ money(c.amount) }}</td>

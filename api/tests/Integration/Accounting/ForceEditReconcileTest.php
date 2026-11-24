@@ -163,7 +163,7 @@ final class ForceEditReconcileTest extends TestCase
             $this->markTestSkipped('Instance bez OSS sloupců (migrace 0137).');
         }
         $invoiceId = $this->postedOssInvoiceInClosedPeriod('FV-B11-OSS1');
-        $existing = $this->invoices->find($invoiceId, $this->supplierId);
+        $existing = $this->invoices->find($invoiceId);
         self::assertNotNull($existing);
 
         // Tělo je s uloženým řádkem shodné ve VŠEM kromě země spotřeby — kdyby otisk OSS

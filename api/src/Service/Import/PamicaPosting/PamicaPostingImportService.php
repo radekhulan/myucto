@@ -238,6 +238,7 @@ final class PamicaPostingImportService
         // Účty: PAMICA → osnova firmy.
         $accounts = [];
         $codes = [];
+        $liabilityCodes = [];
         foreach ($parsed['internal_documents'] as $doc) {
             foreach ($doc['lines'] as $line) {
                 $codes[$line['debit']] = true;
@@ -245,12 +246,11 @@ final class PamicaPostingImportService
             }
         }
         foreach ($parsed['commitments'] as $c) {
-            $codes[$c['credit']] = true;
             foreach ($c['lines'] as $line) {
+                $codes[$line['credit']] = $liabilityCodes[$line['credit']] = true;
                 if ($line['debit'] !== null) $codes[$line['debit']] = true;
             }
         }
-        $liabilityCodes = array_fill_keys(array_map(static fn (array $c): string => $c['credit'], $parsed['commitments']), true);
         ksort($codes, SORT_STRING);
         foreach (array_keys($codes) as $code) {
             $accounts[] = $this->resolveAccount($supplierId, (string) $code, $parsed['accounting_date'], isset($liabilityCodes[$code]));
@@ -266,7 +266,8 @@ final class PamicaPostingImportService
         if ($invalid !== []) {
             $checks[] = self::check('accounts_invalid', 'error',
                 'Účty ' . implode(', ', array_map(static fn (array $a): string => (string) $a['target'], $invalid))
-                . ' nejde použít: jsou neaktivní, syntetika má analytiky, nebo závazek neleží na účtu pasiv.');
+                . ' nejde použít: jsou neaktivní, syntetika má analytiky, nebo závazek neleží na účtu pasiv. '
+                . 'Zkontrolujte účtovou osnovu. U členěné syntetiky vyberte konkrétní analytiku v přiřazení nebo v PAMICE.');
         }
         if ($creatable !== []) {
             $checks[] = self::check('accounts_creatable', 'error',
@@ -311,9 +312,10 @@ final class PamicaPostingImportService
                 'lines' => $c['lines'],
                 'amount' => $c['amount'],
             ];
-            if ($c['variable_symbol'] !== null && preg_match('/^[0-9]{1,10}$/', $c['variable_symbol']) !== 1) {
+            if ($c['source_variable_symbol'] !== null) {
                 $checks[] = self::check('variable_symbol_invalid', 'warning',
-                    'Závazek „' . $c['title'] . '": variabilní symbol „' . $c['variable_symbol'] . '" není číselný, načte se bez něj.');
+                    'Závazek „' . $c['title'] . '": variabilní symbol pro platbu musí mít 1 až 10 číslic. '
+                    . 'Hodnota „' . $c['source_variable_symbol'] . '" se uloží do poznámky. Správný symbol doplňte před úhradou.');
             }
         }
 
@@ -321,6 +323,15 @@ final class PamicaPostingImportService
         $resolved = [];
         foreach ($accounts as $a) {
             $resolved[$a['source']] = (string) ($a['target'] ?? $a['proposed'] ?? $a['source']);
+        }
+        foreach ($parsed['commitments'] as $c) {
+            $credits = array_unique(array_column($c['lines'], 'credit'));
+            $targets = array_unique(array_map(static fn (string $credit): string => $resolved[$credit], $credits));
+            if (count($targets) > 1) {
+                $checks[] = self::check('multiple_credit_accounts', 'error',
+                    'Závazek ' . $c['item_id'] . ' má položky na různých účtech Dal (' . implode(', ', $targets)
+                    . '). V PAMICE sjednoťte účet Dal nebo upravte přiřazení zkratek v MyÚčtu.');
+            }
         }
         $totals = self::totals($parsed, $resolved);
         foreach ($totals['clearing'] as $code => $balance) {
@@ -382,9 +393,8 @@ final class PamicaPostingImportService
         }
         $synthetic = substr($code, 0, 3);
         $analytic = substr($code, 3);
-        $candidates = array_values(array_unique(array_filter([$code, $analytic !== '' ? $synthetic . '.' . $analytic : null])));
         $base = ['source' => $code, 'synthetic' => $synthetic, 'target' => null, 'proposed' => null];
-        foreach ($candidates as $candidate) {
+        foreach ($analytic !== '' ? [$code, $synthetic . '.' . $analytic] : [] as $candidate) {
             $row = $this->accounts->findByCode($supplierId, $candidate, $date);
             if ($row !== null) return $this->usable($row, $candidate, $liability, $base);
         }
@@ -511,11 +521,11 @@ final class PamicaPostingImportService
                 // Náhled na neplatný účet upozornil; závazek vznikne bez něj.
             }
         }
-        $vs = $c['variable_symbol'] !== null && preg_match('/^[0-9]{1,10}$/', $c['variable_symbol']) === 1 ? $c['variable_symbol'] : null;
         $noteParts = [];
         if ($c['constant_symbol'] !== null) $noteParts[] = 'KS ' . $c['constant_symbol'];
         if ($c['payment_type'] === 'cash') $noteParts[] = 'Vyplácí se hotově.';
         $noteParts[] = self::sourceNote($parsed);
+        if ($c['source_variable_symbol'] !== null) $noteParts[] = 'Původní VS: ' . $c['source_variable_symbol'];
         $input = [
             'side' => 'payable',
             'kind' => 'other',
@@ -527,7 +537,7 @@ final class PamicaPostingImportService
             'due_on' => $c['due_on'],
             'currency' => 'CZK',
             'amount' => $c['amount'],
-            'variable_symbol' => $vs,
+            'variable_symbol' => $c['variable_symbol'],
             'counterparty_account' => $account['counterparty_account'],
             'counterparty_bank_code' => $account['counterparty_bank_code'],
             'account_code' => self::mapped($map, $c['credit']),
@@ -642,8 +652,10 @@ final class PamicaPostingImportService
             }
             if ($clearing === null) continue;
             $codes = array_values(array_unique(array_filter(array_map(static fn (array $l): ?string => $l['code'], $c['lines']))));
+            $labels = array_map(PamicaPostingCodeMap::label(...), $codes);
+            $mapping = $labels !== $codes ? 'přiřazení ' : (count($codes) === 1 ? 'zkratku ' : 'zkratky ');
             $hint = $codes !== []
-                ? 'Zkontrolujte ' . (count($codes) === 1 ? 'zkratku ' : 'zkratky ') . implode(', ', $codes)
+                ? 'Zkontrolujte ' . $mapping . implode(', ', $labels)
                     . ' (srážka ze mzdy se účtuje obvykle MD ' . $clearing . ' / Dal účet závazku, např. 342 nebo 336).'
                 : 'Zkontrolujte předkontaci závazku v PAMICE (obvykle MD ' . $clearing . ' / Dal účet závazku, např. 342 nebo 336).';
             $checks[] = self::check('commitment_on_clearing_account', 'error',

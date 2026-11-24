@@ -387,12 +387,14 @@ final class AssetLifecycleTest extends TestCase
 
     public function testPutIntoUseRefusesActivationEntryForCardWithOpeningState(): void
     {
+        $first = (string) $this->db->pdo()->query('SELECT MIN(starts_on) FROM accounting_periods WHERE supplier_id = ' . $this->supplierId)->fetchColumn();
+        $acquired = ((int) substr($first, 0, 4) - 4) . '-04-01';
         $created = $this->service->create($this->supplierId, [
             'inventory_number' => 'M-OPEN-001',
             'name' => 'Převzatý byt',
             'input_price' => 6000000.00,
-            'acquisition_date' => (self::YEAR - 4) . '-04-01',
-            'put_into_use_date' => (self::YEAR - 4) . '-04-01',
+            'acquisition_date' => $acquired,
+            'put_into_use_date' => $acquired,
             'tax_method' => 'straight',
             'tax_group' => 5,
             'opening_tax_years' => 4,
@@ -404,12 +406,12 @@ final class AssetLifecycleTest extends TestCase
         $assetId = (int) $created['asset']['id'];
 
         try {
-            $this->service->putIntoUse($this->supplierId, $assetId, (self::YEAR - 4) . '-04-01', true, ['user_id' => $this->userId]);
+            $this->service->putIntoUse($this->supplierId, $assetId, $acquired, true, ['user_id' => $this->userId]);
             self::fail('Karta s počátečními oprávkami nesmí dostat zápis o zařazení.');
         } catch (AssetException $e) {
             self::assertSame('opening_state_entry', $e->errorCode);
         }
-        $this->service->putIntoUse($this->supplierId, $assetId, (self::YEAR - 4) . '-04-01', false, ['user_id' => $this->userId]);
+        $this->service->putIntoUse($this->supplierId, $assetId, $acquired, false, ['user_id' => $this->userId]);
         self::assertSame('in_use', $this->assets->find($this->supplierId, $assetId)['status']);
         self::assertSame(0, $this->activationEntries($assetId));
     }
@@ -464,6 +466,66 @@ final class AssetLifecycleTest extends TestCase
         } catch (AssetException $e) {
             self::assertSame('asset_has_depreciation', $e->errorCode);
         }
+    }
+
+    public function testPutIntoUseAllowsActivationEntryForInYearCardWithOpeningState(): void
+    {
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => 'M-OPEN-IN-001',
+            'name' => 'Převzatý stroj pořízený v roce',
+            'input_price' => 240000.00,
+            'acquisition_date' => (self::YEAR + 1) . '-03-01',
+            'put_into_use_date' => (self::YEAR + 1) . '-03-01',
+            'tax_method' => 'straight',
+            'tax_group' => 2,
+            'opening_acc_months' => 2,
+            'opening_acc_amount' => 8000.00,
+            'acc_useful_life_months' => 60,
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+
+        $this->service->putIntoUse($this->supplierId, $assetId, (self::YEAR + 1) . '-03-01', true,
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        self::assertSame(1, $this->activationEntries($assetId));
+    }
+
+    public function testPutIntoUseRefusesSecondActivationWhenJournalAlreadyHasIt(): void
+    {
+        $price = 333333.33;
+        $date = self::YEAR . '-06-10';
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '022', 'side' => 'debit', 'amount' => $price],
+            ['account_code' => '042', 'side' => 'credit', 'amount' => $price],
+        ], [
+            'entry_date' => $date,
+            'document_no' => 'ID-ZAR-1',
+            'description' => 'Zařazení převzaté z jiného systému',
+            'posted' => true,
+            'posted_by' => $this->userId,
+            'user_id' => $this->userId,
+        ]);
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => 'M-DUP-001',
+            'name' => 'Stroj zařazený v deníku',
+            'input_price' => $price,
+            'acquisition_date' => $date,
+            'tax_method' => 'straight',
+            'tax_group' => 2,
+            'acc_useful_life_months' => 60,
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+
+        try {
+            $this->service->putIntoUse($this->supplierId, $assetId, $date, true, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+            self::fail('Druhý zápis o zařazení se stejnou cenou nesmí vzniknout.');
+        } catch (AssetException $e) {
+            self::assertSame('activation_already_posted', $e->errorCode);
+            self::assertStringContainsString('ID-ZAR-1', $e->getMessage());
+        }
+        $this->service->putIntoUse($this->supplierId, $assetId, $date, false, ['user_id' => $this->userId]);
+        self::assertSame('in_use', $this->assets->find($this->supplierId, $assetId)['status']);
+        self::assertSame(0, $this->activationEntries($assetId));
+        self::assertEqualsWithDelta($price, $this->accountBalance('022'), 0.001);
     }
 
     private function activationEntries(int $assetId): int

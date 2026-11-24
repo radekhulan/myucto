@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
@@ -1094,11 +1095,11 @@ final class DocumentLinker
     /** Celkem dokladu v Kč - úhrady se porovnávají v Kč, doklad v cizí měně se přepočte kurzem dokladu. */
     private function documentTotal(int $supplierId, bool $issued, int $id): float
     {
-        $total = ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate');
+        $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $stmt = $this->db->pdo()->prepare(
             $issued
-                ? "SELECT {$total} FROM invoices WHERE id = ? AND supplier_id = ?"
-                : "SELECT {$total} FROM purchase_invoices WHERE id = ? AND supplier_id = ?"
+                ? 'SELECT ' . IssuedCzkAmounts::grossSql('d', $total) . ' FROM invoices d WHERE id = ? AND supplier_id = ?'
+                : "SELECT {$total} FROM purchase_invoices d WHERE id = ? AND supplier_id = ?"
         );
         $stmt->execute([$id, $supplierId]);
         return (float) $stmt->fetchColumn();

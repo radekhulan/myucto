@@ -76,7 +76,7 @@ final class InvoicePdfRenderer
     ): string
     {
         $persist = !(bool) $this->config->get('demo.enabled', false);
-        $invoice = $invoiceData ?? $this->repo->find($invoiceId);
+        $invoice = $invoiceData ?? $this->repo->find($invoiceId, includeImportedCzk: true);
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }
@@ -232,7 +232,7 @@ final class InvoicePdfRenderer
      */
     public function renderUnsignedInvoiceOnly(int $invoiceId, string $outputPath): void
     {
-        $invoice = $this->repo->find($invoiceId);
+        $invoice = $this->repo->find($invoiceId, includeImportedCzk: true);
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }

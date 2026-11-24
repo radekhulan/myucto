@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
@@ -325,6 +326,7 @@ final class InvoiceImporter
             }
         }
         $clients = [];
+        $taxPayments = $ctx->taxRecords ? TaxRecordsImporter::issuedPaymentKeys($ctx) : [];
         foreach (self::sourceInvoices($ctx->backup, true, onlyDirs: $ctx->dirYears + $ctx->openingDocumentDirs) as [$r, $sourceItems]) {
             $year = $ctx->yearOf($r);
             // Doklad z let před prvním převáděným rokem, otevřený k jeho začátku ({@see OpeningDocuments}).
@@ -406,7 +408,12 @@ final class InvoiceImporter
             // doplní evidovaná platba ({@see DocumentLinker::matchPayments()}).
             $paidAt = $ctx->taxRecords ? null : $ctx->paidWithin(self::date($r, ['Uhrazeno']));
             // Money vede úhradu jen jako datum (celá, nebo žádná) - částečná úhrada doklad neblokuje.
-            $fx = $this->takeOverCurrency($ctx, $r, $amounts, null);
+            $units = (float) ($r['PocetJedn'] ?? 0);
+            $paymentKey = 'FV|' . $r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0);
+            $blocked = $ctx->taxRecords && (isset($taxPayments[$paymentKey]) || self::date($r, ['Uhrazeno']) !== null)
+                ? 'převod úhrad v daňové evidenci vyžaduje doložené párování v Kč' : null;
+            $fx = $this->foreignCurrency->decideIssued($ctx->supplierId, self::currency($r), (float) ($r['Kurs'] ?? 0),
+                $units > 0.0 ? $units : 1.0, $amounts, blocked: $blocked);
             try {
                 $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                     supplierId: $ctx->supplierId,
@@ -437,6 +444,7 @@ final class InvoiceImporter
                     bookedAt: $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
                     bookedBy: $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
                     vatClassificationCode: $class['code'],
+                    czkSnapshot: $amounts['snapshot'] ?? [],
                 ));
             } catch (\PDOException $e) {
                 if ((string) $e->getCode() !== '23000') {
@@ -1126,7 +1134,7 @@ final class InvoiceImporter
         if (!array_key_exists('CelkemSDPH', $r)) {
             return false;
         }
-        $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt = $this->homeTotalQuery($table);
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         return $stored !== false && abs((float) $stored - self::expectedTotal($r)) >= 0.005;
@@ -1137,8 +1145,7 @@ final class InvoiceImporter
         if (!array_key_exists('CelkemSDPH', $r)) {
             return false;
         }
-        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
-        $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt = $this->homeTotalQuery($table);
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         $money = self::expectedTotal($r);
@@ -1151,6 +1158,13 @@ final class InvoiceImporter
             $docNo, $year, number_format((float) $stored, 2, ',', ' '), number_format($money, 2, ',', ' ')
         ), ['document_no' => $docNo, 'year' => $year, 'id' => $id]);
         return true;
+    }
+
+    private function homeTotalQuery(string $table): \PDOStatement
+    {
+        $home = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        $total = $table === 'invoices' ? IssuedCzkAmounts::grossSql('d', $home) : $home;
+        return $this->db->pdo()->prepare("SELECT {$total} FROM {$table} d WHERE id = ? AND supplier_id = ?");
     }
 
     /**
@@ -1469,7 +1483,8 @@ final class InvoiceImporter
         $items = [];
         foreach ($amounts['items'] as $i => $item) {
             $items[$i] = self::issuedItem($descriptions[self::rateKey($item['rate'])] ?? self::headerDescription($r),
-                $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
+                $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code'],
+                $item['home_base'] ?? null, $item['home_vat'] ?? null);
         }
         return $items;
     }
@@ -1574,9 +1589,11 @@ final class InvoiceImporter
         }
         $total = round($sumBase + $sumVat, 2);
         $rounding = 0.0;
+        $summaryMismatch = false;
         if ($moneyTotal !== null && abs($moneyTotal - $total) >= 0.005) {
             $diff = round($moneyTotal - $total, 2);
-            if (abs($diff) <= self::ROUNDING_LIMIT) {
+            $summaryMismatch = abs($diff) > self::ROUNDING_LIMIT;
+            if (!$summaryMismatch) {
                 $rounding = $diff;
                 $total = $moneyTotal;
             } elseif (!$quiet) {
@@ -1586,7 +1603,8 @@ final class InvoiceImporter
                 ), ['document_no' => $docNo]);
             }
         }
-        return ['items' => $items, 'base' => $sumBase, 'vat' => $sumVat, 'total' => $total, 'rounding' => $rounding];
+        return ['items' => $items, 'base' => $sumBase, 'vat' => $sumVat, 'total' => $total,
+            'rounding' => $rounding, 'summary_mismatch' => $summaryMismatch];
     }
 
     /**
@@ -1678,7 +1696,7 @@ final class InvoiceImporter
      * spotřeby i měrnou jednotku, takže je z čeho rozhodovat. Sjednotit to jde teprve
      * tehdy, až půjde z Money zjistit totéž.
      */
-    private static function issuedItem(string $description, float $base, float $vat, int $rateId, float $rate, ?string $code): MigratedDocumentItem
+    private static function issuedItem(string $description, float $base, float $vat, int $rateId, float $rate, ?string $code, ?float $homeBase = null, ?float $homeVat = null): MigratedDocumentItem
     {
         return MigratedDocumentItem::issued(
             $description,
@@ -1686,6 +1704,8 @@ final class InvoiceImporter
             $base, $vat, round($base + $vat, 2),
             $code,
             OssMigrationPolicy::DOMESTIC_COLUMNS,
+            importTaxBaseCzk: $homeBase,
+            importTaxVatCzk: $homeVat,
         );
     }
 

@@ -144,11 +144,8 @@ final class FxRevaluationService
             // NEPŘEPOČÍTÁVAJÍ (na rozdíl od peněžních pohledávek/závazků 311/321 a
             // banky/valutové pokladny 211/221, které přeceňujeme dál beze změny).
             // Datový model nerozlišuje peněžní vs. nepeněžní zálohu jiným spolehlivým
-            // příznakem než účtem (advance leg 314/324 se navíc účtuje CZK-only přes
-            // bank/cash source a settlement leg bez cizoměnové stopy — do openFxItems
-            // by měl vstoupit jen výjimečně, např. při ručně nastavené kontaci
-            // saldokonta na 314/324), proto konzervativně vylučujeme celou účtovou
-            // skupinu 314/324 z FX přecenění saldokonta.
+            // příznakem než účtem. Z přecenění vylučujeme celou skupinu 314/324,
+            // včetně bankovních úhrad záloh s cizoměnovou stopou.
             if (self::isNonMonetaryAdvanceAccount((string) $item['account_code'])) {
                 continue;
             }
@@ -485,7 +482,7 @@ final class FxRevaluationService
      * NEPŘECEŇUJE. Prefixový match kryje i analytiky (3141x, 3241x) — stejný vzor
      * jako guard účtů nákladu v PostingService.
      */
-    private static function isNonMonetaryAdvanceAccount(string $accountCode): bool
+    public static function isNonMonetaryAdvanceAccount(string $accountCode): bool
     {
         $code = trim($accountCode);
         return str_starts_with($code, '314') || str_starts_with($code, '324');

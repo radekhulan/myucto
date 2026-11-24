@@ -52,5 +52,6 @@ final class MigratedIssuedDocument
         public readonly ?string $bankSnapshot = null,
         public readonly ?int $parentInvoiceId = null,
         public readonly ?string $correctiveDeliveredOn = null,
+        public readonly array $czkSnapshot = [],
     ) {}
 }

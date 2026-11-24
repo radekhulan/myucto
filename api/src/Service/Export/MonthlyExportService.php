@@ -209,7 +209,7 @@ final class MonthlyExportService
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 $this->jobs->appendLog($jobId, 'Vystavené faktury: ' . count($salesIds) . ' ks');
                 foreach ($salesIds as $id) {
-                    $inv = $this->invoiceRepo->find($id);
+                    $inv = $this->invoiceRepo->find($id, includeImportedCzk: true);
                     if ($inv === null) continue;
                     $typeLabel = match ($inv['invoice_type'] ?? 'invoice') {
                         'proforma' => 'Proforma', 'credit_note' => 'Dobropis',
