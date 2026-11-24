@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
+use PDO;
 
 /**
  * Převody z POHODY: běhy průvodce s protokolem (`pohoda_imports`) a mapa „co už
@@ -74,6 +75,23 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_PAYROLL_DEDUCTION = 'payroll_deduction';
     /** Převzatá věta registrace ČSSZ: `RegZAM:id:id věty` => id vztahu (nebo osoby). */
     public const KIND_PAYROLL_REGISTRATION = 'payroll_registration';
+
+    private const COMPLETED_IMPORT = "mode = 'import' AND status IN ('completed', 'completed_with_warnings')";
+
+    /** @return list<int> firmy s dokončeným převodem z POHODY */
+    public function completedSuppliers(): array
+    {
+        return array_map('intval', $this->db->pdo()->query(
+            'SELECT DISTINCT supplier_id FROM pohoda_imports WHERE ' . self::COMPLETED_IMPORT . ' ORDER BY supplier_id'
+        )->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function hasCompletedImport(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM pohoda_imports WHERE supplier_id = ? AND ' . self::COMPLETED_IMPORT . ' LIMIT 1');
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
 
     protected function runsTable(): string
     {

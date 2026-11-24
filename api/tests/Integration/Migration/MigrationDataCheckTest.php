@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Migration\Check\CheckItem;
+use MyInvoice\Service\Migration\Check\Checks\AssetAccountUndeterminedCheck;
 use MyInvoice\Service\Migration\Check\Checks\FinalInvoiceAdvanceVatCheck;
 use MyInvoice\Service\Migration\Check\Checks\ForeignBankInCzkCheck;
 use MyInvoice\Service\Migration\Check\Checks\ImportedStatementBalanceCheck;
@@ -19,6 +20,7 @@ use MyInvoice\Service\Migration\Check\Checks\SubledgerLedgerCheck;
 use MyInvoice\Service\Migration\Check\Checks\TaxDocumentAdvanceLinkCheck;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckService;
+use MyInvoice\Service\Migration\Pohoda\PohodaAssetAccountRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PDO;
@@ -33,6 +35,9 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class MigrationDataCheckTest extends TestCase
 {
+    private const ASSET_REVIEW_PREFIX = 'Převod z POHODY - ke kontrole: ';
+    private const ASSET_REVIEW_NOTE = 'majetkový účet se z počátečních stavů nepodařilo určit';
+
     private Container $c;
     private PDO $pdo;
     private MigrationDataCheckService $service;
@@ -89,6 +94,7 @@ final class MigrationDataCheckTest extends TestCase
     {
         $keys = array_column($this->service->summary($this->supplierId)['checks'], 'key');
         self::assertContains(SettledWithoutPaymentCheck::KEY, $keys);
+        self::assertContains(AssetAccountUndeterminedCheck::KEY, $keys);
         self::assertContains(TaxDocumentAdvanceLinkCheck::KEY, $keys);
         self::assertSame(['pohoda'], $this->service->summary($this->supplierId)['sources']);
 
@@ -137,6 +143,103 @@ final class MigrationDataCheckTest extends TestCase
         self::assertFalse($this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY)['can_fix']);
         $this->assertNothingToFix(SettledWithoutPaymentCheck::KEY);
         self::assertSame(0, $this->rows('invoice_payments', "invoice_id = {$prior}"));
+    }
+
+    public function testPohodaAssetAccountRepairRespectsOpeningBalanceAndCardState(): void
+    {
+        $this->account('021.000', 'asset');
+        $this->account('022.000', 'asset');
+        $this->account('701.000', 'equity');
+        $opening = $this->post('2025-01-01', '021.000', '701.000', 1200.0, 'opening');
+        $this->pdo->prepare('UPDATE journal_entries SET source_id = period_id WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $opening]);
+        $lines = $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount, line_no)
+            VALUES (?, ?, ?, ?, ?, ?)');
+        foreach ([['021.000', 'credit', 199.0], ['701.000', 'debit', 199.0], ['022.000', 'debit', 2500.0], ['701.000', 'credit', 2500.0]] as $i => [$account, $side, $amount]) {
+            $lines->execute([$this->supplierId, $opening, $this->accounts[$account], $side, $amount, $i + 10]);
+        }
+        $this->map('journal_entry', '2025|PS', $opening);
+        $this->post('2025-01-01', '021.000', '701.000', 50000.0, 'opening');
+
+        $existing = $this->assetCard(550.0, '081.000', account: '021.000');
+        $note = self::ASSET_REVIEW_PREFIX . 'ověřte odpisy; ' . self::ASSET_REVIEW_NOTE . '; ověřte zůstatek.';
+        $building = $this->assetCard(300.0, '081.000', $note);
+        $capacity = $this->assetCard(1.01, '081.000', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.');
+        $machine = $this->assetCard(900.0, '082', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.', 'in_use');
+        $missing = $this->assetCard(333.0, '081.777', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.');
+        $depreciated = $this->assetCard(800.0, '082', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.', 'in_use');
+        $booked = $this->assetCard(800.0, '082', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.', 'in_use');
+        $disposed = $this->assetCard(800.0, '082', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.', 'disposed');
+        $improvement = $this->pdo->prepare('INSERT INTO asset_improvements (supplier_id, asset_id, completed_on, amount) VALUES (?, ?, ?, ?)');
+        $improvement->execute([$this->supplierId, $existing, '2024-12-30', 50.0]);
+        $improvement->execute([$this->supplierId, $building, '2024-12-31', 102.0]);
+        $improvement->execute([$this->supplierId, $building, '2025-01-01', 7000.0]);
+        $this->pdo->prepare("INSERT INTO depreciation_entries (supplier_id, asset_id, kind, fiscal_year, amount, full_amount, residual_value_end)
+            VALUES (?, ?, 'tax', 2025, 100, 100, 700)")->execute([$this->supplierId, $depreciated]);
+        $this->pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id)
+            VALUES (?, ?, '2025-02-01', 'asset', ?)")->execute([$this->supplierId, $this->periodId, $booked]);
+
+        $repair = $this->c->get(PohodaAssetAccountRepair::class);
+        self::assertContains($this->supplierId, $repair->convertedSuppliers());
+        $dryRun = $repair->run([$this->supplierId], false)[0]['cards'];
+        self::assertSame([$building => '021.000', $capacity => null, $machine => '022.000', $missing => null], array_column($dryRun, 'new_account', 'id'));
+        self::assertStringContainsString('počáteční stav', $dryRun[1]['reason']);
+        self::assertStringContainsString('1 001,00 Kč', $dryRun[1]['reason']);
+        self::assertSame(1, $this->rows('assets', "id = {$building} AND asset_account_code = '022'"));
+        self::assertSame(0, $this->rows('activity_log', "action = '" . PohodaAssetAccountRepair::AUDIT_ACTION . "'"));
+
+        $key = AssetAccountUndeterminedCheck::KEY;
+        $preview = $this->service->preview($this->supplierId, $key);
+        self::assertSame([$building, $machine], array_column($preview['changes'], 'entity_id'));
+        $this->pdo->prepare('UPDATE assets SET description = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$note . "\nPoznámka účetní.", $this->supplierId, $building]);
+        try {
+            $this->service->fix($this->supplierId, $key, $this->userId, [], $preview['fingerprint']);
+            self::fail('Oprava musí odmítnout zastaralý náhled.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame(['stale_preview', 409], [$e->errorCode, $e->status]);
+        }
+        self::assertSame(0, $this->rows('activity_log', "action = '" . PohodaAssetAccountRepair::AUDIT_ACTION . "'"));
+        $preview = $this->service->preview($this->supplierId, $key);
+        $result = $this->service->fix($this->supplierId, $key, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(2, $result['fixed_count']);
+        self::assertSame('review', $result['after']['status']);
+        $cards = $this->pdo->prepare('SELECT id, asset_account_code, description, status FROM assets WHERE supplier_id = ? ORDER BY id');
+        $cards->execute([$this->supplierId]);
+        $stored = $cards->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
+        self::assertSame(['asset_account_code' => '021.000',
+            'description' => self::ASSET_REVIEW_PREFIX . "ověřte odpisy; ověřte zůstatek.\nPoznámka účetní.",
+            'status' => 'draft'], $stored[$building]);
+        self::assertSame(['asset_account_code' => '022.000', 'description' => null, 'status' => 'in_use'], $stored[$machine]);
+        foreach ([$capacity, $missing, $depreciated, $booked, $disposed] as $untouched) {
+            self::assertSame('022', $stored[$untouched]['asset_account_code']);
+            self::assertSame(self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.', $stored[$untouched]['description']);
+        }
+        self::assertSame(3, $this->rows('journal_entries', '1=1'));
+        $this->assertNothingToFix($key);
+        self::assertSame([$capacity => null, $missing => null], array_column($repair->run([$this->supplierId], true)[0]['cards'], 'new_account', 'id'));
+        self::assertSame(2, $this->rows('activity_log', "action = '" . PohodaAssetAccountRepair::AUDIT_ACTION . "'"));
+    }
+
+    /**
+     * Starší období bez počátečních stavů z POHODY (např. prázdné období založené zápisem
+     * s překlepem v roce) opravu neblokuje: platí zápis počátečních stavů převodu.
+     */
+    public function testPohodaAssetAccountRepairUsesMappedOpeningAfterEarlierPeriod(): void
+    {
+        $this->account('021.000', 'asset');
+        $this->account('701.000', 'equity');
+        $this->post('2025-01-01', '021.000', '701.000', 1200.0, 'opening');
+        $laterPeriod = $this->c->get(AccountingPeriodRepository::class)->create($this->supplierId, 2026, '2026-01-01', '2026-12-31');
+        $laterOpening = $this->post('2025-01-01', '021.000', '701.000', 1200.0, 'opening');
+        $this->pdo->prepare("UPDATE journal_entries SET source_id = ?, period_id = ?, entry_date = '2026-01-01' WHERE supplier_id = ? AND id = ?")
+            ->execute([$laterPeriod, $laterPeriod, $this->supplierId, $laterOpening]);
+        $this->map('journal_entry', '2026|PS', $laterOpening);
+        $asset = $this->assetCard(300.0, '081.000', self::ASSET_REVIEW_PREFIX . self::ASSET_REVIEW_NOTE . '.');
+
+        $plan = $this->c->get(PohodaAssetAccountRepair::class)->run([$this->supplierId], true)[0];
+        self::assertSame([$asset => '021.000'], array_column($plan['cards'], 'new_account', 'id'));
+        self::assertSame(1, $this->rows('assets', "id = {$asset} AND asset_account_code = '021.000'"));
     }
 
     /**
@@ -606,6 +709,15 @@ final class MigrationDataCheckTest extends TestCase
             }
         }
         return $id;
+    }
+
+    private function assetCard(float $price, string $accumulated, ?string $description = null, string $status = 'draft', string $account = '022'): int
+    {
+        $this->pdo->prepare("INSERT INTO assets (supplier_id, inventory_number, name, asset_account_code, accumulated_account_code,
+                   description, status, input_price, acquisition_date, put_into_use_date, tax_method)
+            VALUES (?, ?, 'Syntetická karta', ?, ?, ?, ?, ?, '2024-10-01', '2024-10-01', 'none')")
+            ->execute([$this->supplierId, 'MAJ-' . (++$this->seq), $account, $accumulated, $description, $status, $price]);
+        return (int) $this->pdo->lastInsertId();
     }
 
     private function account(string $code, string $type): void

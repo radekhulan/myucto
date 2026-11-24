@@ -27,7 +27,7 @@ Kontrola nic nemění, dokud opravu sami nepotvrdíte. Spouštět ji můžete op
    - **K opravě**: aspoň jeden nález oprava opraví,
    - **Ke kontrole**: nálezy, které oprava nezmění (oprava není jednoznačná nebo leží v chráněném období).
 3. Otevřete **Detail** kontroly. Nálezy můžete filtrovat podle stavu (K opravě, Chráněné období,
-   Ke kontrole). Číslo dokladu otevře doklad, výpis nebo saldokonto účtu.
+   Ke kontrole). Odkaz u nálezu otevře doklad, výpis, kartu majetku nebo saldokonto účtu.
 4. U kontroly s opravou zvolte **Opravit**. Náhled ukáže, které doklady se změní, jakou částkou
    a co oprava jen ohlásí. Kontrola bankovních účtů nabízí v náhledu volbu pro výpisy nahrané po převodu.
 5. Zkontrolujte náhled a zvolte **Provést opravu**. Když se data mezi náhledem a potvrzením změnila
@@ -250,7 +250,20 @@ php api/bin/migration-data-check.php --supplier=12 --check=foreign_bank_in_czk -
 Bez `--fix` nic nemění. Pojistky jsou stejné jako v aplikaci. AI asistent napojený přes MCP server čte
 kontroly nástrojem `migration_data_checks` (přehled, nebo nálezy jedné kontroly); opravu nespustí.
 
-## 126.14 Související kapitoly
+## 126.14 Neurčený majetkový účet karty z POHODY
+
+Kontrola hledá koncepty a zařazené karty s poznámkou z převodu o neurčeném majetkovém účtu.
+U zařazených karet kontroluje jen karty bez evidovaných odpisů a bez zápisu o zařazení v deníku.
+
+Oprava určí účet podle počátečních stavů převzatých z POHODY, vstupní ceny
+včetně dřívějších technických zhodnocení a účtu oprávek. Součet cen všech přiřazených karet smí přesáhnout
+počáteční stav účtu nejvýše o 1 Kč. Náhled ukáže původní a navržený účet. Potvrzením změníte
+účet na kartě a z jejího popisu odstraníte pouze poznámku o neurčeném účtu.
+
+Pokud účet nelze jednoznačně určit nebo jeho počáteční stav nestačí, otevřete kartu
+a ověřte její účet proti původní evidenci POHODY.
+
+## 126.15 Související kapitoly
 
 - [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)
