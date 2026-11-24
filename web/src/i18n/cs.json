@@ -10971,11 +10971,15 @@
           "manual_acceptance_contradicted": "Ověřený protokol ČSSZ nesouhlasí s ručním potvrzením přijetí. Zkontrolujte podání v aplikaci ČSSZ.",
           "registration_receipt_oic_invalid": "ČSSZ přihlášku přijala, ale osobní identifikační číslo (OIČ) v jejím protokolu nemá předepsaný tvar (deset číslic, poslední je kontrolní). Aplikace ho proto nepřevzala.",
           "registration_receipt_id_ppv_invalid": "ČSSZ přihlášku přijala, ale identifikátor pracovního vztahu (ID PPV) v jejím protokolu nemá předepsaný tvar (1 až 22 číslic). Aplikace ho proto nepřevzala.",
+          "registration_receipt_oic_conflict": "ČSSZ přihlášku přijala, ale osobní identifikační číslo (OIČ) z jejího protokolu už v evidenci patří jiné osobě. Aplikace ho proto nepřevzala.",
+          "registration_receipt_id_ppv_conflict": "ČSSZ přihlášku přijala, ale identifikátor pracovního vztahu (ID PPV) z jejího protokolu už v evidenci patří jinému pracovnímu vztahu. Aplikace ho proto nepřevzala.",
           "unknown": "Podání vyžaduje kontrolu. Podrobnosti pro podporu jsou dostupné níže."
         },
         "issue_code_remediation": {
           "registration_receipt_oic_invalid": "Ověřte OIČ v Seznamu zaměstnanců na ePortálu ČSSZ a opište ho na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\". Uvádí-li ePortál stejné číslo jako protokol, požádejte ČSSZ o opravu: s číslem v nesprávném tvaru by neprošlo ani měsíční hlášení.",
-          "registration_receipt_id_ppv_invalid": "Ověřte ID PPV v Seznamu zaměstnanců na ePortálu ČSSZ a opište ho na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\". Uvádí-li ePortál stejné číslo jako protokol, požádejte ČSSZ o opravu."
+          "registration_receipt_id_ppv_invalid": "Ověřte ID PPV v Seznamu zaměstnanců na ePortálu ČSSZ a opište ho na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\". Uvádí-li ePortál stejné číslo jako protokol, požádejte ČSSZ o opravu.",
+          "registration_receipt_oic_conflict": "Osoba je v evidenci nejspíš vedená dvakrát. Ponechte jen jednu kartu osoby, vztahy převeďte pod ni a OIČ pak opište na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\".",
+          "registration_receipt_id_ppv_conflict": "Tentýž vztah je v evidenci nejspíš vedený dvakrát (například dvě dohody téže osoby). Sloučte vztahy přes Další akce vztahu → Sloučit do jiného vztahu a ID PPV pak ověřte na kartě pracovního vztahu."
         },
         "issue_remediation": {
           "source": "Opravte nebo doplňte zdrojové údaje agendy a podání připravte znovu.",

@@ -19,6 +19,18 @@ use MyInvoice\Support\PeriodFilter;
  *
  * Všechny mutace jdou přes {@see mutate()} s optimistickým zámkem
  * (`row_version`), protože DB trigger vyžaduje posun právě o jedničku.
+ *
+ * ── Časy jsou v čase aplikace ───────────────────────────────────────────────
+ * Všechny sloupce `*_at` nese fronta v čase aplikace (`app.timezone`, tedy
+ * v zóně, kterou {@see Connection} nastavuje spojení), stejně jako výchozí
+ * `created_at`. Události se proto zapisují přes `NOW()` a časy z kanálu
+ * (doručenka, ruční odeslání) se před zápisem převedou do zóny aplikace.
+ * Dřív se události psaly přes `UTC_TIMESTAMP()`: řádek pak vypadal odeslaný
+ * hodinu před založením, den podání daňového tvrzení
+ * ({@see \MyInvoice\Service\Epo\Isds\TaxSubmissionDispatchProjection}) četl
+ * UTC jako místní čas a odeslání krátce po půlnoci posledního dne lhůty
+ * vypadalo jako podané včas. Řádky z té doby převedla migrace 2339; značka
+ * `time_basis` (výchozí `app`) říká, že řádek už je v čase aplikace.
  */
 final class SubmissionOutboxRepository
 {
@@ -316,7 +328,7 @@ final class SubmissionOutboxRepository
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
-                SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = NOW(),
                     isds_sender_box_id = ?, row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND dispatch_state IN (\'ready\', \'failed\')'
         );
@@ -327,14 +339,22 @@ final class SubmissionOutboxRepository
         return $this->find($supplierId, $id);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * `failed_at` se maže spolu s kódem a textem chyby: všechny tři popisují
+     * TRVAJÍCÍ selhání zprávy (CHECK `chk_submission_outbox_failed` je váže na
+     * stav `failed`), ne historii. Historii neúspěšných pokusů nese
+     * `submission_outbox_attempts`. Dřív odeslaná zpráva nesla čas
+     * předchozího selhání a vypadala jako odeslaná i selhaná zároveň.
+     *
+     * @return array<string,mixed>
+     */
     public function markSent(int $supplierId, int $id, string $externalMessageId, int $expectedVersion): array
     {
         return $this->mutate(
             $supplierId,
             $id,
-            'dispatch_state = \'sent\', external_message_id = ?, sent_at = UTC_TIMESTAMP(),
-             last_error_code = NULL, last_error_message = NULL',
+            'dispatch_state = \'sent\', external_message_id = ?, sent_at = NOW(),
+             failed_at = NULL, last_error_code = NULL, last_error_message = NULL',
             [$externalMessageId],
             $expectedVersion,
         );
@@ -358,7 +378,7 @@ final class SubmissionOutboxRepository
         return $this->mutate(
             $supplierId,
             $id,
-            'dispatch_state = \'failed\', failed_at = UTC_TIMESTAMP(), last_error_code = ?, last_error_message = ?',
+            'dispatch_state = \'failed\', failed_at = NOW(), last_error_code = ?, last_error_message = ?',
             [$errorCode, mb_substr($errorMessage, 0, 500)],
             $expectedVersion,
         );
@@ -378,7 +398,7 @@ final class SubmissionOutboxRepository
             $supplierId,
             $id,
             'dispatch_state = \'delivered\', delivered_at = ?',
-            [$deliveredAt->format('Y-m-d H:i:s')],
+            [self::appTime($deliveredAt)],
             $expectedVersion,
         );
     }
@@ -402,7 +422,7 @@ final class SubmissionOutboxRepository
             $supplierId,
             $id,
             'acceptance_state = ?, acceptance_evidence_kind = ?, acceptance_note = ?, '
-            . $timeColumn . ' = UTC_TIMESTAMP()',
+            . $timeColumn . ' = NOW()',
             [$acceptanceState, $evidenceKind, $note !== null ? mb_substr($note, 0, 500) : null],
             $expectedVersion,
         );
@@ -419,7 +439,7 @@ final class SubmissionOutboxRepository
         return $this->mutate(
             $supplierId,
             $id,
-            'artifact_validation_status = ?, artifact_validated_at = UTC_TIMESTAMP()',
+            'artifact_validation_status = ?, artifact_validated_at = NOW()',
             [$status],
             $expectedVersion,
         );
@@ -435,7 +455,7 @@ final class SubmissionOutboxRepository
         return $this->mutate(
             $supplierId,
             $id,
-            'recipient_box_verified_at = UTC_TIMESTAMP()',
+            'recipient_box_verified_at = NOW()',
             [],
             $expectedVersion,
         );
@@ -467,7 +487,7 @@ final class SubmissionOutboxRepository
             $supplierId,
             $id,
             'receipt_document_id = ?, receipt_inbox_message_id = ?, receipt_matched_by = ?,
-             receipt_attached_at = UTC_TIMESTAMP()',
+             receipt_attached_at = NOW()',
             [$documentId, $inboxMessageId, $matchedBy],
             $expectedVersion,
         );
@@ -490,7 +510,7 @@ final class SubmissionOutboxRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
                 SET dispatch_state = \'sending\', dispatch_mode = \'manual\',
-                    confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    confirmed_by = ?, confirmed_at = NOW(),
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
         );
@@ -524,7 +544,7 @@ final class SubmissionOutboxRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
                 SET dispatch_state = \'sending\', dispatch_mode = \'gateway\',
-                    confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    confirmed_by = ?, confirmed_at = NOW(),
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
         );
@@ -557,8 +577,8 @@ final class SubmissionOutboxRepository
             $supplierId,
             $id,
             'dispatch_state = \'sent\', external_message_id = ?, sent_at = ?,
-             last_error_code = NULL, last_error_message = NULL',
-            [$externalMessageId, $sentAt->format('Y-m-d H:i:s')],
+             failed_at = NULL, last_error_code = NULL, last_error_message = NULL',
+            [$externalMessageId, self::appTime($sentAt)],
             $expectedVersion,
         );
     }
@@ -604,8 +624,8 @@ final class SubmissionOutboxRepository
             // Dopředná tolerance kryje i to, že `created_at` je serverový čas,
             // kdežto čas v doručence nese vlastní posun.
             $sql .= ' AND created_at BETWEEN DATE_SUB(?, INTERVAL 400 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)';
-            $params[] = $around->format('Y-m-d H:i:s');
-            $params[] = $around->format('Y-m-d H:i:s');
+            $params[] = self::appTime($around);
+            $params[] = self::appTime($around);
         }
         $sql .= ' ORDER BY created_at DESC, id DESC LIMIT ' . $limit;
 
@@ -910,6 +930,16 @@ final class SubmissionOutboxRepository
             throw new \RuntimeException('Podání se změnilo, ale nepodařilo se ho načíst.');
         }
         return $row;
+    }
+
+    /**
+     * Okamžik z kanálu (ISDS uvádí offset, ruční zadání ho mít nemusí) jako
+     * čas aplikace, ve kterém fronta drží všechny sloupce — viz hlavička třídy.
+     */
+    private static function appTime(\DateTimeImmutable $at): string
+    {
+        return $at->setTimezone(new \DateTimeZone(date_default_timezone_get()))
+            ->format('Y-m-d H:i:s');
     }
 
     private function assertAvailable(): void

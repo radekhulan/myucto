@@ -1826,7 +1826,26 @@ final class PayrollSubmissionService
                  * předepsaný tvar, takže se do evidence nezapsal. Bez nálezu
                  * by přijaté podání vypadalo hotové a čísla by tiše chyběla.
                  */
+                $notAdopted = [];
                 foreach ($registered['unusable'] as $unusable) {
+                    $notAdopted[] = [
+                        $unusable['employment_id'],
+                        $unusable['identifier_type'] === 'ik_mpsv'
+                            ? 'registration_receipt_oic_invalid'
+                            : 'registration_receipt_id_ppv_invalid',
+                    ];
+                }
+                // Číslo z protokolu už v evidenci nese jiná osoba nebo jiný
+                // vztah (osoba vedená dvakrát) — taky se nezapsalo.
+                foreach ($registered['conflicting'] as $conflicting) {
+                    $notAdopted[] = [
+                        $conflicting['employment_id'],
+                        $conflicting['identifier_type'] === 'ik_mpsv'
+                            ? 'registration_receipt_oic_conflict'
+                            : 'registration_receipt_id_ppv_conflict',
+                    ];
+                }
+                foreach ($notAdopted as [$notAdoptedEmploymentId, $notAdoptedCode]) {
                     $this->repository->insertIssue(
                         $supplierId,
                         $submission['environment'],
@@ -1834,11 +1853,9 @@ final class PayrollSubmissionService
                         $partId,
                         'error',
                         'remote',
-                        $unusable['identifier_type'] === 'ik_mpsv'
-                            ? 'registration_receipt_oic_invalid'
-                            : 'registration_receipt_id_ppv_invalid',
+                        $notAdoptedCode,
                         'payroll_employment',
-                        'payroll_employment:' . $unusable['employment_id'],
+                        'payroll_employment:' . $notAdoptedEmploymentId,
                         null,
                         null,
                         $importedBy,

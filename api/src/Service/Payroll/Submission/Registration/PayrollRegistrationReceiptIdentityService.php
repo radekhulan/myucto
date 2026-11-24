@@ -134,7 +134,8 @@ final readonly class PayrollRegistrationReceiptIdentityService
      *
      * @return array{
      *   changed:bool,
-     *   unusable:list<array{employment_id:int,identifier_type:string}>
+     *   unusable:list<array{employment_id:int,identifier_type:string}>,
+     *   conflicting:list<array{employment_id:int,identifier_type:string,message:string}>
      * }
      */
     public function applyAcceptedEmploymentRegistrationOutcomes(
@@ -153,6 +154,7 @@ final readonly class PayrollRegistrationReceiptIdentityService
         );
         $changed = false;
         $unusable = [];
+        $conflicting = [];
         foreach ($outcomes as $outcome) {
             $employeeId = (int) $outcome['employee_id'];
             $employmentId = (int) $outcome['employment_id'];
@@ -201,36 +203,62 @@ final readonly class PayrollRegistrationReceiptIdentityService
                 $submissionId,
                 (string) $outcome['form_guid'],
             );
+            /*
+             * Číslo, které už v evidenci nese jiná osoba nebo jiný vztah
+             * (osoba vedená dvakrát), se nepřevezme. Výjimka by vrátila celý
+             * import protokolu včetně přijetí podání; volající z toho udělá
+             * nález podání se jménem držitele.
+             */
             if ($personMatches === null) {
-                $this->identityService->assignPersonExternalId(
-                    $supplierId,
-                    $employeeId,
-                    $environment,
-                    $personReference,
-                    $effectiveOn,
-                    'trusted_receipt',
-                    $sourceReference,
-                    $receiptId,
-                    $actorId,
-                );
-                $changed = true;
+                try {
+                    $this->identityService->assignPersonExternalId(
+                        $supplierId,
+                        $employeeId,
+                        $environment,
+                        $personReference,
+                        $effectiveOn,
+                        'trusted_receipt',
+                        $sourceReference,
+                        $receiptId,
+                        $actorId,
+                    );
+                    $changed = true;
+                } catch (PayrollExternalIdentifierConflict $conflict) {
+                    $conflicting[] = [
+                        'employment_id' => $employmentId,
+                        'identifier_type' => 'ik_mpsv',
+                        'message' => $conflict->getMessage(),
+                    ];
+                }
             }
             if ($employmentMatches === null) {
-                $this->identityService->assignEmploymentExternalId(
-                    $supplierId,
-                    $employmentId,
-                    $environment,
-                    $employmentReference,
-                    $effectiveOn,
-                    'trusted_receipt',
-                    $sourceReference,
-                    $receiptId,
-                    $actorId,
-                );
-                $changed = true;
+                try {
+                    $this->identityService->assignEmploymentExternalId(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                        $employmentReference,
+                        $effectiveOn,
+                        'trusted_receipt',
+                        $sourceReference,
+                        $receiptId,
+                        $actorId,
+                    );
+                    $changed = true;
+                } catch (PayrollExternalIdentifierConflict $conflict) {
+                    $conflicting[] = [
+                        'employment_id' => $employmentId,
+                        'identifier_type' => 'id_ppv',
+                        'message' => $conflict->getMessage(),
+                    ];
+                }
             }
         }
 
-        return ['changed' => $changed, 'unusable' => $unusable];
+        return [
+            'changed' => $changed,
+            'unusable' => $unusable,
+            'conflicting' => $conflicting,
+        ];
     }
 }

@@ -164,6 +164,58 @@ final class PayrollComponentJmhzLegacyPackageAdoptionTest extends TestCase
         self::assertSame('10329', $this->mappings->snapshot($this->supplierId, $this->componentId('MZDA_MESICNI'))['target_attribute_id']);
     }
 
+    /**
+     * Převzetí běží při každém čtení číselníku složek a při přípravě JMHZ.
+     * Dřív pokaždé spustilo INSERT … SELECT (sdílené zámky na zařazeních
+     * firmy) a UPDATE se spojením (výhradní), i když nebylo co převést; dva
+     * souběžné požadavky téže firmy tak končily deadlockem 1213. V ustáleném
+     * stavu teď stačí jedno čtení bez zámků.
+     */
+    public function testSteadyStateAdoptionDoesNotWriteOrLock(): void
+    {
+        $this->mappings->adoptLegacy($this->supplierId);
+        $before = $this->statementCounters();
+
+        self::assertSame(0, $this->mappings->adoptLegacy($this->supplierId));
+        $this->defaults->apply($this->supplierId);
+
+        $after = $this->statementCounters();
+        foreach ($before as $counter => $value) {
+            self::assertSame($value, $after[$counter], "Ustálený stav spustil {$counter}.");
+        }
+    }
+
+    /**
+     * Předvyplnění zařazení je fail-soft, ale odvolanou cizí transakci
+     * (deadlock, 1020) spolknout nesmí: volající by pokračoval v autocommitu.
+     */
+    public function testFailSoftDefaultsRethrowAbortedOuterTransaction(): void
+    {
+        self::assertTrue($this->db->pdo()->inTransaction());
+        $lockTimeout = new \PDOException('Lock wait timeout exceeded');
+        $lockTimeout->errorInfo = ['HY000', 1205, 'Lock wait timeout exceeded'];
+        $this->defaults->rethrowAbortedOuterTransaction($lockTimeout);
+
+        $deadlock = new \PDOException('Deadlock found when trying to get lock');
+        $deadlock->errorInfo = ['40001', 1213, 'Deadlock found when trying to get lock'];
+        $this->expectExceptionObject($deadlock);
+        $this->defaults->rethrowAbortedOuterTransaction($deadlock);
+    }
+
+    /** @return array<string,int> */
+    private function statementCounters(): array
+    {
+        $counters = [];
+        foreach ($this->db->pdo()->query(
+            "SHOW SESSION STATUS WHERE Variable_name IN
+                ('Com_insert_select', 'Com_update_multi', 'Com_update', 'Com_insert')"
+        )->fetchAll(PDO::FETCH_NUM) as $row) {
+            $counters[(string) $row[0]] = (int) $row[1];
+        }
+
+        return $counters;
+    }
+
     private function assertAdoptedAfter(callable $trigger): void
     {
         $wage = $this->componentId('MZDA_MESICNI');

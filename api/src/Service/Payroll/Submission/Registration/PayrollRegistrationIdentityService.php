@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -1386,8 +1387,9 @@ final readonly class PayrollRegistrationIdentityService
         return [
             'submission_id' => $pending['submission_id'],
             'state' => $awaiting ? 'awaiting_result' : 'queued',
-            'submitted_on' => $awaiting && $pending['submitted_at'] !== null
-                ? substr($pending['submitted_at'], 0, 10)
+            // `submitted_at` je v UTC, den odeslání se čte českým kalendářem.
+            'submitted_on' => $awaiting
+                ? PayrollSubmissionCalendar::dayOfUtc($pending['submitted_at'])
                 : null,
         ];
     }
@@ -2480,6 +2482,12 @@ final readonly class PayrollRegistrationIdentityService
                 ];
             }
 
+            $this->assertPersonIdentifierFree(
+                $supplierId,
+                $environment,
+                $employeeId,
+                $normalizedValue,
+            );
             $id = $this->repository->insertPersonExternalIdPlaceholder(
                 $supplierId,
                 $employeeId,
@@ -2497,13 +2505,25 @@ final readonly class PayrollRegistrationIdentityService
                 $supplierId,
                 $id,
             );
-            $this->repository->sealPersonExternalId(
+            if (!$this->repository->sealPersonExternalId(
                 $supplierId,
                 $id,
                 $sealed->ciphertext,
                 $sealed->lookupHash,
                 $sealed->masked,
-            );
+            )) {
+                // Totéž číslo mezitím zapsal souběžný požadavek.
+                $this->assertPersonIdentifierFree(
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $normalizedValue,
+                );
+                throw new \DomainException(self::fieldNote(
+                    'person_external_identifier',
+                    'se mezitím zapsalo jinde. ' . self::REOPEN_FORM,
+                ));
+            }
 
             return [
                 'id' => $id,
@@ -2780,6 +2800,12 @@ final readonly class PayrollRegistrationIdentityService
                 ];
             }
 
+            $this->assertEmploymentIdentifierFree(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $value,
+            );
             $id = $this->repository->insertExternalIdPlaceholder(
                 $supplierId,
                 $employment['employee_id'],
@@ -2798,13 +2824,25 @@ final readonly class PayrollRegistrationIdentityService
                 $supplierId,
                 $id,
             );
-            $this->repository->sealExternalId(
+            if (!$this->repository->sealExternalId(
                 $supplierId,
                 $id,
                 $sealed->ciphertext,
                 $sealed->lookupHash,
                 $sealed->masked,
-            );
+            )) {
+                // Totéž číslo mezitím zapsal souběžný požadavek.
+                $this->assertEmploymentIdentifierFree(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $value,
+                );
+                throw new \DomainException(self::fieldNote(
+                    'employment_external_identifier',
+                    'se mezitím zapsal jinde. ' . self::REOPEN_FORM,
+                ));
+            }
 
             return [
                 'id' => $id,
@@ -2818,6 +2856,92 @@ final readonly class PayrollRegistrationIdentityService
                 'created' => true,
             ];
         });
+    }
+
+    /**
+     * ID PPV smí v jedné firmě a prostředí nést jediný záznam, a to napříč
+     * celou historií (`uq_payroll_employment_external_id_value`). Dřív se
+     * kolize poznala až na chybě databáze 1062 při zápisu hodnoty: akce
+     * skončila chybou 500 a importy hlásily surový text SQL. Typicky jde
+     * o osobu vedenou se dvěma vztahy (dvě dohody), z nichž jeden už číslo
+     * nese.
+     */
+    private function assertEmploymentIdentifierFree(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $value,
+    ): void {
+        $holder = $this->repository->employmentExternalIdHolder(
+            $supplierId,
+            $environment,
+            'id_ppv',
+            $this->sensitiveData->lookupHash(
+                $value,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            ),
+        );
+        if ($holder === null) {
+            return;
+        }
+        throw new PayrollExternalIdentifierConflict(
+            self::fieldNote(
+                'employment_external_identifier',
+                $holder['employment_id'] === $employmentId
+                    ? 'už tenhle vztah v evidenci má jako ukončený záznam, '
+                        . 'takže ho znovu zapsat nejde. Zkontrolujte historii '
+                        . 'identifikátorů na kartě vztahu.'
+                    : 'už v evidenci patří jinému pracovnímu vztahu: '
+                        . $holder['label'] . '. Jedno číslo od ČSSZ patří '
+                        . 'jedinému vztahu. Jde-li o tentýž vztah vedený '
+                        . 'dvakrát (například dvě dohody téže osoby), sloučte '
+                        . 'je přes Další akce vztahu → Sloučit do jiného '
+                        . 'vztahu. Jinak zkontrolujte opsané číslo.',
+            ),
+            'id_ppv',
+            $holder['employee_id'],
+            $holder['employment_id'],
+        );
+    }
+
+    /** OIČ osoby, obdoba {@see assertEmploymentIdentifierFree()}. */
+    private function assertPersonIdentifierFree(
+        int $supplierId,
+        string $environment,
+        int $employeeId,
+        string $value,
+    ): void {
+        $holder = $this->repository->personExternalIdHolder(
+            $supplierId,
+            $environment,
+            'ik_mpsv',
+            $this->sensitiveData->lookupHash(
+                $value,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            ),
+        );
+        if ($holder === null) {
+            return;
+        }
+        throw new PayrollExternalIdentifierConflict(
+            self::fieldNote(
+                'person_external_identifier',
+                $holder['employee_id'] === $employeeId
+                    ? 'už tahle osoba v evidenci má jako ukončený záznam, '
+                        . 'takže ho znovu zapsat nejde. Zkontrolujte historii '
+                        . 'identifikátorů na kartě vztahu.'
+                    : 'už v evidenci patří jiné osobě: ' . $holder['label']
+                        . '. Osoba má jediné OIČ a dvě osoby ho sdílet '
+                        . 'nemohou. Jde-li o tutéž osobu vedenou dvakrát, '
+                        . 'ponechte jen jednu kartu osoby a vztahy převeďte '
+                        . 'pod ni. Jinak zkontrolujte opsané číslo.',
+            ),
+            'ik_mpsv',
+            $holder['employee_id'],
+            null,
+        );
     }
 
     /**

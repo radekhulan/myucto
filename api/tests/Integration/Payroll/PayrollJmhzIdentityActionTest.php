@@ -286,26 +286,126 @@ final class PayrollJmhzIdentityActionTest extends TestCase
         self::assertSame(0, $this->storedIdentifiers());
     }
 
-    private function createEmployment(PDO $pdo): int
+    /**
+     * Osoba vedená se dvěma vztahy (dvě dohody): ID PPV, které už nese první
+     * vztah, se k druhému nezapíše. Dřív zápis spadl na unikátním klíči
+     * hodnoty (1062) a akce vrátila 500; teď je to 409 s hláškou, která
+     * jmenuje vztah s číslem a navede na sloučení.
+     */
+    public function testIdPpvOfAnotherEmploymentIsConflictNamingTheHolder(): void
     {
-        $pdo->prepare(
-            'INSERT INTO payroll_employees
-                (supplier_id, full_name, taxpayer_type, employment_type,
-                 tax_declaration_signed, tax_credit_taxpayer, child_count,
-                 monthly_gross, auto_post, is_active)
-             VALUES (?, "Syntetická Osoba", "employee", "hpp",
-                     1, 1, 0, 40000, 0, 1)',
-        )->execute([$this->supplierId]);
-        $employeeId = (int) $pdo->lastInsertId();
+        $saved = $this->action->put(
+            $this->request('PUT', $this->validBody()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $pdo = $this->db->pdo();
+        $employeeId = (int) $pdo->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = '
+            . $this->employmentId,
+        )->fetchColumn();
+        $duplicate = $this->createEmployment($pdo, $employeeId, 'jmhz-identity-dpp');
+
+        $body = $this->validBody();
+        $body['person_external_identifier'] = null;
+        $conflict = $this->action->put(
+            $this->request('PUT', $body),
+            new Response(),
+            ['employmentId' => (string) $duplicate],
+        );
+
+        self::assertSame(409, $conflict->getStatusCode(), (string) $conflict->getBody());
+        $error = $this->json($conflict)['error'];
+        self::assertSame('conflict', $error['code']);
+        self::assertStringContainsString(
+            'Syntetická Osoba (jmhz-identity-action)',
+            $error['message'],
+        );
+        self::assertStringContainsString('Sloučit do jiného vztahu', $error['message']);
+        self::assertStringNotContainsString('200000000000000000002', $error['message']);
+        self::assertSame(0, $this->identifiersOf($duplicate));
+        self::assertSame(0, $this->pendingPlaceholders());
+    }
+
+    /** OIČ, které už nese jiná osoba, je taky 409 se jménem držitele. */
+    public function testOicOfAnotherPersonIsConflictNamingTheHolder(): void
+    {
+        $saved = $this->action->put(
+            $this->request('PUT', $this->validBody()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $other = $this->createEmployment($this->db->pdo(), null, 'jmhz-identity-other');
+
+        $body = $this->validBody();
+        $body['employment_external_identifier'] = null;
+        $conflict = $this->action->put(
+            $this->request('PUT', $body),
+            new Response(),
+            ['employmentId' => (string) $other],
+        );
+
+        self::assertSame(409, $conflict->getStatusCode(), (string) $conflict->getBody());
+        $error = $this->json($conflict)['error'];
+        self::assertSame('conflict', $error['code']);
+        self::assertStringContainsString('jiné osobě: Syntetická Osoba', $error['message']);
+        self::assertStringNotContainsString('1000000001', $error['message']);
+        self::assertSame(0, $this->pendingPlaceholders());
+        self::assertSame(1, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM payroll_person_external_ids WHERE supplier_id = '
+            . $this->supplierId,
+        )->fetchColumn());
+    }
+
+    private function createEmployment(
+        PDO $pdo,
+        ?int $employeeId = null,
+        string $code = 'jmhz-identity-action',
+    ): int {
+        if ($employeeId === null) {
+            $pdo->prepare(
+                'INSERT INTO payroll_employees
+                    (supplier_id, full_name, taxpayer_type, employment_type,
+                     tax_declaration_signed, tax_credit_taxpayer, child_count,
+                     monthly_gross, auto_post, is_active)
+                 VALUES (?, "Syntetická Osoba", "employee", "hpp",
+                         1, 1, 0, 40000, 0, 1)',
+            )->execute([$this->supplierId]);
+            $employeeId = (int) $pdo->lastInsertId();
+        }
         $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, code, relation_type, status,
                  start_date, is_legacy_projection)
-             VALUES (?, ?, "jmhz-identity-action", "employment", "active",
+             VALUES (?, ?, ?, "employment", "active",
                      "2026-08-01", 0)',
-        )->execute([$this->supplierId, $employeeId]);
+        )->execute([$this->supplierId, $employeeId, $code]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    private function identifiersOf(int $employmentId): int
+    {
+        return (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM payroll_employment_external_ids
+              WHERE supplier_id = ' . $this->supplierId
+            . ' AND employment_id = ' . $employmentId,
+        )->fetchColumn();
+    }
+
+    private function pendingPlaceholders(): int
+    {
+        return (int) $this->db->pdo()->query(
+            'SELECT
+                (SELECT COUNT(*) FROM payroll_person_external_ids
+                  WHERE supplier_id = ' . $this->supplierId . '
+                    AND value_ciphertext = "enc:v2:pending")
+              + (SELECT COUNT(*) FROM payroll_employment_external_ids
+                  WHERE supplier_id = ' . $this->supplierId . '
+                    AND value_ciphertext = "enc:v2:pending")',
+        )->fetchColumn();
     }
 
     /** @return array<string,mixed> */

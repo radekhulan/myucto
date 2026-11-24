@@ -1240,7 +1240,8 @@
         "2334_money_s3_import_fingerprint.sql",
         "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql",
-        "2337_imported_issued_tax_snapshot.sql"
+        "2337_imported_issued_tax_snapshot.sql",
+        "2339_submission_outbox_app_time.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -27846,6 +27847,7 @@
                 "sent_at": "datetime NULL DEFAULT NULL",
                 "subject": "varchar(255) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
+                "time_basis": "enum('utc','app') NOT NULL DEFAULT 'app'",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
             "indexes": {

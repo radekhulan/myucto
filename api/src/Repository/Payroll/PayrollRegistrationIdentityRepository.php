@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use PDO;
 
 final class PayrollRegistrationIdentityRepository
@@ -1311,6 +1312,106 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Kdo už v evidenci nese danou hodnotu identifikátoru — i v ukončeném
+     * záznamu, protože klíč `uq_payroll_employment_external_id_value` drží
+     * jednoznačnost napříč celou historií. Popisek je „Jméno (kód)" jako
+     * v {@see PayrollPeopleRepository::employmentLabels()}, ať hláška jmenuje
+     * vztah stejně jako zbytek mezd.
+     *
+     * @return array{id:int,employee_id:int,employment_id:int,closed:bool,label:string}|null
+     */
+    public function employmentExternalIdHolder(
+        int $supplierId,
+        string $environment,
+        string $identifierType,
+        string $valueHash,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ext.id, ext.employee_id, ext.employment_id, ext.valid_to,
+                    employment.code,
+                    ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
+               FROM payroll_employment_external_ids ext
+               JOIN payroll_employments employment
+                 ON employment.id = ext.employment_id
+                AND employment.supplier_id = ext.supplier_id
+               JOIN payroll_employees employee
+                 ON employee.id = employment.employee_id
+                AND employee.supplier_id = employment.supplier_id
+              WHERE ext.supplier_id = ?
+                AND ext.environment = ?
+                AND ext.identifier_type = ?
+                AND ext.value_hash = ?
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $identifierType,
+            $valueHash,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+        $code = (string) ($row['code'] ?? '');
+        $name = (string) ($row['full_name'] ?? '');
+
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'employment_id' => $this->positiveInt($row, 'employment_id'),
+            'closed' => $row['valid_to'] !== null,
+            'label' => $code === '' ? $name : sprintf('%s (%s)', $name, $code),
+        ];
+    }
+
+    /**
+     * Osoba, která už v evidenci nese danou hodnotu OIČ (i v ukončeném
+     * záznamu, viz `uq_payroll_person_external_id_value`).
+     *
+     * @return array{id:int,employee_id:int,closed:bool,label:string}|null
+     */
+    public function personExternalIdHolder(
+        int $supplierId,
+        string $environment,
+        string $identifierType,
+        string $valueHash,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ext.id, ext.employee_id, ext.valid_to,
+                    ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
+               FROM payroll_person_external_ids ext
+               JOIN payroll_employees employee
+                 ON employee.id = ext.employee_id
+                AND employee.supplier_id = ext.supplier_id
+              WHERE ext.supplier_id = ?
+                AND ext.environment = ?
+                AND ext.identifier_type = ?
+                AND ext.value_hash = ?
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $identifierType,
+            $valueHash,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'closed' => $row['valid_to'] !== null,
+            'label' => (string) ($row['full_name'] ?? ''),
+        ];
+    }
+
+    /**
      * Zahodí ručně opsaný identifikátor, aby šel přepsat správnou hodnotou.
      *
      * Číslo od ČSSZ se opisuje z protokolu ručně, takže překlep je běžný.
@@ -1704,52 +1805,97 @@ final class PayrollRegistrationIdentityRepository
         return (int) $this->db->pdo()->lastInsertId();
     }
 
+    /**
+     * Doplní zašifrovanou hodnotu do rozepsaného řádku.
+     *
+     * Vrací false, když stejnou hodnotu mezitím zapsal souběžný požadavek
+     * (1062 na `uq_payroll_employment_external_id_value`). Rozepsaný řádek
+     * se pak smaže, aby v evidenci nezůstal placeholder `enc:v2:pending`
+     * ani tehdy, když volající chybu zachytí a pokračuje v téže transakci
+     * (import protokolu); hlášku s držitelem čísla skládá služba.
+     */
     public function sealExternalId(
         int $supplierId,
         int $id,
         string $ciphertext,
         string $hash,
         string $masked,
-    ): void {
-        $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_employment_external_ids
-                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
-              WHERE supplier_id = ? AND id = ?'
-        );
-        $statement->execute([
+    ): bool {
+        return $this->seal(
+            'payroll_employment_external_ids',
+            'Externí identifikátor vztahu nelze uložit.',
+            $supplierId,
+            $id,
             $ciphertext,
             $hash,
             $masked,
-            $supplierId,
-            $id,
-        ]);
-        if ($statement->rowCount() !== 1) {
-            throw new \DomainException('Externí identifikátor vztahu nelze uložit.');
-        }
+        );
     }
 
+    /** @see sealExternalId */
     public function sealPersonExternalId(
         int $supplierId,
         int $id,
         string $ciphertext,
         string $hash,
         string $masked,
-    ): void {
-        $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_person_external_ids
-                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
-              WHERE supplier_id = ? AND id = ?'
-        );
-        $statement->execute([
+    ): bool {
+        return $this->seal(
+            'payroll_person_external_ids',
+            'Externí identifikátor osoby nelze uložit.',
+            $supplierId,
+            $id,
             $ciphertext,
             $hash,
             $masked,
-            $supplierId,
-            $id,
-        ]);
-        if ($statement->rowCount() !== 1) {
-            throw new \DomainException('Externí identifikátor osoby nelze uložit.');
+        );
+    }
+
+    private function seal(
+        string $table,
+        string $failure,
+        int $supplierId,
+        int $id,
+        string $ciphertext,
+        string $hash,
+        string $masked,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE ' . $table . '
+                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+              WHERE supplier_id = ? AND id = ?'
+        );
+        try {
+            DbErrorLogger::expectingDuplicates(
+                [
+                    'uq_payroll_employment_external_id_value',
+                    'uq_payroll_person_external_id_value',
+                ],
+                static fn (): bool => $statement->execute([
+                    $ciphertext,
+                    $hash,
+                    $masked,
+                    $supplierId,
+                    $id,
+                ]),
+            );
+        } catch (\PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== 1062) {
+                throw $exception;
+            }
+            $this->db->pdo()->prepare(
+                'DELETE FROM ' . $table . '
+                  WHERE supplier_id = ? AND id = ?
+                    AND value_ciphertext = "enc:v2:pending"'
+            )->execute([$supplierId, $id]);
+
+            return false;
         }
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException($failure);
+        }
+
+        return true;
     }
 
     /**

@@ -479,7 +479,8 @@ final class PayrollComponentRepository
     {
         try {
             $this->jmhzDefaults->seed($supplierId);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $this->jmhzDefaults->rethrowAbortedOuterTransaction($e);
             return;
         }
     }
@@ -526,7 +527,8 @@ final class PayrollComponentRepository
     {
         try {
             $this->jmhzDefaults->apply($supplierId, $componentIds);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $this->jmhzDefaults->rethrowAbortedOuterTransaction($e);
             return;
         }
     }

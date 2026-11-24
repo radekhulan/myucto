@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollExternalIdentifierConflict;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
 /**
@@ -44,7 +45,8 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  *    přes {@see PayrollRegistrationIdentityService::openResolutionTask()} —
  *    tedy tentýž mechanismus, kterým se hlásí neshody identity ve zbytku
  *    řetězce, a který je sám idempotentní (otevřený úkol se nezakládá
- *    podruhé).
+ *    podruhé). Stejně se hlásí číslo, které v evidenci už nese JINÁ osoba
+ *    nebo JINÝ vztah ({@see PayrollExternalIdentifierConflict}).
  *
  * ── Proč se tady nikdy nevyhazuje výjimka za nedohledaný vztah ──────────────
  * Volá se to uvnitř transakce importu protokolu. Výjimka by vrátila zpět
@@ -158,40 +160,47 @@ final readonly class JmhzReceiptIdentityService
                 if ($matches === true) {
                     continue;
                 }
-                if ($matches === false) {
-                    $task = $this->identityService->openResolutionTask(
-                        $supplierId,
-                        $employmentId,
-                        $environment,
-                        $subject['task_kind'],
-                        $subject['reason_code'],
-                        null,
-                        $receiptId,
-                        null,
-                        $actorId,
-                    );
-                    $findings[] = [
-                        'form_guid' => $guid,
-                        'employment_id' => $employmentId,
-                        'field' => $subject['field'],
-                        'reason_code' => $subject['reason_code'],
-                        'task_id' => $task['id'],
-                    ];
-                    continue;
+                if ($matches === null) {
+                    try {
+                        $this->assign(
+                            $subject['field'],
+                            $supplierId,
+                            $employeeId,
+                            $employmentId,
+                            $environment,
+                            $subject['value'],
+                            $outcome['effective_on'],
+                            $sourceReference,
+                            $receiptId,
+                            $actorId,
+                        );
+                        $assigned++;
+                        continue;
+                    } catch (PayrollExternalIdentifierConflict) {
+                        // Číslo z protokolu už v evidenci nese jiná osoba nebo
+                        // jiný vztah. Výjimka by vrátila celý import protokolu
+                        // (viz docblock třídy), takže jde o neshodu k ztotožnění
+                        // stejně jako jiná hodnota u téhož vztahu.
+                    }
                 }
-                $this->assign(
-                    $subject['field'],
+                $task = $this->identityService->openResolutionTask(
                     $supplierId,
-                    $employeeId,
                     $employmentId,
                     $environment,
-                    $subject['value'],
-                    $outcome['effective_on'],
-                    $sourceReference,
+                    $subject['task_kind'],
+                    $subject['reason_code'],
+                    null,
                     $receiptId,
+                    null,
                     $actorId,
                 );
-                $assigned++;
+                $findings[] = [
+                    'form_guid' => $guid,
+                    'employment_id' => $employmentId,
+                    'field' => $subject['field'],
+                    'reason_code' => $subject['reason_code'],
+                    'task_id' => $task['id'],
+                ];
             }
         }
 

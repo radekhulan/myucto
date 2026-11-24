@@ -145,6 +145,48 @@ final class PayrollE2eReg2ReceiptIdentifierTest extends TestCase
         );
     }
 
+    /**
+     * ID PPV z protokolu už v evidenci nese jiný vztah (osoba vedená dvakrát).
+     * Dřív zápis skončil chybou databáze 1062 a vrátil celý import protokolu
+     * včetně přijetí přihlášky; teď se přihláška uzavře a číslo dostane nález.
+     */
+    public function testAcceptedProtocolWithIdPpvOfAnotherEmploymentNamesTheConflict(): void
+    {
+        [, $holderEmploymentId] = $this->regPerson('Protokol', 'Držitel', 77, 'dpp', self::START_ON);
+        $identities = $this->container->get(PayrollRegistrationIdentityService::class);
+        self::assertInstanceOf(PayrollRegistrationIdentityService::class, $identities);
+        $identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $holderEmploymentId,
+            'test',
+            null,
+            '200000000000000000077',
+            self::START_ON,
+            null,
+            true,
+            $this->actors[0],
+        );
+        [$employeeId, $employmentId] = $this->regPerson('Protokol', 'Dvojník', 79, 'dpp', self::START_ON);
+        $this->regSaveA1Profile($employmentId, $this->regA1Profile(self::START_ON, 'T'));
+        $prepared = $this->regPrepare($employmentId, ['registration_mode' => 'full']);
+        $submissionId = (int) $prepared['submission_id'];
+
+        $this->regReceipt($prepared, 'accepted', self::VALID_OIC, '200000000000000000077');
+
+        self::assertSame('accepted', $this->regSubmissionStatus($submissionId));
+        self::assertSame(1, $this->oicCount($employeeId));
+        self::assertNull($this->regIdentifier($employmentId, 'id_ppv'));
+        self::assertSame(
+            ['registration_receipt_id_ppv_conflict'],
+            array_column($this->issues($submissionId), 'issue_code'),
+        );
+        self::assertSame(0, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND value_ciphertext = "enc:v2:pending"',
+            [$this->supplierId],
+        ));
+    }
+
     /** Běžný protokol nález nedostane. */
     public function testWellFormedIdentifiersLeaveNoFinding(): void
     {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Component;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use PDO;
@@ -181,7 +182,8 @@ final class PayrollComponentJmhzMappingDefaults
         }
         try {
             $this->mappings->adoptLegacy($supplierId);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $this->rethrowAbortedOuterTransaction($e);
         }
         $existing = $this->mappings->listForSupplier($supplierId);
         $applied = [];
@@ -204,12 +206,30 @@ final class PayrollComponentJmhzMappingDefaults
             }
             try {
                 $applied[] = $this->mappings->put($supplierId, $componentId, $target, null, null);
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                $this->rethrowAbortedOuterTransaction($e);
                 continue;
             }
         }
 
         return $applied;
+    }
+
+    /**
+     * Fail-soft předvyplnění nesmí spolknout odvolanou transakci volajícího.
+     *
+     * Deadlock (1213) nebo 1020 MariaDB vrátí CELOU cizí transakci, ve které se
+     * předvyplnění volá (materializace absencí, převod mezd…), a
+     * `inTransaction()` přitom dál hlásí true. Spolknutá chyba by nechala
+     * další zápisy volajícího běžet v autocommitu. Opakování patří vlastníkovi
+     * transakce, proto se mu chyba vrací; bez cizí transakce zůstává
+     * předvyplnění fail-soft jako dosud.
+     */
+    public function rethrowAbortedOuterTransaction(\Throwable $failure): void
+    {
+        if (TransactionFailure::aborted($failure) && $this->db->pdo()->inTransaction()) {
+            throw $failure;
+        }
     }
 
     /**
@@ -232,7 +252,8 @@ final class PayrollComponentJmhzMappingDefaults
      * Nejdřív se do něj převezmou zařazení ze staršího balíku
      * ({@see PayrollComponentJmhzMappingRepository::adoptLegacy()}), aby firma
      * po přechodu na nový balík nepřišla o rozhodnutí účetní. V ustáleném stavu
-     * jsou to vždy čtyři příkazy: dohledání balíku, převzetí (dva) a zápis.
+     * jsou to vždy tři příkazy: dohledání balíku, kontrola převzetí (bez zámků)
+     * a zápis.
      *
      * @return int počet nově založených zařazení
      */

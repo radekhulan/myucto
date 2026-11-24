@@ -40,6 +40,37 @@ final class PayrollSubmissionCalendar
         return self::now($at)->format('Y-m-d');
     }
 
+    /**
+     * Okamžik uložený v UTC jako český čas, nebo null u prázdné či nečitelné
+     * hodnoty.
+     *
+     * Mzdová podání drží události v UTC (`payroll_submissions.submitted_at`
+     * a `decided_at` plní {@see PayrollSubmissionService} časem v UTC, frontend
+     * je čte přes `formatUtcDateTime`). Den podání se ale posuzuje českým
+     * kalendářem, takže holé `substr(…, 0, 10)` nebo `new \DateTimeImmutable()`
+     * v zóně aplikace by podání mezi půlnocí a 1. až 2. hodinou ranní přiřadily
+     * předchozímu dni a podání po lhůtě by vypadalo včasné.
+     */
+    public static function fromUtc(?string $utc): ?\DateTimeImmutable
+    {
+        if ($utc === null || trim($utc) === '') {
+            return null;
+        }
+        $moment = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d H:i:s',
+            substr(trim($utc), 0, 19),
+            new \DateTimeZone('UTC'),
+        );
+
+        return $moment === false ? null : $moment->setTimezone(self::zone());
+    }
+
+    /** Český den (`RRRR-MM-DD`) okamžiku uloženého v UTC, viz {@see fromUtc()}. */
+    public static function dayOfUtc(?string $utc): ?string
+    {
+        return self::fromUtc($utc)?->format('Y-m-d');
+    }
+
     /** Čas vyplnění podání pro `datumVyplneni` (`RRRR-MM-DDTHH:MM:SS+HH:MM`). */
     public static function filledAt(?\DateTimeInterface $at = null): string
     {

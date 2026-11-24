@@ -214,7 +214,7 @@ final class PayrollOperationalHealthService
                     AND dispatch_state = "sent"
                     AND receipt_document_id IS NULL
                     AND acceptance_state = "unknown"
-                    AND sent_at < UTC_TIMESTAMP() - INTERVAL 1 HOUR) AS awaiting_receipt
+                    AND sent_at < NOW() - INTERVAL 1 HOUR) AS awaiting_receipt
                FROM submission_outbox
               WHERE supplier_id = ?
                 AND channel = "isds"
