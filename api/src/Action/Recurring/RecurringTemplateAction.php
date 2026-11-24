@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Recurring;
 
+use MyInvoice\Http\EntityTagInput;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -301,6 +302,9 @@ final class RecurringTemplateAction
     public function create(Request $request, Response $response): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
+        if ($error = EntityTagInput::rejectInvalid($request, $response, $body)) {
+            return $error;
+        }
         $supplierId = SupplierGuard::currentId($request);
         $body['supplier_id'] = $supplierId;
 
@@ -319,9 +323,6 @@ final class RecurringTemplateAction
             ]);
         }
 
-        if (array_key_exists('tags', $body) && RequestAuthorization::isClientType($request)) {
-            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
-        }
         $errors = $this->validate($body);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
@@ -350,6 +351,9 @@ final class RecurringTemplateAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if ($error = EntityTagInput::rejectInvalid($request, $response, $body)) {
+            return $error;
+        }
         $body['supplier_id'] = (int) $tpl['supplier_id'];
 
         // Částečný PUT (#113): vynechaný klíč = uložená hodnota šablony, vynechané items
@@ -420,9 +424,6 @@ final class RecurringTemplateAction
             }
         }
 
-        if (array_key_exists('tags', $body) && RequestAuthorization::isClientType($request)) {
-            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
-        }
         $errors = $this->validate($body);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
@@ -628,9 +629,6 @@ final class RecurringTemplateAction
     private function validate(array $data): array
     {
         $err = [];
-        if (array_key_exists('tags', $data) && !EntityTagRepository::validNames($data['tags'])) {
-            $err['tags'][] = 'Zadejte nejvýše 64 neprázdných štítků po nejvýše 64 znacích.';
-        }
 
         if (empty($data['client_id']) || !is_numeric($data['client_id'])) {
             $err['client_id'][] = 'Klient je povinný';

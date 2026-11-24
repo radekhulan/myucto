@@ -4969,6 +4969,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Client' }
 
+  /api/v1/invoices/tags:
+    get:
+      tags: [Invoices]
+      summary: Našeptávání interních štítků firmy (nejvýše 50 shod)
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: q, schema: { type: string, maxLength: 64 }, description: "Začátek názvu" }
+        - { in: query, name: ids, schema: { type: string }, description: "Až 64 konkrétních ID oddělených čárkou pro uložený filtr." }
+      responses:
+        '200':
+          description: Firemní štítky podle názvu
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/EntityTag' } }
+        '403': { description: Klientské roli nejsou interní štítky dostupné. }
+        '422': { description: Neplatný dotaz. }
+
   /api/v1/invoices:
     get:
       tags: [Invoices]
@@ -5099,6 +5116,8 @@ paths:
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_vat_classification]', description: "1 = doplnit členění plnění z evidence DPH a skutečné řádky přiznání; odvozené sloupce se neřadí", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_journal_notes]', description: "1 = živé poznámky deníku; vyžaduje oprávnění accounting read", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[tag_ids]', schema: { type: string }, description: "Průnik ID interních štítků oddělených čárkou nebo none pro doklady bez štítku." }
+        - { in: query, name: 'filter[include_tags]', schema: { type: integer, enum: [0, 1] }, description: "Vrátit vlastní štítky faktury (interní role)." }
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
@@ -5113,6 +5132,8 @@ paths:
           name: per_page
           schema: { type: integer, minimum: 5, maximum: 200, default: 50 }
       responses:
+        '422': { description: Neplatný filtr seznamu. }
+        '403': { description: Nedostatečné oprávnění nebo požadavek klientské role na interní štítky. }
         '200':
           description: OK
           content:
@@ -5494,6 +5515,7 @@ paths:
         - { in: query, name: 'filter[unpaid_as_of]', schema: { type: string, format: date } }
         - { in: query, name: 'filter[booked]', schema: { type: string, enum: ['1', '0'] } }
         - { in: query, name: 'filter[oss_review]', schema: { type: string, enum: [any, oss, domestic, '1'] } }
+        - { in: query, name: 'filter[tag_ids]', schema: { type: string }, description: "Průnik ID interních štítků oddělených čárkou nebo none pro doklady bez štítku." }
         - { in: query, name: 'filter[revenue_category_id]', schema: { type: string, example: '3,7,none' } }
         - { in: query, name: 'filter[revenue_category_exclude]', schema: { type: string, example: '12,none' } }
         - $ref: '#/components/parameters/ListDimensionValueId'
@@ -14304,6 +14326,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: q, schema: { type: string, maxLength: 64 }, description: "Začátek názvu" }
+        - { in: query, name: ids, schema: { type: string }, description: "Až 64 konkrétních ID oddělených čárkou pro uložený filtr." }
       responses:
         '200':
           description: Firemní štítky podle názvu
@@ -14330,6 +14353,8 @@ paths:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
       responses:
+        '422': { description: Neplatný filtr seznamu. }
+        '403': { description: Nedostatečné oprávnění nebo požadavek klientské role na interní štítky. }
         '200':
           description: OK
           content:
@@ -14351,6 +14376,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RecurringTemplateInput' }
       responses:
+        '403': { description: Nedostatečné oprávnění nebo požadavek klientské role na interní štítky. }
         '201':
           description: Vytvořeno
           content:
@@ -14393,6 +14419,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RecurringTemplateInput' }
       responses:
+        '403': { description: Nedostatečné oprávnění nebo požadavek klientské role na interní štítky. }
         '200':
           description: OK
           content:
@@ -55070,6 +55097,7 @@ components:
     Invoice:
       type: object
       properties:
+        tags: { type: array, items: { $ref: '#/components/schemas/EntityTag' }, description: "Interní štítky faktury, v seznamu jen s filter[include_tags]=1." }
         country: { type: [string, "null"], description: "ISO2 státu protistrany v seznamu; neurčuje místo plnění." }
         journal_notes: { type: array, description: "Živé poznámky účetního zápisu, připnuté první; jen s filter[include_journal_notes]=1 a accounting read.", items: { type: string } }
         document_tags: { type: array, description: "Štítky dostupných příloh; jen s filter[include_document_tags]=1 a documents read.", items: { type: string } }
@@ -55383,6 +55411,7 @@ components:
         Vstup pro POST /invoices (vytvoří draft) i PUT /invoices/{id} (úprava draftu).
         Vystavená/zaplacená/storno faktura nelze upravovat — vrátí 409.
       properties:
+        tags: { type: array, maxItems: 64, items: { type: string, minLength: 1, maxLength: 64 }, description: "Interní štítky. Vynechání zachová stávající hodnoty, prázdné pole je odebere." }
         client_id: { type: [integer, "null"], description: "Musí patřit aktuálnímu supplier-ovi. Povinné, kromě zjednodušeného dokladu (is_simplified): bez klienta se naváže na systémového koncového zákazníka firmy." }
         project_id: { type: [integer, "null"], description: "Pokud uvedeno, musí patřit `client_id`" }
         branding_profile_id: { type: [integer, "null"], description: "Volitelný brandingový profil stejného supplier-a; bez pole se použije výchozí profil klienta." }

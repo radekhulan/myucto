@@ -522,6 +522,10 @@ V seznamu klikněte na štítek pod názvem nebo ho vyberte ve filtrech. Při v�
 více štítků zůstanou šablony se všemi vybranými štítky. Filtr **Bez štítku**
 najde dosud nezařazené šablony. Obě možnosti můžete kombinovat se stavem a hledáním.
 
+Nová faktura i nový koncept při vytvoření převezmou aktuální štítky šablony.
+Změna štítků šablony se projeví až u další nové faktury. Štítky otevřeného
+konceptu můžete upravit samostatně a při jeho vystavení se zachovají.
+
 ### 17.8.13 Vazba na vygenerované faktury
 
 Každá faktura vytvořená šablonou si pamatuje, z které šablony pochází. V detailu

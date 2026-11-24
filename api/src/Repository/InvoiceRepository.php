@@ -19,6 +19,7 @@ use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Service\Accounting\Bulk\BulkTransaction;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
@@ -1014,6 +1015,8 @@ final class InvoiceRepository
             $params[] = (int) $filters['supplier_id'];
         }
 
+        EntityTagRepository::filter(TagTarget::Invoice, 'i.id', $filters['tag_ids'] ?? '', $where, $params);
+
         if (!empty($filters['type'])) {
             $types = is_array($filters['type']) ? $filters['type'] : [$filters['type']];
             $place = implode(',', array_fill(0, count($types), '?'));
@@ -1716,9 +1719,17 @@ final class InvoiceRepository
         }
         $params[] = $userId;
 
-        $pdo->prepare($sql)->execute($params);
+        $insert = static function () use ($pdo, $sql, $params): int {
+            $pdo->prepare($sql)->execute($params);
+            return (int) $pdo->lastInsertId();
+        };
+        if (empty($data['tags'])) return $insert();
 
-        return (int) $pdo->lastInsertId();
+        return BulkTransaction::run($pdo, function () use ($insert, $supplierId, $data): int {
+            $id = $insert();
+            (new EntityTagRepository($this->db))->replace(TagTarget::Invoice, $supplierId, $id, $data['tags']);
+            return $id;
+        });
     }
 
     /**
@@ -1873,20 +1884,34 @@ final class InvoiceRepository
         if ($hasType) $params[] = (string) $data['invoice_type'];
         $params[] = $id;
 
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
+        $update = function () use ($sql, $params, $requireUnbooked, $id): bool {
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute($params);
 
-        if ($requireUnbooked && $stmt->rowCount() === 0) {
-            // rowCount 0 = buď booked_at podmínka nesedla, nebo identická data (MySQL
-            // počítá changed rows). Rozliš dotazem — locked jen když booked_at není NULL.
-            // Vědomě akceptovaný double-race: mezi UPDATE a tímto SELECTem může účetní
-            // doklad zase odemknout → falešné 200 u no-op zápisu (ms okno, bez dopadu
-            // na data — UPDATE nic nezměnil).
-            $check = $this->db->pdo()->prepare('SELECT 1 FROM invoices WHERE id = ? AND booked_at IS NULL');
-            $check->execute([$id]);
-            return $check->fetchColumn() !== false;
-        }
-        return true;
+            if ($requireUnbooked && $stmt->rowCount() === 0) {
+                // rowCount 0 = buď booked_at podmínka nesedla, nebo identická data (MySQL
+                // počítá changed rows). Rozliš dotazem — locked jen když booked_at není NULL.
+                // Vědomě akceptovaný double-race: mezi UPDATE a tímto SELECTem může účetní
+                // doklad zase odemknout → falešné 200 u no-op zápisu (ms okno, bez dopadu
+                // na data — UPDATE nic nezměnil).
+                $check = $this->db->pdo()->prepare('SELECT 1 FROM invoices WHERE id = ? AND booked_at IS NULL');
+                $check->execute([$id]);
+                return $check->fetchColumn() !== false;
+            }
+            return true;
+        };
+        if (!array_key_exists('tags', $data)) return $update();
+
+        return BulkTransaction::run($this->db->pdo(), function () use ($update, $current, $id, $data): bool {
+            if (!$update()) return false;
+            (new EntityTagRepository($this->db))->replace(TagTarget::Invoice, (int) $current['supplier_id'], $id, $data['tags']);
+            return true;
+        });
+    }
+
+    public function tagsForInvoices(int $supplierId, array $invoiceIds): array
+    {
+        return (new EntityTagRepository($this->db))->forEntities(TagTarget::Invoice, $supplierId, $invoiceIds);
     }
 
     public function delete(int $id): void

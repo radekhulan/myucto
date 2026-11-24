@@ -1240,7 +1240,8 @@
         "2334_money_s3_import_fingerprint.sql",
         "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql",
-        "2337_entity_tags_recurring_templates.sql"
+        "2337_entity_tags_recurring_templates.sql",
+        "2338_invoice_tags.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7779,6 +7780,24 @@
                 "fk_is_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_is_reversal": "(reversal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_is_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "invoice_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "entity_id": "bigint(20) unsigned NOT NULL",
+                "tag_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (entity_id, tag_id)",
+                "idx_invoice_tag_entity": "BTREE (tag_id, entity_id)"
+            },
+            "foreign_keys": {
+                "fk_invoice_tag_invoice": "(entity_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_invoice_tag_tag": "(tag_id) -> entity_tags (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

@@ -27,6 +27,16 @@ final class EntityTagRepository
         return $query->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** Popisky pro obnovení uloženého filtru mimo první stránku našeptávače. */
+    public function byIds(int $supplierId, array $ids): array
+    {
+        if (!$ids) return [];
+        $slots = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT id, name FROM entity_tags WHERE supplier_id = ? AND id IN ($slots)");
+        $stmt->execute([$supplierId, ...$ids]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     /** Nahrazení celé sady se serializuje zámkem vlastníka v transakci volajícího. */
     public function replace(TagTarget $target, int $supplierId, int $entityId, array $names): void
     {

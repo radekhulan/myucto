@@ -714,6 +714,7 @@ final class Routes
         $app->get('/api/sales-quotes/{id:[0-9]+}/history/{eventId:[0-9]+}/pdf', [$quotes, 'pdf']);
 
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
+        $app->get    ('/api/invoices/tags',         \MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
         // Kniha vystavených faktur (PDF/XLSX) nad filtrem seznamu.

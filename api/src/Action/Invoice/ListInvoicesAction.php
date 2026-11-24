@@ -53,6 +53,11 @@ final class ListInvoicesAction
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
+        $includeTags = ($filter['include_tags'] ?? null) === '1';
+        if ($includeTags && RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Štítky jsou interní.', 403);
+        }
+
         $filters = InvoiceListFilters::issued($request, $this->dimensions);
         if (is_string($filters)) {
             return Json::error($response, 'validation_failed', $filters, 422);
@@ -84,6 +89,7 @@ final class ListInvoicesAction
                 ($filter['include_journal_notes'] ?? null) === '1',
                 ($filter['include_document_tags'] ?? null) === '1' ? DocumentViewerResolver::fromRequest($request) : null,
             );
+            $tags = $includeTags ? $this->repo->tagsForInvoices((int) $filters['supplier_id'], $ids) : [];
             $dimensionLabels = ($filter['include_dimensions'] ?? null) === '1'
                 ? $this->dimensionSummaries->forDocuments((int) $filters['supplier_id'], 'invoice', $ids)
                 : [];
@@ -93,6 +99,7 @@ final class ListInvoicesAction
                     if ($lock !== null) {
                         $row['locked'] = $lock->toArray();
                     }
+                    if ($includeTags) $row['tags'] = $tags[(int) $row['id']] ?? [];
                     $row += $extras[(int) $row['id']] ?? [];
                     if (isset($details[(int) $row['id']])) {
                         $row += $details[(int) $row['id']];

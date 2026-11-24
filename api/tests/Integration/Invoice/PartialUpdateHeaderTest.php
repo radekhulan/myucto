@@ -95,6 +95,39 @@ final class PartialUpdateHeaderTest extends TestCase
         $this->db->close();
     }
 
+    public function testInternalInvoiceTagsRoundTripAndFilter(): void
+    {
+        $names = ['PHPUnit-A-' . bin2hex(random_bytes(5)), 'PHPUnit-B-' . bin2hex(random_bytes(5))];
+        $invoices = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $scope = ['supplier_id' => $this->supplierId, 'client_id' => $this->clientId];
+        try {
+            $id = $this->createInvoice(extra: ['tags' => $names]);
+            $untagged = $this->createInvoice();
+            $tags = $this->put($id, ['note_above_items' => 'Se štítky'])['body']['tags'];
+            self::assertSame($names, array_column($tags, 'name'));
+            $container = Bootstrap::buildContainer();
+            $clientRequest = $this->request('GET', [])->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']);
+            $detail = $container->get(\MyInvoice\Action\Invoice\GetInvoiceAction::class);
+            self::assertArrayNotHasKey('tags', self::decode($detail($clientRequest, new Psr7Response(), ['id' => $id]))['body']);
+            $suggest = $container->get(\MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
+            self::assertSame(403, $suggest($clientRequest, new Psr7Response())->getStatusCode());
+            $foreignRequest = $this->request('GET', [])
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId + 1)
+                ->withQueryParams(['ids' => (string) $tags[0]['id']]);
+            self::assertSame([], self::decode($suggest($foreignRequest, new Psr7Response()))['body']);
+            $both = implode(',', array_column($tags, 'id'));
+            self::assertSame([$id], $invoices->listIds($scope + ['tag_ids' => $both], 10)['ids']);
+            self::assertSame([$untagged], $invoices->listIds($scope + ['tag_ids' => 'none'], 10)['ids']);
+            self::assertSame(400, $this->put($id, ['tags' => 'není pole'])['status']);
+            self::assertSame([$tags[1]], $this->put($id, ['tags' => [$names[1]]])['body']['tags']);
+            self::assertSame([], $invoices->listIds($scope + ['tag_ids' => $both], 10)['ids']);
+            self::assertSame([], $this->put($id, ['tags' => []])['body']['tags']);
+        } finally {
+            $this->db->pdo()->prepare('DELETE FROM entity_tags WHERE supplier_id = ? AND name IN (?, ?)')
+                ->execute([$this->supplierId, ...$names]);
+        }
+    }
+
     /** BEZ OPRAVY PADÁ: tělo jen s poznámkou bylo odmítnuto (client_id povinný) a s ním resetovalo hlavičku. */
     public function testOmittedHeaderFieldsKeepStoredValues(): void
     {

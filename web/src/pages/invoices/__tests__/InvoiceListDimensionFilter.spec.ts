@@ -12,6 +12,10 @@ vi.mock('@/api/invoices', async original => {
   const actual = await original<typeof import('@/api/invoices')>()
   return { ...actual, invoicesApi: { ...actual.invoicesApi, listGrouped: mocks.list } }
 })
+vi.mock('@/api/entityTags', async original => ({
+  ...await original<typeof import('@/api/entityTags')>(),
+  tagsById: async () => [{ id: 23, name: 'Hosting' }, { id: 42, name: 'Servis' }],
+}))
 vi.mock('@/api/clients', () => ({ clientsApi: { list: async () => ({ data: [] }) } }))
 vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: async () => [] } }))
 vi.mock('@/api/revenueCategories', () => ({ revenueCategoriesApi: { list: async () => [] } }))
@@ -70,6 +74,18 @@ describe('vydané faktury – filtr dimenze', () => {
     mocks.list.mockReset().mockResolvedValue({ data: [], meta: { total: 0, pages: 1 } })
   })
   afterEach(() => { vi.useRealTimers() })
+
+  it('použije průnik štítků i pro knihu a uložený filtr', async () => {
+    const { wrapper } = await open({ tag_ids: '23,42' })
+    const vm = wrapper.vm as unknown as Vm
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ tag_ids: '23,42' }))
+    expect(mocks.getQuery!()).toEqual({ tag_ids: '23,42' })
+    expect(new URL(vm.invoiceBookUrl('xlsx'), 'https://x.test').searchParams.get('filter[tag_ids]')).toBe('23,42')
+    vm.clearFilter('tags')
+    await flushPromises()
+    expect(mocks.getQuery!()).toEqual({})
+    wrapper.unmount()
+  })
 
   it('převezme dimenzi z URL, pošle ji seznamu, knize i do uložených filtrů a ukáže chip', async () => {
     const { wrapper } = await open({ dimension_value_id: '5', dimension_descendants: '0' })

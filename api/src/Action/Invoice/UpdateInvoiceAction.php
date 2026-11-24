@@ -20,6 +20,7 @@ use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Http\EntityTagInput;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Cash\CashSettlementService;
@@ -134,6 +135,9 @@ final class UpdateInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if ($error = EntityTagInput::rejectInvalid($request, $response, $body)) {
+            return $error;
+        }
         if ((isset($body['currency_id']) && (int) $body['currency_id'] !== (int) $existing['currency_id'])
             || (isset($body['currency']) && (string) $body['currency'] !== (string) $existing['currency'])) {
             $billingReport = (new \MyInvoice\Repository\WorkReportRepository($this->db))->findByInvoice($id, (int) $existing['supplier_id']);
@@ -954,6 +958,9 @@ final class UpdateInvoiceAction
             if ($warnings !== []) {
                 $invoice['_warnings'] = $warnings;
             }
+        }
+        if (!RequestAuthorization::isClientType($request)) {
+            $invoice['tags'] = $this->repo->tagsForInvoices(SupplierGuard::currentId($request), [$id])[$id] ?? [];
         }
         return Json::ok($response, $invoice);
     }
