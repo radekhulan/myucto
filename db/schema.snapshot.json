@@ -1241,6 +1241,7 @@
         "2335_document_dimension_filter_indexes.sql",
         "2336_purchase_numbering_date_basis.sql",
         "2337_imported_issued_tax_snapshot.sql",
+        "2338_payroll_run_discard_correction.sql",
         "2339_submission_outbox_app_time.sql"
     ],
     "tables": {
@@ -31619,7 +31620,7 @@
         "trg_payroll_run_revision_immutable_delete": "BEFORE DELETE ON payroll_run_revisions #f04f86bd4774198d8cc5a54287f4e7a0d746de7e",
         "trg_payroll_run_revision_immutable_update": "BEFORE UPDATE ON payroll_run_revisions #988d3894f1644dd1fca9ab04b369fe096282aa02",
         "trg_payroll_run_revision_takeover_block": "BEFORE INSERT ON payroll_run_revisions #1e14da6afb3b5ff3720dcc381705fb99f67430d3",
-        "trg_payroll_run_update_guard": "BEFORE UPDATE ON payroll_runs #b9fada5e0f2f8960fa3eb4273d13ebc7bd4d6c5f",
+        "trg_payroll_run_update_guard": "BEFORE UPDATE ON payroll_runs #3a78ca571cdd75eeb27e906175e9c7361b473f69",
         "trg_payroll_sickness_input_materialization_immutable_delete": "BEFORE DELETE ON payroll_sickness_input_materializations #062210db44bcad2a4bb2a08fc3cca4636459fd85",
         "trg_payroll_sickness_input_materialization_immutable_update": "BEFORE UPDATE ON payroll_sickness_input_materializations #062210db44bcad2a4bb2a08fc3cca4636459fd85",
         "trg_payroll_signing_profile_update_guard": "BEFORE UPDATE ON payroll_submission_signing_profiles #ecb3428cc4a30fa6c35dcdfe9927bc65ec41c2fb",

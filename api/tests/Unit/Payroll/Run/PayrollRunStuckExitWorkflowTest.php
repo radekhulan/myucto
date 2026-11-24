@@ -32,6 +32,43 @@ final class PayrollRunStuckExitWorkflowTest extends TestCase
         );
     }
 
+    /** Zahození opravy vrací běh do stavu před žádostí, jen u otevřené opravy. */
+    public function testDiscardCorrectionReturnsToRequestedStateOnlyForOpenCorrection(): void
+    {
+        $workflow = new PayrollRunWorkflow();
+        foreach ([PayrollRunStatus::INPUTS_LOCKED, PayrollRunStatus::REOPENED, PayrollRunStatus::CALCULATED, PayrollRunStatus::REVIEWED] as $status) {
+            self::assertContains(PayrollRunCommand::DISCARD_CORRECTION, $workflow->availableCommands($status, true));
+            self::assertNotContains(PayrollRunCommand::DISCARD_CORRECTION, $workflow->availableCommands($status));
+        }
+        foreach ([PayrollRunStatus::APPROVED, PayrollRunStatus::CORRECTION_PENDING, PayrollRunStatus::CANCELLED, PayrollRunStatus::DRAFT] as $status) {
+            self::assertNotContains(PayrollRunCommand::DISCARD_CORRECTION, $workflow->availableCommands($status, true));
+        }
+        foreach ([PayrollRunStatus::APPROVED, PayrollRunStatus::POSTED, PayrollRunStatus::PAYMENT_READY, PayrollRunStatus::PAID, PayrollRunStatus::CLOSED] as $target) {
+            self::assertSame($target, $workflow->transition(
+                PayrollRunStatus::CALCULATED,
+                PayrollRunCommand::DISCARD_CORRECTION,
+                new PayrollRunTransitionContext(1, correctionRequestedFrom: $target, openCorrectionRevision: true),
+            )->to);
+        }
+        try {
+            $workflow->transition(
+                PayrollRunStatus::CALCULATED,
+                PayrollRunCommand::DISCARD_CORRECTION,
+                new PayrollRunTransitionContext(1, correctionRequestedFrom: PayrollRunStatus::APPROVED),
+            );
+            self::fail('Řádnou revizi nejde zahodit jako opravu.');
+        } catch (\DomainException) {
+            self::addToAssertionCount(1);
+        }
+
+        $this->expectException(\DomainException::class);
+        $workflow->transition(
+            PayrollRunStatus::REOPENED,
+            PayrollRunCommand::DISCARD_CORRECTION,
+            new PayrollRunTransitionContext(1, openCorrectionRevision: true),
+        );
+    }
+
     public function testChangePaymentDateKeepsDraftAndCancelledAndRejectsApprovedRun(): void
     {
         $workflow = new PayrollRunWorkflow();

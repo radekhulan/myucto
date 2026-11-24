@@ -7,9 +7,31 @@ namespace MyInvoice\Service\Payroll\Run;
 final class PayrollRunWorkflow
 {
     /**
+     * @param bool $openCorrectionRevision aktuální revize je otevřená opravná
+     *     revize nad schválenou; jen tehdy se nabízí „Zahodit opravu"
      * @return list<PayrollRunCommand>
      */
-    public function availableCommands(PayrollRunStatus $status): array
+    public function availableCommands(
+        PayrollRunStatus $status,
+        bool $openCorrectionRevision = false,
+    ): array {
+        $commands = $this->statusCommands($status);
+        if ($openCorrectionRevision && in_array($status, [
+            PayrollRunStatus::INPUTS_LOCKED,
+            PayrollRunStatus::REOPENED,
+            PayrollRunStatus::CALCULATED,
+            PayrollRunStatus::REVIEWED,
+        ], true)) {
+            $commands[] = PayrollRunCommand::DISCARD_CORRECTION;
+        }
+
+        return $commands;
+    }
+
+    /**
+     * @return list<PayrollRunCommand>
+     */
+    private function statusCommands(PayrollRunStatus $status): array
     {
         return match ($status) {
             PayrollRunStatus::DRAFT => [
@@ -101,7 +123,7 @@ final class PayrollRunWorkflow
         PayrollRunCommand $command,
         PayrollRunTransitionContext $context,
     ): PayrollRunTransition {
-        if (!in_array($command, $this->availableCommands($from), true)) {
+        if (!in_array($command, $this->availableCommands($from, $context->openCorrectionRevision), true)) {
             throw new \DomainException(sprintf(
                 'Přechod %s není ze stavu %s povolen.',
                 $command->value,
@@ -137,6 +159,10 @@ final class PayrollRunWorkflow
             PayrollRunCommand::WITHDRAW_CORRECTION => $context->correctionRequestedFrom
                 ?? throw new \DomainException(
                     'Stav před vyžádáním opravy se nepodařilo dohledat. Pokračujte „Otevřít opravu“.',
+                ),
+            PayrollRunCommand::DISCARD_CORRECTION => $context->correctionRequestedFrom
+                ?? throw new \DomainException(
+                    'Stav před vyžádáním opravy se nepodařilo dohledat, opravu nejde zahodit.',
                 ),
             PayrollRunCommand::REVIEW => PayrollRunStatus::REVIEWED,
             PayrollRunCommand::APPROVE => PayrollRunStatus::APPROVED,
@@ -265,6 +291,19 @@ final class PayrollRunWorkflow
             throw new \DomainException(
                 'Žádost o opravu nejde vzít zpět: stav před ní se nepodařilo dohledat. '
                 . 'Pokračujte „Otevřít opravu“.',
+            );
+        }
+        if ($command === PayrollRunCommand::DISCARD_CORRECTION
+            && !in_array($context->correctionRequestedFrom, [
+                PayrollRunStatus::APPROVED,
+                PayrollRunStatus::POSTED,
+                PayrollRunStatus::PAYMENT_READY,
+                PayrollRunStatus::PAID,
+                PayrollRunStatus::CLOSED,
+            ], true)
+        ) {
+            throw new \DomainException(
+                'Opravu nejde zahodit: stav běhu před žádostí o opravu se nepodařilo dohledat.',
             );
         }
         if ($command === PayrollRunCommand::REOPEN

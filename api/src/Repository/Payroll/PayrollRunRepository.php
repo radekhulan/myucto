@@ -1617,6 +1617,86 @@ final class PayrollRunRepository
     }
 
     /**
+     * Mají kontroly snímku revize přesně tytéž nálezy jako nově sestavený snímek?
+     *
+     * Otisk vstupů (`input_snapshot_hash`) kontroly snímku nezahrnuje: nález jako
+     * „neschválená docházka" nebo blokátor hodinové mzdy se může změnit, i když
+     * data osob zůstala stejná. Obnova podkladů je beze změny jen tehdy, když
+     * sedí otisk i nálezy; jinak by v revizi zůstal starý blokátor a cesta ven
+     * by nevedla. Nálezy, které zapisuje až výpočet (exekuce, zákonný výpočet),
+     * se neporovnávají: přepočet je nahradí sám.
+     *
+     * @param list<\MyInvoice\Service\Payroll\Run\PayrollRunValidation> $validations
+     */
+    public function snapshotValidationsMatch(int $supplierId, int $revisionId, array $validations): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT severity, code, entity_type, entity_id, message, remediation_path,
+                    requires_override, subject_ids_json
+               FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code NOT IN ("enforcement_manual_review", "statutory_calculation_manual_review")'
+        );
+        $stmt->execute([$supplierId, $revisionId]);
+        $stored = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $subjects = $row['subject_ids_json'] === null
+                ? []
+                : json_decode((string) $row['subject_ids_json'], true, flags: JSON_THROW_ON_ERROR);
+            $stored[] = self::validationFingerprint(
+                (string) $row['severity'],
+                (string) $row['code'],
+                (string) $row['entity_type'],
+                $row['entity_id'] === null ? null : (int) $row['entity_id'],
+                (string) $row['message'],
+                $row['remediation_path'] === null ? null : (string) $row['remediation_path'],
+                (int) $row['requires_override'] === 1,
+                is_array($subjects) ? array_map('intval', $subjects) : [],
+            );
+        }
+        $fresh = array_map(
+            static fn ($validation): string => self::validationFingerprint(
+                $validation->severity,
+                $validation->code,
+                $validation->entityType,
+                $validation->entityId,
+                $validation->message,
+                $validation->remediationPath,
+                $validation->requiresOverride,
+                $validation->subjectIds,
+            ),
+            $validations,
+        );
+        sort($stored);
+        sort($fresh);
+
+        return $stored === $fresh;
+    }
+
+    /** @param list<int> $subjectIds */
+    private static function validationFingerprint(
+        string $severity,
+        string $code,
+        string $entityType,
+        ?int $entityId,
+        string $message,
+        ?string $remediationPath,
+        bool $requiresOverride,
+        array $subjectIds,
+    ): string {
+        return CanonicalJson::encode([
+            'code' => $code,
+            'entity_id' => $entityId,
+            'entity_type' => $entityType,
+            'message' => $message,
+            'remediation_path' => $remediationPath,
+            'requires_override' => $requiresOverride,
+            'severity' => $severity,
+            'subject_ids' => array_values($subjectIds),
+        ]);
+    }
+
+    /**
      * @param array<string,mixed> $result
      */
     public function replaceEnforcementValidations(
@@ -2257,6 +2337,164 @@ final class PayrollRunRepository
         $value = $stmt->fetchColumn();
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /** Číslo příští revize běhu: o jedno vyšší než nejvyšší existující. */
+    public function nextRevisionNo(int $supplierId, int $runId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(MAX(revision_no), 0) + 1
+               FROM payroll_run_revisions
+              WHERE supplier_id = ? AND run_id = ?'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Stav, do kterého se běh vrátí po zahození opravy: stav před poslední
+     * žádostí o opravu, ale jen pokud po ní žádné schválení nenásledovalo.
+     * Žádost starší než poslední schválení patří k jiné, už dokončené opravě.
+     */
+    public function correctionDiscardTarget(int $supplierId, int $runId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT request.from_status
+               FROM payroll_run_events request
+              WHERE request.supplier_id = ? AND request.run_id = ?
+                AND request.event_type = "request_correction"
+                AND request.to_status = "correction_pending"
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_run_events approval
+                       WHERE approval.supplier_id = request.supplier_id
+                         AND approval.run_id = request.run_id
+                         AND approval.event_type = "approve"
+                         AND approval.id > request.id
+                    )
+              ORDER BY request.id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Zahodí rozpracované revize nad schválenou revizí běhu a jako nástupce
+     * zapíše tu schválenou: platit bude zase ona. Trigger revizí nástupce
+     * vyžaduje, u zahozené opravy je jím právě schválený základ.
+     *
+     * @return list<int> zahozené revize
+     */
+    public function abandonRevisionsAboveApproved(
+        int $supplierId,
+        int $runId,
+        int $approvedRevisionId,
+        int $approvedRevisionNo,
+    ): array {
+        $select = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_run_revisions
+              WHERE supplier_id = ? AND run_id = ?
+                AND revision_no > ?
+                AND status IN ("snapshot", "calculated", "reviewed")
+              ORDER BY revision_no
+              FOR UPDATE'
+        );
+        $select->execute([$supplierId, $runId, $approvedRevisionNo]);
+        $ids = array_values(array_map('intval', $select->fetchAll(PDO::FETCH_COLUMN)));
+        if ($ids === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions
+                SET status = "abandoned",
+                    superseded_at = NOW(),
+                    superseded_by_revision_id = ?
+              WHERE supplier_id = ? AND run_id = ?
+                AND revision_no > ?
+                AND status IN ("snapshot", "calculated", "reviewed")'
+        );
+        $stmt->execute([$approvedRevisionId, $supplierId, $runId, $approvedRevisionNo]);
+
+        return $ids;
+    }
+
+    /**
+     * Znovu zamkne vstupy, se kterými schválená revize počítala — podle jejich
+     * id ve snímku, ne podle vztahu. Vstup přidaný až v zahozené opravě
+     * zůstane schválený a odemčený, aby ho vzala příští oprava.
+     *
+     * @param array<string,mixed> $inputSnapshot
+     * @return int počet znovu zamčených vstupů
+     */
+    public function relockRevisionInputs(int $supplierId, string $periodStart, array $inputSnapshot): int
+    {
+        $ids = [];
+        foreach ($inputSnapshot['people'] ?? [] as $person) {
+            foreach (is_array($person) ? ($person['employments'] ?? []) : [] as $employment) {
+                foreach (is_array($employment) ? ($employment['inputs'] ?? []) : [] as $input) {
+                    if (is_array($input) && is_int($input['id'] ?? null)) {
+                        $ids[$input['id']] = true;
+                    }
+                }
+            }
+        }
+        if ($ids === []) {
+            return 0;
+        }
+        $locked = 0;
+        foreach (array_chunk(array_keys($ids), 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE payroll_inputs
+                    SET status = "locked",
+                        row_version = row_version + 1
+                  WHERE supplier_id = ?
+                    AND period_start = ?
+                    AND status = "approved"
+                    AND id IN (' . implode(', ', array_fill(0, count($chunk), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, $periodStart, ...$chunk]);
+            $locked += $stmt->rowCount();
+        }
+
+        return $locked;
+    }
+
+    /**
+     * Souhrn běhu znovu ze schválené revize (počet osob, materializace výplat
+     * i součty), když se na ni běh vrací po zahození opravy.
+     *
+     * @param array<string,mixed> $revision
+     */
+    public function restoreRevisionSummary(int $supplierId, int $runId, array $revision): void
+    {
+        $input = $revision['input_snapshot'] ?? null;
+        $result = $revision['result_snapshot'] ?? null;
+        $people = is_array($input) ? ($input['people'] ?? null) : null;
+        $totals = is_array($result) && is_array($result['totals'] ?? null) ? $result['totals'] : [];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_runs
+                SET summary_revision_id = ?,
+                    summary_person_count = ?,
+                    summary_payment_materialization = ?,
+                    summary_cash_payable_minor = ?,
+                    summary_enforcement_withheld_minor = ?,
+                    summary_payable_after_enforcement_minor = ?
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([
+            (int) $revision['id'],
+            is_array($people) ? count($people) : 0,
+            self::supportsPaymentMaterialization($input) ? 1 : 0,
+            self::summaryMinor($totals, 'cash_payable_minor'),
+            self::summaryMinor($totals, 'enforcement_withheld_minor'),
+            self::summaryMinor($totals, 'payable_after_enforcement_minor'),
+            $supplierId,
+            $runId,
+        ]);
     }
 
     /**

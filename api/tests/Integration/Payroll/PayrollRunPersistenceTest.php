@@ -4465,6 +4465,9 @@ final class PayrollRunPersistenceTest extends TestCase
         );
         self::assertSame(403, $forbidden->getStatusCode());
 
+        // Obnova bez nové skutečnosti revizi nezakládá (viz test níž), tady
+        // musí mít podklady co převzít.
+        $this->approvedInput(10_000, 'REFRESH_GUARD_BONUS', 'manual');
         $refreshedRun = $this->command(
             $this->payrollRole(),
             (int) $run['id'],
@@ -4499,6 +4502,387 @@ final class PayrollRunPersistenceTest extends TestCase
             'refresh-approved-run',
             $this->actors[0],
         );
+    }
+
+    /**
+     * Obnova podkladů bez nové skutečnosti nezakládá revizi. Dřív přibyla
+     * zahozená revize při každém kliknutí (i dvojkliku) se stejným otiskem
+     * vstupů jako revize, kterou nahradila.
+     */
+    public function testRefreshInputsWithoutChangeKeepsTheOpenRevision(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $calculated = $this->service->lockAndCalculate(
+            $this->supplierId,
+            $runId,
+            (int) $run['row_version'],
+            'unchanged-refresh-calculate',
+            $this->actors[0],
+        );
+        $revisionId = (int) $calculated->revision['id'];
+        $version = (int) $calculated->run['row_version'];
+
+        $first = $this->service->refreshInputs($this->supplierId, $runId, $version, 'unchanged-refresh-first', $this->actors[0]);
+        // Dvojklik: druhý požadavek se stejnou verzí a jiným klíčem.
+        $second = $this->service->refreshInputs($this->supplierId, $runId, $version, 'unchanged-refresh-second', $this->actors[0]);
+
+        foreach ([$first, $second] as $result) {
+            self::assertFalse($result->idempotentReplay);
+            self::assertSame('inputs_unchanged', $result->outcome?->outcome);
+            self::assertSame('calculated', $result->from->value);
+            self::assertSame('calculated', $result->to->value);
+            self::assertSame($revisionId, (int) $result->revision['id']);
+            self::assertSame($version, (int) $result->run['row_version']);
+        }
+        self::assertCount(1, $this->runs->revisions($this->supplierId, $runId));
+        self::assertSame('calculated', $this->runs->revision($this->supplierId, $revisionId)['status']);
+        $events = array_values(array_filter(
+            $this->runs->events($this->supplierId, $runId),
+            static fn (array $event): bool => $event['event_type'] === 'refresh_inputs',
+        ));
+        self::assertCount(2, $events);
+        self::assertTrue($events[0]['metadata']['inputs_unchanged']);
+        self::assertSame($revisionId, $events[0]['revision_id']);
+
+        $replay = $this->service->refreshInputs($this->supplierId, $runId, $version, 'unchanged-refresh-first', $this->actors[0]);
+        self::assertTrue($replay->idempotentReplay);
+        self::assertSame('inputs_unchanged', $replay->outcome?->outcome);
+
+        // Výsledek dál platí: běh jde schválit bez přepočtu.
+        $approved = $this->service->approve($this->supplierId, $runId, $version, 'unchanged-refresh-approve', $this->actors[2]);
+        self::assertSame($revisionId, (int) $approved->revision['id']);
+    }
+
+    /** Skutečná změna podkladů revizi založí; další obnova bez změny už ne. */
+    public function testRefreshInputsCreatesRevisionOnlyForRealChange(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $calculated = $this->service->lockAndCalculate(
+            $this->supplierId,
+            $runId,
+            (int) $run['row_version'],
+            'changed-refresh-calculate',
+            $this->actors[0],
+        );
+        $this->approvedInput(10_000, 'CHANGED_REFRESH_BONUS', 'manual');
+        $changed = $this->service->refreshInputs(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            'changed-refresh-new',
+            $this->actors[0],
+        );
+        self::assertNull($changed->outcome);
+        self::assertSame('inputs_locked', $changed->to->value);
+        self::assertSame(2, (int) $changed->revision['revision_no']);
+
+        $again = $this->service->refreshInputs(
+            $this->supplierId,
+            $runId,
+            (int) $changed->run['row_version'],
+            'changed-refresh-again',
+            $this->actors[0],
+        );
+        self::assertSame('inputs_unchanged', $again->outcome?->outcome);
+        self::assertSame('inputs_locked', $again->to->value);
+        self::assertSame((int) $changed->revision['id'], (int) $again->revision['id']);
+        self::assertCount(2, $this->runs->revisions($this->supplierId, $runId));
+    }
+
+    /**
+     * Obnova v otevřené opravě hned po znovuotevření: podklady jsou tytéž,
+     * opravná revize zůstává (dřív revize navíc se stejným otiskem).
+     */
+    public function testRefreshInputsWithoutChangeKeepsOpenCorrectionRevision(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'unchanged-correction-request',
+            $this->actors[2],
+            'Kontrola opravy bez změny.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'unchanged-correction-reopen',
+            $this->actors[1],
+            'Kontrola opravy bez změny.',
+        );
+        $refreshed = $this->service->refreshInputs(
+            $this->supplierId,
+            $runId,
+            (int) $reopened->run['row_version'],
+            'unchanged-correction-refresh',
+            $this->actors[0],
+        );
+        self::assertSame('inputs_unchanged', $refreshed->outcome?->outcome);
+        self::assertSame('reopened', $refreshed->to->value);
+        self::assertSame((int) $reopened->revision['id'], (int) $refreshed->revision['id']);
+        self::assertSame('correction', $refreshed->revision['revision_kind']);
+        self::assertCount(2, $this->runs->revisions($this->supplierId, $runId));
+        self::assertSame(
+            'approved',
+            $this->runs->revision($this->supplierId, (int) $approved->revision['id'])['status'],
+        );
+    }
+
+    /**
+     * Otisk vstupů nálezy snímku nezahrnuje. Nový neschválený vstup data osob
+     * nezmění, ale blokátor ano: obnova ho musí do revize převzít, jinak by
+     * v ní zůstaly staré kontroly.
+     */
+    public function testRefreshInputsWithChangedFindingsCreatesRevision(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $calculated = $this->service->lockAndCalculate(
+            $this->supplierId,
+            $runId,
+            (int) $run['row_version'],
+            'findings-refresh-calculate',
+            $this->actors[0],
+        );
+        $draftId = $this->approvedInput(10_000, 'FINDINGS_REFRESH_DRAFT', 'manual');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_inputs SET status = "draft", approved_by = NULL, approved_at = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $draftId]);
+
+        $refreshed = $this->service->refreshInputs(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            'findings-refresh',
+            $this->actors[0],
+        );
+        self::assertNull($refreshed->outcome);
+        self::assertSame(2, (int) $refreshed->revision['revision_no']);
+        self::assertContains(
+            'draft_inputs_present',
+            array_column($this->runs->validations($this->supplierId, (int) $refreshed->revision['id']), 'code'),
+        );
+    }
+
+    /**
+     * „Zahodit opravu" vrací běh na schválenou revizi: opravné revize se zahodí
+     * se schválenou jako nástupcem, ukazatel revize klesne na schválenou,
+     * vstupy schválené revize se znovu zamknou, vstup zadaný v opravě zůstane
+     * odemčený pro příští opravu a běh se vrátí do stavu před žádostí.
+     */
+    public function testDiscardCorrectionReturnsRunToApprovedRevision(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $approvedRevisionId = (int) $approved->revision['id'];
+        $approvedNo = (int) $approved->revision['revision_no'];
+        $requested = $this->service->requestCorrection($this->supplierId, $runId, (int) $approved->run['row_version'], 'discard-request', $this->actors[2], 'Oprava, kterou nakonec nechceme.');
+        $reopened = $this->service->reopen($this->supplierId, $runId, (int) $requested->run['row_version'], 'discard-reopen', $this->actors[1], 'Oprava, kterou nakonec nechceme.');
+        self::assertSame('approved', $this->scalar('SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?', [$this->supplierId, $this->inputId]));
+        $wrongInputId = $this->approvedInput(10_000, 'DISCARD_WRONG_BONUS', 'manual');
+        $refreshed = $this->service->refreshInputs($this->supplierId, $runId, (int) $reopened->run['row_version'], 'discard-refresh', $this->actors[0]);
+        $calculated = $this->service->calculate($this->supplierId, $runId, (int) $refreshed->run['row_version'], 'discard-calculate', $this->actors[0]);
+        self::assertContains('discard_correction', $this->listedRun($runId)['available_commands']);
+
+        $discarded = $this->service->discardCorrection($this->supplierId, $runId, (int) $calculated->run['row_version'], 'discard-run', $this->actors[2], 'Oprava nebyla potřeba.');
+
+        self::assertFalse($discarded->idempotentReplay);
+        self::assertSame('calculated', $discarded->from->value);
+        self::assertSame('approved', $discarded->to->value);
+        self::assertSame('correction_discarded', $discarded->outcome?->outcome);
+        self::assertSame($approvedNo, $discarded->outcome->details['restored_revision_no']);
+        // Revizi 2 zahodila už obnova podkladů (nástupce revize 3), zahodí se jen 3.
+        self::assertSame(1, $discarded->outcome->details['discarded_revision_count']);
+        self::assertSame(1, $discarded->outcome->details['source_changes_since_approval']);
+        self::assertSame($approvedRevisionId, (int) $discarded->revision['id']);
+        self::assertSame($approvedNo, (int) $discarded->run['current_revision_no']);
+        self::assertSame($approvedRevisionId, (int) $this->runs->currentRevision($this->supplierId, $runId)['id']);
+        foreach ($this->runs->revisions($this->supplierId, $runId) as $revision) {
+            if ((int) $revision['revision_no'] === $approvedNo) {
+                self::assertSame('approved', $revision['status']);
+                continue;
+            }
+            self::assertSame('abandoned', $revision['status']);
+            self::assertSame(
+                (int) $revision['id'] === (int) $refreshed->revision['id'] ? $approvedRevisionId : (int) $refreshed->revision['id'],
+                (int) $this->scalar(
+                    'SELECT superseded_by_revision_id FROM payroll_run_revisions WHERE supplier_id = ? AND id = ?',
+                    [$this->supplierId, (int) $revision['id']],
+                ),
+            );
+        }
+        self::assertSame('locked', $this->scalar('SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?', [$this->supplierId, $this->inputId]));
+        self::assertSame('approved', $this->scalar('SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?', [$this->supplierId, $wrongInputId]));
+        self::assertSame($approvedRevisionId, (int) $this->scalar('SELECT summary_revision_id FROM payroll_runs WHERE supplier_id = ? AND id = ?', [$this->supplierId, $runId]));
+        $events = $this->runs->events($this->supplierId, $runId);
+        $last = $events[array_key_last($events)];
+        self::assertSame('discard_correction', $last['event_type']);
+        self::assertSame($approvedRevisionId, $last['revision_id']);
+        self::assertSame('Oprava nebyla potřeba.', $last['reason']);
+        self::assertSame([(int) $refreshed->revision['id']], $last['metadata']['discarded_revision_ids']);
+
+        $replay = $this->service->discardCorrection($this->supplierId, $runId, (int) $calculated->run['row_version'], 'discard-run', $this->actors[2], 'Oprava nebyla potřeba.');
+        self::assertTrue($replay->idempotentReplay);
+        self::assertSame('correction_discarded', $replay->outcome?->outcome);
+
+        $listed = $this->listedRun($runId);
+        self::assertSame('approved', $listed['status']);
+        self::assertNotContains('discard_correction', $listed['available_commands']);
+        self::assertContains('request_correction', $listed['available_commands']);
+
+        // Další oprava navazuje číslem na nejvyšší revizi a vezme vstup z opravy.
+        $requestedAgain = $this->service->requestCorrection($this->supplierId, $runId, (int) $discarded->run['row_version'], 'discard-request-2', $this->actors[2], 'Teď už oprava doopravdy.');
+        $reopenedAgain = $this->service->reopen($this->supplierId, $runId, (int) $requestedAgain->run['row_version'], 'discard-reopen-2', $this->actors[1], 'Teď už oprava doopravdy.');
+        self::assertSame(4, (int) $reopenedAgain->revision['revision_no']);
+        self::assertSame($approvedRevisionId, (int) $reopenedAgain->revision['previous_revision_id']);
+        self::assertSame('correction', $reopenedAgain->revision['revision_kind']);
+    }
+
+    /** Zahodit jde jen otevřenou opravu; řádnou revizi ani schválený běh ne. */
+    public function testDiscardCorrectionIsOnlyForOpenCorrection(): void
+    {
+        $run = $this->createRun();
+        $calculated = $this->service->lockAndCalculate($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'discard-regular-calc', $this->actors[0]);
+        try {
+            $this->service->discardCorrection($this->supplierId, (int) $run['id'], (int) $calculated->run['row_version'], 'discard-regular', $this->actors[0]);
+            self::fail('Řádná revize nemá schválený základ, na který by se šlo vrátit.');
+        } catch (\DomainException $e) {
+            self::assertStringContainsString('discard_correction', $e->getMessage());
+        }
+        self::assertNotContains('discard_correction', $this->listedRun((int) $run['id'])['available_commands']);
+        $approved = $this->service->approve($this->supplierId, (int) $run['id'], (int) $calculated->run['row_version'], 'discard-regular-approve', $this->actors[2]);
+        $this->expectException(\DomainException::class);
+        $this->service->discardCorrection($this->supplierId, (int) $run['id'], (int) $approved->run['row_version'], 'discard-approved', $this->actors[0]);
+    }
+
+    /**
+     * Guard `payroll_runs` (migrace 2338) pustí pokles ukazatele revize jen na
+     * schválenou revizi, nad kterou je vše zahozené. Jinak dál odmítá.
+     */
+    public function testRevisionPointerMayOnlyFallToApprovedRevisionWithAbandonedAbove(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $requested = $this->service->requestCorrection($this->supplierId, $runId, (int) $approved->run['row_version'], 'pointer-request', $this->actors[2], 'Kontrola guardu ukazatele.');
+        $reopened = $this->service->reopen($this->supplierId, $runId, (int) $requested->run['row_version'], 'pointer-reopen', $this->actors[1], 'Kontrola guardu ukazatele.');
+
+        // Nad schválenou revizí leží živá opravná revize.
+        $this->assertPointerRejected($runId, 1);
+        // Revize 0 neexistuje.
+        $this->assertPointerRejected($runId, 0);
+
+        $discarded = $this->service->discardCorrection($this->supplierId, $runId, (int) $reopened->run['row_version'], 'pointer-discard', $this->actors[2]);
+        self::assertSame(1, (int) $discarded->run['current_revision_no']);
+        $this->assertPointerRejected($runId, 0);
+
+        // Po schválení další opravy: na odsunutou ani zahozenou revizi ne.
+        $requestedAgain = $this->service->requestCorrection($this->supplierId, $runId, (int) $discarded->run['row_version'], 'pointer-request-2', $this->actors[2], 'Kontrola guardu ukazatele.');
+        $reopenedAgain = $this->service->reopen($this->supplierId, $runId, (int) $requestedAgain->run['row_version'], 'pointer-reopen-2', $this->actors[1], 'Kontrola guardu ukazatele.');
+        $calculated = $this->service->calculate($this->supplierId, $runId, (int) $reopenedAgain->run['row_version'], 'pointer-calculate-2', $this->actors[0]);
+        $this->service->approve($this->supplierId, $runId, (int) $calculated->run['row_version'], 'pointer-approve-2', $this->actors[2]);
+        self::assertSame(3, (int) $this->runs->find($this->supplierId, $runId)['current_revision_no']);
+        $this->assertPointerRejected($runId, 2);
+        $this->assertPointerRejected($runId, 1);
+    }
+
+    private function assertPointerRejected(int $runId, int $revisionNo): void
+    {
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_runs SET current_revision_no = ? WHERE supplier_id = ? AND id = ?'
+            )->execute([$revisionNo, $this->supplierId, $runId]);
+            self::fail("Ukazatel revize nesmí klesnout na {$revisionNo}.");
+        } catch (\PDOException $e) {
+            self::assertStringContainsString('revision pointer must not go backwards', $e->getMessage());
+        }
+    }
+
+    /** HTTP: „Zahodit opravu" s právem `payroll.review`, bez něj 403. */
+    public function testDiscardCorrectionAction(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $requested = $this->service->requestCorrection($this->supplierId, $runId, (int) $approved->run['row_version'], 'action-discard-request', $this->actors[2], 'Oprava přes API.');
+        $reopened = $this->service->reopen($this->supplierId, $runId, (int) $requested->run['row_version'], 'action-discard-reopen', $this->actors[1], 'Oprava přes API.');
+
+        $withoutReview = new EffectiveRole(
+            95,
+            'Syntetická účetní bez kontroly mezd',
+            'staff',
+            true,
+            [
+                'payroll' => AccessLevel::READ->value,
+                'payroll.calculate' => AccessLevel::WRITE->value,
+                'payroll.inputs.write' => AccessLevel::WRITE->value,
+            ],
+        );
+        $forbidden = $this->action->command(
+            $this->apiRequest('POST', "/api/payroll/runs/{$runId}/commands/discard_correction", $withoutReview)
+                ->withHeader('Idempotency-Key', 'action-discard-forbidden')
+                ->withParsedBody(['row_version' => (int) $reopened->run['row_version']]),
+            new Response(),
+            ['id' => (string) $runId, 'command' => 'discard_correction'],
+        );
+        self::assertSame(403, $forbidden->getStatusCode(), (string) $forbidden->getBody());
+
+        $response = $this->action->command(
+            $this->apiRequest('POST', "/api/payroll/runs/{$runId}/commands/discard_correction", $this->payrollRole())
+                ->withHeader('Idempotency-Key', 'action-discard')
+                ->withParsedBody(['row_version' => (int) $reopened->run['row_version']]),
+            new Response(),
+            ['id' => (string) $runId, 'command' => 'discard_correction'],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('reopened', $body['from_status']);
+        self::assertSame('approved', $body['to_status']);
+        self::assertSame('correction_discarded', $body['outcome']['outcome']);
+        self::assertSame((int) $approved->revision['revision_no'], (int) $body['run']['current_revision_no']);
+
+        // Schválený běh opravu nemá: 422 s hláškou, ne 500.
+        $again = $this->action->command(
+            $this->apiRequest('POST', "/api/payroll/runs/{$runId}/commands/discard_correction", $this->payrollRole())
+                ->withHeader('Idempotency-Key', 'action-discard-again')
+                ->withParsedBody(['row_version' => (int) $body['run']['row_version']]),
+            new Response(),
+            ['id' => (string) $runId, 'command' => 'discard_correction'],
+        );
+        self::assertSame(422, $again->getStatusCode(), (string) $again->getBody());
+    }
+
+    /** HTTP: dvojklik na „Obnovit podklady" (dva klíče, tatáž verze) = jedna revize. */
+    public function testRefreshInputsActionDoubleClickDoesNotCreateRevisions(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $calculated = $this->service->lockAndCalculate(
+            $this->supplierId,
+            $runId,
+            (int) $run['row_version'],
+            'action-unchanged-calculate',
+            $this->actors[0],
+        );
+        foreach (['action-unchanged-1', 'action-unchanged-2'] as $key) {
+            $response = $this->action->command(
+                $this->apiRequest('POST', "/api/payroll/runs/{$runId}/commands/refresh_inputs", $this->payrollRole())
+                    ->withHeader('Idempotency-Key', $key)
+                    ->withParsedBody(['row_version' => (int) $calculated->run['row_version']]),
+                new Response(),
+                ['id' => (string) $runId, 'command' => 'refresh_inputs'],
+            );
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            $body = $this->json($response);
+            self::assertSame('inputs_unchanged', $body['outcome']['outcome']);
+            self::assertSame('calculated', $body['to_status']);
+            self::assertSame(1, (int) $body['run']['current_revision_no']);
+        }
+        self::assertCount(1, $this->runs->revisions($this->supplierId, $runId));
     }
 
     /** @return array<string,mixed> */

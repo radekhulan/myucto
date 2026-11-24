@@ -43,6 +43,13 @@ enum PayrollRunCommand: string
      */
     case WITHDRAW_CORRECTION = 'withdraw_correction';
     /**
+     * „Zahodit opravu" — otevřenou opravnou revizi zahodí a vrátí běh na
+     * schválenou revizi a do stavu před žádostí o opravu. Dřív vedla z otevřené
+     * opravy jediná cesta, zrušit celý běh; ten pak zůstal zrušený a měsíc šlo
+     * dokončit jen další opravou.
+     */
+    case DISCARD_CORRECTION = 'discard_correction';
+    /**
      * „Změnit datum výplaty" před schválením. U běhu se snímkem vznikne nová
      * revize s novým datem (snímek, lhůty i zákonný výpočet na datu závisí),
      * u konceptu a zrušeného běhu se změní jen datum.

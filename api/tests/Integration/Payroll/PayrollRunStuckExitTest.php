@@ -234,9 +234,12 @@ final class PayrollRunStuckExitTest extends TestCase
         $this->createEmployment($officeId, 'Testovací Výjimka', 31, 'dpp', 'dpp', 10, 2_500);
         $run = $this->runs->createRun($this->supplierId, self::PERIOD_START, self::PAYDAY, $officeId, $this->actors[0]);
         $first = $this->runs->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'carry-lock', $this->actors[0]);
+        // Obnova bez změny podkladů revizi nezakládá; druhá revize potřebuje novou skutečnost.
+        $this->createEmployment($officeId, 'Testovací Výjimka Druhá', 32, 'dpp', 'dpp', 10, 2_500);
         $second = $this->runs->refreshInputs($this->supplierId, (int) $run['id'], (int) $first->run['row_version'], 'carry-refresh', $this->actors[0]);
         $source = (int) $first->revision['id'];
         $target = (int) $second->revision['id'];
+        self::assertNotSame($source, $target);
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type, entity_id, message,
