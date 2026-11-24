@@ -132,7 +132,8 @@ final class PayrollSubmissionInboxRepository
      * @return list<array{
      *   obligation_id:int,obligation_status:string,agenda_code:string,
      *   subject_type:string,subject_reference:string,period_start:string,
-     *   period_end:string,earliest_submission_on:string,due_on:string,
+     *   period_end:string,source_event_type:string,
+     *   earliest_submission_on:string,due_on:string,
      *   submission_id:?int,submission_status:?string,
      *   inbox_id:?int,inbox_problem_kind:?string,
      *   inbox_escalation_level:?string,inbox_status:?string,
@@ -173,7 +174,8 @@ final class PayrollSubmissionInboxRepository
      * @return list<array{
      *   obligation_id:int,obligation_status:string,agenda_code:string,
      *   subject_type:string,subject_reference:string,period_start:string,
-     *   period_end:string,earliest_submission_on:string,due_on:string,
+     *   period_end:string,source_event_type:string,
+     *   earliest_submission_on:string,due_on:string,
      *   submission_id:?int,submission_status:?string,
      *   inbox_id:?int,inbox_problem_kind:?string,
      *   inbox_escalation_level:?string,inbox_status:?string,
@@ -190,7 +192,7 @@ final class PayrollSubmissionInboxRepository
                     obligation.status AS obligation_status,
                     obligation.agenda_code, obligation.subject_type,
                     obligation.subject_reference, obligation.period_start,
-                    obligation.period_end,
+                    obligation.period_end, obligation.source_event_type,
                     deadline.earliest_submission_on, deadline.due_on,
                     latest_submission.id AS submission_id,
                     latest_submission.status AS submission_status,
@@ -271,6 +273,7 @@ final class PayrollSubmissionInboxRepository
                 ),
                 'period_start' => self::string($row, 'period_start'),
                 'period_end' => self::string($row, 'period_end'),
+                'source_event_type' => self::string($row, 'source_event_type'),
                 'earliest_submission_on' => self::string(
                     $row,
                     'earliest_submission_on',

@@ -31,6 +31,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private \DI\Container $container;
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
     private PayrollSubmissionInboxRepository $inboxRepository;
@@ -41,6 +42,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
     protected function setUp(): void
     {
         $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $this->container = $container;
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_obligations')) {
             $this->markTestSkipped('Migrace 1279 neproběhla.');
@@ -364,6 +366,66 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
         $item = $this->findByObligation($service->list($this->supplierId), $obligation['id']);
         self::assertNotNull($item);
         self::assertSame('resolved', $item['status']);
+    }
+
+    /**
+     * Odhláška za vztah skončený v převzatém měsíci: lhůtu hlídal předchozí
+     * program. Položka „po termínu" nevznikne a dřívější se vyřeší, stejně
+     * jako o ní mlčí hlídač termínů.
+     */
+    public function testDeregistrationHandledByPredecessorIsNotAnInboxProblem(): void
+    {
+        $clock = new MockClock('2026-11-24 09:00:00 Europe/Prague');
+        $service = $this->predecessorAwareService($clock);
+        $obligation = $this->obligations->register(
+            $this->supplierId,
+            'REGZEC25',
+            'employment',
+            'employment:4711',
+            '2026-08-03',
+            '2026-08-11',
+            'regular',
+            'vrep_apep',
+            'payroll_employment_registration',
+            'payroll_registration_event:4711',
+            hash('sha256', 'event:inbox-predecessor'),
+            '2026-08-03',
+            '2026-08-11',
+            'calendar_days',
+            'inbox-test-ruleset',
+            hash('sha256', 'ruleset:inbox-predecessor'),
+            'inbox-predecessor',
+            createdBy: $this->userId,
+        );
+
+        // Bez začátku vedení mezd je odhláška povinnost MyÚčta.
+        $item = $this->findByObligation($service->list($this->supplierId), $obligation['id']);
+        self::assertNotNull($item);
+        self::assertSame('overdue', $item['problem_kind']);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_module_state (supplier_id, status, start_period, row_version)
+             VALUES (?, "setup", "2026-09-01", 1)
+             ON DUPLICATE KEY UPDATE start_period = VALUES(start_period)',
+        )->execute([$this->supplierId]);
+        // Začátek se v rámci instance cachuje; nové nastavení čte nová služba.
+        $service = $this->predecessorAwareService($clock);
+
+        $item = $this->findByObligation($service->list($this->supplierId), $obligation['id']);
+        self::assertNotNull($item);
+        self::assertSame('resolved', $item['status']);
+    }
+
+    private function predecessorAwareService(MockClock $clock): PayrollSubmissionInboxService
+    {
+        return new PayrollSubmissionInboxService(
+            $this->inboxRepository,
+            new PayrollDeadlineAssessmentService($clock),
+            $clock,
+            new \MyInvoice\Service\Payroll\PayrollHistoricalPeriodService(
+                $this->container->get(\MyInvoice\Repository\Payroll\PayrollModuleStateRepository::class),
+            ),
+        );
     }
 
     public function testTenantIsolation(): void

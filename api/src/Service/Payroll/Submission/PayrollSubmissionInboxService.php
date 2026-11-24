@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use Psr\Clock\ClockInterface;
 
@@ -50,6 +52,8 @@ final class PayrollSubmissionInboxService
         private readonly PayrollSubmissionInboxRepository $repository,
         private readonly PayrollDeadlineAssessmentService $deadlines,
         private readonly ClockInterface $clock,
+        // Začátek vedení mezd pro pravidlo „vyřízeno předchozím programem".
+        private readonly ?PayrollHistoricalPeriodService $historicalPeriods = null,
     ) {}
 
     /**
@@ -71,8 +75,9 @@ final class PayrollSubmissionInboxService
                 $supplierId,
                 $environment,
             );
+            $startPeriod = $this->historicalPeriods?->startPeriod($supplierId);
             foreach ($candidates as $candidate) {
-                $this->syncCandidate($supplierId, $environment, $candidate, $now);
+                $this->syncCandidate($supplierId, $environment, $candidate, $now, $startPeriod);
             }
         });
     }
@@ -93,6 +98,7 @@ final class PayrollSubmissionInboxService
         string $environment,
         array $candidate,
         string $now,
+        ?string $startPeriod = null,
     ): void {
         $inboxId = $candidate['inbox_id'];
         $inboxStatus = $candidate['inbox_status'];
@@ -123,7 +129,25 @@ final class PayrollSubmissionInboxService
             $assessment->phase,
             $candidate['submission_status'],
         );
-        $resolving = in_array(
+        /*
+         * Událost vyřízená předchozím programem (přihláška či odhláška ČSSZ,
+         * oznámení pojišťovně před začátkem vedení mezd), ke které z MyÚčta nic
+         * neodešlo, není problém MyÚčta. Totéž pravidlo jako hlídač termínů
+         * a Měsíční přehled ({@see PayrollPredecessorObligationScope::storedObligationHandledByPredecessor()});
+         * bez něj tu zůstala otevřená položka „po termínu" za lhůtu z doby,
+         * kdy mzdy vedl někdo jiný. Položka se nezakládá a existující se vyřeší.
+         */
+        $handledByPredecessor = PayrollPredecessorObligationScope::storedObligationHandledByPredecessor(
+            $startPeriod,
+            $candidate['source_event_type'] ?? '',
+            $candidate['period_start'],
+            $candidate['due_on'],
+            $candidate['submission_status'],
+        );
+        if ($handledByPredecessor) {
+            $newKind = null;
+        }
+        $resolving = $handledByPredecessor || in_array(
             $assessment->phase,
             self::RESOLVING_PHASES,
             true,

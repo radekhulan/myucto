@@ -288,6 +288,11 @@ final class Bootstrap
                     'sicknessEvents',
                     \DI\get(\MyInvoice\Repository\Payroll\PayrollSicknessRepository::class),
                 ),
+            \MyInvoice\Service\Payroll\Submission\PayrollSubmissionInboxService::class =>
+                \DI\autowire()->constructorParameter(
+                    'historicalPeriods',
+                    \DI\get(\MyInvoice\Service\Payroll\PayrollHistoricalPeriodService::class),
+                ),
             \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::class =>
                 \DI\autowire()->constructorParameter(
                     'predecessorGaps',
@@ -304,6 +309,15 @@ final class Bootstrap
                 )->constructorParameter(
                     'healthNotifications',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService::class),
+                )->constructorParameter(
+                    'checklistCoverage',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage::class),
+                ),
+            // Karta vztahu: oznámení pojišťovně pokryté hromadným oznámením.
+            \MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class =>
+                \DI\autowire()->constructorParameter(
+                    'healthChecklistCoverage',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(

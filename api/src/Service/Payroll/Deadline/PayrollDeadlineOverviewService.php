@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
@@ -210,6 +211,7 @@ final readonly class PayrollDeadlineOverviewService
         private ?PayrollMonthlyAgendaDutyService $agendaDuties = null,
         private ?PayrollHistoricalPeriodService $historicalPeriods = null,
         private ?HealthInsuranceSubmissionService $healthNotifications = null,
+        private ?HealthBulkNotificationChecklistCoverage $checklistCoverage = null,
     ) {}
 
     /**
@@ -981,7 +983,10 @@ final readonly class PayrollDeadlineOverviewService
     ): array {
         return array_map(
             fn (array $row): array => $this->checklistRowItem($row),
-            $this->repository->checklistDeadlines($supplierId, $from, $to, $itemKey),
+            $this->withoutBulkNotifiedChecklist(
+                $supplierId,
+                $this->repository->checklistDeadlines($supplierId, $from, $to, $itemKey),
+            ),
         );
     }
 
@@ -990,8 +995,43 @@ final readonly class PayrollDeadlineOverviewService
     {
         return array_map(
             fn (array $row): array => $this->checklistRowItem($row),
-            $this->repository->checklistWithoutDeadline($supplierId, $itemKey),
+            $this->withoutBulkNotifiedChecklist(
+                $supplierId,
+                $this->repository->checklistWithoutDeadline($supplierId, $itemKey),
+            ),
         );
+    }
+
+    /**
+     * Oznámení pojišťovně o nástupu či skončení, které splnilo odeslané
+     * hromadné oznámení ({@see HealthBulkNotificationChecklistCoverage}).
+     * SQL doklad checklistu ho nepozná (věty jsou v šifrovaném XML), takže se
+     * dorovnává tady, stejně jako na kartě vztahu.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withoutBulkNotifiedChecklist(int $supplierId, array $rows): array
+    {
+        if ($this->checklistCoverage === null || $rows === []) {
+            return $rows;
+        }
+        $covered = $this->checklistCoverage->coveredItems($supplierId, array_map(
+            static fn (array $row): array => [
+                'item_id' => (int) $row['item_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'item_key' => (string) $row['item_key'],
+            ],
+            $rows,
+        ));
+        if ($covered === []) {
+            return $rows;
+        }
+
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => !isset($covered[(int) $row['item_id']]),
+        ));
     }
 
     /**
@@ -1007,6 +1047,16 @@ final readonly class PayrollDeadlineOverviewService
     {
         $groups = [];
         foreach ($this->repository->checklistWithoutDeadlineCounts($supplierId) as $itemKey => $count) {
+            // Počet jde z SQL; oznámení pojišťovně pokrytá hromadným oznámením
+            // se odečtou nad týmž výběrem, jaký ukáže rozbalená skupina.
+            if ($this->checklistCoverage !== null
+                && isset(HealthBulkNotificationChecklistCoverage::ITEM_DUTY_KINDS[(string) $itemKey])
+            ) {
+                $count = count($this->undatedChecklistItems($supplierId, (string) $itemKey));
+                if ($count < 1) {
+                    continue;
+                }
+            }
             $groups[] = [
                 'key' => self::UNDATED_PHASE . ':checklist:' . $itemKey,
                 'phase' => self::UNDATED_PHASE,
