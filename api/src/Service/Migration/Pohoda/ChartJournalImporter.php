@@ -200,6 +200,15 @@ final class ChartJournalImporter
                 $ctx->report(self::STEP_JOURNAL, $done, $total);
             }
             $key = $year . '|' . $groupKey;
+            $sourceDate = PohodaXml::date($rows[0], 'sourceDate');
+            if (!isset($existing[$key]) && $sourceDate !== null) {
+                $original = array_replace($rows[0], ['date' => $sourceDate]);
+                $originalGroupKey = PohodaJournal::groupKey($original);
+                if (isset($existing[$year . '|' . $originalGroupKey]) || isset($existing[($year - 1) . '|' . $originalGroupKey])) {
+                    $stats['existing']++;
+                    continue;
+                }
+            }
             // Doklad roku agendy, který už přinesla agenda minulého roku (vedla i doklady
             // po svém konci a převod je zapsal do tohoto období) - tentýž zápis podruhé nevzniká.
             $carried = $existing[($year - 1) . '|' . $groupKey] ?? null;

@@ -12,6 +12,7 @@ use MyInvoice\Service\ActivityLogger;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\MockClock;
 
 final class AccountingPeriodPostingGuardTest extends TestCase
 {
@@ -37,14 +38,14 @@ final class AccountingPeriodPostingGuardTest extends TestCase
             id INTEGER PRIMARY KEY, accounting_mode TEXT, accounting_enabled INTEGER, accounting_starts_on TEXT
         )');
         $this->pdo->exec("INSERT INTO supplier VALUES (7, 'double_entry', 1, NULL), (8, 'double_entry', 1, NULL)");
-        $this->pdo->exec('CREATE TABLE journal_entries (supplier_id INTEGER, period_id INTEGER)');
+        $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, period_id INTEGER)');
         $this->pdo->exec('CREATE TABLE activity_log (
             supplier_id INTEGER, user_id INTEGER, action TEXT, entity_type TEXT,
             entity_id INTEGER, payload TEXT, ip TEXT, user_agent TEXT
         )');
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($this->pdo);
-        $this->periods = new AccountingPeriodRepository($db);
+        $this->periods = new AccountingPeriodRepository($db, new MockClock('2026-12-31 12:00:00'));
         $this->provisioner = new AccountingPeriodProvisioner($db, $this->periods, new ActivityLogger($db));
     }
 
@@ -88,6 +89,45 @@ final class AccountingPeriodPostingGuardTest extends TestCase
         self::assertCount(2, $this->periods->listForTenant(7));
     }
 
+    #[DataProvider('postingPaths')]
+    public function testPostingRefusesToCreatePeriodTwoYearsAhead(bool $viaProvisioner): void
+    {
+        try {
+            $this->openForPosting($viaProvisioner, '2028-01-01');
+            self::fail('Zaúčtování nemá samo založit období o dva roky dopředu.');
+        } catch (PostingException $e) {
+            self::assertSame('period_after_horizon', $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+            self::assertStringContainsString('překlep v roce', $e->getMessage());
+        }
+        self::assertNull($this->periods->findByYear(7, 2028));
+    }
+
+    #[DataProvider('postingPaths')]
+    public function testPostingCanUseExistingFuturePeriod(bool $viaProvisioner): void
+    {
+        $id = $this->periods->create(7, 2028, '2028-01-01', '2028-12-31');
+        self::assertSame($id, $this->openForPosting($viaProvisioner, '2028-01-01')['id']);
+        self::assertCount(1, $this->periods->listForTenant(7));
+    }
+
+    public static function postingPaths(): array
+    {
+        return ['provisioner' => [true], 'repository' => [false]];
+    }
+
+    public function testPostingHorizonUsesTheCompanyFiscalYear(): void
+    {
+        $this->periods->create(7, 2026, '2026-07-01', '2027-06-30');
+        self::assertSame('2028-06-30', $this->openForPosting(true, '2028-06-30')['ends_on']);
+        try {
+            $this->openForPosting(true, '2028-07-01');
+            self::fail('První den dalšího hospodářského roku už je za horizontem.');
+        } catch (PostingException $e) {
+            self::assertSame('period_after_horizon', $e->errorCode);
+        }
+    }
+
     public function testPostingFillsGapAndYearBeforeFirstPeriod(): void
     {
         $this->periods->create(7, 2026, '2026-01-01', '2026-12-31');
@@ -125,7 +165,7 @@ final class AccountingPeriodPostingGuardTest extends TestCase
         $empty = $this->periods->create(7, 2016, '2016-01-01', '2016-12-31');
         $this->periods->create(7, 2017, '2017-01-01', '2017-12-31', 'import');
         $used = $this->periods->create(7, 2018, '2018-01-01', '2018-12-31', 'posting');
-        $this->pdo->prepare('INSERT INTO journal_entries VALUES (7, ?)')->execute([$used]);
+        $this->pdo->prepare('INSERT INTO journal_entries (supplier_id, period_id) VALUES (7, ?)')->execute([$used]);
         $this->periods->create(8, 2015, '2015-01-01', '2015-12-31');
         self::assertSame([], $this->periods->emptyBeforeAccountingStart(7));
 
@@ -135,6 +175,21 @@ final class AccountingPeriodPostingGuardTest extends TestCase
         $this->pdo->exec("UPDATE supplier SET accounting_starts_on = '2016-07-01' WHERE id = 7");
         self::assertSame([], $this->periods->emptyBeforeAccountingStart(7));
         self::assertCount(4, $this->periods->listForTenant(7));
+    }
+
+    public function testDiagnosticCountsEntriesOnlyInPeriodsCreatedByPostingBeyondTheHorizon(): void
+    {
+        $this->periods->create(7, 2027, '2027-01-01', '2027-12-31', 'posting');
+        $used = $this->periods->create(7, 2028, '2028-01-01', '2028-12-31', 'posting');
+        $empty = $this->periods->create(7, 2029, '2029-01-01', '2029-12-31', 'posting');
+        $this->periods->create(7, 2030, '2030-01-01', '2030-12-31', 'import');
+        $this->periods->create(7, 2031, '2031-01-01', '2031-12-31');
+        $this->periods->create(8, 2028, '2028-01-01', '2028-12-31', 'posting');
+        $this->pdo->prepare('INSERT INTO journal_entries (supplier_id, period_id) VALUES (7, ?), (7, ?), (8, ?)')->execute([$used, $used, $used]);
+
+        $rows = $this->periods->postingPeriodsAfterHorizon(7);
+        self::assertSame([$used, $empty], array_column($rows, 'id'));
+        self::assertSame([2, 0], array_map('intval', array_column($rows, 'entry_count')));
     }
 
     private function openForPosting(bool $viaProvisioner, string $date): ?array

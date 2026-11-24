@@ -79,7 +79,7 @@ final class AccountingActivationTest extends TestCase
                     accounting_activation_status = 'draft', taxpayer_type = 'fo' WHERE id = ?"
         )->execute([self::STARTS_ON, $this->supplierId]);
         $seeder->seedForSupplier($this->supplierId);
-        $periods->ensureOpenPeriodFor($this->supplierId, self::STARTS_ON);
+        $periods->ensureOpenPeriodFor($this->supplierId, self::STARTS_ON, forPosting: false);
     }
 
     protected function tearDown(): void

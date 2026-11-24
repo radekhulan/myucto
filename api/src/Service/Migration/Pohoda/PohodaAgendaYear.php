@@ -109,8 +109,8 @@ final class PohodaAgendaYear
      *
      * @return list<int>
      */
-    public function laterYears(): array
+    public function laterYears(?PohodaExport $export = null): array
     {
-        return $this->export->counts($this->calendar, $this->label)['later_years'];
+        return ($export ?? $this->export)->counts($this->calendar, $this->label)['later_years'];
     }
 }

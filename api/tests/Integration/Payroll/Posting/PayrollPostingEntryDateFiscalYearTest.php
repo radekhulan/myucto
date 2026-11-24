@@ -10,6 +10,8 @@ use MyInvoice\Service\Accounting\PostingException;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Ú-15 — zamčené nebo uzavřené období posouvá datum mzdového zápisu na první
@@ -35,6 +37,7 @@ final class PayrollPostingEntryDateFiscalYearTest extends TestCase
         }
         try {
             $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+            $container->set(ClockInterface::class, new MockClock(self::YEAR . '-06-15 12:00:00'));
             $this->db = $container->get(Connection::class);
             $this->batches = $container->get(PayrollPostingBatchRepository::class);
         } catch (\Throwable $exception) {

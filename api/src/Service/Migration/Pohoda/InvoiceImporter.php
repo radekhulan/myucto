@@ -235,7 +235,9 @@ final class InvoiceImporter
             return;
         }
         $key = 'internal|' . $number . '|' . $date;
-        if ($this->map->get($ctx->supplierId, PohodaImportRepository::KIND_S74B_CORRECTION, $key) !== null) {
+        $original = PohodaXml::date($h, 'sourceAccountingDate');
+        if ($this->map->get($ctx->supplierId, PohodaImportRepository::KIND_S74B_CORRECTION, $key) !== null
+            || ($original !== null && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_S74B_CORRECTION, 'internal|' . $number . '|' . $original) !== null)) {
             $p->count(self::STEP_INTERNAL, 'existing');
             return;
         }

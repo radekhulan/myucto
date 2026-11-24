@@ -74,11 +74,11 @@ info:
     `403 token_write_forbidden` — i tokenu se scope `read_write`. Mzdová část má
     vlastní omezený kontrakt popsaný níže.
 
-    Při povoleném zaúčtování se chybějící účetní období může založit jako první
-    období firmy nebo po konci řady. Chybějící období před začátkem řady nebo
-    v její mezeře musí založit účetní ručně. Jednotlivý zápis vrátí HTTP 422
-    s kódem `period_before_start` nebo `period_gap`. V dávce je kód u jednotlivého
-    odmítnutého dokladu.
+    Při povoleném zaúčtování se chybějící účetní období může založit automaticky
+    nejvýše do příštího účetního roku firmy. Chybějící pozdější období založí účetní
+    ručně. Jednotlivý zápis vrátí HTTP 422 s kódem `period_after_horizon`,
+    `period_before_start` nebo `period_gap` podle důvodu odmítnutí. V dávce je kód
+    u jednotlivého odmítnutého dokladu.
 
     Oprávnění `reports.submissions` je výjimkou i pro čtení: archiv připravených
     DPH, KH a SH je klientovi a interní roli bez `reports` dostupný pouze
@@ -8759,8 +8759,8 @@ paths:
         a `credit_account_code` se pak neuplatní. Účetní úkon: běžný API token 403
         `token_write_forbidden`, token s plným zápisem (`system_write`) jako uživatel
         v aplikaci; uzavřené období ani zámek k datu nepřebije (`period_not_open`, `date_locked`).
-        Chybějící období před účetní řadou nebo uvnitř ní vrátí 422 `period_before_start`
-        nebo `period_gap`.
+        Chybějící období, které nelze založit automaticky, vrátí 422 `period_before_start`,
+        `period_gap` nebo `period_after_horizon`.
       requestBody:
         required: true
         content:
@@ -17742,8 +17742,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: >-
-            Nevyvážený zápis / zavřené období / neznámý účet / `period_before_start` nebo
-            `period_gap`; u dvojic `pair_missing_debit_account`,
+            Nevyvážený zápis / zavřené období / neznámý účet / `period_before_start`,
+            `period_gap` nebo `period_after_horizon`; u dvojic `pair_missing_debit_account`,
             `pair_missing_credit_account`, `pair_same_account`, `pair_amount_not_positive`, `pair_unbalanced`,
             `pair_incomplete`, `pair_numbering`, `pair_in_composite_form`, `single_unpaired`, `pairing_required`
           content:
@@ -17817,7 +17817,8 @@ paths:
       description: >-
         Převzaté zaúčtování s vlastnickou vazbou zachová celé beze změny a vrátí existující zápis.
         Změna kontace patří do výslovného přeúčtování celé skupiny.
-        Chybějící historické období vrátí 422 `period_before_start` nebo `period_gap`.
+        Chybějící období, které nelze založit automaticky, vrátí 422 `period_before_start`,
+        `period_gap` nebo `period_after_horizon`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17838,7 +17839,8 @@ paths:
       description: >-
         Převzaté zaúčtování s vlastnickou vazbou zachová celé beze změny a vrátí existující zápis.
         Změna kontace patří do výslovného přeúčtování celé skupiny.
-        Chybějící historické období vrátí 422 `period_before_start` nebo `period_gap`.
+        Chybějící období, které nelze založit automaticky, vrátí 422 `period_before_start`,
+        `period_gap` nebo `period_after_horizon`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -21444,6 +21446,8 @@ paths:
         nebo nedokončená operace vrací `ok: false` i při nulovém čistém rozdílu.
         Kontrola `empty_period_before_accounting_start` upozorní na otevřená
         období bez zápisů v deníku před známým začátkem účetnictví firmy.
+        Kontrola `posting_period_after_horizon` vrací období založená zaúčtováním
+        od 1. ledna aktuálního kalendářního roku + 2 včetně počtu zápisů.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -23850,7 +23854,8 @@ paths:
         Příjmový doklad `sale` / `invoice_payment` u firmy s aktivní evidencí tržeb vytvoří
         při zaúčtování tržbu EET (viz založení dokladu); `eet_device_id` volí zařízení, když
         pokladna žádné namapované nemá.
-        Pro podvojné účetnictví může zaúčtování vrátit 422 `period_before_start` nebo `period_gap`.
+        Pro podvojné účetnictví může zaúčtování vrátit 422 `period_before_start`,
+        `period_gap` nebo `period_after_horizon`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -35541,7 +35546,9 @@ paths:
       tags:
       - Accounting
       summary: Aktuální nálezy jedné účetní kontroly
-      description: Klíč `empty_period_before_accounting_start` vrací období bez zápisů před známým začátkem účetnictví firmy.
+      description: >-
+        Klíč `empty_period_before_accounting_start` vrací období bez zápisů před známým začátkem účetnictví firmy.
+        Klíč `posting_period_after_horizon` vrací období založená zaúčtováním za horizontem včetně počtu zápisů.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -53825,7 +53832,8 @@ components:
         klíče podle konkrétní chyby — nejčastěji `fields` u validace, dále například
         `items`, `candidates` nebo `suggestion`. Klienti by neznámé klíče měli tolerovat.
         Účetní chyby `period_before_start` a `period_gap` označují chybějící období
-        před prvním obdobím firmy nebo uvnitř řady.
+        před prvním obdobím firmy nebo uvnitř řady. Kód `period_after_horizon`
+        označuje chybějící období po příštím účetním roce firmy.
       properties:
         error:
           type: object
@@ -64574,7 +64582,9 @@ components:
           maximum: 1
     ClosingCheckFinding:
       type: object
-      description: Rozsah období je u `doc_type=accounting_period` v `note`, jeho ID v `doc_id` a účetní rok v `doc_no`.
+      description: >-
+        U `doc_type=accounting_period` je ID období v `doc_id` a účetní rok v `doc_no`.
+        Kontrola období před začátkem účetnictví uvádí rozsah v `note`.
       properties:
         doc_type:
           type:
@@ -64624,6 +64634,14 @@ components:
           - object
           - 'null'
           additionalProperties: true
+          properties:
+            posting_period_after_horizon:
+              type: object
+              required: [starts_on, ends_on, entry_count]
+              properties:
+                starts_on: { type: string, format: date }
+                ends_on: { type: string, format: date }
+                entry_count: { type: integer, minimum: 0 }
         note:
           type:
           - string

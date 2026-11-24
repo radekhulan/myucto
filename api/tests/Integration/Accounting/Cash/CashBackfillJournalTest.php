@@ -84,7 +84,7 @@ final class CashBackfillJournalTest extends TestCase
         $pdo->prepare('DELETE FROM cash_documents WHERE supplier_id = ?')->execute([$this->supplierId]);
 
         $seeder->seedForSupplier($this->supplierId);
-        $this->periods->ensureOpenPeriodFor($this->supplierId, self::YEAR . '-06-15');
+        $this->periods->ensureOpenPeriodFor($this->supplierId, self::YEAR . '-06-15', forPosting: false);
     }
 
     protected function tearDown(): void

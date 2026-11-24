@@ -204,9 +204,9 @@ final class PohodaImporter
         // skutečného data, takže do rozjetého účetnictví se nesmí přimíchat ani tam. Pozdější
         // roky z přehledu exportu jsou kalendářní (náhled firmu nezná); u hospodářského roku
         // firmy se proto počítají znovu podle jejího kalendáře.
-        $allLaterYears = $laterYears !== null && $agendaYear->calendar->isCalendar() ? array_map('intval', $laterYears) : $agendaYear->laterYears();
+        $allLaterYears = $laterYears !== null && $agendaYear->calendar->isCalendar() ? array_map('intval', $laterYears) : $agendaYear->laterYears($export);
         $laterYears = array_values(array_diff($allLaterYears, $skipYears));
-        $skipped = array_values(array_intersect($allLaterYears, $skipYears));
+        $skipped = $skipYears === [] ? [] : array_values(array_intersect($agendaYear->laterYears(), $skipYears));
         $nonprofit = $export->hasNonprofitChart();
         $guard = new AccountingFrameworkImportGuard($this->db, $nonprofit);
         $targetPeriods = $guard->periodsForYears($supplierId, [$agendaLabel, ...$laterYears]);
@@ -361,6 +361,7 @@ final class PohodaImporter
         if ($selectedYears !== null) {
             $skipYears = array_values(array_unique([...$skipYears, ...array_diff($agendaYear->laterYears(), $selectedYears)]));
         }
+        $export = $export->withPostingYears($agendaYear->calendar, $agendaYear->label, $skipYears, $selectedYears);
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import', $acceptDifferences);
         $protocol->set('agenda', [
             'ico' => $export->ico,
@@ -379,7 +380,7 @@ final class PohodaImporter
                 $protocol->error(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
             } elseif ($m['level'] === 'warning') {
                 $protocol->warn(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
-                $protocol->count(self::STEP_PREFLIGHT, 'skipped_documents');
+                $protocol->count(self::STEP_PREFLIGHT, $m['code'] === 'accounting_date_corrected' ? 'corrected_accounting_dates' : 'skipped_documents');
             }
         }
         // Mzdy agendy, které se nepřevedou (licence, modul Mzdy): upozornění zůstane
@@ -413,7 +414,7 @@ final class PohodaImporter
 
         $frameworkGuard = new AccountingFrameworkImportGuard($this->db, $export->hasNonprofitChart());
         $frameworkPeriods = $automationManaged
-            ? $frameworkGuard->periodsForYears($supplierId, [$agendaYear->label, ...array_values(array_diff($agendaYear->laterYears(), $skipYears))])
+            ? $frameworkGuard->periodsForYears($supplierId, [$agendaYear->label, ...array_values(array_diff($agendaYear->laterYears($export), $skipYears))])
             : [];
         $pdo = $this->db->pdo();
         $ctx->verifyPaidIssuedCurrency = !$dryRun && !$relinkOnly && !$pdo->inTransaction();

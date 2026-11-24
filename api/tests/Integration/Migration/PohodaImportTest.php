@@ -280,6 +280,38 @@ final class PohodaImportTest extends TestCase
         self::assertTrue($protocol->get('reconciliation')[0]['ok']);
     }
 
+    public function testCashAccountingDateTypoDoesNotCreateAnAccountingPeriod(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withCashReceipt($dir, 'TEST-POK-1', '2026-09-01', 300);
+        SyntheticPohodaExport::withCashReceipt($dir, 'TEST-POK-2', '2026-09-02', 200);
+        $journal = $dir . '/' . PohodaExport::FILES['journal'];
+        file_put_contents($journal, strtr((string) file_get_contents($journal), [
+            '<act:date>2026-09-01</act:date>' => '<act:date>6026-09-01</act:date>',
+            '<act:date>2026-09-02</act:date>' => '<act:date>2026-09-03</act:date>',
+        ]));
+        $cash = $dir . '/' . PohodaExport::FILES['cash'];
+        file_put_contents($cash, strtr((string) file_get_contents($cash), [
+            '<vch:date>2026-09-01</vch:date>' => '<vch:date>2026-09-01</vch:date><vch:dateAccounting>6026-09-01</vch:dateAccounting>',
+            '<vch:date>2026-09-02</vch:date>' => '<vch:date>2026-09-02</vch:date><vch:dateAccounting>2026-09-03</vch:dateAccounting>',
+        ]));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT j.document_no, j.entry_date
+               FROM journal_entries j JOIN cash_documents c ON c.supplier_id = j.supplier_id AND c.id = j.source_id
+              WHERE j.supplier_id = ? AND j.source_type = 'cash' AND j.document_no IN ('TEST-POK-1', 'TEST-POK-2')
+              ORDER BY j.document_no"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame(['TEST-POK-1' => '2026-09-01', 'TEST-POK-2' => '2026-09-03'], $stmt->fetchAll(\PDO::FETCH_KEY_PAIR));
+        self::assertSame(0, $this->rows('accounting_periods', $supplierId, 'fiscal_year = 6026'));
+        $warnings = array_values(array_filter((array) $protocol->get('preflight'), static fn (array $m): bool => $m['code'] === 'accounting_date_corrected'));
+        self::assertSame([['document_no' => 'TEST-POK-1', 'accounting_date' => '6026-09-01', 'document_date' => '2026-09-01']], array_column($warnings, 'context'));
+    }
+
     public function testOtherItemsReuseImportedJournalAndDoNotDuplicateOnRerun(): void
     {
         $supplierId = $this->supplier();

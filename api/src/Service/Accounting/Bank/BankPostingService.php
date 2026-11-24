@@ -637,7 +637,7 @@ final class BankPostingService
                 ]);
             });
         } catch (PostingException $e) {
-            if (in_array($e->errorCode, ['period_before_start', 'period_gap'], true)) {
+            if (in_array($e->errorCode, ['period_before_start', 'period_after_horizon', 'period_gap'], true)) {
                 return $this->paymentMatchSuggestion($supplierId, $tx, $e->errorCode);
             }
             if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
@@ -2018,7 +2018,7 @@ final class BankPostingService
             'note'                => $note,
             'confidence'          => 1.00,
             'operation_type'      => OperationType::BANK_PAYMENT_MATCHED,
-            'status'              => in_array($note, ['period_closed', 'period_before_start', 'period_gap', 'cross_currency'], true)
+            'status'              => in_array($note, ['period_closed', 'period_before_start', 'period_after_horizon', 'period_gap', 'cross_currency'], true)
                 ? 'blocked' : (in_array($note, ['already_paid_verify', 'overpaid_verify'], true) ? 'needs_input' : 'pending'),
         ]);
         return ['action' => 'suggested', 'reason' => $note, 'suggestion_id' => $res['id']];
@@ -2851,7 +2851,7 @@ final class BankPostingService
                 // Položka už je uhrazená, stornovaná nebo platba převyšuje dluh: rozhodne člověk.
                 return $this->ruleSuggestion($supplierId, $tx, $rule, 'other_item_unavailable', 'pending', $absAmount);
             } catch (PostingException $e) {
-                if (in_array($e->errorCode, ['period_before_start', 'period_gap'], true)) {
+                if (in_array($e->errorCode, ['period_before_start', 'period_after_horizon', 'period_gap'], true)) {
                     return $this->ruleSuggestion($supplierId, $tx, $rule, $e->errorCode, 'blocked', $absAmount);
                 }
                 if ($e->errorCode === 'dimension_required') {

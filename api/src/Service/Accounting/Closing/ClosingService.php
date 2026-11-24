@@ -5925,6 +5925,26 @@ final class ClosingService
             ];
         }
 
+        if ($wants('posting_period_after_horizon')) {
+            $items = array_map(static fn (array $row): array => [
+                'doc_type' => 'accounting_period',
+                'doc_id' => (int) $row['id'],
+                'doc_no' => (string) $row['fiscal_year'],
+                'issues' => ['posting_period_after_horizon'],
+                'detail' => ['posting_period_after_horizon' => [
+                    'starts_on' => $row['starts_on'],
+                    'ends_on' => $row['ends_on'],
+                    'entry_count' => (int) $row['entry_count'],
+                ]],
+            ], $this->periods->postingPeriodsAfterHorizon($supplierId));
+            $checks[] = [
+                'key' => 'posting_period_after_horizon',
+                'severity' => 'warning',
+                'ok' => $items === [],
+                'value' => ['items' => $items],
+            ];
+        }
+
         $balanceCodes = [];
         foreach ([
             'transit_261_open' => ['261'],

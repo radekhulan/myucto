@@ -9,6 +9,8 @@ use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
 use PDO;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Clock\NativeClock;
 
 /**
  * Repository pro accounting_periods — účetní období per firma (Epic F1).
@@ -16,7 +18,12 @@ use PDO;
  */
 final class AccountingPeriodRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    private const POSTING_YEARS_AHEAD = 1;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly ClockInterface $clock = new NativeClock(),
+    ) {}
 
     /**
      * @return list<array<string,mixed>>
@@ -471,12 +478,22 @@ final class AccountingPeriodRepository
      * Automaticky se zakládá první období firmy, období po konci řady, mezera uvnitř
      * řady (zapomenutý rok mezi převzatou historií a současností) a jeden účetní rok
      * bezprostředně před prvním obdobím (pozdní doklad nebo storno za loňský rok).
-     * Starší datum před začátkem účetnictví je skoro vždy překlep v roce (2016 místo
-     * 2026) a založilo by prázdné staré období, proto se odmítne; skutečně starší rok
-     * založí účetní ručně.
+     * Chybějící období starší než rok před začátkem nebo vzdálenější než příští
+     * účetní rok založí účetní ručně.
      */
     public function assertCanAutomaticallyOpenForPosting(int $supplierId, string $date): void
     {
+        $calendar = $this->fiscalCalendar($supplierId);
+        $year = $calendar->fiscalYearOfDate($date);
+        $today = $this->clock->now()->format('Y-m-d');
+        if ($year > $calendar->fiscalYearOfDate($today) + self::POSTING_YEARS_AHEAD) {
+            throw new PostingException(
+                'period_after_horizon',
+                'Datum je za příštím účetním rokem firmy. Zkontrolujte, zda nejde o překlep v roce. '
+                . 'Pokud jde opravdu o budoucí rok, založte období ručně v Nástroje → Uzávěrka.',
+            );
+        }
+
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'SELECT MIN(starts_on) AS first_start FROM accounting_periods WHERE supplier_id = ?'
@@ -487,8 +504,7 @@ final class AccountingPeriodRepository
         if ($firstStart === null || $firstStart === false || $date >= (string) $firstStart) {
             return;
         }
-        $calendar = $this->fiscalCalendar($supplierId);
-        if ($calendar->fiscalYearOfDate($date) >= $calendar->fiscalYearOfDate((string) $firstStart) - 1) {
+        if ($year >= $calendar->fiscalYearOfDate((string) $firstStart) - 1) {
             return;
         }
         throw new PostingException(
@@ -523,6 +539,22 @@ final class AccountingPeriodRepository
               ORDER BY ap.starts_on, ap.id"
         );
         $stmt->execute([$supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return list<array{id:int,fiscal_year:int,starts_on:string,ends_on:string,entry_count:int}> */
+    public function postingPeriodsAfterHorizon(int $supplierId): array
+    {
+        $firstYearAfterHorizon = (int) $this->clock->now()->format('Y') + self::POSTING_YEARS_AHEAD + 1;
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT ap.id, ap.fiscal_year, ap.starts_on, ap.ends_on, COUNT(je.id) AS entry_count
+               FROM accounting_periods ap
+               LEFT JOIN journal_entries je ON je.supplier_id = ap.supplier_id AND je.period_id = ap.id
+              WHERE ap.supplier_id = ? AND ap.created_reason = 'posting' AND ap.starts_on >= ?
+              GROUP BY ap.id, ap.fiscal_year, ap.starts_on, ap.ends_on
+              ORDER BY ap.starts_on, ap.id"
+        );
+        $stmt->execute([$supplierId, sprintf('%04d-01-01', $firstYearAfterHorizon)]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
