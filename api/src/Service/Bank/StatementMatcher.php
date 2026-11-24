@@ -14,6 +14,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
@@ -289,7 +290,7 @@ final class StatementMatcher
             if ($remaining <= 0.005) {
                 continue;
             }
-            $expected = $this->expectedMatch($remaining, (string) $m['currency'], (float) ($m['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
+            $expected = $this->expectedMatch($remaining, (string) $m['currency'], IssuedCzkAmounts::settlementRate($m), $txCurrency, $exactTolerance);
             if ($expected === null) {
                 continue;
             }
@@ -881,7 +882,8 @@ final class StatementMatcher
         $vsKey = VariableSymbolNormalizer::matchKey((string) $vs);
         $paymentVsMatch = $this->vsKeyMatches('invoices', 'i', 'payment_variable_symbol');
         [$candidateSql, $candidateParams] = $this->vsCandidates('invoices', 'i', (string) $vs, $supplierId, ['varsymbol'], ['varsymbol', 'payment_variable_symbol']);
-        $sql = "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type, i.parent_invoice_id, i.calendar_id, i.due_date, cur.code AS currency,
+        $sql = "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.import_amount_to_pay_czk,
+                       i.status, i.invoice_type, i.parent_invoice_id, i.calendar_id, i.due_date, cur.code AS currency,
                        CASE WHEN i.varsymbol = ? OR i.payment_variable_symbol = ? THEN 2 ELSE 1 END AS vs_match_rank,
                        {$paymentVsMatch} AS payment_vs_match
                   FROM invoices i
@@ -950,7 +952,7 @@ final class StatementMatcher
             && (!empty($inv['parent_invoice_id']) || AdvanceDrawLinks::drawingByLines($pdo, [(int) $inv['id']]) !== [])
             && ($advanceViolation = $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount)) !== null) {
             $proforma = $pdo->prepare(
-                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
+                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.import_amount_to_pay_czk, i.status, i.invoice_type,
                         i.parent_invoice_id, cur.code AS currency
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
@@ -994,7 +996,8 @@ final class StatementMatcher
         $compareBase = $alreadyPaid
             ? round(max((float) $inv['amount_to_pay'], (float) ($inv['paid_total'] ?? 0)) - $settledElsewhere, 2)
             : $remaining;
-        $m = $this->expectedMatch($compareBase, (string) $inv['currency'], (float) ($inv['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
+        $rate = IssuedCzkAmounts::settlementRate($inv);
+        $m = $this->expectedMatch($compareBase, (string) $inv['currency'], $rate, $txCurrency, $exactTolerance);
         if ($m === null) {
             return ['status' => 'unmatched', 'reason' => 'currency_mismatch',
                     'tx_currency' => $txCurrency, 'invoice_currency' => $inv['currency']];
@@ -1004,7 +1007,7 @@ final class StatementMatcher
         if (!$alreadyPaid && $amount - $m['expected'] > $m['exact']) {
             $offsetTotal = $this->creditNoteOffsetTotal($pdo, (int) $inv['id']);
             if ($offsetTotal > 0) {
-                $full = $this->expectedMatch(round($remaining + $offsetTotal, 2), (string) $inv['currency'], (float) ($inv['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
+                $full = $this->expectedMatch(round($remaining + $offsetTotal, 2), (string) $inv['currency'], $rate, $txCurrency, $exactTolerance);
                 if ($full !== null && abs($amount - $full['expected']) <= $full['exact']) {
                     $m = $full;
                     $remaining = round($remaining + $offsetTotal, 2);
@@ -1221,7 +1224,7 @@ final class StatementMatcher
         return FxPaymentSettlement::amountInInvoiceCurrency(
             $txAmount,
             (string) $inv['currency'],
-            (float) ($inv['exchange_rate'] ?: 0),
+            IssuedCzkAmounts::settlementRate($inv),
             $txCurrency,
             $fallback,
             $settleRemaining,
@@ -2063,12 +2066,9 @@ final class StatementMatcher
         int $transactionId,
         ?string $txCurrency,
     ): array {
-        if ($txCurrency !== null && strtoupper($txCurrency) !== self::LOCAL_CURRENCY) {
-            return ['status' => 'unmatched', 'reason' => 'fx_credit_refund_requires_manual'];
-        }
         [$candidateSql, $candidateParams] = $this->vsCandidates('invoices', 'i', $vs, $supplierId, ['varsymbol'], ['varsymbol']);
         $stmt = $pdo->prepare(
-            "SELECT i.id, i.amount_to_pay, i.exchange_rate, cur.code AS currency,
+            "SELECT i.id, i.amount_to_pay, i.exchange_rate, i.import_amount_to_pay_czk, cur.code AS currency,
                     CASE WHEN i.varsymbol = ? THEN 2 ELSE 1 END AS vs_match_rank
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ? AND " . RefundDocument::openRefundSql('i') . "
@@ -2077,7 +2077,9 @@ final class StatementMatcher
         $stmt->execute([$vs, $supplierId, ...$candidateParams]);
         $matches = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if ((string) $row['currency'] !== self::LOCAL_CURRENCY) continue;
+            $currency = (string) $row['currency'];
+            if ($currency !== strtoupper($txCurrency ?? self::LOCAL_CURRENCY)
+                || ($currency !== self::LOCAL_CURRENCY && $row['import_amount_to_pay_czk'] === null)) continue;
             $remaining = CreditRefundAllocation::issuedRemaining($pdo, $supplierId, (int) $row['id'], $transactionId);
             if ($remaining === null || $remaining <= InvoicePaymentService::TOLERANCE) continue;
             $m = $this->expectedMatch($remaining, (string) $row['currency'], (float) ($row['exchange_rate'] ?: 0), $txCurrency);

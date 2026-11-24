@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -80,7 +81,8 @@ final class BankMatchSearch
                 $filter .= " AND i.status <> 'paid' AND i.amount_to_pay - ($settled) > 0 AND cur.code = ?";
                 $params[] = $currency;
             }
-            $branches[] = "SELECT '$type' AS type, i.id, $ref AS ref, i.amount_to_pay AS amount,
+            $sourceDue = $issued ? 'i.import_amount_to_pay_czk' : 'NULL';
+            $branches[] = "SELECT '$type' AS type, i.id, $ref AS ref, i.amount_to_pay AS amount, {$sourceDue} AS import_amount_to_pay_czk,
                     i.exchange_rate, cur.code AS currency, i.issue_date, i.due_date,
                     c.company_name AS party, i.status = 'paid' AS paid
                 FROM $table i JOIN currencies cur ON cur.id = i.currency_id
@@ -94,8 +96,8 @@ final class BankMatchSearch
             $rate = max(0.0, (float) $row['exchange_rate']);
             $cross = strtoupper($row['currency']) !== $currency;
             $converted = $cross && $currency === FxPaymentSettlement::LOCAL_CURRENCY && $rate > 0
-                ? round(FxPaymentSettlement::expectedLocalAmount(abs((float) $row['amount']), $rate), 2) : null;
-            unset($row['exchange_rate']);
+                ? abs((float) ($row['import_amount_to_pay_czk'] ?? FxPaymentSettlement::expectedLocalAmount((float) $row['amount'], $rate))) : null;
+            unset($row['exchange_rate'], $row['import_amount_to_pay_czk']);
             $row['id'] = (int) $row['id'];
             $row['amount'] = (float) $row['amount'];
             $row['paid'] = (bool) $row['paid'];
@@ -137,13 +139,16 @@ final class BankMatchSearch
         if ($expected < 0.005 || $document['status'] === 'paid') $expected = abs((float) $document['amount_to_pay']);
         $rate = (float) $document['exchange_rate'];
         if ($rate <= 0) $rate = 1.0;
+        $expectedCzk = ($document['import_amount_to_pay_czk'] ?? null) !== null
+            ? IssuedCzkAmounts::allocated($document, $expected, $rate, max(0.0, abs((float) $document['amount_to_pay']) - $expected))
+            : $expected * $rate;
         $query = $this->db->pdo()->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
             $effectiveCurrency AS currency, bt.counterparty_name, bt.variable_symbol, bt.description, bt.bank_ref,
             bs.account_number, bs.bank_code" . $from . " ORDER BY
             CASE WHEN $effectiveCurrency = ? THEN 0 WHEN $effectiveCurrency = 'CZK' THEN 1 ELSE 2 END,
             ABS(ABS(bt.amount) - CASE WHEN $effectiveCurrency = 'CZK' AND ? <> 'CZK' THEN ? ELSE ? END),
             ABS(DATEDIFF(bt.posted_at, ?)), bt.id DESC LIMIT $limit OFFSET $offset");
-        $query->execute([...$params, $currency, $currency, $expected * $rate, $expected, $document['due_date'] ?? $document['issue_date']]);
+        $query->execute([...$params, $currency, $currency, $expectedCzk, $expected, $document['due_date'] ?? $document['issue_date']]);
         $items = array_map(static function (array $row): array {
             $row['id'] = (int) $row['id'];
             $row['statement_id'] = (int) $row['statement_id'];

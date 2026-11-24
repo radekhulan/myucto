@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Support\Sql;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
+
 /**
  * Jediný zdroj pravdy pro otázku „kolik je tahle částka v CZK".
  *
@@ -61,5 +63,22 @@ final class CzkAmountExpr
     public static function amount(string $amountExpr, string $docAlias, string $currencyAlias = 'cur'): string
     {
         return sprintf('%s * %s', $amountExpr, self::rate($docAlias, $currencyAlias));
+    }
+
+    public static function issuedRevenue(bool $isVatPayer, string $docAlias = 'i', string $currencyAlias = 'cur'): string
+    {
+        $field = $isVatPayer ? 'total_without_vat' : 'total_with_vat';
+        $fallback = self::amount("{$docAlias}.{$field}", $docAlias, $currencyAlias);
+        return $isVatPayer ? IssuedCzkAmounts::netSql($docAlias, $fallback) : IssuedCzkAmounts::grossSql($docAlias, $fallback);
+    }
+
+    public static function issuedRemaining(string $docAlias = 'i', string $currencyAlias = 'cur'): string
+    {
+        $due = "{$docAlias}.amount_to_pay";
+        $remaining = "({$due} - {$docAlias}.paid_total)";
+        $fallback = self::amount($remaining, $docAlias, $currencyAlias);
+        return "CASE WHEN {$docAlias}.import_amount_to_pay_czk IS NOT NULL AND {$due} <> 0
+                 THEN {$docAlias}.import_amount_to_pay_czk - ROUND({$docAlias}.import_amount_to_pay_czk * {$docAlias}.paid_total / {$due}, 2)
+                 ELSE {$fallback} END";
     }
 }

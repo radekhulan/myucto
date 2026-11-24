@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use PDO;
@@ -309,7 +310,7 @@ final class DocumentLinker
         $ids = array_values(array_unique($ids));
         $in = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $pdo->prepare(
-            "SELECT i.id, i.status, i.invoice_type, i.paid_total, i.exchange_rate, cur.code AS currency,
+            "SELECT i.id, i.status, i.invoice_type, i.paid_total, i.amount_to_pay, i.import_amount_to_pay_czk, i.exchange_rate, cur.code AS currency,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id) AS recorded
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ? AND i.id IN ({$in})"
@@ -358,7 +359,7 @@ final class DocumentLinker
                 return null;
             }
             $invoice = $invoices[$invoiceId];
-            $rate = (string) $invoice['currency'] !== 'CZK' && $invoice['exchange_rate'] !== null && (float) $invoice['exchange_rate'] > 0 ? (float) $invoice['exchange_rate'] : 1.0;
+            $rate = (string) $invoice['currency'] !== 'CZK' ? (IssuedCzkAmounts::settlementRate($invoice) ?: 1.0) : 1.0;
             $amount = round(min($czk / $rate, $left[$invoiceId]), 2);
             if ($amount < 0.01) {
                 return 0.0;
@@ -370,9 +371,10 @@ final class DocumentLinker
             if ($kind === 'cash') {
                 $linkCash->execute([(int) $pdo->lastInsertId(), (int) $movementId, $ctx->supplierId, $invoiceId]);
             }
+            $previous = (float) $invoice['paid_total'] - $left[$invoiceId];
             $left[$invoiceId] = round($left[$invoiceId] - $amount, 2);
             $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payments_recorded');
-            return round($amount * $rate, 2);
+            return IssuedCzkAmounts::allocated($invoice, $amount, $rate, $previous);
         };
         // Přeplatek pohybu nad uhrazenou částkou faktury (v Kč) - kandidát na přeúčtování níže.
         $overflow = [];
@@ -449,7 +451,8 @@ final class DocumentLinker
                 $in = implode(',', array_fill(0, count($docs), '?'));
                 $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
                 $kind = $type === 'invoice' ? 'invoice_type' : 'document_kind';
-                $rows = $pdo->prepare("SELECT id, {$kind} AS kind, varsymbol AS number, exchange_rate FROM {$table} WHERE supplier_id = ? AND id IN ({$in})");
+                $snapshot = $type === 'invoice' ? ', amount_to_pay, import_amount_to_pay_czk' : '';
+                $rows = $pdo->prepare("SELECT id, {$kind} AS kind, varsymbol AS number, exchange_rate{$snapshot} FROM {$table} WHERE supplier_id = ? AND id IN ({$in})");
                 $rows->execute(array_merge([$ctx->supplierId], array_keys($docs)));
                 $invoices = [];
                 $notes = [];
@@ -464,7 +467,7 @@ final class DocumentLinker
                     continue;
                 }
                 foreach ($notes as $note) {
-                    $rate = $note['exchange_rate'] !== null && (float) $note['exchange_rate'] > 0 ? (float) $note['exchange_rate'] : 1.0;
+                    $rate = IssuedCzkAmounts::settlementRate($note) ?: 1.0;
                     if ($this->offsetCreditNote($ctx, $type, (int) $invoices[0]['id'], (int) $note['id'], (string) $note['number'],
                         round($docs[(int) $note['id']] / $rate, 2), $dates[$entryId])) {
                         $ctx->protocol->count(self::STEP_PAYMENTS, 'credit_note_offsets');

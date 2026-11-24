@@ -71,6 +71,7 @@ final class PohodaImporter
         private readonly PohodaTaxEvidenceImporter $taxEvidence,
         private readonly OrderImporter $orders,
         private readonly PohodaForeignBank $foreignBank,
+        private readonly PohodaForeignIssuedRepair $foreignIssued,
     ) {}
 
     /**
@@ -415,6 +416,7 @@ final class PohodaImporter
             ? $frameworkGuard->periodsForYears($supplierId, [$agendaYear->label, ...array_values(array_diff($agendaYear->laterYears(), $skipYears))])
             : [];
         $pdo = $this->db->pdo();
+        $ctx->verifyPaidIssuedCurrency = !$dryRun && !$relinkOnly && !$pdo->inTransaction();
         // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes savepoint -
         // vlastní BEGIN by PDO odmítlo a vnější transakci by nesměla vrátit.
         $savepoint = $dryRun && $pdo->inTransaction();
@@ -456,6 +458,9 @@ final class PohodaImporter
                         $this->assertPeriodsWritable($supplierId, $frameworkPeriods);
                         $fn();
                     });
+                    if ($key === DocumentLinker::STEP_PAYMENTS && $ctx->foreignIssuedPaymentIds !== []) {
+                        $this->convertPaidIssued($ctx, $key);
+                    }
                     $protocol->finish($key);
                 } catch (\Throwable $e) {
                     // Odvolaná transakce (1020/1213) nesmí zůstat viset jako otevřená:
@@ -502,6 +507,20 @@ final class PohodaImporter
             }
         }
         return $protocol;
+    }
+
+    private function convertPaidIssued(PohodaContext $ctx, string $step): void
+    {
+        $protocol = $ctx->protocol;
+        foreach ($this->foreignIssued->run($ctx->supplierId, $ctx->export, true, $ctx->userOrNull(), $ctx->foreignIssuedPaymentIds) as $row) {
+            $converted = $row['status'] === 'converted';
+            $code = $converted ? 'foreign_currency' : 'foreign_currency_in_home';
+            $protocol->count($step, $code);
+            $protocol->info($step, $code, $converted
+                ? sprintf('Doklad %s převzat v %s, převedeno úhrad: %d.', $row['document_no'], $row['currency'], $row['payments_converted'])
+                : sprintf('Doklad %s ponechán v Kč. %s', $row['document_no'], $row['reason']),
+                ['document_no' => $row['document_no'], 'currency' => $row['currency']]);
+        }
     }
 
     private function periodBlockers(int $supplierId, array $periods, bool $currentRead = false): array

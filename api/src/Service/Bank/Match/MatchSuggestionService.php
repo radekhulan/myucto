@@ -11,6 +11,7 @@ use MyInvoice\Service\Bank\BankNoticeLifecycle;
 use MyInvoice\Service\Bank\BankTransactionContext;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use PDO;
 
@@ -367,7 +368,7 @@ final class MatchSuggestionService
         $placeholders = implode(',', array_fill(0, count($invoiceIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, i.client_id, i.invoice_type, i.status, i.amount_to_pay, i.paid_total,
-                    i.exchange_rate, cur.code AS currency
+                    i.exchange_rate, i.import_amount_to_pay_czk, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ? AND i.id IN ($placeholders)
                 AND i.status IN ('issued','sent','reminded','paid')
@@ -597,8 +598,9 @@ final class MatchSuggestionService
         $txCurrency = strtoupper((string) $tx['currency']);
         $invoiceCurrency = strtoupper((string) $invoice['currency']);
         if ($txCurrency === $invoiceCurrency) return round(abs((float) $tx['amount']), 2);
-        if ($txCurrency === 'CZK' && (float) $invoice['exchange_rate'] > 0) {
-            return round(abs((float) $tx['amount']) / (float) $invoice['exchange_rate'], 2);
+        $rate = IssuedCzkAmounts::settlementRate($invoice);
+        if ($txCurrency === 'CZK' && $rate > 0) {
+            return round(abs((float) $tx['amount']) / $rate, 2);
         }
         return $fallback;
     }

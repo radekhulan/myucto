@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use PDO;
 
 final class AdvanceSettlementEvidenceReader
@@ -132,6 +133,7 @@ final class AdvanceSettlementEvidenceReader
         $entries = $this->rows('SELECT e.id FROM journal_entries e LEFT JOIN journal_entries rev ON rev.id=e.reversed_by AND rev.supplier_id=e.supplier_id WHERE e.supplier_id=? AND e.source_type=? AND e.source_id=? AND e.posted_at IS NOT NULL AND e.entry_date<=? AND (e.reversed_by IS NULL OR rev.entry_date>?) ORDER BY e.id', [$supplierId, $type, (int) $document['id'], $asOf, $asOf], $currentRead);
         $originals = [];
         $settlement = '0.00';
+        $settlementFx = '0.00';
         $counter = [];
         $accountId = (int) $item['account_id'];
         foreach ($entries as $entry) {
@@ -143,6 +145,11 @@ final class AdvanceSettlementEvidenceReader
                     elseif ($line['currency_code'] === null && $line['side'] === ($direction === 'sale' ? 'credit' : 'debit')) $settlement = bcadd($settlement, (string) $line['signed_amount'], 2);
                 } elseif (isset($available[(int) $line['account_id']]) && $line['side'] === ($direction === 'sale' ? 'debit' : 'credit')) {
                     $counter[(int) $line['account_id']] = bcadd($counter[(int) $line['account_id']] ?? '0.00', (string) $line['signed_amount'], 2);
+                } elseif (($line['line_text'] ?? null) === PostingService::ADVANCE_FX_LINE_TEXT
+                    && in_array($line['account_type'], ['revenue', 'expense'], true)) {
+                    $settlementFx = $line['side'] === ($direction === 'sale' ? 'debit' : 'credit')
+                        ? bcsub($settlementFx, (string) $line['signed_amount'], 2)
+                        : bcadd($settlementFx, (string) $line['signed_amount'], 2);
                 }
             }
         }
@@ -152,7 +159,7 @@ final class AdvanceSettlementEvidenceReader
             if (bccomp($amount, $available[$counterId], 2) > 0) $findings[] = 'advance_settlement_exceeds_receipts';
             $counterTotal = bcadd($counterTotal, $amount, 2);
         }
-        if (bccomp($settlement, $counterTotal, 2) !== 0) $findings[] = 'advance_settlement_pair_unproven';
+        if (bccomp($settlement, bcsub($counterTotal, $settlementFx, 2), 2) !== 0) $findings[] = 'advance_settlement_pair_unproven';
         $applied = bcadd($settlement, $available[$accountId] ?? '0.00', 2);
         $foreign = $availableForeign[$accountId] ?? '0.00';
         foreach ($counter as $counterId => $amount) {
@@ -264,7 +271,7 @@ final class AdvanceSettlementEvidenceReader
 
     private function entryLines(int $supplierId, int $entryId, bool $currentRead): array
     {
-        return $this->rows('SELECT l.id,l.account_id,l.side,l.signed_amount,l.signed_amount_foreign,l.currency_code,a.account_type FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE l.supplier_id=? AND l.entry_id=? ORDER BY l.line_no,l.id', [$supplierId, $entryId], $currentRead);
+        return $this->rows('SELECT l.id,l.account_id,l.side,l.signed_amount,l.signed_amount_foreign,l.currency_code,l.line_text,a.account_type FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE l.supplier_id=? AND l.entry_id=? ORDER BY l.line_no,l.id', [$supplierId, $entryId], $currentRead);
     }
 
     private function rows(string $sql, array $params, bool $currentRead): array
@@ -285,6 +292,53 @@ final class AdvanceSettlementEvidenceReader
             [$supplierId, $proformaId],
         );
         return round($bank + $cash, 2);
+    }
+
+    /**
+     * Korunová hodnota konkrétní bankovní alokace ve stejné měně jako záloha.
+     * Čte se z živého zápisu na účtu zálohy (u karty ze zápisu vypořádání).
+     * Stejný pohyb může platit několik dokladů, proto se řádek hledá podle
+     * měny a nominálu alokace, nikoli jen podle účtu celého zápisu.
+     *
+     * @param 'sale'|'purchase' $side
+     * @return array{foreign:float, czk:float}
+     */
+    public function tracedBankAdvance(int $supplierId, string $side, int $advanceId, string $currency, string $account): array
+    {
+        $isSale = $side === 'sale';
+        $member = $isSale ? 'ip' : 'pm';
+        $bankCurrency = "UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''), 'CZK'))";
+        $source = $isSale ? "UPPER(ip.currency)" : $bankCurrency;
+        $members = $this->receiptSql($side, 'bank',
+            "{$member}.id, {$member}.amount, {$member}.supplier_id, je.id AS entry_id, je.source_id, je.posted_at, {$source} AS currency");
+        $cardSettlement = Card\CardSettlementService::SOURCE_SETTLEMENT;
+        $sql = "WITH members AS ({$members})
+                SELECT m.id, m.amount, MIN(l.amount) AS czk, MAX(l.amount) AS max_czk
+                  FROM members m
+             LEFT JOIN journal_entries card ON card.supplier_id = m.supplier_id
+                       AND card.source_type = '{$cardSettlement}' AND card.source_id = m.source_id
+                       AND card.reversed_by IS NULL AND card.posted_at IS NOT NULL
+                  JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id
+                       AND l.entry_id = COALESCE(card.id, m.entry_id)
+                       AND l.side = ? AND l.currency_code = m.currency
+                       AND l.amount_foreign = m.amount AND l.is_red_storno = 0
+                  JOIN chart_of_accounts a ON a.supplier_id = m.supplier_id AND a.id = l.account_id AND a.account_code = ?
+                 WHERE m.currency = ? AND m.posted_at IS NOT NULL
+                 GROUP BY m.id, m.amount";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, $advanceId, $isSale ? 'credit' : 'debit', $account, $currency]);
+        $total = ['foreign' => 0.0, 'czk' => 0.0];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($row['czk'] !== $row['max_czk']) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Zaúčtované alokace zálohy se stejnou cizoměnovou částkou mají různé korunové částky. Zúčtujte zálohu ručně.',
+                );
+            }
+            $total['foreign'] += (float) $row['amount'];
+            $total['czk'] += (float) $row['czk'];
+        }
+        return array_map(static fn (float $amount): float => round($amount, 2), $total);
     }
 
     /**
@@ -317,6 +371,57 @@ final class AdvanceSettlementEvidenceReader
     {
         return round($this->postedAdvanceReceived($supplierId, $proformaId) + $this->openingAdvanceReceived($supplierId, $proformaId)
             + $this->takenOverSettlementReceived($supplierId, $proformaId), 2);
+    }
+
+    public function importedAdvanceReceivedCzk(int $supplierId, int $proformaId, string $accountCode): float
+    {
+        $accounts = 'fca.account_code = x.account_code OR fca.account_code LIKE x.account_pattern';
+        $bank = self::proformaBankReceiptCzkSql($accounts);
+        $cash = self::proformaCashReceiptCzkSql($accounts);
+        $fallback = IssuedCzkAmounts::allocationSql('ipf', 'ip.amount', 'ROUND(ip.amount * ipf.exchange_rate, 2)');
+        $stmt = $this->db->pdo()->prepare(
+            "WITH params AS (SELECT :account AS account_code, :account_pattern AS account_pattern)
+             SELECT COALESCE(SUM(COALESCE({$bank}, {$cash}, CASE WHEN " . self::openingReceiptSql('ip', 'ipf') . ' OR '
+                . self::takenOverSettlementReceiptSql('ip') . " THEN {$fallback} END)), 0)
+               FROM invoice_payments ip
+               CROSS JOIN params x
+               JOIN invoices ipf ON ipf.id = ip.invoice_id AND ipf.supplier_id = ip.supplier_id
+              WHERE ip.supplier_id = :supplier AND ip.invoice_id = :invoice"
+        );
+        $stmt->execute(['account' => $accountCode, 'account_pattern' => $accountCode . '.%', 'supplier' => $supplierId, 'invoice' => $proformaId]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    public static function proformaBankReceiptCzkSql(string $accounts, ?string $asOf = null): string
+    {
+        $bankWhere = "fe.supplier_id = ip.supplier_id AND fe.source_type = 'bank' AND fe.source_id = ip.bank_transaction_id";
+        $bank = self::proformaReceiptCzkSql('FROM journal_entries fe', $bankWhere, $accounts, $asOf);
+        $allocated = "({$bank} * ip.amount / NULLIF((SELECT SUM(fip.amount) FROM invoice_payments fip
+                                                        WHERE fip.supplier_id = ip.supplier_id
+                                                          AND fip.bank_transaction_id = ip.bank_transaction_id), 0))";
+        $trace = self::proformaReceiptCzkSql('FROM journal_entries fe',
+            $bankWhere . " AND fl.side = 'credit' AND fl.currency_code = ip.currency AND fl.signed_amount_foreign = ip.amount",
+            $accounts, $asOf, 'CASE WHEN MIN(fl.signed_amount) = MAX(fl.signed_amount) THEN MIN(fl.signed_amount) END');
+        return "CASE WHEN ipf.import_amount_to_pay_czk IS NOT NULL THEN COALESCE({$trace}, {$allocated}) ELSE {$allocated} END";
+    }
+
+    public static function proformaCashReceiptCzkSql(string $accounts, ?string $asOf = null): string
+    {
+        return self::proformaReceiptCzkSql("FROM cash_documents fcd
+                JOIN journal_entries fe ON fe.supplier_id = fcd.supplier_id AND fe.source_type = 'cash' AND fe.source_id = fcd.id",
+            'fcd.supplier_id = ip.supplier_id AND fcd.invoice_payment_id = ip.id', $accounts, $asOf);
+    }
+
+    private static function proformaReceiptCzkSql(string $from, string $where, string $accounts, ?string $asOf, string $amount = "SUM(CASE WHEN fl.side = 'credit' THEN fl.signed_amount ELSE 0 END)"): string
+    {
+        $live = $asOf === null ? 'fe.reversed_by IS NULL'
+            : "fe.entry_date <= {$asOf} AND (fe.reversed_by IS NULL OR frev.entry_date > {$asOf})";
+        return "(SELECT {$amount}
+                {$from}
+                JOIN journal_entry_lines fl ON fl.entry_id = fe.id AND fl.supplier_id = fe.supplier_id
+                JOIN chart_of_accounts fca ON fca.id = fl.account_id
+           LEFT JOIN journal_entries frev ON frev.id = fe.reversed_by
+               WHERE {$where} AND fe.posted_at IS NOT NULL AND {$live} AND ({$accounts}))";
     }
 
     /**

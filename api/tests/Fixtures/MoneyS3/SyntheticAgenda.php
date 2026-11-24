@@ -112,7 +112,7 @@ final class SyntheticAgenda
      *
      * @return array<string,string>
      */
-    public static function files(): array
+    public static function files(bool $issuedCurrencyRounding = false): array
     {
         $vendor = [
             'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
@@ -351,11 +351,14 @@ final class SyntheticAgenda
                 ['Doklad' => 'FP24001', 'PrijatDokl' => 'DF-2025-020', 'VarSymbol' => '2025020',
                     'Zaklad_2' => 300.0, 'DPH_2' => 63.0, 'CelkemSDPH' => 363.0, 'Popis' => 'Drobné služby'] + $purchaseDates('2025-05-06') + $vendor,
             ]),
-            'ROK.002/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, [
+            'ROK.002/VFaktury.DAT' => Ms3FixtureWriter::table(
+                $issuedCurrencyRounding ? [...self::ISSUED_FIELDS, ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]] : self::ISSUED_FIELDS, [
                 ['Druh' => 'Z', 'Doklad' => 'ZV25001', 'VarSymbol' => '2025101',
                     'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Záloha na poradenství'] + $issuedDates('2025-05-02') + $customer,
                 ['Doklad' => 'FV25001', 'VarSymbol' => '2025001',
-                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Poradenství'] + $issuedDates('2025-05-20') + $customer,
+                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Poradenství']
+                    + ($issuedCurrencyRounding ? ['Mena' => 'EUR', 'Kurs' => 25.0, 'PocetJedn' => 1, 'ValutyZak2' => 40.0, 'ValutyDPH2' => 8.39] : [])
+                    + $issuedDates('2025-05-20') + $customer,
             ]),
             'ROK.002/PoklKnih.DAT' => Ms3FixtureWriter::table(self::CASH_FIELDS, [
                 ['Doklad' => 'PV25001', 'Pokl' => 'PO', 'Vydej' => 1, 'PrKont' => 'PV001', 'DatVyst' => '2025-02-01', 'DatUcPr' => '2025-02-01', 'Popis' => 'Kancelářské potřeby', 'Celkem' => 800.0],

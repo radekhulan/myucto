@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -91,14 +92,15 @@ final class GetProjectAction
 
         // Nezaplaceno + Po splatnosti per měna. _czk fieldy přes i.exchange_rate
         // pro multi-currency projekt — UI agreguje napříč měnami v CZK.
+        $remainingCzk = CzkAmountExpr::issuedRemaining();
         $stmtU = $pdo->prepare(
             "SELECT cur.code AS currency,
                     SUM(i.amount_to_pay - i.paid_total) AS unpaid_total,
-                    SUM((i.amount_to_pay - i.paid_total) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS unpaid_total_czk,
+                    SUM($remainingCzk) AS unpaid_total_czk,
                     COUNT(*) AS unpaid_count,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE() THEN i.amount_to_pay - i.paid_total ELSE 0 END) AS overdue_total,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE()
-                             THEN (i.amount_to_pay - i.paid_total) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)
+                             THEN $remainingCzk
                              ELSE 0 END) AS overdue_total_czk,
                     SUM(CASE WHEN i.due_date {$overdueOperator} CURDATE() THEN 1 ELSE 0 END) AS overdue_count
                FROM invoices i

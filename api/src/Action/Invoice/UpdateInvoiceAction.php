@@ -119,7 +119,7 @@ final class UpdateInvoiceAction
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
-        $existing = $this->repo->find($id);
+        $existing = $this->repo->find($id, includeImportedCzk: true);
         if (!SupplierGuard::owns($request, $existing)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         }
@@ -174,6 +174,15 @@ final class UpdateInvoiceAction
         // Částečný PUT (#113): vynechaný klíč = uložená hodnota, ne default nového dokladu.
         // Musí předcházet guardům (zámek, notes_only, BOLA) i resolveru defaultů.
         $body = self::mergeStoredHeader($body, $existing);
+        $importedCzk = ($existing['import_total_with_vat_czk'] ?? null) !== null;
+        if ($importedCzk) {
+            if (self::financialFieldsChanged($body, $existing) !== []
+                || (isset($body['currency']) && (string) $body['currency'] !== (string) $existing['currency'])) {
+                return Json::error($response, 'document_locked',
+                    'Účetní údaje převzatého dokladu jsou uložené podle zdroje. Opravte je opravným dokladem.', 409);
+            }
+            unset($body['items']);
+        }
 
         // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
@@ -729,7 +738,9 @@ final class UpdateInvoiceAction
             );
         }
         $this->paymentSchedule->saveFromPayload(\MyInvoice\Http\SupplierGuard::currentId($request), $id, $body);
-        $this->calc->recompute($id);
+        if (!$importedCzk) {
+            $this->calc->recompute($id);
+        }
 
         // Exchange rate logika:
         //   1. User manuálně nastavil kurz v payloadu → uložit (ruční override má prioritu)
@@ -749,7 +760,7 @@ final class UpdateInvoiceAction
         $userRate = $body['exchange_rate'] ?? null;
         $userRateProvided = $userRate !== null && $userRate !== '' && is_numeric($userRate) && (float) $userRate > 0;
 
-        if ($userRateProvided) {
+        if (!$importedCzk && $userRateProvided) {
             // Manuální override z UI. `rate_date` musí být rozhodný den dokladu (DUZP
             // s fallbackem na vystavení, SSOT ExchangeRateDate) — ne slepě issue_date.
             // Jinak by doklad s DUZP tvrdil, že kurz platí ke dni vystavení, a kontrola
@@ -759,9 +770,9 @@ final class UpdateInvoiceAction
                 (float) $userRate,
                 ExchangeRateDate::forInvoice($body) ?? (string) $body['issue_date'],
             );
-        } elseif ($wasDraft && ($currencyChanged || $issueDateChanged || $taxDateChanged)) {
+        } elseif (!$importedCzk && $wasDraft && ($currencyChanged || $issueDateChanged || $taxDateChanged)) {
             $rateMeta = $this->rateApplier->applyToInvoice($id);
-        } else {
+        } elseif (!$importedCzk) {
             $this->rateApplier->ensureRate($id);
         }
 
@@ -793,7 +804,7 @@ final class UpdateInvoiceAction
         // změny v údajích odběratele/dodavatele/banky promítly do nově generovaného PDF.
         // UI to uživateli avizuje („Změny přepíšou snapshoty"). U draftu se snapshoty
         // nepoužívají (renderer bere live data), takže rebuild řešíme jen pro vystavené.
-        if ($existing['status'] !== 'draft') {
+        if (!$importedCzk && $existing['status'] !== 'draft') {
             $this->pdf->rebuildSnapshots($id);
         }
 
@@ -810,7 +821,7 @@ final class UpdateInvoiceAction
         // příjmový pokladní doklad; odebraná volba ten dřívější zruší. Na draftu se volba
         // jen uloží (inkasovat se dá až vystavený doklad). Měkká brána — chyba pokladny
         // NESMÍ shodit uložení faktury, jen se ohlásí warningem.
-        $settlement = $this->cashSettlement->maybeSettle(
+        $settlement = $importedCzk ? ['status' => CashSettlementService::NOOP] : $this->cashSettlement->maybeSettle(
             SupplierGuard::currentId($request),
             'invoice',
             $id,
@@ -855,7 +866,7 @@ final class UpdateInvoiceAction
         // B11 reconcile: po opravě dokladu stornuj původní zápis a přeúčtuj opravený doklad
         // do aktuálního otevřeného období (deník začne sedět na nový doklad; PostingService
         // sám zaloguje accounting.reversed/posted).
-        if ($forceMode === 'reconcile') {
+        if (!$importedCzk && $forceMode === 'reconcile') {
             try {
                 $reconcile = $this->journalSync->reconcileForceEdit(
                     (int) $existing['supplier_id'],
@@ -875,7 +886,7 @@ final class UpdateInvoiceAction
             if ($reconcile !== null) {
                 $invoice['_reconcile'] = $reconcile;
             }
-        } elseif ($repostOpenForceEdit) {
+        } elseif (!$importedCzk && $repostOpenForceEdit) {
             try {
                 $repostedEntryId = $this->journalSync->repostForceEdit(
                     (int) $existing['supplier_id'],

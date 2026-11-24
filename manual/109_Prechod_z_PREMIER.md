@@ -226,15 +226,13 @@ Další rok převedete i později zopakováním postupu (§ 109.8.4).
 Při přeúčtování přeplatku mezi vydanými fakturami se bankovní a pokladní úhrady
 zpracují společně podle data a při shodném datu podle pořadí řádků deníku PREMIER.
 
-**Faktura v cizí měně.** Převezme se v měně a kurzu dokladu, když částky
-položek v měně přepočtené kurzem dávají na haléř koruny ze zaúčtování
-v deníku (z nich PREMIER počítá přiznání). DPH, kontrolní hlášení i deník
-tak zůstávají v Kč přesně stejné a platbu v měně jde spárovat s fakturou
-včetně kurzového rozdílu. Když přepočet na haléř nesedí (položka složená
-z deníku, haléřový rozdíl kurzu dorovnaný na největší položku), u samovyměření,
-u částečně uhrazené vydané faktury nebo když firma nemá měnu v číselníku měn,
-se faktura převede v Kč podle zaúčtování a poznámka dokladu i protokol uvedou
-důvod.
+**Faktura v cizí měně.** Vydaná faktura s odpovídajícími položkami v obou
+měnách se převezme v měně a kurzu dokladu i při drobném rozdílu zaokrouhlení.
+Základy a daň v Kč zůstanou podle zaúčtování PREMIERu. Běžná přijatá faktura
+se převezme v měně, když přepočet odpovídá na haléř. Převod používá Kč podle
+zaúčtování i s důvodem v poznámce a protokolu například u položek bez částek
+v měně, při samovyměření, při částečné úhradě vydané faktury bez částky v měně
+nebo když firma nemá měnu v číselníku.
 
 **Klasifikace DPH.** PREMIER vede u každé položky dokladu kód DPH a jeho
 definici v číselníku kódů: řádky přiznání a oddíl kontrolního hlášení. Převod

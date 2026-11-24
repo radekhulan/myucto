@@ -41,6 +41,8 @@ final class InvoiceIsdocService
             $invoice = $persistRate
                 ? ($this->repo->find($id) ?? throw new \RuntimeException('Faktura nenalezena.'))
                 : $this->rates->applyResolvedToInvoiceData($invoice, $resolved);
+        } elseif (isset($invoice['id'], $invoice['czk_recap']) && !array_key_exists('import_total_with_vat_czk', $invoice)) {
+            $invoice = $this->repo->find((int) $invoice['id'], includeImportedCzk: true) ?? $invoice;
         }
         return $this->exporter->buildXml($invoice);
     }

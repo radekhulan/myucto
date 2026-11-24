@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use PDO;
 
@@ -321,8 +322,12 @@ final class OpeningDocuments
         [$docType, $table, $partner, $vendorNumber] = $issued
             ? ['invoice', 'invoices', 'client_id', 'NULL']
             : ['purchase_invoice', 'purchase_invoices', 'vendor_id', 'd.vendor_invoice_number'];
+        $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        if ($issued) {
+            $total = IssuedCzkAmounts::grossSql('d', $total);
+        }
         $stmt = $pdo->prepare(
-            'SELECT d.id, MAX(e.period_id = ?), ' . ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate') . ",
+            "SELECT d.id, MAX(e.period_id = ?), {$total},
                     d.varsymbol, d.payment_variable_symbol, {$vendorNumber}, cl.ic
                FROM journal_entries e
                JOIN journal_entry_document_links l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id AND l.doc_type = ?

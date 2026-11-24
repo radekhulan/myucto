@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\CreditNoteOffsetService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -469,10 +470,13 @@ final class TaxRecordsReconciler
         if ($ids === []) {
             return [];
         }
+        $gross = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+        $vat = ForeignCurrencyTakeover::homeAmountSql('d.total_vat', 'd.exchange_rate');
         $stmt = $this->db->pdo()->prepare(sprintf(
             'SELECT id, total_with_vat, %s AS home_total, %s AS home_vat, advance_paid_amount, %s AS kind, %s AS deductible
-               FROM %s WHERE supplier_id = ? AND id IN (%s)',
-            ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate'), ForeignCurrencyTakeover::homeAmountSql('total_vat', 'exchange_rate'),
+               FROM %s d WHERE supplier_id = ? AND id IN (%s)',
+            $purchase ? $gross : IssuedCzkAmounts::grossSql('d', $gross),
+            $purchase ? $vat : IssuedCzkAmounts::vatSql('d', $vat),
             $purchase ? 'document_kind' : 'invoice_type', $purchase ? "(tax_deductible = 1 AND vat_deduction = 'full')" : '1',
             $purchase ? 'purchase_invoices' : 'invoices', implode(',', array_fill(0, count($ids), '?')),
         ));

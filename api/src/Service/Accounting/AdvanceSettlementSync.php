@@ -25,7 +25,7 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
  * spárovaná — pak nechal pohledávku ze zálohy na 314 a závazek na 321 rozjeté. Účetní
  * to viděla jako „nezaúčtované" a platbu přesunula na konečnou fakturu.
  *
- * Mění se VÝHRADNĚ pár zúčtování; ostatní řádky zápisu zůstávají, jak jsou (i ruční
+ * Mění se VÝHRADNĚ řádky zúčtování včetně jeho kurzového rozdílu. Ostatní řádky zůstávají (i ruční
  * přeúčtování nákladového účtu). Očekávaný pár se bere z téhož builderu jako při
  * zaúčtování, takže pravidlo (strop, DDKP, cizí měna) žije na jednom místě. V zápisu se
  * vymění jen řádky páru ({@see PostingService::replaceEntryLines()}) s optimistickým
@@ -209,8 +209,10 @@ final class AdvanceSettlementSync
             // Záloha vedená přímo na saldokontu: pár se nezapisuje, není co dorovnávat.
             return ['action' => 'none', 'reason' => 'settlement_on_same_account', 'entry_id' => $entryId];
         }
-        $isPair = static fn (string $code, string $lineSide): bool =>
-            ($code === $debitCode && $lineSide === 'debit') || ($code === $creditCode && $lineSide === 'credit');
+        $isSettlement = static fn (string $code, array $line): bool =>
+            ($code === $debitCode && $line['side'] === 'debit')
+            || ($code === $creditCode && $line['side'] === 'credit')
+            || ($line['line_text'] ?? null) === PostingService::ADVANCE_FX_LINE_TEXT;
 
         // Záporná konečná faktura (vyúčtování k vyplacení) má saldokonto na opačné straně,
         // takže by se předpis nedal od páru zúčtování odlišit. Taková se dorovná ručně.
@@ -228,7 +230,7 @@ final class AdvanceSettlementSync
         $expected = [];
         foreach ($rebuilt as $line) {
             $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code'], (string) $entry['entry_date']);
-            if ($isPair($code, (string) $line['side'])) {
+            if ($isSettlement($code, $line)) {
                 $expected[] = ['account_code' => $code] + $line;
             }
         }
@@ -238,7 +240,7 @@ final class AdvanceSettlementSync
         $currentIds = [];
         foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
             $code = (string) ($accountMap[(int) $line['account_id']]['code'] ?? '');
-            if ($isPair($code, (string) $line['side'])) {
+            if ($isSettlement($code, $line)) {
                 $current[] = ['account_code' => $code, 'side' => (string) $line['side'], 'amount' => (float) $line['amount']];
                 $currentIds[] = (int) $line['id'];
             }
@@ -405,15 +407,16 @@ final class AdvanceSettlementSync
 
     /**
      * @param list<array<string,mixed>> $lines
-     * @return list<string>
+     * @return array<string,int>
      */
     private static function signature(array $lines): array
     {
         $out = [];
         foreach ($lines as $l) {
-            $out[] = $l['side'] . '|' . $l['account_code'] . '|' . (int) round((float) $l['amount'] * 100.0);
+            $key = $l['side'] . '|' . $l['account_code'];
+            $out[$key] = ($out[$key] ?? 0) + self::cents((float) $l['amount']);
         }
-        sort($out);
+        ksort($out);
         return $out;
     }
 }

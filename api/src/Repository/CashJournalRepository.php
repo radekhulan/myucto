@@ -9,6 +9,7 @@ use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\BankStatementSource;
 use MyInvoice\Service\Bank\BankNoticeLifecycle;
 use MyInvoice\Service\Bank\EmailNoticeReconciler;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\TaxEvidence\PaymentCoverage;
 use MyInvoice\Support\Sql\CreditNoteOffsetRemainderExpr;
@@ -158,6 +159,8 @@ final class CashJournalRepository
             CreditNoteOffsetRemainderExpr::joinSql($docType, $sid, $alias, $asOf, $alias . '_cnr');
         $remVat = static fn (string $alias): string => CreditNoteOffsetRemainderExpr::vatSql($alias, $alias . '_cnr');
         $remGross = static fn (string $alias): string => CreditNoteOffsetRemainderExpr::grossSql($alias, $alias . '_cnr');
+        $issuedVat = static fn (string $alias): string => CreditNoteOffsetRemainderExpr::issuedVatSql($alias, $alias . '_cnr');
+        $issuedGross = static fn (string $alias): string => CreditNoteOffsetRemainderExpr::issuedGrossSql($alias, $alias . '_cnr');
         if ($bankIds !== null) {
             // Kontext několika bank nesmí materializovat zápočty celé firmy.
             $remJoin = static fn (string $docType, string $alias, string $asOf): string => '';
@@ -169,6 +172,8 @@ final class CashJournalRepository
                 $alias === 'bpi' ? 'purchase_invoice' : 'invoice', $alias,
                 $alias === 'i' ? 'ibt.posted_at' : 'bt.posted_at', '18446744073709551615',
             );
+            $issuedVat = $remVat;
+            $issuedGross = $remGross;
         }
         $legs = [];
         $bankLeg = null;
@@ -186,8 +191,8 @@ final class CashJournalRepository
                     cd.purpose AS cash_purpose, cav.base_sum AS cash_vat_base, cav.vat_sum AS cash_vat_amount,
                     NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
                     cd.invoice_id AS invoice_id, ci.invoice_type AS inv_type,
-                    ci.total_without_vat AS inv_without_vat, " . $remVat('ci') . " AS inv_vat,
-                    " . $remGross('ci') . " AS inv_with_vat,
+                    " . IssuedCzkAmounts::netSql('ci', 'ci.total_without_vat') . " AS inv_without_vat, " . $issuedVat('ci') . " AS inv_vat,
+                    " . $issuedGross('ci') . " AS inv_with_vat,
                     ci.income_tax_exempt AS inv_exempt, ci.status AS inv_status,
                     CASE WHEN cip.id IS NOT NULL AND cip.amount <> 0
                          THEN ROUND(cd.total_amount * (cip.amount - ccov.covered) / cip.amount, 2)
@@ -303,8 +308,8 @@ final class CashJournalRepository
                         binc.czk_base AS bank_income_base, binc.czk_exempt AS bank_income_exempt,
                         bi.id AS invoice_id,
                         bi.invoice_type AS inv_type,
-                        bi.total_without_vat AS inv_without_vat, " . $remVat('bi') . " AS inv_vat,
-                        " . $remGross('bi') . " AS inv_with_vat,
+                        " . IssuedCzkAmounts::netSql('bi', 'bi.total_without_vat') . " AS inv_without_vat, " . $issuedVat('bi') . " AS inv_vat,
+                        " . $issuedGross('bi') . " AS inv_with_vat,
                         bi.income_tax_exempt AS inv_exempt, bi.status AS inv_status,
                         CASE WHEN binc.btid IS NOT NULL THEN ABS(binc.czk_overpaid)
                              ELSE {$legacyOverpaid} END AS inv_overpaid,
@@ -341,7 +346,7 @@ final class CashJournalRepository
                                -- brutto DPH nenese a celý zůstává v příjmu.
                                SUM(ROUND(CASE WHEN i.income_tax_exempt = 1 THEN 0
                                               WHEN {$payerAtIp} = 1 AND i.total_with_vat <> 0
-                                                   THEN ip.amount - bcov.covered * LEAST(1, GREATEST(0, " . $remVat('i') . ' / ' . $remGross('i') . "))
+                                                   THEN ip.amount - bcov.covered * LEAST(1, GREATEST(0, " . $issuedVat('i') . ' / ' . $issuedGross('i') . "))
                                               ELSE ip.amount END
                                          * {$ipRateBank}, 2)) AS czk_base,
                                -- Osvobozená noha se dělí na základ/DPH STEJNĚ jako zdanitelná
@@ -351,7 +356,7 @@ final class CashJournalRepository
                                -- income_nontax v CashJournalService::bankIncomeAlloc().
                                SUM(ROUND(CASE WHEN i.income_tax_exempt <> 1 THEN 0
                                               WHEN {$payerAtIp} = 1 AND i.total_with_vat <> 0
-                                                   THEN ip.amount - bcov.covered * LEAST(1, GREATEST(0, " . $remVat('i') . ' / ' . $remGross('i') . "))
+                                                   THEN ip.amount - bcov.covered * LEAST(1, GREATEST(0, " . $issuedVat('i') . ' / ' . $issuedGross('i') . "))
                                               ELSE ip.amount END
                                          * {$ipRateBank}, 2)) AS czk_exempt,
                                -- Přeplatek v CZK, podklad pro ruční zařazení pohybu (1027).
@@ -432,8 +437,8 @@ final class CashJournalRepository
                     NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
                     NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
                     ip.invoice_id AS invoice_id, ii.invoice_type AS inv_type,
-                    ii.total_without_vat AS inv_without_vat, " . $remVat('ii') . " AS inv_vat,
-                    " . $remGross('ii') . " AS inv_with_vat,
+                    " . IssuedCzkAmounts::netSql('ii', 'ii.total_without_vat') . " AS inv_without_vat, " . $issuedVat('ii') . " AS inv_vat,
+                    " . $issuedGross('ii') . " AS inv_with_vat,
                     ii.income_tax_exempt AS inv_exempt, ii.status AS inv_status,
                     ROUND(ip.amount * {$ipRateC1}, 2) - ROUND(ccov1.covered * {$ipRateC1}, 2) AS inv_overpaid,
                     NULL AS purchase_invoice_id, NULL AS pi_without_vat, NULL AS pi_vat, NULL AS pi_with_vat,
@@ -526,8 +531,9 @@ final class CashJournalRepository
                     gcn.id AS invoice_id, gcn.invoice_type AS inv_type,
                     -- Vratka k dobropisu: dobropis nikdy není fakturou zápočtu (CreditNoteOffsetService
                     -- zápočet proti dobropisu nepřipustí), dělí se tedy podle sebe.
-                    gcn.total_without_vat AS inv_without_vat, gcn.total_vat AS inv_vat,
-                    gcn.total_with_vat AS inv_with_vat,
+                    " . IssuedCzkAmounts::netSql('gcn', 'gcn.total_without_vat') . " AS inv_without_vat,
+                    " . IssuedCzkAmounts::vatSql('gcn', 'gcn.total_vat') . " AS inv_vat,
+                    " . IssuedCzkAmounts::grossSql('gcn', 'gcn.total_with_vat') . " AS inv_with_vat,
                     gcn.income_tax_exempt AS inv_exempt, gcn.status AS inv_status, NULL AS inv_overpaid,
                     NULL AS purchase_invoice_id, NULL AS pi_without_vat, NULL AS pi_vat, NULL AS pi_with_vat,
                     NULL AS pi_deductible, NULL AS pi_kind, NULL AS pi_vat_deduction,

@@ -6,13 +6,17 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Action\Bank\BankStatementAction;
 use MyInvoice\Action\Invoice\CreatePaymentTaxDocumentAction;
+use MyInvoice\Action\Invoice\DeleteInvoiceAction;
 use MyInvoice\Action\Invoice\IssueInvoiceAction;
+use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -67,6 +71,77 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
     public static function payoutVariants(): array
     {
         return ['dvě zálohy' => [false], 'dvě zálohy a běžná faktura' => [true]];
+    }
+
+    public function testBankAdvanceTaxDocumentUsesPaymentDateAndLeavesNoOrphanAfterRematch(): void
+    {
+        $pdo = $this->db->pdo();
+        $day = self::YEAR . '-06-15';
+        $this->container->get(AccountingSupplierSettingsRepository::class)->setFxRateMode($this->supplierId, 'daily');
+        $pdo->prepare(
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified)
+             VALUES (?, ?, 1, 0) ON DUPLICATE KEY UPDATE is_vat_payer = 1, is_identified = 0'
+        )->execute([$this->supplierId, $day]);
+        $pdo->prepare(
+            "INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, 'EUR', 26)
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)"
+        )->execute([$day]);
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $client = $this->client('Odběratel EUR zálohy');
+        $symbol = (string) random_int(700000000, 799999999);
+        $advance = $this->proforma($symbol, $client, 100.00);
+        $pdo->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = 24, exchange_rate_date = ? WHERE id = ?')
+            ->execute([$eur, self::YEAR . '-06-10', $advance]);
+        $statement = $this->statement();
+        $pdo->prepare("UPDATE bank_statements SET currency = 'EUR' WHERE id = ?")->execute([$statement]);
+        $tx = $this->transaction($statement, 121.00, ['currency' => 'EUR', 'variable_symbol' => $symbol]);
+        $args = ['id' => (string) $tx];
+        $bank = $this->container->get(BankStatementAction::class);
+        $matcher = $this->container->get(StatementMatcher::class);
+
+        $child = $pdo->prepare(
+            "SELECT td.id, td.status, td.tax_date, td.exchange_rate, td.exchange_rate_date,
+                    td.total_vat, c.code, ip.id AS payment_id
+               FROM invoices td
+               JOIN currencies c ON c.id = td.currency_id
+          LEFT JOIN invoice_payments ip ON ip.tax_document_invoice_id = td.id AND ip.supplier_id = td.supplier_id
+              WHERE td.supplier_id = ? AND td.parent_invoice_id = ? AND td.invoice_type = 'tax_document'"
+        );
+        for ($cycle = 0; $cycle < 2; $cycle++) {
+            $match = $matcher->matchBatch([$tx])[$tx] ?? [];
+            self::assertContains($match['status'] ?? null, ['auto_exact', 'auto_partial'], json_encode($match));
+            self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+            $matcher->matchBatch([$tx]);
+            $child->execute([$this->supplierId, $advance]);
+            $children = $child->fetchAll(\PDO::FETCH_ASSOC);
+            self::assertCount(1, $children);
+            $ddkp = $children[0];
+            $id = (int) $ddkp['id'];
+            self::assertSame('draft', $ddkp['status']);
+            self::assertSame($day, $ddkp['tax_date']);
+            self::assertSame($day, $ddkp['exchange_rate_date']);
+            self::assertSame('EUR', $ddkp['code']);
+            self::assertSame(26.00, (float) $ddkp['exchange_rate']);
+            self::assertSame(21.00, (float) $ddkp['total_vat']);
+            self::assertGreaterThan(0, (int) $ddkp['payment_id']);
+            self::assertSame($id, $this->container->get(PaymentTaxDocumentCreator::class)->createForPayment((int) $ddkp['payment_id'], $this->userId));
+            $taxRows = $this->container->get(VatLedgerService::class)
+                ->documentRows($this->supplierId, 'sale', $id, self::YEAR . '-06-01', self::YEAR . '-06-30', true);
+            self::assertCount(1, $taxRows);
+            self::assertSame(546.00, (float) $taxRows[0]['vat_czk']);
+
+            $blocked = $this->callAction($bank, 'unmatch', 'POST', 'admin', args: $args);
+            self::assertSame('has_tax_document', $blocked['body']['error']['code'] ?? null);
+            $deleted = $this->callAction($this->container->get(DeleteInvoiceAction::class), '__invoke', 'DELETE', 'admin', args: ['id' => (string) $id]);
+            self::assertSame(200, $deleted['status'], json_encode($deleted['body']));
+            $released = $this->callAction($bank, 'unmatch', 'POST', 'admin', args: $args);
+            self::assertSame(200, $released['status'], json_encode($released['body']));
+            $child->execute([$this->supplierId, $advance]);
+            self::assertSame([], $child->fetchAll(\PDO::FETCH_ASSOC));
+            $payments = $pdo->prepare('SELECT COUNT(*) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?');
+            $payments->execute([$this->supplierId, $advance]);
+            self::assertSame(0, (int) $payments->fetchColumn());
+        }
     }
 
     #[DataProvider('payoutVariants')]

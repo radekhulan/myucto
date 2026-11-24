@@ -9,7 +9,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use PDO;
 
 /**
- * Mapování zkratek předkontací mzdového programu na účty firmy (migrace 2317).
+ * Mapování předkontací mzdového programu na účty firmy (migrace 2318).
  *
  * PAMICA nastavená na předkontace POHODY vyváží místo dvojice účtů zkratku (7Int, 4Oz).
  * Účetní jednou přiřadí každé zkratce účet MD a účet Dal z osnovy firmy; import zaúčtování
@@ -20,6 +20,8 @@ use PDO;
 final class PamicaPostingCodeMap
 {
     public const MAX_CODES = 200;
+    public const EMPTY_INTERNAL = '@EMPTY_INTERNAL';
+    public const EMPTY_COMMITMENT = '@EMPTY_COMMITMENT';
 
     public function __construct(
         private readonly Connection $db,
@@ -36,6 +38,15 @@ final class PamicaPostingCodeMap
     public static function key(string $code): string
     {
         return mb_strtoupper(trim($code));
+    }
+
+    public static function label(string $code): string
+    {
+        return match (self::key($code)) {
+            self::EMPTY_INTERNAL => 'bez předkontace (interní doklad)',
+            self::EMPTY_COMMITMENT => 'bez předkontace (závazek)',
+            default => $code,
+        };
     }
 
     /**
@@ -94,14 +105,17 @@ final class PamicaPostingCodeMap
             if (!is_array($row)) {
                 throw new PamicaPostingException('invalid_code_map', "{$label}: neplatný záznam.");
             }
-            $code = trim((string) ($row['code'] ?? ''));
-            if (!self::isCode($code)) {
+            $code = is_string($row['code'] ?? null) ? trim($row['code']) : '';
+            if (in_array(self::key($code), [self::EMPTY_INTERNAL, self::EMPTY_COMMITMENT], true)) {
+                $code = self::key($code);
+            } elseif (!self::isCode($code)) {
                 throw new PamicaPostingException('invalid_code_map', "{$label}: zkratka předkontace „{$code}\" není platná.");
             }
-            $debit = $this->account($supplierId, $row['debit_account_code'] ?? null, $code, 'MD');
-            $credit = $this->account($supplierId, $row['credit_account_code'] ?? null, $code, 'Dal');
+            $codeLabel = self::label($code);
+            $debit = $this->account($supplierId, $row['debit_account_code'] ?? null, $codeLabel, 'MD');
+            $credit = $this->account($supplierId, $row['credit_account_code'] ?? null, $codeLabel, 'Dal');
             if (mb_strtoupper($debit) === mb_strtoupper($credit)) {
-                throw new PamicaPostingException('invalid_code_map', "Zkratka {$code}: účet MD a účet Dal musí být různé.");
+                throw new PamicaPostingException('invalid_code_map', "Přiřazení „{$codeLabel}\": účet MD a účet Dal musí být různé.");
             }
             $rows[self::key($code)] = [$code, $debit, $credit];
         }
@@ -122,14 +136,14 @@ final class PamicaPostingCodeMap
     {
         $value = is_string($value) ? trim($value) : '';
         if ($value === '') {
-            throw new PamicaPostingException('invalid_code_map', "Zkratka {$code}: vyberte účet {$side}.");
+            throw new PamicaPostingException('invalid_code_map', "Přiřazení „{$code}\": vyberte účet {$side}.");
         }
         $row = mb_strlen($value) <= 20 ? $this->accounts->findByCode($supplierId, $value) : null;
         if ($row === null) {
-            throw new PamicaPostingException('invalid_code_map', "Zkratka {$code}: účet {$side} {$value} v účtové osnově firmy není.");
+            throw new PamicaPostingException('invalid_code_map', "Přiřazení „{$code}\": účet {$side} {$value} v účtové osnově firmy není.");
         }
         if (empty($row['is_active'])) {
-            throw new PamicaPostingException('invalid_code_map', "Zkratka {$code}: účet {$side} {$value} je neaktivní.");
+            throw new PamicaPostingException('invalid_code_map', "Přiřazení „{$code}\": účet {$side} {$value} je neaktivní.");
         }
         // Syntetika s analytikami se neúčtuje (stejně jako u účtů PAMICY v importu): závazek
         // by se rozpadl na syntetiku a analytiku a součet analytik by na syntetiku neseděl.
@@ -137,7 +151,7 @@ final class PamicaPostingCodeMap
             static fn (array $c): bool => !empty($c['is_active'])));
         if ($children !== []) {
             throw new PamicaPostingException('invalid_code_map',
-                "Zkratka {$code}: účet {$side} {$value} je syntetický a člení se na analytiky. Vyberte analytický účet (např. "
+                "Přiřazení „{$code}\": účet {$side} {$value} je syntetický a člení se na analytiky. Vyberte analytický účet (např. "
                 . $children[0]['account_code'] . ').');
         }
         return (string) ($row['account_code'] ?? $value);

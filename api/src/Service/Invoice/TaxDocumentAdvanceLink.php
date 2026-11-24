@@ -105,6 +105,7 @@ final class TaxDocumentAdvanceLink
             $this->deductions->lockDocuments($supplierId, 'invoice', [$taxDocumentId, $advanceId]);
             $td = $this->invoice($supplierId, $taxDocumentId);
             $advance = $this->invoice($supplierId, $advanceId);
+            self::assertLinkMutable($td);
             if (!$this->isLinkableTaxDocument($td)) {
                 throw new \DomainException('Navázat lze jen vystavený daňový doklad k přijaté platbě s kladnou částkou a bez vazby na jiný doklad.');
             }
@@ -161,6 +162,7 @@ final class TaxDocumentAdvanceLink
             $this->deductions->lockDocuments($supplierId, 'invoice', [$taxDocumentId, $advanceId]);
             $td = $this->invoice($supplierId, $taxDocumentId);
             $advance = $this->invoice($supplierId, $advanceId);
+            self::assertLinkMutable($td);
             if ((int) $td['parent_invoice_id'] !== $advanceId || $advance['invoice_type'] !== 'proforma') {
                 throw new \DomainException('Doklad nemá vazbu na tuto zálohovou fakturu.');
             }
@@ -198,7 +200,7 @@ final class TaxDocumentAdvanceLink
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT i.id, i.invoice_type, i.status, i.parent_invoice_id, i.client_id, i.currency_id,
-                    i.issue_date, i.effective_tax_date, i.tax_date, i.total_with_vat, cur.code AS currency
+                    i.issue_date, i.effective_tax_date, i.tax_date, i.total_with_vat, i.import_total_with_vat_czk, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ? AND i.id = ?'
         );
@@ -210,6 +212,13 @@ final class TaxDocumentAdvanceLink
     {
         return $invoice['invoice_type'] === 'tax_document' && !in_array($invoice['status'], ['draft', 'cancelled'], true)
             && $invoice['parent_invoice_id'] === null && (float) $invoice['total_with_vat'] > 0;
+    }
+
+    private static function assertLinkMutable(array $invoice): void
+    {
+        if ($invoice['import_total_with_vat_czk'] !== null) {
+            throw new \DomainException('Na převzatém dokladu s částkami ze zdroje nelze změnit vazbu na zálohu.');
+        }
     }
 
     /** Započte i historickou vazbu přes platbu. Každý nestornovaný doklad právě jednou. */

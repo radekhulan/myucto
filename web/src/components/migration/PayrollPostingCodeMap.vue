@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import { missingAccountingKind, payrollPostingCodeLabel } from './payrollPostingCodeLabel'
 import {
   payrollPostingImportsApi,
   type PayrollPostingCodeMapRow, type PayrollPostingUnmappedCode,
@@ -32,21 +33,51 @@ const { t, locale } = useI18n()
 const toast = useToast()
 
 interface Row { code: string; debit: string; credit: string; unmapped?: PayrollPostingUnmappedCode }
+type Tab = 'codes' | 'missing'
 const rows = ref<Row[]>([])
 const accounts = ref<ChartAccount[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
+const tab = ref<Tab>('codes')
+const tabsId = useId()
+const rowTab = (row: Row): Tab => missingAccountingKind(row.code) === null ? 'codes' : 'missing'
+const tabs = computed(() => (['codes', 'missing'] as const).filter(k => rows.value.some(r => rowTab(r) === k)))
+const visibleRows = computed(() => rows.value.filter(r => rowTab(r) === tab.value))
+const label = (row: Row): string => payrollPostingCodeLabel(row.code, t)
+
+function suggestedAccount(code: string): string {
+  const active = accounts.value.filter(a => a.is_active)
+  const parents = new Set(active.map(a => a.parent_id))
+  const postable = (candidate: string) => active.some(a => a.account_code === candidate && !parents.has(a.id))
+  if (postable(code)) return code
+  const fallback = code.includes('.') ? code.split('.')[0]! : `${code}.000`
+  return postable(fallback) ? fallback : ''
+}
+
+function prefillSuggestions(): void {
+  for (const row of rows.value) {
+    const suggestion = row.unmapped?.suggested_accounts
+    if (!suggestion || row.debit || row.credit) continue
+    row.debit = suggestedAccount(suggestion.debit)
+    row.credit = suggestedAccount(suggestion.credit)
+  }
+}
 
 function reset(): void {
   rows.value = [
     ...props.unmapped.map(u => ({ code: u.code, debit: '', credit: '', unmapped: u })),
     ...props.mapped.map(m => ({ code: m.code, debit: m.debit_account_code, credit: m.credit_account_code })),
   ]
+  tab.value = tabs.value.includes('missing') ? 'missing' : 'codes'
+  prefillSuggestions()
   error.value = null
 }
 watch(() => [props.unmapped, props.mapped], reset, { immediate: true })
 onMounted(() => {
-  accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
+  accountingApi.listAccounts().then(v => {
+    accounts.value = v
+    prefillSuggestions()
+  }).catch(() => { accounts.value = [] })
 })
 
 const known = computed(() => new Set(accounts.value.map(a => a.account_code)))
@@ -89,7 +120,18 @@ async function save(): Promise<void> {
       <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('payroll_posting_import.code_map.title') }}</h3>
       <p class="mt-1 text-sm text-neutral-600">{{ t(unmapped.length ? 'payroll_posting_import.code_map.hint_unmapped' : allSaved ? 'payroll_posting_import.code_map.hint_all' : 'payroll_posting_import.code_map.hint_edit') }}</p>
     </div>
-    <div class="overflow-x-auto rounded-lg border border-neutral-200">
+    <nav v-if="tabs.length > 1" class="flex flex-wrap gap-1 border-b border-neutral-200" role="tablist"
+      :aria-label="t('payroll_posting_import.code_map.title')">
+      <button v-for="k in tabs" :id="`${tabsId}-${k}`" :key="k" type="button" role="tab"
+        :aria-selected="tab === k" :aria-controls="`${tabsId}-panel`" :data-testid="`payroll-posting-code-tab-${k}`"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium"
+        :class="tab === k ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
+        @click="tab = k">
+        {{ t(`payroll_posting_import.code_map.tab_${k}`) }}
+      </button>
+    </nav>
+    <div class="overflow-x-auto rounded-lg border border-neutral-200" :id="`${tabsId}-panel`"
+      :role="tabs.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="tabs.length > 1 ? `${tabsId}-${tab}` : undefined">
       <table class="min-w-full text-sm">
         <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
           <tr>
@@ -100,23 +142,26 @@ async function save(): Promise<void> {
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
-          <tr v-for="row in rows" :key="row.code" class="align-top" :data-testid="`payroll-posting-code-${row.code}`">
-            <td class="px-3 py-2 font-mono font-medium whitespace-nowrap">{{ row.code }}</td>
+          <tr v-for="row in visibleRows" :key="row.code" class="align-top" :data-testid="`payroll-posting-code-${row.code}`">
+            <td class="px-3 py-2 font-medium" :class="rowTab(row) === 'codes' ? 'font-mono whitespace-nowrap' : ''">{{ label(row) }}</td>
             <td class="px-3 py-2">
               <template v-if="row.unmapped">
                 <div class="text-xs text-neutral-500">{{ usage(row.unmapped) }} · {{ t('payroll_posting_import.code_map.count', { n: row.unmapped.count }) }}</div>
                 <div v-for="(s, i) in row.unmapped.samples" :key="i" class="text-xs">{{ s.text || s.document }} · {{ money(s.amount) }}</div>
+                <p v-if="row.unmapped.suggested_accounts" class="mt-1 text-xs text-neutral-600">
+                  {{ t('payroll_posting_import.code_map.deduction_suggestion') }}
+                </p>
               </template>
               <span v-else class="text-xs text-neutral-500">{{ t('payroll_posting_import.code_map.already_mapped') }}</span>
               <div v-if="rowError(row) && (row.debit || row.credit)" class="mt-1 text-xs text-danger-600">{{ rowError(row) }}</div>
             </td>
             <td class="px-3 py-2 min-w-40">
               <ChartAccountSelect v-model="row.debit" :accounts="accounts" :disabled="!canEdit" compact
-                :aria-label="t('payroll_posting_import.code_map.debit_for', { code: row.code })" />
+                :aria-label="t('payroll_posting_import.code_map.debit_for', { code: label(row) })" />
             </td>
             <td class="px-3 py-2 min-w-40">
               <ChartAccountSelect v-model="row.credit" :accounts="accounts" :disabled="!canEdit" compact
-                :aria-label="t('payroll_posting_import.code_map.credit_for', { code: row.code })" />
+                :aria-label="t('payroll_posting_import.code_map.credit_for', { code: label(row) })" />
             </td>
           </tr>
         </tbody>

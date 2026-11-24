@@ -39,7 +39,7 @@ final class InvoiceIsdocAction
         $id  = (int) ($args['id'] ?? 0);
         $sid = SupplierGuard::currentId($request);
 
-        $invoice = $this->repo->find($id);
+        $invoice = $this->repo->find($id, includeImportedCzk: true);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         }

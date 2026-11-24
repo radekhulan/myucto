@@ -133,7 +133,7 @@ final class PohodaXmlExporter
     {
         $invoices = [];
         foreach ($invoiceIds as $id) {
-            $inv = $this->repo->find((int) $id);
+            $inv = $this->repo->find((int) $id, includeImportedCzk: true);
             if ($inv !== null && $inv['invoice_type'] !== 'cancellation') {
                 $invoices[] = $inv;
             }
@@ -338,9 +338,8 @@ final class PohodaXmlExporter
 
             $inv->appendChild($hdr);
 
-            // Foreign currency? Pak summary musí mít jak homeCurrency (CZK z czk_recap),
-            // tak foreignCurrency (EUR + kurz). Položky pro foreign-currency fakturu jdou
-            // do inv:foreignCurrency (Pohoda si CZK dopočítá z global kurzu).
+            // Cizoměnový doklad nese v rekapitulaci měnu i Kč. Má-li převzaté Kč
+            // i na položkách, zapíší se vedle částek v měně dokladu.
             $invCurrency = (string) ($invoice['currency'] ?? 'CZK');
             $isForeign = $invCurrency !== 'CZK';
             $exchangeRate = $isForeign ? (float) ($invoice['exchange_rate'] ?? 1.0) : 1.0;
@@ -401,6 +400,16 @@ final class PohodaXmlExporter
                 $unitPrice = TimeBillingExport::usesPreciseUnitPrice($item)
                     ? TimeBillingExport::formatRate($unitPriceNet)
                     : $this->fmt($unitPriceNet);
+                if ($isForeign && isset($item['import_tax_base_czk'], $item['import_tax_vat_czk'])) {
+                    $baseCzk = (float) $item['import_tax_base_czk'];
+                    $vatCzk = (float) $item['import_tax_vat_czk'];
+                    $home = $dom->createElementNS(self::NS_INV, 'inv:homeCurrency');
+                    $this->el($dom, $home, self::NS_TYP, 'typ:unitPrice', $this->fmt($qtyItem != 0.0 ? $baseCzk / $qtyItem : 0.0));
+                    $this->el($dom, $home, self::NS_TYP, 'typ:price', $this->fmt($baseCzk));
+                    $this->el($dom, $home, self::NS_TYP, 'typ:priceVAT', $this->fmt($vatCzk));
+                    $this->el($dom, $home, self::NS_TYP, 'typ:priceSum', $this->fmt($baseCzk + $vatCzk));
+                    $row->appendChild($home);
+                }
                 $this->el($dom, $block, self::NS_TYP, 'typ:unitPrice', $unitPrice);
                 $this->el($dom, $block, self::NS_TYP, 'typ:price',     $this->fmt((float) ($item['total_without_vat'] ?? 0)));
                 $this->el($dom, $block, self::NS_TYP, 'typ:priceVAT',  $this->fmt((float) ($item['total_vat'] ?? 0)));
@@ -420,7 +429,7 @@ final class PohodaXmlExporter
             $bd = $invoice['vat_breakdown'] ?? [];
 
             // homeCurrency = VŽDY v CZK. Pro CZK fakturu z totals/vat_breakdown, pro
-            // foreign fakturu primárně z czk_recap (přepočet ČNB kurzem po sazbách).
+            // cizoměnovou fakturu primárně z czk_recap.
             // Když czk_recap chybí (typicky přijaté faktury), přepočteme buckety z měny
             // dokladu na CZK kurzem — jinak by homeCurrency nesla cizoměnové částky
             // označené jako CZK. (Pohoda u cizoměnového dokladu CZK stranu sice ignoruje
@@ -451,11 +460,15 @@ final class PohodaXmlExporter
             $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3VAT', $this->fmt($homeBuckets['thirdVat']));
             $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3Sum', $this->fmt($homeBuckets['third'] + $homeBuckets['thirdVat']));
             // `round` je typ:typeRound = xsd:choice → musí obalit <typ:priceRound>, ne nést
-            // prostou hodnotu. Emitujeme jen u CZK dokladu s reálným zaokrouhlením.
+            // prostou hodnotu.
             // POZOR: `typeCurrencyHome` NEMÁ `priceSum` — celkovou částku si Pohoda dopočítá
             // z bucketů + round (dřív tu byl neplatný <typ:priceSum>).
-            $rounding = (float) ($totals['rounding'] ?? 0);
-            if (!$isForeign && $rounding !== 0.0) {
+            $rounding = $isForeign ? 0.0 : (float) ($totals['rounding'] ?? 0);
+            if ($isForeign && isset($invoice['import_total_with_vat_czk'], $invoice['import_total_without_vat_czk'], $invoice['import_total_vat_czk'])) {
+                $rounding = round((float) $invoice['import_total_with_vat_czk']
+                    - (float) $invoice['import_total_without_vat_czk'] - (float) $invoice['import_total_vat_czk'], 2);
+            }
+            if ($rounding !== 0.0) {
                 $roundWrap = $dom->createElementNS(self::NS_TYP, 'typ:round');
                 $this->el($dom, $roundWrap, self::NS_TYP, 'typ:priceRound', $this->fmt($rounding));
                 $homeCurrency->appendChild($roundWrap);

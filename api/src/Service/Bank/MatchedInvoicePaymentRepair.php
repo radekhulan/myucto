@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use PDO;
 
 final class MatchedInvoicePaymentRepair
@@ -33,7 +34,7 @@ final class MatchedInvoicePaymentRepair
             $repaired = false;
             if ($tx !== false) {
                 $query = $pdo->prepare(
-                    "SELECT i.id, i.amount_to_pay, i.exchange_rate, cur.code AS currency
+                    "SELECT i.id, i.amount_to_pay, i.exchange_rate, i.import_amount_to_pay_czk, cur.code AS currency
                        FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
                       WHERE i.id = ? AND i.supplier_id = ?
                         AND i.invoice_type IN ('invoice', 'proforma')
@@ -61,7 +62,7 @@ final class MatchedInvoicePaymentRepair
                     $sameCurrency = $currency !== '' && $currency === strtoupper((string) $invoice['currency']);
                     $full = $sameCurrency
                         ? abs($amount - $due) <= InvoicePaymentService::TOLERANCE
-                        : FxPaymentSettlement::isFullCzkSettlement($amount, $due, (string) $invoice['currency'], (float) $invoice['exchange_rate'], $currency);
+                        : FxPaymentSettlement::isFullCzkSettlement($amount, $due, (string) $invoice['currency'], IssuedCzkAmounts::settlementRate($invoice), $currency);
                     if ($full) {
                         $this->payments->recordPayment((int) $invoice['id'], $sameCurrency ? min($amount, $due) : $due, (string) $tx['posted_at'], [
                             'source' => 'bank',

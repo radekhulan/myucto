@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -73,7 +74,7 @@ final class ProjectStatsAction
         // se neroztrhnou ani nevypadnou z rankingu. Parametr $currency zachován
         // pro BC ale ignoruje se (vždy CZK).
         unset($currency);
-        $revCzk = "$rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)";
+        $revCzk = CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat');
         $stmt = $pdo->prepare(
             "SELECT p.id, p.name,
                     c.company_name AS client_company_name,
@@ -124,7 +125,7 @@ final class ProjectStatsAction
     {
         // CZK přepočet — viz topProjects().
         unset($currency);
-        $revCzk = "$rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)";
+        $revCzk = CzkAmountExpr::issuedRevenue($rev === 'i.total_without_vat');
         $stmt = $pdo->prepare(
             "SELECT p.id, p.name,
                     c.company_name AS client_company_name,

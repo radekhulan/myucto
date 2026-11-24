@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\CreditNoteRefundExpr;
 use MyInvoice\Support\Sql\JournalSettlementAllocationSql;
@@ -519,7 +520,9 @@ final class SaldoRepository
             if ($synthetic === '311') {
                 $sql = "SELECT d.id, COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no, d.issue_date, d.due_date, d.status,
                                cl.id AS partner_id, cl.company_name AS partner_name, cur.code AS currency_code,
-                               {$home('d.total_with_vat', 'd')} AS booked, d.amount_to_pay, d.paid_total,
+                               " . IssuedCzkAmounts::grossSql('d', $home('d.total_with_vat', 'd')) . " AS booked,
+                               CASE WHEN d.import_total_with_vat_czk IS NOT NULL THEN d.total_with_vat ELSE 0 END AS foreign_booked,
+                               d.amount_to_pay, d.paid_total,
                                (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
                                   LEFT JOIN bank_transactions ipbt ON ipbt.id = ip.bank_transaction_id
                                  WHERE ip.invoice_id = d.id AND COALESCE(DATE(ipbt.posted_at), ip.paid_on) <= ?) AS paid_as_of,
@@ -796,7 +799,7 @@ final class SaldoRepository
             'partner_name'   => (string) $r['partner_name'],
             'currency_code'  => (string) $r['currency_code'],
             'booked_signed'  => $booked,
-            'foreign_signed' => 0.0,
+            'foreign_signed' => (float) ($r['foreign_booked'] ?? 0.0),
             'paid_ratio'     => $ratio,
         ];
     }
@@ -846,28 +849,12 @@ final class SaldoRepository
      */
     private static function proformaPaymentCzkSql(): string
     {
-        $posted = static fn (string $from, string $where): string =>
-            "(SELECT SUM(CASE WHEN fl.side = 'credit' THEN fl.signed_amount ELSE 0 END)
-                {$from}
-                JOIN journal_entry_lines fl ON fl.entry_id = fe.id AND fl.supplier_id = fe.supplier_id
-                JOIN chart_of_accounts fca ON fca.id = fl.account_id
-                LEFT JOIN journal_entries frev ON frev.id = fe.reversed_by
-               WHERE {$where}
-                 AND fe.posted_at IS NOT NULL AND fe.entry_date <= x.as_of
-                 AND (fe.reversed_by IS NULL OR frev.entry_date > x.as_of)
-                 AND (fca.id = x.account_id OR fca.parent_id = x.account_id))";
-        $bank = $posted('FROM journal_entries fe',
-            "fe.supplier_id = ip.supplier_id AND fe.source_type = 'bank' AND fe.source_id = ip.bank_transaction_id");
-        $cash = $posted("FROM cash_documents fcd
-                JOIN journal_entries fe ON fe.supplier_id = fcd.supplier_id AND fe.source_type = 'cash' AND fe.source_id = fcd.id",
-            'fcd.supplier_id = ip.supplier_id AND fcd.invoice_payment_id = ip.id');
+        $accounts = 'fca.id = x.account_id OR fca.parent_id = x.account_id';
+        $bank = AdvanceSettlementEvidenceReader::proformaBankReceiptCzkSql($accounts, 'x.as_of');
+        $cash = AdvanceSettlementEvidenceReader::proformaCashReceiptCzkSql($accounts, 'x.as_of');
+        $fallback = IssuedCzkAmounts::allocationSql('ipf', 'ip.amount', 'ROUND(ip.amount * COALESCE(NULLIF(ipf.exchange_rate, 0), 1), 2)');
         return "CASE WHEN UPPER(COALESCE(NULLIF(ip.currency, ''), 'CZK')) = 'CZK' THEN ip.amount
-                     ELSE COALESCE(
-                         {$bank} * ip.amount / NULLIF((SELECT SUM(fip.amount) FROM invoice_payments fip
-                                                        WHERE fip.supplier_id = ip.supplier_id
-                                                          AND fip.bank_transaction_id = ip.bank_transaction_id), 0),
-                         {$cash},
-                         ROUND(ip.amount * COALESCE(NULLIF(ipf.exchange_rate, 0), 1), 2)) END";
+                     ELSE COALESCE({$bank}, {$cash}, {$fallback}) END";
     }
 
     /** `AND cl.id = <id>` (int literál, viz fetchOpenInvoices) nebo prázdný řetězec. */
@@ -1309,8 +1296,8 @@ final class SaldoRepository
             $openingVatCte = ",
             opening_vat AS (
                 SELECT td.parent_invoice_id AS invoice_id,
-                       SUM(CASE WHEN tdc.code = 'CZK' OR td.exchange_rate IS NULL THEN td.total_vat
-                                ELSE ROUND(td.total_vat * td.exchange_rate, 2) END) AS vat_czk
+                       SUM(" . IssuedCzkAmounts::vatSql('td', "CASE WHEN tdc.code = 'CZK' OR td.exchange_rate IS NULL THEN td.total_vat
+                                ELSE ROUND(td.total_vat * td.exchange_rate, 2) END") . ") AS vat_czk
                   FROM invoices td
                   CROSS JOIN params x
                   JOIN currencies tdc ON tdc.id = td.currency_id
@@ -1393,7 +1380,7 @@ final class SaldoRepository
                    p.issue_date, p.due_date, p.status,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
-                   " . ($overdrawn ? 'LEAST(p.total_with_vat, ' . $settledTotal . ')' : '0') . " AS overdrawn_czk,
+                   " . ($overdrawn ? 'LEAST(' . IssuedCzkAmounts::grossSql('p', 'p.total_with_vat') . ', ' . $settledTotal . ')' : '0') . " AS overdrawn_czk,
                    c.collected_czk, {$settledTotal} AS settled_czk,
                    (SELECT td.id FROM invoices td
                      WHERE td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.id
@@ -1783,7 +1770,11 @@ final class SaldoRepository
         $advanceExpr = 'ROUND(COALESCE(advl.lines_sum, 0), 2)';
         $toPayExpr   = 'COALESCE(d.amount_to_pay, 0)';
         $bookedExpr  = 'ROUND(SUM(b.booked_part), 2)';
-        $foreignExpr = 'ROUND(SUM(b.foreign_part), 2)';
+        $foreignExpr = "CASE WHEN SUM(b.foreign_trace) = 0 AND d.import_amount_to_pay_czk IS NOT NULL
+                             THEN CASE WHEN {$bookedExpr} = d.import_total_with_vat_czk THEN d.total_with_vat
+                                       WHEN {$bookedExpr} = -ABS(d.import_total_with_vat_czk) THEN -ABS(d.total_with_vat)
+                                       ELSE COALESCE(ROUND({$bookedExpr} * ABS(d.amount_to_pay) / NULLIF(ABS(d.import_amount_to_pay_czk), 0), 2), 0) END
+                             ELSE ROUND(SUM(b.foreign_part), 2) END";
         // Proplacený dobropis se v `invoice_payments` neobjeví (PAYABLE_TYPES ho tam
         // nepustí) — zkratka „vrácené peníze ⇒ poměr 1" je proto jediný způsob, jak
         // ho uzavřít. Zrcadlí zkratku `d.status='paid'` z fetchOpenPurchases().
@@ -1841,7 +1832,7 @@ final class SaldoRepository
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at, d.parent_invoice_id,
-                      cl.id, cl.company_name, cur.code, d.amount_to_pay,
+                      cl.id, cl.company_name, cur.code, d.amount_to_pay, d.total_with_vat, d.import_amount_to_pay_czk, d.import_total_with_vat_czk,
                       paid.paid_sum, advl.lines_sum, man.settled
             HAVING " . ($componentsOnly ? '1=1' : self::openFilterSql($bookedExpr, $ratio)) . "
              " . ($stream ? ' ORDER BY cl.id, d.due_date, d.id' : self::orderSql('d', $orderByDue));
@@ -1920,7 +1911,8 @@ final class SaldoRepository
         $sums = "SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked_part,
                  SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                           THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END)
-                          ELSE 0 END) AS foreign_part";
+                          ELSE 0 END) AS foreign_part,
+                 COUNT(CASE WHEN l.currency_code <> 'CZK' AND l.amount_foreign IS NOT NULL THEN 1 END) AS foreign_trace";
         $lines = "JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN journal_entries rev ON rev.id = e.reversed_by";
@@ -2024,13 +2016,9 @@ final class SaldoRepository
     private static function drawnOnReceivableCte(): string
     {
         $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
-        $parentLines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
-                          WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
-                            AND " . AdvanceDrawSql::deductionLine('pii');
+        $parentCzk = AdvanceDrawSql::parentDrawCzk('f', $rate);
         return "SELECT dr.advance_id AS invoice_id, SUM(dr.amount) AS amount, MAX(dr.amount <= 0.005) AS full_cover
-                  FROM (SELECT f.parent_invoice_id AS advance_id,
-                               CASE WHEN COALESCE(({$parentLines}), 0) > 0.005
-                                    THEN ROUND((f.advance_paid_amount + ({$parentLines})) * {$rate}, 2) ELSE 0 END AS amount
+                  FROM (SELECT f.parent_invoice_id AS advance_id, {$parentCzk} AS amount
                           FROM collected c0
                           CROSS JOIN params x
                           JOIN invoices f ON f.supplier_id = x.supplier_id AND f.parent_invoice_id = c0.invoice_id
@@ -2038,7 +2026,7 @@ final class SaldoRepository
                           JOIN currencies fcur ON fcur.id = f.currency_id
                          WHERE " . self::invoiceBookedOnAccountSql('f.id') . "
                         UNION ALL
-                        SELECT ii.advance_invoice_id, ROUND(-SUM(ii.total_without_vat) * {$rate}, 2)
+                        SELECT ii.advance_invoice_id, ROUND(-SUM(COALESCE(ii.import_tax_base_czk, ii.total_without_vat * {$rate})), 2)
                           FROM collected c0
                           CROSS JOIN params x
                           JOIN invoice_items ii ON ii.advance_invoice_id = c0.invoice_id

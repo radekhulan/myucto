@@ -148,16 +148,16 @@ final class ExchangeRateGuardTest extends TestCase
 
     /**
      * Pojistka proti tomu, že guard zezelená kvůli vadnému regexu: kanonický tvar
-     * musí v kódu existovat, jinak se hlídá vzorec, který nikdo nepoužívá.
+     * musí v kódu existovat, jinak se hlídá vzorec, který nikdo nepoužívá. Počítá se
+     * zápis v SQL i volání {@see \MyInvoice\Support\Sql\CzkAmountExpr}, který ho skládá.
      */
     public function testCanonicalFormIsActuallyUsed(): void
     {
         $found = 0;
         foreach ($this->phpFiles(dirname(__DIR__, 2) . '/src') as $path) {
-            $found += preg_match_all(
-                "/IF\(\s*[a-z_]*\.?code\s*=\s*'CZK'/i",
-                SourceCorpus::read($path),
-            ) ?: 0;
+            $source = SourceCorpus::read($path);
+            $found += preg_match_all("/IF\(\s*[a-z_]*\.?code\s*=\s*'CZK'/i", $source) ?: 0;
+            $found += preg_match_all('/CzkAmountExpr::(rate|amount|issued[A-Za-z]+)\(/', $source) ?: 0;
         }
 
         self::assertGreaterThan(20, $found, 'Kanonický kurzový výraz zmizel — aktualizuj guard.');

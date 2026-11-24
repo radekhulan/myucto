@@ -36,6 +36,7 @@ use MyInvoice\Service\Bank\BankTransactionReleaseException;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use MyInvoice\Service\Invoice\InvoiceAlreadySettledException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
@@ -2530,7 +2531,7 @@ final class BankStatementAction
         // uživatel chce spárovat i s už zaplacenou fakturou (duplicitní/druhá platba, doplatek).
         // Částku NEfiltrujeme v SQL — kvůli cizí měně se porovnává přes kurz až v PHP.
         $issued = "SELECT 'invoice' AS mtype, i.id, i.varsymbol AS ref, i.amount_to_pay AS amount,
-                          i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
+                          i.exchange_rate, i.import_amount_to_pay_czk, i.issue_date, i.due_date, cur.code AS currency,
                           c.company_name AS party, i.status AS status
                      FROM invoices i
                      JOIN currencies cur ON cur.id = i.currency_id
@@ -2543,7 +2544,7 @@ final class BankStatementAction
 
         $purchase = "SELECT 'purchase_invoice' AS mtype, p.id,
                             COALESCE(NULLIF(p.vendor_invoice_number,''), p.varsymbol) AS ref, p.amount_to_pay AS amount,
-                            p.exchange_rate, p.issue_date, p.due_date, cur.code AS currency,
+                            p.exchange_rate, NULL AS import_amount_to_pay_czk, p.issue_date, p.due_date, cur.code AS currency,
                             c.company_name AS party, p.status AS status
                        FROM purchase_invoices p
                        JOIN currencies cur ON cur.id = p.currency_id
@@ -2582,7 +2583,7 @@ final class BankStatementAction
                 $tol = $absTol;
             } elseif ($txCcy === $local) {
                 // Cizoměnová faktura placená v CZK → přepočet kurzem faktury (CZK = částka × kurz).
-                $expected = FxPaymentSettlement::expectedLocalAmount($invMag, $rate);
+                $expected = abs((float) ($r['import_amount_to_pay_czk'] ?? FxPaymentSettlement::expectedLocalAmount($invMag, $rate)));
                 $tol = FxPaymentSettlement::matchTolerance($expected, $absTol, $card);
                 $converted = $expected;
             } elseif ($allowRawAmountFallback) {
@@ -2743,7 +2744,7 @@ final class BankStatementAction
         // NEfiltrujeme v SQL (efektivní příspěvek se počítá v PHP — kvůli cizí měně + paid).
         $reconcilableSql = InvoicePaymentService::bankReconcilableSql('ip');
         $sql = "SELECT i.id, i.client_id, i.varsymbol AS ref, i.amount_to_pay, i.paid_total, i.status,
-                       i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
+                       i.exchange_rate, i.import_amount_to_pay_czk, i.issue_date, i.due_date, cur.code AS currency,
                        c.company_name AS party,
                        (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
                          WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable,
@@ -2795,7 +2796,7 @@ final class BankStatementAction
                 continue;
             }
             $invCcy = strtoupper((string) $r['currency']);
-            $rate   = (float) ($r['exchange_rate'] ?: 0);
+            $rate   = IssuedCzkAmounts::settlementRate($r);
             $conv   = $this->remainingInTxCurrency($effective, $invCcy, $rate, $txCcy);
             if ($conv === null) {
                 continue; // cizoměnový účet × jiná měna faktury bez kurzu → nepřevedeme
@@ -3446,7 +3447,7 @@ final class BankStatementAction
         }
 
         // Faktura musí patřit aktuálnímu supplier (anti cross-supplier match)
-        $invoice = $this->invoices->find($invoiceId);
+        $invoice = $this->invoices->find($invoiceId, includeImportedCzk: true);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'invoice_not_found', 'Faktura nenalezena.', 404);
         }
@@ -3552,17 +3553,18 @@ final class BankStatementAction
                 $txCurrency = isset($txRow['tx_currency']) && $txRow['tx_currency'] !== null
                     ? (string) $txRow['tx_currency']
                     : null;
+                $rate = IssuedCzkAmounts::settlementRate($invoice);
                 $invAmount = $this->txAmountInInvoiceCurrency(
                     $txAmount,
                     (string) ($invoice['currency'] ?? 'CZK'),
-                    (float) ($invoice['exchange_rate'] ?? 0),
+                    $rate,
                     $txCurrency,
                     $remaining,
                     FxPaymentSettlement::isFullCzkSettlement(
                         $txAmount,
                         $remaining,
                         (string) ($invoice['currency'] ?? 'CZK'),
-                        (float) ($invoice['exchange_rate'] ?? 0),
+                        $rate,
                         $txCurrency,
                     ),
                 );
@@ -3687,7 +3689,7 @@ final class BankStatementAction
             ? (string) $txRow['tx_currency']
             : null;
         $invoiceCurrency = (string) ($invoice['currency'] ?? 'CZK');
-        $rate = (float) ($invoice['exchange_rate'] ?? 0);
+        $rate = IssuedCzkAmounts::settlementRate($invoice);
         $remaining = CreditRefundAllocation::issuedRemaining($pdo, $supplierId, $invoiceId, $txId, true);
         $amount = $remaining !== null ? round($this->txAmountInInvoiceCurrency(
             $txAmount,
@@ -3891,7 +3893,7 @@ final class BankStatementAction
         $reconcilableSql = InvoicePaymentService::bankReconcilableSql('ip');
         $stmt = $pdo->prepare(
             "SELECT i.id, i.supplier_id, i.invoice_type, i.status, i.client_id,
-                    i.amount_to_pay, i.paid_total, i.exchange_rate, cur.code AS currency,
+                    i.amount_to_pay, i.paid_total, i.exchange_rate, i.import_amount_to_pay_czk, cur.code AS currency,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
                       WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable,
                     (SELECT COUNT(*) FROM invoice_payments ip
@@ -3971,7 +3973,7 @@ final class BankStatementAction
                 $toPay[$iid] = $remaining;
             }
             $conv = $this->remainingInTxCurrency(
-                $contrib, (string) $inv['currency'], (float) ($inv['exchange_rate'] ?: 0), $txCcy
+                $contrib, (string) $inv['currency'], IssuedCzkAmounts::settlementRate($inv), $txCcy
             );
             if ($conv === null) {
                 return Json::error($response, 'currency_mismatch',
@@ -4046,7 +4048,7 @@ final class BankStatementAction
                         'Stav faktur se mezitím změnil (faktura už nemá co uhradit). Zkus párování znovu.', 409);
                 }
                 $conv = $this->remainingInTxCurrency(
-                    $rem, (string) $byId[$iid]['currency'], (float) ($byId[$iid]['exchange_rate'] ?: 0), $txCcy
+                    $rem, (string) $byId[$iid]['currency'], IssuedCzkAmounts::settlementRate($byId[$iid]), $txCcy
                 );
                 if ($conv === null) {
                     self::rollbackAtomic($pdo, $own, $savepoint);

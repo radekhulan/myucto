@@ -345,7 +345,7 @@ final class FxSettlementChannelsTest extends TestCase
     {
         $parent = $this->document('purchase_invoice', false);
         $this->db->pdo()->prepare("UPDATE purchase_invoices SET document_kind='advance',varsymbol='2098000903' WHERE supplier_id=? AND id=?")->execute([$this->sid, $parent]);
-        $bank = $this->settle('purchase_invoice', $parent, 'bank', $paid, null, true);
+        $bank = $this->settle('purchase_invoice', $parent, 'bank', $paid, postBank: false);
         $posting = Bootstrap::buildContainer()->get(PostingService::class);
         $posting->postDocument($this->sid, 'bank', $bank, [
             ['account_code' => '314', 'side' => 'debit', 'amount' => $paid * 24],
@@ -361,6 +361,64 @@ final class FxSettlementChannelsTest extends TestCase
         self::assertSame(number_format($paid * 24, 2, '.', ''), $evidence['advance_evidence']['applied_czk']);
         $preview = Bootstrap::buildContainer()->get(ClosingService::class)->fxPreview($this->sid, $this->pid);
         self::assertSame((float) (1000 - $paid), $preview['totals']['loss']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith(['invoice', '324', '311', '663', 'credit'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['purchase_invoice', '314', '321', '563', 'debit'])]
+    public function testFinalInvoiceRecognizesBankAdvanceRateDifferenceOnce(
+        string $type, string $advanceAccount, string $saldo, string $fxAccount, string $fxSide,
+    ): void {
+        $pdo = $this->db->pdo();
+        $c = Bootstrap::buildContainer();
+        $pdo->exec("UPDATE exchange_rates SET rate=26 WHERE rate_date='2098-09-15' AND currency_code='EUR'");
+        $pdo->prepare("UPDATE supplier SET proforma_payment_document='manual' WHERE id=?")->execute([$this->sid]);
+        $isSale = $type === 'invoice';
+        if ($isSale) {
+            $parent = $this->invoice($this->sid, 24, '2098-06-15', '2098000981', false, 'proforma');
+            $final = $this->invoice($this->sid, 25, '2098-10-15', '2098000982', false);
+            $pdo->prepare('UPDATE invoices SET parent_invoice_id=?,advance_paid_amount=500 WHERE supplier_id=? AND id=?')
+                ->execute([$parent, $this->sid, $final]);
+        } else {
+            $parent = $this->document($type, false);
+            $pdo->prepare("UPDATE purchase_invoices SET document_kind='advance' WHERE supplier_id=? AND id=?")
+                ->execute([$this->sid, $parent]);
+            $final = $this->document($type, false);
+            $pdo->prepare("UPDATE purchase_invoices SET advance_purchase_invoice_id=?,advance_paid_amount=500,exchange_rate=25,
+                              issue_date='2098-10-15',tax_date='2098-10-15',received_at='2098-10-15' WHERE supplier_id=? AND id=?")
+                ->execute([$parent, $this->sid, $final]);
+        }
+        $bank = $this->settle($type, $parent, 'bank', 500);
+        $posting = $c->get(PostingService::class);
+        $lines = $isSale
+            ? $posting->buildFromInvoice($this->sid, $final)
+            : $posting->buildFromPurchaseInvoice($this->sid, $final);
+        $entry = $posting->postDocument($this->sid, $type, $final, $lines, ['entry_date' => '2098-10-15', 'posted' => true]);
+        $bankPosting = $c->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        self::assertSame('already_posted', $bankPosting->handleTransaction($bank, $this->user)['reason']);
+
+        $journalLines = $pdo->prepare(
+            'SELECT a.account_code, l.side, l.amount FROM journal_entry_lines l
+              JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id
+             WHERE l.supplier_id=? AND l.entry_id=?'
+        );
+        $journalLines->execute([$this->sid, $entry]);
+        $rows = $journalLines->fetchAll(\PDO::FETCH_ASSOC);
+        $fx = array_values(array_filter($rows, static fn (array $l): bool => in_array($l['account_code'], ['563', '663'], true)));
+        self::assertCount(1, $fx);
+        self::assertSame($fxAccount, $fx[0]['account_code']);
+        self::assertSame($fxSide, $fx[0]['side']);
+        self::assertSame(500.00, (float) $fx[0]['amount']);
+        $totals = [];
+        foreach ($rows as $line) {
+            $key = $line['account_code'] . ':' . $line['side'];
+            $totals[$key] = ($totals[$key] ?? 0.0) + (float) $line['amount'];
+        }
+        self::assertSame(13000.00, $totals[$advanceAccount . ':' . ($isSale ? 'debit' : 'credit')]);
+        self::assertSame(12500.00, $totals[$saldo . ':' . ($isSale ? 'credit' : 'debit')]);
+        $evidence = $this->evidence($type, $final, '2098-12-31');
+        self::assertTrue($evidence['complete'], json_encode($evidence));
+        self::assertSame('500.00', $evidence['remaining_foreign']);
+        self::assertSame('12500.00', $evidence['booked_czk']);
     }
 
     public function testAdvanceForeignAmountComesFromReceiptAndActualCzkFromLedger(): void
@@ -402,7 +460,7 @@ final class FxSettlementChannelsTest extends TestCase
         $parent = $this->invoice($this->sid, $rate, '2098-06-15', '2098000970', false, 'proforma');
         $pdo->prepare('UPDATE invoices SET total_without_vat=1000,total_vat=210,total_with_vat=1210 WHERE id=?')->execute([$parent]);
         $pdo->prepare("UPDATE invoice_items SET vat_rate_id=(SELECT id FROM vat_rates WHERE country='CZ' AND rate_percent=21 AND is_reverse_charge=0 ORDER BY id LIMIT 1),vat_rate_snapshot=21,total_vat=210,total_with_vat=1210 WHERE invoice_id=?")->execute([$parent]);
-        $bank = $this->settle('invoice', $parent, 'bank', 605, null, true);
+        $bank = $this->settle('invoice', $parent, 'bank', 605, postBank: false);
         $posting = Bootstrap::buildContainer()->get(PostingService::class);
         $posting->postDocument($this->sid, 'bank', $bank, [
             ['account_code' => '221', 'side' => 'debit', 'amount' => 605 * $rate, 'currency_code' => 'EUR', 'amount_foreign' => 605, 'fx_rate' => $rate],
@@ -772,7 +830,7 @@ final class FxSettlementChannelsTest extends TestCase
     private function advanceCycle(int $paid): array
     {
         $parent = $this->invoice($this->sid, 24, '2098-06-15', '2098000920', false, 'proforma');
-        $bank = $this->settle('invoice', $parent, 'bank', $paid, null, true);
+        $bank = $this->settle('invoice', $parent, 'bank', $paid, postBank: false);
         $posting = Bootstrap::buildContainer()->get(PostingService::class);
         $posting->postDocument($this->sid, 'bank', $bank, [
             ['account_code' => '221', 'side' => 'debit', 'amount' => $paid * 24, 'currency_code' => 'EUR', 'amount_foreign' => $paid, 'fx_rate' => 24],
@@ -798,7 +856,7 @@ final class FxSettlementChannelsTest extends TestCase
         }
         $pdo->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,currency_default_id) SELECT id,'Synthetic FX vendor','Test','Test','10000',country_id,'fx-vendor@example.com',? FROM supplier WHERE id=?")->execute([$eur,$this->sid]);
         $vendor=(int)$pdo->lastInsertId();
-        $pdo->prepare("INSERT INTO purchase_invoices(supplier_id,varsymbol,vendor_id,vendor_invoice_number,document_kind,issue_date,tax_date,due_date,received_at,currency_id,exchange_rate,vendor_snapshot,total_without_vat,total_with_vat,status,created_by) VALUES (?,'2098000902',?,CONCAT('SYN-FX-PF-',UUID()),'invoice','2098-06-15','2098-06-15','2098-06-30','2098-06-15',?,24,'{}',1000,1000,'received',?)")->execute([$this->sid,$vendor,$eur,$this->user]);
+        $pdo->prepare("INSERT INTO purchase_invoices(supplier_id,varsymbol,vendor_id,vendor_invoice_number,document_kind,issue_date,tax_date,due_date,received_at,currency_id,exchange_rate,vendor_snapshot,total_without_vat,total_with_vat,status,created_by) VALUES (?,CONCAT('20980',LPAD(FLOOR(RAND()*100000),5,'0')),?,CONCAT('SYN-FX-PF-',UUID()),'invoice','2098-06-15','2098-06-15','2098-06-30','2098-06-15',?,24,'{}',1000,1000,'received',?)")->execute([$this->sid,$vendor,$eur,$this->user]);
         $id=(int)$pdo->lastInsertId();
         $pdo->prepare("INSERT INTO purchase_invoice_items(purchase_invoice_id,description,quantity,unit,unit_price_without_vat,vat_rate_id,vat_rate_snapshot,total_without_vat,total_vat,total_with_vat,order_index) VALUES (?,'Synthetic service',1,'ks',1000,(SELECT id FROM vat_rates ORDER BY id LIMIT 1),0,1000,0,1000,0)")->execute([$id]);
         if ($post) Bootstrap::buildContainer()->get(PostingService::class)->postDocument($this->sid,'purchase_invoice',$id,[
@@ -816,7 +874,7 @@ final class FxSettlementChannelsTest extends TestCase
         return $c->get(FxSettlementEvidenceRepository::class)->read($this->sid,$items[0],$asOf,$current);
     }
 
-    private function settle(string $type,int $id,string $channel,int $amount, ?\Psr\Container\ContainerInterface $container = null, bool $expectUnsupportedAdvance = false): ?int
+    private function settle(string $type,int $id,string $channel,int $amount, ?\Psr\Container\ContainerInterface $container = null, bool $postBank = true): ?int
     {
         $c=$container ?? Bootstrap::buildContainer();$pdo=$c->get(Connection::class)->pdo();
         if ($channel==='manual') {
@@ -842,9 +900,10 @@ final class FxSettlementChannelsTest extends TestCase
             $tx=(int)$pdo->lastInsertId();
             if ($type==='invoice') $c->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class)->recordPayment($id,$amount,'2098-09-15',['source'=>'bank','bank_transaction_id'=>$tx]);
             else $pdo->prepare("INSERT INTO payment_matches(supplier_id,bank_transaction_id,purchase_invoice_id,amount,match_type) VALUES (?,?,?,?,'manual')")->execute([$this->sid,$tx,$id,$amount]);
-            $result=$c->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class)->handleTransaction($tx,$this->user);
-            if ($expectUnsupportedAdvance) self::assertSame(['action' => 'skipped', 'reason' => 'fx_not_supported'], $result);
-            else self::assertSame('posted',$result['action'],json_encode($result));
+            if ($postBank) {
+                $result=$c->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class)->handleTransaction($tx,$this->user);
+                self::assertSame('posted',$result['action'],json_encode($result));
+            }
             return $tx;
         }
         return null;
