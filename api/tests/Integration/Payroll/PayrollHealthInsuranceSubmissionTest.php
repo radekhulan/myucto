@@ -1390,6 +1390,67 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertSame([], $this->service->bulkNotifiedAmong($this->supplierId, 'test', $rows));
     }
 
+    /**
+     * Položka checklistu „Oznámení pojišťovně o nástupu" má za doklad
+     * individuální povinnost ve stavu odesláno. Ta vlastní podání nemá, takže
+     * karta vztahu i Termíny ji po odeslání hromadného oznámení dál hlásily
+     * jako nesplněnou, zatímco přehled podání už mlčel.
+     */
+    public function testDeliveredBulkNotificationCompletesTheChecklistItem(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, status, due_date)
+             VALUES (?, ?, "onboarding", "health_insurance_registration", "pending", "2026-03-09")',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $itemId = (int) $this->db->pdo()->lastInsertId();
+        $this->service->registerPeriodObligations($this->supplierId, 'production', '2026-03');
+
+        $employments = $this->container->get(\MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class);
+        $cardItem = function () use ($employments, $itemId): array {
+            foreach ($employments->listForEmployee($this->supplierId, $this->employeeId) as $employment) {
+                foreach ($employment['checklist'] as $item) {
+                    if ((int) $item['id'] === $itemId) {
+                        return $item;
+                    }
+                }
+            }
+            self::fail('Položka checklistu na kartě chybí.');
+        };
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-03-20 09:00:00', new \DateTimeZone('Europe/Prague')));
+        $overview = new \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService(
+            new \MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository($this->db),
+            new \MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService($clock),
+            new \MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository($this->db),
+            $this->container->get(\MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::class),
+            new \MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy(),
+            new \MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository($this->db),
+            new \MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy(
+                $this->container->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+            ),
+            $clock,
+            checklistCoverage: new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage(
+                $this->db,
+                $this->service,
+            ),
+        );
+        $overviewItem = fn (): array => array_values(array_filter(
+            $overview->overview($this->supplierId, 'production')['items'],
+            static fn (array $item): bool => $item['reference'] === 'payroll_checklist_item:' . $itemId,
+        ));
+
+        self::assertSame('pending', $cardItem()['effective_status']);
+        self::assertCount(1, $overviewItem());
+
+        $this->deliverMarchBulkNotification();
+
+        $item = $cardItem();
+        self::assertSame('completed', $item['effective_status']);
+        self::assertSame('evidence', $item['effective_reason']);
+        self::assertSame([], $overviewItem());
+    }
+
     private function deliverMarchBulkNotification(): int
     {
         $result = $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');

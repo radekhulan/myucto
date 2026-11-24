@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthBulkNotificationChecklistCoverage;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use PDO;
 
@@ -137,6 +138,9 @@ final class PayrollEmploymentRepository
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly PayrollEmployerSettingsRepository $employerSettings,
         private readonly PayrollRunMissingEmploymentRepository $missingInRuns,
+        // Doklad položek „Oznámení pojišťovně" z odeslaného hromadného oznámení;
+        // SQL doklad ho nepozná, viz checklist().
+        private readonly ?HealthBulkNotificationChecklistCoverage $healthChecklistCoverage = null,
     ) {}
 
     /**
@@ -2288,8 +2292,34 @@ final class PayrollEmploymentRepository
                        item.due_date IS NULL, item.due_date ASC, item.item_key ASC'
         );
         $stmt->execute([$supplierId, $employmentId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        /*
+         * Oznámení pojišťovně o nástupu či skončení se podává hromadným
+         * oznámením; jeho odeslání je doklad, který SQL výraz nepozná (věty
+         * jsou v šifrovaném XML). Totéž pravidlo jako Termíny a Měsíční
+         * přehled ({@see HealthBulkNotificationChecklistCoverage}); ptá se jen,
+         * když na vztahu taková položka bez dokladu čeká.
+         */
+        $bulkNotified = $this->healthChecklistCoverage?->coveredItems(
+            $supplierId,
+            array_map(
+                static fn (array $row): array => [
+                    'item_id' => (int) $row['id'],
+                    'employment_id' => $employmentId,
+                    'item_key' => (string) $row['item_key'],
+                ],
+                array_values(array_filter(
+                    $rows,
+                    static fn (array $row): bool => $row['status'] === 'pending'
+                        && !(bool) $row['evidence_present']
+                        && !(bool) $row['predecessor_handled'],
+                )),
+            ),
+        ) ?? [];
         $result = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
+            $row['evidence_present'] = (bool) $row['evidence_present']
+                || isset($bulkNotified[(int) $row['id']]);
             $item = $this->cast($this->row($row));
             $evidence = (bool) $item['evidence_present'];
             $item['evidence_present'] = $evidence;
