@@ -546,6 +546,7 @@ final class DepreciationPostingService
 
     private function postAccountingEntryLocked(int $supplierId, array $asset, array $row, string $entryDate, array $meta, bool $allowClosingPeriod): int
     {
+        $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
         $amount = round((float) $row['amount'], 2);
         $entryId = $this->entries->upsert([
             'supplier_id' => $supplierId,
@@ -567,7 +568,6 @@ final class DepreciationPostingService
         $rule = $this->rules->resolve($supplierId, 'depreciation.booking');
         $expense = $rule['debit_account_code'] ?? '551';
 
-        $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
         $this->posting->postDocument($supplierId, 'depreciation', $entryId, [
             ['account_code' => $expense, 'side' => 'debit', 'amount' => $amount],
             ['account_code' => (string) $asset['accumulated_account_code'], 'side' => 'credit', 'amount' => $amount],

@@ -20391,6 +20391,8 @@
       "advance_payment_only": "Zálohový doklad se neúčtuje jako předpis. Zaúčtujte jeho úhradu z banky nebo pokladny na účet 314.",
       "missing_exchange_rate": "Doklad v cizí měně nemá vyplněný směnný kurz - doplňte kurz k datu účetního případu.",
       "no_accounting_period": "Pro datum dokladu neexistuje účetní období - nejdřív ho založte v Účetnictví → Uzávěrka.",
+      "period_before_start": "Datum je před začátkem účetnictví firmy v MyÚčtu. Zkontrolujte, zda nejde o překlep v roce. Pokud jde opravdu o starší rok, založte období ručně v Nástroje → Uzávěrka.",
+      "period_gap": "Datum spadá do mezery mezi účetními obdobími. Zkontrolujte datum, nebo chybějící období založte ručně v Nástroje → Uzávěrka.",
       "period_missing": "Účetní období pro rok dokladu není založené - nejdřív ho vytvořte v Účetnictví → Uzávěrka.",
       "depreciation_journal_missing": "Účetní odpis roku je u karty vedený jako zaúčtovaný, ale jeho zápis v deníku chybí. Znovu se neúčtoval, aby se nezdvojil. Ověřte v deníku, zda odpis roku nese jiný zápis (např. převzatý z původního programu), a případně ho zaúčtujte ručně.",
       "open_periods_action": "Založit období",
@@ -22639,6 +22641,7 @@
       },
       "checks": {
         "prior_period_open": "Předchozí období není uzavřené",
+        "empty_period_before_accounting_start": "Otevřená období bez zápisů před začátkem účetnictví",
         "pl_balance_before_period": "Nenulové zůstatky nákladů/výnosů před začátkem období",
         "drafts_in_period": "Nezaúčtované koncepty v deníku období",
         "journal_unbalanced": "Deník období není vyrovnaný (Σ MD ≠ Σ Dal)",

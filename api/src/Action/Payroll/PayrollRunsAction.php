@@ -1185,6 +1185,8 @@ final class PayrollRunsAction
                 'finding_code' => $e->findingCode,
                 'remediation_path' => $e->remediationPath,
             ]);
+        } catch (PostingException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\PDOException $e) {

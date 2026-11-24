@@ -30,11 +30,9 @@ use PDO;
  *   - `documents_outside` … existují doklady k zaúčtování s datem mimo jakékoli
  *                           období (typicky import historie).
  *
- * Poslední dva stavy si {@see AccountingPeriodProvisioner} umí spravit sám ve chvíli,
- * kdy se doklad účtuje nebo importuje. Diagnostika je tu proto, že to uživatel má
- * vidět DŘÍV, než na to narazí — a proto, že provisioner odmítá případy, které
- * jednoznačné nejsou (nepravidelná řada s překryvem, nesmyslný rok, daňová evidence);
- * ty zůstanou svítit tady.
+ * Při zaúčtování může {@see AccountingPeriodProvisioner} založit období po konci
+ * řady. Data před prvním obdobím a v mezerách vyžadují opravu data nebo vědomé
+ * doplnění období. Diagnostika na ně upozorní ještě před zaúčtováním.
  */
 final class AccountingPeriodHealthService
 {

@@ -610,18 +610,17 @@ final class BankPostingService
         }
 
         $postedAt = (string) $tx['posted_at'];
-        $period = $this->periods->ensureOpenPeriodFor($supplierId, $postedAt);
-        if (($period['status'] ?? 'open') !== 'open') {
-            return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
-        }
-
-        // Náhled výš kartu ani analytiku nezakládá (jen spočítá, co by vzniklo). Teď se
-        // doopravdy účtuje — řádky platby kartou se postaví znovu i se založením.
-        if ($this->cardClearingFor($supplierId, $tx, false) !== null) {
-            $postedLines = $this->withBankAnalytic($supplierId, $tx, $this->buildMatched($supplierId, $tx, null, true)['lines']);
-        }
-
         try {
+            $period = $this->periods->ensureOpenPeriodFor($supplierId, $postedAt, forPosting: !$activationBackfill);
+            if (($period['status'] ?? 'open') !== 'open') {
+                return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
+            }
+
+            // Náhled výš kartu ani analytiku nezakládá (jen spočítá, co by vzniklo). Teď se
+            // účtuje, takže se při sestavení řádků mohou založit.
+            if ($this->cardClearingFor($supplierId, $tx, false) !== null) {
+                $postedLines = $this->withBankAnalytic($supplierId, $tx, $this->buildMatched($supplierId, $tx, null, true)['lines']);
+            }
             // Úhrada dokladu není použití pravidla: přepisuje-li zápis pohybu zaúčtovaného
             // pravidlem, dimenze pravidla z pohybu zmizí. Savepoint je vrátí, když zápis selže.
             $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $postedLines, $postedAt, $tx, $userId): int {
@@ -636,6 +635,9 @@ final class BankPostingService
                 ]);
             });
         } catch (PostingException $e) {
+            if (in_array($e->errorCode, ['period_before_start', 'period_gap'], true)) {
+                return $this->paymentMatchSuggestion($supplierId, $tx, $e->errorCode);
+            }
             if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
                 return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
             }
@@ -1864,7 +1866,7 @@ final class BankPostingService
             'note'                => $note,
             'confidence'          => 1.00,
             'operation_type'      => OperationType::BANK_PAYMENT_MATCHED,
-            'status'              => in_array($note, ['period_closed', 'cross_currency'], true)
+            'status'              => in_array($note, ['period_closed', 'period_before_start', 'period_gap', 'cross_currency'], true)
                 ? 'blocked' : (in_array($note, ['already_paid_verify', 'overpaid_verify'], true) ? 'needs_input' : 'pending'),
         ]);
         return ['action' => 'suggested', 'reason' => $note, 'suggestion_id' => $res['id']];
@@ -2678,11 +2680,11 @@ final class BankPostingService
 
         if ($autoEligible) {
             $postedAt = (string) $tx['posted_at'];
-            $period = $this->periods->ensureOpenPeriodFor($supplierId, $postedAt);
-            if (($period['status'] ?? 'open') !== 'open') {
-                return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
-            }
             try {
+                $period = $this->periods->ensureOpenPeriodFor($supplierId, $postedAt);
+                if (($period['status'] ?? 'open') !== 'open') {
+                    return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
+                }
                 // Dimenze pravidla a zápis buď spolu, nebo vůbec: chybějící povinná dimenze
                 // vrátí obojí a pohyb skončí jako návrh k doplnění. Totéž přiřazení cílové
                 // položce: zápis bez přiřazení by na jejím účtu založil přeplatek.
@@ -2695,6 +2697,9 @@ final class BankPostingService
                 // Položka už je uhrazená, stornovaná nebo platba převyšuje dluh: rozhodne člověk.
                 return $this->ruleSuggestion($supplierId, $tx, $rule, 'other_item_unavailable', 'pending', $absAmount);
             } catch (PostingException $e) {
+                if (in_array($e->errorCode, ['period_before_start', 'period_gap'], true)) {
+                    return $this->ruleSuggestion($supplierId, $tx, $rule, $e->errorCode, 'blocked', $absAmount);
+                }
                 if ($e->errorCode === 'dimension_required') {
                     return $this->ruleSuggestion($supplierId, $tx, $rule, 'dimension_required', 'needs_input', $absAmount);
                 }

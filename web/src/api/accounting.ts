@@ -1,5 +1,6 @@
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
+import { POSTING_PERIOD_ERROR_KEYS } from './errors'
 import { journalListFilterParams } from './listQueries'
 import type { AutomationProvenance } from './automation'
 import type { DimensionRuleWarning, DimensionSplits } from './dimensions'
@@ -2439,6 +2440,7 @@ export interface ReportingSettings {
 export const POSTING_ERROR_CODES = [
   'not_found', 'entry_not_found', 'document_not_postable', 'advance_payment_only', 'missing_exchange_rate',
   'no_accounting_period', 'period_not_open', 'unbalanced_entry', 'unknown_account',
+  ...Object.keys(POSTING_PERIOD_ERROR_KEYS),
   // Odpisy majetku u hospodářského roku hlásí totéž jako `no_accounting_period`,
   // jen pod vlastním kódem (DepreciationPostingService) — bez něj spadl na `generic`.
   'period_missing',

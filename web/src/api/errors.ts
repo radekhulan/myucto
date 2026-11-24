@@ -22,6 +22,17 @@ export function apiErrorCode(err: any): string {
   return typeof code === 'string' ? code : ''
 }
 
+export const POSTING_PERIOD_ERROR_KEYS = {
+  period_before_start: 'accounting.posting_errors.period_before_start',
+  period_gap: 'accounting.posting_errors.period_gap',
+} as const
+
+export function postingPeriodErrorKey(code: string): string | undefined {
+  return Object.hasOwn(POSTING_PERIOD_ERROR_KEYS, code)
+    ? POSTING_PERIOD_ERROR_KEYS[code as keyof typeof POSTING_PERIOD_ERROR_KEYS]
+    : undefined
+}
+
 /**
  * Uzavřený mzdový rok — kam se jde odemknout.
  *
