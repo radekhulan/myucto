@@ -51,6 +51,11 @@ final class RecurringManualScheduleTest extends TestCase
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $columns = 'invoice_type, client_id, project_id, supplier_id, branding_profile_id, issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language, note_above_items, note_below_items, payment_method, discount_percent, recurring_template_id, revenue_category_id, payment_variable_symbol, rounding_mode, status, created_by';
         $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, ' . $columns . ')');
+        $pdo->exec('CREATE TABLE entity_tags (id INTEGER PRIMARY KEY, supplier_id INTEGER, name TEXT)');
+        $pdo->exec('CREATE TABLE recurring_template_tags (entity_id INTEGER, tag_id INTEGER, PRIMARY KEY (entity_id, tag_id))');
+        $pdo->exec('CREATE TABLE invoice_tags (entity_id INTEGER, tag_id INTEGER, PRIMARY KEY (entity_id, tag_id))');
+        $pdo->exec("INSERT INTO entity_tags VALUES (21, 7, 'Servis'), (22, 7, 'Pronájem')");
+        $pdo->exec('INSERT INTO recurring_template_tags VALUES (12, 21), (13, 22)');
         $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY, is_vat_payer INTEGER, default_payment_due_unit TEXT, default_rounding_mode TEXT)');
         $pdo->exec("INSERT INTO supplier VALUES (7, 1, NULL, 'auto')");
         $pdo->exec('CREATE TABLE supplier_vat_status_history (id INTEGER, supplier_id INTEGER, effective_from TEXT, is_vat_payer INTEGER)');
@@ -137,5 +142,8 @@ final class RecurringManualScheduleTest extends TestCase
         self::assertSame(1, (int) $invoice['prices_include_vat']);
         self::assertSame('auto', $invoice['rounding_mode']);
         self::assertSame(12, (int) $invoice['recurring_template_id']);
+        $assigned = $pdo->prepare('SELECT tag_id FROM invoice_tags WHERE entity_id = ?');
+        $assigned->execute([$invoice['id']]);
+        self::assertSame([21], $assigned->fetchAll(PDO::FETCH_COLUMN));
     }
 }
