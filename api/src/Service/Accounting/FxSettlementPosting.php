@@ -38,7 +38,8 @@ final class FxSettlementPosting
      * Saldokontní účet, na kterém je předpis dokladu. Pravidlo úhrady dává syntetiku (321,
      * 311); vede-li firma saldokonto na analytice (převzaté účetnictví: předpis na 321.001),
      * musí úhrada odúčtovat tutéž analytiku - jinak předpis na analytice zůstane otevřený
-     * a úhrada visí na syntetice. Jen když předpis má pod syntetikou právě jednu analytiku;
+     * a úhrada visí na syntetice. Analytikou je i převzatý kód bez tečky (321001), viz
+     * {@see SaldoAccountMatch}. Jen když předpis má pod syntetikou právě jednu analytiku;
      * předpis na syntetice (běžná firma) nebo víc analytik = kód z pravidla beze změny.
      *
      * Platí i pro cizoměnové větve: převod z cizího programu zakládá doklad v cizí měně
@@ -47,17 +48,10 @@ final class FxSettlementPosting
      */
     private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
     {
-        if (preg_match('/^\d{3}$/', $code) !== 1) {
+        if (!SaldoAccountMatch::isSynthetic($code)) {
             return $code;
         }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT DISTINCT a.account_code
-               FROM journal_entry_lines l
-               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code LIKE CONCAT(?, '.%')"
-        );
-        $stmt->execute([$supplierId, $entryId, $code]);
-        return self::singleAnalyticCode($code, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        return self::singleAnalyticCode($code, self::analyticsOf($code, $this->entryCodes($supplierId, $entryId, $code)));
     }
 
     /**
@@ -71,20 +65,46 @@ final class FxSettlementPosting
      */
     private function openingSaldoCode(int $supplierId, array $predpis, string $code): string
     {
+        $codes = array_values(array_filter(
+            $this->entryCodes($supplierId, $predpis['entry_ids'][0], $code),
+            static fn (string $account): bool => SaldoAccountMatch::belongsTo($account, $code),
+        ));
+        return self::openingCode($predpis, $code, $codes);
+    }
+
+    /**
+     * Účty zápisu začínající kódem $code (kandidáti, přesnou příslušnost určí {@see SaldoAccountMatch}).
+     *
+     * @return list<string>
+     */
+    private function entryCodes(int $supplierId, int $entryId, string $code): array
+    {
         $stmt = $this->db->pdo()->prepare(
             "SELECT DISTINCT a.account_code
                FROM journal_entry_lines l
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND l.entry_id = ? AND (a.account_code = ? OR a.account_code LIKE CONCAT(?, '.%'))"
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code LIKE CONCAT(?, '%')"
         );
-        $stmt->execute([$supplierId, $predpis['entry_ids'][0], $code, $code]);
-        return self::openingCode($predpis, $code, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $stmt->execute([$supplierId, $entryId, $code]);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * @param list<string> $codes
+     * @return list<string>
+     */
+    private static function analyticsOf(string $code, array $codes): array
+    {
+        return array_values(array_unique(array_filter(
+            $codes,
+            static fn (string $account): bool => SaldoAccountMatch::isAnalyticOf($account, $code),
+        )));
     }
 
     /** @param list<string> $analytics */
     private static function singleAnalyticCode(string $code, array $analytics): string
     {
-        return preg_match('/^\d{3}$/', $code) === 1 && count($analytics) === 1 ? $analytics[0] : $code;
+        return SaldoAccountMatch::isSynthetic($code) && count($analytics) === 1 ? $analytics[0] : $code;
     }
 
     /**
@@ -231,7 +251,7 @@ final class FxSettlementPosting
         $byEntry = [];
         foreach ($lines as $line) {
             $account = (string) $line['account_code'];
-            if ($account === $code || str_starts_with($account, $code . '.')) {
+            if (SaldoAccountMatch::belongsTo($account, $code)) {
                 $byEntry[(int) $line['entry_id']][] = $line;
             }
         }
@@ -246,10 +266,7 @@ final class FxSettlementPosting
         $codes = [];
         $rates = [];
         foreach ($byEntry as $lines) {
-            $analytics = array_values(array_unique(array_filter(
-                array_map(static fn (array $line): string => (string) $line['account_code'], $lines),
-                static fn (string $account): bool => str_starts_with($account, $code . '.'),
-            )));
+            $analytics = self::analyticsOf($code, array_map(static fn (array $line): string => (string) $line['account_code'], $lines));
             $codes[] = self::singleAnalyticCode($code, $analytics);
             foreach ($lines as $line) {
                 if ($line['currency_code'] !== null && $line['fx_rate'] !== null && (float) $line['fx_rate'] > 0) {
@@ -333,15 +350,14 @@ final class FxSettlementPosting
             }
             $codes = array_values(array_unique(array_column($byEntry[$predpis['entry_ids'][0]] ?? [], 'account_code')));
             if ($predpis['opening'] ?? false) {
-                $matches = array_values(array_filter($codes, static fn (string $code): bool => $code === $fallback || str_starts_with($code, $fallback . '.')));
+                $matches = array_values(array_filter($codes, static fn (string $code): bool => SaldoAccountMatch::belongsTo($code, $fallback)));
                 $accounts[$docId] = self::openingCode($predpis, $fallback, $matches);
                 continue;
             }
             $code = $docType === 'purchase_invoice'
                 ? PurchasePayableAccount::paymentCode(PurchasePayableAccount::payableFromCodes($codes), $fallback)
                 : $fallback;
-            $analytics = array_values(array_filter($codes, static fn (string $account): bool => str_starts_with($account, $code . '.')));
-            $accounts[$docId] = self::singleAnalyticCode($code, $analytics);
+            $accounts[$docId] = self::singleAnalyticCode($code, self::analyticsOf($code, $codes));
         }
         return $accounts;
     }
