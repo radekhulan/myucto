@@ -421,6 +421,8 @@ final class GeneralLedgerReportTest extends TestCase
             'entry_date' => '2099-03-04', 'description' => 'Storno VPD-2099-0001: chyba — duplicita',
             'posted_by' => $this->userId, 'user_id' => $this->userId,
         ]);
+        // Prázdné číslo zápisu (ne NULL) se doplní z dokladu stejně jako v deníku.
+        $pdo->prepare("UPDATE journal_entries SET document_no = '' WHERE id = ?")->execute([$cashEntry]);
         // Faktura bez věcného textu: zkrácení by nechalo jen protistranu, popis zůstane celý.
         $clientId = $this->insertClient('Odběratel Popis s.r.o.');
         $invoiceId = $this->insertInvoiceWithItem($clientId, 'ignorováno', 30.00, '2099-03-05');

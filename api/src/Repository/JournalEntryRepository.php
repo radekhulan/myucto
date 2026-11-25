@@ -2222,9 +2222,9 @@ final class JournalEntryRepository
             $stmt->execute($params);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $out[(int) $r['id']] = [
-                    'document_no' => JournalDescriptionBuilder::clean(
-                        $r['document_no'] ?? $r['source_doc_number'] ?? $r['source_bank_ref'] ?? null,
-                    ),
+                    'document_no' => JournalDescriptionBuilder::clean($r['document_no'] ?? null)
+                        ?? JournalDescriptionBuilder::clean($r['source_doc_number'] ?? null)
+                        ?? JournalDescriptionBuilder::clean($r['source_bank_ref'] ?? null),
                     'parts' => JournalDescriptionBuilder::parts(
                         $r['description'] ?? null,
                         (string) $r['source_type'],
