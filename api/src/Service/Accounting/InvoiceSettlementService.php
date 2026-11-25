@@ -120,7 +120,7 @@ final class InvoiceSettlementService
             // Protiúčet nesmí být tatáž strana, kterou zápočet uzavírá — vznikl by
             // zápis "311 MD / 311 D", který nic nevyrovná.
             $docAccount = $doc['doc_account'];
-            if ($accountCode === $docAccount || str_starts_with($accountCode, $docAccount . '.')
+            if (SaldoAccountMatch::belongsTo($accountCode, $docAccount)
                 || $this->posting->redirectedAccountCode($supplierId, $accountCode, $settledOn)
                     === $this->posting->redirectedAccountCode($supplierId, $docAccount, $settledOn)
             ) {

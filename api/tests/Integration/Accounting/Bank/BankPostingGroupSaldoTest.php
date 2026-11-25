@@ -88,6 +88,58 @@ final class BankPostingGroupSaldoTest extends BankPostingTestCase
         self::assertSame(0, $this->entryCountForTx($tx));
     }
 
+    /** Převzatá analytika bez tečky (321001) je analytikou syntetiky 321 z pravidla úhrady. */
+    public function testSaldoAnalyticWithoutDotInGroupIsUsed(): void
+    {
+        $this->analytic('321001');
+        $pf = $this->purchase(1210.00);
+        $this->groupWithReversedDirect('purchase_invoice', $pf, ['518', '321001', 1000.00], [
+            [['343', 'debit', 210.00], ['321001', 'credit', 210.00]],
+            [['518', 'debit', 1000.00], ['321001', 'credit', 1000.00]],
+        ]);
+
+        $tx = $this->transaction($this->statement(), -1210.00, ['match_status' => 'manual']);
+        $this->paymentMatch($tx, $pf, 1210.00);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        self::assertSame(['221:credit:1210.00', '321001:debit:1210.00'], $this->postedLines((int) $res['entry_id']));
+    }
+
+    public function testTwoAnalyticsWithoutDotInGroupStayAmbiguous(): void
+    {
+        $this->analytic('321001');
+        $this->analytic('321002');
+        $pf = $this->purchase(1210.00);
+        $this->groupWithReversedDirect('purchase_invoice', $pf, ['518', '321001', 1000.00], [
+            [['343', 'debit', 210.00], ['321001', 'credit', 210.00]],
+            [['518', 'debit', 1000.00], ['321002', 'credit', 1000.00]],
+        ]);
+
+        $tx = $this->transaction($this->statement(), -1210.00, ['match_status' => 'manual']);
+        $this->paymentMatch($tx, $pf, 1210.00);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('skipped', $res['action']);
+        self::assertSame('posting_group_saldo_ambiguous', $res['reason']);
+        self::assertSame(0, $this->entryCountForTx($tx));
+    }
+
+    /** Nativní předpis na analytice bez tečky: úhrada ji odúčtuje, nespadne na syntetiku 321. */
+    public function testNativeSaldoAnalyticWithoutDotIsUsed(): void
+    {
+        $this->analytic('321001');
+        $pf = $this->purchase(1210.00);
+        $this->entry('purchase_invoice', $pf, [['518', 'debit', 1210.00], ['321001', 'credit', 1210.00]]);
+
+        $tx = $this->transaction($this->statement(), -1210.00, ['match_status' => 'manual']);
+        $this->paymentMatch($tx, $pf, 1210.00);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        self::assertSame(['221:credit:1210.00', '321001:debit:1210.00'], $this->postedLines((int) $res['entry_id']));
+    }
+
     public function testGroupWithoutSaldoLineIsNotGuessed(): void
     {
         $pf = $this->purchase(1000.00);
