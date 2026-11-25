@@ -413,15 +413,15 @@ async function reopen() {
 }
 
 async function downloadXml() {
-  const url = !isFinal.value && (type.value === 'fo' || (state.value?.podklady.accounting_decree === '504' && state.value.nonprofit_filing_proof_hash))
-    ? taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam(), type.value)
-    : taxReturnApi.xmlUrl(type.value, year.value, variant.value, seqParam())
+  const url = isFinal.value
+    ? taxReturnApi.xmlUrl(type.value, year.value, variant.value, seqParam())
+    : taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam(), type.value)
   try {
     const headers = await downloadApiFile(url)
     exportWarning.value = headers['x-validation-status'] === 'failed'
       ? t('taxReturn.xml_validation_warning')
       : Number(headers['x-business-errors'] ?? 0) > 0 ? t('taxReturn.xml_business_warning') : ''
-    if ((type.value === 'po' || isFinal.value) && warnings.value.length === 0 && !prefinalize.value?.checks.some(c => !c.ok && !c.na)) {
+    if (isFinal.value && !exportWarning.value && warnings.value.length === 0 && !prefinalize.value?.checks.some(c => !c.ok && !c.na)) {
       await router.push('/reports/submissions')
     }
   } catch (e) {

@@ -198,6 +198,7 @@ final class TaxReturnAction
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $built['filename'] . '"')
             ->withHeader($type === 'po' ? 'X-DPPO-Preview' : 'X-DPFO-Preview', '1')
+            ->withHeader('X-Validation-Status', $built['xsd_status'])
             ->withHeader('X-Business-Errors', (string) count($built['business_errors']))
             ->withHeader('Cache-Control', 'no-store');
     }

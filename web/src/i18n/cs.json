@@ -33461,7 +33461,7 @@
     "check_tax_evidence_closing": "Dokončená roční uzávěrka daňové evidence",
     "check_osvc_month_statuses": "Měsíční stavy samostatné výdělečné činnosti",
     "xml_business_warning": "Pracovní XML bylo staženo s obsahovými nesrovnalostmi. Před podáním zkontrolujte podklady a uvedená upozornění.",
-    "xml_validation_warning": "XML bylo staženo, ale neprošlo kontrolou schématu. Před podáním zkontrolujte údaje a opravte chyby uvedené v archivu podání.",
+    "xml_validation_warning": "XML neprošlo kontrolou schématu. Opravte údaje v přiznání a stáhněte nový soubor.",
     "unsupported_title": "Situace, které aplikace v přiznání neumí",
     "unsupported_action": "Co s tím",
     "unsupported_blocking_badge": "Varování",

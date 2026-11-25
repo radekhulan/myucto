@@ -33461,7 +33461,7 @@
     "check_tax_evidence_closing": "Completed annual closing of tax records",
     "check_osvc_month_statuses": "Monthly self-employment statuses",
     "xml_business_warning": "The draft XML was downloaded with content issues. Review the source data and warnings before filing.",
-    "xml_validation_warning": "The XML was downloaded but failed schema validation. Check the data and correct the errors listed in the submission archive before filing.",
+    "xml_validation_warning": "The XML failed schema validation. Correct the data in the return and download a new file.",
     "unsupported_title": "Situations the application cannot handle in the return",
     "unsupported_action": "What to do",
     "unsupported_blocking_badge": "Warning",
