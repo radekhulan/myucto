@@ -136,4 +136,50 @@ final class CsasOAuthRepository
             'disconnected' => $row['disconnected_at'] !== null,
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
+
+    /**
+     * Napojení ČS všech firem instalace s uloženým přístupem; pro rozeslání obnoveného tokenu
+     * sdíleného souhlasu ({@see \MyInvoice\Service\Bank\Connector\CsasSharedConsent}).
+     *
+     * @return list<array{id:int,supplier_id:int,currency_id:int,token_ciphertext:string}>
+     */
+    public function allConnectedCredentials(): array
+    {
+        $stmt = $this->db->pdo()->query("SELECT id, supplier_id, currency_id, token_ciphertext FROM bank_connections
+            WHERE provider = 'csas' AND token_ciphertext IS NOT NULL ORDER BY supplier_id, id");
+        return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'supplier_id' => (int) $row['supplier_id'],
+            'currency_id' => (int) $row['currency_id'], 'token_ciphertext' => (string) $row['token_ciphertext']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Aktivní účty u České spořitelny ostatních firem instalace (mimo nosnou firmu sdíleného
+     * souhlasu) a stav jejich napojení; tvar jako {@see siblingAccounts()} s firmou a jejím názvem navíc.
+     *
+     * @return list<array{supplier_id:int,company_name:string,currency_id:int,code:string,account_number:string,connection_id:?int,
+     *     provider:?string,token_ciphertext:?string,disconnected:bool}>
+     */
+    public function otherSuppliersAccounts(int $ownerSupplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT c.supplier_id, s.company_name, c.id, c.code,
+                COALESCE(NULLIF(c.account_number, ''), c.iban, '') AS account_number,
+                bc.id AS connection_id, bc.provider, bc.token_ciphertext, bc.disconnected_at
+            FROM currencies c
+            JOIN supplier s ON s.id = c.supplier_id
+            LEFT JOIN bank_connections bc ON bc.currency_id = c.id AND bc.supplier_id = c.supplier_id
+            WHERE c.supplier_id <> ? AND c.is_active = 1 AND c.bank_code = '0800'
+            ORDER BY c.supplier_id, c.id");
+        $stmt->execute([$ownerSupplierId]);
+        return array_map(static fn (array $row): array => [
+            'supplier_id' => (int) $row['supplier_id'],
+            'company_name' => (string) $row['company_name'],
+            'currency_id' => (int) $row['id'],
+            'code' => strtoupper((string) $row['code']),
+            'account_number' => (string) $row['account_number'],
+            'connection_id' => $row['connection_id'] === null ? null : (int) $row['connection_id'],
+            'provider' => $row['provider'] === null ? null : (string) $row['provider'],
+            'token_ciphertext' => $row['token_ciphertext'] === null ? null : (string) $row['token_ciphertext'],
+            'disconnected' => $row['disconnected_at'] !== null,
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
 }

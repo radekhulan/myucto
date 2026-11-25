@@ -12,7 +12,8 @@ use MyInvoice\Service\OAuth\OAuthException;
 final class CsasCredentialVault
 {
     public function __construct(private readonly CsasApiClient $api, private readonly CsasOAuthRepository $repository,
-        private readonly SecretEncryption $secrets, private readonly OAuthClientFlow $flow) {}
+        private readonly SecretEncryption $secrets, private readonly OAuthClientFlow $flow,
+        private readonly CsasSharedConsent $shared) {}
 
     /**
      * Platný přístup. Propadlý access token obnoví přes společnou vrstvu ({@see OAuthClientFlow::rotate()}):
@@ -22,10 +23,14 @@ final class CsasCredentialVault
      * Jeden souhlas banky může pokrývat více účtů firmy ({@see CsasSiblingAccountLinker}). Každý účet
      * má vlastní kopii přístupu, obnovené tokeny se ale hned uloží i ostatním účtům téhož souhlasu.
      * Další účet pak banku o obnovu nežádá a zámek je proto společný pro celou aplikaci u banky.
+     *
+     * Kopie sdíleného souhlasu jiné firmy ({@see CsasSharedConsent}) platí jen, dokud je sdílení
+     * nastavené a hlavní firma má tentýž souhlas pořád připojený.
      */
     public function access(#[\SensitiveParameter] string $serialized): array
     {
         $data = $this->decode($serialized);
+        if (self::isSharedCopy($data)) $this->assertSharedConsent($data);
         if (self::fresh($data)) return $data;
         $supplierId = $data['supplier_id'];
         $connectionId = $data['connection_id'];
@@ -57,14 +62,52 @@ final class CsasCredentialVault
      */
     public static function consentLockKey(#[\SensitiveParameter] array $data): string
     {
-        return $data['supplier_id'] . ':csas:' . substr(hash('sha256', ($data['environment'] ?? 'production') . "\0" . $data['client_id']), 0, 24);
+        return self::consentOwner($data) . ':csas:' . substr(hash('sha256', ($data['environment'] ?? 'production') . "\0" . $data['client_id']), 0, 24);
     }
 
-    /** Patří oba přístupy k témuž souhlasu banky (stejná aplikace, prostředí a refresh token)? */
+    /** Firma, které souhlas banky patří: u kopie sdíleného souhlasu hlavní firma, jinak firma napojení. */
+    public static function consentOwner(#[\SensitiveParameter] array $data): int
+    {
+        return $data['consent_supplier_id'] ?? $data['supplier_id'];
+    }
+
+    /** Je přístup kopií sdíleného souhlasu hlavní firmy uloženou u jiné firmy? */
+    public static function isSharedCopy(#[\SensitiveParameter] array $data): bool
+    {
+        return self::consentOwner($data) !== $data['supplier_id'];
+    }
+
+    /** Patří oba přístupy k témuž souhlasu banky (stejný vlastník, aplikace, prostředí a refresh token)? */
     public static function sameConsent(#[\SensitiveParameter] array $a, #[\SensitiveParameter] array $b): bool
     {
-        return $a['supplier_id'] === $b['supplier_id'] && ($a['environment'] ?? 'production') === ($b['environment'] ?? 'production')
+        return self::consentOwner($a) === self::consentOwner($b) && ($a['environment'] ?? 'production') === ($b['environment'] ?? 'production')
             && hash_equals($a['client_id'], $b['client_id']) && hash_equals($a['refresh_token'], $b['refresh_token']);
+    }
+
+    /**
+     * Kopie souhlasu jiné firmy se smí použít, jen když sdílení její souhlas povoluje a nosná firma
+     * má tentýž souhlas pořád připojený. Odpojení nebo nové přihlášení nosné firmy tak kopie zastaví
+     * hned, ne až ve chvíli, kdy banka odmítne token; účet pak převezme jiný souhlas, který ho pokrývá.
+     */
+    public function sharedConsentAlive(#[\SensitiveParameter] array $copy): bool
+    {
+        $owner = self::consentOwner($copy);
+        if (!$this->shared->allows($owner)) return false;
+        foreach ($this->repository->connectedCredentials($owner) as $row) {
+            try {
+                $stored = $this->decode($this->secrets->decryptFor($row['token_ciphertext'], self::context($owner, $row['id'])));
+            } catch (\Throwable) {
+                continue;
+            }
+            if (!self::isSharedCopy($stored) && $stored['connection_id'] === $row['id'] && self::sameConsent($stored, $copy)) return true;
+        }
+        return false;
+    }
+
+    private function assertSharedConsent(#[\SensitiveParameter] array $copy): void
+    {
+        if ($this->sharedConsentAlive($copy)) return;
+        throw new BankConnectorException('csas_shared_consent_unavailable', 'Sdílený souhlas České spořitelny už není připojený.');
     }
 
     /** @param array<string,mixed> $tokens odpověď banky na obnovu */
@@ -86,17 +129,23 @@ final class CsasCredentialVault
     /**
      * Obnovené tokeny uloží i ostatním účtům téhož souhlasu. Účet, kterému uložení selže,
      * si přístup obnoví sám při dalším použití (refresh token ČS se obnovou nemění).
+     * Souhlas sdílený napříč firmami ({@see CsasSharedConsent}) se rozešle všem firmám instalace.
      */
     private function shareRotation(#[\SensitiveParameter] array $rotated, #[\SensitiveParameter] string $previousRefreshToken,
         #[\SensitiveParameter] array $tokens): void
     {
-        $supplierId = $rotated['supplier_id'];
+        $owner = self::consentOwner($rotated);
         $before = ['refresh_token' => $previousRefreshToken] + $rotated;
-        foreach ($this->repository->connectedCredentials($supplierId) as $row) {
-            if ($row['id'] === $rotated['connection_id']) continue;
+        $rows = !$this->shared->disabled()
+            ? $this->repository->allConnectedCredentials()
+            : array_map(static fn (array $row): array => $row + ['supplier_id' => $rotated['supplier_id']],
+                $this->repository->connectedCredentials($rotated['supplier_id']));
+        foreach ($rows as $row) {
+            $supplierId = $row['supplier_id'];
+            if ($supplierId === $rotated['supplier_id'] && $row['id'] === $rotated['connection_id']) continue;
             try {
                 $sibling = $this->decode($this->secrets->decryptFor($row['token_ciphertext'], self::context($supplierId, $row['id'])));
-                if ($sibling['connection_id'] !== $row['id'] || !self::sameConsent($sibling, $before)) continue;
+                if ($sibling['supplier_id'] !== $supplierId || $sibling['connection_id'] !== $row['id'] || !self::sameConsent($sibling, $before)) continue;
                 $ciphertext = $this->secrets->encryptFor($this->encode(self::withTokens($sibling, $tokens)), self::context($supplierId, $row['id']));
                 if (str_starts_with($ciphertext, 'enc:v2:')) $this->repository->rotate($supplierId, $row['id'], $ciphertext);
             } catch (\Throwable) {
@@ -115,7 +164,8 @@ final class CsasCredentialVault
             $required = ['version', 'supplier_id', 'connection_id', 'api_key', 'client_id', 'client_secret', 'redirect_uri',
                 'access_token', 'refresh_token', 'access_expires_at', 'account_id', 'account_iban', 'account_currency', 'call_guard_key', 'environment'];
             // Přístupy z doby, kdy konektor jen četl, udělený scope ani vhodnost účtu pro platby nemají.
-            $optional = ['scope', 'payment_account_suitable'];
+            // consent_supplier_id má jen kopie sdíleného souhlasu hlavní firmy ({@see CsasSharedConsent}).
+            $optional = ['scope', 'payment_account_suitable', 'consent_supplier_id'];
             if (!is_array($data) || array_diff(array_keys($data), $required, $optional) || array_diff($required, array_keys($data))
                 || $data['version'] !== 1) throw new \RuntimeException();
             if (array_key_exists('scope', $data) && (!is_string($data['scope']) || strlen($data['scope']) > 1024
@@ -124,6 +174,8 @@ final class CsasCredentialVault
             foreach (['supplier_id', 'connection_id', 'access_expires_at'] as $key) {
                 if (!is_int($data[$key]) || $data[$key] < 1) throw new \RuntimeException();
             }
+            if (array_key_exists('consent_supplier_id', $data)
+                && (!is_int($data['consent_supplier_id']) || $data['consent_supplier_id'] < 1)) throw new \RuntimeException();
             foreach (array_diff($required, ['version', 'supplier_id', 'connection_id', 'access_expires_at']) as $key) {
                 if (!is_string($data[$key]) || $data[$key] === '' || strlen($data[$key]) > 16384
                     || preg_match('/[\x00-\x1f\x7f]/', $data[$key])) throw new \RuntimeException();
@@ -154,7 +206,8 @@ final class CsasCredentialVault
      */
     public static function paymentAvailability(#[\SensitiveParameter] array $data): string
     {
-        if (!CsasApiClient::grantsPayments((string) ($data['scope'] ?? ''))) return 'authorization_scope_missing';
+        // Sdílený souhlas hlavní firmy slouží jinou firmu jen ke čtení výpisů.
+        if (self::isSharedCopy($data) || !CsasApiClient::grantsPayments((string) ($data['scope'] ?? ''))) return 'authorization_scope_missing';
         return ($data['payment_account_suitable'] ?? false) === true ? 'available' : 'account_not_suitable';
     }
 

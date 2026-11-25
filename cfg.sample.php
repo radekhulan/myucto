@@ -698,6 +698,12 @@ return [
             //     'api_key' => '', 'client_id' => '', 'client_secret' => '',
             //     'redirect_uri' => 'https://myucto.cz/oauth/csas/callback',
             // ],
+            // Souhlas sdílený mezi firmami: vrací-li banka v souhlasu jedné firmy i účty
+            // ostatních firem instalace, napojí se přes něj (jen čtení výpisů) a ta firma se
+            // pro ně stává nosnou. Firma s vlastním souhlasem si ho ponechá. Propojení dělá
+            // cron bankovních spojení, ihned `php api/bin/bank-link-sibling-accounts.php --apply`.
+            // Výchozí = sdílí každý souhlas; false = nesdílí se; ['supplier_id' => N] = jen firma N.
+            // 'shared_consent' => false,
         ],
     ],
 

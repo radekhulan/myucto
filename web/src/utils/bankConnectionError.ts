@@ -95,7 +95,7 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string, para
     payment_order_not_domestic: 'not_domestic', payment_order_invalid: 'order_invalid', payment_order_changed: 'order_changed',
     payment_order_too_many_items: 'too_many_items', payment_order_account_mismatch: 'account',
     payment_execution_date_too_early: 'date', payment_execution_date_too_far: 'date_too_far',
-    csas_payments_scope_missing: 'csas_scope', csas_mass_authorization_forbidden: 'csas_mass_authorization',
+    csas_payments_scope_missing: 'csas_scope', csas_shared_consent_unavailable: 'csas_shared_consent', csas_mass_authorization_forbidden: 'csas_mass_authorization',
     payment_signature_unavailable: 'signature_unavailable', payment_signature_failed: 'signature_failed',
     payment_signature_expired: 'signature_expired', payment_status_unavailable: 'status_unavailable', app_url_invalid: 'app_url',
     kb_plus_statements_unavailable: 'kb_plus_statements', kb_plus_statement_pending: 'kb_plus_statement_pending',

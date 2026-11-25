@@ -14,6 +14,12 @@ final class CsasConnectorTest extends TestCase
 {
     use \MyInvoice\Tests\Support\InlineOAuthRotation;
 
+    private static function noSharing(): \MyInvoice\Service\Bank\Connector\CsasSharedConsent
+    {
+        return new \MyInvoice\Service\Bank\Connector\CsasSharedConsent(
+            new \MyInvoice\Infrastructure\Config\Config(['bank_connectors' => ['csas' => ['shared_consent' => false]]]));
+    }
+
     private function credentials(): array
     {
         return ['version' => 1, 'supplier_id' => 7, 'connection_id' => 9, 'api_key' => 'synthetic-key',
@@ -27,7 +33,7 @@ final class CsasConnectorTest extends TestCase
         $api = $this->createMock(CsasApiClient::class);
         $repo = $this->createMock(CsasOAuthRepository::class);
         $secret = $this->createMock(SecretEncryption::class);
-        $vault = new CsasCredentialVault($api, $repo, $secret, $this->inlineRotationFlow());
+        $vault = new CsasCredentialVault($api, $repo, $secret, $this->inlineRotationFlow(), self::noSharing());
         $data = $this->credentials();
         $data['access_expires_at'] = time() - 1;
         $repo->expects(self::once())->method('credential')->with(7, 9)->willReturn('enc:v2:stored');
@@ -46,7 +52,7 @@ final class CsasConnectorTest extends TestCase
         $api = $this->createMock(CsasApiClient::class);
         $repo = $this->createMock(CsasOAuthRepository::class);
         $secret = $this->createMock(SecretEncryption::class);
-        $vault = new CsasCredentialVault($api, $repo, $secret, $this->inlineRotationFlow());
+        $vault = new CsasCredentialVault($api, $repo, $secret, $this->inlineRotationFlow(), self::noSharing());
         $data = $this->credentials() + ['environment' => 'production'];
         if ($stored !== null) $data['scope'] = $stored;
         $data['access_expires_at'] = time() - 1;
@@ -109,7 +115,7 @@ final class CsasConnectorTest extends TestCase
         $repo = $this->createMock(CsasOAuthRepository::class);
         $secret = $this->createMock(SecretEncryption::class);
         $flow = $this->inlineRotationFlow();
-        $vault = new CsasCredentialVault($api, $repo, $secret, $flow);
+        $vault = new CsasCredentialVault($api, $repo, $secret, $flow, self::noSharing());
         $expired = ['access_expires_at' => time() - 1, 'environment' => 'production'] + $this->credentials();
         $sibling = ['connection_id' => 10, 'account_id' => 'remote-eur', 'account_iban' => 'CZ6708000000002000000018', 'account_currency' => 'EUR',
             'call_guard_key' => str_repeat('b', 64), 'scope' => 'siblings.accounts'] + $expired;
@@ -138,6 +144,47 @@ final class CsasConnectorTest extends TestCase
             [$shared['access_token'], $shared['refresh_token'], $shared['connection_id'], $shared['account_id'], $shared['call_guard_key'], $shared['scope']],
             'Další účet převezme tokeny, ale ponechá si vlastní účet, hlídání volání a rozsah bez plateb.');
         self::assertArrayNotHasKey(CsasCredentialVault::context(7, 11), $sealed, 'Účet jiného souhlasu se nemění.');
+    }
+
+    /**
+     * Souhlas sdílený s jinou firmou: obnovené tokeny dostane i převzaté napojení jiné firmy
+     * (šifrované pro její kontext), obnova proběhne jednou pro všechny.
+     */
+    public function testRotationOfSharedConsentReachesCopiesInOtherCompanies(): void
+    {
+        $api = $this->createMock(CsasApiClient::class);
+        $repo = $this->createMock(CsasOAuthRepository::class);
+        $secret = $this->createMock(SecretEncryption::class);
+        $vault = new CsasCredentialVault($api, $repo, $secret, $this->inlineRotationFlow(),
+            new \MyInvoice\Service\Bank\Connector\CsasSharedConsent(new \MyInvoice\Infrastructure\Config\Config([])));
+        $expired = ['access_expires_at' => time() - 1, 'environment' => 'production'] + $this->credentials();
+        $copy = ['supplier_id' => 12, 'connection_id' => 41, 'consent_supplier_id' => 7, 'account_id' => 'remote-eur',
+            'account_iban' => 'CZ6708000000002000000018', 'account_currency' => 'EUR', 'call_guard_key' => str_repeat('b', 64),
+            'scope' => 'siblings.accounts'] + $expired;
+        $ownCompany = ['supplier_id' => 13, 'connection_id' => 51] + $copy;
+        unset($ownCompany['consent_supplier_id']);
+        $plain = ['enc:v2:own' => $vault->encode($expired), 'enc:v2:copy' => $vault->encode($copy), 'enc:v2:other' => $vault->encode($ownCompany)];
+        $secret->method('decryptFor')->willReturnCallback(static fn (string $cipher, string $context): string => $plain[$cipher]);
+        $repo->method('credential')->willReturn('enc:v2:own');
+        $repo->expects(self::never())->method('connectedCredentials');
+        $repo->expects(self::once())->method('allConnectedCredentials')->willReturn([
+            ['id' => 9, 'supplier_id' => 7, 'currency_id' => 3, 'token_ciphertext' => 'enc:v2:own'],
+            ['id' => 41, 'supplier_id' => 12, 'currency_id' => 40, 'token_ciphertext' => 'enc:v2:copy'],
+            ['id' => 51, 'supplier_id' => 13, 'currency_id' => 50, 'token_ciphertext' => 'enc:v2:other'],
+        ]);
+        $api->expects(self::once())->method('refresh')->willReturn(['access_token' => 'rotated-access', 'expires_in' => 300]);
+        $sealed = [];
+        $secret->method('encryptFor')->willReturnCallback(static function (string $raw, string $context) use (&$sealed): string {
+            $sealed[$context] = json_decode($raw, true);
+            return 'enc:v2:' . count($sealed);
+        });
+        $repo->expects(self::exactly(2))->method('rotate')->willReturn(true);
+
+        $vault->access($plain['enc:v2:own']);
+
+        $shared = $sealed[CsasCredentialVault::context(12, 41)];
+        self::assertSame(['rotated-access', 12, 7], [$shared['access_token'], $shared['supplier_id'], $shared['consent_supplier_id']]);
+        self::assertArrayNotHasKey(CsasCredentialVault::context(13, 51), $sealed, 'Vlastní souhlas jiné firmy se nemění.');
     }
 
     public function testChangedAccountFailsBeforeTransactions(): void
@@ -172,7 +219,7 @@ final class CsasConnectorTest extends TestCase
     public function testReadOnlyCredentialStillDecodesButCannotSubmitPayments(): void
     {
         $vault = new CsasCredentialVault($this->createMock(CsasApiClient::class), $this->createMock(CsasOAuthRepository::class),
-            $this->createMock(SecretEncryption::class), $this->inlineRotationFlow());
+            $this->createMock(SecretEncryption::class), $this->inlineRotationFlow(), self::noSharing());
         $connector = new CsasBankConnector($this->createMock(CsasApiClient::class), $vault, new CsasTransactionParser());
         $legacy = $this->credentials() + ['environment' => 'production'];
 

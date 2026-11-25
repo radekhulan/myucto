@@ -15,6 +15,7 @@ use MyInvoice\Service\Bank\Connector\KbPlusCredentialVault;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\Connector\CsasApiClient;
 use MyInvoice\Service\Bank\Connector\CsasCredentialVault;
+use MyInvoice\Service\Bank\Connector\CsasSharedConsent;
 use MyInvoice\Service\OAuth\OAuthClientFlow;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -84,7 +85,7 @@ final class BankTokenRotationTest extends TestCase
             return ['access_token' => 'synthetic-access-2', 'refresh_token' => 'synthetic-refresh-2', 'expires_in' => 300];
         });
         $vault = new CsasCredentialVault($api, new CsasOAuthRepository($this->db), $this->container->get(SecretEncryption::class),
-            $this->container->get(OAuthClientFlow::class));
+            $this->container->get(OAuthClientFlow::class), $this->container->get(CsasSharedConsent::class));
         $stale = $vault->encode($credentials);
         $this->store($connectionId, $stale, CsasCredentialVault::context($this->supplierId, $connectionId));
 
@@ -115,7 +116,7 @@ final class BankTokenRotationTest extends TestCase
             return ['access_token' => 'synthetic-access-2', 'expires_in' => 300];
         });
         $vault = new CsasCredentialVault($api, new CsasOAuthRepository($this->db), $this->container->get(SecretEncryption::class),
-            $this->container->get(OAuthClientFlow::class));
+            $this->container->get(OAuthClientFlow::class), $this->container->get(CsasSharedConsent::class));
         $serialized = [];
         foreach ([$first => 'synthetic-refresh', $second => 'synthetic-refresh', $other => 'other-consent'] as $id => $refresh) {
             $serialized[$id] = $vault->encode(['connection_id' => $id, 'refresh_token' => $refresh] + $base);

@@ -319,6 +319,32 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(0, $summary['errors']);
     }
 
+    /**
+     * Kvóta ČS platí pro celou aplikaci u banky: po 429 cron v tomtéž běhu další účty
+     * ČS nevolá (jen by čerpaly vyčerpanou kvótu), banky s kvótou na účet volá dál.
+     */
+    public function testProviderWideQuotaStopsFurtherCallsOfThatBankInTheRun(): void
+    {
+        $calls = 0;
+        $connector = new SyncConnector(static function () use (&$calls): string {
+            if (++$calls === 1) throw new BankConnectorException(BankConnectorException::RATE_LIMITED, 'safe');
+            return 'SYNTHETIC-GPC';
+        });
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->method('enabledWithCredentials')->willReturn([
+            array_replace($this->connection(), ['id' => 201, 'provider' => 'csas']),
+            array_replace($this->connection(), ['id' => 202, 'provider' => 'csas']),
+            array_replace($this->connection(), ['id' => 203, 'provider' => 'fio']),
+        ]);
+
+        $summary = $h['service']->syncAll();
+
+        self::assertSame(2, $connector->downloadCalls, 'Druhý účet ČS se po 429 nevolá, Fio ano.');
+        self::assertSame(['rate_limited', 'provider_quota_exhausted'], array_column($summary['details'], 'skipped'));
+        self::assertSame([2, 1, 0], [$summary['skipped'], $summary['succeeded'], $summary['errors']]);
+    }
+
     public function testAmbiguousStatementDuplicateRequiresManualReconciliation(): void
     {
         $connector = new SyncConnector();

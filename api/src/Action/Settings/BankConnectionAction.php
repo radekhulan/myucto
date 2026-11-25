@@ -150,7 +150,7 @@ final class BankConnectionAction
             + ($cause !== null ? ['cause' => self::failureContext($cause)] : []));
         $status = match ($e->errorCode) {
             'connection_not_found' => 404,
-            'bank_connection_busy', 'bank_rate_limited', 'history_gap',
+            'bank_connection_busy', 'bank_rate_limited', 'history_gap', 'csas_shared_consent_unavailable',
             'statement_reconciliation_required', 'kb_plus_statement_pending' => 409,
             'provider_required', 'provider_not_implemented', 'provider_account_mismatch',
             'token_required', 'token_invalid', 'account_inactive', 'account_currency_missing',

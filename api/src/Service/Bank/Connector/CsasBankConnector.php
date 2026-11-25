@@ -45,6 +45,17 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
     }
 
     /**
+     * Účty souhlasu pro platný přístup ({@see CsasCredentialVault::access()}). Po synchronizaci účtů
+     * téhož souhlasu vrátí seznam z paměti procesu, takže propojení dalších účtů banku znovu nevolá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function consentAccounts(#[\SensitiveParameter] array $access): array
+    {
+        return $this->accounts($access);
+    }
+
+    /**
      * Seznam účtů souhlasu. Účty téhož souhlasu sdílejí access token, takže synchronizace
      * dalšího účtu v tomtéž běhu použije seznam načtený pro předchozí účet a banku znovu nevolá.
      * Klíčem je otisk access tokenu: nový token (obnova, jiný souhlas) vždy načte seznam znovu.

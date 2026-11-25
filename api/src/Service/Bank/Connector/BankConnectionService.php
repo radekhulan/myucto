@@ -22,6 +22,8 @@ final class BankConnectionService
      */
     public const MAX_AUTOMATIC_DAYS = 89;
     private const MAX_MANUAL_DAYS = 31;
+    /** Banky, jejichž kvóta volání platí pro celou aplikaci (WEB-API-key), ne pro jeden účet. */
+    private const PROVIDER_WIDE_QUOTA = ['csas'];
 
     public function __construct(
         private readonly BankConnectionRepository $connections,
@@ -274,8 +276,18 @@ final class BankConnectionService
     public function syncAll(): array
     {
         $summary = ['processed' => 0, 'succeeded' => 0, 'skipped' => 0, 'errors' => 0, 'details' => []];
+        $quotaExhausted = [];
         foreach ($this->connections->enabledWithCredentials() as $connection) {
             $summary['processed']++;
+            $provider = (string) $connection['provider'];
+            if (isset($quotaExhausted[$provider])) {
+                $summary['skipped']++;
+                $summary['details'][] = [
+                    'connection_id' => (int) $connection['id'],
+                    'skipped' => 'provider_quota_exhausted',
+                ];
+                continue;
+            }
             if ($this->pacedOut($connection)) {
                 $summary['skipped']++;
                 $summary['details'][] = [
@@ -297,6 +309,12 @@ final class BankConnectionService
                 ];
             } catch (BankConnectorOperationException $e) {
                 if (self::isRateLimit($e->errorCode)) {
+                    // Kvóta celé aplikace u banky: další účty téhož poskytovatele by v tomto běhu
+                    // jen dál čerpaly vyčerpanou kvótu, zkusí se v příštím běhu.
+                    if ($e->errorCode === BankConnectorException::RATE_LIMITED
+                        && in_array($provider, self::PROVIDER_WIDE_QUOTA, true)) {
+                        $quotaExhausted[$provider] = true;
+                    }
                     $summary['skipped']++;
                     $summary['details'][] = [
                         'connection_id' => (int) $connection['id'],

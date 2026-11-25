@@ -1492,6 +1492,7 @@
     "error_order_changed": "The order changed after the interrupted submission. The submission was closed for manual review.",
     "error_too_many_items": "The batch has more items than the bank accepts. Split the order.",
     "error_date_too_far": "The due date is too far in the future for the bank. Prepare the order with an earlier date.",
+    "error_csas_shared_consent": "This account is read through the Česká spořitelna consent of the installation's main company, which is no longer connected. Reconnect the main company's account, or connect this account with its own consent.",
     "error_csas_scope": "The Česká spořitelna consent does not include payment submission. Grant consent again in Bank accounts with submission enabled.",
     "error_csas_mass_authorization": "Your George user may not sign bulk payments. Ask the bank to adjust your disposition rights.",
     "error_signature_unavailable": "The batch cannot be signed now. Reload the stored order status.",

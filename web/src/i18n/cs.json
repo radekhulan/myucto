@@ -1492,6 +1492,7 @@
     "error_order_changed": "Příkaz se od přerušeného odeslání změnil. Odeslání se uzavřelo k ruční kontrole.",
     "error_too_many_items": "Dávka má víc položek, než banka přijme. Rozdělte příkaz.",
     "error_date_too_far": "Datum splatnosti je pro banku příliš daleko v budoucnosti. Připravte příkaz s bližším datem.",
+    "error_csas_shared_consent": "Účet se načítá přes souhlas České spořitelny hlavní firmy instalace a ten už není připojený. Připojte znovu účet hlavní firmy, nebo připojte tento účet vlastním souhlasem.",
     "error_csas_scope": "Souhlas České spořitelny nezahrnuje odesílání plateb. V Bankovních účtech udělte souhlas znovu se zapnutou volbou odesílání.",
     "error_csas_mass_authorization": "Váš uživatel v George nemá právo podepisovat hromadné platby. Požádejte banku o úpravu dispozičních práv.",
     "error_signature_unavailable": "Dávku teď nelze podepsat. Načtěte uložený stav příkazu.",

@@ -248,6 +248,11 @@ final class CsasOnboardingService
             $this->siblings->link($currencyId, $credentials, $remoteAccounts, $previous);
         } catch (\Throwable) {
         }
+        // Účty ostatních firem, které souhlas pokrývá a které nemají vlastní napojení ({@see CsasSharedConsent}).
+        try {
+            $this->siblings->linkShared($credentials, $remoteAccounts, $previous);
+        } catch (\Throwable) {
+        }
         return $currencyId;
     }
 

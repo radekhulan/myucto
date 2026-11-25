@@ -9,6 +9,10 @@ declare(strict_types=1);
  * slouží pro účty připojené dřív. Bez --apply jen vypíše, co by propojil. Na banku volá jen
  * obnovu tokenu a seznam účtů, jednou za souhlas.
  *
+ * Vypíše a s --apply propojí i účty ČS ostatních firem instalace, které souhlas jiné firmy
+ * pokrývá ({@see \MyInvoice\Service\Bank\Connector\CsasSharedConsent}, vypnutí
+ * bank_connectors.csas.shared_consent = false).
+ *
  * Použití: php api/bin/bank-link-sibling-accounts.php [--supplier=ID] [--apply]
  */
 
@@ -23,6 +27,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\Connector\CsasApiClient;
 use MyInvoice\Service\Bank\Connector\CsasCredentialVault;
+use MyInvoice\Service\Bank\Connector\CsasSharedConsentSync;
 use MyInvoice\Service\Bank\Connector\CsasSiblingAccountLinker;
 
 $apply = in_array('--apply', $argv, true);
@@ -61,6 +66,8 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
         echo "firma {$supplierId}, napojení {$connectionId}: přístup nelze přečíst, přeskočeno\n";
         continue;
     }
+    // Převzatý souhlas propojuje jeho nosná firma (níže), ne firma, které ho převzala.
+    if (CsasCredentialVault::isSharedCopy($stored)) continue;
     foreach ($processed as $seen) {
         if (CsasCredentialVault::sameConsent($seen, $stored)) continue 2;
     }
@@ -78,6 +85,16 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
     if ($results === []) echo "  žádné další účty u ČS\n";
     foreach ($results as $result) {
         echo "  účet {$result['currency_id']}: {$result['status']}"
+            . (isset($result['connection_id']) ? " (napojení {$result['connection_id']})" : '') . "\n";
+        if (in_array($result['status'], [CsasSiblingAccountLinker::LINKED, CsasSiblingAccountLinker::RELINKED], true)) $summary['linked']++;
+        if ($result['status'] === CsasSiblingAccountLinker::FAILED) $summary['failed']++;
+    }
+}
+if ($supplierFilter === null) {
+    $shared = $container->get(CsasSharedConsentSync::class)->linkPending($apply, true);
+    echo $shared === null ? "sdílení souhlasů mezi firmami je vypnuté\n" : "souhlasy sdílené mezi firmami:\n";
+    foreach ($shared ?? [] as $result) {
+        echo "  nosná firma {$result['owner_supplier_id']} -> firma {$result['supplier_id']}, účet {$result['currency_id']}: {$result['status']}"
             . (isset($result['connection_id']) ? " (napojení {$result['connection_id']})" : '') . "\n";
         if (in_array($result['status'], [CsasSiblingAccountLinker::LINKED, CsasSiblingAccountLinker::RELINKED], true)) $summary['linked']++;
         if ($result['status'] === CsasSiblingAccountLinker::FAILED) $summary['failed']++;
