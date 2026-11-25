@@ -39,9 +39,10 @@ final class GetInvoiceAction
             (string) ($invoice['currency'] ?? 'CZK') !== 'CZK'
             && empty($invoice['exchange_rate'])
         ) {
-            $demo = DemoReadOnlyMiddleware::enabled($request);
-            $resolved = $this->rateApplier->ensureRate($id, persist: !$demo);
-            $invoice = $demo
+            $readOnly = DemoReadOnlyMiddleware::enabled($request)
+                || $request->getAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID) !== null;
+            $resolved = $this->rateApplier->ensureRate($id, persist: !$readOnly);
+            $invoice = $readOnly
                 ? $this->rateApplier->applyResolvedToInvoiceData($invoice, $resolved)
                 : $this->repo->find($id);
         }

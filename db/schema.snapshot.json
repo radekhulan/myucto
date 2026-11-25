@@ -1247,7 +1247,8 @@
         "2341_vat_classification_energy_reverse_charge.sql",
         "2342_myeet_checkouts.sql",
         "2343_mobile_oidc_codes.sql",
-        "2344_myeet_sale_license.sql"
+        "2344_myeet_sale_license.sql",
+        "2345_myeet_readonly_license.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9334,6 +9335,7 @@
             "columns": {
                 "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
                 "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "license_readonly_until": "bigint(20) unsigned NOT NULL DEFAULT 0",
                 "license_valid_until": "bigint(20) unsigned NOT NULL DEFAULT 0",
                 "license_version": "bigint(20) unsigned NOT NULL DEFAULT 0",
                 "order_id": "char(26) NOT NULL COLLATE ascii_bin",

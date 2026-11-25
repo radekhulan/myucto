@@ -136,6 +136,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Auth/MfaStepUpProofStore.php',
     '*/api/src/Service/Auth/MfaProtectedOperationService.php',
     '*/api/src/Service/Auth/MfaStepUpService.php',
+    '*/api/src/Service/Auth/MyeetCustomerProvisioner.php',
     '*/api/src/Service/Auth/PasskeyService.php',
     '*/api/src/Service/Auth/PasskeySessionTransitionService.php',
     '*/api/src/Service/Auth/PasswordHasher.php',

@@ -73,16 +73,17 @@ final class InvoicePdfRenderer
         bool $forceRegenerate = false,
         ?int $userId = null,
         ?array $invoiceData = null,
+        bool $persist = true,
     ): string
     {
-        $persist = !(bool) $this->config->get('demo.enabled', false);
+        $persist = $persist && !(bool) $this->config->get('demo.enabled', false);
         $invoice = $invoiceData ?? $this->repo->find($invoiceId, includeImportedCzk: true);
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }
         // Interní doklad splátky odběratel nedostává, daňovým dokladem je kalendář (§ 31, § 31a).
         if (!empty($invoice['calendar_id'])) {
-            return $this->render((int) $invoice['calendar_id'], $forceRegenerate, $userId);
+            return $this->render((int) $invoice['calendar_id'], $forceRegenerate, $userId, persist: $persist);
         }
 
         $cachedPath = $this->cachePath($invoice);

@@ -12,6 +12,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\MergedInvoicePdfExporter;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -19,7 +20,9 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[AllowMockObjectsWithoutExpectations]
 final class ExportSelectedPdfActionTest extends TestCase
 {
-    public function testExportsOwnedInvoicesForReadonlyUserAndPreservesOrder(): void
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function testExportsOwnedInvoicesForReadonlyUserAndPreservesOrder(bool $myeetReadOnly): void
     {
         $path = tempnam(sys_get_temp_dir(), 'selected-pdf-test-');
         self::assertNotFalse($path);
@@ -32,12 +35,16 @@ final class ExportSelectedPdfActionTest extends TestCase
         $exporter = $this->createMock(MergedInvoicePdfExporter::class);
         $exporter->expects(self::once())
             ->method('export')
-            ->with([12, 11], ['id' => 7], 3, true, true)
+            ->with([12, 11], ['id' => 7], 3, true, !$myeetReadOnly)
             ->willReturn(['path' => $path, 'signed' => true]);
 
+        $request = $this->request(['ids' => '12,11,12', 'sign_pdf' => '1']);
+        if ($myeetReadOnly) {
+            $request = $request->withAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID, 7);
+        }
         try {
             $response = ($this->action($invoices, $exporter))(
-                $this->request(['ids' => '12,11,12', 'sign_pdf' => '1']),
+                $request,
                 (new ResponseFactory())->createResponse(),
             );
 

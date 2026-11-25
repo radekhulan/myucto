@@ -13,6 +13,8 @@ use MyInvoice\Service\Supplier\SupplierCreator;
 
 final class MyeetCustomerProvisioner
 {
+    public const READ_ONLY_PERIOD_SECONDS = 30 * 86400;
+
     public function __construct(
         private readonly Connection $db,
         private readonly SupplierCreator $suppliers,
@@ -97,36 +99,44 @@ final class MyeetCustomerProvisioner
         });
     }
 
-    public function recordLicense(string $orderId, int $userId, int $supplierId, int $validUntil, int $version): bool
+    public function recordLicense(string $orderId, int $userId, int $supplierId, int $validUntil, int $version, ?int $readOnlyUntil = null): bool
     {
         $pdo = $this->db->pdo();
         $update = $pdo->prepare(
-            'UPDATE myeet_checkouts SET license_valid_until = ?, license_version = ?
+            'UPDATE myeet_checkouts SET license_valid_until = ?, license_readonly_until = ?, license_version = ?
              WHERE order_id = ? AND user_id = ? AND supplier_id = ? AND sale_managed = 1 AND license_version < ?'
         );
-        $update->execute([$validUntil, $version, $orderId, $userId, $supplierId, $version]);
+        $update->execute([$validUntil, $readOnlyUntil ?? 0, $version, $orderId, $userId, $supplierId, $version]);
         if ($update->rowCount() === 1) {
             return true;
         }
         $current = $pdo->prepare(
-            'SELECT license_version, license_valid_until FROM myeet_checkouts
+            'SELECT license_version, license_valid_until, license_readonly_until FROM myeet_checkouts
              WHERE order_id = ? AND user_id = ? AND supplier_id = ? AND sale_managed = 1'
         );
         $current->execute([$orderId, $userId, $supplierId]);
         $row = $current->fetch(\PDO::FETCH_ASSOC);
-        return $row !== false && ((int) $row['license_version'] > $version
-            || ((int) $row['license_version'] === $version && (int) $row['license_valid_until'] === $validUntil));
+        return $row !== false && (
+            ($readOnlyUntil === null && (int) $row['license_version'] > $version)
+            || ((int) $row['license_version'] >= $version && (int) $row['license_valid_until'] === $validUntil
+                && (int) $row['license_readonly_until'] === ($readOnlyUntil ?? 0))
+        );
     }
 
-    public function licenseExpired(int $userId, int $supplierId): bool
+    /** @return array{valid_until: int, readonly_until: int}|null */
+    public function licenseAccess(int $userId, int $supplierId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(MAX(license_valid_until), 0) FROM myeet_checkouts
-             WHERE user_id = ? AND supplier_id = ? AND sale_managed = 1 GROUP BY user_id, supplier_id'
+            'SELECT MAX(license_valid_until) AS valid_until, MAX(license_readonly_until) AS readonly_until
+             FROM myeet_checkouts WHERE user_id = ? AND supplier_id = ? AND sale_managed = 1
+             GROUP BY user_id, supplier_id'
         );
         $stmt->execute([$userId, $supplierId]);
-        $validUntil = $stmt->fetchColumn();
-        return $validUntil !== false && (int) $validUntil <= time();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row === false ? null : [
+            'valid_until' => (int) $row['valid_until'],
+            'readonly_until' => (int) $row['readonly_until'],
+        ];
     }
 
     public function recordInvoice(string $orderId, int $invoiceId): void

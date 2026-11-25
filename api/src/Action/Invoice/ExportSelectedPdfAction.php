@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -89,7 +90,8 @@ final class ExportSelectedPdfAction
                 ['id' => $supplierId],
                 $userId,
                 $sign,
-                !DemoReadOnlyMiddleware::enabled($request),
+                !DemoReadOnlyMiddleware::enabled($request)
+                    && $request->getAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID) === null,
             );
         } catch (\DomainException $e) {
             ob_end_clean();

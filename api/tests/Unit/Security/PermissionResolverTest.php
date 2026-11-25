@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Security;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
@@ -58,6 +59,26 @@ final class PermissionResolverTest extends TestCase
 
         self::assertSame(7, $role->id);
         self::assertSame(AccessLevel::READ, $role->level('invoices'));
+    }
+
+    public function testMyeetReadOnlyPreservesExportWithoutGrantingNewPermissions(): void
+    {
+        $this->insertRole(2, 'Správce firmy', 'staff', true, [
+            'invoices' => AccessLevel::WRITE->value,
+            'utilities.export' => AccessLevel::READ->value,
+        ], 'admin');
+        $resolver = $this->resolver(new SupplierAccess(11, false, null));
+        $request = $this->request(2, 'staff');
+        $role = $resolver->resolve($request->withAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID, 11));
+
+        self::assertSame(AccessLevel::READ, $role->level('invoices'));
+        self::assertSame(AccessLevel::READ, $role->level('utilities.export'));
+        self::assertSame(AccessLevel::NONE, $role->level('purchase_invoices'));
+        self::assertFalse($role->isCompanyAdmin());
+        self::assertSame(AccessLevel::WRITE, $resolver->resolve($request)->level('invoices'));
+        self::assertSame(AccessLevel::WRITE, $resolver->resolve(
+            $request->withAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID, 12),
+        )->level('invoices'));
     }
 
     public function testDeactivatedRoleGrantsNoPermission(): void

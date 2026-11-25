@@ -6,6 +6,7 @@ namespace MyInvoice\Security;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -58,6 +59,11 @@ final class PermissionResolver
             if ($resolved->isSuperadmin() || $defaultType === '' || $resolved->type !== $defaultType) {
                 return EffectiveRole::denied();
             }
+        }
+        if ($request->getAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID) === $access->supplierId) {
+            return new EffectiveRole($resolved->id, 'Pouze čtení', $resolved->type, $resolved->isActive,
+                array_map(static fn (int $level): int => min($level, AccessLevel::READ->value), $resolved->permissions),
+                $resolved->type === 'staff' ? 'readonly' : null);
         }
         return $resolved;
     }

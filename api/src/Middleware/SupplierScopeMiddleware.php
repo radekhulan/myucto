@@ -37,6 +37,7 @@ use Slim\Psr7\Factory\ResponseFactory;
 final class SupplierScopeMiddleware implements MiddlewareInterface
 {
     public const ATTR_CURRENT_ID = 'supplier.current_id';
+    public const ATTR_MYEET_READONLY_SUPPLIER_ID = 'myeet.readonly_supplier_id';
     public const HEADER_NAME     = 'X-Supplier-Id';
 
     public function __construct(
@@ -101,16 +102,29 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
         }
 
+        $selfService = in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true);
         if ($access->supplierId > 0 && (int) ($user['id'] ?? 0) > 0
             && !($user['is_superadmin'] ?? false)
             && $this->config?->get('myeet.sale_managed', false) === true
             && $this->config->get('app.url') === 'https://eet.myucto.online'
             && $request->getUri()->getHost() === 'eet.myucto.online'
-            && !in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)
-            && !str_starts_with($path, '/api/public/')
-            && $this->myeet?->licenseExpired((int) $user['id'], $access->supplierId)) {
-            return Json::error($this->responseFactory->createResponse(402),
-                'myeet_license_expired', 'Platnost licence MyEET pro tuto firmu skončila.', 402);
+            && (!$selfService || $path === '/api/auth/me' || $path === '/api/auth/api-me')
+            && !str_starts_with($path, '/api/public/')) {
+            $license = $this->myeet?->licenseAccess((int) $user['id'], $access->supplierId);
+            $now = time();
+            if ($license !== null && $license['valid_until'] <= $now) {
+                if ($license['readonly_until'] > $now) {
+                    $request = $request->withAttribute(self::ATTR_MYEET_READONLY_SUPPLIER_ID, $access->supplierId);
+                    if (!$selfService && !in_array($request->getMethod(), ['GET', 'HEAD', 'OPTIONS'], true)) {
+                        return Json::error($this->responseFactory->createResponse(402),
+                            'myeet_license_readonly', 'Firma je dočasně dostupná jen pro čtení a export.', 402,
+                            ['readonly_until' => $license['readonly_until']]);
+                    }
+                } elseif (!$selfService) {
+                    return Json::error($this->responseFactory->createResponse(402),
+                        'myeet_license_expired', 'Platnost licence MyEET pro tuto firmu skončila.', 402);
+                }
+            }
         }
 
         SupplierWriteGenerations::setRequestSupplier($access->supplierId);

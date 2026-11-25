@@ -113,10 +113,18 @@ final class MyeetCheckoutActivationAction
             || !is_int($body['version'] ?? null) || $body['version'] <= 0) {
             return $this->invalid($response);
         }
-        if (!$this->provisioner->recordLicense($body['order_id'], $body['user_id'], $body['supplier_id'], $body['valid_until'], $body['version'])) {
+        $readOnlyUntil = $body['readonly_until'] ?? null;
+        if (array_key_exists('readonly_until', $body) && (!is_int($readOnlyUntil) || $readOnlyUntil < 0
+            || ($readOnlyUntil > 0 && ($body['valid_until'] === 0
+                || $readOnlyUntil - $body['valid_until'] !== MyeetCustomerProvisioner::READ_ONLY_PERIOD_SECONDS)))) {
+            return $this->invalid($response);
+        }
+        if (!$this->provisioner->recordLicense(
+            $body['order_id'], $body['user_id'], $body['supplier_id'], $body['valid_until'], $body['version'], $readOnlyUntil,
+        )) {
             return $this->conflict($response);
         }
-        return Json::ok($response, ['data' => ['saved' => true]]);
+        return Json::ok($response, ['data' => ['saved' => true, 'readonly_until' => $readOnlyUntil ?? 0]]);
     }
 
     private function customer(array $body, mixed $ico): array

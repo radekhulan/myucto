@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
@@ -42,19 +43,20 @@ final class PdfAction
 
         // Backfill kurzu (cache → ČNB → last known) pro EUR / cizí měnu bez kurzu —
         // PDF musí přepočet vždy obsahovat, pokud je kurz dostupný.
-        $demo = DemoReadOnlyMiddleware::enabled($request);
+        $readOnly = DemoReadOnlyMiddleware::enabled($request)
+            || $request->getAttribute(SupplierScopeMiddleware::ATTR_MYEET_READONLY_SUPPLIER_ID) !== null;
         if (
             (string) ($invoice['currency'] ?? 'CZK') !== 'CZK'
             && empty($invoice['exchange_rate'])
         ) {
-            $resolved = $this->rateApplier->ensureRate($id, persist: !$demo);
-            if ($demo) {
+            $resolved = $this->rateApplier->ensureRate($id, persist: !$readOnly);
+            if ($readOnly) {
                 $invoice = $this->rateApplier->applyResolvedToInvoiceData($invoice, $resolved);
             }
         }
 
         $q = $request->getQueryParams();
-        $regenerate = !$demo && !empty($q['regenerate']);
+        $regenerate = !$readOnly && !empty($q['regenerate']);
         $download   = !empty($q['download']);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = isset($user['id']) ? (int) $user['id'] : null;
@@ -62,7 +64,7 @@ final class PdfAction
         // Zachyť případné echo/warning z 3rd party libs během renderu.
         ob_start();
         try {
-            $path = $this->renderer->render($id, $regenerate, $userId, $demo ? $invoice : null);
+            $path = $this->renderer->render($id, $regenerate, $userId, $readOnly ? $invoice : null, persist: !$readOnly);
         } catch (\Throwable $e) {
             ob_end_clean();
             return Json::internalError($response, 'pdf_failed', $e->getMessage(), 500);
