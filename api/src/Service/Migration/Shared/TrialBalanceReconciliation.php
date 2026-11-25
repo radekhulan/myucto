@@ -130,21 +130,36 @@ final class TrialBalanceReconciliation
         if ($rows === []) {
             return null;
         }
-        $parts = array_map(
+        $describe = static fn (array $list): string => implode('; ', array_map(
             static fn (array $r): string => sprintf(
                 '%s %s Kč%s',
                 $r['row_code'],
                 number_format((float) $r['net'], 2, ',', ' '),
                 $r['column'] === 'previous' ? ' (minulé období)' : '',
             ),
-            $rows,
-        );
+            $list,
+        ));
+        // Peněžní prostředky (C.IV.) opravnou položku nemají: záporná pokladna nebo účet
+        // je stav účtu 211/221 ve zdroji, ne chyba mapování výkazů.
+        $money = array_values(array_filter($rows, static fn (array $r): bool => str_starts_with((string) $r['row_code'], 'C.IV.')));
+        $other = array_values(array_filter($rows, static fn (array $r): bool => !str_starts_with((string) $r['row_code'], 'C.IV.')));
+        $texts = [];
+        if ($other !== []) {
+            $texts[] = sprintf(
+                'Rok %d: rozvaha má řádek aktiv se záporným netto (%s). Opravná položka je nejspíš zařazená jinam než pohledávka, ke které patří; upravte výjimky mapování výkazů.',
+                $year,
+                $describe($other),
+            );
+        }
+        if ($money !== []) {
+            $texts[] = sprintf(
+                'Rok %d: peněžní prostředky v rozvaze mají záporný zůstatek (%s). Pokladna ve zdroji šla do minusu, nebo jde o kontokorent, který patří do závazků; zkontrolujte doklady pokladny a banky ve zdrojovém programu.',
+                $year,
+                $describe($money),
+            );
+        }
 
-        return sprintf(
-            'Rok %d: rozvaha má řádek aktiv se záporným netto (%s). Opravná položka je nejspíš zařazená jinam než pohledávka, ke které patří; upravte výjimky mapování výkazů.',
-            $year,
-            implode('; ', $parts),
-        );
+        return implode(' ', $texts);
     }
 
     public static function assertStatementFrameworkSupported(string $framework): void

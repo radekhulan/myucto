@@ -12,6 +12,7 @@ import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
+import MigrationOtherCompanyNotice from '@/components/migration/MigrationOtherCompanyNotice.vue'
 import { migrationYearLabel } from '@/utils/migrationYear'
 
 /**
@@ -246,9 +247,9 @@ const actions = computed<ActionItem[]>(() => {
         </div>
         <p class="mb-5 text-sm text-neutral-500">{{ tt('supplier_ico', { ico: upload.supplier_ico || '—' }) }}</p>
 
-        <p v-if="!years.length" class="mb-5 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="premier-no-agenda">
+        <MigrationOtherCompanyNotice v-if="!years.length" :agendas="agendas" :supplier-ico="upload.supplier_ico" testid="premier-no-agenda">
           {{ upload.supplier_ico ? tt('no_matching_agenda', { ico: upload.supplier_ico }) : tt('supplier_ico_missing') }}
-        </p>
+        </MigrationOtherCompanyNotice>
         <template v-else>
           <div class="mb-5 text-sm" data-testid="premier-years">
             <p class="font-medium">{{ tt('year') }}: <span data-testid="premier-years-selected">{{ yearsLabel || '—' }}</span></p>

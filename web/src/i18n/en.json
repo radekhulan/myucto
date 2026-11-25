@@ -2791,6 +2791,12 @@
     "body_native": "This company is a non-profit organisation or another accounting unit under Decree 504/2002 Coll. (association, foundation, institute, owners' association). A MyÚčto export transfers the chart of accounts and the journal only into a company with the same accounting framework (Decree 500 or 504) and does not transfer members and fees, grants, capital or the non-profit income tax records. The transfer has not been verified for non-profit organisations, so please contact support before the transfer.",
     "contact": "Contact support"
   },
+  "migration_other_company": {
+    "switch_hint": "The data belongs to {company} (company ID {ico}), but you uploaded it in {current} (company ID {ownIco}). Switch to {company} and upload the data again there.",
+    "missing_hint": "The data belongs to {company} (company ID {ico}), but you uploaded it in {current} (company ID {ownIco}). There is no company with ID {ico} in MyÚčto yet: create it, switch to it and upload the data there.",
+    "switch": "Switch to {company}",
+    "create": "Create company"
+  },
   "migration_payroll_notice": {
     "title": "Payroll will not be migrated to MyÚčto",
     "summary": "The migrated data contain payroll of {employees} employees {period} ({months} months). This payroll will not be migrated.",

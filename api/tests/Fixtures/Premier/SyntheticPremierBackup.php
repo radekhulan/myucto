@@ -137,6 +137,8 @@ final class SyntheticPremierBackup
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
      *                           se zaúčtováním v deníku, viz {@see payroll()}
      *   `payroll_mismatch`      s `payroll`: jeden měsíc deníku nesedí na mzdy
+     *   `payroll_employer_fraction` s `payroll`: vztah 3 nese v MZDY přesný podíl sociálního pojištění
+     *                           zaměstnavatele (9 919,68), deník úhrn zaokrouhlený nahoru (9 920)
      *   `payroll_detail`        s `payroll`: další vztahy a evidence mzdového modulu, viz {@see payrollDetail()}
      *   `payroll_nonresident`   s `payroll_detail`: osoba DPP (INTER 6) je daňový nerezident s kartou
      *                           `PER_NERZ` (stát rezidence SK); karta rezidenta (CZ) u INTER 5
@@ -406,7 +408,7 @@ final class SyntheticPremierBackup
         if (!empty($flags['payroll'])) {
             array_push($chart, ['331', '100', 'Zaměstnanci'], ['336', '100', 'Zúčtování sociálního pojištění'], ['336', '200', 'Zúčtování zdravotního pojištění'],
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
-            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']), !empty($flags['payroll_unknown_codes']));
+            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']), !empty($flags['payroll_unknown_codes']), !empty($flags['payroll_employer_fraction']));
             if (!empty($flags['payroll_detail']) && !empty($flags['payroll_nonresident'])) {
                 self::nonResident($tables);
             }
@@ -609,7 +611,7 @@ final class SyntheticPremierBackup
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      */
-    private static function payroll(array &$tables, bool $mismatch, bool $detail = false, bool $unknownCodes = false): void
+    private static function payroll(array &$tables, bool $mismatch, bool $detail = false, bool $unknownCodes = false, bool $employerFraction = false): void
     {
         $tables['PERSONAL'] = [
             [['INTER', 'N', 8], ['CISLO', 'N', 10], ['VSTUP', 'D'], ['VYSTUP', 'D'], ['BANKA_UCET', 'C', 30], ['BANKA_KOD', 'C', 20], ['UVA_KATE', 'C', 3],
@@ -691,7 +693,11 @@ final class SyntheticPremierBackup
         $inter = 300;
         foreach ($months as [$relation, $year, $month, $values]) {
             $days = (int) date('t', (int) mktime(0, 0, 0, $month, 1, $year));
-            $rows[] = $values + ['INTER' => $relation, 'ROK' => $year, 'MESIC' => $month, 'KAL_DNY' => $days, 'KAL_DNYPP' => $days, 'ID' => "M{$relation}-{$year}-{$month}"];
+            $row = $values;
+            if ($employerFraction && $relation === 3) {
+                $row['MZ_SOCF'] = 9919.68;
+            }
+            $rows[] = $row + ['INTER' => $relation, 'ROK' => $year, 'MESIC' => $month, 'KAL_DNY' => $days, 'KAL_DNYPP' => $days, 'ID' => "M{$relation}-{$year}-{$month}"];
             $date = sprintf('%04d-%02d-%02d', $year, $month, $days);
             $number = sprintf('%02d%02d%d', $year % 100, $month, $relation);
             $gross = ($values['MZ_HRUBA'] ?? 0) + ($values['MZ_ODSTAT'] ?? 0);

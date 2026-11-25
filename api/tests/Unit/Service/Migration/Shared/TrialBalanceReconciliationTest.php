@@ -75,6 +75,22 @@ final class TrialBalanceReconciliationTest extends TestCase
         self::assertSame([], TrialBalanceReconciliation::balanceSheet(['checks' => ['balanced' => true]])['negative_net_rows']);
     }
 
+    public function testNegativeCashIsNotBlamedOnAllowanceMapping(): void
+    {
+        $text = (string) TrialBalanceReconciliation::negativeNetWarning(2091, [
+            ['row_code' => 'C.IV.1.', 'column' => 'current', 'net' => -390.0],
+        ]);
+        self::assertStringContainsString('peněžní prostředky v rozvaze mají záporný zůstatek (C.IV.1. -390,00 Kč)', $text);
+        self::assertStringNotContainsString('Opravná položka', $text, 'Pokladna opravnou položku nemá.');
+
+        $both = (string) TrialBalanceReconciliation::negativeNetWarning(2091, [
+            ['row_code' => 'C.II.2.1.', 'column' => 'current', 'net' => -18000.0],
+            ['row_code' => 'C.IV.1.', 'column' => 'previous', 'net' => -390.0],
+        ]);
+        self::assertStringContainsString('záporným netto (C.II.2.1. -18 000,00 Kč). Opravná položka', $both);
+        self::assertStringContainsString('záporný zůstatek (C.IV.1. -390,00 Kč (minulé období))', $both);
+    }
+
     public function test504ConversionBalanceDoesNotPretendToHave500Diagnostics(): void
     {
         $this->expectException(\MyInvoice\Service\Accounting\Reports\ReportException::class);
