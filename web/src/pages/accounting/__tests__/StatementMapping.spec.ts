@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   suggestStatementOverridesFromXml: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  routeQuery: vi.fn(),
 }))
 
 vi.mock('@/api/accounting', () => ({
@@ -42,6 +43,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  useRoute: () => ({ query: m.routeQuery() ?? {} }),
 }))
 
 import StatementMapping from '@/pages/accounting/StatementMapping.vue'
@@ -75,6 +77,16 @@ describe('StatementMapping.vue', () => {
       { id: 6, supplier_id: 1, fiscal_year: 2099, starts_on: '2099-01-01', ends_on: '2099-12-31', status: 'open', closed_at: null, created_at: '' },
     ])
     m.saveStatementOverrides.mockResolvedValue({ overrides: [] })
+  })
+
+  it('otevře účelovou výsledovku v období z odkazu uzávěrky', async () => {
+    m.routeQuery.mockReturnValue({ period_id: '6', statement_type: 'income_statement_purpose' })
+    m.getStatementOverrides.mockResolvedValue(overview())
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    expect(m.getStatementOverrides).toHaveBeenCalledWith(6, 'income_statement_purpose')
+    expect(wrapper.findAll('[data-test="type-tab"]')).toHaveLength(3)
   })
 
   it('(a) ukáže účty s řádkem, kam dnes jdou, a zdroj zařazení', async () => {

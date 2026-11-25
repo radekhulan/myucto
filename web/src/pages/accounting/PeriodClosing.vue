@@ -1041,6 +1041,18 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                       :value="c.value" :export-url="checkExportUrl(c.key)"
                       :list-link="docListLink(c.key)" :period-id="periodId" />
                     <span v-else class="font-mono break-all">{{ checkValue(c.value) }}</span>
+                    <div v-if="c.key === 'entity_category_unavailable' && c.value && typeof c.value === 'object'
+                        && 'mapping_period_id' in c.value && typeof c.value.mapping_period_id === 'number'"
+                      class="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1">
+                      <span v-if="'mapping_fiscal_year' in c.value" class="text-neutral-500">
+                        {{ t('accounting.closing.turnover_mapping.period', { year: c.value.mapping_fiscal_year }) }}
+                      </span>
+                      <RouterLink v-for="form in ['income_statement', 'income_statement_purpose']" :key="form"
+                        :to="{ name: 'accounting-statement-mapping', query: { period_id: c.value.mapping_period_id, statement_type: form } }"
+                        class="text-primary-700 underline">
+                        {{ t(`accounting.closing.turnover_mapping.${form}`) }}
+                      </RouterLink>
+                    </div>
                   </td>
                 </tr>
               </tbody>

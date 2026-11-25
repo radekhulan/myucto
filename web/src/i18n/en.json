@@ -19599,7 +19599,8 @@
         "explainer_title": "When to use an exception",
         "explainer_body": "The global map places an account by its synthetic number. The regulation, however, leaves the company choices the account number cannot express: a shareholder loan due in more than a year belongs to long-term liabilities, income and expenses towards a controlled or controlling entity go to their own sub-rows, and a specific analytic account may belong elsewhere than its synthetic account. An exception applies only to this company and is used by the balance sheet, the income statement, their exports and the corporate income tax return appendix.",
         "tab_balance_sheet": "Balance sheet",
-        "tab_income_statement": "Income statement",
+        "tab_income_statement": "Income statement by nature",
+        "tab_income_statement_purpose": "Income statement by function",
         "search_placeholder": "Search account or name",
         "only_overrides": "Exceptions only",
         "only_balances": "With balance only",
@@ -23055,6 +23056,11 @@
         "confirm_text_17_7": "Once the financial statements are approved, the books can no longer be reopened (§17(7) of the Accounting Act). Corrections are made in the following period (§35).",
         "locked_hint": "The statements are approved and the approval cannot be revoked (§17/7). Corrections are made in the period in which the error is found (§35)."
       },
+      "turnover_mapping": {
+        "period": "Mismatch in period {year}",
+        "income_statement": "Mapping by nature",
+        "income_statement_purpose": "Mapping by function"
+      },
       "reopen": {
         "button": "Reopen",
         "title": "Reopening period {year}",
@@ -25498,6 +25504,13 @@
   "checks": {
     "doc_date": "Date",
     "issue": {
+      "turnover_only_nature": "Included in net turnover only in the statement by nature",
+      "turnover_only_purpose": "Included in net turnover only in the statement by function",
+      "turnover_amount_differs": "The amount included in net turnover differs between the statements",
+      "turnover_unmapped_revenue_nature": "Revenue is missing from the turnover mapping by nature",
+      "turnover_unmapped_revenue_purpose": "Revenue is missing from the turnover mapping by function",
+      "turnover_ambiguous_revenue_nature": "Revenue in turnover mapping by nature differs from the account balance",
+      "turnover_ambiguous_revenue_purpose": "Revenue in turnover mapping by function differs from the account balance",
       "amount_mismatch": "amount does not match",
       "posting_period_after_horizon": "From {from} to {to}, journal entries {count}",
       "counterparty_mismatch": "counterparty does not match",

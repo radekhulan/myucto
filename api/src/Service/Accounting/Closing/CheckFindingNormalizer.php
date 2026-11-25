@@ -230,7 +230,7 @@ final class CheckFindingNormalizer
             'amount'       => self::pick($row, self::AMOUNT_KEYS),
             'note'         => isset($row['note']) ? (string) $row['note']
                 : (isset($row['line_count']) ? (int) $row['line_count'] . '×' : null),
-        ];
+        ] + (isset($row['issues']) ? ['issues' => $row['issues']] : []);
     }
 
     /**

@@ -262,6 +262,8 @@ const truncated = computed(() => parsed.value?.truncated === true)
 const isAccount = computed(() =>
   parsed.value?.kind === 'account'
   || (parsed.value?.kind === undefined && Array.isArray(parsed.value?.accounts)))
+const hasAccountIssues = computed(() => findings.value.some(f => f.issues?.length))
+const showAccountAmount = computed(() => !hasAccountIssues.value || findings.value.some(f => f.amount != null))
 
 /** Skalární hodnoty (zůstatky, rozdíly) — kontrola bez seznamu nálezů. */
 const scalars = computed<[string, unknown][]>(() => {
@@ -468,7 +470,8 @@ function docLink(f: Finding): RouteLocationRaw | null {
             <tr v-if="isAccount">
               <th class="px-3 py-2 text-left font-medium">{{ t('checks.account') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('checks.name') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ t('checks.amount') }}</th>
+              <th v-if="showAccountAmount" class="px-3 py-2 text-right font-medium">{{ t('checks.amount') }}</th>
+              <th v-if="hasAccountIssues" class="px-3 py-2 text-left font-medium">{{ t('checks.note') }}</th>
             </tr>
             <tr v-else>
               <th class="px-3 py-2 text-left font-medium">{{ t('checks.document') }}</th>
@@ -489,7 +492,8 @@ function docLink(f: Finding): RouteLocationRaw | null {
                   <span v-else>{{ f.account_code }}</span>
                 </td>
                 <td class="px-3 py-2">{{ f.name }}</td>
-                <td class="px-3 py-2 text-right font-mono">{{ fmtAmount(f.amount) }}</td>
+                <td v-if="showAccountAmount" class="px-3 py-2 text-right font-mono">{{ fmtAmount(f.amount) }}</td>
+                <td v-if="hasAccountIssues" class="px-3 py-2 text-xs text-neutral-500">{{ issueText(f) }}</td>
               </template>
               <template v-else>
                 <td class="px-3 py-2 font-mono">

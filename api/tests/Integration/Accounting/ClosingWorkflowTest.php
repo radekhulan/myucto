@@ -487,9 +487,20 @@ final class ClosingWorkflowTest extends TestCase
         self::assertNotNull($check);
         self::assertSame('warning', $check['severity']);
         self::assertFalse($check['ok']);
-        self::assertStringContainsString('Čistý obrat', (string) $check['value']);
+        self::assertIsArray($check['value']);
+        self::assertSame('account', $check['value']['kind']);
+        self::assertSame(1, $check['value']['count']);
+        self::assertSame('648', $check['value']['findings'][0]['account_code']);
+        self::assertSame(['turnover_only_nature'], $check['value']['findings'][0]['issues']);
         self::assertNull($this->findCheck($precheck['checks'], 'section18_statements_required'));
         self::assertNotNull($this->findCheck($precheck['checks'], 'unposted_invoices'), 'Ostatní kontroly doběhnou.');
+
+        $nextYear = self::YEAR + 1;
+        $nextPeriod = $this->periods->create($this->supplierId, $nextYear, $nextYear . '-01-01', $nextYear . '-12-31');
+        $historicalConflict = $this->closing->checkFindings($this->supplierId, $nextPeriod, 'entity_category_unavailable');
+        self::assertArrayHasKey('mapping_period_id', $historicalConflict['value']);
+        self::assertSame($this->periodId, $historicalConflict['value']['mapping_period_id']);
+        self::assertSame(self::YEAR, $historicalConflict['value']['mapping_fiscal_year']);
     }
 
     public function testPrecheckDoesNotRequireSupplementaryStatementsForAuditedMicroEntity(): void

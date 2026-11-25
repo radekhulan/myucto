@@ -6509,7 +6509,9 @@ final class ClosingService
                     'key' => 'entity_category_unavailable',
                     'severity' => 'warning',
                     'ok' => false,
-                    'value' => $e->getMessage(),
+                    'value' => $e->errorCode === 'net_turnover_membership_conflict' && !empty($e->context['accounts'])
+                        ? $e->context
+                        : $e->getMessage(),
                 ];
             }
         }

@@ -19599,7 +19599,8 @@
         "explainer_title": "Kdy výjimku použít",
         "explainer_body": "Globální mapa zařazuje účet podle čísla syntetiky. Předpis ale nechává firmě volby, které z čísla účtu nevyčtete: půjčka od společníka splatná za víc než rok patří do dlouhodobých závazků, výnosy a náklady vůči ovládané či ovládající osobě do vlastních podřádků a konkrétní analytika může patřit jinam než její syntetika. Výjimka platí jen pro tuto firmu a použije ji rozvaha, výsledovka, jejich exporty i příloha přiznání DPPO.",
         "tab_balance_sheet": "Rozvaha",
-        "tab_income_statement": "Výsledovka",
+        "tab_income_statement": "Výsledovka · druhové",
+        "tab_income_statement_purpose": "Výsledovka · účelové",
         "search_placeholder": "Hledat účet nebo název",
         "only_overrides": "Jen s výjimkou",
         "only_balances": "Jen se zůstatkem",
@@ -23055,6 +23056,11 @@
         "confirm_text_17_7": "Po schválení účetní závěrky již nelze účetní knihy znovu otevřít (§17 odst. 7 ZoÚ). Opravy se provádějí až v následujícím období (§35 ZoÚ).",
         "locked_hint": "Závěrka je schválená a schválení nelze zrušit (§17/7 ZoÚ). Opravy se provádějí v období zjištění (§35 ZoÚ)."
       },
+      "turnover_mapping": {
+        "period": "Nesoulad za období {year}",
+        "income_statement": "Druhové mapování",
+        "income_statement_purpose": "Účelové mapování"
+      },
       "reopen": {
         "button": "Znovuotevřít",
         "title": "Znovuotevření období {year}",
@@ -25498,6 +25504,13 @@
   "checks": {
     "doc_date": "Datum",
     "issue": {
+      "turnover_only_nature": "Do čistého obratu vstupuje jen v druhovém členění",
+      "turnover_only_purpose": "Do čistého obratu vstupuje jen v účelovém členění",
+      "turnover_amount_differs": "Do čistého obratu vstupuje v každém členění jiná částka",
+      "turnover_unmapped_revenue_nature": "Výnos chybí v druhovém mapování obratu",
+      "turnover_unmapped_revenue_purpose": "Výnos chybí v účelovém mapování obratu",
+      "turnover_ambiguous_revenue_nature": "Výnos v druhovém mapování obratu nesouhlasí se zůstatkem účtu",
+      "turnover_ambiguous_revenue_purpose": "Výnos v účelovém mapování obratu nesouhlasí se zůstatkem účtu",
       "amount_mismatch": "částka nesedí",
       "posting_period_after_horizon": "Od {from} do {to}, počet zápisů v deníku {count}",
       "counterparty_mismatch": "protistrana nesedí",

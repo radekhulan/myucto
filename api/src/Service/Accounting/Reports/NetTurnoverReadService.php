@@ -40,16 +40,61 @@ final class NetTurnoverReadService
             array_values(array_unique($split)), array_values(array_unique($preserve)),
         );
         $selected = $this->settings->getNetTurnoverExtraRows($supplierId);
-        $previous = null;
+        $projections = [];
         foreach ($forms as $type => $form) {
-            $result = $this->projection->project(
+            $projections[$type] = $this->projection->project(
                 $form['rows'], $form['map'], $balances, $type, (string) $period['starts_on'], $selected[$type] ?? [],
             );
-            if ($result['findings'] !== [] || ($previous !== null && $previous['members'] !== $result['members'])) {
-                throw new ReportException('net_turnover_membership_conflict', 'Čistý obrat pro kategorizaci nelze určit. V nastavení „Čistý obrat: výnosy obchodního modelu“ ověřte shodné zahrnutí výnosů v druhovém i účelovém členění výsledovky a úplnost mapování účtů do výkazů.');
-            }
-            $previous = $result;
         }
-        return $previous['amount'];
+        $nature = $projections['income_statement'];
+        $purpose = $projections[FinancialStatementService::TYPE_PURPOSE];
+        if ($nature['findings'] !== [] || $purpose['findings'] !== [] || $nature['members'] !== $purpose['members']) {
+            throw new ReportException('net_turnover_membership_conflict',
+                'Čistý obrat pro kategorizaci nelze určit. V nastavení „Čistý obrat: výnosy obchodního modelu“ ověřte shodné zahrnutí výnosů v druhovém i účelovém členění výsledovky a úplnost mapování účtů do výkazů.',
+                context: [
+                    'accounts' => self::conflictingAccounts($nature, $purpose, $balances),
+                    'mapping_period_id' => (int) $period['id'],
+                    'mapping_fiscal_year' => (int) $period['fiscal_year'],
+                ]);
+        }
+        return $nature['amount'];
+    }
+
+    private static function conflictingAccounts(array $nature, array $purpose, array $balances): array
+    {
+        $issues = [];
+        foreach (['nature' => $nature, 'purpose' => $purpose] as $form => $projection) {
+            foreach ($projection['findings'] as $finding) {
+                $issues[$finding['account_code']][] = 'turnover_' . $finding['code'] . '_' . $form;
+            }
+        }
+        $natureMembers = $nature['members'];
+        $purposeMembers = $purpose['members'];
+        foreach (array_keys($natureMembers + $purposeMembers) as $member) {
+            $byNature = $natureMembers[$member] ?? null;
+            $byPurpose = $purposeMembers[$member] ?? null;
+            if ($byNature === $byPurpose) {
+                continue;
+            }
+            [, $code] = explode(':', $member, 3);
+            $issues[$code][] = match (true) {
+                $byNature === null => 'turnover_only_purpose',
+                $byPurpose === null => 'turnover_only_nature',
+                default => 'turnover_amount_differs',
+            };
+        }
+
+        $accounts = array_column($balances, null, 'code');
+        ksort($issues, SORT_NATURAL);
+        $findings = [];
+        foreach ($issues as $code => $reasons) {
+            $findings[] = [
+                'account_code' => (string) $code,
+                'account_id' => (int) $accounts[$code]['account_id'],
+                'name' => $accounts[$code]['name'],
+                'issues' => array_values(array_unique($reasons)),
+            ];
+        }
+        return $findings;
     }
 }
