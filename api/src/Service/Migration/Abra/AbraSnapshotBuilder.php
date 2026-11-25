@@ -819,6 +819,7 @@ final class AbraSnapshotBuilder
     private function scopeLinks(array &$snapshot, array &$meta): void
     {
         $selected = $this->importedEndpointKeys;
+        $selectedIds = $this->importedEndpointKeys;
         $untyped = [];
         foreach (['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka', 'pokladni-pohyb'] as $evidence) {
             foreach ($snapshot[$evidence] as $row) {
@@ -831,6 +832,9 @@ final class AbraSnapshotBuilder
                     foreach (self::tokens($row[$field] ?? null) as $token) {
                         $selected[$evidence . '|' . $token] = true;
                         $untyped[$token] = true;
+                        if ($field === 'id') {
+                            $selectedIds[$evidence . '|' . $token] = true;
+                        }
                     }
                 }
             }
@@ -841,24 +845,28 @@ final class AbraSnapshotBuilder
                 continue;
             }
             $matches = false;
-            $movementReferences = [];
+            $movementReferences = false;
             foreach (['a', 'b'] as $side) {
-                $relation = AbraSource::relation($row[$side . '@ref'] ?? $row[$side] ?? null);
+                $raw = $row[$side . '@ref'] ?? $row[$side] ?? null;
+                $relation = AbraSource::relation($raw);
                 $evidence = $relation !== null ? self::relationEvidence($relation['evidence']) : '';
                 if (in_array($evidence, ['banka', 'pokladni-pohyb'], true)) {
-                    $movementReferences[] = $evidence . '|' . $relation['key'];
+                    $movementReferences = true;
+                    $lookup = self::isIdReference($raw) ? $selectedIds : $selected;
+                    $matches = $matches || isset($lookup[$evidence . '|' . $relation['key']]);
                 }
             }
-            if ($movementReferences !== []) {
-                $matches = array_intersect_key(array_fill_keys($movementReferences, true), $selected) !== [];
+            if ($movementReferences) {
                 if ($matches) $kept[] = $row;
                 continue;
             }
             foreach (['a', 'b'] as $side) {
-                $relation = AbraSource::relation($row[$side . '@ref'] ?? $row[$side] ?? null);
+                $raw = $row[$side . '@ref'] ?? $row[$side] ?? null;
+                $relation = AbraSource::relation($raw);
                 $evidence = $relation !== null ? self::relationEvidence($relation['evidence']) : '';
                 if ($evidence !== '') {
-                    $matches = isset($selected[$evidence . '|' . $relation['key']]);
+                    $lookup = self::isIdReference($raw) ? $selectedIds : $selected;
+                    $matches = isset($lookup[$evidence . '|' . $relation['key']]);
                 } else {
                     $references = [];
                     self::allScalarTokens($row[$side] ?? null, $references);
@@ -875,6 +883,25 @@ final class AbraSnapshotBuilder
             $meta['excluded_by_period']['vazba'] = $excluded;
         }
         $snapshot['vazba'] = $kept;
+    }
+
+    /**
+     * Číselný odkaz (`/banka/2025.json`) je interní ID záznamu. Nesmí se shodovat s částí
+     * kódu dokladu, třeba s rokem v `BANK-01/2025`; kód se odkazuje přes `code:`.
+     */
+    private static function isIdReference(mixed $value): bool
+    {
+        if (is_array($value)) {
+            $value = $value['id'] ?? $value['evidencePath'] ?? $value['@ref'] ?? null;
+        }
+        if (!is_scalar($value)) {
+            return false;
+        }
+        $text = trim((string) $value);
+        if (str_ends_with($text, '.json')) {
+            $text = substr($text, 0, -5);
+        }
+        return preg_match('~(?:code|ext|key):~i', $text) !== 1 && preg_match('~(?:^|/)\d+$~D', $text) === 1;
     }
 
     /** @param array<string,bool> $out */
