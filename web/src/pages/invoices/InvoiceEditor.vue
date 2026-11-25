@@ -3092,6 +3092,8 @@ async function saveDocument(payload: InvoicePayload): Promise<void> {
       saved = await invoicesApi.create(payload)
       if (wrBillingSnapshot.value) billingDraftId.value = saved.id
     }
+    // Editor může po uložení zůstat otevřený (selže výkaz), další uložení porovnává s tímto stavem.
+    if (saved.tags) storedTagNames.value = saved.tags.map(tag => tag.name)
     if (wrBillingSnapshot.value) {
       if (legacyItemIndex >= 0) wrBillingLegacyItemId.value = saved.items[legacyItemIndex]?.id ?? null
       syncBillingInvoiceItems(saved.items)
