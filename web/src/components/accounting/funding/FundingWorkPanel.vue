@@ -280,7 +280,7 @@ defineExpose({ reload })
 
   <template v-if="!selected">
    <div class="flex flex-wrap items-end gap-3">
-    <label :class="[formLabel, 'w-full max-w-lg']">{{ t('nonprofitFunding.period') }}
+    <label :class="[formLabel, 'w-full max-w-lg']">{{ t('nonprofitFunding.work.period') }}
      <select v-model.number="period" :class="input" :disabled="busy" data-field="work-period"><option v-for="p in periods" :key="p.id" :value="p.id">{{ range(p.starts_on, p.ends_on) }} · {{ t(`nonprofitFunding.period_${p.status}`) }}</option></select>
     </label>
    </div>
@@ -292,7 +292,7 @@ defineExpose({ reload })
      <table class="w-full text-sm" data-section="work-sources">
       <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500"><tr>
        <th class="px-3 py-2">{{ t('nonprofitFunding.name') }}</th><th class="px-3 py-2">{{ t('nonprofitFunding.provider') }}</th>
-       <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.budget') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.received') }}</th>
+       <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.budget') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.received') }}</th>
        <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.allocated') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.documented') }}</th>
        <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.remaining') }}</th><th class="px-3 py-2">{{ t('nonprofitFunding.work.state') }}</th>
       </tr></thead>
@@ -312,7 +312,7 @@ defineExpose({ reload })
      <button v-for="s in overview.sources" :key="s.id" type="button" class="block w-full rounded-lg border border-neutral-200 bg-surface p-4 text-left shadow-sm" :data-source="s.id" @click="open(s.id)">
       <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ s.title }}</span><span v-if="s.status === 'cancelled'" :class="quietBadge('neutral')">{{ t('nonprofitFunding.work.cancelledBadge') }}</span><span v-else-if="s.totals.review_count" :class="loudBadge('warning')">{{ t('nonprofitFunding.work.reviewCount', { count: s.totals.review_count }) }}</span><span v-else :class="quietBadge('success')">{{ t('nonprofitFunding.work.stateOk') }}</span></span>
       <span class="block text-sm text-neutral-500">{{ s.provider_label }}</span>
-      <span class="mt-2 grid grid-cols-2 gap-2 text-sm"><span><span class="block text-neutral-500">{{ t('nonprofitFunding.budget') }}</span>{{ money(s.totals.budget_cents) }}</span><span><span class="block text-neutral-500">{{ t('nonprofitFunding.remaining') }}</span>{{ money(s.totals.remaining_cents) }}</span></span>
+      <span class="mt-2 grid grid-cols-2 gap-2 text-sm"><span><span class="block text-neutral-500">{{ t('nonprofitFunding.work.budget') }}</span>{{ money(s.totals.budget_cents) }}</span><span><span class="block text-neutral-500">{{ t('nonprofitFunding.remaining') }}</span>{{ money(s.totals.remaining_cents) }}</span></span>
      </button>
     </div>
    </template>
@@ -340,7 +340,7 @@ defineExpose({ reload })
     <section :class="[card, 'p-5']" data-section="work-summary">
      <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitFunding.work.summary') }}</h3>
      <dl class="grid gap-4 text-sm sm:grid-cols-3 lg:grid-cols-6" data-section="work-totals">
-      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.budget') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.budget_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.budget') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.budget_cents) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.received') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.received_cents) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.allocated') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.allocated_cents) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.documented') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.documented_cents) }}</dd></div>

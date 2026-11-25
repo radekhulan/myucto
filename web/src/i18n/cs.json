@@ -42945,7 +42945,9 @@
       "colActor": "Uživatel",
       "colAction": "Změna",
       "historyEmpty": "Zatím bez změn.",
-      "accountsShort": "účty"
+      "accountsShort": "účty",
+      "period": "Účetní období",
+      "budget": "Schválený rozpočet"
     }
   },
   "securities504": {

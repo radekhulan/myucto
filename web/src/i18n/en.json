@@ -45018,7 +45018,9 @@
       "colActor": "User",
       "colAction": "Change",
       "historyEmpty": "No changes yet.",
-      "accountsShort": "accounts"
+      "accountsShort": "accounts",
+      "period": "Accounting period",
+      "budget": "Approved budget"
     }
   },
   "eet": {
