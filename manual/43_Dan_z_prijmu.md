@@ -164,7 +164,7 @@ Pravidla jsou v [§ 43.11.12](#431112-prijem-mimo-zaklad-dane-z-prijmu-osvobozen
 | Varování, že dary pod 2 000 Kč se neodečtou | Dar pod zákonnou hranicí systém vyloučí | Ověřte položky darů |
 | Varování o daňové ztrátě k převodu | Ztráta se uplatní až v dalších obdobích | Zkontrolujte přehled **Daňové ztráty** na kartě **Úpravy a odpočty** |
 | Pracovní XML bylo staženo s obsahovými nesrovnalostmi | Podklady jsou neúplné nebo nesouhlasí | Zkontrolujte podklady a uvedená upozornění před podáním |
-| XML bylo staženo, ale neprošlo kontrolou schématu | Údaje jsou chybné | Opravte chyby uvedené v archivu podání |
+| XML bylo staženo, ale neprošlo kontrolou schématu | Údaje jsou chybné | Opravte chyby uvedené u exportu. U archivovaných souborů je najdete také v archivu podání. |
 | Není vybrán druh příjmu § 10 | Druh příjmu je povinný, finanční úřad podání vytkne | Vyberte druh příjmu v kartě **Úpravy a odpočty** |
 | Zálohy se nespárovaly | Chybí výpis, nesedí variabilní symbol, částka nebo datum | Naimportujte výpis nebo potvrďte úhradu ručně |
 | Přiznání je uzamčené, nelze upravit | Je ve stavu **Finální** | Klikněte na **Odemknout** |
@@ -304,7 +304,7 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
 
 - **Pracovní XML** - pracovní XML rozpracovaného přiznání; nearchivuje se a není určeno
   k podání.
-- **Stáhnout XML** - ostré DPPDP9 / DPFDP7 ověřené proti XSD a obsahovým kontrolám.
+- **Stáhnout XML** - DPPDP9 / DPFDP7 pro finalizované přiznání. Aplikace provede technickou kontrolu schématu a dostupné věcné kontroly.
   Finalizované **DPFO i DPPO** uchovávají neměnný výpočet a XML včetně příloh.
   Opakované stažení vrátí stejné uložené XML. Pokud starší finální DPPO uložené XML
   nemá, export jej sestaví z uloženého výpočtu a aktuálních identifikačních údajů
@@ -312,10 +312,11 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   rekonstrukci upozorní. Nová finalizace vytvoří další
   revizi; původní uložené XML zůstává zachované. Soubor nahrajete na
   [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru". Ostrý export se
-  **archivuje**. Pokud jsou nalezeny nesrovnalosti, stránka po stažení zůstane
-  otevřená s varováním; jinak aplikace otevře **Daně → EPO podání a archív**.
-  Selhání kontroly XSD ani obsahové kontroly stažení nezakáže. V archivu lze snapshot předat do
-  předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
+  **archivuje**. Při věcné chybě DPFO aplikace poskytne XML ke kontrole s upozorněním bez záznamu v archivu.
+  Pokud už je stejná verze v archivu, blokuje její předání do EPO a datové schránky.
+  Při zjištěných nesrovnalostech zůstane stránka po stažení otevřená s varováním.
+  U úspěšného finálního exportu aplikace otevře **Daně → EPO podání a archív**.
+  Způsobilý archivovaný soubor lze předat do předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
 - Finalizované **DPPO** si pamatuje stav účetnictví období, ze kterého vzniklo (výsledkové

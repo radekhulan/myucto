@@ -731,7 +731,7 @@ kontroly zaměřené na **inventarizaci zůstatků**:
 | Krok je dostupný až po zahájení uzávěrky | Období je ještě Otevřené | Klikněte na **Zahájit uzávěrku**. |
 | Znovuotevření odmítnuto, existují uzávěrkové zápisy | Zaúčtovaná uzavření a otevírací zápisy | Nejdřív vezměte zpět kroky **Otevření nového roku** a **Uzavření knih**. |
 | Schválení odmítnuto: *„… automatické sekce přílohy k závěrce nejsou zmražené …“* | Při uzavření knih ani při schválení se nepodařilo zmrazit přílohu, typicky nejde vyhodnotit kategorii účetní jednotky | Doplňte podklady kategorizace (mapování rozvahy, počet zaměstnanců) a schválení zopakujte. |
-| Kontrola *Kategorii účetní jednotky nelze určit* | Nastavení **Čistý obrat: výnosy obchodního modelu** zahrnuje výnosy jen v jednom členění výsledovky (druhovém, nebo účelovém), případně mapování účtů do výkazů není úplné. Důvod uvádí kontrola. | V nastavení účetnictví zahrňte tytéž výnosy v obou členěních a kontroly spusťte znovu. Do té doby nejde ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. |
+| Kontrola *Kategorii účetní jednotky nelze určit* | Druhová a účelová výsledovka zahrnují do čistého obratu jiné výnosy, případně není úplné mapování účtů do výkazů. | Otevřete podrobnosti nálezu a zkontrolujte uvedené účty. Odkazy **Druhové mapování** a **Účelové mapování** otevřou dotčené období. Po opravě kontroly spusťte znovu. |
 | Schválenou závěrku nelze zrušit ani změnit přechodem stavu | Zákonné schválení je nevratné (§ 17 odst. 7) | Opravte chybu v období zjištění (§ 35). |
 | Otevření roku odmítnuto: *„Následující období … má rozdělanou uzávěrku (stav Uzavírá se)“* | Uzávěrka dalšího roku byla zahájena dřív, než se otevřel nový rok | V uzávěrce dalšího roku klikněte na **Přerušit uzávěrku** (má-li už uzávěrkové zápisy, nejdřív vezměte zpět její kroky) a otevření roku zopakujte. |
 | Otevření roku zablokované, panel ukazuje **Rozdíl** | Převzatý otevírací zápis nesouhlasí s konečnými stavy | Rozdíl dohledejte a opravte, nebo použijte **Nahradit převzaté stavy vypočtenými**. |
@@ -768,9 +768,9 @@ Stavový automat podporuje tyto samostatné přechody s právem Spravovat obdob�
 - **Zahájit interní kontrolu** (Uzavřené na Zkontrolované): označí závěrku jako procházející interní kontrolou. Jde o vratný pracovní stav, žádná zákonná data nevznikají.
 - **Zrušit interní kontrolu** (Zkontrolované na Uzavřené): vyžaduje **důvod** (nejméně 10 znaků). Ruší pouze interní kontrolu, žádná data zákonného schválení se přitom nemažou (protože ve stavu Zkontrolované ještě žádná neexistují).
 - **Schválit závěrku** (Uzavřené nebo Zkontrolované na Schválené): potvrzovací dialog upozorní, že schválení je nevratné a po něm už knihy nepůjde znovu otevřít; vyžaduje potvrzení zaškrtnutím.
-- **Znovuotevřít** (Uzavřené na Otevřené): vyžaduje důvod (nejméně 10 znaků). Má-li období zaúčtované uzávěrkové nebo otevírací zápisy, aplikace znovuotevření odmítne (viz [§ 72.5.2](#7252-krok-11-otevreni-noveho-roku)).
+- **Znovuotevřít** (Uzavřené na Otevřené): vyžaduje důvod (nejméně 10 znaků). Při věcném nesouladu lze knihy znovu otevřít do schválení závěrky, nejdéle do konce následujícího účetního období (§ 17 odst. 7 ZoÚ). Má-li období zaúčtované závěrkové nebo otevírací zápisy, vezměte zpět příslušné kroky průvodce v téže lhůtě (viz [§ 72.5.2](#7252-krok-11-otevreni-noveho-roku)).
 
-Stránka Účetní období nabízí u uzavřeného období tlačítka **Schválit závěrku** a **Znovuotevřít**. Přechody
+Stránka Účetní období nabízí u uzavřeného období **Schválit závěrku**. Volba **Znovuotevřít** po uplynutí lhůty zmizí a stránka uvede důvod. Přechody
 interní kontroly (Zahájit a Zrušit interní kontrolu) a schválení ze stavu Zkontrolované podporuje stavový automat
 na serveru, samostatná tlačítka pro ně ale stránka nemá.
 
