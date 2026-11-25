@@ -381,4 +381,47 @@ final class JournalDescriptionBuilderTest extends TestCase
     {
         self::assertSame($expected, B::parts($description, $type, $facts));
     }
+
+    /**
+     * Rozpis hlavní knihy má číslo dokladu ve vlastním sloupci, popis proto nese jen
+     * věcný text jako deník (pokladna a protistrana pryč), druh dokladu zůstává.
+     */
+    public function testWithoutDocumentHeadKeepsKindAndTextLikeJournal(): void
+    {
+        $cash = 'VPD-2099-0001 — Pokladna Hlavní — Jan Novák — 2099012 - Úhrada faktury přijaté';
+        self::assertSame('2099012 - Úhrada faktury přijaté', B::withoutDocumentHead($cash,
+            B::parts($cash, 'cash', ['source_doc_number' => 'VPD-2099-0001', 'partner_name' => 'Jan Novák'])));
+
+        $credit = 'Dobropis PF 2099-0007 — Dodavatel a.s. — vrácení zboží';
+        self::assertSame('Dobropis PF — vrácení zboží', B::withoutDocumentHead($credit,
+            B::parts($credit, 'purchase_invoice', ['source_ref' => '2099-0007', 'partner_name' => 'Dodavatel a.s.'])));
+
+        $bank = 'Banka 2099/004 — příchozí platba — Odběratel s.r.o. (VS 2099000123) — platba za služby';
+        self::assertSame('platba za služby', B::withoutDocumentHead($bank, B::parts($bank, 'bank', [])));
+    }
+
+    /**
+     * Sestava nemá sloupec Firma, stav ani tooltip: kde by zkrácení něco ztratilo (popis bez
+     * věcného textu, ručně přepsaný popis, storno), zůstane uložený popis celý.
+     */
+    public function testWithoutDocumentHeadKeepsFullDescriptionWhenShorteningWouldLoseIt(): void
+    {
+        $bank = 'Banka 2099/004 — příchozí platba — Odběratel s.r.o. (VS 2099000123)';
+        self::assertSame($bank, B::withoutDocumentHead($bank, B::parts($bank, 'bank', [])));
+
+        $invoice = 'FV 2099000123 — Odběratel s.r.o.';
+        self::assertSame($invoice, B::withoutDocumentHead($invoice,
+            B::parts($invoice, 'invoice', ['source_ref' => '2099000123', 'partner_name' => 'Odběratel s.r.o.'])));
+
+        $rewritten = 'Oprava zaokrouhlení';
+        self::assertSame($rewritten, B::withoutDocumentHead($rewritten,
+            B::parts($rewritten, 'invoice', ['source_ref' => '2099000123', 'partner_name' => 'Odběratel s.r.o.'])));
+
+        $storno = 'Storno VPD-2099-0001: chyba — duplicita';
+        self::assertSame($storno, B::withoutDocumentHead($storno,
+            B::parts($storno, 'cash', ['source_doc_number' => 'VPD-2099-0001'])));
+
+        self::assertSame('Ruční přeúčtování nákladů', B::withoutDocumentHead('Ruční přeúčtování nákladů',
+            B::parts('Ruční přeúčtování nákladů', 'manual', [])));
+    }
 }

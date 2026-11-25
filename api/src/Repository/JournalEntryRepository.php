@@ -2204,6 +2204,54 @@ final class JournalEntryRepository
     }
 
     /**
+     * Rozklad popisu zápisů ({@see JournalDescriptionBuilder::parts()}) a číslo dokladu nad
+     * týmiž údaji dokladu jako seznam deníku, pro sestavy, které ukazují číslo dokladu ve
+     * vlastním sloupci (rozpis hlavní knihy). Číslo dokladu doplní zápisy bez `document_no`
+     * (starší zápisy faktur) z dokladu, aby po zkrácení popisu nezmizelo.
+     * Jeden dotaz na dávku, každý JOIN po klíči.
+     *
+     * @param list<int> $entryIds
+     * @return array<int, array{document_no:?string, parts:array{kind:?string, partner:?string, vs:?string, text:?string}}>
+     */
+    public function descriptionParts(int $supplierId, array $entryIds): array
+    {
+        $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
+        $out = [];
+        foreach (array_chunk($entryIds, 500) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT je.id, je.description, je.source_type,
+                        COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
+                        COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
+                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
+                        " . self::DOCUMENT_FACT_SELECT . "
+                   FROM journal_entries je
+                   " . self::DOCUMENT_SOURCE_JOINS . "
+              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
+                     AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
+              LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
+                     AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
+              " . self::DOCUMENT_FACT_JOINS . "
+                  WHERE je.supplier_id = ? AND je.id IN ({$marks})"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['id']] = [
+                    'document_no' => JournalDescriptionBuilder::clean(
+                        $r['document_no'] ?? $r['source_doc_number'] ?? $r['source_bank_ref'] ?? null,
+                    ),
+                    'parts' => JournalDescriptionBuilder::parts(
+                        $r['description'] ?? null,
+                        (string) $r['source_type'],
+                        $r,
+                    ),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Bankovní zápis nese číslo v řadě účtu (BCR-08), ID pohybu z banky zůstává na pohybu.
      * Vyhledávání podle čísla dokladu ho proto hledá i tam. Jeden placeholder (LIKE).
      */
