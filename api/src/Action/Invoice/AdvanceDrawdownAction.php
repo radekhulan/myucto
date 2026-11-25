@@ -30,7 +30,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount | percent, basis?}: nastaví čerpání
  *          zálohy (částka nebo procento plnění faktury, basis gross = s DPH, net = bez DPH); na vystavené
  *          faktuře doplní odpočet a přeúčtuje ji ({@see IssuedInvoiceAdvanceDrawdown})
- *   DELETE /api/invoices/{id}/advance-drawdown  odebere čerpání zálohy `?proforma_id=`, bez něj všech záloh
+ *   DELETE /api/invoices/{id}/advance-drawdown  odebere čerpání zálohy `?proforma_id=`, bez něj všech záloh;
+ *          na vystavené faktuře ji přeúčtuje
  */
 final class AdvanceDrawdownAction
 {
@@ -81,34 +82,10 @@ final class AdvanceDrawdownAction
         try {
             $supplierId = SupplierGuard::currentId($request);
             if ((string) ($invoice['status'] ?? '') !== 'draft') {
-                // Stejné brány jako finanční oprava vystavené faktury (UpdateInvoiceAction):
-                // právo upravit vystavenou fakturu, přeúčtovat ji a u podaného období DPH správce.
-                if (!RequestAuthorization::canRepostIssuedInvoice($request)) {
-                    return Json::error(
-                        $response,
-                        'journal_post_forbidden',
-                        'Odečtení zálohy na vystavené faktuře přeúčtuje deník. K tomu je potřeba právo upravit vystavenou fakturu i „Zaúčtovat doklad“.',
-                        403,
-                    );
+                if ($deny = $this->denyIssuedChange($request, $response, $invoice, $supplierId)) {
+                    return $deny;
                 }
-                $refDate = DocumentLockService::invoiceRefDate($invoice);
-                if ($refDate !== null
-                    && (!RequestAuthorization::mayOverridePeriodProtection($request) || !RequestAuthorization::canChangeFiledVatPeriod($request))
-                    && ($filed = $this->filedPeriods->describe($supplierId, $refDate)) !== null) {
-                    return Json::error(
-                        $response,
-                        'period_filed',
-                        'Období faktury už bylo podáno (' . $filed . '). Odpočet zálohy v něm může doplnit jen správce firmy; '
-                            . 'opravu podaného období řešte opravným nebo dodatečným tvrzením.',
-                        409,
-                    );
-                }
-                $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-                $result = $this->issued->apply($supplierId, $id, $proformaId, $amount, $percent, $basis, [
-                    'user_id'    => isset($user['id']) ? (int) $user['id'] : null,
-                    'ip'         => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
-                    'user_agent' => $request->getHeaderLine('User-Agent'),
-                ]);
+                $result = $this->issued->apply($supplierId, $id, $proformaId, $amount, $percent, $basis, $this->meta($request));
             } else {
                 $result = $percent !== null
                     ? $this->drawdown->applyPercent($supplierId, $id, $proformaId, $percent, $basis)
@@ -156,7 +133,22 @@ final class AdvanceDrawdownAction
             return Json::error($response, 'invalid_input', 'Neplatná záloha (proforma_id).', 400);
         }
         try {
-            $removed = $this->drawdown->remove(SupplierGuard::currentId($request), $id, $proformaId);
+            $supplierId = SupplierGuard::currentId($request);
+            if ((string) ($invoice['status'] ?? '') !== 'draft') {
+                if ($deny = $this->denyIssuedChange($request, $response, $invoice, $supplierId)) {
+                    return $deny;
+                }
+                $removed = $this->issued->remove($supplierId, $id, $proformaId, $this->meta($request))['removed'];
+            } else {
+                $removed = $this->drawdown->remove($supplierId, $id, $proformaId);
+            }
+        } catch (PostingException | UnbalancedEntryException $e) {
+            return Json::error(
+                $response,
+                $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry',
+                'Čerpání zálohy nešlo odebrat, protože zápis faktury v deníku nejde přeúčtovat: ' . $e->getMessage(),
+                $e instanceof PostingException ? $e->httpStatus : 422,
+            );
         } catch (\DomainException $e) {
             return Json::error($response, 'drawdown_failed', $e->getMessage(), 409);
         }
@@ -166,6 +158,49 @@ final class AdvanceDrawdownAction
             'proforma_ids' => $removed,
         ]);
         return Json::ok($response, $this->repo->find($id));
+    }
+
+    /**
+     * Změna čerpání na vystavené faktuře: stejné brány jako finanční oprava vystavené faktury
+     * (UpdateInvoiceAction), tedy právo upravit vystavenou fakturu i přeúčtovat ji a u podaného
+     * období DPH správce (ne přes API token).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    private function denyIssuedChange(Request $request, Response $response, array $invoice, int $supplierId): ?Response
+    {
+        if (!RequestAuthorization::canRepostIssuedInvoice($request)) {
+            return Json::error(
+                $response,
+                'journal_post_forbidden',
+                'Změna odpočtu zálohy na vystavené faktuře přeúčtuje deník. K tomu je potřeba právo upravit vystavenou fakturu i „Zaúčtovat doklad“.',
+                403,
+            );
+        }
+        $refDate = DocumentLockService::invoiceRefDate($invoice);
+        if ($refDate !== null
+            && (!RequestAuthorization::mayOverridePeriodProtection($request) || !RequestAuthorization::canChangeFiledVatPeriod($request))
+            && ($filed = $this->filedPeriods->describe($supplierId, $refDate)) !== null) {
+            return Json::error(
+                $response,
+                'period_filed',
+                'Období faktury už bylo podáno (' . $filed . '). Odpočet zálohy v něm může změnit jen správce firmy; '
+                    . 'opravu podaného období řešte opravným nebo dodatečným tvrzením.',
+                409,
+            );
+        }
+        return null;
+    }
+
+    /** @return array{user_id:?int, ip:?string, user_agent:string} */
+    private function meta(Request $request): array
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        return [
+            'user_id'    => isset($user['id']) ? (int) $user['id'] : null,
+            'ip'         => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            'user_agent' => $request->getHeaderLine('User-Agent'),
+        ];
     }
 
     /** @param array<string,mixed> $context */

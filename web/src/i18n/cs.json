@@ -26537,7 +26537,7 @@
       "action": "Odečíst zálohu",
       "tooltip": "Odečíst zaplacené zálohy (i víc záloh, nebo část zálohy)",
       "tooltip_issued": "Doplnit odpočet zaplacené zálohy podle daňového dokladu; faktura se přeúčtuje",
-      "issued_hint": "Faktura je vystavená. Odpočet zálohy změní její částky a DPH, stav úhrady a zápis v deníku se přepočítají. Zálohu odečtenou jen v hlavičce (Spárovat se zálohou) odpočet nahradí.",
+      "issued_hint": "Faktura je vystavená. Přidání i odebrání odpočtu zálohy změní její částky a DPH, stav úhrady a zápis v deníku se přepočítají. Zálohu odečtenou jen v hlavičce (Spárovat se zálohou) odpočet nahradí.",
       "remove": "Odebrat čerpání záloh",
       "remove_confirm": "Odebrat z této faktury odpočty všech záloh?",
       "modal_title": "Odečíst zálohy",

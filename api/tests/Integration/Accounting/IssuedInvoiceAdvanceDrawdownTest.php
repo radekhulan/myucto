@@ -81,6 +81,24 @@ final class IssuedInvoiceAdvanceDrawdownTest extends BankPostingTestCase
         self::assertEqualsWithDelta(1000.00, $byAcc['324']['debit'] ?? 0.0, 0.001, 'Zúčtování zálohy 324 MD základem DDKP.');
         self::assertEqualsWithDelta(0.0, ($byAcc['343.200']['credit'] ?? 0.0) - ($byAcc['343.200']['debit'] ?? 0.0), 0.001,
             'Daň z plnění a odpočet DPH zálohy se v zápisu faktury vyruší.');
+
+        // Odebrání odpočtu na vystavené faktuře vrátí plnou daň, pohledávku i zápis bez zálohy.
+        try {
+            $this->container->get(AdvancePartialDrawdown::class)->remove($this->supplierId, $final, $proforma);
+            self::fail('Odebrání konceptovou cestou na vystavené faktuře má selhat.');
+        } catch (\DomainException) {
+        }
+        $removed = $this->container->get(IssuedInvoiceAdvanceDrawdown::class)
+            ->remove($this->supplierId, $final, $proforma, ['user_id' => $this->userId]);
+        self::assertSame([$proforma], $removed['removed']);
+        $inv = $this->container->get(InvoiceRepository::class)->find($final);
+        self::assertEqualsWithDelta(210.00, (float) $inv['total_vat'], 0.001);
+        self::assertEqualsWithDelta(1210.00, (float) $inv['amount_to_pay'], 0.001);
+        self::assertSame('issued', $inv['status'], 'Bez odpočtu zálohy faktura není uhrazená.');
+        self::assertNull($inv['parent_invoice_id']);
+        $byAcc = $this->linesByAccountCode((int) $active[0]);
+        self::assertEqualsWithDelta(0.0, $byAcc['324']['debit'] ?? 0.0, 0.001, 'Zápis už zálohu nezúčtovává.');
+        self::assertEqualsWithDelta(210.00, ($byAcc['343.200']['credit'] ?? 0.0) - ($byAcc['343.200']['debit'] ?? 0.0), 0.001);
     }
 
     public function testUnlinkRevertsHeaderAdvanceAndPaidStatus(): void

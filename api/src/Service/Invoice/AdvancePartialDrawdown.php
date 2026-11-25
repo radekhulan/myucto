@@ -78,20 +78,20 @@ final class AdvancePartialDrawdown
 
     /**
      * Odebere z konceptu faktury čerpání zálohy `$proformaId`, nebo bez něj čerpání všech
-     * záloh i vazbu na proformu.
+     * záloh i vazbu na proformu. `$allowIssued` jako u {@see apply()}.
      *
      * @return list<int> zálohy, jejichž čerpání se odebralo
      */
-    public function remove(int $supplierId, int $invoiceId, ?int $proformaId = null): array
+    public function remove(int $supplierId, int $invoiceId, ?int $proformaId = null, bool $allowIssued = false): array
     {
-        $invoice = $this->draftInvoice($supplierId, $invoiceId);
+        $invoice = $this->draftInvoice($supplierId, $invoiceId, false, $allowIssued);
         $parentProforma = $this->parentProforma($supplierId, $invoice);
         $locks = $proformaId !== null && $proformaId > 0
             ? [$proformaId]
             : array_keys($this->ownDraws($invoiceId, $parentProforma) + ($parentProforma > 0 ? [$parentProforma => true] : []));
         sort($locks);
-        $removed = $this->synchronizedMany($locks, fn (): array => $this->transactional(function () use ($supplierId, $invoiceId, $proformaId): array {
-            $invoice = $this->draftInvoice($supplierId, $invoiceId, true);
+        $removed = $this->synchronizedMany($locks, fn (): array => $this->transactional(function () use ($supplierId, $invoiceId, $proformaId, $allowIssued): array {
+            $invoice = $this->draftInvoice($supplierId, $invoiceId, true, $allowIssued);
             $parentProforma = $this->parentProforma($supplierId, $invoice);
             $own = $this->ownDraws($invoiceId, $parentProforma);
             $pdo = $this->db->pdo();
