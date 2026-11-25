@@ -1,3 +1,4 @@
+import type { JournalSourceRef } from '@/utils/journalSourceLink'
 export type J6ProfileKind = 'narrow_vpp' | 'broad_vpp' | 'non_vpp' | 'svj' | 'documented'
 export type J6PoolKind = 'revenue' | 'expense'
 export type J6PreviewKind = 'decision' | 'result' | 'coverage' | 'usage' | 'funding_reference' | 'funding_history'
@@ -60,6 +61,30 @@ export interface J6SourceRow {
 export type J6FindingCode = 'missing_activity' | 'missing_activity_kind' | 'missing_tax_regime' | 'invalid_activity' | 'invalid_tax_regime' | 'unknown_activity_origin' | 'unknown_activity_kind_origin' | 'unknown_tax_regime_origin' | 'joint_allocation_required' | 'joint_dimensions_changed'
 export interface J6SourceFinding { line_id: number; code: J6FindingCode }
 export interface J6DraftSourcePage { draft: J6Draft; rows: J6SourceRow[]; findings: J6SourceFinding[]; after: string | null }
+/** Zjištění podkladů období po účtu a kódu (jeden průchod podkladů na vyžádání). */
+export interface J6SourceFindingGroup { account_id: number; account_code: string; account_name: string | null; code: J6FindingCode; line_count: number }
+export interface J6SourceFindingSummary { source: J6CurrentSourceHeader; line_count: number; groups: J6SourceFindingGroup[] }
+/** Řádek se zjištěním; zdroj zápisu nese stejná pole jako deník (journalSourceLink). */
+export interface J6SourceFindingLine extends JournalSourceRef {
+  line_id: number
+  entry_id: number
+  line_no: number
+  date: string
+  account_code: string
+  kind: 'revenue' | 'expense'
+  amount_cents: number
+  codes: J6FindingCode[]
+  source_type: string
+  source_id: number | null
+  /** Další pole zdroje, která deník vrací ke štítku (číslo dokladu zdroje, reference banky, název majetku). */
+  source_ref?: string | null
+  source_bank_ref?: string | null
+  source_asset_name?: string | null
+  document_no: string | null
+  description: string | null
+}
+export interface J6SourceFindingFilter { code?: J6FindingCode; account?: string }
+export interface J6SourceFindingPage { rows: J6SourceFindingLine[]; after: string | null }
 
 export interface J6TaxDecision {
   final_regime?: 'subject' | 'exempt' | 'out_of_scope' | ''

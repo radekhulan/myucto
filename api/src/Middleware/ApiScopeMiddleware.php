@@ -178,6 +178,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      */
     private const BEARER_SESSION_ONLY = [
         '#^/api/accounting/periods/[0-9]+/nonprofit-tax/drafts?(/|$)#',
+        // Zjištění podkladů vypisují řádky deníku s popisem zápisu; jen pro pracovní plochu v aplikaci.
+        '#^/api/accounting/periods/[0-9]+/nonprofit-tax/source-findings(/|$)#',
         '#^/api/accounting/nonprofit-dppo(/|$)#',
         '#^/api/accounting/nonprofit-membership(/|$)#',
         '#^/api/accounting/periods/[0-9]+/nonprofit-membership/reconciliation$#',

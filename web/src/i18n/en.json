@@ -41965,6 +41965,27 @@
       "nonprofit_tax_facts_incomplete": "Required facts or their evidence are missing.",
       "nonprofit_tax_framework_unsupported": "The accounting framework or period is not supported for this calculation.",
       "nonprofit_tax_preview_not_found": "The preview expired or no longer belongs to the current revision. Prepare a new preview."
+    },
+    "sourceFindings": {
+      "title": "Source findings",
+      "help": "Revenue and expense lines missing the activity, activity type or preliminary tax classification with a documented origin, or whose classification does not match the joint allocation. The summary is computed on request in one pass over the period sources. Fix the classification in the document or entry, split lines in the joint allocation, and compute the summary again.",
+      "show": "Show findings",
+      "refresh": "Compute again",
+      "total": "{lines} of {rows} accounting lines have findings.",
+      "none": "The period sources have no findings.",
+      "account": "Account",
+      "lines": "Lines",
+      "showLines": "Show lines",
+      "linesTitle": "Lines with findings: {filter}",
+      "date": "Date",
+      "document": "Document",
+      "amount": "Amount",
+      "openDocument": "Open document",
+      "openEntry": "Open entry",
+      "continueSearch": "No line in the searched part of the period. Continue with the next page.",
+      "error": "Source findings could not be loaded.",
+      "changed": "The sources changed since the overview was loaded. Reload the overview so the header counts match the summary.",
+      "openJointAllocations": "Open joint allocations"
     }
   },
   "propertyPayments": {
@@ -44414,7 +44435,25 @@
     "reductionEvidence": "Evidence of entitlement and purpose",
     "saveReduction": "Save reduction in draft",
     "retryReduction": "Verify the draft save outcome",
-    "reductionUncertain": "The save outcome is unknown. Verify the current draft. The same request can only be repeated against the original unchanged revision."
+    "reductionUncertain": "The save outcome is unknown. Verify the current draft. The same request can only be repeated against the original unchanged revision.",
+    "readiness": {
+      "title": "Calculation readiness",
+      "steps": {
+        "sources": "Sources and tax assessment",
+        "legal_profile": "Legal profile",
+        "profile_match": "Profile matches the assessment",
+        "return_data": "Link to financial statements"
+      },
+      "status": {
+        "ok": "OK",
+        "failed": "needs fixing",
+        "not_evaluated": "not checked"
+      },
+      "links": {
+        "sources": "Open the tax assessment",
+        "profile_match": "Open the tax assessment"
+      }
+    }
   },
   "nonprofitTaxNative": {
     "svjProfile": "Unit owners association (SVJ)",

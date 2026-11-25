@@ -20,7 +20,9 @@ use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6AssessmentWithdrawalService;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6DraftContext;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6HttpCursor;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6LegacyAssessmentConversionService;
+use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6SourceFindingService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentException;
+use MyInvoice\Service\Tax\Nonprofit\Snapshot\SnapshotCursor;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
@@ -47,12 +49,43 @@ final class J6NonprofitTaxAction
         private readonly J6AssessmentWithdrawalService $withdrawal,
         private readonly J6LegacyAssessmentConversionService $conversion,
         private readonly J6AssessmentDocumentRenderer $documents,
+        private readonly J6SourceFindingService $findings,
     ) {}
 
     public function source(Request $request, Response $response, array $args): Response
     {
         return $this->handle($request, $response, false, fn(int $supplier): array =>
             $this->assessments->currentSourceHeader($supplier, (int) $args['periodId']));
+    }
+
+    /** Souhrn zjištění podkladů období po účtu a kódu; jeden průchod podkladů na vyžádání. */
+    public function sourceFindings(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, false, function(int $supplier) use ($args): array {
+            $period = (int) $args['periodId'];
+            $this->period($supplier, $period);
+            return $this->findings->summary($supplier, $period);
+        }, true);
+    }
+
+    /** Stránkovaný seznam řádků podkladů se zjištěním, volitelně jen pro jeden kód a účet. */
+    public function sourceFindingLines(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, false, function(int $supplier) use ($request, $args): array {
+            $period = (int) $args['periodId'];
+            $this->period($supplier, $period);
+            $query = $request->getQueryParams();
+            $code = $this->filter($query, 'code', '/^[a-z_]{1,64}$/D');
+            $account = $this->filter($query, 'account', '#^[0-9A-Za-z._/-]{1,32}$#D');
+            $limit = $this->queryInt($request, 'limit', 50, 1, 200);
+            // Kurzor patří k filtru: s jiným kódem, účtem nebo velikostí stránky by přeskočil řádky.
+            $binding = ['actor_id' => $this->actor($request), 'supplier_id' => $supplier, 'period_id' => $period,
+                'kind' => 'source_findings', 'code' => $code, 'account' => $account, 'limit' => $limit];
+            $position = $this->after($request, $binding);
+            if ($position !== null && !is_array($position)) throw new \InvalidArgumentException('Finding cursor is invalid.');
+            $page = $this->findings->lines($supplier, $period, $code, $account, SnapshotCursor::fromArray($position), $limit);
+            return ['rows' => $page['rows'], 'after' => $page['next_cursor'] === null ? null : $this->cursors->encode($binding, $page['next_cursor'])];
+        }, true);
     }
 
     public function open(Request $request, Response $response, array $args): Response
@@ -409,6 +442,13 @@ final class J6NonprofitTaxAction
         if (is_string($value) && preg_match('/^(0|[1-9][0-9]*)$/D', $value) === 1) $value = filter_var($value, FILTER_VALIDATE_INT);
         if (!is_int($value) || $value < $minimum || $value > $maximum) throw new \InvalidArgumentException('Page bounds are invalid.');
         return $value;
+    }
+
+    private function filter(array $query, string $key, string $pattern): ?string
+    {
+        if (!array_key_exists($key, $query) || $query[$key] === '') return null;
+        if (!is_string($query[$key]) || preg_match($pattern, $query[$key]) !== 1) throw new \InvalidArgumentException('Filter is invalid.');
+        return $query[$key];
     }
 
     private function period(int $supplier, int $period): void

@@ -3803,8 +3803,8 @@ paths:
       tags:
       - Accounting
       summary: Hlavička aktuálních účetních podkladů daňového posouzení
-      description: Pouze čtení. Počty řádků a zjištění a otisk aktuálních podkladů období; jednotlivé řádky jsou dostupné
-        jen v interním konceptu posouzení.
+      description: Pouze čtení. Počty řádků a zjištění a otisk aktuálních podkladů období; jednotlivé řádky a zjištění
+        jsou dostupné jen v aplikaci (koncept posouzení a zjištění podkladů), ne přes API token.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - name: periodId
@@ -48476,7 +48476,21 @@ components:
                 xsd_sha256: { type: string }
                 xsd_verified: { type: boolean }
                 official_source: { type: string, format: uri }
-            preparation_findings: { type: array, items: { type: object } }
+            preparation_findings:
+              type: array
+              description: Všechna zjištění kontroly připravenosti (může jich být víc); zjištění kroku je zároveň v readiness_steps, ostatní (akceptace výpočtu, jiný účetní rámec v části období, nepodporovaná pravidla nebo formulář) jen zde.
+              items: { type: object }
+            readiness_steps:
+              type: array
+              description: Kroky připravenosti DPPO 504 v pořadí výpočtu; bez kontroly připravenosti všechny not_evaluated.
+              items:
+                type: object
+                required: [step, status, code, message]
+                properties:
+                  step: { type: string, enum: [sources, legal_profile, profile_match, return_data] }
+                  status: { type: string, enum: [ok, failed, not_evaluated] }
+                  code: { type: string, nullable: true }
+                  message: { type: string, nullable: true }
     NonprofitDppoOperationCapability:
       type: object
       required: [allowed, code, message]

@@ -43944,7 +43944,25 @@
     "reductionEvidence": "Doložení nároku a účelu snížení",
     "saveReduction": "Uložit snížení do návrhu",
     "retryReduction": "Ověřit výsledek uložení návrhu",
-    "reductionUncertain": "Výsledek uložení není známý. Ověřte aktuální návrh. Stejný požadavek lze opakovat pouze nad původní nezměněnou revizí."
+    "reductionUncertain": "Výsledek uložení není známý. Ověřte aktuální návrh. Stejný požadavek lze opakovat pouze nad původní nezměněnou revizí.",
+    "readiness": {
+      "title": "Připravenost výpočtu",
+      "steps": {
+        "sources": "Podklady a daňové posouzení",
+        "legal_profile": "Právní profil",
+        "profile_match": "Shoda profilu s posouzením",
+        "return_data": "Návaznost na výkazy"
+      },
+      "status": {
+        "ok": "v pořádku",
+        "failed": "vyžaduje opravu",
+        "not_evaluated": "neověřeno"
+      },
+      "links": {
+        "sources": "Otevřít daňové posouzení",
+        "profile_match": "Otevřít daňové posouzení"
+      }
+    }
   },
   "jointAllocations": {
     "actions": {
@@ -44550,6 +44568,27 @@
       "nonprofit_tax_facts_incomplete": "Chybí rozhodné skutečnosti nebo jejich důkaz.",
       "nonprofit_tax_framework_unsupported": "Účetní rámec nebo období není pro tento výpočet podporované.",
       "nonprofit_tax_preview_not_found": "Náhled vypršel nebo už nepatří aktuální revizi. Připravte nový náhled."
+    },
+    "sourceFindings": {
+      "title": "Zjištění podkladů",
+      "help": "Řádky výnosů a nákladů, kterým chybí činnost, druh činnosti nebo předběžné daňové zařazení s doloženým původem, nebo jejichž členění nesouhlasí se společnou alokací. Souhrn se spočítá na vyžádání jedním průchodem podkladů období. Členění opravte v dokladu nebo zápisu, rozdělené řádky ve společné alokaci, a souhrn spočítejte znovu.",
+      "show": "Zobrazit zjištění",
+      "refresh": "Spočítat znovu",
+      "total": "Zjištění má {lines} z {rows} účetních řádků.",
+      "none": "Podklady období nemají žádná zjištění.",
+      "account": "Účet",
+      "lines": "Řádků",
+      "showLines": "Zobrazit řádky",
+      "linesTitle": "Řádky se zjištěním: {filter}",
+      "date": "Datum",
+      "document": "Doklad",
+      "amount": "Částka",
+      "openDocument": "Otevřít doklad",
+      "openEntry": "Otevřít zápis",
+      "continueSearch": "V prohledané části období žádný řádek není. Pokračujte další stránkou.",
+      "error": "Zjištění podkladů se nepodařilo načíst.",
+      "changed": "Podklady se od načtení přehledu změnily. Obnovte přehled, ať počty v záhlaví odpovídají souhrnu.",
+      "openJointAllocations": "Otevřít společné alokace"
     }
   },
   "propertyServiceLifecycle": {

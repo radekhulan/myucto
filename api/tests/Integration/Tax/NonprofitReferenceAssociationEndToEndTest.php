@@ -277,6 +277,204 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         }
     }
 
+    public function testReadinessReportsMissingAssessmentAndLegalProfileTogether(): void
+    {
+        // #402: připravenost ukáže podklady a právní profil samostatně, ne jen první chybu výpočtu.
+        $this->postReferenceYear();
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'failed', 'legal_profile' => 'failed', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertSame(['nonprofit_dppo_legal_profile_required', 'nonprofit_dppo_assessment_required'],
+            array_column($caps['preparation_findings'], 'code'));
+        self::assertFalse($caps['calculation_ready']);
+
+        // Po potvrzení profilu zůstane jen chybějící posouzení.
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-ready'), $this->actor);
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'failed', 'legal_profile' => 'ok', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertSame(['nonprofit_dppo_assessment_required'], array_column($caps['preparation_findings'], 'code'));
+    }
+
+    public function testReadinessKeepsLegalProfileVisibleWhenPagedAssessmentIsStale(): void
+    {
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-stale-ready'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-stale-ready-' . $this->supplier);
+        $main = $this->catalog['activity']['values']['main'];
+        $this->entry('O-98', '2025-06-01', [['602', 'credit', '1.00', [$main, $this->kinds['education'], $this->catalog['tax_regime']['values']['subject']]],
+            ['221', 'debit', '1.00']]);
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'failed', 'legal_profile' => 'ok', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertSame('nonprofit_dppo_j6_receipt_invalid', $caps['readiness_steps'][0]['code']);
+    }
+
+    public function testReadinessReportsProfileConflictWithSourcesInOrder(): void
+    {
+        $this->postReferenceYear();
+        $request = $this->legalRequest('tj-legal-conflict');
+        $request['profile'] = ['kind' => 'non_vpp', 'entity_type' => 'other_non_vpp', 'main_activity_nonbusiness' => true,
+            'legal_basis' => 'zdp_17a', 'evidence' => 'Syntetické stanovy spolku bez statusu veřejně prospěšného poplatníka'];
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $request, $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-conflict-' . $this->supplier);
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'ok', 'legal_profile' => 'ok', 'profile_match' => 'failed', 'return_data' => 'not_evaluated'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertSame(['nonprofit_dppo_profile_conflict'], array_column($caps['preparation_findings'], 'code'));
+    }
+
+    public function testReadinessOfCompleteYearKeepsCalculationFlowAndConfirmedChoices(): void
+    {
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-ok'), $this->actor);
+        $confirmed = $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-ready-ok-' . $this->supplier);
+        // Volba osvobození daru je součástí neměnných stránek výsledku revize (NonprofitGiftElectionGuard),
+        // nezměněný request_hash potvrzené revize ji tedy dokládá.
+        $history = fn (): array => [
+            $this->pdo->query('SELECT id,status,request_hash FROM nonprofit_tax_assessments WHERE supplier_id=' . $this->supplier . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC),
+            $this->pdo->query('SELECT id,revision_no,record_hash FROM nonprofit_legal_profiles WHERE supplier_id=' . $this->supplier . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC),
+        ];
+        $before = $history();
+
+        $caps = $this->readiness();
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'ok'),
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertTrue($caps['calculation_ready']);
+        self::assertFalse($caps['filing_ready']);
+        self::assertSame(['nonprofit_dppo_calculation_not_accepted'], array_column($caps['preparation_findings'], 'code'));
+        self::assertSame($before, $history(), 'Kontrola připravenosti nic nezapsala.');
+
+        // Profil bez kontroly připravenosti kroky nevyhodnocuje.
+        [$status, $profile] = $this->http('GET', '/periods/' . $this->period . '/nonprofit-legal-profile');
+        self::assertSame(200, $status, json_encode($profile));
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'not_evaluated'),
+            array_column($profile['capabilities']['readiness_steps'], 'status', 'step'));
+
+        // Běžný průchod pokračuje výpočtem DPPO nad stejnou potvrzenou revizí (i s volbou daru).
+        $data = $this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider::class)->gather($this->supplier, $this->year);
+        self::assertSame((int) $confirmed['assessment_id'], $data['nonprofit']['assessment']['id']);
+        self::assertSame(130400.0, (float) $data['vh']);
+        self::assertSame($before, $history());
+
+        // Po akceptaci výpočtu nabídne připravenost dokončení přiznání (filing_ready) jako dosud.
+        (new NonprofitDppoAcceptanceService($this->db))->change($this->supplier, NonprofitDppoAcceptanceService::ACCEPT, true,
+            'Syntetický protokol porovnání s etalonem TJ Příklad', 'Syntetická akceptace výpočtu', 'tj-ready-accept', null, $this->actor);
+        $caps = $this->readiness();
+        self::assertTrue($caps['calculation_ready']);
+        self::assertTrue($caps['filing_ready']);
+        self::assertSame([], $caps['preparation_findings']);
+    }
+
+    public function testReadinessFollowsLegacyAssessmentPath(): void
+    {
+        // Legacy cesta ověřuje právní profil dřív než posouzení; kroky se musí přiřadit stejně jako ve stránkované.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-legacy'), $this->actor);
+        $j6 = $this->container->get(NonprofitTaxAssessmentService::class);
+        $snapshot = $j6->read($this->supplier, $this->period)['snapshot'];
+        $j6->confirm($this->supplier, $this->period, $this->referenceAssessment(), $snapshot['input_hash'], 'Syntetické legacy posouzení', 'tj-legacy-ready', $this->actor);
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'ok'),
+            array_column($this->readiness()['readiness_steps'], 'status', 'step'));
+
+        // Legacy snímek podkladů nese právní profil: jeho změna posouzení zneplatní, chyba patří podkladům.
+        // Ke kontrole shody legacy cesta nedojde (nesoulad odmítne už potvrzení posouzení).
+        $request = $this->legalRequest('tj-legal-legacy-2', 1);
+        $request['profile'] = ['kind' => 'non_vpp', 'entity_type' => 'other_non_vpp', 'main_activity_nonbusiness' => true,
+            'legal_basis' => 'zdp_17a', 'evidence' => 'Syntetické stanovy spolku bez statusu veřejně prospěšného poplatníka'];
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $request, $this->actor);
+        self::assertSame(['sources' => 'failed', 'legal_profile' => 'ok', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'],
+            array_column($this->readiness()['readiness_steps'], 'status', 'step'));
+
+        // Zastaralé legacy posouzení i po změně účetnictví: chyba patří podkladům, profil je potvrzený.
+        $main = $this->catalog['activity']['values']['main'];
+        $this->entry('O-97', '2025-06-01', [['602', 'credit', '1.00', [$main, $this->kinds['education'], $this->catalog['tax_regime']['values']['subject']]],
+            ['221', 'debit', '1.00']]);
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'failed', 'legal_profile' => 'ok', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+    }
+
+    public function testReadinessOfDocumentedManualPeriodReportsUnsupportedRuleset(): void
+    {
+        // R10: doložené ruční posouzení (documented_manual) a připravenost DPPO 504.
+        // Ruční metodika je jen pro období mimo automatickou (2024 až 2026), proto prodloužené období do poloviny 2027.
+        $period = (new AccountingPeriodRepository($this->db))->create($this->supplier, 2026, '2026-01-01', '2027-06-30');
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $period, $this->legalRequest('tj-legal-manual'), $this->actor);
+        $main = $this->catalog['activity']['values']['main'];
+        $this->entry('M-01', '2026-02-01', [['518', 'debit', '25000.00', [$main, $this->kinds['sport'], $this->catalog['tax_regime']['values']['subject']]],
+            ['221', 'credit', '25000.00']], $period);
+        $j6 = $this->container->get(NonprofitTaxAssessmentService::class);
+        $snapshot = $j6->read($this->supplier, $period)['snapshot'];
+        $assessment = ['profile' => ['kind' => 'documented', 'entity_kind' => 'narrow_vpp', 'evidence' => 'Syntetické stanovy spolku TJ Příklad'],
+            'method' => ['mode' => 'documented_manual', 'valid_from' => '2026-01-01', 'valid_to' => '2027-06-30',
+                'evidence' => 'Syntetické doložené ruční posouzení', 'legal_basis' => 'zdp_18a_24_25'],
+            'activities' => [(string) $this->kinds['sport'] => ['evidence' => 'Syntetická sportovní činnost']], 'decisions' => [], 'funding' => []];
+        foreach ($snapshot['sources'] as $row) {
+            $assessment['decisions'][$row['id']] = ['title' => 'nonbusiness_cost', 'deductible_cents' => 0, 'final_regime' => 'subject',
+                'evidence' => 'Syntetický doložený náklad', 'legal_basis' => 'zdp_25'];
+        }
+        $j6->confirm($this->supplier, $period, $assessment, $snapshot['input_hash'], 'Syntetické ruční posouzení', 'tj-manual', $this->actor);
+        // Nativní DPPO 504 pravidla mimo roky 2024 až 2026 nepodporuje: připravenost skončí obecným
+        // důvodem a žádný krok nevyhodnotí (UI kroky skryje a ukáže jen důvod).
+        [$status, $body] = $this->http('POST', '/periods/' . $period . '/nonprofit-legal-profile/readiness');
+        self::assertSame(200, $status, json_encode($body));
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'not_evaluated'),
+            array_column($body['capabilities']['readiness_steps'], 'status', 'step'));
+        self::assertSame(['nonprofit_dppo_ruleset_not_supported'], array_column($body['capabilities']['preparation_findings'], 'code'));
+        self::assertFalse($body['capabilities']['calculation_ready']);
+    }
+
+    public function testReadinessLeavesSavedReturnInputsToTheReturnCalculation(): void
+    {
+        // Rozhodnutí: připravenost ověřuje podklady výpočtu bez vstupů přiznání. Úpravy, dary a snížení
+        // uložené v přiznání (i v opravné či dodatečné variantě) ověří a ukáže výpočet přiznání, kde se opravují.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-inputs'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-inputs-' . $this->supplier);
+        $service = $this->container->get(TaxReturnService::class);
+        $service->getReturn($this->supplier, $this->year, 'po', $this->actor);
+        $inputs = ['nonprofit' => ['adjustments' => [['kind' => 'expense_addback', 'source_id' => 'line:999999999', 'amount_cents' => 100,
+            'legal_basis' => 'zdp_25', 'evidence' => 'Syntetická úprava navázaná na zaniklý řádek']]]];
+        $this->pdo->prepare("UPDATE income_tax_returns SET inputs=? WHERE supplier_id=? AND year=? AND taxpayer_type='po'")
+            ->execute([json_encode($inputs), $this->supplier, $this->year]);
+        $caps = $this->readiness();
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'ok'),
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertTrue($caps['calculation_ready']);
+        try {
+            $service->getReturn($this->supplier, $this->year, 'po', $this->actor);
+            self::fail('Return calculation accepted an invalid saved adjustment.');
+        } catch (TaxReturnException $e) {
+            self::assertSame('nonprofit_dppo_adjustment_invalid', $e->errorCode);
+        }
+    }
+
+    public function testIncompleteSourcesStillStopCalculationWithTheSameCode(): void
+    {
+        // R8: výpočet bez kontroly připravenosti končí stejnou chybou jako dřív; připravenost ji přiřadí podkladům.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-incomplete'), $this->actor);
+        $this->entry('O-96', '2025-06-01', [['602', 'credit', '1.00'], ['221', 'debit', '1.00']]);
+        try {
+            $this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider::class)->gather($this->supplier, $this->year);
+            self::fail('DPPO 504 accepted incomplete sources.');
+        } catch (TaxReturnException $e) {
+            self::assertSame('nonprofit_dppo_sources_incomplete', $e->errorCode);
+        }
+        $caps = $this->readiness();
+        self::assertSame('failed', $caps['readiness_steps'][0]['status']);
+        self::assertSame('nonprofit_dppo_sources_incomplete', $caps['readiness_steps'][0]['code']);
+        self::assertSame('ok', $caps['readiness_steps'][1]['status']);
+    }
+
+    private function readiness(): array
+    {
+        [$status, $body] = $this->http('POST', '/periods/' . $this->period . '/nonprofit-legal-profile/readiness');
+        self::assertSame(200, $status, json_encode($body));
+        return $body['capabilities'];
+    }
+
     public function testBalanceSheetEntriesDoNotStaleConfirmedAssessment(): void
     {
         // #397: otisk podkladů závisí jen na řádcích, které do posouzení vstupují, ne na

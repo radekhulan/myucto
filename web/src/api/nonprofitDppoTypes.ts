@@ -18,7 +18,11 @@ export interface LegalCapabilities {
   operations?: Partial<Record<NonprofitOperationKey, NonprofitOperationCapability>>
   form_manifest?: NonprofitFormManifest | null
   preparation_findings: Array<{ code: string; message: string }>
+  /** Kroky připravenosti DPPO 504 v pořadí výpočtu; bez kontroly připravenosti všechny not_evaluated. */
+  readiness_steps?: ReadinessStep[]
 }
+export type ReadinessStepKey = 'sources' | 'legal_profile' | 'profile_match' | 'return_data'
+export interface ReadinessStep { step: ReadinessStepKey; status: 'ok' | 'failed' | 'not_evaluated'; code: string | null; message: string | null }
 export interface LegalOverview { period: AccountingPeriod; latest: LegalRevision | null; entity_types: string[]; kinds: LegalKind[]; capabilities: LegalCapabilities }
 export interface LegalReadiness { period: AccountingPeriod; capabilities: LegalCapabilities }
 export interface AcceptanceRevision {

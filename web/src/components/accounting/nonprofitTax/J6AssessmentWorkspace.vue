@@ -12,6 +12,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { formInput, formTextarea, formLabel } from '@/components/ui/formStyles'
 import { centsText, parseCents } from '@/utils/nonprofitTaxDraft'
+import J6SourceFindings from './J6SourceFindings.vue'
 
 const props = defineProps<{ supplierId: number; periodId: number; canManage: boolean; reloadKey: number }>()
 const { t, locale } = useI18n()
@@ -660,6 +661,7 @@ onMounted(() => { void loadOverview() })
         <template v-if="latest.summary"> · {{ t('nonprofitTaxJ6.assessedResult') }}: <span class="font-mono">{{ money(latest.summary.assessed_result_cents) }}</span></template>
         <template v-if="latest.conversion_required"> · {{ t('nonprofitTaxJ6.conversionRequired') }}</template>
       </p>
+      <J6SourceFindings v-if="current.finding_count > 0" :key="current.input_hash" :current-hash="current.input_hash" :supplier-id="props.supplierId" :period-id="props.periodId" />
       <div class="grid gap-3 md:grid-cols-2">
         <label :class="formLabel">{{ t('nonprofitTaxJ6.profile') }}
           <select v-model="profileKind" data-test="profile-kind" :class="formInput" class="mt-1" :disabled="!!draft && !editable">
@@ -701,7 +703,7 @@ onMounted(() => { void loadOverview() })
             <div><strong>{{ row.account_code }} · {{ row.date }}</strong><p class="text-xs text-neutral-600">{{ row.id }} · {{ row.kind }} · {{ row.tax_regime ?? t('nonprofitTaxJ6.unknown') }}</p></div>
             <div class="flex flex-wrap items-center gap-2"><span class="font-mono">{{ (row.amount_cents / 100).toFixed(2) }}</span><button type="button" :class="btnOutline('primary')" :disabled="!editable" @click="assessSource(row)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.edit" /></svg>{{ t('nonprofitTaxJ6.assess') }}</button></div>
           </div>
-          <p v-for="finding in sourceFindings.filter(item => item.line_id === row.line_id)" :key="finding.code" class="mt-2 text-sm text-warning-700">{{ t('nonprofitTaxJ6.finding') }}: {{ finding.code }}</p>
+          <p v-for="finding in sourceFindings.filter(item => item.line_id === row.line_id)" :key="finding.code" class="mt-2 text-sm text-warning-700">{{ t('nonprofitTaxJ6.finding') }}: {{ t('nonprofitTax.findings.' + finding.code) }}</p>
         </article>
         <p v-if="!sourceRows.length" class="text-sm text-neutral-600">{{ t('nonprofitTaxJ6.empty') }}</p>
         <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutline('neutral')" :disabled="!sourceBack.length" @click="sourcePrevious"><svg class="h-4 w-4 shrink-0 rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.previous') }}</button><button type="button" data-test="source-next" :class="btnOutline('neutral')" :disabled="!sourceAfter" @click="sourceNext"><svg class="h-4 w-4 shrink-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.next') }}</button></div>

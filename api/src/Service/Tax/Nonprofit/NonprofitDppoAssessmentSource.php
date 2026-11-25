@@ -45,6 +45,18 @@ final readonly class NonprofitDppoAssessmentSource
         return [$view, NonprofitDppoJ6Receipt::capturePaged($period, $view, $view['graph_receipt_hash'])];
     }
 
+    /** Poslední revize období je potvrzená; o aktuálnosti vůči podkladům nerozhoduje. */
+    public static function confirmed(?array $assessment): bool
+    {
+        return $assessment !== null && $assessment['status'] === 'confirmed';
+    }
+
+    /** Období bez potvrzeného posouzení J6; sdílí ho výpočet i připravenost DPPO. */
+    public static function assessmentRequired(): TaxReturnException
+    {
+        return new TaxReturnException('nonprofit_dppo_assessment_required', 'DPPO 504 vyžaduje aktuální potvrzené posouzení J6.', 422);
+    }
+
     /**
      * Aktuální potvrzené posouzení období ve tvaru legacy (result.rows, snapshot.legal_profile),
      * ověřené proti dnešním účetním podkladům. Používá DPPO i použití daňové úspory.
@@ -52,9 +64,7 @@ final readonly class NonprofitDppoAssessmentSource
     public function currentView(int $supplierId, int $periodId): array
     {
         $assessment = $this->legacy->latest($supplierId, $periodId, true);
-        if ($assessment === null || $assessment['status'] !== 'confirmed') {
-            throw new TaxReturnException('nonprofit_dppo_assessment_required', 'DPPO 504 vyžaduje aktuální potvrzené posouzení J6.', 422);
-        }
+        if (!self::confirmed($assessment)) throw self::assessmentRequired();
         if (!self::pagedOnly($assessment)) {
             $this->fundingCapacity->assertCurrentReceipt($supplierId, $assessment);
             return $assessment;
