@@ -1246,7 +1246,8 @@
         "2340_submission_outbox_app_time.sql",
         "2341_vat_classification_energy_reverse_charge.sql",
         "2342_myeet_checkouts.sql",
-        "2343_mobile_oidc_codes.sql"
+        "2343_mobile_oidc_codes.sql",
+        "2344_myeet_sale_license.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
