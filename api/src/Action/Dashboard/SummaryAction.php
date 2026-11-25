@@ -63,28 +63,101 @@ final class SummaryAction
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         $payroll = RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ);
         $reports = RequestAuthorization::allows($request, 'reports', AccessLevel::READ);
+        $part = $request->getQueryParams()['part'] ?? null;
+        $cacheKey = match ($part) {
+            'overview', 'statistics' => 'dashboard-summary:' . $part,
+            'cashflow' => 'dashboard-summary:cashflow:' . (int) $payroll . (int) $reports,
+            default => 'dashboard-summary:' . (int) $payroll . (int) $reports,
+        };
 
         // Souhrn je jen z dat firmy; od uživatele se liší jen podle dvou oprávnění výše.
         return Json::ok($response, $this->cache->remember(
             $sid,
-            'dashboard-summary:' . (int) $payroll . (int) $reports,
+            $cacheKey,
             new \DateTimeImmutable('today'),
-            fn (): array => $this->summary($sid, $payroll, $reports),
+            fn (): array => $this->summary($sid, $payroll, $reports, is_string($part) ? $part : null),
         ));
     }
 
     /** @return array<string,mixed> */
-    private function summary(int $sid, bool $payroll, bool $reports): array
+    private function summary(int $sid, bool $payroll, bool $reports, ?string $part = null): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
+        if ($part === 'cashflow') {
+            return ['cashflow_forecast' => $this->receivablesForecast($pdo, $sid, $today, $payroll, $reports)];
+        }
+
         $year = (int) $today->format('Y');
         $prevYear = $year - 1;
         $isVatPayer = $this->fetchIsVatPayer($pdo, $sid);
-        // revenueByYear počítáme jednou a sdílíme s forecastem (CAGR trend) — žádný druhý dotaz.
-        $revenueByYear = $this->revenueByYear($pdo, $sid, $isVatPayer);
+        $common = [
+            'kpi'                   => $this->kpi($pdo, $year, $prevYear, $sid, $isVatPayer),
+            'top_clients_12m'       => $this->topClientsRolling12m($pdo, $sid, $isVatPayer),
+            'revenue_by_month'      => $this->revenueByMonth($pdo, $sid, $isVatPayer),
+            'today'                 => $today->format('Y-m-d'),
+            'year'                  => $year,
+            'prev_year'             => $prevYear,
+            'is_vat_payer'          => $isVatPayer,
+        ];
+        if ($part === 'statistics') {
+            return $common + $this->statistics($pdo, $year, $prevYear, $sid, $isVatPayer);
+        }
+
         $purchaseExists = $pdo->prepare('SELECT EXISTS (SELECT 1 FROM purchase_invoices WHERE supplier_id = ?)');
         $purchaseExists->execute([$sid]);
+        $overview = $common + [
+            'has_purchase_invoices'  => (bool) $purchaseExists->fetchColumn(),
+            'overdue'                => $this->overdue($pdo, $sid),
+            'unpaid_upcoming'        => $this->unpaidUpcoming($pdo, $sid),
+            'draft_invoices'         => $this->draftInvoices($pdo, $sid),
+            'purchase_costs_by_month'=> $this->purchaseCostsByMonth($pdo, $sid, $isVatPayer),
+            'due_buckets'            => $this->dueBuckets($pdo, $sid),
+            'pending_approvals'      => $this->pendingApprovals($pdo, $sid),
+            // Vyžádání chybějících dokladů od klienta (Fáze F, audit 2026-07).
+            'document_requests_open' => $this->documentRequests->openCounts($sid),
+            'bank_posting_pending'   => $this->bankPostingPending($pdo, $sid),
+            'automation_auto_today'  => $this->automationAutoToday($pdo, $sid),
+            'accounting_backfill_pending' => $this->accountingBackfillPending($pdo, $sid),
+        ];
+        if ($part === 'overview') {
+            return $overview;
+        }
+
+        return $overview + $this->statistics($pdo, $year, $prevYear, $sid, $isVatPayer) + [
+            'cashflow_forecast' => $this->receivablesForecast($pdo, $sid, $today, $payroll, $reports),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function statistics(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer): array
+    {
+        // revenueByYear počítáme jednou a sdílíme s forecastem (CAGR trend) — žádný druhý dotaz.
+        $revenueByYear = $this->revenueByYear($pdo, $sid, $isVatPayer);
+        return [
+            'top_clients_ytd'        => $this->topClients($pdo, $year, $sid, $isVatPayer),
+            'top_clients_prev_year'  => $this->topClients($pdo, $prevYear, $sid, $isVatPayer),
+            'revenue_breakdown_12m'  => $this->revenueBreakdown12m($pdo, $sid, $isVatPayer),
+            'revenue_by_year'        => $revenueByYear,
+            'rolling_12m'            => $this->rolling12mRevenue($pdo, $sid, $isVatPayer),
+            'cashflow_ytd'           => $this->cashflowYtd($pdo, $year, $prevYear, $sid),
+            'payment_days_histogram' => $this->paymentDaysHistogram($pdo, $sid),
+            'vat_breakdown_12m'      => $isVatPayer ? $this->vatBreakdown12m($pdo, $sid) : [],
+            'aging_report'           => $this->agingReport($pdo, $sid),
+            'revenue_forecast'       => $this->revenueForecast($pdo, $year, $prevYear, $sid, $isVatPayer, $revenueByYear),
+            'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
+                $sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)),
+            'invoice_size_histogram' => $this->invoiceSizeHistogram($pdo, $sid, $isVatPayer),
+            'revenue_last_30d'       => $this->revenueLast30d($pdo, $sid, $isVatPayer),
+            'active_recurring_count' => $this->activeRecurringCount($pdo, $sid),
+            'active_clients_count'   => $this->activeClientsCount($pdo, $sid),
+            'flat_tax_threshold'     => $this->flatTaxThreshold($pdo, $year, $sid),
+            'vat_registration_limits' => $this->vatRegistrationLimits($year),
+        ];
+    }
+
+    private function receivablesForecast(\PDO $pdo, int $sid, \DateTimeImmutable $today, bool $payroll, bool $reports): array
+    {
         $derived = [];
         $forecastFrom = $today->format('Y-m-d');
         $forecastTo = $today->modify('+90 days')->format('Y-m-d');
@@ -96,49 +169,10 @@ final class SummaryAction
             array_push($derived, ...$this->obligationSources->taxForecasts($sid, $forecastFrom, $forecastTo));
         }
 
-        return [
-            'has_purchase_invoices'  => (bool) $purchaseExists->fetchColumn(),
-            'kpi'                    => $this->kpi($pdo, $year, $prevYear, $sid, $isVatPayer),
-            'overdue'                => $this->overdue($pdo, $sid),
-            'unpaid_upcoming'        => $this->unpaidUpcoming($pdo, $sid),
-            'draft_invoices'         => $this->draftInvoices($pdo, $sid),
-            'top_clients_ytd'        => $this->topClients($pdo, $year, $sid, $isVatPayer),
-            'top_clients_prev_year'  => $this->topClients($pdo, $prevYear, $sid, $isVatPayer),
-            'top_clients_12m'        => $this->topClientsRolling12m($pdo, $sid, $isVatPayer),
-            'revenue_by_month'       => $this->revenueByMonth($pdo, $sid, $isVatPayer),
-            'revenue_breakdown_12m'  => $this->revenueBreakdown12m($pdo, $sid, $isVatPayer),
-            'purchase_costs_by_month'=> $this->purchaseCostsByMonth($pdo, $sid, $isVatPayer),
-            'revenue_by_year'        => $revenueByYear,
-            'rolling_12m'            => $this->rolling12mRevenue($pdo, $sid, $isVatPayer),
-            'cashflow_ytd'           => $this->cashflowYtd($pdo, $year, $prevYear, $sid),
-            'payment_days_histogram' => $this->paymentDaysHistogram($pdo, $sid),
-            'vat_breakdown_12m'      => $isVatPayer ? $this->vatBreakdown12m($pdo, $sid) : [],
-            'cashflow_forecast'      => OtherItemForecastService::mergeSourceCumulative(
-                (new OtherItemForecastService($this->db))->mergeCumulative(
-                    $this->cashflowForecast($pdo, $sid), $sid, 'receivable', 'in'),
-                $derived, 'receivable', 'in'),
-            'due_buckets'            => $this->dueBuckets($pdo, $sid),
-            'aging_report'           => $this->agingReport($pdo, $sid),
-            'revenue_forecast'       => $this->revenueForecast($pdo, $year, $prevYear, $sid, $isVatPayer, $revenueByYear),
-            'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
-                $sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)),
-            'invoice_size_histogram' => $this->invoiceSizeHistogram($pdo, $sid, $isVatPayer),
-            'revenue_last_30d'       => $this->revenueLast30d($pdo, $sid, $isVatPayer),
-            'active_recurring_count' => $this->activeRecurringCount($pdo, $sid),
-            'active_clients_count'   => $this->activeClientsCount($pdo, $sid),
-            'pending_approvals'      => $this->pendingApprovals($pdo, $sid),
-            // Vyžádání chybějících dokladů od klienta (Fáze F, audit 2026-07).
-            'document_requests_open' => $this->documentRequests->openCounts($sid),
-            'bank_posting_pending'   => $this->bankPostingPending($pdo, $sid),
-            'automation_auto_today'  => $this->automationAutoToday($pdo, $sid),
-            'accounting_backfill_pending' => $this->accountingBackfillPending($pdo, $sid),
-            'flat_tax_threshold'     => $this->flatTaxThreshold($pdo, $year, $sid),
-            'vat_registration_limits' => $this->vatRegistrationLimits($year),
-            'today'                  => $today->format('Y-m-d'),
-            'year'                   => $year,
-            'prev_year'              => $prevYear,
-            'is_vat_payer'           => $isVatPayer,
-        ];
+        return OtherItemForecastService::mergeSourceCumulative(
+            (new OtherItemForecastService($this->db))->mergeCumulative(
+                $this->cashflowForecast($pdo, $sid), $sid, 'receivable', 'in'),
+            $derived, 'receivable', 'in');
     }
 
     /** Počet aktivních (neaarchivovaných) zákazníků v rámci aktuálního dodavatele (bez čistých dodavatelů). */

@@ -265,6 +265,28 @@ export interface DashboardSummary {
   is_vat_payer: boolean
 }
 
+type DashboardOverviewDetails = Pick<DashboardSummary,
+  'has_purchase_invoices' | 'overdue' | 'unpaid_upcoming' | 'draft_invoices' |
+  'purchase_costs_by_month' | 'due_buckets' |
+  'pending_approvals' | 'document_requests_open' | 'bank_posting_pending' | 'automation_auto_today' |
+  'accounting_backfill_pending'
+>
+
+export type DashboardOverview = DashboardOverviewDetails & Pick<DashboardSummary,
+  'kpi' | 'top_clients_12m' | 'revenue_by_month' | 'today' | 'year' | 'prev_year' | 'is_vat_payer'
+> & Partial<Pick<DashboardSummary, 'cashflow_forecast'>>
+
+export type DashboardStatistics = Omit<DashboardSummary, keyof DashboardOverviewDetails | 'cashflow_forecast'>
+
 export const dashboardApi = {
   summary: () => api.get<DashboardSummary>('/dashboard/summary').then(r => r.data),
+  overview: (signal: AbortSignal) => api.get<DashboardOverview>('/dashboard/summary', {
+    params: { part: 'overview' }, signal,
+  }).then(r => r.data),
+  cashflow: (signal: AbortSignal) => api.get<Pick<DashboardSummary, 'cashflow_forecast'>>('/dashboard/summary', {
+    params: { part: 'cashflow' }, signal,
+  }).then(r => r.data.cashflow_forecast),
+  statistics: () => api.get<DashboardStatistics>('/dashboard/summary', {
+    params: { part: 'statistics' },
+  }).then(r => r.data),
 }

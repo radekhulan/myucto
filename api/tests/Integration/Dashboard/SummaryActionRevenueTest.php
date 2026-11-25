@@ -7,10 +7,13 @@ namespace MyInvoice\Tests\Integration\Dashboard;
 use MyInvoice\Action\Dashboard\SummaryAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Charakterizační (golden baseline) testy pro Dashboard\SummaryAction — ZAMYKAJÍ
@@ -109,6 +112,29 @@ final class SummaryActionRevenueTest extends TestCase
         self::assertEqualsWithDelta($base2001 + 1750.0, $this->yearTotal($after, 2001, 'CZK'), 0.01, 'Rok 2001 CZK = 1000+500+250 (net, plátce).');
         self::assertEqualsWithDelta($base2000 + 999.0, $this->yearTotal($after, 2000, 'CZK'), 0.01, 'Rok 2000 CZK = jen kontrolní 999.');
         self::assertSame($baseCnt2001 + 3, $this->yearCount($after, 2001, 'CZK'), 'Do roku 2001 spadají 3 doklady.');
+    }
+
+    public function testDashboardPartsReconstructTheDefaultSummaryWithoutChangingValues(): void
+    {
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/dashboard/summary')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
+        $read = fn (array $query): array => json_decode(
+            (string) ($this->action)($request->withQueryParams($query), new Response())->getBody(),
+            true, 512, JSON_THROW_ON_ERROR,
+        );
+        $full = $read([]);
+        $overview = $read(['part' => 'overview']);
+        $forecast = $read(['part' => 'cashflow']);
+        $statistics = $read(['part' => 'statistics']);
+
+        self::assertArrayHasKey('kpi', $overview);
+        self::assertArrayNotHasKey('cashflow_forecast', $overview);
+        self::assertArrayNotHasKey('payment_days_histogram', $overview);
+        self::assertArrayHasKey('payment_days_histogram', $statistics);
+        self::assertArrayNotHasKey('overdue', $statistics);
+        self::assertArrayNotHasKey('cashflow_forecast', $statistics);
+        self::assertSame(['cashflow_forecast' => $full['cashflow_forecast']], $forecast);
+        self::assertSame($full, $overview + $statistics + $forecast);
     }
 
     /** kpi(): per-currency this_year / prev_year / prev_year_ytd + počty. */

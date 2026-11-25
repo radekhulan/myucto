@@ -8154,9 +8154,8 @@ paths:
       tags: [Reports]
       summary: Dashboard summary — KPI, top klienti, obrat, forecasty, statistiky
       description: |
-        Agregovaná data pro Dashboard i stránku Grafy (`/stats`). Endpoint
-        sjednocuje desítky agregací do jednoho dotazu (cache je řízena DB
-        cache tabulkami `*_revenue_cache`).
+        Agregovaná data pro Dashboard i stránku Grafy (`/stats`). Bez parametru
+        `part` vrací kompletní souhrn. Pomocí `part` lze načíst jen vybranou část.
 
         `has_purchase_invoices` označuje existenci přijaté faktury aktuální firmy
         bez omezení období a slouží ke skrytí úvodního průvodce.
@@ -8188,6 +8187,13 @@ paths:
         - **active_clients_count / active_recurring_count** — counts,
         - **pending_approvals** — počet žádostí o schválení výkazu,
         - **is_vat_payer / today / year / prev_year** — kontext.
+      parameters:
+        - in: query
+          name: part
+          schema: { type: string, enum: [overview, cashflow, statistics] }
+          description: |
+            `overview` vrátí KPI a provozní údaje pro Přehled. `cashflow` vrátí
+            pouze `cashflow_forecast`. `statistics` vrátí KPI a údaje pro Grafy.
       responses:
         '200':
           description: OK
@@ -56180,6 +56186,7 @@ components:
       type: object
       description: |
         Souhrnná data pro Dashboard (homepage) i stránku Grafy (`/stats`).
+        Při výběru přes `part` jsou přítomná jen pole dané části souhrnu.
 
         **VAT-aware obrat:** Pro plátce DPH (`supplier.is_vat_payer = 1`) se obrat
         ve všech KPI a grafech počítá z `total_without_vat`; pro neplátce z

@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
+import { dashboardApi, type DashboardStatistics } from '@/api/dashboard'
 import { projectsApi, type ProjectStats } from '@/api/projects'
 import { formatMoneyWhole, formatNumber } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -21,7 +21,7 @@ import OtherItemResultImpact from '@/components/accounting/OtherItemResultImpact
 
 const { t } = useI18n()
 
-const summary = ref<DashboardSummary | null>(null)
+const summary = ref<DashboardStatistics | null>(null)
 const projectStats = ref<ProjectStats | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -29,7 +29,7 @@ const error = ref('')
 onMounted(async () => {
   try {
     const [s, ps] = await Promise.all([
-      dashboardApi.summary(),
+      dashboardApi.statistics(),
       projectsApi.stats(),
     ])
     summary.value = s

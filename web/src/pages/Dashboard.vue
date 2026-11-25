@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, computed, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 
 const { t } = useI18n()
-import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
+import { dashboardApi, type CashflowForecast, type DashboardOverview } from '@/api/dashboard'
 import { formatMoney, formatMoneyWhole, formatDate, formatNumber } from '@/composables/useFormat'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import SparklineChart from '@/components/charts/SparklineChart.vue'
@@ -51,26 +51,58 @@ const supplierIdentity = computed<string>(() => {
 // schovat) — dokud svítí, prázdný stav pod ním by byl jen šum.
 const guideVisible = ref(false)
 
-const summary = ref<DashboardSummary | null>(null)
+const summary = ref<DashboardOverview | null>(null)
 const loading = ref(true)
 const error = ref('')
+const forecast = ref<CashflowForecast[]>([])
+const forecastLoading = ref(false)
+const forecastError = ref(false)
+let dashboardRequest: AbortController | undefined
+
+async function loadForecast(signal: AbortSignal) {
+  forecastLoading.value = true
+  forecastError.value = false
+  try {
+    const result = await dashboardApi.cashflow(signal)
+    if (!signal.aborted) forecast.value = result
+  } catch {
+    if (!signal.aborted) forecastError.value = true
+  } finally {
+    if (!signal.aborted) forecastLoading.value = false
+  }
+}
+
+function retryForecast() {
+  if (dashboardRequest) void loadForecast(dashboardRequest.signal)
+}
 
 async function loadSummary() {
+  dashboardRequest?.abort()
+  error.value = ''
   // Žádný dodavatel → nenačítej summary (vrátilo by jen prázdná data), ukaž gate.
   if (!hasSupplier.value) {
     loading.value = false
     return
   }
+  const request = new AbortController()
+  dashboardRequest = request
+  const { signal } = request
+  forecastLoading.value = false
+  forecastError.value = false
   try {
-    summary.value = await dashboardApi.summary()
-  } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('errors.generic')
-  } finally {
+    const data = await dashboardApi.overview(signal)
+    if (signal.aborted) return
+    summary.value = data
     loading.value = false
+    if (!hasAnyData.value) return
+    if (data.cashflow_forecast !== undefined) forecast.value = data.cashflow_forecast
+    else await loadForecast(signal)
+  } catch (e: any) {
+    if (!signal.aborted) error.value = e?.response?.data?.error?.message || t('errors.generic')
+  } finally {
+    if (!signal.aborted) loading.value = false
   }
 }
-
-onMounted(loadSummary)
 
 // Výkaz práce modal — otevíráno z tlačítka „Výkaz" na kartě konceptu (stejný popup jako v /invoices).
 const wrModalOpen = ref(false)
@@ -78,7 +110,6 @@ const wrModalOpen = ref(false)
 // Souhrn (tržby, neuhrazené, koncepty) se po zápisu v jiném okně přepíše
 // na místě, bez hlášky o načítání.
 useWindowRefresh(async () => {
-  error.value = ''
   await loadSummary()
   if (error.value) throw new Error(error.value)
 }, () => !wrModalOpen.value)
@@ -122,6 +153,14 @@ const hasAnyData = computed(() => {
       || (summary.value.overdue?.length ?? 0) > 0
       || (summary.value.unpaid_upcoming?.length ?? 0) > 0
 })
+
+watch([() => supplierStore.currentSupplierId, hasSupplier], () => {
+  summary.value = null
+  forecast.value = []
+  loading.value = true
+  void loadSummary()
+}, { immediate: true })
+onBeforeUnmount(() => dashboardRequest?.abort())
 
 function openInvoice(id: number) {
   router.push(`/invoices/${id}`)
@@ -538,7 +577,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       </section>
 
       <!-- Cash-flow forecast 30 / 60 / 90 dní — kolik se očekává inkasovat -->
-      <div v-if="summary.cashflow_forecast.length" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div v-if="forecast.length || forecastLoading || forecastError" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <div class="flex flex-col gap-1 mb-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('dashboard.cashflow_forecast') }}</h3>
           <span class="text-xs text-neutral-400">{{ t('dashboard.cashflow_forecast_hint') }}</span>
@@ -548,19 +587,24 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
              kdežto „711 177,50 Kč" potřebuje 140 px a nezalomí se (nedělitelné
              mezery). Čísla si pak lezla přes sebe a přes okraj karty. Pod `sm`
              proto řádek na řádek: popisek vlevo, částky vpravo. -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <p v-if="forecastLoading && !forecast.length" role="status" class="text-sm text-neutral-500">{{ t('dashboard.loading_data') }}</p>
+        <div v-if="forecastError" class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-sm">
+          <p role="status" class="text-danger-600">{{ t('errors.generic') }}</p>
+          <button type="button" class="text-primary-700 hover:underline" @click="retryForecast">{{ t('common.retry') }}</button>
+        </div>
+        <div v-if="forecast.length" class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div v-for="period in ['30','60','90']" :key="`cf-${period}`"
             class="flex items-baseline justify-between gap-3 sm:block sm:text-center">
             <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 sm:mb-1.5">{{ t('dashboard.cashflow_in_days', { n: period }) }}</div>
             <div class="text-right sm:text-center">
               <div class="space-y-0.5">
-                <div v-for="cf in summary.cashflow_forecast" :key="`cf-${period}-${cf.currency}`"
+                <div v-for="cf in forecast" :key="`cf-${period}-${cf.currency}`"
                   class="font-mono text-base sm:text-lg font-semibold text-neutral-900">
                   {{ formatMoneyWhole(period === '30' ? cf.in_30 : period === '60' ? cf.in_60 : cf.in_90, cf.currency) }}
                 </div>
               </div>
               <div class="text-xs text-neutral-500 mt-1 space-y-0.5">
-                <div v-for="cf in summary.cashflow_forecast" :key="`cf-cnt-${period}-${cf.currency}`">
+                <div v-for="cf in forecast" :key="`cf-cnt-${period}-${cf.currency}`">
                   {{ period === '30' ? cf.count_30 : period === '60' ? cf.count_60 : cf.count_90 }} {{ t('dashboard.invoices_unit') }}
                 </div>
               </div>
