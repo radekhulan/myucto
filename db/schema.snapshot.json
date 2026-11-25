@@ -1243,7 +1243,8 @@
         "2337_imported_issued_tax_snapshot.sql",
         "2338_outgoing_webhooks.sql",
         "2339_payroll_run_discard_correction.sql",
-        "2340_submission_outbox_app_time.sql"
+        "2340_submission_outbox_app_time.sql",
+        "2341_vat_classification_energy_reverse_charge.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
