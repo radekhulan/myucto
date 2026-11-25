@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\TaxEvidence;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 
 /**
  * Zámek roku daňové evidence: rok s dokončenou (finální) roční uzávěrkou se už nemění.
@@ -17,6 +18,40 @@ use MyInvoice\Infrastructure\Database\Connection;
 final class TaxEvidenceYearLock
 {
     public const ERROR_CODE = 'closing_final';
+
+    /**
+     * Finalizace drží zámek od čtení deníku, klasifikace od ověření roku až po zápis.
+     * Řádek firmy existuje i před založením první roční uzávěrky.
+     *
+     * @template T
+     * @param callable():T $operation
+     * @return T
+     */
+    public static function synchronized(Connection $db, int $supplierId, callable $operation): mixed
+    {
+        $pdo = $db->pdo();
+        return TransactionFailure::retrying($pdo, static function () use ($pdo, $supplierId, $operation): mixed {
+            $ownTransaction = !$pdo->inTransaction();
+            if ($ownTransaction) {
+                $pdo->beginTransaction();
+            }
+            try {
+                $lock = $pdo->prepare('SELECT id FROM supplier WHERE id = ? FOR UPDATE');
+                $lock->execute([$supplierId]);
+                $lock->closeCursor();
+                $result = $operation();
+                if ($ownTransaction) {
+                    $pdo->commit();
+                }
+                return $result;
+            } catch (\Throwable $e) {
+                if ($ownTransaction && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        });
+    }
 
     public static function isFinal(Connection $db, int $supplierId, int $year): bool
     {

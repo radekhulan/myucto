@@ -74,6 +74,14 @@ describe('Periods: schválení závěrky je konečné', () => {
     expect(wrapper.text()).toContain('accounting.closing.reopen.button')
     expect(wrapper.text()).not.toContain('accounting.closing.approve.revoke_button')
   })
+
+  it('po uplynutí lhůty nabízí schválení a vysvětlí nedostupné znovuotevření', async () => {
+    m.listPeriods.mockResolvedValue([{ ...period(2, 'closed'), expired_reopen_deadline: '2023-12-31' }])
+    const wrapper = await mountPage()
+    expect(wrapper.text()).toContain('accounting.closing.approve.button')
+    expect(wrapper.text()).toContain('accounting.closing.reopen.expired')
+    expect(wrapper.text()).not.toContain('accounting.closing.reopen.button')
+  })
 })
 
 describe('Periods: začátek prvního období (#227)', () => {

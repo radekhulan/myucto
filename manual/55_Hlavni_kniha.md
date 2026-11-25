@@ -242,7 +242,8 @@ je u řádků sloupec **Protiúčet**. Firma se složeným zápisem vidí opis s
 
 Záložka **Inventura účtu** ukazuje účetní a skutečný stav účtu a jeho analytik
 z [inventarizačního protokolu](69_Inventarizace_rozvahovych_uctu.md) k rozvahovému
-dni. Vedou na ni odkazy z rozvahy a výsledovky po účtech.
+dni. Při stavu **Bez uložené inventury** zobrazuje jen účetní zůstatky.
+Vedou na ni odkazy z rozvahy a výsledovky po účtech.
 
 Doklad v opisu vede podle zdroje na vydanou fakturu, přijatou fakturu, bankovní
 výpis, pokladní doklad, kartu majetku nebo na vyrovnaný doklad zápočtu; bez

@@ -46,7 +46,7 @@ final class StatementNotesAction
         }
 
         try {
-            return Json::ok($response, $this->notes->build($supplierId, (int) ($args['id'] ?? 0)));
+            return Json::ok($response, $this->notes->build($supplierId, (int) ($args['id'] ?? 0), includeSuggestions: true));
         } catch (\Throwable $e) {
             return $this->mapError($response, $e);
         }
@@ -85,7 +85,7 @@ final class StatementNotesAction
             'filled'  => $content !== null && trim($content) !== '',
         ]);
 
-        return Json::ok($response, $this->notes->build($supplierId, $periodId));
+        return Json::ok($response, $this->notes->build($supplierId, $periodId, includeSuggestions: true));
     }
 
     /**
@@ -120,7 +120,7 @@ final class StatementNotesAction
 
         return Json::ok($response, [
             'carried' => $result['copied'],
-            'notes'   => $this->notes->build($supplierId, $periodId),
+            'notes'   => $this->notes->build($supplierId, $periodId, includeSuggestions: true),
         ]);
     }
 

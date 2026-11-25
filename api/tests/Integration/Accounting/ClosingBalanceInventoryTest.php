@@ -128,13 +128,10 @@ final class ClosingBalanceInventoryTest extends TestCase
         $codes = array_map(static fn (array $r): string => (string) $r['account_code'], $preview['rows']);
         self::assertContains('221', $codes);
         self::assertContains('411', $codes);
+        self::assertSame('not_started', $preview['inventory']['status']);
+        self::assertFalse($preview['inventory']['completed']);
     }
 
-    /**
-     * Uzavřené/schválené období bez uložené inventarizace (např. rok uzavřený ještě
-     * před EP-6): buildWithSaved dopočte skutečný stav z účetního (counted = book,
-     * resolved) — inventarizace se prezentuje jako dokončená, ne jako samá nevyřešená.
-     */
     public static function closedStatuses(): iterable
     {
         yield 'closed' => ['closed'];
@@ -143,7 +140,7 @@ final class ClosingBalanceInventoryTest extends TestCase
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('closedStatuses')]
-    public function testClosedPeriodBackFillsInventoryFromLedger(string $status): void
+    public function testClosedPeriodWithoutInventoryRetainsOnlyBookBalances(string $status): void
     {
         // Simulace uzavřeného období — bez uložené inventarizace.
         $this->db->pdo()->prepare('UPDATE accounting_periods SET status = ? WHERE id = ? AND supplier_id = ?')
@@ -152,19 +149,16 @@ final class ClosingBalanceInventoryTest extends TestCase
         $preview = $this->closing->inventoryPreview($this->supplierId, $this->periodId);
 
         self::assertNotSame([], $preview['rows']);
+        self::assertContains('221', array_column($preview['rows'], 'account_code'));
         foreach ($preview['rows'] as $r) {
-            self::assertTrue((bool) $r['back_filled'], 'Účet ' . $r['account_code'] . ' má být dopočten.');
-            self::assertTrue((bool) $r['resolved'], 'Dopočtený účet je vyřešený.');
-            self::assertSame(
-                round((float) $r['book_balance'], 2),
-                round((float) $r['counted_balance'], 2),
-                'Skutečný stav = účetní zůstatek.',
-            );
+            self::assertNull($r['counted_balance']);
+            self::assertNull($r['difference']);
+            self::assertFalse($r['resolved']);
         }
-        self::assertSame('completed', $preview['inventory']['status']);
-        self::assertSame(0, $preview['inventory']['unresolved_count']);
-        self::assertTrue($preview['inventory']['completed']);
-        self::assertTrue($preview['inventory']['back_filled']);
+        self::assertSame('not_started', $preview['inventory']['status']);
+        self::assertSame(0, $preview['inventory']['item_count']);
+        self::assertFalse($preview['inventory']['completed']);
+        self::assertFalse($preview['inventory']['can_close']);
     }
 
     public function testCompletedInventoryWithMatchingCountsUnblocksClose(): void

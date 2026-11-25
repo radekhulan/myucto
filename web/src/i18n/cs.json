@@ -19599,7 +19599,8 @@
         "explainer_title": "Kdy výjimku použít",
         "explainer_body": "Globální mapa zařazuje účet podle čísla syntetiky. Předpis ale nechává firmě volby, které z čísla účtu nevyčtete: půjčka od společníka splatná za víc než rok patří do dlouhodobých závazků, výnosy a náklady vůči ovládané či ovládající osobě do vlastních podřádků a konkrétní analytika může patřit jinam než její syntetika. Výjimka platí jen pro tuto firmu a použije ji rozvaha, výsledovka, jejich exporty i příloha přiznání DPPO.",
         "tab_balance_sheet": "Rozvaha",
-        "tab_income_statement": "Výsledovka",
+        "tab_income_statement": "Výsledovka · druhové",
+        "tab_income_statement_purpose": "Výsledovka · účelové",
         "search_placeholder": "Hledat účet nebo název",
         "only_overrides": "Jen s výjimkou",
         "only_balances": "Jen se zůstatkem",
@@ -20891,6 +20892,7 @@
       "protocol_title": "Inventarizační protokol",
       "status_completed": "Dokončeno",
       "status_in_progress": "Rozpracováno",
+      "status_not_started": "Bez uložené inventury",
       "unresolved": "Nevyřešené rozdíly: {n}",
       "responsible_person": "Odpovědná osoba",
       "inventory_date": "Datum inventury",
@@ -20898,7 +20900,7 @@
       "protocol_ref_ph": "č. j. / odkaz na podepsaný protokol",
       "note_ph": "Poznámka k rozdílu",
       "readonly_hint": "Skutečný stav lze uložit jen v otevřeném nebo uzavíraném období.",
-      "back_filled_hint": "Období je uzavřené - skutečný stav byl dopočten z účetních zůstatků (uzávěrka již majetek a závazky ověřila). Inventarizace je tak kompletní bez ručního doplnění.",
+      "not_started_hint": "Podklad z účetních zůstatků. Doložte skutečný stav inventurním soupisem.",
       "save": "Uložit",
       "save_complete": "Uložit a dokončit",
       "saved": "Inventarizace uložena.",
@@ -22563,6 +22565,7 @@
       }
     },
     "statement_notes": {
+      "suggestion_hint": "Předvyplněno z účetních výkazů nebo nastavení. Před uložením zkontrolujte údaje a doplňte významné skutečnosti.",
       "carry_over_offer": "Loni jste přílohu vyplnili - {count} sekcí lze převzít z roku {year}. Přepíše se jen to, co je letos prázdné.",
       "carry_over_action": "Převzít z roku {year}",
       "carried_over_done": "Převzato {count} sekcí. Projděte je a upravte, co už letos neplatí.",
@@ -23054,12 +23057,18 @@
         "confirm_text_17_7": "Po schválení účetní závěrky již nelze účetní knihy znovu otevřít (§17 odst. 7 ZoÚ). Opravy se provádějí až v následujícím období (§35 ZoÚ).",
         "locked_hint": "Závěrka je schválená a schválení nelze zrušit (§17/7 ZoÚ). Opravy se provádějí v období zjištění (§35 ZoÚ)."
       },
+      "turnover_mapping": {
+        "period": "Nesoulad za období {year}",
+        "income_statement": "Druhové mapování",
+        "income_statement_purpose": "Účelové mapování"
+      },
       "reopen": {
         "button": "Znovuotevřít",
         "title": "Znovuotevření období {year}",
+        "expired": "Lhůta pro znovuotevření účetních knih skončila {date}.",
         "text": "Znovuotevření uzavřeného období je zásah do uzavřeného účetnictví a zaznamená se do auditní stopy. Existují-li uzávěrkové zápisy, nejprve vezměte zpět kroky Otevření roku a Uzavření knih.",
         "reason": "Důvod",
-        "reason_placeholder": "Důvod znovuotevření / zrušení schválení…",
+        "reason_placeholder": "Která položka závěrky neodpovídá skutečnému stavu?",
         "reason_required": "Důvod je povinný (min. 10 znaků)."
       },
       "series": {
@@ -25496,6 +25505,13 @@
   "checks": {
     "doc_date": "Datum",
     "issue": {
+      "turnover_only_nature": "Do čistého obratu vstupuje jen v druhovém členění",
+      "turnover_only_purpose": "Do čistého obratu vstupuje jen v účelovém členění",
+      "turnover_amount_differs": "Do čistého obratu vstupuje v každém členění jiná částka",
+      "turnover_unmapped_revenue_nature": "Výnos chybí v druhovém mapování obratu",
+      "turnover_unmapped_revenue_purpose": "Výnos chybí v účelovém mapování obratu",
+      "turnover_ambiguous_revenue_nature": "Výnos v druhovém mapování obratu nesouhlasí se zůstatkem účtu",
+      "turnover_ambiguous_revenue_purpose": "Výnos v účelovém mapování obratu nesouhlasí se zůstatkem účtu",
       "amount_mismatch": "částka nesedí",
       "posting_period_after_horizon": "Od {from} do {to}, počet zápisů v deníku {count}",
       "counterparty_mismatch": "protistrana nesedí",
@@ -33446,7 +33462,7 @@
     "check_tax_evidence_closing": "Dokončená roční uzávěrka daňové evidence",
     "check_osvc_month_statuses": "Měsíční stavy samostatné výdělečné činnosti",
     "xml_business_warning": "Pracovní XML bylo staženo s obsahovými nesrovnalostmi. Před podáním zkontrolujte podklady a uvedená upozornění.",
-    "xml_validation_warning": "XML bylo staženo, ale neprošlo kontrolou schématu. Před podáním zkontrolujte údaje a opravte chyby uvedené v archivu podání.",
+    "xml_validation_warning": "XML neprošlo kontrolou schématu. Opravte údaje v přiznání a stáhněte nový soubor.",
     "unsupported_title": "Situace, které aplikace v přiznání neumí",
     "unsupported_action": "Co s tím",
     "unsupported_blocking_badge": "Varování",
@@ -33485,6 +33501,7 @@
     "sickness": "Nemocenské",
     "download_insurance_pdf": "Stáhnout PDF přehledů",
     "cssz_xml": "Stáhnout XML ČSSZ",
+    "cssz_xml_unsupported": "Pro rok {year} vyplňte přehled ve formuláři na ePortálu ČSSZ. Výpočet si můžete stáhnout v PDF.",
     "health_pdf": "Přehled pro ZP",
     "advances_title": "Zálohy na daň a pojistné",
     "advances_widget_title": "Nadcházející zálohy na daň a pojistné",

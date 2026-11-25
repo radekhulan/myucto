@@ -180,10 +180,16 @@ final class VatClassificationMapper
      */
     public function projectDphLines(iterable $rows): array
     {
+        return $this->dphLineProjection($rows)->lines();
+    }
+
+    /** @param iterable<array<string,mixed>> $rows */
+    public function dphLineProjection(iterable $rows): DphLineProjection
+    {
         $projection = new DphLineProjection();
         foreach ($rows as $r) {
             $projection->add($r);
         }
-        return $projection->lines();
+        return $projection;
     }
 }

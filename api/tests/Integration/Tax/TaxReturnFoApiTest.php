@@ -166,6 +166,82 @@ final class TaxReturnFoApiTest extends TestCase
             "SELECT COUNT(*) FROM tax_submissions WHERE supplier_id = {$this->supplierId} AND form_code = 'dpfdp7'"
         )->fetchColumn();
         self::assertSame(2, $subCount, 'Každý ze dvou exportů se archivuje jako samostatné stažení.');
+        $last = (int) $this->db->pdo()->query(
+            "SELECT last_submission_id FROM income_tax_returns WHERE supplier_id = {$this->supplierId} AND taxpayer_type = 'fo'"
+        )->fetchColumn();
+        $resolver = Bootstrap::buildContainer()->get(\MyInvoice\Service\Submission\DefaultSubmissionArtifactResolver::class);
+        $artifact = $resolver->resolve($this->supplierId, 'tax_submission', $last);
+        self::assertSame('passed', $artifact['authority']['validation_status']);
+        self::assertSame($finalXml, $artifact['bytes']);
+    }
+
+    public function testBusinessInvalidFoRemainsDownloadableWithoutCreatingFilingArchive(): void
+    {
+        $xml = $this->finalizeFoWithoutSection10KindCode();
+        $args = ['type' => 'fo', 'year' => (string) self::YEAR];
+
+        [$req, $res] = $this->req('GET');
+        $response = $this->action->xml($req, $res, $args);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame($xml, (string) $response->getBody());
+        self::assertSame('passed', $response->getHeaderLine('X-Validation-Status'));
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM tax_submissions WHERE supplier_id = ? AND form_code = ?');
+        $stmt->execute([$this->supplierId, 'dpfdp7']);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+        self::assertSame('1', $response->getHeaderLine('X-Business-Errors'));
+    }
+
+    public function testPreviouslyArchivedBusinessInvalidFoIsNotAvailableToSubmissionQueue(): void
+    {
+        $xml = $this->finalizeFoWithoutSection10KindCode();
+        $repo = new \MyInvoice\Repository\TaxSubmissionRepository($this->db);
+        $id = $repo->archive($this->supplierId, 'dpfdp7', self::YEAR, null, null, $xml, [], 'passed', [], $this->userId);
+        $container = Bootstrap::buildContainer();
+        $resolver = $container->get(\MyInvoice\Service\Submission\DefaultSubmissionArtifactResolver::class);
+        $isds = $container->get(\MyInvoice\Service\Epo\Isds\TaxSubmissionIsdsService::class);
+        foreach ([
+            fn () => $resolver->resolve($this->supplierId, 'tax_submission', $id),
+            fn () => $isds->enqueue($this->supplierId, $id, $this->userId),
+        ] as $resolve) {
+            try {
+                $resolve();
+                self::fail('Dříve archivované DPFO se známou věcnou chybou nesmí jít do fronty.');
+            } catch (\MyInvoice\Service\Submission\Channel\SubmissionChannelException $e) {
+                self::assertSame('dpfo_business_validation_failed', $e->errorCode);
+            }
+        }
+
+        $direct = $container->get(\MyInvoice\Service\Epo\EpoDirectSubmissionService::class);
+        $validation = new \ReflectionMethod($direct, 'validatedSubmission');
+        $this->expectException(\MyInvoice\Service\Epo\EpoSubmissionException::class);
+        try {
+            $validation->invoke($direct, $id, $this->supplierId);
+        } catch (\MyInvoice\Service\Epo\EpoSubmissionException $e) {
+            self::assertSame('dpfo_business_validation_failed', $e->errorCode);
+            throw $e;
+        }
+    }
+
+    private function finalizeFoWithoutSection10KindCode(): string
+    {
+        $container = Bootstrap::buildContainer();
+        $service = $container->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class);
+        $draft = $service->getReturn($this->supplierId, self::YEAR, 'fo', $this->userId);
+        $repo = new \MyInvoice\Repository\TaxReturnRepository($this->db);
+        $saved = $repo->updateInputs($this->supplierId, self::YEAR, 'fo', [
+            's10_items' => [['income' => 1000, 'expenses' => 0, 'text' => 'Syntetický ostatní příjem']],
+        ], $draft['return']['row_version']);
+        $final = $service->finalize($this->supplierId, self::YEAR, 'fo', $saved['row_version'], $this->userId);
+        self::assertSame('final', $final['return']['status']);
+        self::assertSame('failed', $final['snapshot']['business_status']);
+        $snapshot = $repo->snapshot($this->supplierId, $final['snapshot']['id']);
+        self::assertCount(1, $snapshot['business_errors']);
+        self::assertStringContainsString('kód druhu příjmu', $snapshot['business_errors'][0]);
+        $xml = $service->buildXml($this->supplierId, self::YEAR, 'fo')['xml'];
+        self::assertSame('passed', $container->get(\MyInvoice\Service\Validation\XmlSchemaValidator::class)->validate($xml, 'dpfdp7')['status']);
+
+        return $xml;
     }
 
     public function testLaterEntityStatusDoesNotBlockEarlierFoFinalization(): void

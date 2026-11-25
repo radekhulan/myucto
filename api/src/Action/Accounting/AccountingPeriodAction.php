@@ -64,7 +64,18 @@ final class AccountingPeriodAction
     {
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
-        return Json::ok($response, $this->periods->listForTenant($supplierId));
+        $periods = $this->periods->listForTenant($supplierId);
+        $endsByStart = array_column($periods, 'ends_on', 'starts_on');
+        foreach ($periods as &$period) {
+            if (!in_array($period['status'], ['closed', 'reviewed'], true)) {
+                continue;
+            }
+            $endsOn = (string) $period['ends_on'];
+            $nextStart = AccountingPeriodRepository::nextPeriodBounds($endsOn)['starts_on'];
+            $period['expired_reopen_deadline'] = $this->periods->expiredReopenDeadline($endsOn, $endsByStart[$nextStart] ?? null);
+        }
+        unset($period);
+        return Json::ok($response, $periods);
     }
 
     public function create(Request $request, Response $response): Response
@@ -243,34 +254,6 @@ final class AccountingPeriodAction
             ];
         }
 
-        // Reopen guard (R3): dokud existují posted closing/fx zápisy období nebo opening
-        // zápis následujícího období, musí admin nejprve revertovat kroky open_next a
-        // close_books v průvodci — jinak by reopen nechal v deníku osiřelé závěrkové zápisy.
-        if ($transition === 'closed→open') {
-            $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
-            // Jmenujeme jen kroky, které se OPRAVDU musí vzít zpět. Hláška dřív vždycky
-            // vyjmenovala oba, takže posílala uživatele revertovat i krok, který nikdy
-            // nespustil — a ten pak v průvodci marně hledal tlačítko.
-            $blocking = [];
-            // Převzatý otevírací zápis (krok open_next ho jen převzal) na uzávěrce období
-            // nestojí — reopen neblokuje, a proto se z kontroly vynechává.
-            if ($next !== null && $this->closingRepo->hasOpeningEntries(
-                $supplierId,
-                (int) $next['id'],
-                $this->closingRepo->takenOverOpeningEntryIds($supplierId, $id),
-            )) {
-                $blocking[] = 'Otevření nového roku';
-            }
-            if ($this->closingRepo->hasClosingEntries($supplierId, $id)) {
-                $blocking[] = 'Uzavření knih';
-            }
-            if ($blocking !== []) {
-                return Json::error($response, 'closing_entries_exist',
-                    'Období má zaúčtované závěrkové zápisy — nejprve v uzávěrkovém průvodci vezměte zpět krok '
-                    . implode(' a ', $blocking) . '.', 422);
-            }
-        }
-
         // EP-4: CAS změna stavu období a její auditní událost běží v JEDNÉ transakci —
         // ActivityLogger sdílí tutéž Connection/PDO (PHP-DI singleton), takže INSERT do
         // activity_log je součástí téže tx jako UPDATE stavu. Selhání auditu tak rollbackne
@@ -282,6 +265,15 @@ final class AccountingPeriodAction
             $pdo->beginTransaction();
         }
         try {
+            if ($transition === 'closed→open') {
+                $failure = $this->reopenFailure($supplierId, $id, $rowVersion);
+                if ($failure !== null) {
+                    if ($ownTx) {
+                        $pdo->rollBack();
+                    }
+                    return Json::error($response, ...$failure);
+                }
+            }
             // EP-14: zákonné schválení (approved) je NEVRATNÉ (§17/7) — nesmí projít, dokud
             // není uložená zmražená historická kategorie ÚJ (§1e). Zmražení uzávěrka dělá při
             // uzavření knih, ale pokud tehdy selhalo (viz ClosingService::closeBooks warning),
@@ -358,6 +350,39 @@ final class AccountingPeriodAction
         }
 
         return Json::ok($response, $this->periods->findById($supplierId, $id));
+    }
+
+    /** @return array{string,string,int}|null */
+    private function reopenFailure(int $supplierId, int $id, int $rowVersion): ?array
+    {
+        $period = $this->periods->findForUpdate($id, $supplierId);
+        if ($period === null || (int) $period['row_version'] !== $rowVersion || $period['status'] !== 'closed') {
+            return ['version_conflict', 'Období mezitím změnil jiný uživatel — načtěte aktuální stav.', 409];
+        }
+        $endsOn = (string) $period['ends_on'];
+        $next = $this->periods->nextPeriod($supplierId, $endsOn, forUpdate: true);
+        $deadline = $this->periods->expiredReopenDeadline($endsOn, $next['ends_on'] ?? null);
+        if ($deadline !== null) {
+            return ['reopen_deadline_passed', 'Lhůta pro znovuotevření účetních knih skončila dne ' . $deadline . ' (§ 17 odst. 7 ZoÚ).', 422];
+        }
+
+        $blocking = [];
+        if ($next !== null && $this->closingRepo->hasOpeningEntries(
+            $supplierId,
+            (int) $next['id'],
+            $this->closingRepo->takenOverOpeningEntryIds($supplierId, $id),
+        )) {
+            $blocking[] = 'Otevření nového roku';
+        }
+        if ($this->closingRepo->hasClosingEntries($supplierId, $id)) {
+            $blocking[] = 'Uzavření knih';
+        }
+        if ($blocking !== []) {
+            return ['closing_entries_exist',
+                'Období má zaúčtované závěrkové zápisy — nejprve v uzávěrkovém průvodci vezměte zpět krok '
+                . implode(' a ', $blocking) . '.', 422];
+        }
+        return null;
     }
 
     /**

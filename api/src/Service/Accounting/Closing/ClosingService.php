@@ -53,6 +53,7 @@ use MyInvoice\Service\Tax\Return\LegalProvisionLedgerService;
 use MyInvoice\Service\Accounting\Reports\BalanceInventoryService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\SmallAssetReportService;
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\Match\PaymentMatchAuditChecker;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
@@ -310,6 +311,9 @@ final class ClosingService
         $steps = $this->stepsMap($supplierId, $periodId);
         $prev = $this->previousPeriod($supplierId, (string) $period['starts_on']);
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
+        $expiredReopenDeadline = in_array($period['status'], ['closed', 'reviewed'], true)
+            ? $this->periods->expiredReopenDeadline((string) $period['ends_on'], $next['ends_on'] ?? null)
+            : null;
 
         $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $requiredPreClose = $this->preCloseStepKeys($supplierId, $period);
@@ -364,11 +368,12 @@ final class ClosingService
             'can_open_next' => AccountingPeriodStatus::isClosed((string) $period['status'])
                 && $steps['close_books']['status'] === 'done'
                 && $steps['open_next']['status'] !== 'done',
+            'expired_reopen_deadline' => $expiredReopenDeadline,
             'can_revert_open_next' => $steps['open_next']['status'] === 'done'
-                && $period['status'] === 'closed' && $nextAllowsRevert,
+                && $period['status'] === 'closed' && $nextAllowsRevert && $expiredReopenDeadline === null,
             'can_revert_close_books' => $period['status'] === 'closed'
                 && $steps['close_books']['status'] === 'done'
-                && $steps['open_next']['status'] !== 'done',
+                && $steps['open_next']['status'] !== 'done' && $expiredReopenDeadline === null,
             'can_revert_fx_revaluation' => $period['status'] === 'closing'
                 && $steps['fx_revaluation']['status'] === 'done',
             'can_revert_stock' => $period['status'] === 'closing'
@@ -5648,10 +5653,19 @@ final class ClosingService
             $dumps = [];
             $result = ['step' => $stepKey];
 
+            $next = null;
+            if (in_array($stepKey, ['open_next', 'close_books'], true)) {
+                $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on'], forUpdate: true);
+                $deadline = $this->periods->expiredReopenDeadline((string) $period['ends_on'], $next['ends_on'] ?? null);
+                if ($period['status'] === 'closed' && $deadline !== null) {
+                    throw new ClosingException('reopen_deadline_passed',
+                        'Lhůta pro znovuotevření účetních knih skončila dne ' . $deadline . ' (§ 17 odst. 7 ZoÚ).');
+                }
+            }
+
             switch ($stepKey) {
                 case 'open_next':
                     $this->assertStatus($period, ['closed', 'closing']);
-                    $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
                     // §17/7: do uzavřených knih následujícího období se nesahá —
                     // opening jde smazat, jen dokud N+1 nemá vlastní uzávěrku
                     // (deleteClosingEntry jde mimo PostingService a jeho guardy).
@@ -5728,7 +5742,6 @@ final class ClosingService
 
                 case 'close_books':
                     $this->assertStatus($period, ['closed']);
-                    $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
                     if ($steps['open_next']['status'] === 'done'
                         || ($next !== null && $this->closing->hasOpeningEntries(
                             $supplierId,
@@ -6483,17 +6496,7 @@ final class ClosingService
             ];
         }
 
-        // § 18 odst. 2 ZoÚ — velká a střední ÚJ (a každá s povinným auditem) musí mít
-        // v závěrce i přehled o peněžních tocích a o změnách vlastního kapitálu. Balíček
-        // závěrky je mezi povinnými částmi nemá, takže takové firmě hlásil „hotovo"
-        // u závěrky, které dvě povinné části chyběly — a to je vada, kterou nikdo
-        // nezachytí, dokud ji nenajde auditor.
-        //
-        // Oba přehledy jsou nově součástí balíčku závěrky (`cash_flow`, `equity_changes`),
-        // takže kontrola už nemá být natvrdo `ok => false` — to bylo správně jen do doby,
-        // kdy se výkazy nedaly vygenerovat a účetní je musela přiložit ručně. Nově se
-        // ptá na to, co jediné může být špatně: SEDÍ oba výkazy? Nesedící přehled je vada
-        // v datech (typicky pohyb, jehož protiúčet nejde zařadit) a takhle se odevzdat nedá.
+        // § 18 odst. 2 ZoÚ: u povinných přehledů zkontrolujeme soulad s účetní evidencí.
         $category = null;
         if ($wants('section18_statements_required', 'entity_category_unavailable')) {
             try {
@@ -6506,14 +6509,13 @@ final class ClosingService
                     'key' => 'entity_category_unavailable',
                     'severity' => 'warning',
                     'ok' => false,
-                    'value' => $e->getMessage(),
+                    'value' => $e->errorCode === 'net_turnover_membership_conflict' && !empty($e->context['accounts'])
+                        ? $e->context
+                        : $e->getMessage(),
                 ];
             }
         }
-        $needsSection18 = $category !== null
-            && (in_array((string) $category['category'], ['large', 'medium'], true)
-                || ($category['scope_override'] === null && (string) $category['scope'] === 'full'));
-        if ($needsSection18) {
+        if (StatementSupplementPolicy::requiredForCategory($category['category'] ?? null)) {
             $cashFlow = $this->cashFlowStatement->build($supplierId, $periodId);
             $equityReconciles = $this->equityStatement->build($supplierId, $periodId)['reconciles'];
             $checks[] = [

@@ -81,14 +81,14 @@ final class NetTurnoverProjection
                 }
             }
             if ($balance['account_type'] === 'revenue' && ($mapped === [] || (!NetTurnoverPolicy::isBusinessModel($startsOn) && $amounts === []))) {
-                $findings[] = ['code' => 'unmapped_revenue', 'account_id' => (int) $balance['account_id']];
+                $findings[] = ['code' => 'unmapped_revenue', 'account_id' => (int) $balance['account_id'], 'account_code' => $balance['code']];
             }
             if ($amounts === []) {
                 continue;
             }
             $cents = array_sum(array_keys($amounts));
             if (count($amounts) !== 1 || $balance['account_type'] !== 'revenue' || $cents !== $signed) {
-                $findings[] = ['code' => 'ambiguous_revenue', 'account_id' => (int) $balance['account_id']];
+                $findings[] = ['code' => 'ambiguous_revenue', 'account_id' => (int) $balance['account_id'], 'account_code' => $balance['code']];
             }
             $member = $balance['account_id'] . ':' . $balance['code'] . ':' . ($signed > 0 ? 'credit' : 'debit');
             $members[$member] = ($members[$member] ?? 0) + $cents;

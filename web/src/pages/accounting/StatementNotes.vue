@@ -31,7 +31,7 @@ const carryingOver = ref(false)
 function applyNotes(n: StatementNotes) {
   notes.value = n
   const d: Record<string, string> = {}
-  for (const s of n.sections) d[s.key] = s.content ?? ''
+  for (const s of n.sections) d[s.key] = s.content ?? (canWrite.value ? s.suggestion : null) ?? ''
   drafts.value = d
 }
 
@@ -197,12 +197,16 @@ onMounted(load)
         <p v-if="s.readonly" class="whitespace-pre-wrap text-sm text-neutral-700">{{ s.content }}</p>
         <textarea v-else
           v-model="drafts[s.key]"
+          :data-section="s.key"
           rows="4"
           :disabled="!canWrite"
           :placeholder="s.auto ? t('accounting.statement_notes.auto_placeholder') : t('accounting.statement_notes.placeholder')"
           class="w-full text-sm border border-neutral-300 rounded-md p-2.5 focus:ring-primary-500 focus:border-primary-500 disabled:bg-neutral-50 disabled:text-neutral-500"
         ></textarea>
 
+        <p v-if="s.suggestion && canWrite" class="text-xs text-warning-700">
+          {{ t('accounting.statement_notes.suggestion_hint') }}
+        </p>
         <p v-if="s.auto && !s.readonly" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
         <p v-if="s.carried_over_from_year" class="text-[11px] text-warning-700">
           {{ t('accounting.statement_notes.carried_over_hint', { year: s.carried_over_from_year }) }}

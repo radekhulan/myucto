@@ -77,6 +77,9 @@ výpisu znovu spárujete s dokladem, nese úhradu opět avízo a do peněžního
 3. Pokud k pohybu doklad neexistuje, v řádku zvolte klasifikaci ve výběru **Zařadit...** (například soukromý vklad či výběr).
 4. Zrušení ručního zařazení provedete volbou **Zrušit ruční zařazení**.
 
+Rozhoduje datum pohybu. U bankovních a pokladních pohybů v uzavřeném roce je ruční zařazení uzamčené.
+Bankovní pravidlo zpracuje jen pohyby v otevřených letech, i když výpis pokrývá více let.
+
 **Jak poznáte, že je hotovo:** hláška **Klasifikace uložena.** (po zrušení **Ruční zařazení zrušeno.**), řádek už není červený a
 v souhrnu klesne položka **Nezařazeno**.
 

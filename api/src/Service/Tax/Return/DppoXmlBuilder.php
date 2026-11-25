@@ -1482,7 +1482,7 @@ final class DppoXmlBuilder
      *
      * `pr11_ppt`/`pr11_pzvk` (přehled peněžních toků / změn vlastního kapitálu) NEJSOU
      * uživatelská volba — kopírují, co appendix SKUTEČNĚ přikládá (`cash_flow_attachment`/
-     * `equity_changes_attachment`, řízené `TaxReturnService::needsSection18Statements()`
+     * `equity_changes_attachment`, řízené `StatementSupplementPolicy::requiredForCategory()`
      * podle §18/2 ZoÚ), stejným principem jako `pr11_puz` výše: žádost musí sedět na
      * přiložený obsah, ne být natvrdo 'N' bez ohledu na to, co appka posílá (dodatek 14).
      *

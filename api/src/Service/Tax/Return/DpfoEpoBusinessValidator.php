@@ -18,8 +18,6 @@ final class DpfoEpoBusinessValidator
             $errors[] = 'DPFO: chybí položkový seznam činností §7.';
         }
         $activityIncome = 0.0;
-        $activityActualExpenses = 0.0;
-        $hasActualActivity = false;
         foreach ($activities as $activity) {
             if (!is_array($activity)) {
                 continue;
@@ -29,18 +27,29 @@ final class DpfoEpoBusinessValidator
                 $errors[] = 'DPFO: každá činnost §7 musí mít platný CZ-NACE.';
             }
             $activityIncome += (float) ($activity['income'] ?? 0);
-            if (($activity['expense_mode'] ?? 'pausal') === 'actual') {
-                $hasActualActivity = true;
-                $activityActualExpenses += (float) ($activity['expenses'] ?? 0);
-            }
         }
         if ($activities !== [] && abs($activityIncome - (float) ($s7['income'] ?? 0)) > 0.01) {
             $errors[] = 'DPFO: součet příjmů činností §7 nesouhlasí s řádkem 101.';
         }
-        if ($activities !== [] && abs($activityIncome - (float) ($podklady['s7_income'] ?? 0)) > 0.01) {
+
+        $sourceActivities = (array) ($podklady['activities'] ?? $activities);
+        $sourceIncome = 0.0;
+        $sourceActualExpenses = 0.0;
+        $hasActualActivity = false;
+        foreach ($sourceActivities as $activity) {
+            if (!is_array($activity)) {
+                continue;
+            }
+            $sourceIncome += (float) ($activity['income'] ?? 0);
+            if (($activity['expense_mode'] ?? 'pausal') === 'actual') {
+                $hasActualActivity = true;
+                $sourceActualExpenses += (float) ($activity['expenses'] ?? 0);
+            }
+        }
+        if ($sourceActivities !== [] && abs(round($sourceIncome - (float) ($podklady['s7_income'] ?? 0), 2)) > 0.01) {
             $errors[] = 'DPFO: příjmy přiřazené činnostem §7 nesouhlasí s peněžním deníkem.';
         }
-        if ($hasActualActivity && abs($activityActualExpenses - (float) ($podklady['s7_expenses'] ?? 0)) > 0.01) {
+        if ($hasActualActivity && abs(round($sourceActualExpenses - (float) ($podklady['s7_expenses'] ?? 0), 2)) > 0.01) {
             $errors[] = 'DPFO: skutečné výdaje přiřazené činnostem §7 nesouhlasí s peněžním deníkem.';
         }
 

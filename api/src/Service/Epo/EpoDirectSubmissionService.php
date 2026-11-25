@@ -11,6 +11,7 @@ use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Report\TaxSubmissionFilename;
+use MyInvoice\Service\Tax\Return\IncomeTaxSubmissionGate;
 
 final class EpoDirectSubmissionService
 {
@@ -1647,7 +1648,7 @@ final class EpoDirectSubmissionService
         $formCode = (string) $submission['form_code'];
         if (!$allowSubmitted) {
             try {
-                (new \MyInvoice\Service\Tax\Return\AccountingDecreeService($this->db))->assertDppoSubmissionSupported($supplierId, $submission, true);
+                (new IncomeTaxSubmissionGate($this->db))->assertReady($supplierId, $submission);
             } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
                 throw new EpoSubmissionException($e->errorCode, $e->getMessage(), $e->httpStatus);
             }

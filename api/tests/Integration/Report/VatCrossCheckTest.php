@@ -883,6 +883,33 @@ final class VatCrossCheckTest extends TestCase
         self::assertEqualsWithDelta((float) $acc['difference'], $sumDiff, 0.005, 'Σ documents.difference == difference.');
     }
 
+    public function testFullSelfAssessmentUsesHalereFor343AndWholeCrownsForTheReturn(): void
+    {
+        $countryId = (int) $this->db->pdo()->query("SELECT id FROM countries WHERE iso2 = 'US'")->fetchColumn();
+        self::assertGreaterThan(0, $countryId);
+        $vendor = $this->client('Dodavatel služby ze třetí země', null, $countryId);
+        $purchase = $this->purchase('PF-2048-RCR', $vendor, '24', 10002.19, 0.0, 21.0, ['reverse_charge' => 1]);
+        $this->autoPoster->post($this->supplierId, 'purchase_invoice', $purchase);
+        $this->manualEntry343(sprintf('%04d-%02d-20', self::YEAR, self::MONTH), 1.76);
+
+        $finding = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'account_343_vs_return',
+        );
+        self::assertNotNull($finding);
+        self::assertTrue($finding['blocking']);
+        self::assertEqualsWithDelta(1.76, (float) $finding['difference'], 0.005);
+        self::assertCount(1, $finding['documents']);
+        self::assertEqualsWithDelta(1.76, (float) $finding['documents'][0]['difference'], 0.005);
+
+        $download = $this->download(['acknowledge_mismatch' => '1']);
+        self::assertSame(200, $download['status']);
+        $return = simplexml_load_string($download['raw']);
+        self::assertNotFalse($return);
+        self::assertSame('2100', (string) $return->DPHDP3->Veta1['dan_psl23_z']);
+        self::assertSame('2100', (string) $return->DPHDP3->Veta4['od_zdp23']);
+    }
+
     // T7: měsíční kontrola — timing-only rozdíl je ✓ (ok=true) s info nálezem v hodnotě.
     public function testMonthlyCheckIsOkForTimingOnlyDifference(): void
     {

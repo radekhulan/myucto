@@ -938,7 +938,7 @@ onMounted(reload)
               <template v-if="inventoryReport.inventory?.responsible_person"> · {{ inventoryReport.inventory.responsible_person }}</template>
               <span class="ml-2 px-2 py-0.5 rounded text-xs font-medium"
                 :class="inventoryReport.inventory?.completed ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-700'">
-                {{ inventoryReport.inventory?.completed ? t('accounting.balance_inventory.status_completed') : t('accounting.balance_inventory.status_in_progress') }}
+                {{ t(`accounting.balance_inventory.status_${inventoryReport.inventory?.status ?? 'not_started'}`) }}
               </span>
             </div>
             <RouterLink :to="protocolLink" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-testid="inventory-protocol-link">
@@ -961,7 +961,7 @@ onMounted(reload)
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="row in inventoryReport.rows" :key="row.account_id" :class="!row.resolved ? 'bg-danger-50/40' : ''">
+                <tr v-for="row in inventoryReport.rows" :key="row.account_id" :class="inventoryReport.inventory?.status !== 'not_started' && !row.resolved ? 'bg-danger-50/40' : ''">
                   <td class="px-3 py-2 font-mono">{{ row.account_code }}</td>
                   <td class="px-3 py-2">{{ row.name }}</td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(row.book_display) }}</td>
@@ -970,7 +970,7 @@ onMounted(reload)
                     :class="row.difference_display ? 'text-danger-600 font-semibold' : 'text-neutral-500'">{{ row.difference_display != null ? formatMoney(row.difference_display) : '—' }}</td>
                   <td class="px-3 py-2 text-center">
                     <svg v-if="row.resolved" class="w-4 h-4 inline text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                    <span v-else class="text-danger-600">•</span>
+                    <span v-else-if="inventoryReport.inventory?.status !== 'not_started'" class="text-danger-600">•</span>
                   </td>
                   <td class="px-3 py-2 text-neutral-600">
                     <div>{{ row.documentation_hint }}</div>

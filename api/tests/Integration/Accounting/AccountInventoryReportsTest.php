@@ -661,14 +661,31 @@ final class AccountInventoryReportsTest extends TestCase
         self::assertSame('ne', $cells[7]);
     }
 
-    public function testBackFilledProtocolSaysItIsNotAnInventory(): void
+    public function testClosedPeriodWithoutInventoryExportsOnlyBookBalances(): void
     {
         $this->post([['221', 'debit', 500.0], ['411', 'credit', 500.0]], '03-02');
         $this->db->pdo()->prepare('UPDATE accounting_periods SET status = "closed" WHERE id = ?')->execute([$this->periodId]);
 
-        $sheet = $this->spreadsheet($this->xlsx->balanceInventory($this->inventory->buildWithSaved($this->supplierId, $this->periodId)))->getActiveSheet();
+        $report = $this->inventory->buildWithSaved($this->supplierId, $this->periodId);
+        $sheet = $this->spreadsheet($this->xlsx->balanceInventory($report))->getActiveSheet();
+        $cells = $this->rowByFirstCell($sheet, '221');
+        self::assertEquals(500, $cells[3]);
+        self::assertSame('', (string) $cells[5]);
+        self::assertSame('', (string) $cells[6]);
+        self::assertStringContainsString('Stav: bez uložené inventury', $this->sheetText($sheet));
 
-        self::assertStringContainsString('nejde o doklad o provedené inventuře', $this->sheetText($sheet));
+        $renderer = Bootstrap::buildContainer()->get(BalanceInventoryPdfRenderer::class);
+        $html = (string) (new \ReflectionMethod($renderer, 'renderTemplate'))->invoke($renderer, 'balance_inventory.twig', $report);
+        self::assertStringContainsString('Stav: bez uložené inventury', $html);
+        self::assertStringContainsString('Podklad z účetních zůstatků', $html);
+
+        $account = $this->inventory->accountInventory($this->supplierId, $this->accountId('221'), self::TO);
+        self::assertSame('not_started', $account['inventory']['status']);
+        self::assertNull($account['rows'][0]['counted_display']);
+
+        $this->runPackage(['balance_inventory'], $manifest);
+        self::assertSame('completed_with_warnings', $manifest['status']);
+        self::assertStringContainsString('chybí uložená inventura', implode("\n", $manifest['warnings']));
     }
 
     public function testAccountInventoryReturnsRowsOfTheAccountAndItsAnalytics(): void
@@ -756,6 +773,11 @@ final class AccountInventoryReportsTest extends TestCase
             $items[(int) $r['account_id']] = ['counted_balance' => $r['book_balance']];
         }
         $this->closing->saveInventory($this->supplierId, $this->periodId, $this->rowVersion(), ['complete' => true], $items, ['user_id' => $this->userId]);
+
+        $this->db->pdo()->prepare('UPDATE accounting_periods SET status = "closed" WHERE id = ?')->execute([$this->periodId]);
+        $report = $this->inventory->buildWithSaved($this->supplierId, $this->periodId);
+        self::assertSame('completed', $report['inventory']['status']);
+        self::assertSame(400.0, array_column($report['rows'], null, 'account_code')['221']['counted_display']);
 
         $this->runPackage(['balance_inventory'], $manifest);
 

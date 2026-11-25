@@ -111,6 +111,25 @@ describe('BalanceInventory.vue', () => {
     expect(wrapper.text()).toContain('accounting.balance_inventory.unresolved')
   })
 
+  it('zobrazí historický podklad bez uložené inventury a bez skutečných stavů', async () => {
+    m.listPeriods.mockResolvedValue([{ id: 5, fiscal_year: 2093, status: 'approved' }])
+    const report = makeReport()
+    m.getClosingInventory.mockResolvedValue({
+      ...report,
+      inventory: { ...report.inventory, status: 'not_started' },
+    })
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('accounting.balance_inventory.status_not_started')
+    expect(wrapper.text()).toContain('accounting.balance_inventory.not_started_hint')
+    expect(wrapper.text()).not.toContain('accounting.balance_inventory.status_completed')
+    const cells = wrapper.get('[data-test="inventory-row-221"]').findAll('td')
+    expect(cells[3].text()).toBe('1000')
+    expect(cells[4].text()).toBe('—')
+    expect(cells[5].text()).toBe('—')
+  })
+
   it('(b) uloží inventarizaci — payload nese skutečný stav a resolved dle shody', async () => {
     m.getClosingInventory.mockResolvedValue(makeReport())
     m.saveClosingInventory.mockResolvedValue({ status: 'in_progress', unresolved_count: 1, item_count: 2, completed: false, ok: false, row_version: 4 })

@@ -213,12 +213,14 @@ final class DppoFinalSnapshotAuditTest extends TestCase
         self::assertGreaterThan(0, $export['submission_id']);
     }
 
-    public function testUnsupportedDppoCanBeExported(): void
+    public function testUnsupportedDraftDppoCanBeExportedWithoutArchiving(): void
     {
         $this->db->pdo()->prepare('UPDATE supplier SET tax_public_benefit = 1 WHERE id = ?')->execute([$this->supplierId]);
         $built = $this->returns->buildXml($this->supplierId, self::YEAR, 'po');
         self::assertNotEmpty($built['warnings']);
-        self::assertGreaterThan(0, $this->returns->generateXml($this->supplierId, self::YEAR, 'po', $this->userId)['submission_id']);
+        $export = $this->returns->generateXml($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertSame($built['xml'], $export['xml']);
+        self::assertSame(0, $export['submission_id']);
     }
 
     public function testFoValidationFindingsDoNotPreventFinalSnapshot(): void

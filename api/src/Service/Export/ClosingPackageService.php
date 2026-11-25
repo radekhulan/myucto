@@ -483,7 +483,9 @@ final class ClosingPackageService
                     }
                     // Balíček s nedokončeným protokolem nesmí vypadat hotově.
                     $inventory = $data['inventory'];
-                    if (!$inventory['can_close']) {
+                    if ($inventory['status'] === 'not_started') {
+                        $warnings[] = 'Inventarizace rozvahových účtů: chybí uložená inventura. Skutečný stav doložte inventurním soupisem.';
+                    } elseif (!$inventory['can_close']) {
                         $warnings[] = 'Inventarizace rozvahových účtů není dokončená: nevyřešených účtů ' . (int) $inventory['unresolved_count'] . '.';
                     }
                 } catch (\Throwable $e) { $warnings[] = 'Inventarizace rozvahových účtů: ' . $e->getMessage(); }
@@ -705,13 +707,7 @@ final class ClosingPackageService
             }
 
             // 12) Přehledy podle § 18 odst. 2 ZoÚ (§ 40–44 vyhl. 500/2002 Sb.).
-            // Uměly se spočítat a zobrazit, ale nešly dostat ven — uzávěrka na to jen
-            // upozorňovala varováním „přiložte ručně". Velká a střední ÚJ (a každá
-            // s povinným auditem) je přitom má jako povinnou součást závěrky stejně jako
-            // rozvahu a výsledovku, takže balíček bez nich byl neúplný.
-            //
-            // Doplňkové, ne povinné: u mikro a malé ÚJ povinnost není a balíček by kvůli
-            // nim neměl padat na `failed`.
+            // U mikro a malé ÚJ jde o volitelné sestavy.
             if (in_array('cash_flow', $parts, true)) {
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 try {

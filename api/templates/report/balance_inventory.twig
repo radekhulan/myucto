@@ -78,7 +78,7 @@
             <div class="header-meta">Datum provedení inventarizace: {{ inventory.inventory_date ? inventory.inventory_date|cz_date : '' }}</div>
             <div class="header-meta">Odpovědná osoba: {{ inventory.responsible_person }}</div>
             <div class="header-meta">Protokol: {{ inventory.protocol_ref }}</div>
-            {% if inventory %}<div class="header-meta">Stav: {{ inventory.completed ? 'dokončeno' : 'rozpracováno' }}</div>{% endif %}
+            <div class="header-meta">Stav: {{ inventory.completed ? 'dokončeno' : (inventory.status == 'in_progress' ? 'rozpracováno' : 'bez uložené inventury') }}</div>
         </td>
     </tr>
 </table>
@@ -91,8 +91,8 @@
 {% if inventory.note %}
     <div class="protocol-note">Poznámka: {{ inventory.note }}</div>
 {% endif %}
-{% if inventory.back_filled %}
-    <div class="draft-warning">Skutečný stav je doplněn z účetních zůstatků uzavřeného období, nejde o doklad o provedené inventuře.</div>
+{% if not inventory or inventory.status == 'not_started' %}
+    <div class="draft-warning">Podklad z účetních zůstatků. Doložte skutečný stav inventurním soupisem.</div>
 {% endif %}
 
 {% if draft_count > 0 %}

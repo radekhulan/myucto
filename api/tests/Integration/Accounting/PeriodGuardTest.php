@@ -19,8 +19,10 @@ use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response as Psr7Response;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Integrační testy stavového automatu období a zámků (Epic F4, §6.2 I11–I15):
@@ -44,6 +46,7 @@ final class PeriodGuardTest extends TestCase
     private JournalEntryRepository $journal;
 
     private EntityCategoryService $categories;
+    private MockClock $clock;
     private int $supplierId = 0;
     private int $userId = 0;
     private int $periodId = 0;
@@ -57,6 +60,8 @@ final class PeriodGuardTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $this->clock = new MockClock('2026-11-25T12:00:00Z');
+            $container->set(ClockInterface::class, $this->clock);
             $this->db      = $container->get(Connection::class);
             $this->action  = $container->get(AccountingPeriodAction::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);
@@ -310,6 +315,58 @@ final class PeriodGuardTest extends TestCase
         $payload = $stmt->fetchColumn();
         self::assertNotFalse($payload, 'Reopen je auditovaný (accounting.period_reopened).');
         self::assertStringContainsString('oprava zaúčtování prosinec', (string) $payload, 'Audit nese reason (§17/7).');
+    }
+
+    public function testReopenDeadlineUsesTheActualFollowingPeriodAndIncludesItsLastDay(): void
+    {
+        $this->periods->create($this->supplierId, 2099, '2099-01-01', '2099-06-30');
+        $this->setStatusRaw('closed');
+        $this->clock->modify('2099-06-30T21:59:59Z');
+        $reason = 'Oprava chybného stavu v závěrce';
+
+        $onDeadline = $this->postStatus(['status' => 'open', 'row_version' => $this->rv(), 'reason' => $reason]);
+        self::assertSame(200, $onDeadline['status']);
+
+        $this->setStatusRaw('closed');
+        $this->clock->sleep(1);
+        $afterDeadline = $this->postStatus(['status' => 'open', 'row_version' => $this->rv(), 'reason' => $reason]);
+        self::assertSame(422, $afterDeadline['status']);
+        self::assertSame('reopen_deadline_passed', $afterDeadline['body']['error']['code']);
+        self::assertSame('closed', $this->periods->findById($this->supplierId, $this->periodId)['status']);
+    }
+
+    public function testWizardCannotRevertClosingAfterTheDeadlineWithoutAnOpenedFollowingPeriod(): void
+    {
+        $this->seedRevenue();
+        $this->runChainToClosed();
+        self::assertNull($this->periods->nextPeriod($this->supplierId, self::ENDS_ON));
+        $this->clock->modify('2099-12-31T23:00:00Z');
+        $version = $this->rv();
+
+        $state = $this->closing->state($this->supplierId, $this->periodId);
+        self::assertFalse($state['can_revert_close_books']);
+        try {
+            $this->closing->revertStep($this->supplierId, $this->periodId, 'close_books', $version, $this->meta());
+            self::fail('Vrácení by po lhůtě znovu otevřelo uzavřené knihy.');
+        } catch (ClosingException $e) {
+            self::assertSame('reopen_deadline_passed', $e->errorCode);
+        }
+        self::assertSame($version, $this->rv());
+        self::assertSame('closed', $this->periods->findById($this->supplierId, $this->periodId)['status']);
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'closing', $this->periodId));
+    }
+
+    public function testFiscalYearUsesTheEndOfTheProjectedFollowingFiscalYear(): void
+    {
+        $this->db->pdo()->prepare('UPDATE accounting_periods SET starts_on = ?, ends_on = ? WHERE id = ?')
+            ->execute(['2098-07-01', '2099-06-30', $this->periodId]);
+        $this->setStatusRaw('closed');
+        $this->clock->modify('2100-06-30T21:59:59Z');
+
+        self::assertNull($this->closing->state($this->supplierId, $this->periodId)['expired_reopen_deadline']);
+
+        $this->clock->sleep(1);
+        self::assertSame('2100-06-30', $this->closing->state($this->supplierId, $this->periodId)['expired_reopen_deadline']);
     }
 
     // ── I13: optimistická konkurence (R4) ────────────────────────────────────

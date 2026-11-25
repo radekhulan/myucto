@@ -1294,8 +1294,6 @@ export interface BalanceInventoryRow {
   item_note?: string | null
   /** EP-6: účet je vyřešený (potvrzen nebo diff=0) — nevyřešené blokují uzavření knih. */
   resolved?: boolean
-  /** Skutečný stav odvozen z účetního u uzavřeného období (uzávěrka už zůstatky ověřila). */
-  back_filled?: boolean
   /** Syntetika, pod kterou účet patří; null = účet je sám syntetika. */
   parent_id?: number | null
   parent_code?: string | null
@@ -1354,7 +1352,7 @@ export interface AccountCounterTotal {
 
 /** EP-6: hlavička uložené inventarizace rozvahových účtů. */
 export interface BalanceInventoryHeader {
-  status: 'in_progress' | 'completed'
+  status: 'not_started' | 'in_progress' | 'completed'
   responsible_person: string | null
   inventory_date: string | null
   protocol_ref: string | null
@@ -1364,8 +1362,6 @@ export interface BalanceInventoryHeader {
   completed_at?: string | null
   completed?: boolean
   can_close?: boolean
-  /** Inventura byla dopočtena z účetních zůstatků uzavřeného období (žádná ruční inventura uložena). */
-  back_filled?: boolean
 }
 
 /** Jeden pohyb peněžních prostředků zařazený podle protiúčtu (§ 40–43 vyhl. 500/2002). */

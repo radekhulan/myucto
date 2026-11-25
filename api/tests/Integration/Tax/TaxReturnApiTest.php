@@ -144,6 +144,50 @@ final class TaxReturnApiTest extends TestCase
         return [$req, new Psr7Response()];
     }
 
+    public function testDppoWorkingXmlDoesNotCreateReturnOrFilingArchive(): void
+    {
+        $args = ['type' => 'po', 'year' => (string) self::YEAR];
+        [$req, $res] = $this->req('GET', '/api/tax-return/po/' . self::YEAR . '/xml/preview');
+        $response = $this->action->previewXml($req, $res, $args);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('1', $response->getHeaderLine('X-DPPO-Preview'));
+        self::assertStringContainsString('-pracovni.xml', $response->getHeaderLine('Content-Disposition'));
+        self::assertStringContainsString('<DPPDP9', (string) $response->getBody());
+        self::assertStringContainsString('kc_ii10_10="650000"', (string) $response->getBody());
+
+        $pdo = $this->db->pdo();
+        foreach (['income_tax_returns', 'tax_submissions'] as $table) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ?");
+            $stmt->execute([$this->supplierId]);
+            self::assertSame(0, (int) $stmt->fetchColumn());
+        }
+    }
+
+    public function testDppoDraftRegularXmlRemainsDownloadableWithoutCreatingFilingArchive(): void
+    {
+        $args = ['type' => 'po', 'year' => (string) self::YEAR];
+        $draft = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertSame('draft', $draft['return']['status']);
+
+        [$req, $res] = $this->req('GET', '/api/tax-return/po/' . self::YEAR . '/xml');
+        $response = $this->action->xml($req, $res, $args);
+        self::assertSame(200, $response->getStatusCode());
+        $xml = (string) $response->getBody();
+        self::assertStringContainsString('kc_ii10_10="650000"', $xml);
+        self::assertSame('passed', $response->getHeaderLine('X-Validation-Status'));
+
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM tax_submissions WHERE supplier_id = ? AND form_code = ?');
+        $stmt->execute([$this->supplierId, 'dppdp9']);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+
+        $readOnly = $this->returns->generateXml($this->supplierId, self::YEAR, 'po', null, sideEffects: false);
+        self::assertSame($xml, $readOnly['xml']);
+        self::assertSame(0, $readOnly['submission_id']);
+        $stmt->execute([$this->supplierId, 'dppdp9']);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
     public function testFullWorkflow(): void
     {
         $args = ['type' => 'po', 'year' => (string) self::YEAR];

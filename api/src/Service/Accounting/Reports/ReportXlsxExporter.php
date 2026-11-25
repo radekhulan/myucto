@@ -211,7 +211,11 @@ final class ReportXlsxExporter
             (string) (($inv['responsible_person'] ?? '') ?: '_________________'),
             ($inv['inventory_date'] ?? null) ? $this->czDate((string) $inv['inventory_date']) : '_________________',
             (string) (($inv['protocol_ref'] ?? '') ?: '_________________'),
-            ($inv['completed'] ?? false) ? 'dokončeno' : 'rozpracováno',
+            match ($inv['status'] ?? 'not_started') {
+                'completed' => 'dokončeno',
+                'in_progress' => 'rozpracováno',
+                default => 'bez uložené inventury',
+            },
         ), DataType::TYPE_STRING);
         $sheet->getStyle('A5')->getFont()->setItalic(true);
         if (($inv['note'] ?? null) !== null) {
@@ -263,8 +267,8 @@ final class ReportXlsxExporter
             $sheet->getStyle("A{$nr}")->getFont()->setItalic(true);
             $nr++;
         }
-        if (!empty($inv['back_filled'])) {
-            $sheet->setCellValue("A{$nr}", 'Skutečný stav je doplněn z účetních zůstatků uzavřeného období, nejde o doklad o provedené inventuře.');
+        if (($inv['status'] ?? 'not_started') === 'not_started') {
+            $sheet->setCellValue("A{$nr}", 'Podklad z účetních zůstatků. Doložte skutečný stav inventurním soupisem.');
             $sheet->getStyle("A{$nr}")->getFont()->setBold(true);
             $nr++;
         }

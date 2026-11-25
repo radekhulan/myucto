@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -67,15 +68,18 @@ final class MovementClassificationAction
             return Json::error($response, 'validation_failed', 'note smí mít nejvýš 255 znaků.', 422);
         }
 
-        if (!$this->repo->belongsToSupplier($supplierId, $sourceType, $sourceId)) {
-            return Json::error($response, 'not_found', 'Pohyb nebyl nalezen.', 404);
+        $row = $this->withOpenSource($response, $supplierId, $sourceType, $sourceId,
+            function () use ($request, $body, $supplierId, $sourceType, $sourceId, $taxBucket, $note): array {
+                // Vynechaná poznámka = uložená poznámka (issue #113); smaže ji jen explicitní null/"".
+                if (!array_key_exists('note', $body)) {
+                    $note = $this->repo->find($supplierId, $sourceType, $sourceId)['note'] ?? null;
+                }
+                return $this->repo->upsert($supplierId, $sourceType, $sourceId, $taxBucket, $note, $this->userId($request));
+            },
+        );
+        if ($row instanceof Response) {
+            return $row;
         }
-        // Vynechaná poznámka = uložená poznámka (issue #113); smaže ji jen explicitní null/"".
-        if (!array_key_exists('note', $body)) {
-            $note = $this->repo->find($supplierId, $sourceType, $sourceId)['note'] ?? null;
-        }
-
-        $row = $this->repo->upsert($supplierId, $sourceType, $sourceId, $taxBucket, $note, $this->userId($request));
 
         $this->log($request, 'tax_evidence.movement_classified', (int) $row['id'], [
             'source_type' => $sourceType,
@@ -99,11 +103,13 @@ final class MovementClassificationAction
             return Json::error($response, 'validation_failed', 'Neplatná identifikace pohybu.', 422);
         }
 
-        if (!$this->repo->belongsToSupplier($supplierId, $sourceType, $sourceId)) {
-            return Json::error($response, 'not_found', 'Pohyb nebyl nalezen.', 404);
+        $deleted = $this->withOpenSource($response, $supplierId, $sourceType, $sourceId,
+            fn (): bool => $this->repo->delete($supplierId, $sourceType, $sourceId, $this->userId($request)),
+        );
+        if ($deleted instanceof Response) {
+            return $deleted;
         }
 
-        $deleted = $this->repo->delete($supplierId, $sourceType, $sourceId, $this->userId($request));
         if ($deleted) {
             $this->log($request, 'tax_evidence.movement_classification_deleted', $sourceId, [
                 'source_type' => $sourceType,
@@ -112,6 +118,28 @@ final class MovementClassificationAction
         }
 
         return Json::ok($response, ['deleted' => $deleted]);
+    }
+
+    /**
+     * @template T
+     * @param callable():T $operation
+     * @return T|Response
+     */
+    private function withOpenSource(Response $response, int $supplierId, string $sourceType, int $sourceId, callable $operation): mixed
+    {
+        return TaxEvidenceYearLock::synchronized($this->db, $supplierId,
+            function () use ($response, $supplierId, $sourceType, $sourceId, $operation): mixed {
+                $date = $this->repo->sourceDate($supplierId, $sourceType, $sourceId);
+                if ($date === null) {
+                    return Json::error($response, 'not_found', 'Pohyb nebyl nalezen.', 404);
+                }
+                $year = (int) substr($date, 0, 4);
+                if (TaxEvidenceYearLock::isFinal($this->db, $supplierId, $year)) {
+                    return Json::error($response, TaxEvidenceYearLock::ERROR_CODE, TaxEvidenceYearLock::message($year), 409);
+                }
+                return $operation();
+            },
+        );
     }
 
     private function nullableNote(mixed $v): ?string

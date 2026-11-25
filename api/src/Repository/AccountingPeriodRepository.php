@@ -312,7 +312,7 @@ final class AccountingPeriodRepository
     /**
      * Bezprostředně navazující období: starts_on = afterEndsOn + 1 den (R5).
      */
-    public function nextPeriod(int $supplierId, string $afterEndsOn): ?array
+    public function nextPeriod(int $supplierId, string $afterEndsOn, bool $forUpdate = false): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
@@ -321,11 +321,18 @@ final class AccountingPeriodRepository
                     created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND starts_on = DATE_ADD(?, INTERVAL 1 DAY)
-              LIMIT 1'
+              LIMIT 1' . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $afterEndsOn]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $this->cast($row);
+    }
+
+    public function expiredReopenDeadline(string $endsOn, ?string $nextEndsOn): ?string
+    {
+        $deadline = $nextEndsOn ?? self::nextPeriodBounds($endsOn)['ends_on'];
+        $today = $this->clock->now()->setTimezone(new \DateTimeZone('Europe/Prague'))->format('Y-m-d');
+        return $today > $deadline ? $deadline : null;
     }
 
     /**

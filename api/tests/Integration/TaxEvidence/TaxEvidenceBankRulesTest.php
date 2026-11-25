@@ -64,6 +64,45 @@ final class TaxEvidenceBankRulesTest extends CashJournalTestCase
         self::assertSame(0, $this->rules->apply($this->supplierId)['applied'], 'mimo daňovou evidenci nic');
     }
 
+    #[DataProvider('applyScopes')]
+    public function testRuleSkipsClosedYearWithoutIgnoringItsMovements(bool $oneStatement): void
+    {
+        $statement = $this->statement($this->supplierId, $this->accountA);
+        $closed = $this->bankTx($statement, -100.0, [
+            'posted_at' => self::YEAR . '-12-31', 'description' => 'Testovací poplatek',
+        ]);
+        $open = $this->bankTx($statement, -200.0, [
+            'posted_at' => (self::YEAR + 1) . '-01-01', 'description' => 'Testovací poplatek',
+        ]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_evidence_closings (supplier_id, year, status) VALUES (?, ?, 'final')"
+        )->execute([$this->supplierId, self::YEAR]);
+        $rule = $this->createRule([
+            'name' => 'Poplatky', 'text_contains' => 'poplatek', 'action_ignore' => true, 'tax_bucket' => 'expense_taxable',
+        ]);
+
+        $scope = $oneStatement ? $statement : null;
+        self::assertSame(['applied' => 1, 'ignored' => 1, 'classified' => 1], $this->rules->apply($this->supplierId, $scope));
+        self::assertSame('unmatched', $this->scalar('SELECT match_status FROM bank_transactions WHERE id = ?', [$closed]));
+        self::assertFalse($this->scalar(
+            'SELECT tax_bucket FROM de_movement_classification WHERE supplier_id = ? AND bank_transaction_id = ?',
+            [$this->supplierId, $closed],
+        ));
+        self::assertSame('ignored', $this->scalar('SELECT match_status FROM bank_transactions WHERE id = ?', [$open]));
+        self::assertSame('expense_taxable', $this->scalar(
+            'SELECT tax_bucket FROM de_movement_classification WHERE supplier_id = ? AND bank_transaction_id = ?',
+            [$this->supplierId, $open],
+        ));
+        self::assertSame(1, $this->rules->find($this->supplierId, $rule)['hit_count']);
+        self::assertSame(['applied' => 0, 'ignored' => 0, 'classified' => 0], $this->rules->apply($this->supplierId, $scope));
+    }
+
+    public static function applyScopes(): iterable
+    {
+        yield 'všechny výpisy firmy' => [false];
+        yield 'jeden výpis' => [true];
+    }
+
     public static function accountCriteria(): iterable
     {
         yield 'bank only' => ['*/5050'];

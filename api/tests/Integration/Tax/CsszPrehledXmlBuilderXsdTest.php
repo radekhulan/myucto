@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Tax;
 
 use MyInvoice\Service\Tax\Return\CsszPrehledXmlBuilder;
+use MyInvoice\Service\Tax\Return\TaxReturnException;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -65,6 +66,13 @@ final class CsszPrehledXmlBuilderXsdTest extends TestCase
             $this->sampleSummary($secondary),
             ['productVersion' => '1.0', 'fill_date' => '2026-04-15'] + $meta,
         );
+    }
+
+    public function testCannotBuildReturnFor2026Using2025Schema(): void
+    {
+        $this->expectException(TaxReturnException::class);
+        $this->expectExceptionMessage('za rok 2026');
+        (new CsszPrehledXmlBuilder())->build($this->sampleSupplier(), 2026, $this->sampleSummary());
     }
 
     public function testStructure(): void

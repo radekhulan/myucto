@@ -9,6 +9,7 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -32,11 +33,13 @@ import { useAuthStore } from '@/stores/auth'
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const route = useRoute()
 const canWrite = computed(() => auth.canWrite('accounting'))
 
 const TYPES: { key: StatementOverrideType; label: string }[] = [
   { key: 'balance_sheet', label: 'accounting.statements.mapping.tab_balance_sheet' },
   { key: 'income_statement', label: 'accounting.statements.mapping.tab_income_statement' },
+  { key: 'income_statement_purpose', label: 'accounting.statements.mapping.tab_income_statement_purpose' },
 ]
 const CONDITIONS: StatementBalanceCondition[] = ['any', 'debit', 'credit']
 
@@ -163,6 +166,8 @@ function groupSize(prefix: string): number {
 
 async function loadPeriods() {
   periods.value = await accountingApi.listPeriods()
+  const requested = Number(route.query.period_id)
+  if (periods.value.some(p => p.id === requested)) periodId.value = requested
   if (periods.value.length > 0 && !periodId.value) {
     periodId.value = periods.value[0].id
   }
@@ -448,14 +453,16 @@ const actions = computed<ActionItem[]>(() => [
   {
     key: 'suggest', label: t('accounting.statements.mapping.action_suggest'), icon: 'doc',
     tier: !dirty.value && hasFiledReturn.value ? 'primary' : 'secondary', variant: 'primary',
-    show: canWrite.value, disabled: !hasFiledReturn.value || suggesting.value || loading.value,
+    show: canWrite.value && statementType.value !== 'income_statement_purpose',
+    disabled: !hasFiledReturn.value || suggesting.value || loading.value,
     disabledReason: t('accounting.statements.mapping.suggest_disabled'),
     loading: suggesting.value, run: () => { void suggestFromFiled() },
   },
   {
     key: 'suggest-upload', label: t('accounting.statements.mapping.action_suggest_upload'), icon: 'upload',
     tier: 'overflow', variant: 'neutral',
-    show: canWrite.value, disabled: suggesting.value || loading.value || !periodId.value,
+    show: canWrite.value && statementType.value !== 'income_statement_purpose',
+    disabled: suggesting.value || loading.value || !periodId.value,
     run: pickFile,
   },
   {
@@ -466,6 +473,8 @@ const actions = computed<ActionItem[]>(() => [
 ])
 
 onMounted(async () => {
+  const requestedType = TYPES.find(type => type.key === route.query.statement_type)
+  if (requestedType) statementType.value = requestedType.key
   try {
     await loadPeriods()
     await load()

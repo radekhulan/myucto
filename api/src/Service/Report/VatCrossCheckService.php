@@ -46,7 +46,6 @@ final class VatCrossCheckService
         private readonly DphPriznaniBuilder $dph,
         private readonly KontrolniHlaseniBuilder $kh,
         private readonly SouhrnneHlaseniBuilder $shv,
-        private readonly VatClassificationMapper $mapper,
         private readonly VatLedgerService $ledger,
         private readonly Connection $db,
     ) {}
@@ -650,13 +649,9 @@ final class VatCrossCheckService
         }
         $booked343Net = round($booked343Net, 2); // D − MD = daň k odvodu
 
-        // Daň z přiznání: EXAKTNÍ výstup−vstup z téhož deníku (443 se účtuje z týchž částek
-        // jako DPH evidence → bezztrátové srovnání; zaokrouhlené přiznání ukážeme pro kontext).
-        $dphResult = $this->dph->build($supplierId, $year, $month, $period);
-        $byLine = $dphResult['summary']['lines'] ?? [];
-        $exact = $this->mapper->dphSummaryTotals($byLine);
-        $exactNet = round((float) $exact['due'], 2);
-        $declaredNet = round((float) ($dphResult['summary']['tax_due'] ?? 0.0), 2); // Veta6 dan_zocelk − odp_zocelk
+        $summary = $this->dph->build($supplierId, $year, $month, $period)['summary'];
+        $exactNet = (float) $summary['accounting_vat_net'];
+        $declaredNet = (float) $summary['tax_due'];
 
         $difference = round($booked343Net - $exactNet, 2);
         if (abs($difference) <= self::ACCOUNT_343_TOLERANCE) {

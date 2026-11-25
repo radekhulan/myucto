@@ -18,10 +18,6 @@ use PHPUnit\Framework\TestCase;
 /**
  * § 18 odst. 2 ZoÚ — přehled o peněžních tocích a o změnách vlastního kapitálu.
  *
- * U velké a střední ÚJ (a u každé s povinným auditem) jsou součástí závěrky stejně jako
- * rozvaha a výsledovka. Systém je neuměl vůbec, takže balíček závěrky takové firmě hlásil
- * „hotovo" u závěrky, které dvě povinné části chyběly.
- *
  * ── Co testy hlídají především ──────────────────────────────────────────────
  * Že výkaz SEDÍ NA SKUTEČNOST. U cash flow se každý pohyb peněžních účtů klasifikuje
  * podle protiúčtu, takže součet toků se rovná skutečné změně stavu peněz konstrukčně —

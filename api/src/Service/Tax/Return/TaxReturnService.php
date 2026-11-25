@@ -10,6 +10,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
@@ -1028,9 +1029,8 @@ final class TaxReturnService
         $this->assertAccountingDecree($supplierId, $year, $type, Dppo504CapabilityService::EXPORT_XML);
         $this->assertType($type);
         $this->assertSupplierType($supplierId, $type);
-        if ($this->isNonprofit($supplierId, $year, $type)) {
-            return (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $year, $type, $variant, $variantSeq): array {
-                (new \MyInvoice\Service\Property\Payments\PaymentLocks($this->db))->acquire($supplierId);
+        if ($type === 'po') {
+            $buildPreview = function () use ($supplierId, $year, $type, $variant, $variantSeq): array {
                 $this->assertVariant($variant);
                 $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
                 $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
@@ -1044,10 +1044,15 @@ final class TaxReturnService
                 $built['business_errors'] = [];
                 $built['warnings'] = array_values(array_unique(array_merge($built['warnings'], $xsd['errors'])));
                 return ['computation' => $computation, 'built' => $built];
+            };
+            if (!$this->isNonprofit($supplierId, $year, $type)) {
+                return $buildPreview();
+            }
+            return (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $buildPreview): array {
+                (new \MyInvoice\Service\Property\Payments\PaymentLocks($this->db))->acquire($supplierId);
+
+                return $buildPreview();
             });
-        }
-        if ($type !== 'fo') {
-            throw new TaxReturnException('preview_not_supported', 'Pracovní XML je určeno pro DPFO.', 400);
         }
         $this->assertVariant($variant);
         $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
@@ -1101,9 +1106,9 @@ final class TaxReturnService
      * finálního přiznání výpočet uložený ve snapshotu). {@see buildXml()} bere jen `built`;
      * pracovní PDF sestava ({@see reportSource()}) bere obojí.
      *
-     * @return array{built: array<string,mixed>, computation: array{result: array<string,mixed>, podklady: array<string,mixed>, warnings: list<string>}}
+     * @return array{built: array<string,mixed>, computation: array{result: array<string,mixed>, podklady: array<string,mixed>, warnings: list<string>}, is_final:bool}
      */
-    private function buildXmlWithComputation(int $supplierId, int $year, string $type, string $variant, int $variantSeq): array
+    private function buildXmlWithComputation(int $supplierId, int $year, string $type, string $variant, int $variantSeq, bool $requireFinalNonprofit = false): array
     {
         $this->assertAccountingDecree($supplierId, $year, $type, Dppo504CapabilityService::EXPORT_XML);
         $this->assertType($type);
@@ -1111,6 +1116,9 @@ final class TaxReturnService
         $this->assertVariant($variant);
         $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
+        if ($requireFinalNonprofit && ($row['status'] ?? null) !== 'final' && $this->isNonprofit($supplierId, $year, $type)) {
+            throw new TaxReturnException('final_snapshot_required', 'Archivace504 vyžaduje potvrzené finální přiznání. Pro kontrolu použijte pracovní náhled.', 409);
+        }
         if ($type === 'po' && $row !== null && $row['status'] === 'final'
             && ($row['final_snapshot_id'] === null || $this->returns->snapshot($supplierId, (int) $row['final_snapshot_id']) === null)) {
             if ($this->isNonprofit($supplierId,$year,$type)) throw new TaxReturnException('nonprofit_dppo_stored_proof_invalid','Finální504 nelze rekonstruovat bez původního nativního důkazu.',409);
@@ -1118,6 +1126,7 @@ final class TaxReturnService
             return [
                 'built' => $this->buildDppoXml($supplierId, $year, (array) $row['inputs'], $computation, $variant, $seq),
                 'computation' => $computation,
+                'is_final' => true,
             ];
         }
         if ($type === 'fo' || ($row !== null && $row['status'] === 'final')) {
@@ -1145,6 +1154,7 @@ final class TaxReturnService
                     'filename' => sprintf('%s-%04d%s.xml', $type === 'po' ? 'dppdp9' : 'dpfdp7', $year, $suffix),
                     'summary' => $summary,
                     'warnings' => $summary['warnings'],
+                    'business_errors' => $type === 'fo' ? (array) $stored['business_errors'] : [],
                     'variant' => $variant,
                     'variant_seq' => $seq,
                 ],
@@ -1153,6 +1163,7 @@ final class TaxReturnService
                     'podklady' => (array) ($snapshot['podklady'] ?? []),
                     'warnings' => (array) ($snapshot['warnings'] ?? []),
                 ],
+                'is_final' => true,
             ];
         }
         $inputs = $row !== null ? (array) $row['inputs'] : [];
@@ -1161,6 +1172,7 @@ final class TaxReturnService
         return [
             'built' => $this->buildDppoXml($supplierId, $year, $inputs, $computation, $variant, $seq),
             'computation' => $computation,
+            'is_final' => false,
         ];
     }
 
@@ -1325,30 +1337,34 @@ final class TaxReturnService
     }
 
     /**
-     * Vygeneruje validované EPO XML, zarchivuje (tax_submissions) a naváže na přiznání.
-     * Samotný build deleguje na {@see buildXml()} — společná cesta s uzávěrkovým balíčkem.
+     * Vydá EPO XML a výsledek kontroly. Rozpracované DPPO a DPFO se známými
+     * věcnými chybami se stahují pro kontrolu, bez záznamu v archivu podání.
      *
-     * @return array{xml:string,form_code:string,filename:string,validation_status:string,validation_errors:list<string>,submission_id:int}
+     * @return array{xml:string,form_code:string,filename:string,validation_status:string,validation_errors:list<string>,business_errors:list<string>,submission_id:int}
      */
     public function generateXml(int $supplierId, int $year, string $type, ?int $userId, string $variant = 'radne', int $variantSeq = 1, bool $sideEffects = true): array
     {
         $this->assertAccountingDecree($supplierId, $year, $type);
-        if ($this->isNonprofit($supplierId,$year,$type)) {
-            $row=$this->returns->find($supplierId,$year,$type,$variant,$this->resolveSeq($supplierId,$year,$type,$variant,$variantSeq));
-            if (($row['status']??null)!=='final') throw new TaxReturnException('final_snapshot_required','Archivace504 vyžaduje potvrzené finální přiznání. Pro kontrolu použijte pracovní náhled.',409);
+        $source = $this->buildXmlWithComputation($supplierId, $year, $type, $variant, $variantSeq, requireFinalNonprofit: true);
+        $built = $source['built'];
+        $businessErrors = $built['business_errors'] ?? [];
+        if ($source['is_final'] && $businessErrors === []) {
+            $archived = $this->archiver->archive(
+                $supplierId, $built['form_code'], $year, null, null,
+                $built['xml'], $built['summary'], $userId,
+                $sideEffects,
+                self::FORMA[$variant] ?? 'B',
+            );
+        } else {
+            $validation = $this->xmlValidator->validate($built['xml'], $built['form_code']);
+            $archived = [
+                'submission_id' => null,
+                'validation_status' => $validation['status'],
+                'validation_errors' => $validation['errors'],
+            ];
         }
-        $built = $this->buildXml($supplierId, $year, $type, $variant, $variantSeq);
-        $seq = (int) $built['variant_seq'];
-        $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
-
-        $archived = $this->archiver->archive(
-            $supplierId, $built['form_code'], $year, null, null,
-            $built['xml'], $built['summary'], $userId,
-            $sideEffects,
-            self::FORMA[$variant] ?? 'B',
-        );
-        if ($row !== null && $sideEffects && $archived['submission_id'] !== null) {
-            $this->returns->setLastSubmission($supplierId, $year, $type, (int) $archived['submission_id'], $variant, $seq);
+        if ($sideEffects && $archived['submission_id'] !== null) {
+            $this->returns->setLastSubmission($supplierId, $year, $type, (int) $archived['submission_id'], $variant, (int) $built['variant_seq']);
         }
 
         return [
@@ -1357,6 +1373,7 @@ final class TaxReturnService
             'filename' => $built['filename'],
             'validation_status' => (string) $archived['validation_status'],
             'validation_errors' => (array) $archived['validation_errors'],
+            'business_errors' => $businessErrors,
             'submission_id' => (int) $archived['submission_id'],
         ];
     }
@@ -1471,7 +1488,7 @@ final class TaxReturnService
      * dřív se stavěla jako `ObecnaPriloha`, což je špatná přihrádka.
      *
      * Stejnou cestou (`Prilohy/PredepsanaPriloha`) nese podání i další dvě přílohy, KDYŽ
-     * je pro danou ÚJ § 18 odst. 2 ZoÚ vyžaduje (viz needsSection18Statements()):
+     * je pro danou ÚJ § 18 odst. 2 ZoÚ vyžaduje (viz StatementSupplementPolicy):
      * přehled o peněžních tocích (`PP_PTOK`, {@see buildCashFlowAttachment()}) a přehled
      * o změnách vlastního kapitálu (`PP_ZVKAP`, {@see buildEquityChangesAttachment()}).
      * `PP_UZMUS` (IFRS závěrka) se NESTAVÍ — aplikace IFRS nepodporuje.
@@ -1532,12 +1549,7 @@ final class TaxReturnService
             $usedBytes,
         );
 
-        // § 18 odst. 2 ZoÚ — jen velká/střední ÚJ a každá s povinným auditem (stejné
-        // kritérium jako Section18StatementsAction/ClosingService, viz
-        // needsSection18Statements()). Mikro/malá ÚJ bez auditu povinnost nemá — tam se
-        // přehledy k DPPO NEPŘIKLÁDAJÍ, i kdyby šly sestavit (appendix by nesl přílohu,
-        // kterou zákon nevyžaduje).
-        if ($this->needsSection18Statements((array) $appendix['category'])) {
+        if (StatementSupplementPolicy::requiredForCategory($appendix['category']['category'])) {
             $this->attachIfWithinBudget(
                 $appendix,
                 'cash_flow_attachment',
@@ -1563,27 +1575,6 @@ final class TaxReturnService
      * velikost SOUBORU (před base64), protože to je částka, kterou dokumentace jmenuje.
      */
     private const STATEMENT_NOTES_MAX_BYTES = 10_240 * 1024;
-
-    /**
-     * § 18 odst. 2 ZoÚ: přehled o peněžních tocích a o změnách vlastního kapitálu jsou
-     * POVINNOU součástí závěrky jen u velké a střední ÚJ a u KAŽDÉ ÚJ s povinným auditem
-     * (auditovaná mikro/malá ÚJ dostane plný `scope`, i když by jinak byla zkrácená —
-     * R18/Epic F4, {@see \MyInvoice\Service\Accounting\Reports\EntityCategoryService::evaluate()}).
-     * Mikro a malá ÚJ bez auditu povinnost NEMAJÍ.
-     *
-     * Stejné kritérium jako {@see \MyInvoice\Action\Accounting\Reports\Section18StatementsAction::get()}
-     * (`required` v odpovědi) a kontrola `section18_statements_required` v
-     * {@see \MyInvoice\Service\Accounting\Closing\ClosingService} — JEDNO místo pravdy;
-     * kdyby se rozešlo, uzávěrka/report/přiznání by o téže povinnosti tvrdily každé něco
-     * jiného.
-     *
-     * @param array<string,mixed> $category výstup EntityCategoryService::evaluate()
-     */
-    private function needsSection18Statements(array $category): bool
-    {
-        return in_array((string) ($category['category'] ?? ''), ['large', 'medium'], true)
-            || (($category['scope_override'] ?? null) === null && (string) ($category['scope'] ?? '') === 'full');
-    }
 
     /**
      * Připojí e-přílohu k appendixu, jen když se s dosavadním součtem vejde do limitu
@@ -1699,7 +1690,7 @@ final class TaxReturnService
      * ({@see \MyInvoice\Service\Export\ClosingPackageService}, část `cash_flow`) — žádný
      * druhý generátor, jen jiný výstupní kontejner (příloha DPPO místo souboru v ZIPu).
      *
-     * Volá se JEN když {@see needsSection18Statements()} vrátí true (přehled je pro tuhle
+     * Volá se, pokud {@see StatementSupplementPolicy::requiredForCategory()} vrátí true (přehled je pro tuto
      * ÚJ povinný) — proto je selhání sestavení/renderu vždy warning „je povinný, ale…",
      * ne tiché vynechání.
      *
@@ -1771,7 +1762,8 @@ final class TaxReturnService
         if ($type !== 'fo') {
             throw new TaxReturnException('invalid_type', 'Přehledy pojistného jsou jen pro fyzické osoby (OSVČ).', 400);
         }
-        return $this->insurance->build($supplierId, $year);
+        return $this->insurance->build($supplierId, $year)
+            + ['cssz_xml_available' => CsszPrehledXmlBuilder::supportsYear($year)];
     }
 
     /** PDF Přehledů pojistného OSVČ. @return array{pdf:string,filename:string} */
@@ -1852,6 +1844,7 @@ final class TaxReturnService
         if ($type !== 'fo') {
             throw new TaxReturnException('invalid_type', 'Přehled ČSSZ je jen pro fyzické osoby (OSVČ).', 400);
         }
+        CsszPrehledXmlBuilder::assertSupportedYear($year);
         $summary = $this->insurance->build($supplierId, $year);
         $supplier = $this->loadSupplierCssz($supplierId);
         $meta = [

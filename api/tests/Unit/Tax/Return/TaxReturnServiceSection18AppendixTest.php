@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Tax\Return;
 
+use MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionMethod;
 
 /**
- * `TaxReturnService::needsSection18Statements()` a `attachIfWithinBudget()` — jádro
+ * Pravidlo § 18 odst. 2 ZoÚ a `TaxReturnService::attachIfWithinBudget()` — jádro
  * rozhodnutí, KDY se přehled o peněžních tocích (PP_PTOK) a o změnách vlastního kapitálu
  * (PP_ZVKAP) přikládají k DPPO XML, a sdíleného limitu 10 240 kB na SOUČET všech e-příloh
  * (dppdp9.xsd:6211), ne na jednu.
  *
- * Instance se skládá reflexí (bez volání konstruktoru — obě metody jsou čisté funkce nad
- * argumenty, žádnou z 25 závislostí TaxReturnService nepoužívají), stejný vzor jako
+ * Rozpočet příloh testujeme bez závislostí TaxReturnService, stejně jako
  * {@see TaxReturnServiceDppoAppendixWarningsTest}.
  */
 final class TaxReturnServiceSection18AppendixTest extends TestCase
@@ -28,12 +28,10 @@ final class TaxReturnServiceSection18AppendixTest extends TestCase
 
     private function needsSection18(array $category): bool
     {
-        $method = new ReflectionMethod(TaxReturnService::class, 'needsSection18Statements');
-        return $method->invoke($this->service(), $category);
+        return StatementSupplementPolicy::requiredForCategory($category['category'] ?? null);
     }
 
-    // ── needsSection18Statements() — stejné kritérium jako Section18StatementsAction /
-    // ClosingService `section18_statements_required` ─────────────────────────────────
+    // ── Společné kritérium pro DPPO, stránku výkazů a kontrolu uzávěrky ──
 
     public function testLargeCategoryIsRequiredRegardlessOfScope(): void
     {
@@ -45,11 +43,14 @@ final class TaxReturnServiceSection18AppendixTest extends TestCase
         self::assertTrue($this->needsSection18(['category' => 'medium', 'scope' => 'small', 'scope_override' => null]));
     }
 
-    public function testMicroCategoryWithFullScopeFromMandatoryAuditIsRequired(): void
+    public function testMicroCategoryWithFullScopeFromMandatoryAuditIsNotRequired(): void
     {
-        // R18: povinný audit vynutí scope='full' i u mikro/malé ÚJ (EntityCategoryService)
-        // — a i taková ÚJ přehledy podle § 18/2 potřebuje, i když kategorií je mikro.
-        self::assertTrue($this->needsSection18(['category' => 'micro', 'scope' => 'full', 'scope_override' => null]));
+        self::assertFalse($this->needsSection18(['category' => 'micro', 'scope' => 'full', 'scope_override' => null]));
+    }
+
+    public function testSmallCategoryWithFullScopeFromMandatoryAuditIsNotRequired(): void
+    {
+        self::assertFalse($this->needsSection18(['category' => 'small', 'scope' => 'full', 'scope_override' => null]));
     }
 
     public function testSmallCategoryWithoutAuditIsNotRequired(): void
@@ -64,9 +65,6 @@ final class TaxReturnServiceSection18AppendixTest extends TestCase
 
     public function testAdminFullScopeOverrideOnSmallCategoryDoesNotAloneTriggerRequirement(): void
     {
-        // scope_override != null vyřazuje druhou podmínku (`scope_override === null`) —
-        // ruční rozšíření rozsahu výkazů admin override NENÍ totéž jako zákonná povinnost
-        // podle § 18/2 (stejné jako v ClosingService/Section18StatementsAction).
         self::assertFalse($this->needsSection18(['category' => 'small', 'scope' => 'full', 'scope_override' => 'full']));
     }
 

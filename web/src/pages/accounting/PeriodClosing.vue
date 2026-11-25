@@ -949,6 +949,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       </div>
     </div>
 
+    <p v-if="state?.expired_reopen_deadline" data-test="reopen-deadline-expired"
+      class="mb-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+      {{ t('accounting.closing.reopen.expired', { date: formatDate(state.expired_reopen_deadline) }) }}
+    </p>
+
     <!-- Rok převedený i s uzávěrkou původního systému: průvodce ji znovu neúčtuje a dimenze
          roku jsou kvůli převzaté uzávěrce zmrazené (jinak by se ptali, proč nejdou změnit). -->
     <div v-if="state?.closing_taken_over" data-test="closing-taken-over"
@@ -1036,6 +1041,18 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                       :value="c.value" :export-url="checkExportUrl(c.key)"
                       :list-link="docListLink(c.key)" :period-id="periodId" />
                     <span v-else class="font-mono break-all">{{ checkValue(c.value) }}</span>
+                    <div v-if="c.key === 'entity_category_unavailable' && c.value && typeof c.value === 'object'
+                        && 'mapping_period_id' in c.value && typeof c.value.mapping_period_id === 'number'"
+                      class="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1">
+                      <span v-if="'mapping_fiscal_year' in c.value" class="text-neutral-500">
+                        {{ t('accounting.closing.turnover_mapping.period', { year: c.value.mapping_fiscal_year }) }}
+                      </span>
+                      <RouterLink v-for="form in ['income_statement', 'income_statement_purpose']" :key="form"
+                        :to="{ name: 'accounting-statement-mapping', query: { period_id: c.value.mapping_period_id, statement_type: form } }"
+                        class="text-primary-700 underline">
+                        {{ t(`accounting.closing.turnover_mapping.${form}`) }}
+                      </RouterLink>
+                    </div>
                   </td>
                 </tr>
               </tbody>
