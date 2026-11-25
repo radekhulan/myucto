@@ -11,6 +11,7 @@ use MyInvoice\Middleware\ApiScopeMiddleware;
 use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Tests\Support\OtherDocumentsPostingScenarios;
@@ -105,6 +106,32 @@ final class OtherItemDimensionsPublicApiTest extends TestCase
         $session = $this->call('PUT', '/api/accounting/dimensions/documents/other-items/' . $posted, ['header' => $header], 'read_write', 'session');
         self::assertSame(200, $session['status'], json_encode($session['body'], JSON_UNESCAPED_UNICODE) ?: '');
     }
+
+    public function testPostedItemDimensionsReturnValidationErrorWhenRequiredActivityIsMissing(): void
+    {
+        $supplierId = $this->scenarios->supplierId;
+        $posted = $this->scenarios->ids['other_payable'];
+        $before = $this->dimensions->documentDimensions($supplierId, 'other_item', $posted)['header'];
+        $center = $this->scenarios->types()['cost_center'];
+        $value = $this->value($center, 'REGR-C1');
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_504')")
+            ->execute([$supplierId]);
+        $activity = $this->container->get(DimensionRepository::class)
+            ->createType($supplierId, false, ['code' => 'cinnost', 'name' => 'Činnost', 'kind' => 'custom']);
+        $pdo->prepare("UPDATE dimension_types SET system_key = 'activity' WHERE id = ?")->execute([$activity]);
+
+        $res = $this->call('PUT', '/api/accounting/dimensions/documents/other-items/' . $posted,
+            ['header' => [$center => $value]], 'read_write', 'session');
+
+        self::assertSame(422, $res['status']);
+        self::assertSame('dimension_required', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('Činnost', $res['body']['error']['message'] ?? '');
+        self::assertSame('518', $res['body']['error']['violations'][0]['account_code'] ?? null);
+        self::assertSame($before, $this->dimensions->documentDimensions($supplierId, 'other_item', $posted)['header']);
+    }
+
 
     public function testTokenNeedsOtherItemsWritePermission(): void
     {

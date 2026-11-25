@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionRuleAudit;
 use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -681,6 +682,8 @@ final class DimensionAction
             return Json::ok($response, $fn($this->currentSupplierId($request)), $status);
         } catch (DimensionException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (PostingException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         } catch (\PDOException $e) {
             if (($e->errorInfo[0] ?? null) === '23000') {
                 return Json::error($response, 'integrity_violation', 'Hodnota je použitá nebo koliduje s jinou.', 409);
