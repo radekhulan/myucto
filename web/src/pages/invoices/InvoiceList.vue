@@ -35,6 +35,8 @@ import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
 import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import EntityTagFilter from '@/components/tags/EntityTagFilter.vue'
+import { tagFilter, tagsById, type TagSelection } from '@/api/entityTags'
 import { invoiceListFilterParams } from '@/api/listQueries'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
@@ -144,6 +146,29 @@ const currencyFilter = ref<string>('')
 const REVENUE_CATEGORY_NONE = 'none'
 const revenueCategoryMode = ref<'include' | 'exclude'>('include')
 const revenueCategoryIds = ref<string[]>([])
+const tagIds = ref('')
+const tagNames = ref(new Map<number, string>())
+const selectedTags = computed<TagSelection>({
+  get: () => tagIds.value === 'none' ? 'none' : tagIds.value.split(',').filter(Boolean)
+    .map(id => ({ id: Number(id), name: tagNames.value.get(Number(id)) ?? `#${id}` })),
+  set: (selection) => {
+    if (selection !== 'none') for (const tag of selection) tagNames.value.set(tag.id, tag.name)
+    tagIds.value = tagFilter(selection) ?? ''
+  },
+})
+
+function restoreTags(raw: unknown) {
+  const value = typeof raw === 'string' && /^(?:none|[1-9]\d{0,17}(?:,[1-9]\d{0,17}){0,63})$/.test(raw) ? raw : ''
+  tagIds.value = auth.isClientRole ? '' : value
+  if (!tagIds.value || value === 'none') return
+  const missing = value.split(',').filter(id => !tagNames.value.has(Number(id)))
+  if (missing.length) {
+    void tagsById('invoices', missing.join(',')).then(tags => {
+      for (const tag of tags) tagNames.value.set(tag.id, tag.name)
+    }).catch(() => { /* Filtr dál funguje podle ID. */ })
+  }
+}
+
 const revenueCategories = ref<RevenueCategory[]>([])
 // Hodnoty dimenzí (stejný výběr jako v účetním deníku); jen u firmy se zapnutými dimenzemi.
 const dimensionValueIds = ref<number[]>([])
@@ -182,6 +207,7 @@ const activeFilterCount = computed(() => {
   if (unpaidAsOf.value) n++
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
+  if (tagIds.value) n++
   if (revenueCategoryIds.value.length) n++
   if (dimensionValueIds.value.length) n++
   return n
@@ -199,6 +225,8 @@ const activeFilterCount = computed(() => {
  */
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
+  if (tagIds.value) chips.push({ key: 'tags', label: t('entity_tags.label'),
+    value: selectedTags.value === 'none' ? t('entity_tags.none') : selectedTags.value.map(tag => tag.name).join(', ') })
   if (statusFilter.value) chips.push({ key: 'status', value: statusLabel(statusFilter.value) })
   if (typeFilter.value) chips.push({ key: 'type', value: typeLabel(typeFilter.value) })
   if (clientFilter.value !== '') {
@@ -249,6 +277,7 @@ const filterChips = computed<FilterChip[]>(() => {
 
 function clearFilter(key: string) {
   switch (key) {
+    case 'tags': tagIds.value = ''; break
     case 'status': statusFilter.value = ''; break
     case 'type': typeFilter.value = ''; break
     case 'client': clientFilter.value = ''; break
@@ -1006,6 +1035,8 @@ function listParams(): InvoiceListParams {
     unpaid_as_of: unpaidAsOf.value || undefined,
     booked: bookedFilter.value || undefined,
     oss_review: ossReviewFilter.value || undefined,
+    tag_ids: tagIds.value || undefined,
+    include_tags: !auth.isClientRole && tbl.isVisible('tags'),
     revenue_category_id: revenueCategoryMode.value === 'include' && revenueCategoryIds.value.length
       ? revenueCategoryIds.value : undefined,
     revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
@@ -1090,6 +1121,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'country', labelKey: 'invoice.col_country', defaultHidden: true },
   { key: 'vat_classification', labelKey: 'invoice.col_vat_classification', defaultHidden: true },
   { key: 'vat_return_lines', labelKey: 'invoice.col_vat_return_lines', defaultHidden: true },
+  { key: 'tags', labelKey: 'entity_tags.label', defaultHidden: true, available: () => !auth.isClientRole },
   { key: 'document_tags', labelKey: 'invoice.col_document_tags', defaultHidden: true, available: () => auth.canRead('documents') },
   { key: 'note', labelKey: 'invoice.col_note', defaultHidden: true },
   { key: 'journal_notes', labelKey: 'invoice.col_journal_notes', defaultHidden: true, available: () => auth.canRead('accounting') },
@@ -1132,6 +1164,7 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
     country: inv.country || '—',
     vat_classification: inv.vat_classification_codes?.join(', ') || '—',
     vat_return_lines: inv.vat_return_lines?.join(', ') || '—',
+    tags: inv.tags?.map(tag => tag.name).join(', ') || '—',
     document_tags: inv.document_tags?.join(', ') || '—',
     note: [inv.note_above_items, inv.note_below_items].filter(Boolean).join(' · ') || '—',
     journal_notes: inv.journal_notes?.join(' · ') || '—',
@@ -1159,7 +1192,7 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
   return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
-watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_classification'), tbl.isVisible('vat_return_lines'), tbl.isVisible('document_tags'), tbl.isVisible('journal_notes'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
+watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_classification'), tbl.isVisible('vat_return_lines'), tbl.isVisible('tags'), tbl.isVisible('document_tags'), tbl.isVisible('journal_notes'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
 const listBoxes = ref<HTMLElement[]>([])
 const adaptiveRowsEnabled = computed(() => COLUMNS.some(c => c.available?.() !== false
@@ -1225,6 +1258,7 @@ onMounted(async () => {
 })
 
 function loadFiltersFromQuery(q: typeof route.query) {
+  restoreTags(q.tag_ids)
   statusFilter.value = typeof q.status === 'string' ? q.status : ''
   typeFilter.value   = typeof q.type === 'string' ? q.type : ''
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
@@ -1264,6 +1298,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
 
 function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
+  if (tagIds.value) q.tag_ids = tagIds.value
   if (statusFilter.value) q.status = statusFilter.value
   if (typeFilter.value) q.type = typeFilter.value
   if (clientFilter.value !== '') q.client_id = String(clientFilter.value)
@@ -1317,7 +1352,7 @@ function applyQueryToPage(q: Record<string, string>) {
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
        cashflowDraftUnscheduled, overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
-       revenueCategoryIds, revenueCategoryMode, dimensionValueIds, dimensionDescendants], () => {
+       tagIds, revenueCategoryIds, revenueCategoryMode, dimensionValueIds, dimensionDescendants], () => {
   if (suppressUrlSync) return
   syncFiltersToUrl()
   load(true)
@@ -1575,6 +1610,7 @@ useWindowRefresh(refreshLoadedPages,
           <option value="">{{ t('invoice.all_currencies') }}</option>
           <option v-for="c in currencies" :key="c.id" :value="c.code">{{ c.code }}</option>
         </select>
+        <EntityTagFilter v-if="!auth.isClientRole" v-model="selectedTags" resource="invoices" />
         <!-- Kategorie tržby: výběr 1:N + přepínač, jestli se vybrané mají ukázat, nebo
              naopak schovat. Přepínač se objeví až s výběrem — bez něj nemá co přepínat
              a lišta by měla o jeden trvale zbytečný select víc. -->
@@ -1723,7 +1759,7 @@ useWindowRefresh(refreshLoadedPages,
                   />
                 </th>
                 <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                  <th v-if="['kh', 'dimensions', 'vat_classification', 'vat_return_lines', 'document_tags'].includes(c.key)" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                  <th v-if="['kh', 'dimensions', 'vat_classification', 'vat_return_lines', 'document_tags', 'tags'].includes(c.key)" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                   <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
                     :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total', 'paid_total', 'remaining_amount'].includes(c.key) ? 'right' : 'left'"
                     @toggle="onSortToggle" />
@@ -1860,6 +1896,7 @@ useWindowRefresh(refreshLoadedPages,
                 <td v-else-if="c.key === 'country'" :data-custom-color="!!colors.color('country')" :style="colors.cellStyle('country')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'country')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'country') }}</span></td>
                 <td v-else-if="c.key === 'vat_classification'" :data-custom-color="!!colors.color('vat_classification')" :style="colors.cellStyle('vat_classification')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'vat_classification')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'vat_classification') }}</span></td>
                 <td v-else-if="c.key === 'vat_return_lines'" :data-custom-color="!!colors.color('vat_return_lines')" :style="colors.cellStyle('vat_return_lines')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'vat_return_lines')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'vat_return_lines') }}</span></td>
+                <td v-else-if="c.key === 'tags'" :data-custom-color="!!colors.color('tags')" :style="colors.cellStyle('tags')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'tags')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'tags') }}</span></td>
                 <td v-else-if="c.key === 'document_tags'" :data-custom-color="!!colors.color('document_tags')" :style="colors.cellStyle('document_tags')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'document_tags')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'document_tags') }}</span></td>
                 <td v-else-if="c.key === 'note'" :data-custom-color="!!colors.color('note')" :style="colors.cellStyle('note')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'note')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'note') }}</span></td>
                 <td v-else-if="c.key === 'journal_notes'" :data-custom-color="!!colors.color('journal_notes')" :style="colors.cellStyle('journal_notes')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'journal_notes')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'journal_notes') }}</span></td>

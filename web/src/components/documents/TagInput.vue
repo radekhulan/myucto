@@ -1,22 +1,41 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { documentsApi, type TagInfo } from '@/api/documents'
+import { documentsApi } from '@/api/documents'
 
-const props = defineProps<{ modelValue: string[]; autofocus?: boolean }>()
+import { suggestTags, type TagResource } from '@/api/entityTags'
+
+const props = defineProps<{ modelValue: string[]; autofocus?: boolean; resource?: TagResource; inputId?: string }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: string[]): void }>()
 
 const { t } = useI18n()
 
 const input = ref('')
 const inputEl = ref<HTMLInputElement | null>(null)
-const allTags = ref<TagInfo[]>([])
+const allTags = ref<{ id: number; name: string; usage_count?: number }[]>([])
 const open = ref(false)
 const activeIndex = ref(-1)
 
 onMounted(async () => {
-  try { allTags.value = await documentsApi.tags() } catch { /* ignore */ }
+  if (!props.resource) {
+    try { allTags.value = await documentsApi.tags() } catch { /* bez našeptávání */ }
+  }
   if (props.autofocus) inputEl.value?.focus()
+})
+
+watch([open, input], ([visible, query], _, onCleanup) => {
+  const resource = props.resource
+  if (!resource || !visible) return
+  let current = true
+  const timer = setTimeout(async () => {
+    try {
+      const matches = await suggestTags(resource, query.trim())
+      if (current) allTags.value = matches
+    } catch {
+      if (current) allTags.value = []
+    }
+  }, 150)
+  onCleanup(() => { current = false; clearTimeout(timer) })
 })
 
 const suggestions = computed(() => {
@@ -62,9 +81,12 @@ function onKeydown(e: KeyboardEvent) {
     <div class="flex flex-wrap items-center gap-1 px-2 py-1.5 border border-neutral-300 rounded-md focus-within:ring-2 focus-within:ring-primary-500/20 focus-within:border-primary-500 min-h-9">
       <span v-for="tg in modelValue" :key="tg" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-xs">
         {{ tg }}
-        <button type="button" class="hover:text-danger-500" @click="remove(tg)">×</button>
+        <button type="button" :aria-label="t('entity_tags.remove', { name: tg })" class="hover:text-danger-500" @click="remove(tg)">×</button>
       </span>
       <input
+        :id="inputId"
+        :disabled="!!resource && modelValue.length >= 64"
+        :maxlength="resource ? 64 : undefined"
         ref="inputEl"
         v-model="input"
         type="text"
@@ -85,7 +107,7 @@ function onKeydown(e: KeyboardEvent) {
         @mouseenter="activeIndex = i"
       >
         <span class="text-neutral-700">{{ s.name }}</span>
-        <span class="text-xs text-neutral-400">{{ s.usage_count }}</span>
+        <span v-if="s.usage_count != null" class="text-xs text-neutral-400">{{ s.usage_count }}</span>
       </li>
     </ul>
   </div>

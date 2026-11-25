@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TagInput from '@/components/documents/TagInput.vue'
 import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
 import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
@@ -21,6 +22,8 @@ import { eshopApi, type PriceLevel } from '@/api/eshop'
 const { t, locale } = useI18n()
 const toast = useToast()
 const pageId = useId()
+const tagNames = ref<string[]>([])
+const storedTagNames = ref<string[]>([])
 const editorForm = ref<HTMLFormElement | null>(null)
 const paneDom = usePaneDom()
 const { blockDemoMutation } = useDemoMode()
@@ -1655,6 +1658,8 @@ onMounted(async () => {
 
   if (isEdit.value && invoiceId.value) {
     const inv = await invoicesApi.get(invoiceId.value)
+    storedTagNames.value = (inv.tags ?? []).map(tag => tag.name)
+    tagNames.value = [...storedTagNames.value]
     // Zamčený doklad (F6): klient editor vůbec neotevře — UX vrstva, BE by PUT stejně 403nul.
     if (auth.isClientRole && inv.locked?.is_locked) {
       toast.info(t('lock.client_hint'))
@@ -3014,6 +3019,8 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
       number_series_id: numberSeriesId.value,
       vat_classification_code: form.value.vat_classification_code,
       revenue_category: form.value.revenue_category,
+      ...(!auth.isClientRole && (tagNames.value.length !== storedTagNames.value.length
+        || tagNames.value.some((name, index) => name !== storedTagNames.value[index])) ? { tags: tagNames.value } : {}),
       revenue_category_id: form.value.revenue_category_id,
       // Textový řádek jde jen jako druh + text + pořadí; zbytek si server vynuluje.
       items: items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
@@ -3085,6 +3092,8 @@ async function saveDocument(payload: InvoicePayload): Promise<void> {
       saved = await invoicesApi.create(payload)
       if (wrBillingSnapshot.value) billingDraftId.value = saved.id
     }
+    // Editor může po uložení zůstat otevřený (selže výkaz), další uložení porovnává s tímto stavem.
+    if (saved.tags) storedTagNames.value = saved.tags.map(tag => tag.name)
     if (wrBillingSnapshot.value) {
       if (legacyItemIndex >= 0) wrBillingLegacyItemId.value = saved.items[legacyItemIndex]?.id ?? null
       syncBillingInvoiceItems(saved.items)
@@ -4329,6 +4338,10 @@ useWindowTitle(
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.revenue_category_hint') }}</p>
+          </div>
+          <div v-if="!auth.isClientRole" class="sm:col-span-2">
+            <label :for="`${pageId}-tags`" class="block text-xs text-neutral-500 mb-1">{{ t('entity_tags.label') }}</label>
+            <TagInput v-model="tagNames" resource="invoices" :input-id="`${pageId}-tags`" />
           </div>
           <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="invoice-header-dimensions">
             <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>

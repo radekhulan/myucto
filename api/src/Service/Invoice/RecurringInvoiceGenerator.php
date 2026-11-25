@@ -611,6 +611,13 @@ final class RecurringInvoiceGenerator
                 ] + $ossColumns;
             }
             $this->invoices->replaceItems($newId, $items);
+            // Snímek při vzniku konceptu. Pozdější vystavení převezme štítky samotného konceptu.
+            $pdo->prepare(
+                'INSERT INTO invoice_tags (entity_id, tag_id)
+                 SELECT ?, m.tag_id FROM recurring_template_tags m
+                 JOIN entity_tags t ON t.id = m.tag_id
+                 WHERE t.supplier_id = ? AND m.entity_id = ?'
+            )->execute([$newId, $template['supplier_id'], $template['id']]);
             // Dimenze šablony (hlavička i položky, F1) — položky faktury leží ve stejném
             // pořadí jako položky šablony, sleva z hlavičky až za nimi.
             (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->copyDocument(

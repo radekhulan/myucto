@@ -935,6 +935,7 @@ Kromě konceptu umí asistent s vydanými doklady totéž, co detail faktury v a
 | `prefill_invoice_refund_order`, `create_invoice_refund_order` | vratka přeplatku nebo dobropisu odběrateli jako příkaz k úhradě (do banky nic neodesílá) |
 | `preview_work_report_billing`, `transfer_work_report_billing` | cenová rekapitulace výkazu práce a její přenos do položek konceptu |
 | `set_invoice_project` | zařadí i vystavenou fakturu k zakázce |
+| `set_invoice_tags` | nastaví interní štítky i vystavené nebo zaúčtované faktury |
 | `get_invoice_posting` | zápis zaúčtované faktury v deníku, u nezaúčtované náhled kontace (i přijaté faktury) |
 | `clone_invoice` | založí koncept jako kopii dokladu |
 | `create_final_invoice_from_proforma` | ze zaplacené zálohy založí koncept finální faktury s odečtenou zálohou |

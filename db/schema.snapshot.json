@@ -1249,7 +1249,9 @@
         "2343_mobile_oidc_codes.sql",
         "2344_myeet_sale_license.sql",
         "2345_myeet_readonly_license.sql",
-        "2346_nonprofit_funding_work.sql"
+        "2346_nonprofit_funding_work.sql",
+        "2347_entity_tags_recurring_templates.sql",
+        "2348_invoice_tags.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6218,6 +6220,24 @@
             },
             "checks": []
         },
+        "entity_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "name": "varchar(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_entity_tag_name": "UNIQUE BTREE (supplier_id, name)"
+            },
+            "foreign_keys": {
+                "fk_entity_tag_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "epo_signing_credential_suppliers": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -7773,6 +7793,24 @@
                 "fk_is_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_is_reversal": "(reversal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_is_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "invoice_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "entity_id": "bigint(20) unsigned NOT NULL",
+                "tag_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (entity_id, tag_id)",
+                "idx_invoice_tag_entity": "BTREE (tag_id, entity_id)"
+            },
+            "foreign_keys": {
+                "fk_invoice_tag_invoice": "(entity_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_invoice_tag_tag": "(tag_id) -> entity_tags (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -24940,6 +24978,24 @@
                 "fk_rit_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_rit_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_rit_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "recurring_template_tags": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "entity_id": "bigint(20) unsigned NOT NULL",
+                "tag_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (entity_id, tag_id)",
+                "idx_recurring_tag_entity": "BTREE (tag_id, entity_id)"
+            },
+            "foreign_keys": {
+                "fk_recurring_tag_tag": "(tag_id) -> entity_tags (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_recurring_tag_template": "(entity_id) -> recurring_invoice_templates (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

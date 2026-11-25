@@ -1,3 +1,4 @@
+import type { EntityTag } from './entityTags'
 import type { WorkReportBillingSnapshot, WorkReportBillingPreview } from './workReportBilling'
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
@@ -389,6 +390,7 @@ export interface InvoicePublicLink {
 }
 
 export interface Invoice {
+  tags?: EntityTag[]
   id: number
   varsymbol: string | null
   /** Samostatný platební VS (#249); null = odvodí se z čísla dokladu. */
@@ -620,6 +622,7 @@ export interface ExchangeRateMeta {
 }
 
 export interface InvoiceListItem {
+  tags?: EntityTag[]
   country?: string | null
   note_above_items?: string | null
   note_below_items?: string | null
@@ -705,6 +708,7 @@ export interface MonthGroup {
 }
 
 export interface InvoicePayload {
+  tags?: string[]
   invoice_type?: InvoiceType
   /** Řada z číselníku (jen koncept); vynechané = beze změny, null = výchozí řada druhu. */
   number_series_id?: number | null
@@ -806,6 +810,8 @@ export interface InvoicePayloadTextItem {
 export type OssReviewScope = 'any' | 'oss' | 'domestic'
 
 export interface ListFilters {
+  tag_ids?: string
+  include_tags?: boolean
   include_vat_classification?: boolean
   include_journal_notes?: boolean
   include_document_tags?: boolean
@@ -959,6 +965,7 @@ export const invoicesApi = {
     if (filters.include_kh) params['filter[include_kh]'] = 1
     if (filters.include_vat_classification) params['filter[include_vat_classification]'] = 1
     if (filters.include_journal_notes) params['filter[include_journal_notes]'] = 1
+    if (filters.include_tags) params['filter[include_tags]'] = 1
     if (filters.include_document_tags) params['filter[include_document_tags]'] = 1
     if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
     if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
@@ -1015,6 +1022,9 @@ export const invoicesApi = {
   /** Období časového rozlišení výnosu u řádků — smí i u vystavené a zaúčtované faktury. */
   setAccrual: (id: number, items: Array<{ id: number; accrual_from: string | null; accrual_to: string | null }>) =>
     api.put<Invoice>(`/invoices/${id}/accrual`, { items }).then(r => r.data),
+  /** Interní štítky celou sadou — i u vystavené a zaúčtované faktury, nejsou účetním údajem. */
+  setTags: (id: number, tags: string[]) =>
+    api.post<Invoice>(`/invoices/${id}/tags`, { tags }).then(r => r.data),
   /**
    * Vrátí náhled, jaké číslo faktura dostane při Vystavení (BEZ inkrementu counteru).
    * Používá se v editoru jako placeholder „automaticky: JD2026-01".

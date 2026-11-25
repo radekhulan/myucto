@@ -11,11 +11,13 @@ use MyInvoice\Service\Stock\InvoiceItemTracking;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Http\GuardsDocumentLock;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Http\EntityTagInput;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Codebook\UnitPrecision;
@@ -68,6 +70,9 @@ final class CreateInvoiceAction
     public function __invoke(Request $request, Response $response): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
+        if ($error = EntityTagInput::rejectInvalid($request, $response, $body)) {
+            return $error;
+        }
 
         // Generický `note` → `note_below_items` (issue #38). Musí být nad vším ostatním:
         // pod klíčem `note` není sloupec, takže by ho repository jinak tiše zahodila.
@@ -300,6 +305,9 @@ final class CreateInvoiceAction
             if ($warnings !== []) {
                 $invoice['_warnings'] = $warnings;
             }
+        }
+        if (!RequestAuthorization::isClientType($request)) {
+            $invoice['tags'] = $this->repo->tagsForInvoices(SupplierGuard::currentId($request), [$id])[$id] ?? [];
         }
         return Json::ok($response, $invoice, 201);
     }

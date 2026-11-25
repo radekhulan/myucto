@@ -47,6 +47,7 @@ import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { offsetRoute } from '@/components/accounting/offsetLink'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import TagInput from '@/components/documents/TagInput.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -308,6 +309,34 @@ const signatureSelectionRows = computed(() => {
   if (workReport.value) rows.push({ entityType: 'work_report', label: t('invoice.signing.output_work_report') as string })
   return rows
 })
+
+// ─── Interní štítky ───────────────────────────────────────────────────────
+// Mění se i u vystavené a zaúčtované faktury samostatnou akcí (bez vynucené úpravy):
+// nejsou účetním údajem a zákazník je nevidí.
+const tagsEditing = ref(false)
+const tagsSaving = ref(false)
+const tagsDraft = ref<string[]>([])
+const canEditTags = computed(() => !!invoice.value && !auth.isClientRole && auth.canWrite('invoices'))
+
+function startTagsEdit() {
+  tagsDraft.value = (invoice.value?.tags ?? []).map(tag => tag.name)
+  tagsEditing.value = true
+}
+
+async function saveTags() {
+  if (!invoice.value) return
+  tagsSaving.value = true
+  try {
+    const saved = await invoicesApi.setTags(invoice.value.id, tagsDraft.value)
+    invoice.value = { ...invoice.value, tags: saved.tags ?? [] }
+    tagsEditing.value = false
+    toast.success(t('entity_tags.saved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    tagsSaving.value = false
+  }
+}
 
 // ─── Časové rozlišení výnosu (384) ───────────────────────────────────────
 // Období u řádků jde nastavit i u vystavené a zaúčtované faktury: zápis faktury se
@@ -950,6 +979,7 @@ function actionLabel(a: string): string {
     'invoice.created': 'invoice.actions.created',
     'invoice.updated': 'invoice.actions.updated',
     'invoice.force_updated': 'invoice.actions.force_updated',
+    'invoice.tags_changed': 'invoice.actions.tags_changed',
     'invoice.issued': 'invoice.actions.issued',
     'invoice.paid': 'invoice.actions.paid',
     'invoice.cancelled': 'invoice.actions.cancelled',
@@ -2492,6 +2522,7 @@ useWindowRefresh(async () => {
   void openingBalance.load(invoiceId)
   if (stockIntegrationVisible.value) void loadStockDocuments(invoiceId, generation)
 }, () => !loading.value && !busy.value && !accrualEditing.value && !accrualSaving.value
+  && !tagsEditing.value && !tagsSaving.value
   && !sendOpen.value && !reminderOpen.value && !cancelOpen.value && !partialOpen.value
   && !markPaidOpen.value && !advanceModalOpen.value && !drawdownOpen.value && !penaltyOpen.value
   && !approvalStatusOpen.value && !wrModalOpen.value && !refundDialogOpen.value && !bankMatchTarget.value
@@ -2581,6 +2612,31 @@ useWindowRefresh(async () => {
             <span v-for="b in (invoice.project_billing_emails || []).filter(b => b.email !== invoice!.client_main_email)" :key="b.email">
               ✉ {{ b.email }}<span v-if="b.label" class="text-neutral-400"> ({{ b.label }})</span>
             </span>
+          </div>
+          <div v-if="!auth.isClientRole && (invoice.tags?.length || canEditTags)" class="pt-1" data-test="invoice-tags">
+            <div v-if="!tagsEditing" class="flex flex-wrap items-center gap-1">
+              <span v-for="tag in invoice.tags" :key="tag.id" class="text-xs px-2 py-0.5 rounded-full bg-primary-50 text-primary-700">
+                {{ tag.name }}
+              </span>
+              <button v-if="canEditTags" type="button" class="cursor-pointer text-xs text-primary-700 hover:underline whitespace-nowrap"
+                data-test="invoice-tags-edit" @click="startTagsEdit">
+                {{ invoice.tags?.length ? t('entity_tags.edit') : t('entity_tags.add') }}
+              </button>
+            </div>
+            <div v-else class="flex flex-wrap items-start gap-2">
+              <label :for="`invoice-tags-${invoice.id}`" class="sr-only">{{ t('entity_tags.label') }}</label>
+              <TagInput v-model="tagsDraft" resource="invoices" :input-id="`invoice-tags-${invoice.id}`" :autofocus="true" class="w-full sm:w-96" />
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" :disabled="tagsSaving" @click="tagsEditing = false">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.x" /></svg>
+                  {{ t('common.cancel') }}
+                </button>
+                <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="tagsSaving" data-test="invoice-tags-save" @click="saveTags">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.check" /></svg>
+                  {{ t('entity_tags.save') }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div v-if="invoice.client_ic || invoice.client_dic" class="text-xs font-mono text-neutral-500 text-right whitespace-nowrap">

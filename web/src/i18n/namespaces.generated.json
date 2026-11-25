@@ -81,6 +81,7 @@
     "domain_login",
     "domains",
     "electronic_signatures",
+    "entity_tags",
     "errors",
     "eshop",
     "expense_categories",
@@ -339,6 +340,7 @@
       "bulk_actions",
       "dimensions",
       "documents",
+      "entity_tags",
       "linked_documents",
       "lock",
       "oss_rates",
@@ -373,6 +375,8 @@
       "cash",
       "cash_settlement",
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "lock",
       "number_series",
@@ -401,6 +405,7 @@
       "credit_note_offset",
       "dimensions",
       "documents",
+      "entity_tags",
       "linked_documents",
       "list_nav",
       "lock",
@@ -422,6 +427,8 @@
       "cash",
       "cash_settlement",
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "lock",
       "number_series",
@@ -634,7 +641,8 @@
     ],
     "documents": [
       "capture_photo",
-      "documents"
+      "documents",
+      "entity_tags"
     ],
     "scan-attach": [
       "attachment_check",
@@ -642,6 +650,7 @@
     ],
     "document-detail": [
       "documents",
+      "entity_tags",
       "other_items"
     ],
     "other-items": [
@@ -1494,10 +1503,13 @@
       "price_list"
     ],
     "recurring": [
+      "entity_tags",
       "recurring"
     ],
     "recurring-new": [
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "integrations",
       "number_template",
@@ -1515,6 +1527,8 @@
     ],
     "recurring-edit": [
       "dimensions",
+      "documents",
+      "entity_tags",
       "errors",
       "integrations",
       "number_template",

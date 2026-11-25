@@ -11,6 +11,7 @@ export type ListQuery = Record<string, string | number>
 
 export function invoiceListFilterParams(filters: ListFilters): ListQuery {
   const params: ListQuery = {}
+  if (filters.tag_ids) params['filter[tag_ids]'] = filters.tag_ids
   if (filters.q) params.q = filters.q
   if (filters.status) {
     params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status

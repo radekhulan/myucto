@@ -732,6 +732,7 @@ final class Routes
         $app->get('/api/sales-quotes/{id:[0-9]+}/history/{eventId:[0-9]+}/pdf', [$quotes, 'pdf']);
 
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
+        $app->get    ('/api/invoices/tags',         \MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
         // Kniha vystavených faktur (PDF/XLSX) nad filtrem seznamu.
@@ -765,6 +766,8 @@ final class Routes
         $app->delete ('/api/invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'revertInvoice']);
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/invoices/{id:[0-9]+}/project',   SetInvoiceProjectAction::class);
+        // Interní štítky — i u vystaveného a zaúčtovaného dokladu, nejsou účetním údajem.
+        $app->post   ('/api/invoices/{id:[0-9]+}/tags',      \MyInvoice\Action\Invoice\SetInvoiceTagsAction::class);
         // Období časového rozlišení výnosu (384) — smí i u zaúčtovaného dokladu, čte ho až uzávěrka.
         $app->put    ('/api/invoices/{id:[0-9]+}/accrual',   \MyInvoice\Action\Invoice\SetInvoiceAccrualAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/rebuild-snapshots', \MyInvoice\Action\Invoice\RebuildInvoiceSnapshotsAction::class);
@@ -951,6 +954,7 @@ final class Routes
 
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);
+        $app->get    ('/api/recurring/tags',                  \MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
         $app->post   ('/api/recurring',                       [RecurringTemplateAction::class, 'create']);
         $app->get    ('/api/recurring/{id:[0-9]+}',           [RecurringTemplateAction::class, 'get']);
         $app->get    ('/api/recurring/{id:[0-9]+}/invoices',  [RecurringTemplateAction::class, 'invoices']);

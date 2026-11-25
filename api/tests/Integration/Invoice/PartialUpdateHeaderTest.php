@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Invoice;
 
 use MyInvoice\Action\Invoice\CreateInvoiceAction;
 use MyInvoice\Action\Invoice\SetInvoiceProjectAction;
+use MyInvoice\Action\Invoice\SetInvoiceTagsAction;
 use MyInvoice\Action\Invoice\UpdateInvoiceAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -93,6 +94,89 @@ final class PartialUpdateHeaderTest extends TestCase
             $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$clientId]);
         }
         $this->db->close();
+    }
+
+    public function testInternalInvoiceTagsRoundTripAndFilter(): void
+    {
+        $names = ['PHPUnit-A-' . bin2hex(random_bytes(5)), 'PHPUnit-B-' . bin2hex(random_bytes(5))];
+        $invoices = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $scope = ['supplier_id' => $this->supplierId, 'client_id' => $this->clientId];
+        try {
+            $id = $this->createInvoice(extra: ['tags' => $names]);
+            $untagged = $this->createInvoice();
+            $tags = $this->put($id, ['note_above_items' => 'Se štítky'])['body']['tags'];
+            self::assertSame($names, array_column($tags, 'name'));
+            $container = Bootstrap::buildContainer();
+            $clientRequest = $this->request('GET', [])->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']);
+            $detail = $container->get(\MyInvoice\Action\Invoice\GetInvoiceAction::class);
+            self::assertArrayNotHasKey('tags', self::decode($detail($clientRequest, new Psr7Response(), ['id' => $id]))['body']);
+            $suggest = $container->get(\MyInvoice\Action\Tag\SuggestEntityTagsAction::class);
+            self::assertSame(403, $suggest($clientRequest, new Psr7Response())->getStatusCode());
+            $foreignRequest = $this->request('GET', [])
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId + 1)
+                ->withQueryParams(['ids' => (string) $tags[0]['id']]);
+            self::assertSame([], self::decode($suggest($foreignRequest, new Psr7Response()))['body']);
+            $both = implode(',', array_column($tags, 'id'));
+            self::assertSame([$id], $invoices->listIds($scope + ['tag_ids' => $both], 10)['ids']);
+            self::assertSame([$untagged], $invoices->listIds($scope + ['tag_ids' => 'none'], 10)['ids']);
+            self::assertSame(400, $this->put($id, ['tags' => 'není pole'])['status']);
+            self::assertSame([$tags[1]], $this->put($id, ['tags' => [$names[1]]])['body']['tags']);
+            self::assertSame([], $invoices->listIds($scope + ['tag_ids' => $both], 10)['ids']);
+            self::assertSame([], $this->put($id, ['tags' => []])['body']['tags']);
+        } finally {
+            $this->db->pdo()->prepare('DELETE FROM entity_tags WHERE supplier_id = ? AND name IN (?, ?)')
+                ->execute([$this->supplierId, ...$names]);
+        }
+    }
+
+    /**
+     * BEZ OPRAVY PADÁ: štítky vystaveného a zaúčtovaného dokladu šly změnit jen vynucenou
+     * úpravou (`invoices.edit_issued` + force), PUT bez ní vrací 409 not_editable.
+     */
+    public function testIssuedInvoiceTagsChangeWithoutForcedEdit(): void
+    {
+        $names = ['PHPUnit-V-' . bin2hex(random_bytes(5)), 'PHPUnit-W-' . bin2hex(random_bytes(5))];
+        $action = Bootstrap::buildContainer()->get(SetInvoiceTagsAction::class);
+        $call = fn (int $id, array $body, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
+            => self::decode($action(($request ?? $this->request('POST', []))->withParsedBody($body), new Psr7Response(), ['id' => (string) $id]));
+        try {
+            $id = $this->createInvoice(extra: ['tags' => [$names[0]]]);
+            $this->db->pdo()->prepare("UPDATE invoices SET status = 'sent', varsymbol = ?, booked_at = NOW() WHERE id = ?")
+                ->execute(['PHPU' . substr(bin2hex(random_bytes(4)), 0, 8), $id]);
+            self::assertSame(409, $this->put($id, ['tags' => $names])['status'], 'Úprava vystavené faktury dál vyžaduje force.');
+
+            $res = $call($id, []);
+            self::assertSame(400, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            self::assertSame(400, $call($id, ['tags' => 'není pole'])['status']);
+
+            $client = $this->request('POST', [])->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']);
+            self::assertSame(403, $call($id, ['tags' => []], $client)['status']);
+            $foreign = $this->request('POST', [])->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId + 1);
+            self::assertSame(404, $call($id, ['tags' => ['Cizí']], $foreign)['status']);
+
+            $res = $call($id, ['tags' => [$names[1], $names[0]]]);
+            self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            self::assertSame($names, array_column($res['body']['tags'], 'name'));
+            self::assertSame('sent', $this->row($id)['status']);
+            self::assertNotNull($this->row($id)['booked_at']);
+
+            $log = $this->db->pdo()->prepare(
+                "SELECT payload FROM activity_log WHERE action = 'invoice.tags_changed' AND entity_type = 'invoice' AND entity_id = ? ORDER BY id DESC LIMIT 1"
+            );
+            $log->execute([$id]);
+            self::assertSame(['from' => [$names[0]], 'to' => $names], json_decode((string) $log->fetchColumn(), true));
+
+            self::assertSame([], $call($id, ['tags' => []])['body']['tags']);
+            $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoice_tags WHERE entity_id = ?');
+            $count->execute([$id]);
+            self::assertSame(0, (int) $count->fetchColumn());
+            $foreignTags = $this->db->pdo()->prepare('SELECT COUNT(*) FROM entity_tags WHERE supplier_id = ? AND name = ?');
+            $foreignTags->execute([$this->supplierId + 1, 'Cizí']);
+            self::assertSame(0, (int) $foreignTags->fetchColumn(), 'Cizí firma nesmí dostat štítek.');
+        } finally {
+            $this->db->pdo()->prepare('DELETE FROM entity_tags WHERE supplier_id = ? AND name IN (?, ?)')
+                ->execute([$this->supplierId, ...$names]);
+        }
     }
 
     /** BEZ OPRAVY PADÁ: tělo jen s poznámkou bylo odmítnuto (client_id povinný) a s ním resetovalo hlavičku. */
