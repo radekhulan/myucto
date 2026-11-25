@@ -202,11 +202,13 @@ final class CsasSiblingAccountLinkerTest extends TestCase
 
     /**
      * Sdílený souhlas nosné firmy 7 napojí účty ostatních firem: kopie je vázaná na firmu
-     * účtu, nese vlastníka souhlasu a jen čte. Vlastní souhlas jiné firmy ani odpojený účet
-     * se nepřebírá.
+     * účtu, nese vlastníka souhlasu a přebírá jeho rozsah včetně plateb, je-li účet pro platby
+     * vhodný. Vlastní souhlas jiné firmy ani odpojený účet se nepřebírá.
      */
-    public function testSharedConsentLinksAccountsOfOtherCompaniesReadOnly(): void
+    public function testSharedConsentLinksAccountsOfOtherCompaniesWithTheConsentScope(): void
     {
+        $remote = self::remote();
+        $remote[1]['suitableScope']['PISP'] = '';
         $this->oauth->expects(self::once())->method('otherSuppliersAccounts')->with(7)->willReturn([
             self::local(40, 'EUR', '2000000018', null, null, false, 12),
             self::local(50, 'CZK', '3000000004', 51, $this->storedCredential(51, 'own-refresh', self::SECOND_CZK_IBAN, 'CZK', 13), false, 13),
@@ -224,7 +226,7 @@ final class CsasSiblingAccountLinkerTest extends TestCase
                 $saved = [$supplier, $connection, $enabled, $account, json_decode($plain, true)];
             });
 
-        $results = $this->linker->linkShared($this->primary(), self::remote());
+        $results = $this->linker->linkShared($this->primary(), $remote);
 
         self::assertSame([
             ['supplier_id' => 12, 'currency_id' => 40, 'status' => 'linked', 'connection_id' => 41],
@@ -237,8 +239,11 @@ final class CsasSiblingAccountLinkerTest extends TestCase
         self::assertSame([12, 41, true, self::EUR_IBAN], [$supplier, $connection, $enabled, $account]);
         self::assertSame([12, 41, 7, 'remote-eur', 'synthetic-refresh'],
             [$data['supplier_id'], $data['connection_id'], $data['consent_supplier_id'], $data['account_id'], $data['refresh_token']]);
-        self::assertSame(['siblings.accounts', false], [$data['scope'], $data['payment_account_suitable']], 'Kopie jiné firmy neplatí.');
-        self::assertSame('authorization_scope_missing', CsasCredentialVault::paymentAvailability($data));
+        self::assertSame(['siblings.accounts siblings.payments', true], [$data['scope'], $data['payment_account_suitable']],
+            'Firma účtu přebírá rozsah souhlasu včetně plateb.');
+        self::assertSame('available', CsasCredentialVault::paymentAvailability($data));
+        self::assertSame('account_not_suitable', CsasCredentialVault::paymentAvailability(['payment_account_suitable' => false] + $data),
+            'Účet, který banka pro platby neoznačí, platit nemůže.');
         self::assertSame(CsasCredentialVault::consentLockKey($this->primary()), CsasCredentialVault::consentLockKey($data),
             'Obnova tokenu běží pod zámkem souhlasu nosné firmy.');
     }

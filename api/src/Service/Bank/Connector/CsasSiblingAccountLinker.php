@@ -39,7 +39,8 @@ final class CsasSiblingAccountLinker
     /**
      * Propojí účty ČS ostatních firem instalace, které souhlas firmy pokrývá ({@see CsasSharedConsent});
      * firma se pro ně stává nosnou. Pravidla jsou stejná jako u účtů jedné firmy; kopie přístupu navíc
-     * nese vlastníka souhlasu a platební oprávnění se z ní odebere, takže napojení jiné firmy jen čte.
+     * nese vlastníka souhlasu. Rozsah souhlasu přebírá celý: zahrnuje-li platby a banka účet pro platby
+     * označí, odesílá z něj příkazy i firma účtu (podepisuje je v George ten, kdo souhlas udělil).
      * Účet už napojený souhlasem jiné nosné firmy zůstává u ní, dokud ho ta má připojený.
      *
      * Účet jiné firmy se převezme, jen když ho banka vede na tutéž firmu (majitel účtu ze souhlasu
@@ -182,13 +183,7 @@ final class CsasSiblingAccountLinker
         $credentials['call_guard_key'] = bin2hex(random_bytes(32));
         $credentials['payment_account_suitable'] = CsasOnboardingService::suitableForPayments($remote);
         $owner = CsasCredentialVault::consentOwner($primary);
-        if ($owner !== $supplierId) {
-            // Účet jiné firmy přes sdílený souhlas: jen čtení výpisů.
-            $credentials['consent_supplier_id'] = $owner;
-            $credentials['payment_account_suitable'] = false;
-            $credentials['scope'] = implode(' ', array_values(array_diff(
-                preg_split('/\s+/', trim((string) ($primary['scope'] ?? ''))) ?: [], ['siblings.payments', ''])));
-        }
+        if ($owner !== $supplierId) $credentials['consent_supplier_id'] = $owner;
         $ciphertext = $this->secrets->encryptFor($this->vault->encode($credentials), CsasCredentialVault::context($supplierId, $connectionId));
         if (!str_starts_with($ciphertext, 'enc:v2:')) throw new BankConnectorOperationException('encryption_failed');
         // Převzaté napojení si nechá stav zapnutí, který mu dal uživatel; nové se zapne.

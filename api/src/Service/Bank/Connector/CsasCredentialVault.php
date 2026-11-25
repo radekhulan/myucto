@@ -206,8 +206,7 @@ final class CsasCredentialVault
      */
     public static function paymentAvailability(#[\SensitiveParameter] array $data): string
     {
-        // Sdílený souhlas hlavní firmy slouží jinou firmu jen ke čtení výpisů.
-        if (self::isSharedCopy($data) || !CsasApiClient::grantsPayments((string) ($data['scope'] ?? ''))) return 'authorization_scope_missing';
+        if (!CsasApiClient::grantsPayments((string) ($data['scope'] ?? ''))) return 'authorization_scope_missing';
         return ($data['payment_account_suitable'] ?? false) === true ? 'available' : 'account_not_suitable';
     }
 

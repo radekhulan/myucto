@@ -16,7 +16,8 @@ use MyInvoice\Infrastructure\Config\Config;
  * napojil jako první; banka se pak volá jedním tokenem a obnova přístupu i seznam účtů
  * proběhnou jednou pro všechny firmy souhlasu.
  *
- * Napojení převzaté ze souhlasu jiné firmy umí jen číst. Platby vyžadují vlastní souhlas firmy.
+ * Napojení převzaté ze souhlasu jiné firmy má jeho rozsah: zahrnuje-li platby a banka účet pro platby
+ * označí, firma účtu z něj odesílá příkazy (podepisuje je v George ten, kdo souhlas udělil).
  * Účet, který má firma připojený vlastním souhlasem, nebo který uživatel odpojil, se nepřebírá.
  *
  * Nastavení: výchozí (nevyplněno) = sdílí každý souhlas; `false` = nesdílí se; `['supplier_id' => N]`
