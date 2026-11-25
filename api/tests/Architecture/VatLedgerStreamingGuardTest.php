@@ -49,6 +49,15 @@ final class VatLedgerStreamingGuardTest extends TestCase
         self::assertStringContainsString('->documentRows(', $body, 'Zaúčtování dokladu čte jen jeho řádky evidence.');
     }
 
+    public function testSalesVoucherAggregationReadsOnlyTheRequestedPeriodAndDocuments(): void
+    {
+        $code = self::withoutComments((string) file_get_contents(dirname(__DIR__, 2) . '/src/Service/Report/VatLedgerService.php'));
+        $joined = preg_match('/LEFT JOIN \(SELECT vii\.invoice_id,(.*?)\) vtot ON vtot\.invoice_id = i\.id/s', $code, $parts);
+        self::assertSame(1, $joined);
+        self::assertStringContainsString('vi.supplier_id = ? AND vi.effective_tax_date BETWEEN ? AND ?', $parts[1]);
+        self::assertStringContainsString('{$voucherDocumentFilter}', $parts[1]);
+    }
+
     private static function withoutComments(string $raw): string
     {
         $out = '';

@@ -672,6 +672,7 @@ final class VatLedgerService
         // s daní zůstává, jeho daň se z přiznání ztratit nesmí.
         // Hodnota dokladu pro limit KH (§ 101e) je hodnota plnění, poukaz do ní nepatří.
         $vouchers = $this->db->hasColumn('stock_items', 'eet_item_kind');
+        [$voucherDocumentFilter, $voucherDocumentParams] = self::idFilter('vi.id', $invoiceIds);
         $voucherSource = $sourceBase !== 'NULL'
             ? ', SUM(CASE WHEN vii.import_tax_base_czk IS NOT NULL THEN vii.total_with_vat ELSE 0 END) AS source_foreign,
                  SUM(COALESCE(vii.import_tax_base_czk, 0) + COALESCE(vii.import_tax_vat_czk, 0)) AS source_czk'
@@ -681,12 +682,15 @@ final class VatLedgerService
             ? [
                 MultiPurposeVoucher::stockJoinSql('ii', 'vsi', 'i.supplier_id') . "
          LEFT JOIN (SELECT vii.invoice_id, SUM(vii.total_with_vat) AS total {$voucherSource}
-                      FROM stock_items vs
-                      JOIN invoice_items vii ON vii.stock_item_id = vs.id
-                     WHERE vs.supplier_id = ? AND " . MultiPurposeVoucher::untaxedLineSql('vii', 'vs') . "
+                      FROM invoices vi
+                      JOIN invoice_items vii ON vii.invoice_id = vi.id
+                      JOIN stock_items vs ON vs.id = vii.stock_item_id AND vs.supplier_id = vi.supplier_id
+                     WHERE vi.supplier_id = ? AND vi.effective_tax_date BETWEEN ? AND ?
+                       {$voucherDocumentFilter}
+                       AND " . MultiPurposeVoucher::untaxedLineSql('vii', 'vs') . "
                   GROUP BY vii.invoice_id) vtot ON vtot.invoice_id = i.id",
                 'AND NOT ' . MultiPurposeVoucher::untaxedLineSql('ii', 'vsi'),
-                [$supplierId],
+                [$supplierId, $start, $end, ...$voucherDocumentParams],
                 ' - COALESCE(vtot.total, 0)',
                 " - COALESCE(vtot.source_czk, 0)
                   - ROUND((COALESCE(vtot.total, 0) - COALESCE(vtot.source_foreign, 0)) * {$voucherRate}, 2)",
