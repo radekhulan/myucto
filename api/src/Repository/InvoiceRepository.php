@@ -647,7 +647,9 @@ final class InvoiceRepository
 
     /**
      * Zruší propojení daňového dokladu se zálohovou fakturou (parent_invoice_id = NULL).
-     * advance_paid_amount ponecháme (ruční korekce). Odpojí jen vazbu na proformu —
+     * Odpočet úhrady v hlavičce, který doplnilo propojení ({@see linkAdvanceLocked()}), se vrátí
+     * na 0, jinak by faktura bez vazby dál vypadala jako uhrazená zálohou. Jinou částku
+     * (ruční korekci) ponecháme. Odpojí jen vazbu na proformu —
      * původní fakturu storna/dobropisu (non-proforma parent) se nedotkne.
      *
      * Jen pro invoice_type='invoice' (ručně párovatelný finál). Vazbu DDKP na zálohu
@@ -692,14 +694,24 @@ final class InvoiceRepository
                 );
             }
         }
+        // Částku odpočtu počítá stejně jako propojení: přijaté platby proformy, jinak její celek,
+        // nejvýš do částky faktury. Odpočtové řádky (čerpání § 37a) hlavičku nepoužívají.
         $this->db->pdo()->prepare(
             "UPDATE invoices f
                 JOIN invoices p ON p.id = f.parent_invoice_id
-                SET f.parent_invoice_id = NULL
+                SET f.advance_paid_amount = IF(
+                        NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = f.id AND " . AdvanceDrawSql::deductionLine('ii') . ")
+                        AND ABS(f.advance_paid_amount - LEAST(IF(p.paid_total > 0, p.paid_total, p.total_with_vat), f.total_with_vat)) < 0.005,
+                        0, f.advance_paid_amount),
+                    f.parent_invoice_id = NULL
               WHERE f.id = ? AND f.supplier_id = ? AND f.invoice_type = 'invoice'
                 AND f.import_total_with_vat_czk IS NULL
                 AND p.invoice_type = 'proforma'"
         )->execute([$finalId, $supplierId]);
+        if (($row['invoice_type'] ?? null) === 'invoice') {
+            // Zaokrouhlení dokladu se počítá z částky k úhradě, jako po propojení.
+            (new InvoiceCalculator($this->db))->recompute($finalId);
+        }
     }
 
     /**

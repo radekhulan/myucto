@@ -70,7 +70,7 @@ final class AdvanceWorkflowClientActionTest extends BankPostingTestCase
         self::assertEqualsWithDelta(1210, $invoice['amount_to_pay'], 0.01);
     }
 
-    public function testLinkAndUnlinkPreserveDeductedAmountOnBothSides(): void
+    public function testUnlinkRevertsDeductionAddedByLinkOnBothSides(): void
     {
         $f = $this->fixture();
         $linked = $this->data($this->invoke(LinkAdvanceAction::class, '__invoke', $f['invoice'], ['advance_id' => $f['proforma']]));
@@ -78,13 +78,13 @@ final class AdvanceWorkflowClientActionTest extends BankPostingTestCase
         self::assertEqualsWithDelta(1210, $linked['advance_paid_amount'], 0.01);
         $unlinked = $this->data($this->invoke(UnlinkAdvanceAction::class, '__invoke', $f['invoice']));
         self::assertNull($unlinked['parent_invoice_id']);
-        self::assertEqualsWithDelta(1210, $unlinked['advance_paid_amount'], 0.01);
+        self::assertEqualsWithDelta(0, $unlinked['advance_paid_amount'], 0.01, 'Bez vazby faktura nesmí vypadat jako uhrazená zálohou.');
 
         $this->data($this->invoke(LinkAdvancePurchaseInvoiceAction::class, '__invoke', $f['purchase'], ['advance_id' => $f['purchase_advance']]));
         $this->data($this->invoke(UnlinkAdvancePurchaseInvoiceAction::class, '__invoke', $f['purchase']));
         $row = $this->db->pdo()->query('SELECT advance_purchase_invoice_id, advance_paid_amount FROM purchase_invoices WHERE id = ' . $f['purchase'])->fetch(\PDO::FETCH_ASSOC);
         self::assertNull($row['advance_purchase_invoice_id']);
-        self::assertEqualsWithDelta(500, (float) $row['advance_paid_amount'], 0.01);
+        self::assertEqualsWithDelta(0, (float) $row['advance_paid_amount'], 0.01, 'Odpočet doplněný propojením se vrátí i u přijaté faktury.');
     }
 
     public static function writes(): array
