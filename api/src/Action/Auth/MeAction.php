@@ -96,6 +96,9 @@ final class MeAction
             // Výkazy práce na úvodní stránce (migrace 2312), výchozí zapnuto i bez migrace.
             $dashboardWorkReportsSelect = $this->db->hasColumn('supplier', 'dashboard_work_reports')
                 ? 'dashboard_work_reports' : '1 AS dashboard_work_reports';
+            // Interní štítky (migrace 2349), výchozí vypnuto i bez migrace.
+            $tagsSelect = $this->db->hasColumn('supplier', 'tags_enabled')
+                ? 'tags_enabled' : '0 AS tags_enabled';
             $where  = '';
             $params = [];
             if ($allowed !== []) {
@@ -113,11 +116,12 @@ final class MeAction
                 . ':legal-form:work-report-display:' . $workReportSelect
                 . ':hourly-rate:' . $hourlyRateSelect
                 . ':dashboard-work-reports:' . $dashboardWorkReportsSelect
+                . ':tags:' . $tagsSelect
                 . ':' . ($lineDiscountSelect === 'invoice_pdf_show_line_discount' ? '1' : '0');
             $suppliers = (array) $this->cache->remember(
                 EntityCache::GROUP_SUPPLIER,
                 $cacheKey,
-                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect, $workReportSelect, $hourlyRateSelect, $dashboardWorkReportsSelect): array {
+                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect, $workReportSelect, $hourlyRateSelect, $dashboardWorkReportsSelect, $tagsSelect): array {
                     $stmt = $this->db->pdo()->prepare(
                         // dic + adresa: dashboard pod názvem firmy vypisuje identifikaci
                         // (IČ · DIČ · adresa) na jeden řádek — bez nich by musel dělat
@@ -126,7 +130,7 @@ final class MeAction
                                 is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat, default_rounding_mode,
                                 allow_refund_invoices, auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                                ' . $lineDiscountSelect . ', ' . $workReportSelect . ', ' . $hourlyRateSelect . ', ' . $dashboardWorkReportsSelect . ',
+                                ' . $lineDiscountSelect . ', ' . $workReportSelect . ', ' . $hourlyRateSelect . ', ' . $dashboardWorkReportsSelect . ', ' . $tagsSelect . ',
                                 ' . $simplifiedSelect . ',
                                 accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, dimensions_enabled, fiscal_year_start_month, ' . $ossSelect . ',
                                 ai_provider, ai_data_region, ai_eu_residency_required, client_ai_extraction_enabled, '
@@ -215,6 +219,8 @@ final class MeAction
             $s['work_report_display_options'] = \MyInvoice\Service\WorkReport\WorkReportDisplayOptions::resolve($s['work_report_display_options'] ?? null);
             // Výkazy práce na úvodní stránce (migrace 2312), výchozí zapnuto.
             $s['dashboard_work_reports'] = (bool) ($s['dashboard_work_reports'] ?? true);
+            // Interní štítky (migrace 2349): vypnuto skryje štítky v editoru, detailu i seznamech.
+            $s['tags_enabled'] = (bool) ($s['tags_enabled'] ?? false);
             $s['invoice_pdf_show_line_discount'] = (bool) ($s['invoice_pdf_show_line_discount'] ?? false);
             // Per-faktura přepínač upomínek v editoru se skryje, když dodavatel auto-upomínky nemá.
             $s['auto_send_reminders']      = (bool) ($s['auto_send_reminders'] ?? true);

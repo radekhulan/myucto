@@ -61,6 +61,7 @@ const tplId = computed(() => (isEdit.value ? Number(route.params.id) : null))
 
 const loading = ref(false)
 const tagNames = ref<string[]>([])
+const tagsEnabled = computed(() => !auth.isClientRole && supplierStore.currentSupplier?.tags_enabled === true)
 const submitting = ref(false)
 const error = ref('')
 
@@ -961,7 +962,7 @@ async function submit() {
       client_id: form.value.client_id!,
       project_id: form.value.project_id,
       branding_profile_id: form.value.branding_profile_id,
-      ...(!auth.isClientRole ? { tags: tagNames.value } : {}),
+      ...(tagsEnabled.value ? { tags: tagNames.value } : {}),
       name: form.value.name.trim(),
       frequency: form.value.frequency,
       day_of_month: form.value.end_of_month ? null : form.value.day_of_month,
@@ -1059,7 +1060,7 @@ async function submit() {
             :placeholder="t('recurring.name_placeholder')"
             class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
         </div>
-        <div v-if="!auth.isClientRole">
+        <div v-if="tagsEnabled">
           <label :for="`${pageId}-tags`" class="block text-sm font-medium mb-1">{{ t('entity_tags.label') }}</label>
           <TagInput v-model="tagNames" resource="recurring" :input-id="`${pageId}-tags`" />
         </div>

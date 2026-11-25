@@ -5,6 +5,7 @@ import { ref } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  tagsEnabled: true,
   apply: null as ((query: Record<string, string>) => void) | null,
   getQuery: null as (() => Record<string, string>) | null,
 }))
@@ -20,7 +21,7 @@ vi.mock('@/api/clients', () => ({ clientsApi: { list: async () => ({ data: [] })
 vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: async () => [] } }))
 vi.mock('@/api/revenueCategories', () => ({ revenueCategoriesApi: { list: async () => [] } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: () => true }) }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({}) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { tags_enabled: mocks.tagsEnabled } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/composables/useYearOptions', () => ({ useYearOptions: () => [] }))
 vi.mock('@/composables/useListKeyboard', () => ({ useListKeyboard: () => ({ activeIndex: -1 }) }))
@@ -66,11 +67,13 @@ type Vm = {
   filterChips: { key: string, label?: string, value: string }[]
   clearFilter: (key: string) => void
   invoiceBookUrl: (format: 'pdf' | 'xlsx') => string
+  COLUMNS: { key: string, available?: () => boolean }[]
 }
 
 describe('vydané faktury – filtr dimenze', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    mocks.tagsEnabled = true
     mocks.list.mockReset().mockResolvedValue({ data: [], meta: { total: 0, pages: 1 } })
   })
   afterEach(() => { vi.useRealTimers() })
@@ -84,6 +87,19 @@ describe('vydané faktury – filtr dimenze', () => {
     vm.clearFilter('tags')
     await flushPromises()
     expect(mocks.getQuery!()).toEqual({})
+    wrapper.unmount()
+  })
+
+  it('firma bez zapnutých štítků filtr štítků z URL ignoruje a sloupec Štítky nenabízí', async () => {
+    mocks.tagsEnabled = false
+    const { wrapper } = await open({ tag_ids: '23,42' })
+    const vm = wrapper.vm as unknown as Vm
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ tag_ids: undefined, include_tags: false }))
+    expect(mocks.getQuery!()).toEqual({})
+    expect(vm.activeFilterCount).toBe(0)
+    expect(vm.filterChips.some(c => c.key === 'tags')).toBe(false)
+    expect(new URL(vm.invoiceBookUrl('xlsx'), 'https://x.test').searchParams.get('filter[tag_ids]')).toBeNull()
+    expect(vm.COLUMNS.find(c => c.key === 'tags')?.available?.()).toBe(false)
     wrapper.unmount()
   })
 

@@ -401,6 +401,11 @@ a sestava DPH podle dimenze ([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-
 
 #### Interní štítky faktury
 
+Štítky jsou volitelné a ve výchozím stavu vypnuté. Zapnete je v `Firma → Nastavení`,
+na záložce **Fakturace** v sekci **Fakturace a e-maily**, volbou **Používat interní štítky**.
+Dokud volba není zapnutá, editor, detail ani seznam faktur štítky neukazují a filtr
+podle štítků se neuplatní. Štítky uložené dříve zůstávají a po zapnutí se znovu zobrazí.
+
 V editoru v části **Klasifikace** zadejte štítky nebo vyberte existující název
 ze společného firemního seznamu. Nový název potvrďte klávesou Enter a fakturu uložte.
 Ve filtrech vyberte jeden či více štítků. Zobrazí se doklady se všemi vybranými

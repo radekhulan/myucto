@@ -29196,6 +29196,8 @@
     "documents_section": "Fakturace a e-maily",
     "dashboard_work_reports": "Zobrazovat na úvodní stránce Výkazy práce",
     "dashboard_work_reports_hint": "Rozpracované koncepty vystavených faktur za poslední dva měsíce, které stačí doplnit a vystavit. Vypnutí blok jen skryje, koncepty zůstávají v seznamu vydaných faktur.",
+    "tags_enabled": "Používat interní štítky",
+    "tags_enabled_hint": "Interní štítky na fakturách a šablonách pravidelné fakturace pro třídění a filtrování.",
     "supplier": "Dodavatel",
     "currencies_banks": "Měny + bankovní účty",
     "company_name": "Obchodní jméno",

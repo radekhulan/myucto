@@ -516,6 +516,10 @@ zastaví, dokud ho zase nezapnete. Ruční tlačítko **Vygenerovat teď** fungu
 
 #### Interní štítky šablon
 
+Štítky se zobrazí jen se zapnutou volbou **Používat interní štítky** v `Firma → Nastavení`,
+na záložce **Fakturace** v sekci **Fakturace a e-maily** (výchozí stav je vypnuto, viz
+[§ 14.11.4](14_Faktury.md#14114-filtry)). Bez ní editor ani seznam šablon štítky nenabízí.
+
 V editoru pod názvem šablony začněte psát do pole **Štítky**. Vyberte nabízený
 štítek firmy nebo potvrďte nový název klávesou Enter a šablonu uložte.
 V seznamu klikněte na štítek pod názvem nebo ho vyberte ve filtrech. Při výběru

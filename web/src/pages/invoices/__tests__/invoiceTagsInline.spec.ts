@@ -3,10 +3,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 // Štítky vystavené faktury se v detailu mění samostatnou akcí (POST /invoices/{id}/tags),
-// bez vynucené úpravy dokladu. Klientská role je nevidí ani nemění.
+// bez vynucené úpravy dokladu. Klientská role je nevidí ani nemění, firma bez zapnutých
+// štítků je v detailu nevidí vůbec.
 
 const m = vi.hoisted(() => ({
   clientRole: false,
+  tagsEnabled: true,
   setTags: vi.fn(),
   invoice: {
     id: 9, supplier_id: 1, client_id: 4, status: 'sent', invoice_type: 'invoice', booked_at: '2026-10-02 10:00:00',
@@ -41,7 +43,7 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 vi.mock('@/stores/supplier', () => ({
-  useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'double_entry', stock_enabled: false } }),
+  useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'double_entry', stock_enabled: false, tags_enabled: m.tagsEnabled } }),
 }))
 vi.mock('@/composables/useUserPrefs', () => ({
   ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined),
@@ -57,6 +59,7 @@ vi.mock('vue-i18n', async importOriginal => ({
 import InvoiceDetail from '../InvoiceDetail.vue'
 
 interface DetailVm {
+  tagsEnabled: boolean
   canEditTags: boolean
   tagsEditing: boolean
   tagsDraft: string[]
@@ -79,6 +82,7 @@ async function mountDetail() {
 describe('interní štítky v detailu vydané faktury', () => {
   beforeEach(() => {
     m.clientRole = false
+    m.tagsEnabled = true
     m.setTags.mockReset()
   })
 
@@ -103,6 +107,21 @@ describe('interní štítky v detailu vydané faktury', () => {
     m.clientRole = true
     const wrapper = await mountDetail()
     expect((wrapper.vm as unknown as DetailVm).canEditTags).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('firma bez zapnutých štítků je v detailu nevidí ani nemění', async () => {
+    m.tagsEnabled = false
+    const wrapper = await mountDetail()
+    const vm = wrapper.vm as unknown as DetailVm
+    expect(vm.tagsEnabled).toBe(false)
+    expect(vm.canEditTags).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('firma se zapnutými štítky je v detailu vidí', async () => {
+    const wrapper = await mountDetail()
+    expect((wrapper.vm as unknown as DetailVm).tagsEnabled).toBe(true)
     wrapper.unmount()
   })
 })

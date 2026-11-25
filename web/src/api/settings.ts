@@ -279,6 +279,8 @@ export interface Supplier {
   allow_refund_invoices: boolean
   /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
   dashboard_work_reports: boolean
+  /** Interní štítky na fakturách a šablonách pravidelné fakturace (migrace 2349), výchozí vypnuto. */
+  tags_enabled: boolean
   /**
    * Datum přijetí u importovaných přijatých dokladů (migrace 1848). 'issue_date' =
    * datum z dokladu (vystavení, jinak DUZP) — výchozí; 'import_date' = den importu.

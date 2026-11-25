@@ -63,6 +63,8 @@ export interface SupplierBrief {
   allow_refund_invoices: boolean
   /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
   dashboard_work_reports?: boolean
+  /** Interní štítky na fakturách a šablonách pravidelné fakturace (migrace 2349), výchozí vypnuto. */
+  tags_enabled?: boolean
   /** Rozpis slevy z ceníkové ceny na PDF (migrace 2035); editor podle ní ukáže u řádku pole „Sleva %". */
   work_report_display_options?: import('./invoices').WorkReportDisplayOptions
   invoice_pdf_show_line_discount?: boolean

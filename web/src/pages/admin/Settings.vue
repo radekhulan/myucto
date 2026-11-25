@@ -64,6 +64,7 @@ function syncSupplierStore(s: Supplier) {
     accounting_enabled: s.accounting_enabled ?? true,
     payroll_enabled: s.payroll_enabled ?? false,
     dimensions_enabled: s.dimensions_enabled ?? false,
+    tags_enabled: s.tags_enabled ?? false,
   })
 }
 
@@ -588,6 +589,7 @@ async function saveSupplier() {
       default_prices_include_vat: supplier.value.default_prices_include_vat,
       default_rounding_mode: supplier.value.default_rounding_mode ?? 'auto',
       allow_refund_invoices: supplier.value.allow_refund_invoices ?? false,
+      tags_enabled: supplier.value.tags_enabled ?? false,
       ...(auth.canWrite('settings.invoice_defaults') ? {
         default_payment_due_days: supplier.value.default_payment_due_days,
         default_payment_due_unit: supplier.value.default_payment_due_unit,
@@ -1209,6 +1211,13 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.dashboard_work_reports') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.dashboard_work_reports_hint') }}</p>
+          </div>
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="supplier.tags_enabled" type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="tags-enabled" />
+              <span class="font-medium">{{ t('settings.tags_enabled') }}</span>
+            </label>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.tags_enabled_hint') }}</p>
           </div>
           <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2" :model-value="supplier" part="main"
             @change="Object.assign(supplier, $event)" />

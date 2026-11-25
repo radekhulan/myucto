@@ -25,6 +25,7 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const statusFilter = ref<RecurringStatus | ''>('active')
 const selectedTags = ref<TagSelection>([])
+const tagsEnabled = computed(() => !auth.isClientRole && supplierStore.currentSupplier?.tags_enabled === true)
 function addTag(tag: EntityTag) {
   const current = selectedTags.value === 'none' ? [] : selectedTags.value
   if (!current.some(item => item.id === tag.id)) selectedTags.value = [...current, tag]
@@ -68,7 +69,7 @@ async function load(reset = true) {
     const r = await recurringApi.list({
       status: statusFilter.value || undefined,
       q: search.value.trim() || undefined,
-      tag_ids: tagFilter(selectedTags.value),
+      tag_ids: tagsEnabled.value ? tagFilter(selectedTags.value) : undefined,
       sort: sortBy.value,
       page: page.value,
     })
@@ -232,7 +233,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
           <option value="paused">{{ t('recurring.status.paused') }}</option>
           <option value="expired">{{ t('recurring.status.expired') }}</option>
         </select>
-        <EntityTagFilter v-if="!auth.isClientRole" v-model="selectedTags" resource="recurring" :class="filtersOpen ? '' : 'max-md:hidden'" />
+        <EntityTagFilter v-if="tagsEnabled" v-model="selectedTags" resource="recurring" :class="filtersOpen ? '' : 'max-md:hidden'" />
         <div class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-2 w-full sm:w-auto">
           <div v-if="grandTotalLabel" class="flex items-baseline gap-2">
             <span class="text-sm text-neutral-500">{{ t('recurring.amount_total') }}</span>
@@ -252,7 +253,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
     </div>
 
     <div v-if="loading" class="text-center py-12 text-neutral-400">…</div>
-    <EmptyState v-else-if="filtered.length === 0 && (search.trim() || tagFilter(selectedTags))" boxed icon="cycle"
+    <EmptyState v-else-if="filtered.length === 0 && (search.trim() || (tagsEnabled && tagFilter(selectedTags)))" boxed icon="cycle"
       :title="t('recurring.search_empty')" />
     <EmptyState v-else-if="filtered.length === 0" boxed icon="cycle"
       :title="t('recurring.empty')"
@@ -282,7 +283,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
                   class="row-link cursor-pointer block text-left text-primary-700 font-medium">
                   {{ tpl.name }}
                 </RouterLink>
-                <div v-if="tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
+                <div v-if="tagsEnabled && tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
                   <button v-for="tag in tpl.tags" :key="tag.id" type="button" class="rounded-full bg-primary-50 text-primary-700 px-2 py-0.5 text-xs"
                     @click.stop="addTag(tag)" @auxclick.stop>{{ tag.name }}</button>
                 </div>
@@ -370,7 +371,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
               {{ t('recurring.status.' + tpl.status) }}
             </span>
           </div>
-          <div v-if="tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
+          <div v-if="tagsEnabled && tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
             <button v-for="tag in tpl.tags" :key="tag.id" type="button" class="rounded-full bg-primary-50 text-primary-700 px-2 py-0.5 text-xs"
               @click.stop="addTag(tag)" @auxclick.stop>{{ tag.name }}</button>
           </div>

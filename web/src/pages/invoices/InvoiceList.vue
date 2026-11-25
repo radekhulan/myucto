@@ -147,6 +147,9 @@ const REVENUE_CATEGORY_NONE = 'none'
 const revenueCategoryMode = ref<'include' | 'exclude'>('include')
 const revenueCategoryIds = ref<string[]>([])
 const tagIds = ref('')
+// Interní štítky jsou volba firmy; vypnuté = filtr z URL nebo uloženého filtru se ignoruje.
+const tagsEnabled = computed(() => !auth.isClientRole && supplierStore.currentSupplier?.tags_enabled === true)
+const activeTagIds = computed(() => tagsEnabled.value ? tagIds.value : '')
 const tagNames = ref(new Map<number, string>())
 const selectedTags = computed<TagSelection>({
   get: () => tagIds.value === 'none' ? 'none' : tagIds.value.split(',').filter(Boolean)
@@ -160,7 +163,7 @@ const selectedTags = computed<TagSelection>({
 function restoreTags(raw: unknown) {
   const value = typeof raw === 'string' && /^(?:none|[1-9]\d{0,17}(?:,[1-9]\d{0,17}){0,63})$/.test(raw) ? raw : ''
   tagIds.value = auth.isClientRole ? '' : value
-  if (!tagIds.value || value === 'none') return
+  if (!tagsEnabled.value || !tagIds.value || value === 'none') return
   const missing = value.split(',').filter(id => !tagNames.value.has(Number(id)))
   if (missing.length) {
     void tagsById('invoices', missing.join(',')).then(tags => {
@@ -207,7 +210,7 @@ const activeFilterCount = computed(() => {
   if (unpaidAsOf.value) n++
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
-  if (tagIds.value) n++
+  if (activeTagIds.value) n++
   if (revenueCategoryIds.value.length) n++
   if (dimensionValueIds.value.length) n++
   return n
@@ -225,7 +228,7 @@ const activeFilterCount = computed(() => {
  */
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
-  if (tagIds.value) chips.push({ key: 'tags', label: t('entity_tags.label'),
+  if (activeTagIds.value) chips.push({ key: 'tags', label: t('entity_tags.label'),
     value: selectedTags.value === 'none' ? t('entity_tags.none') : selectedTags.value.map(tag => tag.name).join(', ') })
   if (statusFilter.value) chips.push({ key: 'status', value: statusLabel(statusFilter.value) })
   if (typeFilter.value) chips.push({ key: 'type', value: typeLabel(typeFilter.value) })
@@ -1035,8 +1038,8 @@ function listParams(): InvoiceListParams {
     unpaid_as_of: unpaidAsOf.value || undefined,
     booked: bookedFilter.value || undefined,
     oss_review: ossReviewFilter.value || undefined,
-    tag_ids: tagIds.value || undefined,
-    include_tags: !auth.isClientRole && tbl.isVisible('tags'),
+    tag_ids: activeTagIds.value || undefined,
+    include_tags: tagsEnabled.value && tbl.isVisible('tags'),
     revenue_category_id: revenueCategoryMode.value === 'include' && revenueCategoryIds.value.length
       ? revenueCategoryIds.value : undefined,
     revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
@@ -1121,7 +1124,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'country', labelKey: 'invoice.col_country', defaultHidden: true },
   { key: 'vat_classification', labelKey: 'invoice.col_vat_classification', defaultHidden: true },
   { key: 'vat_return_lines', labelKey: 'invoice.col_vat_return_lines', defaultHidden: true },
-  { key: 'tags', labelKey: 'entity_tags.label', defaultHidden: true, available: () => !auth.isClientRole },
+  { key: 'tags', labelKey: 'entity_tags.label', defaultHidden: true, available: () => tagsEnabled.value },
   { key: 'document_tags', labelKey: 'invoice.col_document_tags', defaultHidden: true, available: () => auth.canRead('documents') },
   { key: 'note', labelKey: 'invoice.col_note', defaultHidden: true },
   { key: 'journal_notes', labelKey: 'invoice.col_journal_notes', defaultHidden: true, available: () => auth.canRead('accounting') },
@@ -1298,7 +1301,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
 
 function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
-  if (tagIds.value) q.tag_ids = tagIds.value
+  if (activeTagIds.value) q.tag_ids = activeTagIds.value
   if (statusFilter.value) q.status = statusFilter.value
   if (typeFilter.value) q.type = typeFilter.value
   if (clientFilter.value !== '') q.client_id = String(clientFilter.value)
@@ -1610,7 +1613,7 @@ useWindowRefresh(refreshLoadedPages,
           <option value="">{{ t('invoice.all_currencies') }}</option>
           <option v-for="c in currencies" :key="c.id" :value="c.code">{{ c.code }}</option>
         </select>
-        <EntityTagFilter v-if="!auth.isClientRole" v-model="selectedTags" resource="invoices" />
+        <EntityTagFilter v-if="tagsEnabled" v-model="selectedTags" resource="invoices" />
         <!-- Kategorie tržby: výběr 1:N + přepínač, jestli se vybrané mají ukázat, nebo
              naopak schovat. Přepínač se objeví až s výběrem — bez něj nemá co přepínat
              a lišta by měla o jeden trvale zbytečný select víc. -->

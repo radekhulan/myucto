@@ -4,9 +4,11 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 // Telefon: stav a řazení opakovaných faktur jsou za tlačítkem „Filtry"; hledání
 // zůstává vidět. Jen `max-md:` třídy, desktop beze změny.
 
-vi.mock('@/api/recurring', () => ({ recurringApi: { list: async () => ({ data: [], meta: { total: 0, page: 1, pages: 1 } }) } }))
+const m = vi.hoisted(() => ({ tagsEnabled: false }))
+const tpl = { id: 1, name: 'Hosting', status: 'active', client_name: 'Syntetický klient', items: [], tags: [{ id: 3, name: 'Servis' }] }
+vi.mock('@/api/recurring', () => ({ recurringApi: { list: async () => ({ data: [tpl], meta: { total: 1, page: 1, pages: 1 } }) } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: {} }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { tags_enabled: m.tagsEnabled } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => vi.fn() }))
 vi.mock('vue-router', () => ({
@@ -20,6 +22,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import RecurringList from '../RecurringList.vue'
+import EntityTagFilter from '@/components/tags/EntityTagFilter.vue'
 
 it('stav a řazení se na telefonu otevřou tlačítkem Filtry', async () => {
   const wrapper = shallowMount(RecurringList)
@@ -32,5 +35,23 @@ it('stav a řazení se na telefonu otevřou tlačítkem Filtry', async () => {
   await toggle.trigger('click')
   expect(wrapper.find('[data-test="recurring-status-filter"]').classes()).not.toContain('max-md:hidden')
   expect(wrapper.find('[data-test="recurring-sort"]').classes()).not.toContain('max-md:hidden')
+  wrapper.unmount()
+})
+
+it('bez zapnutých štítků nemá seznam filtr ani štítky u šablon', async () => {
+  m.tagsEnabled = false
+  const wrapper = shallowMount(RecurringList)
+  await flushPromises()
+  expect(wrapper.findComponent(EntityTagFilter).exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('Servis')
+  wrapper.unmount()
+})
+
+it('se zapnutými štítky má seznam filtr i štítky u šablon', async () => {
+  m.tagsEnabled = true
+  const wrapper = shallowMount(RecurringList)
+  await flushPromises()
+  expect(wrapper.findComponent(EntityTagFilter).exists()).toBe(true)
+  expect(wrapper.text()).toContain('Servis')
   wrapper.unmount()
 })

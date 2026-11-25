@@ -121,6 +121,7 @@ import {
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
+const tagsEnabled = computed(() => !auth.isClientRole && supplierStore.currentSupplier?.tags_enabled === true)
 
 const route = useRoute()
 const router = useRouter()
@@ -3019,7 +3020,7 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
       number_series_id: numberSeriesId.value,
       vat_classification_code: form.value.vat_classification_code,
       revenue_category: form.value.revenue_category,
-      ...(!auth.isClientRole && (tagNames.value.length !== storedTagNames.value.length
+      ...(tagsEnabled.value && (tagNames.value.length !== storedTagNames.value.length
         || tagNames.value.some((name, index) => name !== storedTagNames.value[index])) ? { tags: tagNames.value } : {}),
       revenue_category_id: form.value.revenue_category_id,
       // Textový řádek jde jen jako druh + text + pořadí; zbytek si server vynuluje.
@@ -4339,7 +4340,7 @@ useWindowTitle(
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.revenue_category_hint') }}</p>
           </div>
-          <div v-if="!auth.isClientRole" class="sm:col-span-2">
+          <div v-if="tagsEnabled" class="sm:col-span-2">
             <label :for="`${pageId}-tags`" class="block text-xs text-neutral-500 mb-1">{{ t('entity_tags.label') }}</label>
             <TagInput v-model="tagNames" resource="invoices" :input-id="`${pageId}-tags`" />
           </div>

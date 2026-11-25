@@ -52,6 +52,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 import InvoiceEditor from '../InvoiceEditor.vue'
+import TagInput from '@/components/documents/TagInput.vue'
 
 interface EditorVm {
   tagNames: string[]
@@ -59,7 +60,7 @@ interface EditorVm {
   saveDocument: (payload: InvoicePayload) => Promise<void>
 }
 
-async function mountEditor() {
+async function mountEditor(tagsEnabled = true) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -78,7 +79,7 @@ async function mountEditor() {
     },
   })
   useSupplierStore().setAvailable(
-    [{ id: 1, company_name: 'Syntetická firma', accounting_mode: 'double_entry' } as unknown as SupplierBrief],
+    [{ id: 1, company_name: 'Syntetická firma', accounting_mode: 'double_entry', tags_enabled: tagsEnabled } as unknown as SupplierBrief],
     1,
     true,
   )
@@ -102,6 +103,23 @@ describe('InvoiceEditor.vue (vydané) - štítky po uložení', () => {
     expect(vm.buildPayload([]).tags).toBeUndefined()
     vm.tagNames = []
     expect(vm.buildPayload([]).tags).toEqual([])
+    wrapper.unmount()
+  })
+})
+
+describe('InvoiceEditor.vue (vydané) - štítky jako volba firmy', () => {
+  it('se zapnutými štítky ukáže pole štítků', async () => {
+    const wrapper = await mountEditor(true)
+    expect(wrapper.findComponent(TagInput).exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('bez zapnutých štítků pole skryje a štítky neposílá', async () => {
+    const wrapper = await mountEditor(false)
+    expect(wrapper.findComponent(TagInput).exists()).toBe(false)
+    const vm = wrapper.vm as unknown as EditorVm
+    vm.tagNames = ['Hosting']
+    expect(vm.buildPayload([]).tags).toBeUndefined()
     wrapper.unmount()
   })
 })

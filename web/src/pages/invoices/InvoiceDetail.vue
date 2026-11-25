@@ -316,7 +316,8 @@ const signatureSelectionRows = computed(() => {
 const tagsEditing = ref(false)
 const tagsSaving = ref(false)
 const tagsDraft = ref<string[]>([])
-const canEditTags = computed(() => !!invoice.value && !auth.isClientRole && auth.canWrite('invoices'))
+const tagsEnabled = computed(() => !auth.isClientRole && supplierStore.currentSupplier?.tags_enabled === true)
+const canEditTags = computed(() => !!invoice.value && tagsEnabled.value && auth.canWrite('invoices'))
 
 function startTagsEdit() {
   tagsDraft.value = (invoice.value?.tags ?? []).map(tag => tag.name)
@@ -2613,7 +2614,7 @@ useWindowRefresh(async () => {
               ✉ {{ b.email }}<span v-if="b.label" class="text-neutral-400"> ({{ b.label }})</span>
             </span>
           </div>
-          <div v-if="!auth.isClientRole && (invoice.tags?.length || canEditTags)" class="pt-1" data-test="invoice-tags">
+          <div v-if="tagsEnabled && (invoice.tags?.length || canEditTags)" class="pt-1" data-test="invoice-tags">
             <div v-if="!tagsEditing" class="flex flex-wrap items-center gap-1">
               <span v-for="tag in invoice.tags" :key="tag.id" class="text-xs px-2 py-0.5 rounded-full bg-primary-50 text-primary-700">
                 {{ tag.name }}

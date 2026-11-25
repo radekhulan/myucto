@@ -299,6 +299,13 @@ navázat na doklad k vyplacení. Bez volby se nic z toho nenabízí a editor dá
 
 Se zapnutou volbou ukazuje [Přehled](10_Prehled.md) blok **Výkazy práce** s rozpracovanými koncepty vystavených faktur za poslední dva měsíce, které stačí doplnit a vystavit. Vypnutí blok jen skryje, koncepty zůstávají v seznamu vydaných faktur.
 
+**Interní štítky** (ve výchozím stavu vypnuté):
+
+1. Na záložce **Fakturace** v sekci **Fakturace a e-maily** zapněte **Používat interní štítky**, pokud chcete vystavené faktury a šablony pravidelné fakturace třídit a filtrovat podle vlastních štítků.
+2. Uložte.
+
+Se zapnutou volbou nabízí editor faktury i šablony pole **Štítky**, detail faktury odkaz **Upravit štítky** a seznamy filtr a sloupec **Štítky** (viz [Interní štítky faktury](14_Faktury.md#14114-filtry) a [Pravidelné fakturace](17_Pravidelne_fakturace.md)). Bez volby se štítky nikde nezobrazují, uložené štítky ale zůstávají.
+
 **Kdo fakturu vystavil** (ve výchozím stavu vypnuté):
 
 1. Na záložce **Fakturace** zapněte **Tisknout na faktuře, kdo ji vystavil**.

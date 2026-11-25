@@ -29196,6 +29196,8 @@
     "documents_section": "Invoicing and emails",
     "dashboard_work_reports": "Show Work reports on the home page",
     "dashboard_work_reports_hint": "Draft issued invoices from the last two months that only need completing and issuing. Turning this off only hides the block; drafts stay in the issued invoice list.",
+    "tags_enabled": "Use internal tags",
+    "tags_enabled_hint": "Internal tags on invoices and recurring invoice templates for sorting and filtering.",
     "supplier": "Supplier",
     "currencies_banks": "Currencies + bank accounts",
     "company_name": "Company name",

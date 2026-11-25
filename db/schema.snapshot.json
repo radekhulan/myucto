@@ -1251,7 +1251,8 @@
         "2345_myeet_readonly_license.sql",
         "2346_nonprofit_funding_work.sql",
         "2347_entity_tags_recurring_templates.sql",
-        "2348_invoice_tags.sql"
+        "2348_invoice_tags.sql",
+        "2349_supplier_tags_enabled.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -28432,6 +28433,7 @@
                 "street_number_pop": "varchar(20) NULL DEFAULT NULL",
                 "supplier_group_id": "int(10) unsigned NULL DEFAULT NULL",
                 "tagline": "varchar(190) NULL DEFAULT NULL",
+                "tags_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "tax_accounting_decree": "varchar(3) NOT NULL DEFAULT '500'",
                 "tax_atad_cfc": "tinyint(1) NOT NULL DEFAULT 0",
                 "tax_cooperating_person": "tinyint(1) NOT NULL DEFAULT 0",

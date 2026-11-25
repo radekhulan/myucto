@@ -736,6 +736,8 @@ final class SettingsAction
             'invoice_pdf_compact_items', 'work_report_display_options',
             // Výkazy práce na úvodní stránce (migrace 2312), výchozí zapnuto.
             'dashboard_work_reports',
+            // Interní štítky na fakturách a šablonách pravidelné fakturace (migrace 2349), výchozí vypnuto.
+            'tags_enabled',
             // Bankovní spojení v patičce PDF faktury, u součtu jen QR (migrace 2200), výchozí vypnuto.
             'invoice_pdf_bank_in_footer',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
@@ -1201,7 +1203,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'auto_match_other_items', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', 'dashboard_work_reports', DefaultInvoiceNote::ENABLED_COLUMN], true)
+                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'auto_match_other_items', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', 'dashboard_work_reports', 'tags_enabled', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1607,6 +1609,7 @@ final class SettingsAction
         ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT;
         $row['allow_refund_invoices']    = (bool) ($row['allow_refund_invoices'] ?? false);
         $row['dashboard_work_reports']   = (bool) ($row['dashboard_work_reports'] ?? true);
+        $row['tags_enabled']             = (bool) ($row['tags_enabled'] ?? false);
         // Zjednodušený daňový doklad (migrace 2037): klíče vrátit vždy, i bez migrace.
         $row['simplified_number_format'] = ($row['simplified_number_format'] ?? null) ?: null;
         $row['simplified_hide_customer_default'] = (bool) ($row['simplified_hide_customer_default'] ?? false);
