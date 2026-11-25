@@ -1845,6 +1845,30 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda vykupující elektřinu: FV25002 má členění `19Ř25` a číselník členění agendy
+     * (`UcClnDPH`) u něj vede předmět plnění 19 (dodání elektřiny obchodníkovi), ve starším
+     * účetním období ještě výchozí 5 (odpad).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithElectricityReverseSale(): array
+    {
+        $files = self::filesWithDomesticReverseSale();
+        $path = 'ROK.002/VFaktury.DAT';
+        $rows = [];
+        foreach (Ms3Table::fromString($files[$path], 'VFAKTURY')->rows() as $row) {
+            $rows[] = $row['Doklad'] === 'FV25002' ? ['KodDPH' => '19Ř25', 'Popis' => 'Výkup elektřiny'] + $row : $row;
+        }
+        $files[$path] = Ms3FixtureWriter::table(self::ISSUED_FIELDS, $rows);
+        $files['UcClnDPH.DAT'] = Ms3FixtureWriter::table([['Zkrat', 'C', 20], ['PredmPln', 'C', 3], ['CisloObd', 'L', 4]], [
+            ['Zkrat' => '19Ř25', 'PredmPln' => '5', 'CisloObd' => 41],
+            ['Zkrat' => '19Ř25', 'PredmPln' => '19', 'CisloObd' => 47],
+            ['Zkrat' => '19Ř25_S', 'PredmPln' => '4', 'CisloObd' => 47],
+        ]);
+        return $files;
+    }
+
+    /**
      * Agenda s vydanou FV25002 v tuzemském přenesení daňové povinnosti u stavebních prací
      * (`19Ř25_S`, 1 000 Kč bez daně) a jejím zápisem v deníku.
      *

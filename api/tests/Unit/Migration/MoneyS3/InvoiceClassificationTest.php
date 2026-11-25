@@ -84,6 +84,23 @@ final class InvoiceClassificationTest extends TestCase
         self::assertNull(Ms3VatCode::resolve('19Ř40,41', true), 'Řádek odpočtu na výstupní straně je chyba členění.');
     }
 
+    /**
+     * Předmět plnění tuzemského přenosu si agenda nastavuje u členění sama: `19Ř25` výchozího
+     * číselníku je odpad, firma vykupující elektřinu ho má jako dodání elektřiny (19).
+     * Předmět, pro který MyÚčto nemá klasifikaci, jde k ruční kontrole místo cizího kódu.
+     */
+    public function testDomesticReverseSaleFollowsAgendaSubject(): void
+    {
+        $sale = static fn (string $code, array $subjects): array => InvoiceImporter::classify(['Druh' => 'N', 'KodDPH' => $code], true, 0.0, $subjects);
+        self::assertSame('25s19', $sale('19Ř25', ['19Ř25' => '19'])['code']);
+        self::assertSame('25s20', $sale('19Ř25', ['19Ř25' => '20'])['code']);
+        self::assertSame('25s5', $sale('19Ř25', ['19Ř25_S' => '19'])['code'], 'Předmět jiného členění se nepřebírá.');
+        self::assertSame('25s5', $sale('19Ř25', [])['code'], 'Bez číselníku agendy platí výchozí odpad.');
+        self::assertSame('25s', $sale('19Ř25_S', ['19Ř25_S' => '4'])['code']);
+        self::assertNotSame([], $sale('19Ř25', ['19Ř25' => '13'])['reasons'], 'Kovy (13) MyÚčto nezná, doklad jde ke kontrole.');
+        self::assertSame(['code' => '5s19', 'deduction' => 'full', 'fixed_asset' => false], Ms3VatCode::reverseCharge('19Ř10,11', '19Ř43,44', '19'));
+    }
+
     public function testReverseChargeFromInternalDocumentLines(): void
     {
         self::assertSame(['code' => '24e', 'deduction' => 'reduced', 'fixed_asset' => false], Ms3VatCode::reverseCharge('19Ř05,06', '19Ř43,44 K'));

@@ -26,6 +26,7 @@ use MyInvoice\Service\Migration\MoneyS3\MoneyS3Importer;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3ImportJobService;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
+use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
@@ -350,6 +351,23 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         self::assertSame(0, $this->rowCount('invoices', $supplierId, "varsymbol <> 'FV25002' AND reverse_charge = 1"));
         $august = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 8, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(1000.0, (float) ($august['25']['base'] ?? 0), 0.005, json_encode($august, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
+    /**
+     * Předmět plnění tuzemského přenosu podle číselníku členění agendy: `19Ř25` firmy, která
+     * vykupuje elektřinu, je v KH A.1 kód 19, ne výchozí odpad (5).
+     */
+    public function testDomesticReverseSaleTakesSubjectFromAgendaCodebook(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/el.lz', SyntheticAgenda::filesWithElectricityReverseSale());
+        $backup = Ms3Backup::extract($this->tmp . '/el.lz', $this->tmp . '/el');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV25002' AND vat_classification_code = '25s19' AND reverse_charge = 1 AND status <> 'draft'"), $this->explain($protocol));
+        $kh = $this->container(KontrolniHlaseniBuilder::class)->build($supplierId, 2025, 8);
+        self::assertMatchesRegularExpression('/<VetaA1[^>]*kod_pred_pl="19"/', $kh['xml']);
     }
 
     /** `19Ř26`: tuzemský odběratel = § 71i, zahraniční = služba s místem plnění mimo tuzemsko. */

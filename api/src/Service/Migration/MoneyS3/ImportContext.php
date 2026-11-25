@@ -103,6 +103,15 @@ final class ImportContext
     /** @var array<string,true>|null "rok|zdroj|číslo dokladu" dokladů, které má deník Money (líně) */
     public ?array $journalDocuments = null;
 
+    /** @var array<string,string>|null členění DPH => kód předmětu plnění z číselníku agendy (líně, {@see vatSubjects()}) */
+    private ?array $vatSubjects = null;
+
+    /** @return array<string,string> {@see Ms3VatCode::subjects()} */
+    public function vatSubjects(): array
+    {
+        return $this->vatSubjects ??= Ms3VatCode::subjects($this->backup);
+    }
+
     /**
      * Převod agendy vedené v Money jako daňová evidence ({@see TaxRecordsImporter}): bez
      * deníku, osnovy a účetních období, firma zůstává v daňové evidenci.

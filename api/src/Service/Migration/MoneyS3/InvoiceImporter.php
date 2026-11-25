@@ -384,7 +384,7 @@ final class InvoiceImporter
                 $this->skipUnknownRate($ctx, self::STEP_ISSUED, $docNo, $year, $e);
                 continue;
             }
-            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems));
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems), $ctx->vatSubjects());
             // Ř. 26 (`19Ř26`) u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
             $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
             foreach ($amounts['items'] as $i => $item) {
@@ -497,7 +497,7 @@ final class InvoiceImporter
         foreach ($ctx->backup->rowsAcrossYears('KnihPohl') as $r) {
             $year = $ctx->yearOf($r);
             $docNo = trim((string) ($r['Doklad'] ?? ''));
-            $resolved = Ms3VatCode::resolve((string) ($r['Cleneni'] ?? ''), true);
+            $resolved = Ms3VatCode::resolve((string) ($r['Cleneni'] ?? ''), true, $ctx->vatSubjects());
             if ($year === null || $docNo === '' || (int) ($r['Storno'] ?? 0) === 1 || $resolved === null || !$resolved['in_return']) {
                 continue;
             }
@@ -666,9 +666,10 @@ final class InvoiceImporter
      * @param array<string,mixed> $r
      * `fixed_asset` = odpočet u pořízení majetku (ř. 47, členění Money s příponou M/P/MK/PK).
      *
+     * @param array<string,string> $subjects kód předmětu plnění z číselníku agendy ({@see ImportContext::vatSubjects()})
      * @return array{reasons:list<string>,vat_deduction:string,code:?string,kind:string,fixed_asset:bool}
      */
-    public static function classify(array $r, bool $issued, float $vat): array
+    public static function classify(array $r, bool $issued, float $vat, array $subjects = []): array
     {
         $reasons = [];
         $deduction = 'full';
@@ -702,7 +703,7 @@ final class InvoiceImporter
         }
 
         $code = trim((string) ($r['KodDPH'] ?? ''));
-        $resolved = $code === '' ? null : Ms3VatCode::resolve($code, $issued);
+        $resolved = $code === '' ? null : Ms3VatCode::resolve($code, $issued, $subjects);
         $hasVat = abs($vat) >= 0.005;
         if ($code === '') {
             if ($hasVat) {
@@ -769,18 +770,19 @@ final class InvoiceImporter
      * @param array<string,mixed> $r
      * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
      * @param array<string,string> $codes
+     * @param array<string,string> $subjects {@see classify()}
      * @return array{0:array{reasons:list<string>,vat_deduction:string,code:?string,kind:string,fixed_asset:bool},1:array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float}}
      */
-    private static function classifyLines(array $r, bool $issued, array $amounts, array $codes): array
+    private static function classifyLines(array $r, bool $issued, array $amounts, array $codes, array $subjects = []): array
     {
         if ($codes === []) {
-            return [self::classify($r, $issued, $amounts['vat']), $amounts];
+            return [self::classify($r, $issued, $amounts['vat'], $subjects), $amounts];
         }
         $header = null;
         $reasons = [];
         foreach ($amounts['items'] as $i => $item) {
             $code = $codes[self::rateKey((float) $item['rate'])] ?? null;
-            $line = self::classify(($code !== null ? ['KodDPH' => $code] : []) + $r, $issued, (float) $item['vat']);
+            $line = self::classify(($code !== null ? ['KodDPH' => $code] : []) + $r, $issued, (float) $item['vat'], $subjects);
             $reasons = array_merge($reasons, $line['reasons']);
             $amounts['items'][$i]['code'] = $line['code'];
             if ($header === null || (abs((float) $item['vat']) >= 0.005 && $header['taxed'] === false)) {
@@ -788,7 +790,7 @@ final class InvoiceImporter
             }
         }
         if ($header === null) {
-            return [self::classify($r, $issued, $amounts['vat']), $amounts];
+            return [self::classify($r, $issued, $amounts['vat'], $subjects), $amounts];
         }
         unset($header['taxed']);
         $header['reasons'] = array_values(array_unique($reasons));
@@ -1431,7 +1433,7 @@ final class InvoiceImporter
             return null;
         }
         if ($issued) {
-            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems));
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $sourceItems), $ctx->vatSubjects());
             if ($current['client_id'] !== null) {
                 $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $current['client_id']);
                 foreach ($amounts['items'] as $i => $item) {
