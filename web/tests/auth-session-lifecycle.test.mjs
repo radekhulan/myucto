@@ -54,10 +54,10 @@ test('manual lock is available only for a session with passkey unlock', () => {
 // my zpátky na `/`, guard sem… Celé v JS, bez reloadu — poznat je to jen jako
 // opakující se `Promise.then` v call stacku.
 test('login and the router guard agree on what "authenticated" means', () => {
-  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?name: 'login'/)
+  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\([^\n]*\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?name: 'login'/)
   assert.match(
     login,
-    /const freshDomainLogin = hasPendingCanonicalDomainLogin\(\) && !canonicalDomainLoginSessionCsrf\(\)\s+if \(!freshDomainLogin\) await auth\.refresh\(\)\s+(?:\/\/[^\n]*\n\s*)*if \(!freshDomainLogin && auth\.isAuthenticated(?: && !ssoRequiredFromQuery && ssoTicket\.value === null)?\) \{/,
+    /const freshDomainLogin = hasPendingCanonicalDomainLogin\(\) && !canonicalDomainLoginSessionCsrf\(\)\s+if \(!freshDomainLogin\) await auth\.refresh\([^\n]*\)\s+(?:\/\/[^\n]*\n\s*)*if \(!freshDomainLogin && auth\.isAuthenticated(?: && !ssoRequiredFromQuery && ssoTicket\.value === null)?\) \{/,
   )
   assert.doesNotMatch(login, /const stillAuthed = await auth\.refresh\(\)/)
 })

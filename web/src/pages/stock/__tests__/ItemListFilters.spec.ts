@@ -11,6 +11,8 @@ const m = vi.hoisted(() => ({
   listAttributes: vi.fn(),
   listAttributeOptions: vi.fn(),
   listClients: vi.fn(),
+  getClient: vi.fn(),
+  applyDefault: vi.fn(),
   canWrite: vi.fn(),
   savedConfig: undefined as any,
   tableOptions: {} as Record<string, unknown>,
@@ -28,7 +30,7 @@ vi.mock('@/api/eshop', () => ({
     listAttributeOptions: m.listAttributeOptions,
   },
 }))
-vi.mock('@/api/clients', () => ({ clientsApi: { list: m.listClients } }))
+vi.mock('@/api/clients', () => ({ clientsApi: { list: m.listClients, get: m.getClient } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: m.canWrite }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: string) => value }))
@@ -46,7 +48,7 @@ vi.mock('@/composables/useTablePrefs', () => ({
 vi.mock('@/composables/useSavedFilters', () => ({
   useSavedFilters: (_key: string, config: any) => {
     m.savedConfig = config
-    return { filters: ref([]), activeId: ref(null), applyDefaultIfAny: vi.fn(async () => false), clearActive: vi.fn(), apply: vi.fn() }
+    return { filters: ref([]), activeId: ref(null), applyDefaultIfAny: m.applyDefault, clearActive: vi.fn(), apply: vi.fn() }
   },
   savedFilterTone: () => 'neutral',
 }))
@@ -70,8 +72,10 @@ describe('ItemList catalog filters', () => {
     m.listTags.mockResolvedValue([{ id: 13, name: 'Sale', archived: false }])
     m.listAttributes.mockResolvedValue([{ id: 14, name: 'Colour', data_type: 'enum', is_filterable: true, archived: false }])
     m.listAttributeOptions.mockResolvedValue([{ id: 15, label: 'Blue' }])
-    m.listClients.mockImplementation((params: { page?: number }) => Promise.resolve(params.page === 2
-      ? { data: [{ id: 516, company_name: 'Vendor on page two' }], meta: { pages: 2 } }
+    m.applyDefault.mockResolvedValue(false)
+    m.getClient.mockResolvedValue({ id: 516, company_name: 'Vendor on page two' })
+    m.listClients.mockImplementation((params: { q?: string }) => Promise.resolve(params.q
+      ? { data: [{ id: 516, company_name: 'Vendor on page two' }], meta: { pages: 1 } }
       : { data: [{ id: 16, company_name: 'Vendor Ltd' }], meta: { pages: 2 } }))
   })
 
@@ -89,7 +93,17 @@ describe('ItemList catalog filters', () => {
     expect(wrapper.text()).not.toContain('/12/')
 
     await wrapper.get('select[title="stock.items.filter_manufacturer"]').setValue('11')
-    await wrapper.get('select[title="stock.items.filter_vendor"]').setValue('516')
+    const vendor = wrapper.get('input[aria-label="stock.items.filter_vendor"]')
+    expect(m.listClients).not.toHaveBeenCalled()
+    await vendor.trigger('focus')
+    await flushPromises()
+    expect(m.listClients).toHaveBeenCalledExactlyOnceWith({ q: undefined, role: 'vendors', per_page: 50, sort: 'name' })
+    expect(wrapper.get('[data-test="searchable-select-truncated"]').text()).toBe('stock.items.vendor_results_truncated')
+    await vendor.setValue('page two')
+    await vi.waitFor(() => expect(m.listClients).toHaveBeenLastCalledWith({ q: 'page two', role: 'vendors', per_page: 50, sort: 'name' }))
+    await flushPromises()
+    await wrapper.get('button[role="option"]').trigger('click')
+    expect(m.getClient).not.toHaveBeenCalled()
     await wrapper.get('select[title="stock.items.filter_category"]').setValue('12')
     await wrapper.get('select[title="stock.items.filter_availability"]').setValue('out_of_stock')
     await wrapper.get('select[title="stock.items.filter_tags"]').setValue(['13'])
@@ -113,6 +127,39 @@ describe('ItemList catalog filters', () => {
       attribute_filters: [],
       page: 1,
     }), expect.anything())
+  })
+
+  it('loads the first page without waiting for codebooks or loading the vendor directory', async () => {
+    m.listManufacturers.mockReturnValue(new Promise(() => {}))
+    m.listAttributes.mockReturnValue(new Promise(() => {}))
+    const wrapper = mount(ItemList, { global: { stubs: { FilterBar: filterBar, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, SortableTh: true, EmptyState: true, RouterLink: true } } })
+    await flushPromises()
+
+    expect(m.listItems).toHaveBeenCalledTimes(1)
+    expect(m.listItems).toHaveBeenCalledBefore(m.listManufacturers)
+    expect(m.listClients).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('applies a pinned vendor before that vendor name loads', async () => {
+    let resolveVendor!: (vendor: { id: number; company_name: string }) => void
+    m.getClient.mockReturnValue(new Promise(resolve => { resolveVendor = resolve }))
+    m.applyDefault.mockImplementationOnce(async () => {
+      m.savedConfig.applyQuery({ vendor_id: '516' })
+      return true
+    })
+    const wrapper = mount(ItemList, { global: { stubs: { FilterBar: filterBar, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, SortableTh: true, EmptyState: true, RouterLink: true } } })
+    await flushPromises()
+
+    expect(m.listItems).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ vendor_id: 516 }), expect.anything())
+    expect(m.listClients).not.toHaveBeenCalled()
+    expect(m.getClient).toHaveBeenCalledExactlyOnceWith(516)
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="stock.items.filter_vendor"]')
+    expect(input.element.value).toBe('#516')
+    resolveVendor({ id: 516, company_name: 'Vendor on page two' })
+    await flushPromises()
+    expect(input.element.value).toBe('Vendor on page two')
+    wrapper.unmount()
   })
 
   it('shows the chosen parameter in its own column and asks the server only for that value', async () => {

@@ -8,6 +8,12 @@ import { postWindowFrameMessage } from '@/workspace/frameProtocol'
 import { ssoRequiredLoginPath } from '@/security/oidc'
 import { beginSsoRenewal } from '@/security/ssoRenewal'
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    suppressLoginRedirect?: boolean
+  }
+}
+
 const SSO_LOGIN_ENDPOINTS = ['/auth/login', '/auth/webauthn/login/options', '/auth/webauthn/login/verify']
 
 export const api = axios.create({
@@ -152,6 +158,7 @@ api.interceptors.response.use(
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/login' })
         return Promise.reject(error)
       }
+      if (error.config?.suppressLoginRedirect) return Promise.reject(error)
       const path = window.location.pathname
       if (!path.startsWith('/login') && !path.startsWith('/setup')) {
         /*

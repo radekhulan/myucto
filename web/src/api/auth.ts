@@ -506,7 +506,7 @@ export const authApi = {
 
   logout: (csrf?: string) => api.post('/auth/logout', undefined, csrfHeaders(csrf)).then(() => undefined),
 
-  me: () => api.get<MeResponse>('/auth/me').then((r) => {
+  me: (suppressLoginRedirect = false) => api.get<MeResponse>('/auth/me', { suppressLoginRedirect }).then((r) => {
     setCsrfToken(r.data.csrf_token)
     return r.data
   }),

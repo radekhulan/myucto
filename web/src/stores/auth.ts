@@ -158,14 +158,14 @@ export const useAuthStore = defineStore('auth', () => {
     allowedMfaMethods.value = methods
   }
 
-  async function refresh() {
+  async function refresh({ reuseDomainContext = false, suppressLoginRedirect = false } = {}) {
     const generation = ++refreshGeneration
     permissionsLoading.value = true
     try {
-      const context = await authApi.domainContext()
+      const context = (reuseDomainContext && domainContext.value) || await authApi.domainContext()
       if (generation !== refreshGeneration) return false
       applyDomainContext(context)
-      const data = await authApi.me()
+      const data = await authApi.me(suppressLoginRedirect)
       if (generation !== refreshGeneration) return false
       user.value = data.user
       setSessionCsrfToken(data.csrf_token)

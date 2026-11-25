@@ -16,6 +16,7 @@ import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -36,9 +37,11 @@ const route = useRoute()
 const navigate = useRowLink()
 
 const PER_PAGE = 50
+const VENDOR_SEARCH_LIMIT = 50
+type VendorOption = { value: number; label: string; secondary?: string }
 
 const items = ref<StockItem[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const loadingMore = ref(false)
 const page = ref(1)
 const pages = ref(1)
@@ -52,7 +55,10 @@ const attributes = ref<Attribute[]>([])
 const displayAttributes = ref<Attribute[]>([])
 const displayAttributesLoaded = ref(false)
 const attributeOptions = ref<Record<number, AttributeOption[]>>({})
-const vendors = ref<Client[]>([])
+const vendorOptions = ref<VendorOption[]>([])
+const selectedVendor = ref<VendorOption | null>(null)
+const vendorLoading = ref(false)
+const vendorResultsTruncated = ref(false)
 const selectedIds = ref(new Set<number>())
 const excludedIds = ref(new Set<number>())
 const allMatching = ref(false)
@@ -84,6 +90,10 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 let requestController: AbortController | undefined
 let requestVersion = 0
 let attributeOptionVersion = 0
+let vendorSearchVersion = 0
+let attributesReady: Promise<void> | undefined
+let initialized = false
+let unmounted = false
 
 const selectedAttribute = computed(() => attributes.value.find(a => a.id === filters.attribute_id))
 const selectedAttributeOptions = computed(() => filters.attribute_id === '' ? [] : (attributeOptions.value[filters.attribute_id] ?? []))
@@ -222,8 +232,7 @@ const filterChips = computed<FilterChip[]>(() => {
     if (category) chips.push({ key: 'category', label: t('stock.items.filter_category'), value: category.name })
   }
   if (filters.vendor_id !== '') {
-    const vendor = vendors.value.find(x => x.id === filters.vendor_id)
-    if (vendor) chips.push({ key: 'vendor', label: t('stock.items.filter_vendor'), value: vendor.company_name })
+    chips.push({ key: 'vendor', label: t('stock.items.filter_vendor'), value: selectedVendor.value?.label ?? `#${filters.vendor_id}` })
   }
   if (filters.tag_ids.length) chips.push({ key: 'tags', label: t('stock.items.filter_tags'), value: filters.tag_ids.map(id => tags.value.find(x => x.id === id)?.name).filter(Boolean).join(', ') })
   if (filters.missing) chips.push({ key: 'missing', label: t('stock.items.filter_missing'), value: t(`stock.items.missing_${filters.missing}`) })
@@ -254,7 +263,7 @@ function clearFilter(key: string) {
 }
 
 async function load(reset = true) {
-  if (auth.isClientRole) return
+  if (auth.isClientRole || unmounted) return
   const version = ++requestVersion
   requestController?.abort()
   requestController = new AbortController()
@@ -265,6 +274,8 @@ async function load(reset = true) {
     loadingMore.value = true
   }
   try {
+    if (filters.attribute_id !== '' && filters.attribute_value !== '') await loadAttributes()
+    if (version !== requestVersion) return
     const res = await stockApi.listItems({
       ...currentListFilters(),
       display_attribute_id: displayAttributeRequestId.value,
@@ -298,6 +309,39 @@ function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => applyFilters(), 300)
 }
+
+function vendorOption(vendor: Client): VendorOption {
+  return { value: vendor.id, label: vendor.company_name, secondary: vendor.ic ?? undefined }
+}
+
+async function searchVendors(q: string) {
+  const version = ++vendorSearchVersion
+  vendorLoading.value = true
+  vendorOptions.value = []
+  vendorResultsTruncated.value = false
+  const result = await clientsApi.list({ q: q.trim() || undefined, role: 'vendors', per_page: VENDOR_SEARCH_LIMIT, sort: 'name' }).catch(() => null)
+  if (version !== vendorSearchVersion) return
+  vendorOptions.value = result?.data.map(vendorOption) ?? []
+  vendorResultsTruncated.value = (result?.meta.pages ?? 0) > 1
+  vendorLoading.value = false
+}
+
+function changeVendor(id: number | null) {
+  selectedVendor.value = vendorOptions.value.find(option => option.value === id) ?? null
+  filters.vendor_id = id ?? ''
+  applyFilters()
+}
+
+watch(() => filters.vendor_id, async (id, _previous, onCleanup) => {
+  if (selectedVendor.value?.value === id) return
+  selectedVendor.value = id === '' ? null : { value: id, label: `#${id}` }
+  if (id === '') return
+  let active = true
+  onCleanup(() => { active = false })
+  const vendor = await clientsApi.get(id).catch(() => null)
+  if (active && vendor) selectedVendor.value = vendorOption(vendor)
+}, { flush: 'sync' })
+
 async function ensureAttributeOptions(attributeId: number) {
   if (attributeOptions.value[attributeId]) return
   const version = ++attributeOptionVersion
@@ -431,9 +475,8 @@ function onViewClick(f: SavedFilter) {
   else saved.apply(f)
 }
 
-watch(() => tbl.sort.value, () => void load())
-watch(displayAttributeRequestId, (next, previous) => { if (next !== previous) void load() })
-watch(() => filters.q, scheduleSearch)
+watch([tbl.sort, displayAttributeRequestId], () => { if (initialized) void load() })
+watch(() => filters.q, scheduleSearch, { flush: 'sync' })
 
 function qty(i: StockItem): number { return Number(i.qty ?? 0) }
 function value(i: StockItem): number { return Number(i.value_total ?? 0) }
@@ -469,36 +512,34 @@ function navigateQuickDetail(id: number) {
   quickDetailInitialItem.value = listItem ?? null
 }
 
+function loadAttributes(): Promise<void> {
+  return attributesReady ??= eshopApi.listAttributes().then(rows => {
+    if (unmounted) return
+    displayAttributes.value = rows.filter(x => !x.archived)
+    attributes.value = displayAttributes.value.filter(x => x.is_filterable)
+    displayAttributesLoaded.value = true
+    dropMissingDisplayAttribute()
+    if (selectedAttribute.value?.data_type === 'enum') void ensureAttributeOptions(selectedAttribute.value.id)
+  }).catch(() => undefined)
+}
+
 onMounted(async () => {
   if (auth.isClientRole) return
-  const [wh, mf, cat, tg, attr] = await Promise.all([
-    stockApi.listWarehouses(true).catch(() => [] as Warehouse[]),
-    eshopApi.listManufacturers().catch(() => [] as Manufacturer[]),
-    eshopApi.listCategories().catch(() => [] as Category[]),
-    eshopApi.listTags().catch(() => [] as Tag[]),
-    eshopApi.listAttributes().catch(() => null),
-  ])
-  warehouses.value = wh
-  manufacturers.value = mf.filter(x => !x.archived)
-  categories.value = cat.filter(x => !x.archived)
-  tags.value = tg.filter(x => !x.archived)
-  attributes.value = (attr ?? []).filter(x => !x.archived && x.is_filterable)
-  displayAttributes.value = (attr ?? []).filter(x => !x.archived)
-  displayAttributesLoaded.value = attr !== null
-  dropMissingDisplayAttribute()
-  const loadedVendors: Client[] = []
-  for (let vendorPage = 1; ; vendorPage++) {
-    const result = await clientsApi.list({ role: 'vendors', per_page: 500, page: vendorPage, sort: 'name' }).catch(() => null)
-    if (!result) break
-    loadedVendors.push(...result.data)
-    if (vendorPage >= result.meta.pages) break
-  }
-  vendors.value = loadedVendors
-  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
-  await load()
+  const hasDefault = Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()
+  if (unmounted) return
+  initialized = true
+  if (!hasDefault) void load()
+  void stockApi.listWarehouses(true).then(rows => { warehouses.value = rows }).catch(() => undefined)
+  void eshopApi.listManufacturers().then(rows => { manufacturers.value = rows.filter(x => !x.archived) }).catch(() => undefined)
+  void eshopApi.listCategories().then(rows => { categories.value = rows.filter(x => !x.archived) }).catch(() => undefined)
+  void eshopApi.listTags().then(rows => { tags.value = rows.filter(x => !x.archived) }).catch(() => undefined)
+  void loadAttributes()
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
+  ++requestVersion
+  ++vendorSearchVersion
   if (searchTimer) clearTimeout(searchTimer)
   requestController?.abort()
 })
@@ -581,11 +622,24 @@ onBeforeUnmount(() => {
           <option value="">{{ t('stock.items.filter_manufacturer') }}: {{ t('common.all') }}</option>
           <option v-for="manufacturer in manufacturers" :key="manufacturer.id" :value="manufacturer.id">{{ manufacturer.name }}</option>
         </select>
-        <select v-model="filters.vendor_id" @change="applyFilters" class="h-9 min-w-32 max-w-44 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
-          :title="t('stock.items.filter_vendor')">
-          <option value="">{{ t('stock.items.filter_vendor') }}: {{ t('common.all') }}</option>
-          <option v-for="vendor in vendors" :key="vendor.id" :value="vendor.id">{{ vendor.company_name }}</option>
-        </select>
+        <SearchableSelect
+          :model-value="filters.vendor_id === '' ? null : filters.vendor_id"
+          :selected-option="selectedVendor"
+          :options="vendorOptions"
+          :loading="vendorLoading"
+          :truncated="vendorResultsTruncated"
+          :truncated-label="t('stock.items.vendor_results_truncated')"
+          :aria-label="t('stock.items.filter_vendor')"
+          :placeholder="`${t('stock.items.filter_vendor')}: ${t('common.all')}`"
+          :loading-label="t('common.loading')"
+          :no-results-label="t('common.no_results')"
+          :clear-label="t('common.empty_state.clear_filters')"
+          class="w-44 min-w-32"
+          input-class="!h-9"
+          remote
+          @search="searchVendors"
+          @update:model-value="changeVendor"
+        />
         <select v-model="filters.category_id" @change="applyFilters" class="h-9 min-w-36 max-w-52 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
           :title="t('stock.items.filter_category')">
           <option value="">{{ t('stock.items.filter_category') }}: {{ t('common.all') }}</option>

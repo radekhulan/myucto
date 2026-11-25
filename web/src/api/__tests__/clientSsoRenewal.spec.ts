@@ -43,6 +43,13 @@ describe('401 po vypršení sezení z Entra ID', () => {
     expect(location.href).toBe('/login?return_to=%2Finvoices%3Fstatus%3Dunpaid')
   })
 
+  it('při kontrole relace z routeru ponechá tiché přihlášení poskytovateli', async () => {
+    setSsoRenewalPolicy({ sso_required_provider: 'entra', sso_providers: [{ id: 'entra', strong: true }] })
+    await expect(api.get('/auth/me', { adapter: unauthorized('unauthenticated'), suppressLoginRedirect: true }))
+      .rejects.toBeInstanceOf(AxiosError)
+    expect(location.href).toBe('/api/auth/oidc/entra/login?return_to=%2Finvoices%3Fstatus%3Dunpaid&silent=1')
+  })
+
   it('Entra jen jako možnost vede na přihlašovací formulář', async () => {
     setSsoRenewalPolicy({ sso_providers: [{ id: 'entra', strong: true }] })
     rememberSsoSession({ provider: 'entra', expires_at: '2026-11-09T20:00:00Z' })

@@ -17090,6 +17090,7 @@
       "filter_type": "Type",
       "filter_manufacturer": "Manufacturer",
       "filter_vendor": "Supplier",
+      "vendor_results_truncated": "Only some suppliers are shown. Refine the search.",
       "filter_category": "Category",
       "filter_tags": "Tags",
       "filter_missing": "Missing data",

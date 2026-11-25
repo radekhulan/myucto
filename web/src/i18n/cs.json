@@ -17090,6 +17090,7 @@
       "filter_type": "Typ",
       "filter_manufacturer": "Výrobce",
       "filter_vendor": "Dodavatel",
+      "vendor_results_truncated": "Zobrazená je jen část dodavatelů. Upřesněte hledání.",
       "filter_category": "Kategorie",
       "filter_tags": "Štítky",
       "filter_missing": "Chybějící údaj",

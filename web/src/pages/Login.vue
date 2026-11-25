@@ -197,7 +197,9 @@ onMounted(async () => {
     sessionSuperseded.value = sessionStorage.getItem(SESSION_SUPERSEDED_KEY) === '1'
     sessionStorage.removeItem(SESSION_SUPERSEDED_KEY)
   } catch { /* soukromé okno */ }
-  await auth.fetchSetupStatus()
+  if (auth.setupStatus === null || (auth.domainContext === null && !auth.needsSetup)) {
+    await auth.fetchSetupStatus()
+  }
   if (auth.needsSetup) {
     router.replace('/setup')
     return
@@ -239,7 +241,7 @@ onMounted(async () => {
   // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
   // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
   const freshDomainLogin = hasPendingCanonicalDomainLogin() && !canonicalDomainLoginSessionCsrf()
-  if (!freshDomainLogin) await auth.refresh()
+  if (!freshDomainLogin) await auth.refresh({ reuseDomainContext: true })
   // Sezení z hesla, které firma s vynuceným přihlášením přes organizaci odmítla,
   // je platné, ale nepoužitelné: automatický návrat by skončil ve smyčce.
   // Rozdělané přihlášení přes poskytovatele má přednost před starým sezením.

@@ -638,7 +638,8 @@ a přebytků, viz uzávěrka v modulu Účetnictví). Je to jediný podporovaný
 (výchozí stránkování 50 karet).
 
 Vedle hledání podle SKU, názvu nebo EAN jsou rovnou **výrobce, dodavatel, kategorie
-a dostupnost**. Kategorie zahrnuje i své podkategorie. Rozbalené **Filtry** přidávají
+a dostupnost**. V poli **Dodavatel** můžete hledat podle názvu nebo IČO.
+Kategorie zahrnuje i své podkategorie. Rozbalené **Filtry** přidávají
 typ karty, sklad, štítky, chybějící obrázek, kategorii, cenu, výrobce či EAN,
 rozsah množství a filtrovatelný atribut. Sklad omezí stav a hodnotu na vybraný sklad.
 Podmínky platí pro celý katalog, ne jen pro zobrazenou stránku.

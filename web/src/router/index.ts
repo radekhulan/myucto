@@ -1,6 +1,7 @@
 import {
   createRouter,
   createWebHistory,
+  START_LOCATION,
   type RouteLocationNormalized,
   type RouteLocationRaw,
   type RouteRecordRaw,
@@ -438,9 +439,13 @@ export async function authorizationGuard(
 ): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
 
-  if (auth.setupStatus === null) {
+  const fetchSetupStatus = auth.setupStatus === null
+    || (to.name === 'login' && from !== undefined && from !== START_LOCATION)
+  let loadedDomainContext = false
+  if (fetchSetupStatus) {
     try {
       await auth.fetchSetupStatus()
+      loadedDomainContext = auth.domainContext !== null
     } catch {
       // ignore
     }
@@ -494,7 +499,7 @@ export async function authorizationGuard(
   if (requiresAuth && !auth.isAuthenticated) {
     // Rozhoduje stav storu, ne návratová hodnota: refresh() při síťovém výpadku
     // vrací false, ale známou identitu si záměrně drží.
-    await auth.refresh()
+    await auth.refresh({ reuseDomainContext: loadedDomainContext, suppressLoginRedirect: true })
     if (!auth.isAuthenticated) {
       // Prohlížeč už odchází k tichému obnovení přihlášení (api/client.ts).
       if (ssoRenewalPending()) return false
