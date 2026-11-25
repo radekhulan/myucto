@@ -1,4 +1,9 @@
 {
+  "entity_tags": {
+    "label": "Štítky",
+    "none": "Bez štítku",
+    "remove": "Odebrat štítek {name}"
+  },
   "user_sessions": {
     "select_page": "Vybrat všechny na stránce",
     "select_session": "Vybrat relaci uživatele {name}",

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { EntityTag } from './entityTags'
 import type { PaymentMethod } from './invoices'
 import type { CatalogDescriptionSource, CatalogPolicy } from './priceList'
 
@@ -61,6 +62,7 @@ export interface RecurringTemplateItem extends RecurringTemplateItemOss {
 }
 
 export interface RecurringTemplate {
+  tags?: EntityTag[]
   id: number
   supplier_id: number
   client_id: number
@@ -124,6 +126,7 @@ export interface RecurringTemplate {
 }
 
 export interface RecurringTemplatePayload {
+  tags?: string[]
   client_id: number
   project_id?: number | null
   branding_profile_id?: number | null
@@ -232,9 +235,10 @@ export interface RecurringInvoicesResponse {
 }
 
 export const recurringApi = {
-  list: (filters: { client_id?: number; status?: RecurringStatus; q?: string; page?: number; per_page?: number; sort?: RecurringSort } = {}) => {
+  list: (filters: { client_id?: number; status?: RecurringStatus; q?: string; tag_ids?: string; page?: number; per_page?: number; sort?: RecurringSort } = {}) => {
     const params: Record<string, string | number> = {}
     if (filters.client_id) params.client_id = filters.client_id
+    if (filters.tag_ids) params.tag_ids = filters.tag_ids
     if (filters.q)         params.q = filters.q
     if (filters.status)    params.status = filters.status
     if (filters.page)      params.page = filters.page

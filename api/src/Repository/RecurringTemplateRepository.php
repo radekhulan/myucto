@@ -177,6 +177,7 @@ final class RecurringTemplateRepository
             $where[] = 't.client_id = ?';
             $params[] = (int) $filters['client_id'];
         }
+        EntityTagRepository::filter(TagTarget::RecurringTemplate, 't.id', $filters['tag_ids'] ?? '', $where, $params);
         $this->applySearch($filters, $where, $params);
 
         // Status counts — bez status filtru, ale se zbylými filtry (supplier + client).
@@ -350,6 +351,7 @@ final class RecurringTemplateRepository
         if (!empty($filters['supplier_id'])) { $where[] = 't.supplier_id = ?'; $params[] = (int) $filters['supplier_id']; }
         if (!empty($filters['client_id']))   { $where[] = 't.client_id = ?';   $params[] = (int) $filters['client_id']; }
         if (!empty($filters['status']))      { $where[] = 't.status = ?';      $params[] = (string) $filters['status']; }
+        EntityTagRepository::filter(TagTarget::RecurringTemplate, 't.id', $filters['tag_ids'] ?? '', $where, $params);
         $this->applySearch($filters, $where, $params);
         $stmt = $this->db->pdo()->prepare(
             'SELECT DISTINCT cur.code
@@ -609,6 +611,9 @@ final class RecurringTemplateRepository
         try {
             $id = $this->create($data, $userId);
             $this->replaceItems($id, $items);
+            if (isset($data['tags'])) {
+                (new EntityTagRepository($this->db))->replace(TagTarget::RecurringTemplate, (int) $data['supplier_id'], $id, $data['tags']);
+            }
             $pdo->commit();
             return $id;
         } catch (\Throwable $e) {
@@ -714,6 +719,9 @@ final class RecurringTemplateRepository
             $this->update($id, $data);
             if ($items !== null) {
                 $this->replaceItems($id, $items);
+            }
+            if (isset($data['tags'])) {
+                (new EntityTagRepository($this->db))->replace(TagTarget::RecurringTemplate, (int) $data['supplier_id'], $id, $data['tags']);
             }
             $pdo->commit();
         } catch (\Throwable $e) {

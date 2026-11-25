@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onActivated, onDeactivated, onUnmounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { recurringApi, type RecurringTemplate, type RecurringStatus, type RecurringSort, type RecurringSummary } from '@/api/recurring'
@@ -8,6 +8,8 @@ import { useRowLink } from '@/composables/useRowLink'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EntityTagFilter from '@/components/tags/EntityTagFilter.vue'
+import { tagFilter, type TagSelection, type EntityTag } from '@/api/entityTags'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
@@ -22,10 +24,15 @@ const templates = ref<RecurringTemplate[]>([])
 const loading = ref(false)
 const loadingMore = ref(false)
 const statusFilter = ref<RecurringStatus | ''>('active')
+const selectedTags = ref<TagSelection>([])
+function addTag(tag: EntityTag) {
+  const current = selectedTags.value === 'none' ? [] : selectedTags.value
+  if (!current.some(item => item.id === tag.id)) selectedTags.value = [...current, tag]
+}
 const sortBy = ref<RecurringSort>('next_run')
 // Telefon: stav a řazení za tlačítkem „Filtry" (vzor CashRegister), hledání zůstává vidět.
 const filtersOpen = ref(false)
-const activeFilterCount = computed(() => (statusFilter.value !== 'active' ? 1 : 0) + (sortBy.value !== 'next_run' ? 1 : 0))
+const activeFilterCount = computed(() => (selectedTags.value === 'none' ? 1 : selectedTags.value.length) + (statusFilter.value !== 'active' ? 1 : 0) + (sortBy.value !== 'next_run' ? 1 : 0))
 // Dotaz drží URL (?q=) a sessionStorage — odkaz „Zpět na seznam" z detailu vede
 // na holé /recurring, tak ať se hledání po návratu neztratí.
 const SEARCH_KEY = 'recurring.list.q'
@@ -47,7 +54,9 @@ const summary = ref<RecurringSummary | null>(null)
 // Server-side filtering — frontend žádný extra filter neaplikuje.
 const filtered = computed(() => templates.value)
 
+let loadVersion = 0
 async function load(reset = true) {
+  const version = ++loadVersion
   if (reset) {
     loading.value = true
     page.value = 1
@@ -59,9 +68,11 @@ async function load(reset = true) {
     const r = await recurringApi.list({
       status: statusFilter.value || undefined,
       q: search.value.trim() || undefined,
+      tag_ids: tagFilter(selectedTags.value),
       sort: sortBy.value,
       page: page.value,
     })
+    if (version !== loadVersion) return
     if (reset) {
       templates.value = r.data
     } else {
@@ -72,13 +83,21 @@ async function load(reset = true) {
     if (r.meta.status_counts) statusCounts.value = r.meta.status_counts
     summary.value = r.meta.summary ?? null
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (version === loadVersion) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
 onMounted(() => load(true))
-watch([statusFilter, sortBy], () => load(true))
+let needsRefresh = false
+onDeactivated(() => { needsRefresh = true })
+onActivated(() => {
+  if (needsRefresh) void load(true)
+  needsRefresh = false
+})
+watch([statusFilter, sortBy, selectedTags], () => load(true))
 watch(search, (q) => {
   try { sessionStorage.setItem(SEARCH_KEY, q) } catch { /* private mode */ }
   if (searchTimeout) clearTimeout(searchTimeout)
@@ -213,6 +232,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
           <option value="paused">{{ t('recurring.status.paused') }}</option>
           <option value="expired">{{ t('recurring.status.expired') }}</option>
         </select>
+        <EntityTagFilter v-if="!auth.isClientRole" v-model="selectedTags" resource="recurring" :class="filtersOpen ? '' : 'max-md:hidden'" />
         <div class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-2 w-full sm:w-auto">
           <div v-if="grandTotalLabel" class="flex items-baseline gap-2">
             <span class="text-sm text-neutral-500">{{ t('recurring.amount_total') }}</span>
@@ -232,7 +252,7 @@ function gotoDetail(id: number, e?: MouseEvent) {
     </div>
 
     <div v-if="loading" class="text-center py-12 text-neutral-400">…</div>
-    <EmptyState v-else-if="filtered.length === 0 && search.trim()" boxed icon="cycle"
+    <EmptyState v-else-if="filtered.length === 0 && (search.trim() || tagFilter(selectedTags))" boxed icon="cycle"
       :title="t('recurring.search_empty')" />
     <EmptyState v-else-if="filtered.length === 0" boxed icon="cycle"
       :title="t('recurring.empty')"
@@ -262,6 +282,10 @@ function gotoDetail(id: number, e?: MouseEvent) {
                   class="row-link cursor-pointer block text-left text-primary-700 font-medium">
                   {{ tpl.name }}
                 </RouterLink>
+                <div v-if="tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
+                  <button v-for="tag in tpl.tags" :key="tag.id" type="button" class="rounded-full bg-primary-50 text-primary-700 px-2 py-0.5 text-xs"
+                    @click.stop="addTag(tag)" @auxclick.stop>{{ tag.name }}</button>
+                </div>
                 <span v-if="tpl.last_error" :title="tpl.last_error"
                   class="mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded bg-danger-50 text-danger-700 border border-danger-200 whitespace-nowrap">
                   ⚠ {{ t('recurring.last_error_badge') }}
@@ -345,6 +369,10 @@ function gotoDetail(id: number, e?: MouseEvent) {
             <span class="text-xs px-2 py-0.5 rounded border whitespace-nowrap" :class="statusBadgeClass(tpl.status)">
               {{ t('recurring.status.' + tpl.status) }}
             </span>
+          </div>
+          <div v-if="tpl.tags?.length" class="flex flex-wrap gap-1 mt-1">
+            <button v-for="tag in tpl.tags" :key="tag.id" type="button" class="rounded-full bg-primary-50 text-primary-700 px-2 py-0.5 text-xs"
+              @click.stop="addTag(tag)" @auxclick.stop>{{ tag.name }}</button>
           </div>
           <div class="text-xs text-neutral-500 truncate mt-0.5">
             <RouterLink :to="{ name: 'client-detail', params: { id: tpl.client_id } }" @click.stop @auxclick.stop
