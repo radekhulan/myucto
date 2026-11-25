@@ -1929,6 +1929,11 @@ const isIssued = computed(() => invoice.value && ['issued', 'sent', 'reminded'].
 const canAdminEdit = computed(() =>
   (isAdmin.value || auth.canWrite('invoices.edit_issued'))
   && !isDraft.value && invoice.value?.invoice_type !== 'cancellation')
+// Odečíst zálohu i na vystavené faktuře: server ji přeúčtuje, proto stejné právo jako
+// RequestAuthorization::canRepostIssuedInvoice (úprava vystavené faktury + zaúčtování).
+const canDrawdownIssued = computed(() => !!invoice.value && invoice.value.invoice_type === 'invoice'
+  && ['issued', 'sent', 'reminded', 'paid'].includes(invoice.value.status)
+  && (isAdmin.value || (auth.canWrite('invoices.edit_issued') && auth.canWrite('accounting.journal.post'))))
 const hasPositiveAmountToPay = computed(() => {
   if (!invoice.value) return false
   if (!['invoice', 'proforma'].includes(invoice.value.invoice_type)) return true
@@ -2380,8 +2385,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
         && (inv.currency ?? 'CZK') === 'CZK' && Number(inv.amount_to_pay ?? 0) - Number(inv.paid_total ?? 0) > 0.005,
       to: offsetRoute(Number(inv.client_id), [{ doc_type: 'invoice', doc_id: inv.id, amount: null }]) },
     { key: 'advance-drawdown', label: t('invoice.advance_drawdown.action'), icon: 'coin', tier: 'secondary', variant: 'warning',
-      show: isDraft.value && inv.invoice_type === 'invoice' && w && !lockedForMe.value, disabled: b,
-      title: t('invoice.advance_drawdown.tooltip') as string, run: openDrawdownModal },
+      show: ((isDraft.value && inv.invoice_type === 'invoice' && w) || canDrawdownIssued.value) && !lockedForMe.value, disabled: b,
+      title: t(isDraft.value ? 'invoice.advance_drawdown.tooltip' : 'invoice.advance_drawdown.tooltip_issued') as string, run: openDrawdownModal },
     { key: 'advance-drawdown-remove', label: t('invoice.advance_drawdown.remove'), icon: 'uturn', tier: 'overflow', variant: 'neutral',
       show: isDraft.value && inv.invoice_type === 'invoice' && (inv.parent_invoice?.invoice_type === 'proforma' || drawdownList.value.length > 0)
         && w && !lockedForMe.value,
@@ -3131,6 +3136,9 @@ useWindowRefresh(async () => {
             <button type="button" @click="drawdownOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
           </div>
           <div class="p-4 overflow-y-auto space-y-4">
+            <p v-if="!isDraft" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-700" data-test="drawdown-issued-hint">
+              {{ t('invoice.advance_drawdown.issued_hint') }}
+            </p>
             <div v-if="drawdownSummary" class="text-sm text-neutral-600 flex flex-wrap justify-between gap-2" data-test="drawdown-supply">
               <span>{{ t('invoice.advance_drawdown.supply') }}: <strong>{{ formatMoney(drawdownSummary.supply.gross, invoice.currency) }}</strong></span>
               <span class="text-neutral-500">{{ t('invoice.advance_drawdown.supply_left') }}: {{ formatMoney(uncoveredSupply(drawdownSummary, 'gross'), invoice.currency) }}</span>
@@ -3144,7 +3152,7 @@ useWindowRefresh(async () => {
                     {{ formatMoney(d.gross, invoice.currency) }}
                     <span class="text-xs text-neutral-500">({{ t('invoice.advance_drawdown.mode_net') }} {{ formatMoney(d.base, invoice.currency) }})</span>
                   </span>
-                  <button type="button" :disabled="drawdownSaving" data-test="drawdown-remove-one" @click="removeDrawdownOf(d)"
+                  <button v-if="isDraft" type="button" :disabled="drawdownSaving" data-test="drawdown-remove-one" @click="removeDrawdownOf(d)"
                     class="cursor-pointer inline-flex items-center gap-1 whitespace-nowrap text-xs px-2 py-1 border border-danger-300 text-danger-700 rounded hover:bg-danger-50 disabled:opacity-50 bg-surface">
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.uturn" /></svg>
                     {{ t('invoice.advance_drawdown.remove_one') }}

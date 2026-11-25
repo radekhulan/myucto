@@ -3253,9 +3253,29 @@ final class PurchaseInvoiceRepository
             );
         }
 
+        // Odpočet v hlavičce, který doplnilo propojení (stejný výpočet jako linkAdvance), se vrátí
+        // na 0, jinak by faktura bez vazby dál vypadala jako uhrazená zálohou. Ruční korekce
+        // (jiná částka) zůstává. Shodně s vydanou stranou (InvoiceRepository::unlinkAdvance).
+        $final = $this->find($finalId, $supplierId);
+        $linkedId = (int) ($final['advance_purchase_invoice_id'] ?? 0);
+        $reset = false;
+        if ($final !== null && $linkedId > 0 && (float) ($final['advance_paid_amount'] ?? 0) > 0) {
+            $adv = $this->db->pdo()->prepare(
+                'SELECT id, status, total_with_vat, paid_amount_invoice_ccy FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+            );
+            $adv->execute([$linkedId, $supplierId]);
+            $advance = $adv->fetch(PDO::FETCH_ASSOC);
+            if ($advance !== false) {
+                $linked = (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($this->db))
+                    ->forFinal($supplierId, $advance, (float) $final['total_with_vat'], $finalId);
+                $reset = $linked > 0 && abs((float) $final['advance_paid_amount'] - $linked) < 0.005;
+            }
+        }
+
         $this->db->pdo()
             ->prepare('UPDATE purchase_invoices
-                          SET advance_purchase_invoice_id = NULL
+                          SET advance_purchase_invoice_id = NULL'
+                . ($reset ? ', advance_paid_amount = 0' : '') . '
                         WHERE id = ? AND supplier_id = ?')
             ->execute([$finalId, $supplierId]);
     }

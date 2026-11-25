@@ -54,12 +54,12 @@ final class AdvancePartialDrawdown
      *
      * @return array{proforma_id:int, amount:float, base:float, available:float, remaining:float}
      */
-    public function apply(int $supplierId, int $invoiceId, int $proformaId, float $amount, string $basis = self::BASIS_GROSS): array
+    public function apply(int $supplierId, int $invoiceId, int $proformaId, float $amount, string $basis = self::BASIS_GROSS, bool $allowIssued = false): array
     {
         if ($amount <= 0.0) {
             throw new \InvalidArgumentException('Čerpaná částka zálohy musí být kladná.');
         }
-        return $this->applySpec($supplierId, $invoiceId, $proformaId, round($amount, 2), null, self::basis($basis));
+        return $this->applySpec($supplierId, $invoiceId, $proformaId, round($amount, 2), null, self::basis($basis), $allowIssued);
     }
 
     /**
@@ -68,12 +68,12 @@ final class AdvancePartialDrawdown
      *
      * @return array{proforma_id:int, amount:float, base:float, available:float, remaining:float}
      */
-    public function applyPercent(int $supplierId, int $invoiceId, int $proformaId, float $percent, string $basis = self::BASIS_GROSS): array
+    public function applyPercent(int $supplierId, int $invoiceId, int $proformaId, float $percent, string $basis = self::BASIS_GROSS, bool $allowIssued = false): array
     {
         if ($percent <= 0.0 || $percent > 100.0) {
             throw new \InvalidArgumentException('Procento plnění faktury musí být větší než 0 a nejvýš 100.');
         }
-        return $this->applySpec($supplierId, $invoiceId, $proformaId, null, $percent, self::basis($basis));
+        return $this->applySpec($supplierId, $invoiceId, $proformaId, null, $percent, self::basis($basis), $allowIssued);
     }
 
     /**
@@ -127,7 +127,7 @@ final class AdvancePartialDrawdown
      */
     public function candidates(int $supplierId, int $invoiceId): array
     {
-        $invoice = $this->draftInvoice($supplierId, $invoiceId);
+        $invoice = $this->draftInvoice($supplierId, $invoiceId, false, true);
         $own = $this->ownDraws($invoiceId, $this->parentProforma($supplierId, $invoice));
         $ownSql = $own === [] ? '' : ' OR p.id IN (' . implode(',', array_map('intval', array_keys($own))) . ')';
         $stmt = $this->db->pdo()->prepare(
@@ -226,22 +226,22 @@ final class AdvancePartialDrawdown
     }
 
     /** @return array{proforma_id:int, amount:float, base:float, available:float, remaining:float} */
-    private function applySpec(int $supplierId, int $invoiceId, int $proformaId, ?float $amount, ?float $percent, string $basis): array
+    private function applySpec(int $supplierId, int $invoiceId, int $proformaId, ?float $amount, ?float $percent, string $basis, bool $allowIssued): array
     {
         if ($proformaId <= 0) {
             throw new \InvalidArgumentException('Zadejte zálohu (proforma_id).');
         }
         return $this->cycleLock->synchronized(
             $proformaId,
-            fn (): array => $this->transactional(fn (): array => $this->applyUnlocked($supplierId, $invoiceId, $proformaId, $amount, $percent, $basis)),
+            fn (): array => $this->transactional(fn (): array => $this->applyUnlocked($supplierId, $invoiceId, $proformaId, $amount, $percent, $basis, $allowIssued)),
         );
     }
 
     /** @return array{proforma_id:int, amount:float, base:float, available:float, remaining:float} */
-    private function applyUnlocked(int $supplierId, int $invoiceId, int $proformaId, ?float $amount, ?float $percent, string $basis): array
+    private function applyUnlocked(int $supplierId, int $invoiceId, int $proformaId, ?float $amount, ?float $percent, string $basis, bool $allowIssued): array
     {
         $pdo = $this->db->pdo();
-        $invoice = $this->draftInvoice($supplierId, $invoiceId, true);
+        $invoice = $this->draftInvoice($supplierId, $invoiceId, true, $allowIssued);
         $parentProforma = $this->parentProforma($supplierId, $invoice);
         $own = $this->ownDraws($invoiceId, $parentProforma);
 
@@ -598,7 +598,11 @@ final class AdvancePartialDrawdown
     }
 
     /** @return array<string,mixed> */
-    private function draftInvoice(int $supplierId, int $invoiceId, bool $forUpdate = false): array
+    /**
+     * `$allowIssued` pustí i vystavenou fakturu ({@see IssuedInvoiceAdvanceDrawdown}, které
+     * po čerpání srovná stav úhrady a přeúčtuje zápis). Výpis kandidátů je jen čtení.
+     */
+    private function draftInvoice(int $supplierId, int $invoiceId, bool $forUpdate = false, bool $allowIssued = false): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, client_id, currency_id, status, invoice_type, parent_invoice_id, prices_include_vat, language,
@@ -610,7 +614,9 @@ final class AdvancePartialDrawdown
         if ($row === false) {
             throw new \DomainException('Faktura nenalezena.');
         }
-        if ((string) $row['invoice_type'] !== 'invoice' || (string) $row['status'] !== 'draft') {
+        $status = (string) $row['status'];
+        if ((string) $row['invoice_type'] !== 'invoice'
+            || !($status === 'draft' || ($allowIssued && in_array($status, IssuedInvoiceAdvanceDrawdown::STATUSES, true)))) {
             throw new \DomainException('Zálohu lze čerpat jen konceptem běžné faktury.');
         }
         if ($row['import_total_with_vat_czk'] !== null) {

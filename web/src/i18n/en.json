@@ -26536,6 +26536,8 @@
     "advance_drawdown": {
       "action": "Deduct advance",
       "tooltip": "Deduct paid advances (several advances, or part of one)",
+      "tooltip_issued": "Add the deduction of a paid advance from its tax document; the invoice is reposted",
+      "issued_hint": "The invoice is already issued. The deduction changes its amounts and VAT; the payment status and the journal entry are recalculated. An advance deducted only in the header (Pair with advance) is replaced by the deduction.",
       "remove": "Remove advance drawdowns",
       "remove_confirm": "Remove the deductions of all advances from this invoice?",
       "modal_title": "Deduct advances",

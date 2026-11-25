@@ -9,11 +9,16 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
 use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
+use MyInvoice\Service\Invoice\IssuedInvoiceAdvanceDrawdown;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -23,7 +28,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  *   GET    /api/invoices/{id}/advance-drawdown  zálohy odběratele s nevyčerpanou částkou a čerpáním konceptu
  *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount | percent, basis?}: nastaví čerpání
- *          zálohy (částka nebo procento plnění faktury, basis gross = s DPH, net = bez DPH)
+ *          zálohy (částka nebo procento plnění faktury, basis gross = s DPH, net = bez DPH); na vystavené
+ *          faktuře doplní odpočet a přeúčtuje ji ({@see IssuedInvoiceAdvanceDrawdown})
  *   DELETE /api/invoices/{id}/advance-drawdown  odebere čerpání zálohy `?proforma_id=`, bez něj všech záloh
  */
 final class AdvanceDrawdownAction
@@ -36,6 +42,8 @@ final class AdvanceDrawdownAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
+        private readonly IssuedInvoiceAdvanceDrawdown $issued,
+        private readonly FiledVatPeriodLookup $filedPeriods,
     ) {}
 
     public function candidates(Request $request, Response $response, array $args): Response
@@ -72,9 +80,47 @@ final class AdvanceDrawdownAction
 
         try {
             $supplierId = SupplierGuard::currentId($request);
-            $result = $percent !== null
-                ? $this->drawdown->applyPercent($supplierId, $id, $proformaId, $percent, $basis)
-                : $this->drawdown->apply($supplierId, $id, $proformaId, (float) $amount, $basis);
+            if ((string) ($invoice['status'] ?? '') !== 'draft') {
+                // Stejné brány jako finanční oprava vystavené faktury (UpdateInvoiceAction):
+                // právo upravit vystavenou fakturu, přeúčtovat ji a u podaného období DPH správce.
+                if (!RequestAuthorization::canRepostIssuedInvoice($request)) {
+                    return Json::error(
+                        $response,
+                        'journal_post_forbidden',
+                        'Odečtení zálohy na vystavené faktuře přeúčtuje deník. K tomu je potřeba právo upravit vystavenou fakturu i „Zaúčtovat doklad“.',
+                        403,
+                    );
+                }
+                $refDate = DocumentLockService::invoiceRefDate($invoice);
+                if ($refDate !== null
+                    && (!RequestAuthorization::mayOverridePeriodProtection($request) || !RequestAuthorization::canChangeFiledVatPeriod($request))
+                    && ($filed = $this->filedPeriods->describe($supplierId, $refDate)) !== null) {
+                    return Json::error(
+                        $response,
+                        'period_filed',
+                        'Období faktury už bylo podáno (' . $filed . '). Odpočet zálohy v něm může doplnit jen správce firmy; '
+                            . 'opravu podaného období řešte opravným nebo dodatečným tvrzením.',
+                        409,
+                    );
+                }
+                $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+                $result = $this->issued->apply($supplierId, $id, $proformaId, $amount, $percent, $basis, [
+                    'user_id'    => isset($user['id']) ? (int) $user['id'] : null,
+                    'ip'         => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    'user_agent' => $request->getHeaderLine('User-Agent'),
+                ]);
+            } else {
+                $result = $percent !== null
+                    ? $this->drawdown->applyPercent($supplierId, $id, $proformaId, $percent, $basis)
+                    : $this->drawdown->apply($supplierId, $id, $proformaId, (float) $amount, $basis);
+            }
+        } catch (PostingException | UnbalancedEntryException $e) {
+            return Json::error(
+                $response,
+                $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry',
+                'Zálohu nešlo odečíst, protože zápis faktury v deníku nejde přeúčtovat: ' . $e->getMessage(),
+                $e instanceof PostingException ? $e->httpStatus : 422,
+            );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'invalid_input', $e->getMessage(), 400);
         } catch (AdvanceReceiptNotPostedException $e) {
