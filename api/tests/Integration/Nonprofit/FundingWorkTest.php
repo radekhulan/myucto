@@ -188,6 +188,12 @@ final class FundingWorkTest extends TestCase
         $this->expectError(fn() => $this->work->detail($this->supplier, $otherPeriod, $foreignSource), 'funding_work_period_not_found');
         $this->expectError(fn() => $this->work->costLineAllocations($this->supplier, $this->period, $foreignCost), 'funding_work_line_not_found');
         $this->expectError(fn() => $this->work->create($this->supplier, $this->period, $this->input(['provider_id' => $otherProvider]), $this->actor), 'funding_work_invalid');
+        $missing = (int) $this->pdo->query('SELECT COALESCE(MAX(id), 0) + 1000 FROM clients')->fetchColumn();
+        $this->expectError(fn() => $this->work->create($this->supplier, $this->period, $this->input(['provider_id' => $missing]), $this->actor), 'funding_work_invalid');
+        $version = $this->work->detail($this->supplier, $this->period, $source)['source']['row_version'];
+        foreach ([$otherProvider, $missing] as $provider) {
+            $this->expectError(fn() => $this->work->update($this->supplier, $this->period, $source, $this->input(['provider_id' => $provider]), $version, 'Synthetic', $this->actor), 'funding_work_invalid');
+        }
         $q = $this->pdo->prepare('SELECT COUNT(*) FROM nonprofit_funding_work_allocations WHERE supplier_id = ?');
         $q->execute([$this->supplier]);
         self::assertSame(0, (int) $q->fetchColumn());

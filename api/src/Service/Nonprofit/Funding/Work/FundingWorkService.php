@@ -780,7 +780,8 @@ final class FundingWorkService
      */
     private function assertReferences(int $supplier, array $data, ?array $existing): array
     {
-        $q = $this->db->pdo()->prepare('SELECT 1 FROM clients WHERE supplier_id = ? AND id = ?');
+        // Zamykací čtení: souběžné smazání poskytovatele počká, místo aby zápis zdroje spadl na cizím klíči (1452 = 500).
+        $q = $this->db->pdo()->prepare('SELECT 1 FROM clients WHERE supplier_id = ? AND id = ? LOCK IN SHARE MODE');
         $q->execute([$supplier, $data['provider_id']]);
         if ($q->fetchColumn() === false) self::invalid('Poskytovatel nebyl nalezen.');
         if ($data['activity_kind_ids'] !== []) {
