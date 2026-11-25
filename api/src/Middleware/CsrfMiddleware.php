@@ -157,9 +157,9 @@ final class CsrfMiddleware implements MiddlewareInterface
         $session = $request->getAttribute(AuthMiddleware::ATTR_SESSION);
         $expectedToken = is_array($session) ? (string) ($session['csrf_token'] ?? '') : '';
         $providedToken = $request->getHeaderLine('X-CSRF-Token');
-        if ($path === '/oauth/authorize' && $providedToken === '') {
+        if (in_array($path, ['/oauth/authorize', '/api/auth/mobile/authorize'], true) && $providedToken === '') {
             parse_str((string) $request->getBody(), $form);
-            $providedToken = (string) ($form['csrf_token'] ?? '');
+            $providedToken = is_string($form['csrf_token'] ?? null) ? $form['csrf_token'] : '';
         }
 
         if ($expectedToken === '' || $providedToken === '' || !hash_equals($expectedToken, $providedToken)) {

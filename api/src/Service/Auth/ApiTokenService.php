@@ -183,7 +183,7 @@ final class ApiTokenService
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
                     t.allow_payroll_submission_docs, t.allow_issued_invoice_edit, t.allow_system_write, t.eet_external_by_default,
-                    t.expires_at, t.revoked_at, t.issued_auth_method,
+                    t.expires_at, t.revoked_at, t.issued_auth_method, t.issued_external_identity_id,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
                     r.is_active AS user_role_active, r.system_key AS user_role_system_key,
@@ -195,11 +195,20 @@ final class ApiTokenService
              WHERE t.token_hash = ?
                AND t.revoked_at IS NULL
                AND (t.expires_at IS NULL OR t.expires_at > NOW())
+               AND (t.issued_external_identity_id IS NULL OR EXISTS (
+                   SELECT 1 FROM user_external_identities i
+                   WHERE i.id = t.issued_external_identity_id AND i.user_id = t.user_id
+               ))
              LIMIT 1'
         );
         $stmt->execute([$hash]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$row) {
+            return null;
+        }
+        if ($row['issued_external_identity_id'] !== null
+            && ($this->config?->get('auth.mobile_oidc.enabled', false) !== true
+                || $this->config->get('app.url') !== 'https://eet.myucto.online')) {
             return null;
         }
         if ((int) $row['user_is_active'] !== 1 || (int) $row['user_role_active'] !== 1) {

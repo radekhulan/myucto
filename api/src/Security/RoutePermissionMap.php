@@ -39,6 +39,7 @@ final class RoutePermissionMap
     /** @var list<string> */
     private const SELF_PATHS = [
         '/api/auth/logout', '/api/auth/me', '/api/auth/api-me', '/api/auth/change-password',
+        '/api/auth/mobile/authorize',
         '/api/auth/totp/status', '/api/auth/totp/setup', '/api/auth/totp/enable',
         '/api/auth/webauthn/credentials',
         '/api/auth/webauthn/register/options', '/api/auth/webauthn/register/verify',

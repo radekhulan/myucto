@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Auth\MyeetCustomerProvisioner;
 use MyInvoice\Infrastructure\Cache\SupplierWriteGenerations;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
@@ -40,6 +42,8 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
     public function __construct(
         private readonly SupplierAccessResolver $resolver,
         private readonly ResponseFactory $responseFactory,
+        private readonly ?Config $config = null,
+        private readonly ?MyeetCustomerProvisioner $myeet = null,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -95,6 +99,18 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             }
             $response = $this->responseFactory->createResponse(403);
             return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
+        }
+
+        if ($access->supplierId > 0 && (int) ($user['id'] ?? 0) > 0
+            && ($user['role'] ?? null) !== 'superadmin'
+            && $this->config?->get('myeet.sale_managed', false) === true
+            && $this->config->get('app.url') === 'https://eet.myucto.online'
+            && $request->getUri()->getHost() === 'eet.myucto.online'
+            && !in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)
+            && !str_starts_with($path, '/api/public/')
+            && $this->myeet?->licenseExpired((int) $user['id'], $access->supplierId)) {
+            return Json::error($this->responseFactory->createResponse(402),
+                'myeet_license_expired', 'Platnost licence MyEET pro tuto firmu skončila.', 402);
         }
 
         SupplierWriteGenerations::setRequestSupplier($access->supplierId);

@@ -349,7 +349,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
         // Tvorba API tokenu (PAT) — /api/auth/* je z generic limitu vyňaté, takže
         // bez tohohle pravidla neměl endpoint limit žádný. Brzdí i hádání hesla
         // a TOTP kódu ve step-up kroku (doplněk k BruteForceGuard v akci).
-        if ($path === '/api/auth/tokens' && $method === 'POST') {
+        if (in_array($path, ['/api/auth/tokens', '/api/auth/mobile/authorize'], true) && $method === 'POST') {
             $bucket = $userId > 0 ? 'user:' . $userId : 'ip:' . $this->ipBucket($ip);
             return ['rl:pat:' . $bucket, (int) ($rl['token_create_per_hour'] ?? 10), 3600];
         }

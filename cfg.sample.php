@@ -31,6 +31,17 @@
  */
 
 return [
+    'myeet' => [
+        'checkout_origin' => '',
+        'use_sign_in_callbacks' => false,
+        'sale_managed' => false,
+        'license_sync_token' => '',
+        'checkout_token' => '',
+        'sandbox' => true,
+        'billing_url' => '',
+        'billing_token' => '',
+    ],
+
     // true = všechny EPO operace používají volné zkušební prostředí
     // https://zkus.mojedane.gov.cz; zkušební potvrzení nikdy neoznačí snapshot
     // jako skutečně podaný. V produkční konfiguraci ponechte false.
@@ -235,6 +246,7 @@ return [
         // Vyžaduje povolenou passkey metodu a správně nastavený HTTPS WebAuthn origin.
         // Výměna e-mailu a hesla za API token (POST /api/v1/auth/password-token) pro
         // mobilní a jiné nativní aplikace bez webového přihlášení. Default vypnuto.
+        'mobile_oidc' => ['enabled' => false],
         'password_token' => [
             'enabled' => false,
         ],

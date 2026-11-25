@@ -32,6 +32,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/authorize', '/api/auth/domain-login/exchange',
         '/api/auth/logout', '/api/auth/me', '/api/auth/api-me', '/api/auth/forgot', '/api/auth/reset',
+        '/api/auth/mobile/authorize',
         '/api/auth/change-password', '/api/auth/totp/status', '/api/auth/totp/setup',
         '/api/auth/totp/enable', '/api/csrf-token',
         '/api/auth/oidc/entra/login', '/api/auth/oidc/entra/callback',

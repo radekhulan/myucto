@@ -7,7 +7,8 @@ const router = useRouter()
 
 onMounted(() => {
   const target = route.query.target
-  if (typeof target === 'string' && target.length <= 4096 && target.startsWith('/oauth/authorize?')) {
+  if (typeof target === 'string' && target.length <= 4096
+    && (target.startsWith('/oauth/authorize?') || target.startsWith('/api/auth/mobile/authorize?'))) {
     window.location.replace(target)
     return
   }

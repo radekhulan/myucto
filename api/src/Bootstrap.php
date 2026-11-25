@@ -232,6 +232,19 @@ final class Bootstrap
                 \DI\get(\MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalMailer::class),
             // PDF přijatého dokladu pro jeho schvalovatele (F6) — nepovinné kvůli
             // testům, které middleware staví ručně.
+            SupplierScopeMiddleware::class => \DI\factory(static function (ContainerInterface $c): SupplierScopeMiddleware {
+                $config = $c->get(Config::class);
+                $myeet = $config->get('myeet.sale_managed', false) === true
+                    && $config->get('app.url') === 'https://eet.myucto.online'
+                    ? $c->get(\MyInvoice\Service\Auth\MyeetCustomerProvisioner::class) : null;
+
+                return new SupplierScopeMiddleware(
+                    $c->get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class),
+                    $c->get(\Slim\Psr7\Factory\ResponseFactory::class),
+                    $config,
+                    $myeet,
+                );
+            }),
             \MyInvoice\Middleware\PermissionMiddleware::class =>
                 \DI\autowire()->constructorParameter(
                     'purchaseApprovals',

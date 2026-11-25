@@ -4534,6 +4534,52 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/public/mobile-auth/providers:
+    get:
+      tags: [Auth]
+      summary: Poskytovatelé přihlášení do mobilní aplikace
+      security: []
+      responses:
+        '200':
+          description: Povolení poskytovatelé
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers:
+                    type: array
+                    items: { type: string, enum: [google, apple] }
+  /api/public/mobile-auth/token:
+    post:
+      tags: [Auth]
+      summary: Výměna mobilního autorizačního kódu za API token firmy
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, code_verifier, device_name]
+              properties:
+                code: { type: string }
+                code_verifier: { type: string }
+                device_name: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: API token zařízení
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { type: string }
+        '400': { description: Neplatný nebo použitý kód }
+        '403': { description: Vydání tokenu nepovoluje licence }
+        '404': { description: Mobilní OIDC přihlášení je vypnuté }
   /api/v1/auth/password-token:
     post:
       tags: [Auth]

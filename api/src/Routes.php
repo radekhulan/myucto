@@ -453,6 +453,21 @@ final class Routes
         // Slug helper (název → kód) — sdílený Slugifier; předvyplnění kódu v UI číselníků (eshop, admin/codebooks)
         $app->get   ('/api/slug', \MyInvoice\Action\SlugAction::class);
 
+        $app->post('/api/public/myeet/preflight', [\MyInvoice\Action\Auth\MyeetCheckoutActivationAction::class, 'preflight']);
+        $app->post('/api/public/myeet/activate', [\MyInvoice\Action\Auth\MyeetCheckoutActivationAction::class, 'activate']);
+        $app->post('/api/public/myeet/license', [\MyInvoice\Action\Auth\MyeetCheckoutActivationAction::class, 'license']);
+        foreach (['google', 'apple'] as $myeetProvider) {
+            $app->get('/api/public/myeet/auth/' . $myeetProvider, [\MyInvoice\Action\Auth\MyeetCheckoutOidcAction::class, 'start'])
+                ->setArgument('provider', $myeetProvider);
+            $app->get('/api/public/myeet/auth/' . $myeetProvider . '/callback', [\MyInvoice\Action\Auth\MyeetCheckoutOidcAction::class, 'callback'])
+                ->setArgument('provider', $myeetProvider);
+        }
+        $app->post('/api/public/myeet/auth/apple/callback', [\MyInvoice\Action\Auth\MyeetCheckoutOidcAction::class, 'appleFormCallback']);
+
+        $app->get('/api/public/mobile-auth/providers', [\MyInvoice\Action\Auth\MobileOidcAction::class, 'providers']);
+        $app->map(['GET', 'POST'], '/api/auth/mobile/authorize', [\MyInvoice\Action\Auth\MobileOidcAction::class, 'authorize']);
+        $app->post('/api/public/mobile-auth/token', [\MyInvoice\Action\Auth\MobileOidcAction::class, 'token']);
+
         $app->group('/api/auth', function ($g) {
             $g->get ('/setup-status',    SetupStatusAction::class);
             $g->get ('/setup-preflight', SetupPreflightAction::class);        // audit prostředí před prvním setupem (jen dokud není admin)
@@ -478,7 +493,10 @@ final class Routes
             // Google, Apple a Seznam nahrazují jen heslo: přihlášení a propojení, ověření citlivé operace ne.
             foreach (['google', 'apple', 'seznam'] as $oidcProvider) {
                 $g->get ('/oidc/' . $oidcProvider . '/login',    [\MyInvoice\Action\Auth\OidcAction::class, 'login'])->setArgument('provider', $oidcProvider);
-                $g->get ('/oidc/' . $oidcProvider . '/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'callback'])->setArgument('provider', $oidcProvider);
+                $callback = $oidcProvider === 'seznam'
+                    ? [\MyInvoice\Action\Auth\OidcAction::class, 'callback']
+                    : [\MyInvoice\Action\Auth\MyeetCheckoutOidcAction::class, 'signInCallback'];
+                $g->get ('/oidc/' . $oidcProvider . '/callback', $callback)->setArgument('provider', $oidcProvider);
                 $g->post('/oidc/' . $oidcProvider . '/link',     [\MyInvoice\Action\Auth\OidcAction::class, 'link'])->setArgument('provider', $oidcProvider);
             }
             $g->post  ('/oidc/apple/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'formCallback'])->setArgument('provider', 'apple');
