@@ -417,6 +417,24 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(bankLinks(wrapper)).toHaveLength(0)
   })
 
+  it('uhrazená faktura se zaokrouhlením → uhrazeno ukazuje zaplacenou částku po zaokrouhlení', async () => {
+    // Závazek je v nominálu (9 750,57), haléřový rozdíl jde při úhradě na 548; zaplaceno bylo 9 751,00.
+    m.get.mockResolvedValue(makeInvoice({ status: 'paid', currency: 'CZK', total_with_vat: 9750.57, amount_to_pay: 9750.57, rounding: 0.43, paid_amount: 9750.57, remaining_amount: 0 }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="pi-paid-amount"]').text()).toContain('9751 CZK')
+    expect(wrapper.get('[data-testid="pi-remaining-amount"]').text()).toContain('0 CZK')
+  })
+
+  it('částečně uhrazená faktura se zaokrouhlením → uhrazeno beze změny', async () => {
+    m.get.mockResolvedValue(makeInvoice({ status: 'booked', currency: 'CZK', total_with_vat: 9750.57, amount_to_pay: 9750.57, rounding: 0.43, paid_amount: 5000, remaining_amount: 4750.57 }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="pi-paid-amount"]').text()).toContain('5000 CZK')
+  })
+
   it('uhrazená faktura s nedoplatkem → uhrazeno, zbývá, upozornění a akce „Vyrovnat zbytek"', async () => {
     m.get.mockResolvedValue(makeInvoice({ status: 'paid', currency: 'EUR', amount_to_pay: 236.84, paid_amount: 233.17, remaining_amount: 3.67, paid_shortfall: true }))
     const wrapper = mount(InvoiceDetail, { global: { stubs } })

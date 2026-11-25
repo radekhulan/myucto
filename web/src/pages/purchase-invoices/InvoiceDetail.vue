@@ -501,6 +501,15 @@ async function onAltPayDone() {
 const showPaymentSummary = computed(() =>
   !!invoice.value && invoice.value.status !== 'draft' && invoice.value.status !== 'cancelled'
   && invoice.value.remaining_amount !== undefined)
+// Haléřové zaokrouhlení dokladu se vyrovná až při úhradě (548/648), evidovaná úhrada je proto
+// v nominálu závazku. Plně uhrazený doklad ukáže zaplacenou částku po zaokrouhlení; jen zobrazení.
+const paidAmountDisplay = computed(() => {
+  const inv = invoice.value
+  const paid = inv?.paid_amount ?? 0
+  const rounding = inv?.rounding ?? 0
+  if (!inv || Math.abs(rounding) < 0.001 || (inv.remaining_amount ?? 0) > 0.005) return paid
+  return Math.abs(paid - (inv.amount_to_pay ?? inv.total_with_vat)) < 0.005 ? Math.round((paid + rounding) * 100) / 100 : paid
+})
 // Uhrazený doklad, který evidované úhrady nepokrývají, zbytek visí na saldokontě.
 const hasPaidShortfall = computed(() => !!invoice.value?.paid_shortfall)
 // „Vyrovnat zbytek": existuje úhrada a po ní zbytek. Zápočet proti účtu je účetní
@@ -1937,7 +1946,7 @@ useWindowRefresh(async () => {
             <div class="flex justify-between font-semibold text-lg border-t border-neutral-200 pt-2"><dt>{{ t('purchase_invoice.totals.to_pay') }}</dt><dd class="font-mono">{{ formatMoney((invoice.amount_to_pay ?? invoice.total_with_vat) + (invoice.rounding || 0), invoice.currency) }}</dd></div>
             <!-- Úhrada dokladu: uhrazeno / zbývá (v měně dokladu) -->
             <template v-if="showPaymentSummary">
-              <div class="flex justify-between text-neutral-600" data-testid="pi-paid-amount"><dt>{{ t('purchase_invoice.payment_summary.paid') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount ?? 0, invoice.currency) }}</dd></div>
+              <div class="flex justify-between text-neutral-600" data-testid="pi-paid-amount"><dt>{{ t('purchase_invoice.payment_summary.paid') }}</dt><dd class="font-mono">{{ formatMoney(paidAmountDisplay, invoice.currency) }}</dd></div>
               <div class="flex justify-between font-semibold" data-testid="pi-remaining-amount"
                 :class="hasPaidShortfall ? 'text-warning-700' : (invoice.status !== 'paid' && (invoice.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-500')">
                 <dt>{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
