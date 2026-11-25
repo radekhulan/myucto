@@ -374,7 +374,22 @@ final class AdvancePartialDrawdown
                 advance_invoice_id)
              VALUES (?, ?, 1, '', ?, ?, ?, 0, 0, 0, ?, 'standard', ?, ?)"
         );
+        // Řádek bez klasifikace by zdědil hlavičku konečné faktury. Je-li v ní jiný kód než
+        // u plnění (např. „mimo předmět“), odpočet by z přiznání vypadl a DPH plnění zůstala.
+        // DDKP bez kódu proto zastoupí klasifikace plnění faktury ve stejné sazbě.
+        $supplyCode = $pdo->prepare(
+            'SELECT COALESCE(ii.vat_classification_code, i.vat_classification_code)
+               FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+              WHERE ii.invoice_id = ? AND ii.vat_rate_id = ? AND NOT (' . AdvanceDrawSql::deductionLine('ii') . ')
+              ORDER BY ii.order_index, ii.id LIMIT 1'
+        );
         foreach ($lines as $line) {
+            $code = $line['code'];
+            if ($code === null) {
+                $supplyCode->execute([$invoiceId, $line['vat_rate_id']]);
+                $found = $supplyCode->fetchColumn();
+                $code = $found === false || $found === null ? null : (string) $found;
+            }
             $insert->execute([
                 $invoiceId,
                 self::lineDescription($isEn, $proformaNo, $line['label']),
@@ -382,7 +397,7 @@ final class AdvancePartialDrawdown
                 $line['vat_rate_id'],
                 $line['rate'],
                 ++$maxOrder,
-                $line['code'],
+                $code,
                 $proformaId,
             ]);
         }
@@ -429,7 +444,8 @@ final class AdvancePartialDrawdown
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot, COALESCE(ii.oss_applicable, 0) AS oss,
-                    ii.vat_classification_code, ii.total_without_vat, ii.total_with_vat
+                    COALESCE(ii.vat_classification_code, td.vat_classification_code) AS vat_classification_code,
+                    ii.total_without_vat, ii.total_with_vat
                FROM invoices td
                JOIN invoice_items ii ON ii.invoice_id = td.id
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'

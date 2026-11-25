@@ -95,16 +95,37 @@ final class IssuedInvoiceAdvanceDrawdownTest extends BankPostingTestCase
         $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_at = issue_date WHERE id = ?")->execute([$final]);
         self::assertEqualsWithDelta(605.00, (float) $repo->find($final)['advance_paid_amount'], 0.001);
 
-
         $repo->unlinkAdvance($final, $this->supplierId);
         $this->container->get(IssuedInvoiceAdvanceDrawdown::class)->resync($this->supplierId, $final, ['user_id' => $this->userId]);
-
 
         $inv = $repo->find($final);
         self::assertNull($inv['parent_invoice_id']);
         self::assertEqualsWithDelta(0.0, (float) $inv['advance_paid_amount'], 0.001, 'Odpárování vrátí odpočet, který doplnilo spárování.');
         self::assertEqualsWithDelta(605.00, (float) $inv['amount_to_pay'], 0.001);
         self::assertSame('issued', $inv['status'], 'Faktura bez zálohy už není uhrazená.');
+    }
+
+    /**
+     * Převzatý DDKP bez klasifikace a konečná faktura s jiným kódem v hlavičce (MoroStav:
+     * hlavička „mimo předmět“, položky „1“). Odpočet bez vlastního kódu by zdědil hlavičku,
+     * z přiznání by vypadl a DPH plnění by zůstala celá.
+     */
+    public function testDeductionLineTakesSupplyClassificationWhenTaxDocumentHasNone(): void
+    {
+        $client = $this->client('Odběratel bez klasifikace DDKP');
+        $proforma = $this->document('proforma', 'PF-IS-4', $client, 1000.00, 210.00);
+        $this->payProformaViaBank($proforma, 1210.00);
+        $ddkp = $this->document('tax_document', 'DD-IS-4', $client, 1000.00, 210.00, $proforma, 1);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET vat_classification_code = NULL WHERE id = ?')->execute([$ddkp]);
+        $pdo->prepare('UPDATE invoice_items SET vat_classification_code = NULL WHERE invoice_id = ?')->execute([$ddkp]);
+        $final = $this->document('invoice', '', $client, 1000.00, 210.00);
+        $pdo->prepare("UPDATE invoices SET status = 'draft', varsymbol = NULL, vat_classification_code = 'mimo' WHERE id = ?")->execute([$final]);
+
+        $this->container->get(AdvancePartialDrawdown::class)->apply($this->supplierId, $final, $proforma, 1210.00);
+
+        $code = $pdo->query("SELECT vat_classification_code FROM invoice_items WHERE invoice_id = {$final} AND total_with_vat < 0")->fetchColumn();
+        self::assertSame('1', $code, 'Odpočet nese klasifikaci plnění ve stejné sazbě, ne hlavičku faktury.');
     }
 
     public function testUnlinkKeepsManualAdvanceAmount(): void
