@@ -108,6 +108,14 @@ final class AnnualClosingService
     /** @return array<string,mixed> */
     public function finalize(int $supplierId, int $year, int $expectedVersion, ?int $userId): array
     {
+        return TaxEvidenceYearLock::synchronized($this->db, $supplierId,
+            fn (): array => $this->finalizeLocked($supplierId, $year, $expectedVersion, $userId),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function finalizeLocked(int $supplierId, int $year, int $expectedVersion, ?int $userId): array
+    {
         $row = $this->get($supplierId, $year);
         if (($row['status'] ?? '') === 'final') {
             throw new \DomainException('Uzávěrka je již finální.');

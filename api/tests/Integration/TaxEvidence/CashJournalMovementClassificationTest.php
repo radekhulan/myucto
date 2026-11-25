@@ -106,6 +106,40 @@ final class CashJournalMovementClassificationTest extends CashJournalTestCase
         self::assertEqualsWithDelta(3000.0, $after['totals']['nezarazeno'], 0.01, 'Auto-klasifikace nespárovaného pohybu = nezařazeno (R10).');
     }
 
+    public function testFinalYearRejectsReclassifyingBankAndDeletingCashOverride(): void
+    {
+        $statement = $this->statement($this->supplierId, $this->accountA);
+        $bank = $this->bankTx($statement, 3000.0);
+        $cash = $this->cashDoc('out', 'other', 1500.0);
+        $this->classifyOverride($this->supplierId, 'bank', $bank, 'income_taxable');
+        $this->classifyOverride($this->supplierId, 'cash', $cash, 'expense_taxable');
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_evidence_closings (supplier_id, year, status) VALUES (?, ?, 'final')"
+        )->execute([$this->supplierId, self::YEAR]);
+
+        $reclassified = $this->call($this->supplierId, 'create', 'POST', [
+            'body' => ['source_type' => 'bank', 'source_id' => $bank, 'tax_bucket' => 'private'],
+        ]);
+        self::assertSame(409, $reclassified['status']);
+        self::assertSame('closing_final', $reclassified['body']['error']['code']);
+
+        $deleted = $this->call($this->supplierId, 'delete', 'DELETE', [
+            'args' => ['source_type' => 'cash', 'source_id' => (string) $cash],
+        ]);
+        self::assertSame(409, $deleted['status']);
+        self::assertSame('closing_final', $deleted['body']['error']['code']);
+
+        $journal = $this->fullYear($this->supplierId);
+        self::assertEqualsWithDelta(3000.0, $journal['totals']['prijem_danovy'], 0.01);
+        self::assertEqualsWithDelta(1500.0, $journal['totals']['vydaj_danovy'], 0.01);
+
+        $nextYearBank = $this->bankTx($statement, 1000.0, ['posted_at' => (self::YEAR + 1) . '-01-01']);
+        $accepted = $this->call($this->supplierId, 'create', 'POST', [
+            'body' => ['source_type' => 'bank', 'source_id' => $nextYearBank, 'tax_bucket' => 'income_taxable'],
+        ]);
+        self::assertSame(201, $accepted['status']);
+    }
+
     public function testDeleteNonExistentReturnsDeletedFalse(): void
     {
         $st = $this->statement($this->supplierId, $this->accountA);

@@ -40,24 +40,30 @@ final class MovementClassificationRepository
     /** Ověří, že pohyb (source_type/source_id) patří danému supplieru. */
     public function belongsToSupplier(int $supplierId, string $sourceType, int $sourceId): bool
     {
+        return $this->sourceDate($supplierId, $sourceType, $sourceId) !== null;
+    }
+
+    public function sourceDate(int $supplierId, string $sourceType, int $sourceId): ?string
+    {
         if ($sourceType === 'bank') {
             $ids = $this->journal->matchingStatementIds($supplierId);
             if ($ids === []) {
-                return false;
+                return null;
             }
             $in = implode(',', array_map('intval', $ids));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT 1 FROM bank_transactions WHERE id = ? AND statement_id IN ({$in})"
+                "SELECT posted_at FROM bank_transactions WHERE id = ? AND statement_id IN ({$in})"
             );
             $stmt->execute([$sourceId]);
-            return $stmt->fetchColumn() !== false;
+        } else {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT issue_date FROM cash_documents WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([$sourceId, $supplierId]);
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM cash_documents WHERE id = ? AND supplier_id = ?'
-        );
-        $stmt->execute([$sourceId, $supplierId]);
-        return $stmt->fetchColumn() !== false;
+        $date = $stmt->fetchColumn();
+        return is_string($date) ? $date : null;
     }
 
     /**

@@ -182,6 +182,20 @@ final class TaxEvidenceBankRules
         if ($statementIds === []) {
             return $result;
         }
+
+        return TaxEvidenceYearLock::synchronized($this->db, $supplierId,
+            fn (): array => $this->applyToStatements($supplierId, $statementIds, $rules, $userId),
+        );
+    }
+
+    /**
+     * @param list<int> $statementIds
+     * @param list<array<string,mixed>> $rules
+     * @return array{applied: int, ignored: int, classified: int}
+     */
+    private function applyToStatements(int $supplierId, array $statementIds, array $rules, ?int $userId): array
+    {
+        $result = ['applied' => 0, 'ignored' => 0, 'classified' => 0];
         $in = implode(',', array_map('intval', $statementIds));
         $pdo = $this->db->pdo();
         $txs = $pdo->query(
@@ -194,6 +208,10 @@ final class TaxEvidenceBankRules
                 AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id AND pm.supplier_id = {$supplierId})
                 AND NOT EXISTS (SELECT 1 FROM de_movement_classification c
                                  WHERE c.supplier_id = {$supplierId} AND c.bank_transaction_id = bt.id)
+                AND NOT EXISTS (SELECT 1 FROM tax_evidence_closings c
+                                 WHERE c.supplier_id = {$supplierId} AND c.status = 'final'
+                                   AND bt.posted_at >= MAKEDATE(c.year, 1)
+                                   AND bt.posted_at < MAKEDATE(c.year + 1, 1))
               ORDER BY bt.id"
         )->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
