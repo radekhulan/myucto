@@ -9,6 +9,7 @@ use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementTerminationNoticeDocument;
 use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamCooperationArtifactStore;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Tax\Return\IncomeTaxSubmissionGate;
 use PDO;
 use Psr\Log\LoggerInterface;
 
@@ -87,7 +88,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         }
 
         try {
-            (new \MyInvoice\Service\Tax\Return\AccountingDecreeService($this->db))->assertDppoSubmissionSupported($supplierId, $row, true);
+            (new IncomeTaxSubmissionGate($this->db))->assertReady($supplierId, $row);
         } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
             throw new \MyInvoice\Service\Submission\Channel\SubmissionChannelException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }

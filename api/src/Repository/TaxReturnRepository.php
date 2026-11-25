@@ -227,6 +227,22 @@ final class TaxReturnRepository
         return $row;
     }
 
+    /** @return list<string> */
+    public function snapshotBusinessErrorsForXml(int $supplierId, int $year, string $type, string $xmlSha256): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT s.business_errors
+               FROM income_tax_returns r
+               JOIN income_tax_return_snapshots s ON s.supplier_id = r.supplier_id AND s.tax_return_id = r.id
+              WHERE r.supplier_id = ? AND r.year = ? AND r.taxpayer_type = ? AND s.xml_sha256 = ?
+              ORDER BY s.id DESC LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $year, $this->normType($type), $xmlSha256]);
+        $errors = $stmt->fetchColumn();
+
+        return $errors === false ? [] : $this->decode((string) $errors);
+    }
+
     /**
      * E9 — aplikuje bankou spárované zálohy (daň/sociální/zdravotní) do ručních vstupů
      * přiznání JEN tam, kde je cílové pole dosud prázdné/nulové (žádný ruční vstup).

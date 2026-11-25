@@ -171,6 +171,7 @@ final class TaxReturnAction
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $built['filename'] . '"')
             ->withHeader('X-Validation-Status', $built['validation_status'])
+            ->withHeader('X-Business-Errors', (string) count($built['business_errors']))
             ->withHeader('Cache-Control', 'no-store');
     }
 

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Epo;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxSubmissionEpoRepository;
+use MyInvoice\Service\Tax\Return\IncomeTaxSubmissionGate;
 
 final class EpoSubmissionService
 {
@@ -53,7 +54,7 @@ final class EpoSubmissionService
                 throw new EpoSubmissionException('not_found', 'Podání nebylo nalezeno.', 404);
             }
             try {
-                (new \MyInvoice\Service\Tax\Return\AccountingDecreeService($this->db))->assertDppoSubmissionSupported($supplierId, $submission, true);
+                (new IncomeTaxSubmissionGate($this->db))->assertReady($supplierId, $submission);
             } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
                 throw new EpoSubmissionException($e->errorCode, $e->getMessage(), $e->httpStatus);
             }

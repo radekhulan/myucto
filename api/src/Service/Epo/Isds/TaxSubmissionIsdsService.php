@@ -11,6 +11,7 @@ use MyInvoice\Service\Epo\TaxSubmissionDocumentService;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
+use MyInvoice\Service\Tax\Return\IncomeTaxSubmissionGate;
 
 /**
  * Zařazení archivovaného daňového podání (DPH, KH, SH, DPPO, DPFO) do obecné
@@ -49,7 +50,7 @@ final readonly class TaxSubmissionIsdsService
         private SubmissionOutboxService $outbox,
         private SubmissionOutboxRepository $outboxRows,
         private TaxSubmissionDocumentService $documents,
-        private \MyInvoice\Service\Tax\Return\AccountingDecreeService $accountingDecrees,
+        private IncomeTaxSubmissionGate $incomeTaxFiling,
         private ?IsdsTransportAvailabilityResolver $transportAvailability = null,
     ) {}
 
@@ -69,7 +70,7 @@ final readonly class TaxSubmissionIsdsService
             throw new SubmissionChannelException('not_found', 'Podání nebylo nalezeno.', 404);
         }
         try {
-            $this->accountingDecrees->assertDppoSubmissionSupported($supplierId, $submission, true);
+            $this->incomeTaxFiling->assertReady($supplierId, $submission);
         } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
             throw new SubmissionChannelException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }

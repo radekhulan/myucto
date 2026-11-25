@@ -1146,6 +1146,7 @@ final class TaxReturnService
                     'filename' => sprintf('%s-%04d%s.xml', $type === 'po' ? 'dppdp9' : 'dpfdp7', $year, $suffix),
                     'summary' => $summary,
                     'warnings' => $summary['warnings'],
+                    'business_errors' => $type === 'fo' ? (array) $stored['business_errors'] : [],
                     'variant' => $variant,
                     'variant_seq' => $seq,
                 ],
@@ -1326,10 +1327,10 @@ final class TaxReturnService
     }
 
     /**
-     * Vygeneruje validované EPO XML, zarchivuje (tax_submissions) a naváže na přiznání.
-     * Samotný build deleguje na {@see buildXml()} — společná cesta s uzávěrkovým balíčkem.
+     * Vydá EPO XML a výsledek kontroly. DPFO se známými věcnými chybami
+     * zůstává ke stažení pro kontrolu, bez záznamu v archivu podání.
      *
-     * @return array{xml:string,form_code:string,filename:string,validation_status:string,validation_errors:list<string>,submission_id:int}
+     * @return array{xml:string,form_code:string,filename:string,validation_status:string,validation_errors:list<string>,business_errors:list<string>,submission_id:int}
      */
     public function generateXml(int $supplierId, int $year, string $type, ?int $userId, string $variant = 'radne', int $variantSeq = 1, bool $sideEffects = true): array
     {
@@ -1342,12 +1343,22 @@ final class TaxReturnService
         $seq = (int) $built['variant_seq'];
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
 
-        $archived = $this->archiver->archive(
-            $supplierId, $built['form_code'], $year, null, null,
-            $built['xml'], $built['summary'], $userId,
-            $sideEffects,
-            self::FORMA[$variant] ?? 'B',
-        );
+        $businessErrors = $built['business_errors'] ?? [];
+        if ($businessErrors === []) {
+            $archived = $this->archiver->archive(
+                $supplierId, $built['form_code'], $year, null, null,
+                $built['xml'], $built['summary'], $userId,
+                $sideEffects,
+                self::FORMA[$variant] ?? 'B',
+            );
+        } else {
+            $validation = $this->xmlValidator->validate($built['xml'], $built['form_code']);
+            $archived = [
+                'submission_id' => null,
+                'validation_status' => $validation['status'],
+                'validation_errors' => $validation['errors'],
+            ];
+        }
         if ($row !== null && $sideEffects && $archived['submission_id'] !== null) {
             $this->returns->setLastSubmission($supplierId, $year, $type, (int) $archived['submission_id'], $variant, $seq);
         }
@@ -1358,6 +1369,7 @@ final class TaxReturnService
             'filename' => $built['filename'],
             'validation_status' => (string) $archived['validation_status'],
             'validation_errors' => (array) $archived['validation_errors'],
+            'business_errors' => $businessErrors,
             'submission_id' => (int) $archived['submission_id'],
         ];
     }
