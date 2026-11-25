@@ -2217,24 +2217,12 @@ final class JournalEntryRepository
     {
         $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
         $out = [];
-        foreach (array_chunk($entryIds, 500) as $chunk) {
-            $marks = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT je.id, je.description, je.source_type,
-                        COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
-                        COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
-                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
-                        " . self::DOCUMENT_FACT_SELECT . "
-                   FROM journal_entries je
-                   " . self::DOCUMENT_SOURCE_JOINS . "
-              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
-                     AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
-              LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
-                     AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
-              " . self::DOCUMENT_FACT_JOINS . "
-                  WHERE je.supplier_id = ? AND je.id IN ({$marks})"
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
+        // Kus = strop dávky rozpisu ({@see LedgerReportRepository::generalLedgerLineBatches()}),
+        // takže jedna dávka je vždy jeden dotaz.
+        foreach (array_chunk($entryIds, 1000) as $chunk) {
+            [$sql, $params] = $this->descriptionPartsQuery($supplierId, $chunk);
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute($params);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $out[(int) $r['id']] = [
                     'document_no' => JournalDescriptionBuilder::clean(
@@ -2249,6 +2237,30 @@ final class JournalEntryRepository
             }
         }
         return $out;
+    }
+
+    /**
+     * SQL a parametry dotazu {@see descriptionParts()} pro jeden kus zápisů (veřejné kvůli EXPLAIN testu).
+     *
+     * @param list<int> $entryIds neprázdný seznam
+     * @return array{0:string, 1:list<int>}
+     */
+    public function descriptionPartsQuery(int $supplierId, array $entryIds): array
+    {
+        $marks = implode(',', array_fill(0, count($entryIds), '?'));
+        return ["SELECT je.id, je.description, je.source_type,
+                        COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
+                        COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
+                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
+                        " . self::DOCUMENT_FACT_SELECT . "
+                   FROM journal_entries je
+                   " . self::DOCUMENT_SOURCE_JOINS . "
+              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
+                     AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
+              LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
+                     AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
+              " . self::DOCUMENT_FACT_JOINS . "
+                  WHERE je.supplier_id = ? AND je.id IN ({$marks})", [$supplierId, ...array_map('intval', $entryIds)]];
     }
 
     /**

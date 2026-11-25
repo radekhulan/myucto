@@ -80,8 +80,9 @@ Jiné období nebo filtry nastavte na obrazovce. Během přípravy souboru tlač
 protiúčet, MD, D a průběžný zůstatek. Popis je krátký jako v účetním deníku: číslo dokladu
 je ve vlastním sloupci, a proto popis vynechává číslo dokladu, pokladnu, protistranu
 a variabilní symbol. Zůstane druh dokladu, pokud nejde o běžnou fakturu (např. dobropis),
-a věcný text. Celý uložený popis se ukáže u storna, u popisu bez věcného textu
-a u zápisu bez čísla dokladu. Rozpis navíc obsahuje účty, které obrazovka
+a věcný text. Bankovní pohyb bez věcného textu ukáže protistranu s variabilním symbolem
+(např. připsaný úrok). Celý uložený popis se ukáže u storna, u jiného dokladu bez věcného
+textu a u zápisu bez čísla dokladu. Rozpis navíc obsahuje účty, které obrazovka
 nezobrazí, protože mají nulový počáteční stav i obrat, ale nesou pohyby (typicky zápis
 a jeho červené storno). U každého účtu uvádí počáteční stav, obraty,
 saldo obratů (MD − D) a konečný zůstatek. Kladný zůstatek znamená MD, záporný D.

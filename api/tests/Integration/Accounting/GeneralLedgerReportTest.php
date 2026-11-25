@@ -433,6 +433,21 @@ final class GeneralLedgerReportTest extends TestCase
         $unnumberedEntry = $this->insertJournalEntry('purchase_invoice', $unnumbered, '501', '321', 20.00, '2099-03-06');
         $unnumberedText = 'PF #' . $unnumbered . ' — Dodavatel Popis s.r.o. — bez čísla';
         $set->execute([$unnumberedText, $unnumberedEntry]);
+        // Bankovní pohyb bez věcného textu (text nese jméno protistrany, např. úrok): zůstane protistrana.
+        $pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date, statement_number)
+             VALUES (?, 'popis.gpc', ?, '1000000005', '0100', 'CZK', '2099-03-07', '2099/003')"
+        )->execute([$this->supplierId, hash('sha256', 'popis-' . $this->supplierId)]);
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, counterparty_name)
+             VALUES (?, '2099-03-07', 5.00, 'CZK', 'Připsaný úrok')"
+        )->execute([(int) $pdo->lastInsertId()]);
+        $bankTx = (int) $pdo->lastInsertId();
+        $bankEntry = $this->insertJournalEntry('bank', $bankTx, '221', '662', 5.00, '2099-03-07');
+        $pdo->prepare("UPDATE journal_entries SET document_no = 'BV-POPIS-1' WHERE id = ?")->execute([$bankEntry]);
+        $set->execute([$builder->forSource($this->supplierId, 'bank', $bankTx), $bankEntry]);
+        self::assertSame('Banka 2099/003 — příchozí platba — Připsaný úrok',
+            $pdo->query("SELECT description FROM journal_entries WHERE id = {$bankEntry}")->fetchColumn());
         $vendorNo = (string) $pdo->query("SELECT vendor_invoice_number FROM purchase_invoices WHERE id = {$purchaseId}")->fetchColumn();
 
         $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
@@ -450,7 +465,33 @@ final class GeneralLedgerReportTest extends TestCase
         self::assertSame('Ruční přeúčtování nákladů', $rows[$manualEntry][0][1]);
         self::assertSame(array_fill(0, 2, ['VPD-2099-0001', 'Storno VPD-2099-0001: chyba — duplicita']), $rows[$stornoEntry]);
         self::assertSame(array_fill(0, 2, [null, $unnumberedText]), $rows[$unnumberedEntry]);
+        self::assertSame(array_fill(0, 2, ['BV-POPIS-1', 'Připsaný úrok']), $rows[$bankEntry]);
         self::assertSame(array_fill(0, 2, [$invoiceNo, 'FV ' . $invoiceNo . ' — Odběratel Popis s.r.o.']), $rows[$invoiceEntry]);
+    }
+
+    /**
+     * Údaje dokladu pro krátký popis se načítají jednou na dávku: počet dotazů rozpisu
+     * v jedné dávce nezávisí na počtu zápisů (dotaz pro každý zápis by s nimi rostl).
+     */
+    public function testDetailedExportDescriptionQueriesDoNotGrowWithEntries(): void
+    {
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $count = function () use ($detail): int {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+            $questions = fn (): int => (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetchColumn(1);
+            iterator_to_array($detail->events($this->supplierId, $data, [], false)); // zahřátí pamětí služeb
+            $before = $questions();
+            iterator_to_array($detail->events($this->supplierId, $data, [], false));
+            return $questions() - $before;
+        };
+        for ($i = 1; $i <= 3; $i++) {
+            $this->manual([self::l('518', 'debit', $i), self::l('211', 'credit', $i)], '2099-03-0' . $i, ['description' => 'Zápis ' . $i]);
+        }
+        $few = $count();
+        for ($i = 4; $i <= 9; $i++) {
+            $this->manual([self::l('518', 'debit', $i), self::l('211', 'credit', $i)], '2099-03-0' . $i, ['description' => 'Zápis ' . $i]);
+        }
+        self::assertSame($few, $count());
     }
 
     public function testDetailedExportUsesSameSourceAndDimensionFilters(): void

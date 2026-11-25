@@ -114,7 +114,7 @@ final class GeneralLedgerDetailService
             $line['document_no'] = $facts['document_no'];
         }
         if ($line['document_no'] !== null) {
-            $line['description'] = JournalDescriptionBuilder::withoutDocumentHead($line['description'] ?? null, $facts['parts']);
+            $line['description'] = JournalDescriptionBuilder::withoutDocumentHead($line['description'] ?? null, $facts['parts'], (string) ($line['source_type'] ?? ''));
         }
         return $line;
     }

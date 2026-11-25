@@ -26,6 +26,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Rozpočet SQL dotazů: každá sestava smí oproti stavu před bodem 6 přidat nejvýš jeden
  * dotaz (EntryFormService::hasAnySingle(), paměť na požadavek). Měří se bez paměti.
+ * Dotazy, které po bodu 6 přidala jiná funkce, se přičítají podle LATER_QUERIES.
  *
  * Přegenerování (jen nad kódem před bodem 6!): UPDATE_PAIR_GOLDEN=1.
  */

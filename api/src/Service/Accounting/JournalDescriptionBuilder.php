@@ -454,12 +454,22 @@ final class JournalDescriptionBuilder
      * textu (jen hlavička a protistrana, ručně přepsaný jednodílný popis) a storno, jehož
      * první segment není hlavička dokladu, ale text „Storno …“.
      *
+     * Výjimkou je bankovní pohyb bez věcného textu: {@see parts()} z něj ubere jen hlavičku
+     * „Banka …“, směr platby a číslo dokladu, zbylá protistrana (s VS) je často jediný popis
+     * pohybu („Připsaný úrok“), takže zůstane ona.
+     *
      * @param array{kind:?string, partner:?string, vs:?string, text:?string} $parts
      */
-    public static function withoutDocumentHead(?string $description, array $parts): string
+    public static function withoutDocumentHead(?string $description, array $parts, string $sourceType = ''): string
     {
         $full = (string) $description;
-        if ($parts['text'] === null || str_starts_with(mb_strtolower(ltrim($full)), 'storno')) {
+        if (str_starts_with(mb_strtolower(ltrim($full)), 'storno')) {
+            return $full;
+        }
+        if ($parts['text'] === null) {
+            if ($sourceType === 'bank' && $parts['partner'] !== null) {
+                return $parts['vs'] !== null ? $parts['partner'] . ' (VS ' . $parts['vs'] . ')' : $parts['partner'];
+            }
             return $full;
         }
 

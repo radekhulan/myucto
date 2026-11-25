@@ -406,9 +406,6 @@ final class JournalDescriptionBuilderTest extends TestCase
      */
     public function testWithoutDocumentHeadKeepsFullDescriptionWhenShorteningWouldLoseIt(): void
     {
-        $bank = 'Banka 2099/004 — příchozí platba — Odběratel s.r.o. (VS 2099000123)';
-        self::assertSame($bank, B::withoutDocumentHead($bank, B::parts($bank, 'bank', [])));
-
         $invoice = 'FV 2099000123 — Odběratel s.r.o.';
         self::assertSame($invoice, B::withoutDocumentHead($invoice,
             B::parts($invoice, 'invoice', ['source_ref' => '2099000123', 'partner_name' => 'Odběratel s.r.o.'])));
@@ -423,5 +420,32 @@ final class JournalDescriptionBuilderTest extends TestCase
 
         self::assertSame('Ruční přeúčtování nákladů', B::withoutDocumentHead('Ruční přeúčtování nákladů',
             B::parts('Ruční přeúčtování nákladů', 'manual', [])));
+    }
+
+    /**
+     * Bankovní pohyb bez věcného textu: hlavičku a směr platby rozklad pozná spolehlivě,
+     * zbylá protistrana je popis pohybu (u úroků jediný). U jiného zdroje zůstane celý popis.
+     */
+    public function testWithoutDocumentHeadKeepsBankCounterpartyWhenThereIsNoText(): void
+    {
+        $bank = 'Banka 2099/004 — příchozí platba — Odběratel s.r.o. (VS 2099000123)';
+        self::assertSame('Odběratel s.r.o. (VS 2099000123)', B::withoutDocumentHead($bank, B::parts($bank, 'bank', []), 'bank'));
+
+        $interest = 'Banka 2099/004 — příchozí platba — Připsaný úrok';
+        self::assertSame('Připsaný úrok', B::withoutDocumentHead($interest,
+            B::parts($interest, 'bank', ['partner_name' => 'Připsaný úrok']), 'bank'));
+
+        // Bez protistrany (jen VS) zůstane celý popis.
+        $vsOnly = 'Banka 2099/004 — příchozí platba — VS 2099000123';
+        self::assertSame($vsOnly, B::withoutDocumentHead($vsOnly, B::parts($vsOnly, 'bank', []), 'bank'));
+
+        // Ručně přepsaný popis jen s protistranou zůstane, jak je.
+        $rewritten = 'nájem sklad';
+        self::assertSame($rewritten, B::withoutDocumentHead($rewritten,
+            B::parts($rewritten, 'bank', ['partner_name' => 'nájem sklad']), 'bank'));
+
+        $invoice = 'FV 2099000123 — Odběratel s.r.o.';
+        self::assertSame($invoice, B::withoutDocumentHead($invoice,
+            B::parts($invoice, 'invoice', ['source_ref' => '2099000123', 'partner_name' => 'Odběratel s.r.o.']), 'invoice'));
     }
 }
