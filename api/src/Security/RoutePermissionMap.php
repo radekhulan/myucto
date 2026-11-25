@@ -821,6 +821,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/nonprofit-funding$#', 'accounting', AccessLevel::READ],
         ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-funding/choices$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-funding/(preview|confirm)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/periods/[0-9]+/funding-work(/.*)?$#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/periods/[0-9]+/funding-work/.+$#', 'accounting', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile/confirm$#', 'accounting.periods.close', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile/readiness$#', 'accounting', AccessLevel::READ],

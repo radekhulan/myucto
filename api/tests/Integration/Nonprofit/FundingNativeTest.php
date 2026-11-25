@@ -103,6 +103,20 @@ final class FundingNativeTest extends TestCase
     {
         $a=$this->assessment;$a['funding']=[['source_id'=>'line:'.$this->income,'cost_id'=>'line:'.$this->expense,'amount_cents'=>$amount,'evidence'=>'Synthetic actual eligible use']];return $a;
     }
+    /** #403 rozhodnutí 2: náklad čerpaný v potvrzeném J6 pracovní evidence nesnižuje, jen na souběh upozorní. */
+    public function testWorkingRecordsWarnAboutCostAlreadyDrawnInConfirmedJ6():void
+    {
+        $this->enroll();$s=$this->tax->read($this->supplier,$this->period)['snapshot'];
+        $this->tax->confirm($this->supplier,$this->period,$this->linked(),$s['input_hash'],'Synthetic actual use','actual-use',$this->actor,$this->receipt['id']);
+        $work=Bootstrap::buildContainer()->get(\MyInvoice\Service\Nonprofit\Funding\Work\FundingWorkService::class);
+        $source=$work->create($this->supplier,$this->period,['provider_id'=>$this->provider,'kind'=>'gift','title'=>'Synthetic working gift','contract_ref'=>null,'budget_cents'=>100000,
+            'valid_from'=>'2026-01-01','valid_to'=>'2026-12-31','activity_kind_ids'=>[],'account_prefixes'=>[],'legacy_source_key'=>'gift-sport'],$this->actor)['source']['id'];
+        $offer=$work->costCandidates($this->supplier,$this->period,$source,'',1)['rows'];
+        self::assertSame([[$this->expense,'gift-sport']],array_map(static fn($r)=>[$r['id'],$r['confirmed_source_key']],$offer));
+        $detail=$work->allocate($this->supplier,$this->period,$source,[['line_id'=>$this->expense,'amount_cents'=>80000]],$this->actor);
+        self::assertSame('gift-sport',$detail['allocations'][0]['confirmed_source_key']);
+        self::assertSame(80000,$detail['totals']['documented_cents'],'Čerpání v J6 kapacitu pracovní evidence nesnižuje (rozhodnutí 2).');
+    }
     public function testActualTaxConfirmationRejectsGrantBudgetOveruse():void
     {
         $this->enroll();$snapshot=$this->tax->read($this->supplier,$this->period)['snapshot'];
@@ -200,12 +214,17 @@ final class FundingNativeTest extends TestCase
         $second=$this->policy;$second['source_anchor']='line:'.$secondIncome;$second['source_members']=['line:'.$secondIncome];$second['budget_cents']=10000;
         $secondPreview=$this->funding->preview($this->supplier,$this->period,'aaa-second-gift',$second);
         $this->funding->confirm($this->supplier,$this->period,'aaa-second-gift',$second,$secondPreview['input_hash'],0,'Synthetic distinct gift','second-gift',$this->actor);
+        $this->pdo->prepare("INSERT INTO nonprofit_funding_work_sources(supplier_id,period_id,provider_id,kind,title,budget_cents,valid_from,valid_to,activity_kind_ids,account_prefixes,legacy_source_key,created_by) VALUES (?,?,?,'gift','Synthetic donor donor@example.test working',100,'2026-01-01','2026-12-31','[]','[]','gift-sport',?)")
+            ->execute([$this->supplier,$this->period,$this->provider,$this->actor]);$workSource=(int)$this->pdo->lastInsertId();
         $this->pdo->commit();
         (new \MyInvoice\Service\Anonymization\AnonymizationService($this->cloneConfig))->run(new \MyInvoice\Service\Anonymization\AnonymizationOptions(source:$this->cloneSource,target:$this->cloneTarget,seed:'synthetic-funding-clone'),static function():void{});
         $data=$this->cloneConfig->all();$data['db']['name']=$this->cloneTarget;
         $target=Connection::withoutSharedTestConnection(fn()=>new Connection(new \MyInvoice\Infrastructure\Config\Config($data)));
         try{
             $q=$target->pdo()->prepare('SELECT COUNT(*) FROM nonprofit_tax_assessments WHERE supplier_id=?');$q->execute([$this->supplier]);self::assertSame(4,(int)$q->fetchColumn());
+            // Odkaz pracovní evidence na potvrzený zdroj se v klonu přemapuje na nový klíč (#403).
+            $q=$target->pdo()->prepare('SELECT w.legacy_source_key,(SELECT COUNT(*) FROM nonprofit_funding_revisions r WHERE r.supplier_id=w.supplier_id AND r.source_key=w.legacy_source_key) FROM nonprofit_funding_work_sources w WHERE w.id=?');
+            $q->execute([$workSource]);[$legacy,$matches]=$q->fetch(PDO::FETCH_NUM);self::assertStringStartsWith('funding-',(string)$legacy);self::assertGreaterThan(0,(int)$matches);
             $c=Bootstrap::buildContainer();$c->set(Connection::class,$target);$report=$c->get(FundingService::class)->read($this->supplier);
             self::assertTrue($report['complete']);$original=array_values(array_filter($report['sources'],fn($r)=>$r['revision']['policy']['source_anchor']==='line:'.$this->income))[0];self::assertSame(60000,$original['drawdown_cents']);self::assertSame(10000,$original['budget_remaining_cents']);
             $all=$c->get(FundingRepository::class)->all($this->supplier);self::assertCount(3,$all);$originalRows=array_values(array_filter($all,fn($r)=>$r['policy']['source_anchor']==='line:'.$this->income));self::assertSame($originalRows[0]['record_hash'],$originalRows[1]['parent_hash']);

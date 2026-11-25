@@ -183,6 +183,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/accounting/periods/[0-9]+/nonprofit-membership/reconciliation$#',
         '#^/api/accounting/nonprofit-(funding|capital)(/|$)#',
         '#^/api/accounting/periods/[0-9]+/nonprofit-(funding|capital)/choices$#',
+        '#^/api/accounting/periods/[0-9]+/funding-work(/|$)#',
         '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile(/|$)#',
         '#^/api/accounting/nonprofit-tax-savings(/|$)#',
         '#^/api/eshop/bulk(/|$)#',
