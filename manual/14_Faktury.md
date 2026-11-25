@@ -407,6 +407,10 @@ Ve filtrech vyberte jeden či více štítků. Zobrazí se doklady se všemi vyb
 štítky. Volba **Bez štítku** vyhledá nezařazené doklady. V nastavení sloupců lze
 zapnout **Štítky**. Štítky slouží uvnitř firmy a zákazník je na dokladu neuvidí.
 
+U vystavené, zaúčtované i stornované faktury upravíte štítky přímo v detailu dokladu
+odkazem **Upravit štítky** pod odběratelem. Nejde o úpravu dokladu: částky, zaúčtování
+ani DPH se nemění, a proto to jde i v uzavřeném období. Změna se zapíše do historie dokladu.
+
 #### Kategorie tržby
 
 Filtr bere **několik kategorií najednou** a přepínačem vedle něj rozhodnete, co s nimi:

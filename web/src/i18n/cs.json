@@ -2,7 +2,11 @@
   "entity_tags": {
     "label": "Štítky",
     "none": "Bez štítku",
-    "remove": "Odebrat štítek {name}"
+    "remove": "Odebrat štítek {name}",
+    "edit": "Upravit štítky",
+    "add": "Přidat štítky",
+    "save": "Uložit štítky",
+    "saved": "Štítky uloženy"
   },
   "user_sessions": {
     "select_page": "Vybrat všechny na stránce",
@@ -26135,6 +26139,7 @@
       "created": "Vytvořeno",
       "updated": "Upraveno",
       "force_updated": "Upraveno (admin force)",
+      "tags_changed": "Změněny štítky",
       "issued": "Vystaveno",
       "paid": "Označeno zaplaceno",
       "cancelled": "Stornováno",

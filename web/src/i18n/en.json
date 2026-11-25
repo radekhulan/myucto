@@ -2,7 +2,11 @@
   "entity_tags": {
     "label": "Tags",
     "none": "Untagged",
-    "remove": "Remove tag {name}"
+    "remove": "Remove tag {name}",
+    "edit": "Edit tags",
+    "add": "Add tags",
+    "save": "Save tags",
+    "saved": "Tags saved"
   },
   "user_sessions": {
     "select_page": "Select all on this page",
@@ -26135,6 +26139,7 @@
       "created": "Created",
       "updated": "Updated",
       "force_updated": "Updated (admin force)",
+      "tags_changed": "Tags changed",
       "issued": "Issued",
       "paid": "Marked paid",
       "cancelled": "Cancelled",

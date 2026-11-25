@@ -36215,6 +36215,53 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/InvoiceProjectWrite'
+  /api/v1/invoices/{id}/tags:
+    post:
+      tags:
+      - Invoices
+      summary: Interní štítky faktury v libovolném stavu
+      operationId: publicInvoicesIdTagsPost
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Faktura s uloženými štítky
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Klientské roli nejsou interní štítky dostupné, nebo chybí oprávnění k zápisu faktur.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: |
+        Vyžaduje scope read_write a zápis do faktur.
+
+        Nahradí celou sadu štítků. Klíč `tags` je povinný: chybí-li v těle, vrací 400
+        `validation_failed` (`fields.tags`); prázdné pole štítky odebere. Štítky nejsou
+        účetním údajem, proto se mění i u vystavené, zaúčtované nebo stornované faktury
+        a v uzavřeném období, bez vynucené úpravy dokladu. Změna se zapíše do auditní stopy
+        (`invoice.tags_changed` s původními a novými názvy).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceTagsWrite'
   /api/v1/invoices/{id}/uncancel:
     post:
       tags:
@@ -67997,6 +68044,19 @@ components:
           - type: integer
             minimum: 1
           - type: 'null'
+    InvoiceTagsWrite:
+      type: object
+      required:
+      - tags
+      properties:
+        tags:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: Úplná sada názvů štítků; prázdné pole štítky odebere.
     InvoiceUncancelResult:
       type: object
       required:

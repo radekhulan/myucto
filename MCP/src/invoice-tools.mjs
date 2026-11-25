@@ -940,6 +940,28 @@ export const INVOICE_TOOLS = [
       project_id: Number(a.project_id) > 0 ? a.project_id : null,
     }, tool),
   },
+  {
+    name: 'set_invoice_tags',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Nastavit interní štítky vydané faktury',
+    description:
+      'Nahradí interní štítky vydané faktury celou novou sadou (prázdné pole `tags` je odebere), i když už je '
+      + 'vystavená nebo zaúčtovaná: štítky jsou jen interní třídění firmy, účty, částky ani DPH se nemění '
+      + 'a zákazník je nevidí. Neexistující název se ve firemním seznamu založí, velikost písmen se sjednotí '
+      + 's existujícím štítkem.',
+    inputSchema: schema({
+      id: id('ID faktury.'),
+      tags: {
+        type: 'array',
+        description: 'Úplná sada názvů štítků (nejvýše 64, každý nejvýše 64 znaků); prázdné pole štítky odebere.',
+        items: { type: 'string', minLength: 1, maxLength: 64 },
+        maxItems: 64,
+      },
+    }, ['id', 'tags']),
+    write: true,
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/tags`, { tags: a.tags }, tool),
+  },
 
   // ── Zápočet dobropisu, vratka, výkaz práce ───────────────────────────────
   {

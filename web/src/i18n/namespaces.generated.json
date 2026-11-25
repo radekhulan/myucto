@@ -405,6 +405,7 @@
       "credit_note_offset",
       "dimensions",
       "documents",
+      "entity_tags",
       "linked_documents",
       "list_nav",
       "lock",

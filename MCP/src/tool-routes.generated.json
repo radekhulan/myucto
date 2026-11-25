@@ -4112,6 +4112,15 @@
       ]
     ]
   },
+  "set_invoice_tags": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/tags"
+      ]
+    ]
+  },
   "set_other_item_dimensions": {
     "write": true,
     "api": [

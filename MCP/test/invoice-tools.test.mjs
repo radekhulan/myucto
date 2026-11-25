@@ -76,6 +76,7 @@ const NEW_TOOLS = {
   resume_recurring_invoice: 'write',
   reschedule_recurring_invoice: 'write',
   run_recurring_invoice_now: 'destructive',
+  set_invoice_tags: 'write',
 };
 
 const issuedInvoice = (overrides = {}) => ({
@@ -123,6 +124,8 @@ test('jednoduché nástroje volají správnou cestu se správným tělem', async
     ['get_invoice_recipients', { id: 42, type: 'reminders' }, 'GET', '/invoices/42/recipients'],
     ['pause_recurring_invoice', { id: 5 }, 'POST', '/recurring/5/pause', {}],
     ['resume_recurring_invoice', { id: 5 }, 'POST', '/recurring/5/resume', {}],
+    ['set_invoice_tags', { id: 42, tags: ['Hosting', 'Servis'] }, 'POST', '/invoices/42/tags', { tags: ['Hosting', 'Servis'] }],
+    ['set_invoice_tags', { id: 42, tags: [] }, 'POST', '/invoices/42/tags', { tags: [] }],
   ];
   for (const [name, args, method, path, body] of cases) {
     const client = new FakeClient();

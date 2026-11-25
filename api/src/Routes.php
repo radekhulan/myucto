@@ -766,6 +766,8 @@ final class Routes
         $app->delete ('/api/invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'revertInvoice']);
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/invoices/{id:[0-9]+}/project',   SetInvoiceProjectAction::class);
+        // Interní štítky — i u vystaveného a zaúčtovaného dokladu, nejsou účetním údajem.
+        $app->post   ('/api/invoices/{id:[0-9]+}/tags',      \MyInvoice\Action\Invoice\SetInvoiceTagsAction::class);
         // Období časového rozlišení výnosu (384) — smí i u zaúčtovaného dokladu, čte ho až uzávěrka.
         $app->put    ('/api/invoices/{id:[0-9]+}/accrual',   \MyInvoice\Action\Invoice\SetInvoiceAccrualAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/rebuild-snapshots', \MyInvoice\Action\Invoice\RebuildInvoiceSnapshotsAction::class);

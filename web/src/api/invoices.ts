@@ -1022,6 +1022,9 @@ export const invoicesApi = {
   /** Období časového rozlišení výnosu u řádků — smí i u vystavené a zaúčtované faktury. */
   setAccrual: (id: number, items: Array<{ id: number; accrual_from: string | null; accrual_to: string | null }>) =>
     api.put<Invoice>(`/invoices/${id}/accrual`, { items }).then(r => r.data),
+  /** Interní štítky celou sadou — i u vystavené a zaúčtované faktury, nejsou účetním údajem. */
+  setTags: (id: number, tags: string[]) =>
+    api.post<Invoice>(`/invoices/${id}/tags`, { tags }).then(r => r.data),
   /**
    * Vrátí náhled, jaké číslo faktura dostane při Vystavení (BEZ inkrementu counteru).
    * Používá se v editoru jako placeholder „automaticky: JD2026-01".
