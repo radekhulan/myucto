@@ -23058,9 +23058,10 @@
       "reopen": {
         "button": "Reopen",
         "title": "Reopening period {year}",
+        "expired": "The deadline for reopening the books passed on {date}.",
         "text": "Reopening a closed period touches closed accounting records and is recorded in the audit trail. If closing entries exist, first undo the Open the new year and Close the books steps.",
         "reason": "Reason",
-        "reason_placeholder": "Reason for reopening / revoking approval…",
+        "reason_placeholder": "Which item in the statements does not reflect the actual position?",
         "reason_required": "A reason is required (min. 10 characters)."
       },
       "series": {

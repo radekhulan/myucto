@@ -99,6 +99,7 @@ export type ClosingPeriodStatus = 'open' | 'closing' | 'closed' | 'approved'
 export interface ClosingPeriod extends Omit<AccountingPeriod, 'status'> {
   status: ClosingPeriodStatus
   row_version: number
+  expired_reopen_deadline?: string | null
   closed_by?: number | null
   approved_at?: string | null
   approved_by?: number | null
@@ -273,6 +274,7 @@ export interface ClosingState {
   can_revert_stock?: boolean
   can_revert_close_books?: boolean
   can_revert_open_next?: boolean
+  expired_reopen_deadline?: string | null
   /** Krok je vyžadován k uzavření knih jen tehdy, dává-li v období smysl. */
   stock_step_required?: boolean
   depreciation_step_required?: boolean

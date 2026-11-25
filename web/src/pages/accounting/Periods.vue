@@ -380,10 +380,13 @@ function statusBadge(status: string): string {
                       class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-500/50 text-warning-600 hover:bg-warning-50 font-medium">
                       {{ t('accounting.closing.approve.button') }}
                     </button>
-                    <button v-if="p.status === 'closed'" @click="openStatusDialog(p, 'reopen')"
+                    <button v-if="p.status === 'closed' && !p.expired_reopen_deadline" @click="openStatusDialog(p, 'reopen')"
                       class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-300 text-warning-600 hover:bg-warning-50 font-medium">
                       {{ t('accounting.closing.reopen.button') }}
                     </button>
+                    <span v-if="p.expired_reopen_deadline" class="text-xs text-neutral-500">
+                      {{ t('accounting.closing.reopen.expired', { date: formatDate(p.expired_reopen_deadline) }) }}
+                    </span>
                   </template>
                   <span v-if="p.status === 'approved'" class="text-xs text-neutral-400"
                     :title="t('accounting.closing.approve.locked_hint')">🔒</span>
@@ -421,10 +424,13 @@ function statusBadge(status: string): string {
                 class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-500/50 text-warning-600 hover:bg-warning-50 font-medium">
                 {{ t('accounting.closing.approve.button') }}
               </button>
-              <button v-if="p.status === 'closed'" @click="openStatusDialog(p, 'reopen')"
+              <button v-if="p.status === 'closed' && !p.expired_reopen_deadline" @click="openStatusDialog(p, 'reopen')"
                 class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-300 text-warning-600 hover:bg-warning-50 font-medium">
                 {{ t('accounting.closing.reopen.button') }}
               </button>
+              <span v-if="p.expired_reopen_deadline" class="text-xs text-neutral-500">
+                {{ t('accounting.closing.reopen.expired', { date: formatDate(p.expired_reopen_deadline) }) }}
+              </span>
             </template>
             <RouterLink v-if="auth.can('reports.export')"
               :to="{ name: 'accounting-closing-package', params: { id: p.id } }"

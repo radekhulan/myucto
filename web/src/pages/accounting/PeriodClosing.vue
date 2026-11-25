@@ -949,6 +949,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       </div>
     </div>
 
+    <p v-if="state?.expired_reopen_deadline" data-test="reopen-deadline-expired"
+      class="mb-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+      {{ t('accounting.closing.reopen.expired', { date: formatDate(state.expired_reopen_deadline) }) }}
+    </p>
+
     <!-- Rok převedený i s uzávěrkou původního systému: průvodce ji znovu neúčtuje a dimenze
          roku jsou kvůli převzaté uzávěrce zmrazené (jinak by se ptali, proč nejdou změnit). -->
     <div v-if="state?.closing_taken_over" data-test="closing-taken-over"

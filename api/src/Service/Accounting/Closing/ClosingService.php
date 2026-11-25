@@ -311,6 +311,9 @@ final class ClosingService
         $steps = $this->stepsMap($supplierId, $periodId);
         $prev = $this->previousPeriod($supplierId, (string) $period['starts_on']);
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
+        $expiredReopenDeadline = in_array($period['status'], ['closed', 'reviewed'], true)
+            ? $this->periods->expiredReopenDeadline((string) $period['ends_on'], $next['ends_on'] ?? null)
+            : null;
 
         $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $requiredPreClose = $this->preCloseStepKeys($supplierId, $period);
@@ -365,11 +368,12 @@ final class ClosingService
             'can_open_next' => AccountingPeriodStatus::isClosed((string) $period['status'])
                 && $steps['close_books']['status'] === 'done'
                 && $steps['open_next']['status'] !== 'done',
+            'expired_reopen_deadline' => $expiredReopenDeadline,
             'can_revert_open_next' => $steps['open_next']['status'] === 'done'
-                && $period['status'] === 'closed' && $nextAllowsRevert,
+                && $period['status'] === 'closed' && $nextAllowsRevert && $expiredReopenDeadline === null,
             'can_revert_close_books' => $period['status'] === 'closed'
                 && $steps['close_books']['status'] === 'done'
-                && $steps['open_next']['status'] !== 'done',
+                && $steps['open_next']['status'] !== 'done' && $expiredReopenDeadline === null,
             'can_revert_fx_revaluation' => $period['status'] === 'closing'
                 && $steps['fx_revaluation']['status'] === 'done',
             'can_revert_stock' => $period['status'] === 'closing'
@@ -5649,10 +5653,19 @@ final class ClosingService
             $dumps = [];
             $result = ['step' => $stepKey];
 
+            $next = null;
+            if (in_array($stepKey, ['open_next', 'close_books'], true)) {
+                $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on'], forUpdate: true);
+                $deadline = $this->periods->expiredReopenDeadline((string) $period['ends_on'], $next['ends_on'] ?? null);
+                if ($period['status'] === 'closed' && $deadline !== null) {
+                    throw new ClosingException('reopen_deadline_passed',
+                        'Lhůta pro znovuotevření účetních knih skončila dne ' . $deadline . ' (§ 17 odst. 7 ZoÚ).');
+                }
+            }
+
             switch ($stepKey) {
                 case 'open_next':
                     $this->assertStatus($period, ['closed', 'closing']);
-                    $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
                     // §17/7: do uzavřených knih následujícího období se nesahá —
                     // opening jde smazat, jen dokud N+1 nemá vlastní uzávěrku
                     // (deleteClosingEntry jde mimo PostingService a jeho guardy).
@@ -5729,7 +5742,6 @@ final class ClosingService
 
                 case 'close_books':
                     $this->assertStatus($period, ['closed']);
-                    $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
                     if ($steps['open_next']['status'] === 'done'
                         || ($next !== null && $this->closing->hasOpeningEntries(
                             $supplierId,

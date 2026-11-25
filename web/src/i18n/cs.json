@@ -23058,9 +23058,10 @@
       "reopen": {
         "button": "Znovuotevřít",
         "title": "Znovuotevření období {year}",
+        "expired": "Lhůta pro znovuotevření účetních knih skončila {date}.",
         "text": "Znovuotevření uzavřeného období je zásah do uzavřeného účetnictví a zaznamená se do auditní stopy. Existují-li uzávěrkové zápisy, nejprve vezměte zpět kroky Otevření roku a Uzavření knih.",
         "reason": "Důvod",
-        "reason_placeholder": "Důvod znovuotevření / zrušení schválení…",
+        "reason_placeholder": "Která položka závěrky neodpovídá skutečnému stavu?",
         "reason_required": "Důvod je povinný (min. 10 znaků)."
       },
       "series": {
