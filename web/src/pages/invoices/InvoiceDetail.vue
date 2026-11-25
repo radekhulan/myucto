@@ -3152,7 +3152,7 @@ useWindowRefresh(async () => {
                     {{ formatMoney(d.gross, invoice.currency) }}
                     <span class="text-xs text-neutral-500">({{ t('invoice.advance_drawdown.mode_net') }} {{ formatMoney(d.base, invoice.currency) }})</span>
                   </span>
-                  <button v-if="isDraft" type="button" :disabled="drawdownSaving" data-test="drawdown-remove-one" @click="removeDrawdownOf(d)"
+                  <button v-if="isDraft || canDrawdownIssued" type="button" :disabled="drawdownSaving" data-test="drawdown-remove-one" @click="removeDrawdownOf(d)"
                     class="cursor-pointer inline-flex items-center gap-1 whitespace-nowrap text-xs px-2 py-1 border border-danger-300 text-danger-700 rounded hover:bg-danger-50 disabled:opacity-50 bg-surface">
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.uturn" /></svg>
                     {{ t('invoice.advance_drawdown.remove_one') }}

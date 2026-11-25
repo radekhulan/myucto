@@ -70,6 +70,36 @@ final class IssuedInvoiceAdvanceDrawdown
     }
 
     /**
+     * Odebere z vystavené faktury čerpání zálohy `$proformaId` (bez něj všech záloh),
+     * srovná stav úhrady a přepíše zápis, vše v jedné transakci.
+     *
+     * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array{removed:list<int>, reposted_entry_id:?int}
+     */
+    public function remove(int $supplierId, int $invoiceId, ?int $proformaId, array $meta): array
+    {
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->lockIssued($supplierId, $invoiceId);
+            $removed = $this->drawdown->remove($supplierId, $invoiceId, $proformaId, true);
+            $result = ['removed' => $removed, 'reposted_entry_id' => $this->resync($supplierId, $invoiceId, $meta)];
+            if ($own) {
+                $pdo->commit();
+            }
+            return $result;
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Srovná stav úhrady a zápis v deníku vystavené faktury po změně odpočtu zálohy
      * (čerpání, spárování, odpárování). Volat v transakci volajícího. Propojení se zálohou
      * stav úhrady záměrně nemění ({@see \MyInvoice\Action\Invoice\LinkAdvanceAction}),
@@ -127,7 +157,7 @@ final class IssuedInvoiceAdvanceDrawdown
             throw new \DomainException('Faktura nenalezena.');
         }
         if ((string) $row['invoice_type'] !== 'invoice' || !in_array((string) $row['status'], self::STATUSES, true)) {
-            throw new \DomainException('Zálohu lze odečíst jen na konceptu nebo vystavené běžné faktuře.');
+            throw new \DomainException('Čerpání zálohy lze změnit jen na konceptu nebo vystavené běžné faktuře.');
         }
         if ($row['import_total_with_vat_czk'] !== null) {
             throw new \DomainException('Na převzatém dokladu s částkami ze zdroje nelze změnit čerpání zálohy.');
