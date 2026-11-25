@@ -215,6 +215,16 @@ final class PremierPayrollTest extends TestCase
         self::assertSame(3430.0 + 975.0, $next[1]['ledger']['tax'], 'Záloha na 342100 i srážková daň na 342200.');
     }
 
+    public function testEmployerSocialInsuranceIsRoundedUpFromMonthTotal(): void
+    {
+        $backup = $this->backup(['payroll' => true, 'payroll_employer_fraction' => true]);
+        $totals = PremierPayroll::fromBackup($backup)->monthTotals(SyntheticPremierBackup::YEAR2);
+        self::assertSame(1612.0 + 585.0 + 9920.0 + 3600.0, $totals['2026-02']['employer_insurance'],
+            'Přesný podíl 9 919,68 se v úhrnu měsíce zaokrouhlí nahoru na 9 920 jako v deníku.');
+        $months = PremierPayroll::reconcile($totals, PremierPayroll::ledgerTotals(new PremierJournal($backup), SyntheticPremierBackup::YEAR2));
+        self::assertSame([], array_values(array_filter($months, static fn (array $m): bool => !$m['ok'])));
+    }
+
     public function testMismatchedMonthIsReported(): void
     {
         $backup = $this->backup(['payroll' => true, 'payroll_mismatch' => true]);

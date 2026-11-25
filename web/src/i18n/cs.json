@@ -2791,6 +2791,12 @@
     "body_native": "Tato firma je nezisková organizace nebo jiná účetní jednotka podle vyhlášky 504/2002 Sb. (spolek, nadace, ústav, SVJ). Export MyÚčto přenese osnovu a účetní deník jen do firmy se stejným účetním rámcem (vyhláška 500, nebo 504) a nepřenáší evidenci členů a příspěvků, dotací, kapitálu ani podklady daně z příjmů neziskové organizace. Převod pro neziskové organizace nebyl ověřen, před převodem proto kontaktujte podporu.",
     "contact": "Kontaktovat podporu"
   },
+  "migration_other_company": {
+    "switch_hint": "Data patří firmě {company} (IČO {ico}), ale nahráli jste je ve firmě {current} (IČO {ownIco}). Přepněte se do firmy {company} a nahrajte data znovu tam.",
+    "missing_hint": "Data patří firmě {company} (IČO {ico}), ale nahráli jste je ve firmě {current} (IČO {ownIco}). Firma s IČO {ico} v MyÚčtu zatím není: založte ji, přepněte se do ní a nahrajte data tam.",
+    "switch": "Přepnout do {company}",
+    "create": "Založit firmu"
+  },
   "migration_payroll_notice": {
     "title": "Mzdy se do MyÚčta nepřevedou",
     "summary": "Převáděná data obsahují mzdy {employees} zaměstnanců {period} ({months} měsíců). Tyto mzdy se nepřevedou.",

@@ -109,6 +109,7 @@
     "mfa_setup",
     "migrationChecks",
     "migration_nonprofit_notice",
+    "migration_other_company",
     "migration_overview",
     "migration_payroll_notice",
     "money_s3",
@@ -517,6 +518,7 @@
       "company_profile",
       "imports",
       "migration_nonprofit_notice",
+      "migration_other_company",
       "migration_payroll_notice",
       "pamica",
       "payroll_posting_import",
@@ -527,6 +529,7 @@
       "company_profile",
       "imports",
       "migration_nonprofit_notice",
+      "migration_other_company",
       "migration_payroll_notice",
       "pamica",
       "payroll_posting_import",
@@ -537,6 +540,7 @@
       "company_profile",
       "imports",
       "migration_nonprofit_notice",
+      "migration_other_company",
       "premier"
     ],
     "imports-stereo-nx": [

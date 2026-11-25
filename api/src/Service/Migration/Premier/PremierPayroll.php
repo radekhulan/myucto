@@ -319,6 +319,7 @@ final class PremierPayroll
     public function monthTotals(int $year): array
     {
         $out = [];
+        $employerSocial = [];
         foreach ($this->relations as $relation) {
             foreach ($relation['months'] as $period => $m) {
                 if ((int) substr($period, 0, 4) !== $year) {
@@ -327,9 +328,17 @@ final class PremierPayroll
                 $out[$period] ??= ['gross' => 0.0, 'employee_insurance' => 0.0, 'employer_insurance' => 0.0, 'tax' => 0.0];
                 $out[$period]['gross'] += $m['gross'];
                 $out[$period]['employee_insurance'] += $m['employee_social'] + $m['employee_health'];
-                $out[$period]['employer_insurance'] += $m['employer_social'] + $m['employer_health'];
+                $out[$period]['employer_insurance'] += $m['employer_health'];
+                $employerSocial[$period] = ($employerSocial[$period] ?? 0.0) + $m['employer_social'];
                 $out[$period]['tax'] += $m['advance_tax'] + $m['withholding_tax'] - $m['tax_bonus'];
             }
+        }
+        // PREMIER nese u vztahu přesný podíl pojistného zaměstnavatele na sociální
+        // pojištění (např. 6 425,68), zaměstnavatel ho ale platí a účtuje z úhrnu
+        // vyměřovacích základů zaokrouhlený na celé koruny nahoru (§ 7 zákona
+        // č. 589/1992 Sb., stejně jako {@see \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator}).
+        foreach ($employerSocial as $period => $social) {
+            $out[$period]['employer_insurance'] += (float) (int) ceil(round($social * 100) / 100);
         }
         ksort($out);
         return array_map(static fn (array $v): array => array_map(static fn (float $x): float => round($x, 2), $v), $out);
