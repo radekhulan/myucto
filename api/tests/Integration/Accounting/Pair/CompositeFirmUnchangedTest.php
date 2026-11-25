@@ -37,6 +37,15 @@ final class CompositeFirmUnchangedTest extends TestCase
     private const GOLDEN_DIR = __DIR__ . '/../../../Fixtures/pair/composite';
     private const EXTRA_QUERIES = 1;
 
+    /**
+     * Dotazy přidané po bodu 6 jinou funkcí, ne jednoduchým zápisem. Rozpočet bodu 6 zůstává
+     * vůči zlatému `queries.json`, ty se jen přičtou ke své sestavě.
+     */
+    private const LATER_QUERIES = [
+        // Krátký popis rozpisu: JournalEntryRepository::descriptionParts(), jeden dotaz na dávku řádků.
+        'general_ledger_detail' => 1,
+    ];
+
     /** @var array<int,string> */
     private array $entryTokens = [];
     /** @var array<int,string> */
@@ -141,7 +150,7 @@ final class CompositeFirmUnchangedTest extends TestCase
         $budget = json_decode((string) file_get_contents(self::GOLDEN_DIR . '/queries.json'), true, 8, JSON_THROW_ON_ERROR);
         foreach ($budget as $name => $count) {
             self::assertArrayHasKey($name, $queries);
-            self::assertLessThanOrEqual($count + self::EXTRA_QUERIES, $queries[$name], 'Rozpočet SQL dotazů sestavy ' . $name . ' (stav před bodem 6: ' . $count . ').');
+            self::assertLessThanOrEqual($count + self::EXTRA_QUERIES + (self::LATER_QUERIES[$name] ?? 0), $queries[$name], 'Rozpočet SQL dotazů sestavy ' . $name . ' (stav před bodem 6: ' . $count . ').');
         }
     }
 
