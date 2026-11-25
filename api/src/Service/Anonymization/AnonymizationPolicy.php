@@ -87,6 +87,8 @@ final class AnonymizationPolicy
         'mcp_oauth_grants' => 'obnovovací tokeny externích MCP klientů',
         'mfa_recovery_codes' => 'záchranné kódy 2FA',
         'mfa_step_up_proofs' => 'doklady o ověření relace',
+        'mobile_oidc_codes' => 'jednorázové kódy pro vydání mobilního API tokenu',
+        'myeet_checkouts' => 'reference skutečných plateb a licencí MyEET původní instance',
         'oauth_sessions' => 'rozpracovaná OAuth přihlášení k externím službám',
         'oidc_link_invites' => 'pozvánky k propojení s poskytovatelem identity',
         'oidc_login_flows' => 'rozpracovaná přihlášení přes poskytovatele identity',

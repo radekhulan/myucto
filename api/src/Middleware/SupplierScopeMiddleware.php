@@ -102,7 +102,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         }
 
         if ($access->supplierId > 0 && (int) ($user['id'] ?? 0) > 0
-            && ($user['role'] ?? null) !== 'superadmin'
+            && !($user['is_superadmin'] ?? false)
             && $this->config?->get('myeet.sale_managed', false) === true
             && $this->config->get('app.url') === 'https://eet.myucto.online'
             && $request->getUri()->getHost() === 'eet.myucto.online'

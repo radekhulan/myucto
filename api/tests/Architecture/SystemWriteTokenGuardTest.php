@@ -31,6 +31,7 @@ final class SystemWriteTokenGuardTest extends TestCase
         'Action/Auth/MfaOfferAction.php' => 'MFA',
         'Action/Auth/MfaRecoveryCodeAction.php' => 'MFA',
         'Action/Auth/MfaStepUpAction.php' => 'MFA step-up',
+        'Action/Auth/MobileOidcAction.php' => 'vydání mobilního tokenu po přihlášení v prohlížeči',
         'Action/Auth/OidcAction.php' => 'přihlášení přes poskytovatele identity',
         'Action/Auth/PasskeyAction.php' => 'passkey',
         'Action/Auth/SessionAction.php' => 'relace',

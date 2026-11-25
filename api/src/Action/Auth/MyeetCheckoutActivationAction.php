@@ -191,8 +191,8 @@ final class MyeetCheckoutActivationAction
         if (!is_string($json) || (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE) !== 200) {
             return 0;
         }
-        $body = json_decode($json, true);
-        return (int) ($body['invoice_id'] ?? 0);
+        $invoiceResponse = json_decode($json, true);
+        return (int) ($invoiceResponse['invoice_id'] ?? 0);
     }
 
     private function unavailable(Response $response): Response

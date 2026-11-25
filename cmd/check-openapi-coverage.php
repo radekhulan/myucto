@@ -319,9 +319,12 @@ $specByPath = [];
 $lines = explode("\n", $yaml);
 $currentPath = null;
 foreach ($lines as $line) {
-    if (preg_match('/^  (\/api\/v1\/[^:]+):/', $line, $m)) {
-        $currentPath = '/api' . substr($m[1], strlen('/api/v1'));
-        $specByPath[$currentPath] = [];
+    if (preg_match('/^  (\/[^:]+):/', $line, $m)) {
+        $currentPath = null;
+        if (str_starts_with($m[1], '/api/v1/')) {
+            $currentPath = '/api' . substr($m[1], strlen('/api/v1'));
+            $specByPath[$currentPath] = [];
+        }
         continue;
     }
     if ($currentPath !== null && preg_match('/^    (get|post|put|patch|delete):/i', $line, $m)) {
