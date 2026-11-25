@@ -275,6 +275,10 @@ final class InvoiceImporter
             }
             $items = self::purchaseItems($r, $amounts, $class, $assets, self::lineDescriptions($sourceItems));
             $this->writer->insertPurchaseItems($id, $items);
+            $split = $review || $reverseCharge ? [] : self::deductionSplit($class, $amounts, $sourceItems, $r);
+            if ($split !== []) {
+                $this->writeDeductionSplit($ctx, $id, $docNo, $year, $class, $split);
+            }
             $refresh['fingerprints'][$key] = [$id, DocumentRefresh::fingerprint(DocumentRefresh::sourceHash($r),
                 DocumentRefresh::stateHash($issue, $taxDate, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
             if ($ctx->taxRecords) {
@@ -791,6 +795,128 @@ final class InvoiceImporter
         return [$header, $amounts];
     }
 
+    /**
+     * Rozpis nároku na odpočet přijaté faktury, jejíž položky jedné sazby mají v Money různé
+     * tuzemské členění (část `19Ř40,41 K` krácená § 76, část `19Ř40,41` plná). Položky
+     * převodu vznikají po sazbách a nárok drží hlavička, takže bez rozpisu by celá sazba
+     * dostala nárok hlavičky. Části s jiným nárokem než hlavička se spočtou z položek Money
+     * (cena bez daně × množství, daň ze základu), zbytek sazby připadne nároku hlavičky.
+     * Prázdné pole = rozpis není potřeba nebo ho z položek nejde spolehlivě spočítat.
+     *
+     * @param array<string,mixed> $class {@see classify()}
+     * @param array{items:list<array<string,mixed>>} $amounts
+     * @param list<array<string,mixed>> $sourceItems
+     * @param array<string,mixed> $r
+     * @return list<array{rate:float,base:float,vat:float,deduction:string,description:string}>
+     */
+    public static function deductionSplit(array $class, array $amounts, array $sourceItems, array $r): array
+    {
+        if ($sourceItems === [] || !in_array($class['kind'], ['invoice', 'credit_note', 'tax_document'], true)) {
+            return [];
+        }
+        $header = trim((string) ($r['KodDPH'] ?? ''));
+        $groups = [];
+        foreach ($sourceItems as $item) {
+            $price = (float) ($item['Cena'] ?? 0);
+            if (round($price, 2) === 0.0) {
+                continue;
+            }
+            $resolved = Ms3VatCode::resolve(trim((string) ($item['KodDPH'] ?? '')) ?: $header, false);
+            if ($resolved === null || !$resolved['in_return'] || $resolved['code'] !== null) {
+                return [];
+            }
+            $rate = self::rateKey((float) ($item['SazbaDPH'] ?? 0));
+            $groups[$rate][$resolved['deduction']][] = $item;
+        }
+        $totals = [];
+        foreach ($amounts['items'] as $item) {
+            $rate = self::rateKey((float) $item['rate']);
+            $totals[$rate] = [round(($totals[$rate][0] ?? 0.0) + (float) $item['base'], 2), round(($totals[$rate][1] ?? 0.0) + (float) $item['vat'], 2)];
+        }
+        $out = [];
+        foreach ($groups as $rate => $byDeduction) {
+            if (count($byDeduction) < 2 || !isset($totals[$rate]) || (float) $rate <= 0.0) {
+                continue;
+            }
+            [$restBase, $restVat] = $totals[$rate];
+            $parts = [];
+            foreach ($byDeduction as $deduction => $items) {
+                if ($deduction === $class['vat_deduction']) {
+                    continue;
+                }
+                $base = 0.0;
+                foreach ($items as $item) {
+                    // Jen cena bez daně (CenaTyp 0); cenu s daní nebo odpočet zálohy převod nerozpočítá.
+                    if ((int) ($item['CenaTyp'] ?? 0) !== 0) {
+                        return [];
+                    }
+                    $base += (float) $item['Cena'] * (((float) ($item['PocetMJ'] ?? 0)) ?: 1.0);
+                }
+                $base = round($base, 2);
+                $vat = round($base * (float) $rate / 100, 2);
+                $parts[] = ['rate' => (float) $rate, 'base' => $base, 'vat' => $vat, 'deduction' => (string) $deduction,
+                    'description' => self::splitDescription($items)];
+                $restBase = round($restBase - $base, 2);
+                $restVat = round($restVat - $vat, 2);
+            }
+            $headerItems = $byDeduction[$class['vat_deduction']] ?? [];
+            if ($parts === [] || $headerItems === [] || $restBase * $totals[$rate][0] < 0 || $restVat * $totals[$rate][1] < 0) {
+                return [];
+            }
+            array_unshift($parts, ['rate' => (float) $rate, 'base' => $restBase, 'vat' => $restVat, 'deduction' => (string) $class['vat_deduction'],
+                'description' => self::splitDescription($headerItems)]);
+            array_push($out, ...$parts);
+        }
+        return $out;
+    }
+
+    /** @param list<array<string,mixed>> $items */
+    private static function splitDescription(array $items): string
+    {
+        $texts = array_values(array_unique(array_filter(array_map(static fn (array $i): string => trim((string) ($i['Popis'] ?? '')), $items))));
+        return mb_substr(implode('; ', $texts) ?: 'Převzato z Money S3', 0, 190);
+    }
+
+    /**
+     * Zapíše rozpis nároku ({@see deductionSplit()}) jako rozpis DPH dokladu; prázdný rozpis
+     * smaže rozpis z dřívějšího převodu. Účet části je nákladový účet výchozí předkontace
+     * přijaté faktury, aby případné zaúčtování z dokladu účtovalo stejně jako bez rozpisu.
+     *
+     * @param array<string,mixed> $class
+     * @param list<array{rate:float,base:float,vat:float,deduction:string,description:string}> $split
+     */
+    private function writeDeductionSplit(ImportContext $ctx, int $id, string $docNo, int $year, array $class, array $split): void
+    {
+        if ($split === []) {
+            $this->writer->replacePurchaseVatAllocations($ctx->supplierId, $id, []);
+            return;
+        }
+        $account = $this->defaultExpenseAccount($ctx->supplierId);
+        if ($account === null) {
+            $ctx->protocol->warn(self::STEP_PURCHASE, 'deduction_split_account', "Faktura {$docNo} ({$year}) má v Money část s plným a část s kráceným nárokem na odpočet, ale firma nemá nákladový účet pro rozpis DPH. Rozpis doplňte ručně.", ['document_no' => $docNo, 'year' => $year]);
+            return;
+        }
+        $this->writer->replacePurchaseVatAllocations($ctx->supplierId, $id, array_map(static fn (array $part): array => $part + [
+            'account_code' => $account,
+            'vat_classification_code' => $class['code'],
+        ], $split));
+        $ctx->protocol->count(self::STEP_PURCHASE, 'deduction_split');
+    }
+
+    private function defaultExpenseAccount(int $supplierId): ?string
+    {
+        $rule = (new \MyInvoice\Repository\PostingRuleRepository($this->db))->resolve($supplierId, \MyInvoice\Service\Accounting\PostingService::DEFAULT_RECEIVED_RULE_KEY);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT account_code FROM chart_of_accounts
+              WHERE supplier_id = ? AND (account_code = ? OR account_code LIKE ?)
+              ORDER BY account_code = ? DESC, account_code LIMIT 1'
+        );
+        $preferred = (string) ($rule['debit_account_code'] ?? '518');
+        $stmt->execute([$supplierId, $preferred, substr($preferred, 0, 3) . '%', $preferred]);
+        $code = $stmt->fetchColumn();
+        return $code === false ? null : (string) $code;
+    }
+
     public static function rateKey(float $rate): string
     {
         return VatRateResolver::rateKey($rate);
@@ -808,7 +934,7 @@ final class InvoiceImporter
      */
     public static function sourceInvoices(Ms3Backup $backup, bool $issued, array $onlyDirs, ?array $fields = null): \Generator
     {
-        $itemFields = ['Cislo', 'Popis', 'SazbaDPH', 'Poradi', 'CisloPoloz', 'KodDPH', 'Cena'];
+        $itemFields = ['Cislo', 'Popis', 'SazbaDPH', 'Poradi', 'CisloPoloz', 'KodDPH', 'Cena', 'CenaTyp', 'PocetMJ'];
         foreach ($backup->yearDirs() as $path) {
             $dir = basename($path);
             if (!isset($onlyDirs[$dir])) {
@@ -1265,6 +1391,8 @@ final class InvoiceImporter
         $this->documentRefresh->update($ctx->supplierId, $issued, $id, $prepared['header'], $prepared['items'], $this->writer);
         if ($issued) {
             $ctx->refreshedInvoices[] = $id;
+        } else {
+            $this->writeDeductionSplit($ctx, $id, trim((string) ($r['Doklad'] ?? '')), (int) $ctx->yearOf($r), $prepared['class'], $prepared['split']);
         }
         return true;
     }
@@ -1278,7 +1406,7 @@ final class InvoiceImporter
      * @param array<string,mixed> $r
      * @param array<string,mixed> $current {@see DocumentRefresh::states()}
      * @param list<array<string,mixed>> $sourceItems
-     * @return array{header:array{issue_date:string,tax_date:string,due_date:string,base:float,vat:float,total:float,rounding:float},items:list<MigratedDocumentItem>}|null
+     * @return array{header:array{issue_date:string,tax_date:string,due_date:string,base:float,vat:float,total:float,rounding:float},items:list<MigratedDocumentItem>,class:array<string,mixed>,split:list<array<string,mixed>>}|null
      */
     private function prepareUpdate(ImportContext $ctx, bool $issued, array $r, array $current, array $sourceItems, bool $quiet = false): ?array
     {
@@ -1328,7 +1456,7 @@ final class InvoiceImporter
         return ['header' => [
             'issue_date' => $issue, 'tax_date' => $taxDate, 'due_date' => self::date($r, ['Splatno']) ?? $issue,
             'base' => $amounts['base'], 'vat' => $amounts['vat'], 'total' => $amounts['total'], 'rounding' => $amounts['rounding'],
-        ], 'items' => $items];
+        ], 'items' => $items, 'class' => $class, 'split' => $issued ? [] : self::deductionSplit($class, $amounts, $sourceItems, $r)];
     }
 
     /**

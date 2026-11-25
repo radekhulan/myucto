@@ -580,7 +580,10 @@ final class DphBookBuilder
                 $unassigned[$u]['vat'] = round($unassigned[$u]['vat'] + (float) $r['dimension_unassigned_amounts']['vat_czk'], 2);
                 continue;
             }
-            $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
+            // Řádek přiznání patří do klíče: rozpis DPH může mít pod týmž kódem a sazbou
+            // část s kráceným nárokem (ř. 40k) i část s plným (ř. 40) a přiznání je vykazuje zvlášť.
+            $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate']
+                . ':' . ($r['dphdp3_line'] ?? '');
             if (!isset($grouped[$key])) {
                 // Jen atributy, které build() a toBookRow() čtou: kniha firmy s desítkami
                 // tisíc dokladů by s celými řádky ledgeru nevešla do paměti PHP.
