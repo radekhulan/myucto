@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Service\Accounting\AccountBalanceSign;
-use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
@@ -113,34 +112,17 @@ final class BalanceInventoryService
     public function buildWithSaved(int $supplierId, int $periodId): array
     {
         $report = $this->build($supplierId, $periodId);
-        $period = $this->periods->findById($supplierId, $periodId);
-        // Uzavřené/schválené období: uzavření knih už rozvahové zůstatky ověřilo
-        // (invariant 702 = 0 v closeBooks). Roky uzavřené ještě před EP-6 nemají
-        // uloženou inventuru — bez back-fillu by pak inventarizace hlásila každý
-        // účet jako „nevyřešený" a v read-only období by to nešlo opravit. Proto
-        // u uzavřeného období, kde účetní nic neuložila, odvodíme skutečný stav
-        // z účetního (counted = book, resolved). Otevřené období se nebackfilluje.
-        $periodClosed = $period !== null && AccountingPeriodStatus::isClosed((string) $period['status']);
-
         $header = $this->loadHeader($supplierId, $periodId);
         $saved = $this->loadItems($supplierId, $periodId);
 
         $rows = [];
         $unresolved = 0;
-        $backFilledAny = false;
         foreach (self::effectiveRows($report['rows'], $saved) as $row) {
             $accountId = (int) $row['account_id'];
             $book = round((float) $row['ks_md'] - (float) $row['ks_d'], 2);
             $s = $saved[$accountId] ?? null;
             $counted = $s !== null && $s['counted_balance'] !== null ? round((float) $s['counted_balance'], 2) : null;
             $resolution = $s !== null ? (string) $s['resolution'] : 'open';
-            $backFilled = false;
-            if ($periodClosed && $counted === null && $resolution !== 'resolved') {
-                $counted = $book;
-                $resolution = 'resolved';
-                $backFilled = true;
-                $backFilledAny = true;
-            }
             $difference = $counted !== null ? round($counted - $book, 2) : null;
             $resolved = self::itemResolved($book, $counted, $resolution);
             if (!$resolved) {
@@ -154,7 +136,6 @@ final class BalanceInventoryService
                 'resolution'      => $resolution,
                 'item_note'       => $s !== null ? ($s['note'] !== null ? (string) $s['note'] : null) : null,
                 'resolved'        => $resolved,
-                'back_filled'     => $backFilled,
                 // Hodnoty protokolu tak, jak je účetní vidí na obrazovce a podepisuje.
                 'book_display'       => AccountBalanceSign::clean($book * $factor),
                 'counted_display'    => $counted === null ? null : AccountBalanceSign::clean($counted * $factor),
@@ -169,23 +150,19 @@ final class BalanceInventoryService
             'ks_d'  => round(array_sum(array_column($rows, 'ks_d')), 2),
         ];
         $report['protocol_rows'] = self::protocolRows($rows);
-        // Bez uložené hlavičky u uzavřeného období prezentujeme inventuru jako
-        // dokončenou (back-fill), aby stránka nehlásila uzavřený rok jako rozpracovaný.
         $report['inventory'] = $header ?? [
-            'status'             => $periodClosed ? 'completed' : 'in_progress',
             'responsible_person' => null,
             'inventory_date'     => null,
             'protocol_ref'       => null,
             'note'               => null,
-            'item_count'         => $periodClosed ? count($rows) : 0,
-            'unresolved_count'   => 0,
+            'item_count'         => 0,
             'completed_at'       => null,
         ];
+        $completed = ($header['status'] ?? null) === 'completed' && $unresolved === 0;
+        $report['inventory']['status'] = $header === null ? 'not_started' : ($completed ? 'completed' : 'in_progress');
         $report['inventory']['unresolved_count'] = $unresolved;
-        $report['inventory']['completed'] = ((string) ($report['inventory']['status'] ?? '') === 'completed')
-            || ($periodClosed && $unresolved === 0);
-        $report['inventory']['can_close'] = $report['inventory']['completed'] && $unresolved === 0;
-        $report['inventory']['back_filled'] = $backFilledAny;
+        $report['inventory']['completed'] = $completed;
+        $report['inventory']['can_close'] = $completed;
 
         return $report;
     }

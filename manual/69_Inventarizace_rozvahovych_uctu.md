@@ -50,7 +50,7 @@ skutečný stav a vypořádání rozdílu.
 | Nelze dokončit, zbývají nevyřešené rozdíly | U některých účtů se skutečný stav liší od účetního a nejsou označené jako vyřešené | Rozdíl opravte zápisem, nebo ho doložte poznámkou a zaškrtněte **Vyřešeno**. |
 | Skutečný stav nejde uložit | Období je uzavřené nebo schválené | Skutečný stav lze uložit jen v otevřeném nebo uzavíraném období. |
 | V období jsou nezaúčtované koncepty | Koncepty se do zůstatků nepočítají | Zaúčtujte je, jinak soupis neodpovídá úplnému stavu knih. |
-| Uzavřené období má skutečný stav doplněný sám | Jde o starší uzavřené období bez uloženého protokolu | Viz [§ 69.5.1](#6951-pravidla-sestavy-a-protokolu). Nejde o důkaz fyzické inventury. |
+| Uzavřené období hlásí **Bez uložené inventury** | Aplikace má pouze účetní zůstatky | Skutečný stav doložte původním inventurním soupisem, viz [§ 69.5.1](#6951-pravidla-sestavy-a-protokolu). |
 | Kontrola uzávěrky stále blokuje | Inventarizace není dokončená nebo je nevyřešený rozdíl | Dokončete protokol ([§ 69.3](#693-krok-za-krokem-provest-inventarizaci)). |
 | Syntetika s analytikami má jediný řádek | Protokol je za ni uložený souhrnně | Skutečný stav vymažte, zrušte **Vyřešeno** a uložte. Účet se rozpadne na analytiky. |
 | Soupis otevřených položek hlásí rozdíl | Součet otevřených částek nesedí na zůstatek účtu | Otevřete účet kliknutím na kód a zkontrolujte okruhy. |
@@ -96,12 +96,12 @@ zápisem a důvod rozdílu doložit.
 Při uložení aplikace znovu načte živé účetní zůstatky, vypočte rozdíly a přepíše položky protokolu, takže
 účetní saldo zaslané z obrazovky není zdrojem pravdy.
 
-**Vazba na uzávěrku.** Nedokončená inventarizace nebo nevyřešený rozdíl blokují kontrolu uzávěrky a tím
-uzavření knih.
+**Vazba na uzávěrku.** Rozpracovaná inventarizace nebo nevyřešený rozdíl blokují uzavření knih.
+Chybějící protokol se zobrazí jako upozornění, protože inventarizaci lze doložit i mimo aplikaci.
 
-**Starší uzavřená období.** U staršího již uzavřeného či schváleného období bez uloženého protokolu se pro
-čtení doplní skutečný stav z účetního zůstatku a položky se označí jako vyřešené. Jde o technický backfill
-uzavřeného roku, nikoli důkaz, že byla provedena fyzická nebo dokladová inventura.
+**Uzavřená období.** Pokud chybí uložený protokol, přehled označí období jako **Bez uložené inventury**
+a zobrazí účetní zůstatky. Sloupce skutečného stavu a rozdílu zůstanou prázdné. Skutečný stav doložte
+inventurním soupisem.
 
 ### 69.5.2 Doporučené podklady
 
@@ -131,11 +131,10 @@ Odsouhlasení agendy rozpadne zůstatek účtu na položky, odklad uzávěrky a 
 a označením protokolu, u každého účtu konečný zůstatek MD a Dal, stranu, uložený skutečný stav, rozdíl, stav
 vyřešení, poznámku a způsob doložení, součty syntetik a místo pro podpisy. Skutečný stav a rozdíl jsou orientované
 stejně jako na obrazovce. Nenapočítaný účet má pole prázdná k ručnímu doplnění. Exportuje se uložený stav, před
-exportem proto protokol uložte. Protokol staršího uzavřeného období s doplněným stavem nese upozornění, že nejde
-o doklad o provedené inventuře.
+exportem proto protokol uložte. Pokud protokol v aplikaci chybí, export má označení **Bez uložené inventury**.
 
-Stejný protokol je v [uzávěrkovém balíčku](72_Uzaverka.md#729-krok-za-krokem-uzaverkovy-balicek). Nedokončená
-inventarizace je tam uvedená v upozorněních.
+Stejný výstup je v [uzávěrkovém balíčku](72_Uzaverka.md#729-krok-za-krokem-uzaverkovy-balicek).
+V upozorněních balíčku je uvedený chybějící nebo nedokončený protokol.
 
 ### 69.5.4 Soupis otevřených položek
 

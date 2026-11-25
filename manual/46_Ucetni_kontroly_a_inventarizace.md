@@ -160,7 +160,7 @@ podklad a schválení odpovědnou osobou.
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Na stránce Inventarizace účtů nelze zadávat skutečný stav | Období je uzavřené, skutečný stav lze ukládat jen v otevřeném nebo uzavíraném období | Zvolte otevřené nebo uzavírané období. U uzavřeného roku je stav doplněný z účetních zůstatků jen pro čtení. |
+| Na stránce Inventarizace účtů nelze zadávat skutečný stav | Období je uzavřené, skutečný stav lze ukládat jen v otevřeném nebo uzavíraném období | Pro uzavřený rok použijte uložený protokol. Při stavu **Bez uložené inventury** doložte skutečný stav původním inventurním soupisem. |
 | „Nelze dokončit“ s počtem nevyřešených rozdílů | Zbývá účet s nenulovým rozdílem bez označení **Vyřešeno** | Rozdíl doložte a označte, nebo opravte zdrojový zápis. |
 | Dříve dokončená inventarizace je zase nevyřešená | Po uložení se změnil deník a rozdíl se přepočítal | Znovu odsouhlaste dotčené účty a uložte. |
 | Při uzavření knih jde o chybu inventarizace | Inventarizace je v aplikaci založená, ale rozpracovaná nebo s rozdíly | Dokončete ji podle [§ 46.4](#464-krok-za-krokem-inventarizace-rozvahovych-uctu). |

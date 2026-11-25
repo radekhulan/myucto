@@ -101,7 +101,7 @@ function rowResolved(row: BalanceInventoryRow): boolean {
 const unresolvedCount = computed(() =>
   (report.value?.rows ?? []).filter(r => !rowResolved(r)).length)
 
-const inventoryStatus = computed(() => report.value?.inventory?.status ?? 'in_progress')
+const inventoryStatus = computed(() => report.value?.inventory?.status ?? 'not_started')
 
 /**
  * Součtový řádek nad analytikami jedné syntetiky. Skutečný stav a rozdíl se sečtou, až když
@@ -338,13 +338,11 @@ onMounted(async () => {
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <h2 class="text-sm font-semibold text-neutral-700">{{ t('accounting.balance_inventory.protocol_title') }}</h2>
         <div class="flex items-center gap-2 text-xs">
-          <span v-if="inventoryStatus === 'completed'" class="px-2 py-0.5 rounded bg-success-100 text-success-700 font-medium">
-            {{ t('accounting.balance_inventory.status_completed') }}
-          </span>
-          <span v-else class="px-2 py-0.5 rounded bg-warning-100 text-warning-700 font-medium">
-            {{ t('accounting.balance_inventory.status_in_progress') }}
-          </span>
           <span class="px-2 py-0.5 rounded font-medium"
+            :class="inventoryStatus === 'completed' ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-700'">
+            {{ t(`accounting.balance_inventory.status_${inventoryStatus}`) }}
+          </span>
+          <span v-if="editable || inventoryStatus !== 'not_started'" class="px-2 py-0.5 rounded font-medium"
             :class="unresolvedCount === 0 ? 'bg-neutral-100 text-neutral-600' : 'bg-danger-100 text-danger-700'">
             {{ t('accounting.balance_inventory.unresolved', { n: unresolvedCount }) }}
           </span>
@@ -368,11 +366,10 @@ onMounted(async () => {
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-50" />
         </div>
       </div>
-      <div v-if="report.inventory?.back_filled" class="text-xs text-neutral-600 flex items-start gap-1.5 rounded-md bg-neutral-50 dark:bg-neutral-500/[0.06] border border-neutral-200 px-2.5 py-1.5">
-        <svg class="w-3.5 h-3.5 mt-0.5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>{{ t('accounting.balance_inventory.back_filled_hint') }}</span>
+      <div v-if="inventoryStatus === 'not_started'" class="text-xs text-neutral-600 rounded-md bg-neutral-50 border border-neutral-200 px-2.5 py-1.5">
+        {{ t('accounting.balance_inventory.not_started_hint') }}
       </div>
-      <div v-else-if="!editable" class="text-xs text-neutral-500">{{ t('accounting.balance_inventory.readonly_hint') }}</div>
+      <div v-if="!editable" class="text-xs text-neutral-500">{{ t('accounting.balance_inventory.readonly_hint') }}</div>
       <div v-if="hasRolledUp" class="text-xs text-warning-700" data-test="inventory-rolled-up-hint">{{ t('accounting.balance_inventory.rolled_up_hint') }}</div>
       <div v-if="editable" class="flex flex-wrap items-center justify-end gap-2 pt-1">
         <button type="button" :disabled="saving" :class="[btnOutline('neutral'), 'whitespace-nowrap mr-auto']" data-test="inventory-confirm-zero" @click="confirmZeroAccounts">
@@ -420,7 +417,7 @@ onMounted(async () => {
                 <td class="px-3 py-2"></td>
               </tr>
               <tr v-else-if="item.row" class="hover:bg-neutral-50" :data-test="`inventory-row-${item.row.account_code}`"
-                :class="[!rowResolved(item.row) ? 'bg-danger-50/40' : '', focusAccountId === item.row.account_id ? 'ring-1 ring-inset ring-primary-400' : '']">
+                :class="[(editable || inventoryStatus !== 'not_started') && !rowResolved(item.row) ? 'bg-danger-50/40' : '', focusAccountId === item.row.account_id ? 'ring-1 ring-inset ring-primary-400' : '']">
                 <td class="py-2 pr-3 align-top" :class="item.row.parent_id != null ? 'pl-7' : 'pl-3'">
                   <RouterLink :to="statementLink(item.row)"
                     class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
@@ -443,7 +440,7 @@ onMounted(async () => {
                   <input v-if="editable" type="checkbox" v-model="edits[item.row.account_id].resolved"
                     class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
                   <svg v-else-if="rowResolved(item.row)" class="w-4 h-4 inline text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                  <span v-else class="text-danger-600">•</span>
+                  <span v-else-if="inventoryStatus !== 'not_started'" class="text-danger-600">•</span>
                 </td>
                 <td class="px-3 py-2 text-neutral-600 align-top">
                   <div>{{ item.row.documentation_hint }}</div>
