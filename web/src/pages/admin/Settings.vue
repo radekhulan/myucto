@@ -64,6 +64,7 @@ function syncSupplierStore(s: Supplier) {
     accounting_enabled: s.accounting_enabled ?? true,
     payroll_enabled: s.payroll_enabled ?? false,
     dimensions_enabled: s.dimensions_enabled ?? false,
+    dashboard_work_reports: s.dashboard_work_reports ?? true,
     tags_enabled: s.tags_enabled ?? false,
   })
 }
@@ -589,6 +590,7 @@ async function saveSupplier() {
       default_prices_include_vat: supplier.value.default_prices_include_vat,
       default_rounding_mode: supplier.value.default_rounding_mode ?? 'auto',
       allow_refund_invoices: supplier.value.allow_refund_invoices ?? false,
+      dashboard_work_reports: supplier.value.dashboard_work_reports ?? true,
       tags_enabled: supplier.value.tags_enabled ?? false,
       ...(auth.canWrite('settings.invoice_defaults') ? {
         default_payment_due_days: supplier.value.default_payment_due_days,

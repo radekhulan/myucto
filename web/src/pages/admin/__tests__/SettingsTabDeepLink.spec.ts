@@ -185,6 +185,25 @@ describe('Nastavení — samostatný ISDOC', () => {
 })
 
 
+describe('Nastavení — drobné volby fakturace', () => {
+  // BEZ OPRAVY PADÁ: přepínač výkazů práce na úvodní stránce se do uložení vůbec neposílal.
+  it('uloží vypnutí výkazů práce na úvodní stránce i zapnutí štítků', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, dashboard_work_reports: true, tags_enabled: false })
+    const wrapper = await mountSettings('documents')
+    try {
+      await wrapper.get('[data-test="dashboard-work-reports"]').setValue(false)
+      await wrapper.get('[data-test="tags-enabled"]').setValue(true)
+      await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+      await flushPromises()
+      expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({
+        dashboard_work_reports: false, tags_enabled: true,
+      }))
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})
+
 describe('Nastavení — podoba výkazu práce', () => {
   const DEFAULTS = { compact: false, date: true, hours: true, rate: true, amount: true }
 
