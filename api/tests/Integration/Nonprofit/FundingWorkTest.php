@@ -341,6 +341,31 @@ final class FundingWorkTest extends TestCase
         $this->expectError(fn() => $this->work->addIncomes($this->supplier, $this->period, $source, [$ok], $this->actor), 'funding_work_line_ineligible');
     }
 
+    /**
+     * „Navázat znovu“ nabízí jen řádek, který podmínky zdroje splňuje. Po zúžení podmínek žádný takový
+     * v zápisu není, takže se nenabídne nic (dřív se nabízel týž řádek a navázání skončilo 422).
+     */
+    public function testRelinkOffersOnlyLinesMeetingSourceConditions(): void
+    {
+        $line = $this->post('518', '100.00', '2026-03-01');
+        $source = $this->source(['account_prefixes' => ['518']]);
+        $detail = $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $line, 'amount_cents' => 100]], $this->actor);
+        $detail = $this->work->update($this->supplier, $this->period, $source, $this->input(['account_prefixes' => ['501']]), $detail['source']['row_version'], 'Synthetic narrowing', $this->actor);
+        $allocation = $detail['allocations'][0];
+        self::assertSame(['changed', 'account'], [$allocation['state'], $allocation['review_reason']]);
+        self::assertSame([], $allocation['relink_candidates'], 'Řádek, který podmínky zdroje nesplňuje, se k navázání nenabízí.');
+        $this->expectError(fn() => $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $line, null, $allocation['row_version'], $this->actor), 'funding_work_line_ineligible');
+        // Přeúčtování řádku po zúžení podmínek: nový řádek téhož zápisu podmínky stále nesplňuje.
+        $this->repost($line, '120.00');
+        $allocation = $this->work->detail($this->supplier, $this->period, $source)['allocations'][0];
+        self::assertSame('removed', $allocation['state']);
+        self::assertSame([], $allocation['relink_candidates']);
+        // Po návratu podmínek se nový řádek téhož zápisu nabídne.
+        $current = $this->work->detail($this->supplier, $this->period, $source)['source'];
+        $detail = $this->work->update($this->supplier, $this->period, $source, $this->input(['account_prefixes' => ['518']]), $current['row_version'], 'Synthetic widening', $this->actor);
+        self::assertCount(1, $detail['allocations'][0]['relink_candidates']);
+    }
+
     /** Výnos patří jen jednomu aktivnímu zdroji; zrušení zdroje s náklady odmítne, bez nich výnos uvolní. */
     public function testIncomeBelongsToOneSourceAndCancelRules(): void
     {

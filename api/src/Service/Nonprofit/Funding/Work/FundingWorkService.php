@@ -79,7 +79,7 @@ final class FundingWorkService
         $allocations = $this->links($supplier, 'cost', [$sourceId], max(1, $page));
         $more = count($allocations) > self::PAGE;
         $allocations = array_slice($allocations, 0, self::PAGE);
-        $this->attachRelinkCandidates($supplier, $period, $incomes, $allocations);
+        $this->attachRelinkCandidates($supplier, $period, $sourceId, $incomes, $allocations);
         $this->attachConfirmedLinks($supplier, $incomes, $allocations);
         $this->attachPaymentState($supplier, $allocations);
         $history = $this->db->pdo()->prepare('SELECT h.id, h.income_id, h.allocation_id, h.action, h.before_json, h.after_json, h.reason, h.created_at, u.name AS actor_name
@@ -611,18 +611,21 @@ final class FundingWorkService
     }
 
     /**
-     * Pro vazby ke kontrole nabídne řádky téhož zápisu nebo dokladu se stejným účtem (jedním dotazem).
+     * Pro vazby ke kontrole nabídne řádky téhož zápisu nebo dokladu se stejným účtem, které splňují podmínky
+     * zdroje (jeden dotaz pro výnosy a jeden pro náklady). Bez takového řádku se „Navázat znovu“ nenabídne.
      * Stornovaná vazba dostane nabídku jen z nového zápisu téhož dokladu (storno a nové zaúčtování).
      */
-    private function attachRelinkCandidates(int $supplier, int $period, array &$incomes, array &$allocations): void
+    private function attachRelinkCandidates(int $supplier, int $period, int $sourceId, array &$incomes, array &$allocations): void
     {
         $open = static fn(array $row) => $row['state'] !== self::STATE_OK;
-        $pending = array_values(array_filter([...$incomes, ...$allocations], $open));
-        $lines = $this->ledger->relinkCandidates($supplier, $period, $pending);
-        $pick = static fn(array $row) => $open($row) ? array_values(array_filter($lines, static fn(array $line) => $line['account_id'] === $row['account_id'] && self::sameDocument($row, $line))) : [];
-        foreach ($incomes as &$income) $income['relink_candidates'] = $pick($income);
+        $pick = static fn(array $row, array $lines) => $open($row) ? array_values(array_filter($lines, static fn(array $line) => $line['account_id'] === $row['account_id'] && self::sameDocument($row, $line))) : [];
+        $pending = array_values(array_filter($incomes, $open));
+        $lines = $pending === [] ? [] : $this->ledger->relinkCandidates($supplier, $period, $sourceId, 'income', $pending);
+        foreach ($incomes as &$income) $income['relink_candidates'] = $pick($income, $lines);
         unset($income);
-        foreach ($allocations as &$allocation) $allocation['relink_candidates'] = $pick($allocation);
+        $pending = array_values(array_filter($allocations, $open));
+        $lines = $pending === [] ? [] : $this->ledger->relinkCandidates($supplier, $period, $sourceId, 'cost', $pending);
+        foreach ($allocations as &$allocation) $allocation['relink_candidates'] = $pick($allocation, $lines);
         unset($allocation);
     }
 

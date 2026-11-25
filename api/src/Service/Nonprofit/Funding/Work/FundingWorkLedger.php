@@ -173,12 +173,14 @@ final class FundingWorkLedger
      * (odúčtování a nové zaúčtování dokladu, storno a nové zaúčtování převzatého dokladu nebo dokladu
      * v měsíci s podaným DPH). Jen platné zápisy daného období. Protizápis storna se nenabízí: nese doklad
      * bez source_id (JournalEntryRepository::insertReversal), takže se s dokladem vazby nespáruje.
+     * Nabízí se jen řádek, který podmínky zdroje splňuje ({@see self::problemSql()}, totéž pravidlo jako
+     * kontrola při navázání), jinak by „Navázat znovu“ vedlo jen na odmítnutí.
      * Filtr účtu v SQL jen zmenšuje výsledek pod limit; pravidlo „stejný účet“ uplatní volající.
-     * Jeden dotaz pro všechny vazby.
+     * Jeden dotaz pro všechny vazby jednoho druhu.
      * @param list<array{entry_id:int,account_id:int,entry_source_type:?string,entry_source_id:?int}> $links
      * @return list<array<string,mixed>>
      */
-    public function relinkCandidates(int $supplier, int $period, array $links): array
+    public function relinkCandidates(int $supplier, int $period, int $sourceId, string $kind, array $links): array
     {
         $entries = [];
         $documents = [];
@@ -192,7 +194,7 @@ final class FundingWorkLedger
         $accounts = self::ids($accounts);
         if ($entries === []) return [];
         $where = 'e.id IN (' . self::marks($entries) . ')';
-        $params = [$supplier, $period, ...$accounts, ...$entries];
+        $params = [$sourceId, $supplier, $period, ...$accounts, ...$entries];
         foreach ($documents as [$type, $id]) {
             $where .= ' OR (e.source_type = ? AND e.source_id = ?)';
             array_push($params, $type, $id);
@@ -202,8 +204,10 @@ final class FundingWorkLedger
             JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
             LEFT JOIN dimension_types t ON t.supplier_id = l.supplier_id AND t.system_key = \'activity_kind\'
             LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = t.id
+            JOIN nonprofit_funding_work_sources s ON s.supplier_id = e.supplier_id AND s.id = ?
             WHERE e.supplier_id = ? AND e.period_id = ? AND l.account_id IN (' . self::marks($accounts) . ') AND (' . $where . ')
               AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND l.is_red_storno = 0 AND l.amount > 0
+              AND (' . self::problemSql($kind) . ') IS NULL
             ORDER BY e.id, l.line_no, l.id LIMIT 5000');
         $q->execute($params);
         return array_map(self::line(...), $q->fetchAll(PDO::FETCH_ASSOC));
