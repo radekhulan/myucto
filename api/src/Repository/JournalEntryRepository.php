@@ -2152,7 +2152,7 @@ final class JournalEntryRepository
         // ORDER BY musí být v OBOU úrovních: vnitřní určuje, KTERÝCH padesát řádků
         // se vybere, vnější jejich pořadí ve výsledku (JOIN ho jinak nezaručuje).
         $sql = "SELECT je.id, je.supplier_id, je.period_id, je.entry_date, je.document_date,
-                       COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
+                       " . self::DOCUMENT_NO_SELECT . ",
                        je.description, je.source_type, je.source_id, je.posted_at,
                        je.posted_by, je.reversed_by, je.row_version, je.created_at, je.updated_at,
                        u.name AS posted_by_name,
@@ -2180,10 +2180,7 @@ final class JournalEntryRepository
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
              " . self::DOCUMENT_SOURCE_JOINS . "
-             LEFT JOIN invoices src_i ON je.source_type = 'invoice'
-                    AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
-             LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
-                    AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
+             " . self::DOCUMENT_NO_JOINS . "
              LEFT JOIN depreciation_entries dep ON je.source_type = 'depreciation'
                     AND dep.id = je.source_id AND dep.supplier_id = je.supplier_id
              LEFT JOIN assets ast ON ast.supplier_id = je.supplier_id
@@ -2204,6 +2201,63 @@ final class JournalEntryRepository
     }
 
     /**
+     * Rozklad popisu zápisů ({@see JournalDescriptionBuilder::parts()}) a číslo dokladu nad
+     * týmiž údaji dokladu jako seznam deníku, pro sestavy, které ukazují číslo dokladu ve
+     * vlastním sloupci (rozpis hlavní knihy). Číslo dokladu doplní zápisy bez `document_no`
+     * (starší zápisy faktur) z dokladu, aby po zkrácení popisu nezmizelo.
+     * Jeden dotaz na dávku, každý JOIN po klíči.
+     *
+     * @param list<int> $entryIds
+     * @return array<int, array{document_no:?string, parts:array{kind:?string, partner:?string, vs:?string, text:?string}}>
+     */
+    public function descriptionParts(int $supplierId, array $entryIds): array
+    {
+        $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
+        $out = [];
+        // Kus = strop dávky rozpisu ({@see LedgerReportRepository::generalLedgerLineBatches()}),
+        // takže jedna dávka je vždy jeden dotaz.
+        foreach (array_chunk($entryIds, 1000) as $chunk) {
+            [$sql, $params] = $this->descriptionPartsQuery($supplierId, $chunk);
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute($params);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['id']] = [
+                    'document_no' => JournalDescriptionBuilder::clean(
+                        $r['document_no'] ?? $r['source_doc_number'] ?? $r['source_bank_ref'] ?? null,
+                    ),
+                    'parts' => JournalDescriptionBuilder::parts(
+                        $r['description'] ?? null,
+                        (string) $r['source_type'],
+                        $r,
+                    ),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * SQL a parametry dotazu {@see descriptionParts()} pro jeden kus zápisů (veřejné kvůli EXPLAIN testu).
+     *
+     * @param list<int> $entryIds neprázdný seznam
+     * @return array{0:string, 1:list<int>}
+     */
+    public function descriptionPartsQuery(int $supplierId, array $entryIds): array
+    {
+        $marks = implode(',', array_fill(0, count($entryIds), '?'));
+        return ["SELECT je.id, je.description, je.source_type,
+                        " . self::DOCUMENT_NO_SELECT . ",
+                        COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
+                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
+                        " . self::DOCUMENT_FACT_SELECT . "
+                   FROM journal_entries je
+                   " . self::DOCUMENT_SOURCE_JOINS . "
+             " . self::DOCUMENT_NO_JOINS . "
+              " . self::DOCUMENT_FACT_JOINS . "
+                  WHERE je.supplier_id = ? AND je.id IN ({$marks})", [$supplierId, ...array_map('intval', $entryIds)]];
+    }
+
+    /**
      * Bankovní zápis nese číslo v řadě účtu (BCR-08), ID pohybu z banky zůstává na pohybu.
      * Vyhledávání podle čísla dokladu ho proto hledá i tam. Jeden placeholder (LIKE).
      */
@@ -2211,6 +2265,20 @@ final class JournalEntryRepository
                     SELECT 1 FROM bank_transactions bt_ref
                      WHERE bt_ref.id = je.source_id AND bt_ref.bank_ref LIKE ? ESCAPE '='
                 ))";
+
+    /**
+     * Číslo dokladu zápisu: vlastní číslo zápisu, jinak číslo zdrojové faktury (starší zápisy
+     * faktur `document_no` nemají). Sdílí seznam deníku, jeho export a rozpis hlavní knihy;
+     * JOINy jsou v DOCUMENT_NO_JOINS (alias `je`).
+     */
+    private const DOCUMENT_NO_SELECT =
+        'COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no';
+
+    private const DOCUMENT_NO_JOINS = "
+             LEFT JOIN invoices src_i ON je.source_type = 'invoice'
+                    AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
+             LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
+                    AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id";
 
     /**
      * Údaje prvotního dokladu do volitelných sloupců deníku (Firma, IČ, VS, číslo dokladu
@@ -2641,17 +2709,14 @@ final class JournalEntryRepository
         }
 
         $sql = "SELECT je.id, je.entry_date, je.document_date,
-                       COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
+                       " . self::DOCUMENT_NO_SELECT . ",
                        je.description,
                        je.source_type, je.source_id, je.posted_at, je.reversed_by,
                        u.name AS posted_by_name,
                        {$amountSelect}
                   FROM journal_entries je
              LEFT JOIN users u ON u.id = je.posted_by
-             LEFT JOIN invoices src_i ON je.source_type = 'invoice'
-                    AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
-             LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
-                    AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
+             " . self::DOCUMENT_NO_JOINS . "
                  WHERE {$whereSql}
                  ORDER BY je.entry_date ASC, je.id ASC
                  LIMIT " . ($limit + 1);

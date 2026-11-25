@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\Accounting\AccountCodeRange;
 use MyInvoice\Service\Accounting\AccountCodeRangeException;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 
 /**
  * Podrobný export sdílí PS a obraty s hlavní knihou; doklady předává po dávkách.
  * U firmy s jednoduchým zápisem nese pohyb pole dvojic jako opis účtu a řádek staršího
  * zápisu 1 : N se rozloží na díly ({@see JournalLineContext::pieceMovements()}).
+ * Popis řádku je bez čísla dokladu, pokladny a protistrany jako v deníku
+ * ({@see JournalDescriptionBuilder::withoutDocumentHead()}): číslo dokladu má vlastní sloupec.
  */
 final class GeneralLedgerDetailService
 {
@@ -28,6 +32,7 @@ final class GeneralLedgerDetailService
     public function __construct(
         private readonly LedgerReportRepository $ledger,
         private readonly JournalLineContext $context,
+        private readonly JournalEntryRepository $entries,
         /** Limit rozpisu pro tuto instanci; test akce ho snižuje, aby nepotřeboval 10 000 řádků. */
         private readonly int $maxLines = self::MAX_LINES,
     ) {}
@@ -93,6 +98,28 @@ final class GeneralLedgerDetailService
     }
 
     /**
+     * Sloupec Doklad doplní číslem z dokladu jako deník; popis zkrátí jen řádku, která číslo
+     * dokladu ve sloupci má, jinak by identifikace dokladu z PDF zmizela úplně.
+     *
+     * @param array<string,mixed> $line
+     * @param array{document_no:?string, parts:array{kind:?string, partner:?string, vs:?string, text:?string}}|null $facts
+     * @return array<string,mixed>
+     */
+    private static function shortDescription(array $line, ?array $facts): array
+    {
+        if ($facts === null) {
+            return $line;
+        }
+        if (JournalDescriptionBuilder::clean($line['document_no'] ?? null) === null) {
+            $line['document_no'] = $facts['document_no'];
+        }
+        if ($line['document_no'] !== null) {
+            $line['description'] = JournalDescriptionBuilder::withoutDocumentHead($line['description'] ?? null, $facts['parts'], (string) ($line['source_type'] ?? ''));
+        }
+        return $line;
+    }
+
+    /**
      * Události start/line/end dovolují oběma formátům zpracovat i dlouhý účet
      * bez pole celého roku. Kontrolují se proti téže agregaci jako souhrnná kniha.
      * @return \Generator<int,array<string,mixed>>
@@ -106,7 +133,9 @@ final class GeneralLedgerDetailService
         $started = false;
         $balance = $md = $d = $count = 0;
         foreach ($rows as $batch) {
+            $parts = $this->entries->descriptionParts($supplierId, array_column($batch, 'entry_id'));
             foreach ($this->context->withCounterAccounts($supplierId, $batch, true) as $line) {
+                $line = self::shortDescription($line, $parts[(int) $line['entry_id']] ?? null);
                 while ((int) $accounts[$index]['account_id'] !== (int) $line['group_id']) {
                     $a = $accounts[$index++];
                     if (!$started) yield ['kind' => 'start', 'account' => $a];

@@ -137,6 +137,25 @@ final class CounterAccountExplainTest extends TestCase
             self::assertContains('idx_jel_supplier_entry_pair', $keys, $name . ': partner dvojice po idx_jel_supplier_entry_pair.');
         }
 
+        // Krátký popis rozpisu hlavní knihy: údaje dokladu pro dávku 1000 zápisů jen po klíčích.
+        $ids = $this->db->pdo()->query("SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} ORDER BY id DESC LIMIT 1000")
+            ->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertCount(1000, $ids);
+        $entries = Bootstrap::buildContainer()->get(\MyInvoice\Repository\JournalEntryRepository::class);
+        foreach ($this->explain(...$entries->descriptionPartsQuery($this->supplierId, array_map('intval', $ids))) as $row) {
+            $table = (string) $row['table'];
+            if ($table === 'je' || $table === 'rev_src') {
+                self::assertNotSame('ALL', $row['type'], 'popis rozpisu: ' . json_encode($row, JSON_UNESCAPED_UNICODE));
+                self::assertNotSame('index', $row['type'], 'popis rozpisu: ' . json_encode($row, JSON_UNESCAPED_UNICODE));
+            }
+            if ($table === 'je') {
+                self::assertLessThanOrEqual(2000, (int) $row['rows'], 'popis rozpisu: zápisy dávky po klíči ' . json_encode($row, JSON_UNESCAPED_UNICODE));
+            }
+            if ($table === 'rev_src') {
+                self::assertNotNull($row['key'], 'popis rozpisu: storno po indexu ' . json_encode($row, JSON_UNESCAPED_UNICODE));
+            }
+        }
+
         $rows = $this->ledger->accountLines($this->supplierId, $account, $from, $to, 50, 0, true, $counter, true);
         self::assertNotSame([], $rows);
         foreach ($rows as $row) {

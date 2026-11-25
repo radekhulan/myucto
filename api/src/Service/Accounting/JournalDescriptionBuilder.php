@@ -445,6 +445,40 @@ final class JournalDescriptionBuilder
         ];
     }
 
+    /**
+     * Krátký popis do sestavy s číslem dokladu ve vlastním sloupci (rozpis hlavní knihy):
+     * druh dokladu a věcný text, bez čísla dokladu, pokladny a protistrany.
+     *
+     * Na rozdíl od deníku nemá sestava sloupec Firma, stav ani tooltip s celým popisem, proto
+     * zůstane uložený popis beze změny, kdykoli by zkrácení něco ztratilo: popis bez věcného
+     * textu (jen hlavička a protistrana, ručně přepsaný jednodílný popis) a storno, jehož
+     * první segment není hlavička dokladu, ale text „Storno …“.
+     *
+     * Výjimkou je bankovní pohyb bez věcného textu: {@see parts()} z něj ubere jen hlavičku
+     * „Banka …“, směr platby a číslo dokladu, zbylá protistrana (s VS) je často jediný popis
+     * pohybu („Připsaný úrok“), takže zůstane ona; bez protistrany aspoň VS.
+     *
+     * @param array{kind:?string, partner:?string, vs:?string, text:?string} $parts
+     */
+    public static function withoutDocumentHead(?string $description, array $parts, string $sourceType = ''): string
+    {
+        $full = (string) $description;
+        if (str_starts_with(mb_strtolower(ltrim($full)), 'storno')) {
+            return $full;
+        }
+        if ($parts['text'] === null) {
+            if ($sourceType === 'bank' && $parts['partner'] !== null) {
+                return $parts['vs'] !== null ? $parts['partner'] . ' (VS ' . $parts['vs'] . ')' : $parts['partner'];
+            }
+            if ($sourceType === 'bank' && $parts['vs'] !== null) {
+                return 'VS ' . $parts['vs'];
+            }
+            return $full;
+        }
+
+        return $parts['kind'] !== null ? $parts['kind'] . self::SEPARATOR . $parts['text'] : $parts['text'];
+    }
+
     /** Druh faktury z hlavičky, jen když nese víc než běžné FV/PF (Dobropis FV, Účtenka). */
     private static function documentKind(string $head, string $sourceType): ?string
     {

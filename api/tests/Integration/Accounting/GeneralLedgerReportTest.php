@@ -382,6 +382,118 @@ final class GeneralLedgerReportTest extends TestCase
         self::assertEquals(17.88, $events[4]['account']['closing_md']);
     }
 
+    /**
+     * Rozpis má číslo dokladu ve sloupci Doklad, popis řádku proto bez hlavičky dokladu,
+     * pokladny a protistrany, stejně jako deník se sloupci Doklad a Firma.
+     */
+    public function testDetailedExportShowsShortDescriptionLikeJournal(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, is_active)
+             VALUES (?, 'Pokladna Hlavní', 'CZK', '211', 1, 1)"
+        )->execute([$this->supplierId]);
+        $registerId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO cash_documents (supplier_id, register_id, doc_type, doc_number, purpose, issue_date, tax_date,
+                                         partner_name, description, total_amount, status, created_by)
+             VALUES (?, ?, 'out', 'VPD-2099-0001', 'other', '2099-03-01', '2099-03-01', 'Jan Novák',
+                     '2099012 - Úhrada faktury přijaté', 100.00, 'posted', ?)"
+        )->execute([$this->supplierId, $registerId, $this->userId]);
+        $cashId = (int) $pdo->lastInsertId();
+        $cashEntry = $this->insertJournalEntry('cash', $cashId, '321', '211', 100.00, '2099-03-01');
+
+        $vendorId = $this->insertClient('Dodavatel Popis s.r.o.');
+        $purchaseId = $this->insertPurchaseWithItem($vendorId, 'kancelářský papír', 50.00, '2099-03-02');
+        $purchaseEntry = $this->insertJournalEntry('purchase_invoice', $purchaseId, '501', '321', 50.00, '2099-03-02');
+        $manualEntry = $this->manual([self::l('518', 'debit', 7.00), self::l('211', 'credit', 7.00)], '2099-03-03',
+            ['description' => 'Ruční přeúčtování nákladů']);
+
+        $builder = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\JournalDescriptionBuilder::class);
+        $set = $pdo->prepare('UPDATE journal_entries SET description = ? WHERE id = ?');
+        $set->execute([$builder->forSource($this->supplierId, 'cash', $cashId), $cashEntry]);
+        $set->execute([$builder->forSource($this->supplierId, 'purchase_invoice', $purchaseId), $purchaseEntry]);
+        $stored = $pdo->query("SELECT description FROM journal_entries WHERE id = {$cashEntry}")->fetchColumn();
+        self::assertSame('VPD-2099-0001 — Pokladna Hlavní — Jan Novák — 2099012 - Úhrada faktury přijaté', $stored);
+
+        // Storno pokladního zápisu nese typ zdroje původního dokladu; text „Storno …“ musí zůstat.
+        $stornoEntry = $this->posting->reverse($this->supplierId, $cashEntry, [
+            'entry_date' => '2099-03-04', 'description' => 'Storno VPD-2099-0001: chyba — duplicita',
+            'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        // Faktura bez věcného textu: zkrácení by nechalo jen protistranu, popis zůstane celý.
+        $clientId = $this->insertClient('Odběratel Popis s.r.o.');
+        $invoiceId = $this->insertInvoiceWithItem($clientId, 'ignorováno', 30.00, '2099-03-05');
+        $invoiceEntry = $this->insertJournalEntry('invoice', $invoiceId, '311', '602', 30.00, '2099-03-05');
+        $invoiceNo = (string) $pdo->query("SELECT varsymbol FROM invoices WHERE id = {$invoiceId}")->fetchColumn();
+        $set->execute(['FV ' . $invoiceNo . ' — Odběratel Popis s.r.o.', $invoiceEntry]);
+        // Doklad bez jakéhokoli čísla: sloupec Doklad zůstane prázdný, proto se popis nezkracuje.
+        $unnumbered = $this->insertPurchaseWithItem($vendorId, 'bez čísla', 20.00, '2099-03-06');
+        $pdo->prepare("UPDATE purchase_invoices SET varsymbol = NULL, vendor_invoice_number = '' WHERE id = ?")->execute([$unnumbered]);
+        $unnumberedEntry = $this->insertJournalEntry('purchase_invoice', $unnumbered, '501', '321', 20.00, '2099-03-06');
+        $unnumberedText = 'PF #' . $unnumbered . ' — Dodavatel Popis s.r.o. — bez čísla';
+        $set->execute([$unnumberedText, $unnumberedEntry]);
+        // Bankovní pohyb bez věcného textu (text nese jméno protistrany, např. úrok): zůstane protistrana.
+        $pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date, statement_number)
+             VALUES (?, 'popis.gpc', ?, '1000000005', '0100', 'CZK', '2099-03-07', '2099/003')"
+        )->execute([$this->supplierId, hash('sha256', 'popis-' . $this->supplierId)]);
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, counterparty_name)
+             VALUES (?, '2099-03-07', 5.00, 'CZK', 'Připsaný úrok')"
+        )->execute([(int) $pdo->lastInsertId()]);
+        $bankTx = (int) $pdo->lastInsertId();
+        $bankEntry = $this->insertJournalEntry('bank', $bankTx, '221', '662', 5.00, '2099-03-07');
+        $pdo->prepare("UPDATE journal_entries SET document_no = 'BV-POPIS-1' WHERE id = ?")->execute([$bankEntry]);
+        $set->execute([$builder->forSource($this->supplierId, 'bank', $bankTx), $bankEntry]);
+        self::assertSame('Banka 2099/003 — příchozí platba — Připsaný úrok',
+            $pdo->query("SELECT description FROM journal_entries WHERE id = {$bankEntry}")->fetchColumn());
+        $vendorNo = (string) $pdo->query("SELECT vendor_invoice_number FROM purchase_invoices WHERE id = {$purchaseId}")->fetchColumn();
+
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $rows = [];
+        foreach ($detail->events($this->supplierId, $data, [], false, 1) as $event) {
+            if ($event['kind'] === 'line') {
+                $rows[(int) $event['item']['entry_id']][] = [$event['item']['document_no'], $event['item']['description']];
+            }
+        }
+        // Zápisy bez document_no (starší zápisy dokladů) dostanou číslo z dokladu jako v deníku,
+        // jinak by po zkrácení popisu identifikace dokladu zmizela.
+        self::assertSame(array_fill(0, 2, ['VPD-2099-0001', '2099012 - Úhrada faktury přijaté']), $rows[$cashEntry]);
+        self::assertSame(array_fill(0, 2, [$vendorNo, 'kancelářský papír']), $rows[$purchaseEntry]);
+        self::assertSame('Ruční přeúčtování nákladů', $rows[$manualEntry][0][1]);
+        self::assertSame(array_fill(0, 2, ['VPD-2099-0001', 'Storno VPD-2099-0001: chyba — duplicita']), $rows[$stornoEntry]);
+        self::assertSame(array_fill(0, 2, [null, $unnumberedText]), $rows[$unnumberedEntry]);
+        self::assertSame(array_fill(0, 2, ['BV-POPIS-1', 'Připsaný úrok']), $rows[$bankEntry]);
+        self::assertSame(array_fill(0, 2, [$invoiceNo, 'FV ' . $invoiceNo . ' — Odběratel Popis s.r.o.']), $rows[$invoiceEntry]);
+    }
+
+    /**
+     * Údaje dokladu pro krátký popis se načítají jednou na dávku: počet dotazů rozpisu
+     * v jedné dávce nezávisí na počtu zápisů (dotaz pro každý zápis by s nimi rostl).
+     */
+    public function testDetailedExportDescriptionQueriesDoNotGrowWithEntries(): void
+    {
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $count = function () use ($detail): int {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+            $questions = fn (): int => (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetchColumn(1);
+            iterator_to_array($detail->events($this->supplierId, $data, [], false)); // zahřátí pamětí služeb
+            $before = $questions();
+            iterator_to_array($detail->events($this->supplierId, $data, [], false));
+            return $questions() - $before;
+        };
+        for ($i = 1; $i <= 3; $i++) {
+            $this->manual([self::l('518', 'debit', $i), self::l('211', 'credit', $i)], '2099-03-0' . $i, ['description' => 'Zápis ' . $i]);
+        }
+        $few = $count();
+        for ($i = 4; $i <= 9; $i++) {
+            $this->manual([self::l('518', 'debit', $i), self::l('211', 'credit', $i)], '2099-03-0' . $i, ['description' => 'Zápis ' . $i]);
+        }
+        self::assertSame($few, $count());
+    }
+
     public function testDetailedExportUsesSameSourceAndDimensionFilters(): void
     {
         $vendor = $this->insertClient('Syntetický dodavatel exportu');
