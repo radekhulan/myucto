@@ -84,8 +84,11 @@ final class VatReturnLineClassifier
 
     private const DOMESTIC_REVERSE_SALE_LINE = 25;
 
-    /** Tuzemský přenos u dodavatele (ř. 25): kód předmětu plnění → kód zařazení. */
-    private const DOMESTIC_REVERSE_SALE = ['4' => '25s', '5' => '25s5', '3' => '25s3'];
+    /**
+     * Tuzemský přenos u dodavatele (ř. 25): kód předmětu plnění → kód zařazení. 19 a 20 je
+     * dodání elektřiny a plynu soustavou obchodníkovi (§ 92ea).
+     */
+    private const DOMESTIC_REVERSE_SALE = ['4' => '25s', '5' => '25s5', '3' => '25s3', '19' => '25s19', '20' => '25s20'];
 
     /** Výstupní řádky samovyměření → kód zařazení přijatého dokladu. */
     private const SELF_ASSESSMENT = [3 => '23', 4 => '23', 5 => '24e', 6 => '24e', 7 => '25', 8 => '25', 10 => '5', 11 => '5', 12 => '24', 13 => '24'];
@@ -93,7 +96,7 @@ final class VatReturnLineClassifier
     private const DOMESTIC_REVERSE_PURCHASE_CODE = '5';
 
     /** Tuzemský přenos u příjemce (ř. 10/11): kód předmětu plnění → kód zařazení. */
-    private const DOMESTIC_REVERSE_PURCHASE = ['4' => '5', '5' => '5c', '3' => '5d'];
+    private const DOMESTIC_REVERSE_PURCHASE = ['4' => '5', '5' => '5c', '3' => '5d', '19' => '5s19', '20' => '5s20'];
 
     /** Řádky přiznání v základní a ve snížené sazbě (výstup, samovyměření, odpočet). */
     private const BASE_LINES = [1, 3, 5, 7, 10, 12, 40, 43];

@@ -577,6 +577,8 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 | **25s** | Tuzemský přenos, stavební a montážní práce § 92e (dodavatel) | 25 | KH A.1, `kod_pred_pl=4` |
 | **25s5** | Tuzemský přenos, odpad a šrot § 92c (dodavatel) | 25 | KH A.1, `kod_pred_pl=5` |
 | **25s3** | Tuzemský přenos, dodání nemovité věci § 92d (dodavatel) | 25 | KH A.1, `kod_pred_pl=3` |
+| **25s19** | Tuzemský přenos, dodání elektřiny soustavou obchodníkovi § 92ea (dodavatel, např. výkup z fotovoltaiky) | 25 | KH A.1, `kod_pred_pl=19` |
+| **25s20** | Tuzemský přenos, dodání plynu soustavou obchodníkovi § 92ea (dodavatel) | 25 | KH A.1, `kod_pred_pl=20` |
 | **26** | Vývoz zboží do 3. země (§ 66) | 22 | - |
 | **26s** | Služba s místem plnění mimo tuzemsko, 3. země (§ 9 odst. 1) | 26 | - |
 
@@ -590,6 +592,8 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 | **5** | Tuzemský přenos, stavební a montážní práce § 92e (příjemce) | 10 + odpočet 43 | KH B.1, `kod_pred_pl=4` |
 | **5c** | Tuzemský přenos, odpad a šrot § 92c (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=5` |
 | **5d** | Tuzemský přenos, dodání nemovité věci § 92d (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=3` |
+| **5s19** | Tuzemský přenos, dodání elektřiny soustavou obchodníkovi § 92ea (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=19` |
+| **5s20** | Tuzemský přenos, dodání plynu soustavou obchodníkovi § 92ea (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=20` |
 | **23** | Pořízení zboží z JČS (§ 25) | 3 + 43 | KH A.2 |
 | **24e** | Přijetí služby z JČS (§ 9 odst. 1) | 5 + 43 | KH A.2 |
 | **24** | Přijetí služby ze 3. země nebo od osoby neusazené v tuzemsku | 12 + 43 | KH A.2 |

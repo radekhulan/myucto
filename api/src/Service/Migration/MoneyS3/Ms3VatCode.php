@@ -20,8 +20,9 @@ use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier as Lines;
  *     zboží (daň z přirážky) převod neodhaduje,
  *   - `19Ř20` dodání zboží do EU, `19Ř21` služba do EU, `19Ř22` vývoz, `19Ř26` ostatní
  *     plnění s nárokem, `19Ř50` osvobozené bez nároku, `19Ř51BN` osvobozené plnění
- *     mimo koeficient, `19Ř25` přenesení daňové povinnosti u odpadu (v číselníku Money
- *     předmět plnění 5), `19Ř25_S` u stavebních prací (předmět plnění 4),
+ *     mimo koeficient, `19Ř25` přenesení daňové povinnosti u odpadu (ve výchozím číselníku
+ *     Money předmět plnění 5), `19Ř25_S` u stavebních prací (předmět plnění 4); předmět
+ *     plnění, který agenda u členění nastavila jinak, má přednost ({@see subjects()}),
  *   - `19Ř00P`/`19Ř00U` doklad mimo přiznání.
  * Ostatní členění (přenesená povinnost na vstupu, pořízení z EU, dovoz…) převod
  * nezařazuje a doklad nechá k ruční kontrole.
@@ -62,8 +63,11 @@ final class Ms3VatCode
      * @return array{in_return:bool, code:?string, deduction:'full'|'reduced'|'none', fixed_asset:bool}|null
      *   `code` null = tuzemské plnění, kód se odvodí ze sazby; null celé = členění převod
      *   nezná; `fixed_asset` = odpočet u pořízení majetku (ř. 47)
+     *
+     * @param array<string,string> $subjects kód předmětu plnění z číselníku členění agendy
+     *   ({@see subjects()}); u ř. 25 má přednost před výchozím číselníkem Money
      */
-    public static function resolve(string $code, bool $issued): ?array
+    public static function resolve(string $code, bool $issued, array $subjects = []): ?array
     {
         if (preg_match('/^\d{2}Ř\s*([0-9][0-9 ,]*?)\s*([A-Z_]*)$/u', trim($code), $m) !== 1) {
             return null;
@@ -84,8 +88,38 @@ final class Ms3VatCode
         if ($rows === [1, 2]) {
             return in_array($suffix, ['', '_S'], true) ? ['in_return' => true, 'code' => null, 'deduction' => 'full', 'fixed_asset' => false] : null;
         }
-        $saleCode = count($rows) === 1 ? self::saleCode($rows[0], $suffix) : null;
+        $saleCode = count($rows) === 1 ? self::saleCode($rows[0], $suffix, $subjects[self::key($code)] ?? null) : null;
         return $saleCode === null ? null : ['in_return' => true, 'code' => $saleCode, 'deduction' => 'full', 'fixed_asset' => false];
+    }
+
+    /**
+     * Kód předmětu plnění podle členění DPH z číselníku agendy (`UcClnDPH.PredmPln`).
+     * Agenda si ho u členění nastavuje sama: `19Ř25` je ve výchozím číselníku odpad (5),
+     * firma vykupující elektřinu ho má jako dodání elektřiny obchodníkovi (19). Číselník
+     * vede řádek pro každé účetní období (`CisloObd`), platí ten z posledního.
+     *
+     * @return array<string,string> členění => kód předmětu plnění
+     */
+    public static function subjects(Ms3Backup $backup): array
+    {
+        $out = [];
+        $period = [];
+        foreach ($backup->table('UcClnDPH')?->rows(['Zkrat', 'PredmPln', 'CisloObd']) ?? [] as $r) {
+            $code = self::key((string) ($r['Zkrat'] ?? ''));
+            $subject = trim((string) ($r['PredmPln'] ?? ''));
+            $obd = (int) ($r['CisloObd'] ?? 0);
+            if ($code === '' || $subject === '' || $obd < ($period[$code] ?? PHP_INT_MIN)) {
+                continue;
+            }
+            $out[$code] = $subject;
+            $period[$code] = $obd;
+        }
+        return $out;
+    }
+
+    private static function key(string $code): string
+    {
+        return mb_strtoupper(preg_replace('/\s+/u', '', $code) ?? '');
     }
 
     /** Řádek samovyměření na výstupu (ř. 3–13) na interním dokladu Money. */
@@ -121,13 +155,16 @@ final class Ms3VatCode
         return ['code' => $code, 'deduction' => $reduced ? 'reduced' : 'full', 'fixed_asset' => $asset];
     }
 
-    private static function saleCode(int $row, string $suffix): ?string
+    private static function saleCode(int $row, string $suffix, ?string $subject = null): ?string
     {
         $key = $row . '|' . $suffix;
         if ($key === self::EXEMPT_OUTSIDE_COEFFICIENT) {
             return Lines::EXEMPT_OUTSIDE_COEFFICIENT_CODE;
         }
-        return array_key_exists($key, self::SALE_ROWS) ? Lines::saleCode($row, self::SALE_ROWS[$key]) : null;
+        if (!array_key_exists($key, self::SALE_ROWS)) {
+            return null;
+        }
+        return Lines::saleCode($row, self::SALE_ROWS[$key] !== null && $subject !== null ? $subject : self::SALE_ROWS[$key]);
     }
 
     /** Výstupní dvojice samovyměření tak, jak je Money píše v kódu (`03,04|05,06|…`). */

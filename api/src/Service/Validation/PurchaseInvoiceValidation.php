@@ -19,11 +19,12 @@ final class PurchaseInvoiceValidation
     public const ALLOWED_STATUSES  = ['draft', 'received', 'booked', 'paid', 'cancelled'];
 
     /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský § 92 (5 stavební
-     *  práce, 5c odpad a šrot § 92c, 5d nemovitá věc § 92d), pořízení zboží z JČS (23),
-     *  služba z EU/3. země (24, 24e), dovoz zboží ze 3. země (25). Autoritativní seznam
-     *  pro evidenci DPH staví VatLedgerService z číselníku (`is_reverse_charge = 1`);
-     *  tady jde jen o potlačení varování, takže stačí seed. */
-    public const REVERSE_CHARGE_CODES = ['5', '5c', '5d', '23', '24', '24e', '25'];
+     *  práce, 5c odpad a šrot § 92c, 5d nemovitá věc § 92d, 5s19 a 5s20 elektřina a plyn
+     *  obchodníkovi § 92ea), pořízení zboží z JČS (23), služba z EU/3. země (24, 24e),
+     *  dovoz zboží ze 3. země (25). Autoritativní seznam pro evidenci DPH staví
+     *  VatLedgerService z číselníku (`is_reverse_charge = 1`); tady jde jen o potlačení
+     *  varování, takže stačí seed. */
+    public const REVERSE_CHARGE_CODES = ['5', '5c', '5d', '5s19', '5s20', '23', '24', '24e', '25'];
 
     /**
      * Je doklad v režimu přenesení daňové povinnosti / samovyměření? Rozpozná se
