@@ -1804,6 +1804,29 @@ final class SyntheticAgenda
      *
      * @return array<string,string>
      */
+    /**
+     * Agenda s přijatou FP25002 (1 000 + 210 Kč), jejíž hlavička má krácený nárok
+     * (`19Ř40,41 K`) a položka „Výroba" (400 Kč) vlastní členění s plným nárokem.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithMixedPurchaseDeduction(): array
+    {
+        $files = self::files();
+        $path = 'ROK.002/PFaktury.DAT';
+        $rows = [];
+        foreach (Ms3Table::fromString($files[$path], 'PFAKTURY')->rows() as $row) {
+            $rows[] = $row['Doklad'] === 'FP25002' ? ['Cislo' => 74, 'KodDPH' => self::KOD_DPH_PURCHASE . ' K'] + $row : $row;
+        }
+        $files[$path] = Ms3FixtureWriter::table([...self::PURCHASE_FIELDS, ['Cislo', 'L', 4]], $rows);
+        $files['ROK.002/PFaktPol.DAT'] = Ms3FixtureWriter::table([['Cislo', 'L', 4], ['Popis', 'C', 60], ['SazbaDPH', 'E', 10],
+            ['KodDPH', 'C', 12], ['Cena', 'E', 10], ['CenaTyp', 'B', 1], ['PocetMJ', 'E', 10], ['Poradi', 'L', 4]], [
+            ['Cislo' => 74, 'Popis' => 'Režie', 'SazbaDPH' => 21.0, 'Cena' => 600.0, 'PocetMJ' => 1.0, 'Poradi' => 1],
+            ['Cislo' => 74, 'Popis' => 'Výroba', 'SazbaDPH' => 21.0, 'KodDPH' => self::KOD_DPH_PURCHASE, 'Cena' => 200.0, 'PocetMJ' => 2.0, 'Poradi' => 2],
+        ]);
+        return $files;
+    }
+
     public static function filesWithFixedAssetCodes(): array
     {
         $files = self::files();

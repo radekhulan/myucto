@@ -184,6 +184,39 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
      * samovyměření (jiný kurz) je položka mimo předmět daně - přiznání i KH A.2 zůstávají
      * přesně ze základu interního dokladu, jako je vykázalo Money.
      */
+    /**
+     * Přijatá faktura s krácenou hlavičkou a položkou s plným nárokem v téže sazbě: převod
+     * založí rozpis DPH, takže přiznání vykáže 400 Kč na ř. 40 a zbytek 600 Kč na ř. 40k
+     * (dřív celou sazbu jako krácenou podle hlavičky).
+     */
+    public function testMixedDeductionItemsOfOneRateSplitIntoVatAllocations(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/split.lz', SyntheticAgenda::filesWithMixedPurchaseDeduction());
+        $backup = Ms3Backup::extract($this->tmp . '/split.lz', $this->tmp . '/split');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.vat_deduction, a.base_amount, a.vat_amount FROM purchase_invoice_vat_allocations a
+               JOIN purchase_invoices p ON p.id = a.purchase_invoice_id
+              WHERE p.supplier_id = ? AND p.vendor_invoice_number = 'DF-2025-010' ORDER BY a.order_index"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame([['reduced', '600.00', '126.00'], ['full', '400.00', '84.00']],
+            array_map('array_values', $stmt->fetchAll(PDO::FETCH_ASSOC)), $this->explain($protocol));
+
+        $rows = array_values(array_filter(
+            $this->container(VatLedgerService::class)->rows($supplierId, '2025-03-01', '2025-03-31'),
+            static fn (array $r): bool => $r['source'] === 'purchase' && ($r['vendor_invoice_number'] ?? '') === 'DF-2025-010',
+        ));
+        $byLine = [];
+        foreach ($rows as $r) {
+            $byLine[(string) $r['dphdp3_line']] = round(($byLine[(string) $r['dphdp3_line']] ?? 0.0) + (float) $r['vat_czk'], 2);
+        }
+        self::assertSame(['40k' => 126.0, '40' => 84.0], $byLine, json_encode($rows, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
     public function testSelfAssessedPurchaseIsFlaggedAndRateDifferenceStaysOutsideTheReturn(): void
     {
         $supplierId = $this->supplier();

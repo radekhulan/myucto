@@ -174,6 +174,27 @@ final class MigratedDocumentWriter
         }
     }
 
+    /**
+     * Rozpis DPH přijaté faktury (části s vlastním nárokem na odpočet) nahradí celý;
+     * prázdný seznam rozpis smaže.
+     *
+     * @param list<array{rate:float,base:float,vat:float,deduction:string,description:string,account_code:string,vat_classification_code:?string}> $parts
+     */
+    public function replacePurchaseVatAllocations(int $supplierId, int $purchaseInvoiceId, array $parts): void
+    {
+        $this->stmt('purchase_allocation_delete', 'DELETE FROM purchase_invoice_vat_allocations WHERE supplier_id = ? AND purchase_invoice_id = ?')
+            ->execute([$supplierId, $purchaseInvoiceId]);
+        foreach ($parts as $i => $part) {
+            $this->stmt('purchase_allocation', 'INSERT INTO purchase_invoice_vat_allocations
+                    (supplier_id, purchase_invoice_id, description, usage_type, vat_rate, base_amount, vat_amount, total_amount,
+                     vat_deduction, vat_deduction_percent, tax_treatment, account_code, vat_classification_code, order_index)
+                 VALUES (?, ?, ?, "business", ?, ?, ?, ?, ?, 100, "deductible", ?, ?, ?)')->execute([
+                $supplierId, $purchaseInvoiceId, $part['description'], $part['rate'], $part['base'], $part['vat'],
+                round($part['base'] + $part['vat'], 2), $part['deduction'], $part['account_code'], $part['vat_classification_code'], $i,
+            ]);
+        }
+    }
+
     public function insertPurchaseItem(int $purchaseInvoiceId, MigratedDocumentItem $item, int $orderIndex): void
     {
         $this->stmt('purchase_item', 'INSERT INTO purchase_invoice_items
