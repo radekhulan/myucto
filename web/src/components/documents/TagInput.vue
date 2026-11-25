@@ -85,6 +85,7 @@ function onKeydown(e: KeyboardEvent) {
       </span>
       <input
         :id="inputId"
+        :disabled="!!resource && modelValue.length >= 64"
         :maxlength="resource ? 64 : undefined"
         ref="inputEl"
         v-model="input"

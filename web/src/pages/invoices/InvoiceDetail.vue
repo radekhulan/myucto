@@ -2535,6 +2535,9 @@ useWindowRefresh(async () => {
             :title="invoice.income_tax_exempt_reason || ''">
             {{ t('invoice.income_tax_exempt_badge') }}
           </span>
+          <span v-for="tag in invoice.tags" :key="tag.id" class="text-xs px-2 py-0.5 rounded-full font-normal bg-primary-50 text-primary-700">
+            {{ tag.name }}
+          </span>
           <RouterLink v-if="invoice.recurring_template_id"
             :to="{ name: 'recurring-edit', params: { id: invoice.recurring_template_id } }"
             class="text-xs px-2 py-0.5 rounded font-normal bg-primary-50 text-primary-700 border border-primary-200 hover:bg-primary-100"

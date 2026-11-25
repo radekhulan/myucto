@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration;
 
+use MyInvoice\Repository\EntityTagRepository;
+use MyInvoice\Repository\TagTarget;
+use MyInvoice\Service\Accounting\Bulk\BulkTransaction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\RecurringTemplateRepository;
@@ -1551,6 +1554,29 @@ final class RecurringGeneratorTest extends TestCase
 
         // draftOpenDate pro 30.6. = 1.6.
         $this->assertSame('2026-06-01', RecurringInvoiceGenerator::draftOpenDate('2026-06-30'));
+    }
+
+    public function testInvoiceKeepsTagSnapshotWhenTemplateChangesAndDraftIsReopened(): void
+    {
+        $templateId = $this->createPeriodTemplate('2096-07-31', ['end_of_month' => true]);
+        $tagName = 'PHPUnit-' . bin2hex(random_bytes(6));
+        $tags = new EntityTagRepository($this->db);
+        $pdo = $this->db->pdo();
+        try {
+            BulkTransaction::run($pdo, fn () => $tags->replace(TagTarget::RecurringTemplate, $this->supplierId, $templateId, [$tagName]));
+            $draft = $this->generator->openDraft($templateId, $this->userId);
+            $id = $this->createdInvoiceIds[] = $draft['invoice_id'];
+            BulkTransaction::run($pdo, fn () => $tags->replace(TagTarget::RecurringTemplate, $this->supplierId, $templateId, []));
+            self::assertFalse($this->generator->openDraft($templateId, $this->userId)['created']);
+            $assigned = $tags->forEntities(TagTarget::Invoice, $this->supplierId, [$id]);
+            self::assertSame([$tagName], array_column($assigned[$id] ?? [], 'name'));
+
+            $next = $this->generator->generate($templateId, '2096-08-31', $this->userId, forceDraft: true);
+            $this->createdInvoiceIds[] = $next['invoice_id'];
+            self::assertSame([], $tags->forEntities(TagTarget::Invoice, $this->supplierId, [$next['invoice_id']]));
+        } finally {
+            $pdo->prepare('DELETE FROM entity_tags WHERE supplier_id = ? AND name = ?')->execute([$this->supplierId, $tagName]);
+        }
     }
 
     public function testOpenDraftIsIdempotent(): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -54,6 +55,9 @@ final class GetInvoiceAction
         // dokladů), aby editor nemusel rozlišovat „nemá rozpis" od „ještě se nenačetl".
         $invoice['payment_schedule'] = $this->paymentSchedule->forInvoice($sid, $id);
 
+        if (!RequestAuthorization::isClientType($request)) {
+            $invoice['tags'] = $this->repo->tagsForInvoices($sid, [$id])[$id] ?? [];
+        }
         $invoice['cash_documents'] = $this->repo->cashDocumentsForInvoice($sid, $id);
         $invoice = $this->taxDocumentLinks->withDetail($sid, $invoice);
 

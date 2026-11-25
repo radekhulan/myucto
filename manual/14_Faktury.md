@@ -399,6 +399,14 @@ hlavičky 60 % a 40 %) se zobrazí u každé hodnoty **celý**, částky seznamu
 celé doklady. Kolik DPH připadá na hodnotu, ukazuje Kniha DPH s filtrem dimenze
 a sestava DPH podle dimenze ([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-dph-a-soupis-kh-podle-dimenze)).
 
+#### Interní štítky faktury
+
+V editoru v části **Klasifikace** zadejte štítky nebo vyberte existující název
+ze společného firemního seznamu. Nový název potvrďte klávesou Enter a fakturu uložte.
+Ve filtrech vyberte jeden či více štítků. Zobrazí se doklady se všemi vybranými
+štítky. Volba **Bez štítku** vyhledá nezařazené doklady. V nastavení sloupců lze
+zapnout **Štítky**. Štítky slouží uvnitř firmy a zákazník je na dokladu neuvidí.
+
 #### Kategorie tržby
 
 Filtr bere **několik kategorií najednou** a přepínačem vedle něj rozhodnete, co s nimi:

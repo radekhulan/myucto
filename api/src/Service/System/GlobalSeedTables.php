@@ -417,7 +417,7 @@ final class GlobalSeedTables
         'webhook_deliveries',
         'internal_document_lines', 'internal_documents',
         'invoice_advance_deductions', 'invoice_attachments', 'invoice_items', 'invoice_payment_schedule', 'invoice_payments',
-        'invoice_pdfs', 'invoice_settlements',
+        'invoice_pdfs', 'invoice_settlements', 'invoice_tags',
         'invoices',
         'isds_gateway_sessions',
         'accounting_securities_debt_commands', 'accounting_securities_debt_claims', 'accounting_securities_debt_fx_carries',

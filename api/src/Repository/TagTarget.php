@@ -8,11 +8,13 @@ namespace MyInvoice\Repository;
 enum TagTarget: string
 {
     case RecurringTemplate = 'recurring_template_tags';
+    case Invoice = 'invoice_tags';
 
     public function entityTable(): string
     {
         return match ($this) {
             self::RecurringTemplate => 'recurring_invoice_templates',
+            self::Invoice => 'invoices',
         };
     }
 }

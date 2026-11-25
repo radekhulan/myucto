@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Http;
 
+use MyInvoice\Repository\EntityTagRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
@@ -31,6 +33,9 @@ final class InvoiceListFilters
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        $tagIds = $filter['tag_ids'] ?? '';
+        if (!EntityTagRepository::validFilter($tagIds)) return 'Neplatný filtr štítků.';
+        if ($tagIds !== '' && RequestAuthorization::isClientType($request)) return 'Štítky jsou interní.';
         $dimension = self::dimension($request, $filter, $dimensions);
         if (is_string($dimension)) {
             return $dimension;
@@ -46,6 +51,7 @@ final class InvoiceListFilters
         }
 
         $filters = [
+            'tag_ids'       => $tagIds,
             'q'             => isset($q['q']) ? trim((string) $q['q']) : '',
             'status'        => $filter['status']      ?? null,
             'type'          => $filter['type']        ?? null,
