@@ -435,14 +435,12 @@ final class JournalDescriptionBuilderTest extends TestCase
         self::assertSame('Připsaný úrok', B::withoutDocumentHead($interest,
             B::parts($interest, 'bank', ['partner_name' => 'Připsaný úrok']), 'bank'));
 
-        // Bez protistrany (jen VS) zůstane celý popis.
         $vsOnly = 'Banka 2099/004 — příchozí platba — VS 2099000123';
-        self::assertSame($vsOnly, B::withoutDocumentHead($vsOnly, B::parts($vsOnly, 'bank', []), 'bank'));
+        self::assertSame('VS 2099000123', B::withoutDocumentHead($vsOnly, B::parts($vsOnly, 'bank', []), 'bank'));
 
-        // Ručně přepsaný popis jen s protistranou zůstane, jak je.
-        $rewritten = 'nájem sklad';
-        self::assertSame($rewritten, B::withoutDocumentHead($rewritten,
-            B::parts($rewritten, 'bank', ['partner_name' => 'nájem sklad']), 'bank'));
+        // Bez protistrany i VS zůstane celý popis.
+        $bare = 'Banka 2099/004 — příchozí platba';
+        self::assertSame($bare, B::withoutDocumentHead($bare, B::parts($bare, 'bank', []), 'bank'));
 
         $invoice = 'FV 2099000123 — Odběratel s.r.o.';
         self::assertSame($invoice, B::withoutDocumentHead($invoice,

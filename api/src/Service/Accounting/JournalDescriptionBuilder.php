@@ -456,7 +456,7 @@ final class JournalDescriptionBuilder
      *
      * Výjimkou je bankovní pohyb bez věcného textu: {@see parts()} z něj ubere jen hlavičku
      * „Banka …“, směr platby a číslo dokladu, zbylá protistrana (s VS) je často jediný popis
-     * pohybu („Připsaný úrok“), takže zůstane ona.
+     * pohybu („Připsaný úrok“), takže zůstane ona; bez protistrany aspoň VS.
      *
      * @param array{kind:?string, partner:?string, vs:?string, text:?string} $parts
      */
@@ -469,6 +469,9 @@ final class JournalDescriptionBuilder
         if ($parts['text'] === null) {
             if ($sourceType === 'bank' && $parts['partner'] !== null) {
                 return $parts['vs'] !== null ? $parts['partner'] . ' (VS ' . $parts['vs'] . ')' : $parts['partner'];
+            }
+            if ($sourceType === 'bank' && $parts['vs'] !== null) {
+                return 'VS ' . $parts['vs'];
             }
             return $full;
         }
