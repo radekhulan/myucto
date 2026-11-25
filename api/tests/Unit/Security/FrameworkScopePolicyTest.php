@@ -26,6 +26,8 @@ final class FrameworkScopePolicyTest extends TestCase
         yield 'cenné papíry 504' => ['/api/accounting/securities/debt/preview', FrameworkScopePolicy::NONPROFIT_504];
         yield 'číselník NNO' => ['/api/accounting/catalog/nonprofit-funding/3', FrameworkScopePolicy::NONPROFIT_504];
         yield 'daň NNO období' => ['/api/accounting/periods/7/nonprofit-tax/draft', FrameworkScopePolicy::NONPROFIT_504];
+        yield 'průběžné čerpání dotací' => ['/api/accounting/periods/7/funding-work/sources/3/allocations', FrameworkScopePolicy::NONPROFIT_504];
+        yield 'přehled čerpání dotací' => ['/api/accounting/periods/7/funding-work', FrameworkScopePolicy::NONPROFIT_504];
         // Uzávěrku podle rámce 504 řídí rámec konkrétního období, ne dnešní rámec firmy.
         yield 'krok uzávěrky 504' => ['/api/accounting/periods/7/closing/deferred-tax-504-preview', null];
         yield 'běžný deník' => ['/api/accounting/journal', null];

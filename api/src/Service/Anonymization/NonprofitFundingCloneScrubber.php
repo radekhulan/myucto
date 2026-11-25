@@ -72,6 +72,9 @@ final class NonprofitFundingCloneScrubber
                 ->execute([$row['source_key'],$row['parent_hash'],NonprofitTaxRules::canonicalJson($policy),NonprofitTaxRules::canonicalJson($basis),NonprofitTaxRules::canonicalJson($request),$row['reason'],$row['idempotency_key'],$row['request_hash'],$row['record_hash'],$supplier,$row['id']]);
             $previous[$oldKey]=$row;
         }
+        // Pracovní evidence čerpání odkazuje na potvrzený zdroj jeho klíčem; klon klíč přepsal, odkaz se přemapuje (neznámý zanikne).
+        foreach($pdo->query('SELECT id,supplier_id,legacy_source_key FROM nonprofit_funding_work_sources WHERE legacy_source_key IS NOT NULL FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC) as $work)
+            $pdo->prepare('UPDATE nonprofit_funding_work_sources SET legacy_source_key=? WHERE id=?')->execute([$keys[$work['supplier_id'].':'.$work['legacy_source_key']]??null,$work['id']]);
         foreach($rows as $row){
             $supplier=(int)$row['supplier_id'];$period=(int)$row['period_id'];$q=$pdo->prepare('SELECT input_hash FROM nonprofit_tax_assessments WHERE supplier_id=? AND id=?');$q->execute([$supplier,$row['id']]);
             try{$matches=hash_equals($q->fetchColumn(),$sources->snapshot($supplier,$period,true)['input_hash']);}

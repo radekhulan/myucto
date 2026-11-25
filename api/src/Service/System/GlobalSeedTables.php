@@ -351,6 +351,7 @@ final class GlobalSeedTables
         'nonprofit_tax_source_evidence_chunks', 'nonprofit_tax_source_evidence_manifests', 'nonprofit_tax_source_evidence_manifest_chunks',
         'nonprofit_dppo_acceptances',
         'nonprofit_legal_profiles', 'nonprofit_tax_saving_sources', 'nonprofit_tax_saving_commands', 'nonprofit_tax_saving_events', 'nonprofit_tax_saving_cost_bindings',
+        'nonprofit_funding_work_sources', 'nonprofit_funding_work_incomes', 'nonprofit_funding_work_allocations', 'nonprofit_funding_work_history',
         'property_module_profiles', 'property_objects', 'property_revisions', 'property_revision_groups',
         'property_revision_members', 'property_revision_roles', 'property_revision_identifiers',
         'property_revision_services', 'property_audit',

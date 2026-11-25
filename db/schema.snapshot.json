@@ -1248,7 +1248,8 @@
         "2342_myeet_checkouts.sql",
         "2343_mobile_oidc_codes.sql",
         "2344_myeet_sale_license.sql",
-        "2345_myeet_readonly_license.sql"
+        "2345_myeet_readonly_license.sql",
+        "2346_nonprofit_funding_work.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9556,6 +9557,180 @@
                 "chk_nfr_revision": "`revision_no` > 0",
                 "policy_json": "json_valid(`policy_json`)",
                 "request_json": "json_valid(`request_json`)"
+            }
+        },
+        "nonprofit_funding_work_allocations": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_id": "bigint(20) unsigned NOT NULL",
+                "active_line_id": "bigint(20) unsigned NULL DEFAULT NULL STORED GENERATED AS (if(`status` = 'active',`linked_line_id`,NULL))",
+                "amount_cents": "bigint(20) unsigned NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "credit_notes_seen": "int(10) unsigned NOT NULL DEFAULT 0",
+                "entry_date": "date NOT NULL",
+                "entry_id": "bigint(20) unsigned NOT NULL",
+                "entry_source_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "entry_source_type": "varchar(40) NULL DEFAULT NULL COLLATE ascii_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "line_amount_cents": "bigint(20) NOT NULL",
+                "line_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "linked_line_id": "bigint(20) unsigned NOT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "status": "enum('active','removed') NOT NULL DEFAULT 'active'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "datetime NULL DEFAULT NULL",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nfwa_created_by": "BTREE (created_by)",
+                "fk_nfwa_updated_by": "BTREE (updated_by)",
+                "idx_nfwa_cost_line": "BTREE (supplier_id, linked_line_id, status)",
+                "idx_nfwa_line": "BTREE (line_id)",
+                "idx_nfwa_source": "BTREE (supplier_id, source_id, status)",
+                "uq_nfwa_active_line": "UNIQUE BTREE (supplier_id, source_id, active_line_id)",
+                "uq_nfwa_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nfwa_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwa_line": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nfwa_source": "(supplier_id, source_id) -> nonprofit_funding_work_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwa_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_nfwa_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_nfwa_amount": "`amount_cents` > 0"
+            }
+        },
+        "nonprofit_funding_work_history": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "action": "varchar(40) NOT NULL COLLATE ascii_bin",
+                "after_json": "longtext NULL DEFAULT NULL",
+                "allocation_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "before_json": "longtext NULL DEFAULT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "income_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "reason": "text NULL DEFAULT NULL",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nfwh_allocation": "BTREE (supplier_id, allocation_id)",
+                "fk_nfwh_created_by": "BTREE (created_by)",
+                "fk_nfwh_income": "BTREE (supplier_id, income_id)",
+                "idx_nfwh_source": "BTREE (supplier_id, source_id, id)",
+                "uq_nfwh_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nfwh_allocation": "(supplier_id, allocation_id) -> nonprofit_funding_work_allocations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwh_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwh_income": "(supplier_id, income_id) -> nonprofit_funding_work_incomes (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwh_source": "(supplier_id, source_id) -> nonprofit_funding_work_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwh_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "after_json": "`after_json` is null or json_valid(`after_json`)",
+                "before_json": "`before_json` is null or json_valid(`before_json`)"
+            }
+        },
+        "nonprofit_funding_work_incomes": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_id": "bigint(20) unsigned NOT NULL",
+                "active_line_id": "bigint(20) unsigned NULL DEFAULT NULL STORED GENERATED AS (if(`status` = 'active',`linked_line_id`,NULL))",
+                "amount_cents": "bigint(20) NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "entry_date": "date NOT NULL",
+                "entry_id": "bigint(20) unsigned NOT NULL",
+                "entry_source_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "entry_source_type": "varchar(40) NULL DEFAULT NULL COLLATE ascii_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "line_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "linked_line_id": "bigint(20) unsigned NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "status": "enum('active','removed') NOT NULL DEFAULT 'active'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "datetime NULL DEFAULT NULL",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nfwi_created_by": "BTREE (created_by)",
+                "fk_nfwi_updated_by": "BTREE (updated_by)",
+                "idx_nfwi_line": "BTREE (line_id)",
+                "idx_nfwi_source": "BTREE (supplier_id, source_id, status)",
+                "uq_nfwi_active_line": "UNIQUE BTREE (supplier_id, active_line_id)",
+                "uq_nfwi_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nfwi_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwi_line": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nfwi_source": "(supplier_id, source_id) -> nonprofit_funding_work_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfwi_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_nfwi_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "nonprofit_funding_work_sources": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_prefixes": "longtext NOT NULL",
+                "activity_kind_ids": "longtext NOT NULL",
+                "budget_cents": "bigint(20) unsigned NOT NULL",
+                "contract_ref": "varchar(100) NULL DEFAULT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "kind": "enum('operating_grant','investment_grant','gift') NOT NULL",
+                "legacy_source_key": "varchar(80) NULL DEFAULT NULL COLLATE ascii_bin",
+                "period_id": "bigint(20) unsigned NOT NULL",
+                "provider_id": "bigint(20) unsigned NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "status": "enum('active','cancelled') NOT NULL DEFAULT 'active'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "title": "varchar(255) NOT NULL",
+                "updated_at": "datetime NULL DEFAULT NULL",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "valid_from": "date NOT NULL",
+                "valid_to": "date NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nfws_created_by": "BTREE (created_by)",
+                "fk_nfws_updated_by": "BTREE (updated_by)",
+                "idx_nfws_period": "BTREE (supplier_id, period_id, status)",
+                "idx_nfws_provider": "BTREE (supplier_id, provider_id)",
+                "uq_nfws_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nfws_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfws_period": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfws_provider": "(supplier_id, provider_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nfws_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_nfws_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "account_prefixes": "json_valid(`account_prefixes`)",
+                "activity_kind_ids": "json_valid(`activity_kind_ids`)",
+                "chk_nfws_budget": "`budget_cents` > 0",
+                "chk_nfws_range": "`valid_from` <= `valid_to`"
             }
         },
         "nonprofit_legal_profiles": {
@@ -20155,7 +20330,7 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_hash": "char(64) NOT NULL",
-                "input_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "period_start": "date NOT NULL",
                 "result_hash": "char(64) NULL DEFAULT NULL",
                 "result_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
@@ -20303,7 +20478,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key_hash": "binary(32) NOT NULL",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "previous_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "result_snapshot_hash": "char(64) NULL DEFAULT NULL",
                 "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
@@ -20972,9 +21147,9 @@
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -21009,10 +21184,10 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "person_result_id": "bigint(20) unsigned NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -21047,10 +21222,10 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_set_hash": "char(64) NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "ruleset_hash": "char(64) NOT NULL",
@@ -24174,9 +24349,9 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_pii_pol": "BTREE (purchase_order_line_id)",
-                "ft_pii_description": "FULLTEXT (description)",
                 "fk_pii_stock_item": "BTREE (stock_item_id)",
                 "fk_pii_vat": "BTREE (vat_rate_id)",
+                "ft_pii_description": "FULLTEXT (description)",
                 "idx_pii_accrual_to": "BTREE (accrual_to)",
                 "idx_pii_expense_rule": "BTREE (expense_rule_id)",
                 "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)",
@@ -31480,6 +31655,8 @@
         "trg_nfr_immutable_delete": "BEFORE DELETE ON nonprofit_funding_revisions #c7eaa2db7bdd66ae584c709efe931229740ea451",
         "trg_nfr_immutable_update": "BEFORE UPDATE ON nonprofit_funding_revisions #c7eaa2db7bdd66ae584c709efe931229740ea451",
         "trg_nfr_insert": "BEFORE INSERT ON nonprofit_funding_revisions #8ef193715bd5844a87d770d92e7eb9b550d9c2eb",
+        "trg_nfwh_immutable_delete": "BEFORE DELETE ON nonprofit_funding_work_history #dde437abd2e8f56987c05baf327fa4051f9c74c0",
+        "trg_nfwh_immutable_update": "BEFORE UPDATE ON nonprofit_funding_work_history #dde437abd2e8f56987c05baf327fa4051f9c74c0",
         "trg_nlp_immutable_delete": "BEFORE DELETE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nlp_immutable_update": "BEFORE UPDATE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #5a266b3a9dd32e56bc2bc37c3555a33669433280",
