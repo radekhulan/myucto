@@ -32,6 +32,7 @@ final class FrameworkScopePolicy
         '#^/api/accounting/framework-conversions(/|$)#' => self::CONVERSION_504,
         '#^/api/accounting/(joint-allocations|nonprofit-[a-z-]+|securities/debt|catalog/nonprofit-[a-z-]+)(/|$)#' => self::NONPROFIT_504,
         '#^/api/accounting/periods/[0-9]+/nonprofit-[a-z-]+(/|$)#' => self::NONPROFIT_504,
+        '#^/api/accounting/periods/[0-9]+/funding-work(/|$)#' => self::NONPROFIT_504,
     ];
 
     public function __construct(private readonly Connection $db) {}
