@@ -226,6 +226,39 @@ final class AbraSnapshotBuilderTest extends TestCase
         self::assertSame([], $snapshot['vazba']);
     }
 
+    public function testNumericMovementLinkMatchesInternalIdNotYearInDocumentNumber(): void
+    {
+        $client = new FakeAbraReadOnlyClient();
+        $client->changesEnabled = false;
+        $client->rows['ucetni-obdobi'] = [
+            ['id' => 1, 'kod' => '2020', 'platiOdData' => '2020-01-01', 'platiDoData' => '2020-12-31'],
+            ['id' => 2, 'kod' => '2024', 'platiOdData' => '2024-01-01', 'platiDoData' => '2024-12-31'],
+            ['id' => 3, 'kod' => '2025', 'platiOdData' => '2025-01-01', 'platiDoData' => '2025-12-31'],
+            ['id' => 4, 'kod' => '2026', 'platiOdData' => '2026-01-01', 'platiDoData' => '2026-12-31'],
+        ];
+        $client->rows['faktura-vydana'] = [
+            ['id' => 501, 'datUcto' => '2024-12-15'],
+            ['id' => 502, 'datUcto' => '2020-03-01'],
+        ];
+        $client->rows['banka'] = [
+            ['id' => 71, 'kod' => 'BANK-01/2025', 'datUcto' => '2025-01-10'],
+            ['id' => 2025, 'kod' => 'BANK-01/0042', 'datUcto' => '2020-03-05'],
+        ];
+        $client->rows['vazba'] = [
+            ['id' => 801, 'a@ref' => '/c/demo/faktura-vydana/501.json',
+                'b@ref' => '/c/demo/banka/71.json', 'castka' => '100', 'mena' => 'code:CZK'],
+            ['id' => 802, 'a@ref' => '/c/demo/faktura-vydana/502.json',
+                'b@ref' => '/c/demo/banka/2025.json', 'castka' => '100', 'mena' => 'code:CZK'],
+        ];
+
+        $snapshot = (new AbraSnapshotBuilder($client))->build(self::credentials(), [2025, 2026], 'initial', [],
+            ['ico' => '12345678'], static function (): void {}, static fn (): bool => false);
+
+        self::assertSame([71], array_column($snapshot['banka'], 'id'));
+        self::assertSame([801], array_column($snapshot['vazba'], 'id'));
+        self::assertSame([501], array_column($snapshot['faktura-vydana'], 'id'));
+    }
+
     public function testInitialImportExcludesPaymentLinkToCancelledMovement(): void
     {
         $client = new FakeAbraReadOnlyClient();
