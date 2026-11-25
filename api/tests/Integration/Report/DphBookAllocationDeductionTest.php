@@ -34,6 +34,8 @@ final class DphBookAllocationDeductionTest extends TestCase
     private int $clientId = 0;
     private int $purchaseId = 0;
     private int $coefficientId = 0;
+    private bool $accountAdded = false;
+    private const ACCOUNT = '502';
     private ?array $origVatFlags = null;
 
     protected function setUp(): void
@@ -71,6 +73,14 @@ final class DphBookAllocationDeductionTest extends TestCase
                 ->execute([$this->supplierId, self::YEAR]);
             $this->coefficientId = (int) $pdo->lastInsertId();
         }
+        // Účet rozpisu DPH musí být v osnově firmy (cizí klíč); čistá testovací DB ho mít nemusí.
+        $account = $pdo->prepare('SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?');
+        $account->execute([$this->supplierId, self::ACCOUNT]);
+        if ($account->fetchColumn() === false) {
+            $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type) VALUES (?, ?, 'Test spotřeba energie', 'expense')")
+                ->execute([$this->supplierId, self::ACCOUNT]);
+            $this->accountAdded = true;
+        }
     }
 
     protected function tearDown(): void
@@ -98,6 +108,9 @@ final class DphBookAllocationDeductionTest extends TestCase
         }
         if ($this->coefficientId > 0) {
             $pdo->prepare('DELETE FROM vat_coefficients WHERE id = ?')->execute([$this->coefficientId]);
+        }
+        if ($this->accountAdded) {
+            $pdo->prepare('DELETE FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?')->execute([$this->supplierId, self::ACCOUNT]);
         }
         $this->db->close();
     }
