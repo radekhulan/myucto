@@ -178,6 +178,19 @@ final class CheckFindingNormalizerTest extends TestCase
         self::assertSame(99, $r['value']['findings'][0]['entry_id']);
     }
 
+    public function testJournalLinkIsOmittedOnlyForTheSameJournalEntry(): void
+    {
+        $r = $this->n->normalize($this->check('asset_sale_without_derecognition', [
+            'items' => [
+                ['doc_type' => 'invoice', 'doc_id' => 1, 'entry_id' => 1],
+                ['doc_type' => 'journal_entry', 'doc_id' => 2, 'entry_id' => 2],
+                ['doc_type' => 'journal_entry', 'doc_id' => 3, 'entry_id' => 4],
+            ],
+        ]));
+
+        self::assertSame([1, null, 4], array_column($r['value']['findings'], 'entry_id'));
+    }
+
     /** Cap 0 = bez ořezu (CSV export musí dostat všechno). */
     public function testZeroCapReturnsEverything(): void
     {

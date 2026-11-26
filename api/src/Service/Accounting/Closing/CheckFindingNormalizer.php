@@ -269,11 +269,11 @@ final class CheckFindingNormalizer
             }
         }
 
-        // `entry_id` vedle vlastního dokladu (cancelled_with_entry) je samostatný odkaz
-        // do deníku — bez něj by uživatel neměl jak najít zápis, který má stornovat.
-        $entryId = isset($row['entry_id']) && $docId !== (int) $row['entry_id']
-            ? (int) $row['entry_id']
-            : null;
+        // Odkaz do deníku je duplicitní jen tehdy, když hlavní odkaz míří na stejný zápis.
+        $entryId = isset($row['entry_id']) ? (int) $row['entry_id'] : null;
+        if ($docType === 'journal_entry' && $docId === $entryId) {
+            $entryId = null;
+        }
 
         return [
             'doc_type'     => $docType,
