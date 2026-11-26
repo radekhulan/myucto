@@ -144,7 +144,7 @@ final class AdvancePartialDrawdown
         $stmt->execute([$supplierId, (int) $invoice['client_id'], (int) $invoice['currency_id']]);
         $out = [];
         $receipts = new AdvanceReceiptGuard($this->db);
-        $doubleEntry = $receipts->isDoubleEntry($supplierId);
+        $postsAccounting = $receipts->postsAccounting($supplierId);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $id = (int) $row['id'];
             $groups = $this->taxDocumentGroups($supplierId, $id, false);
@@ -171,7 +171,7 @@ final class AdvancePartialDrawdown
                 'tax_documents'  => $groups === [] ? '' : (string) reset($groups)['label'],
                 // Lze čerpání zaúčtovat ({@see AdvanceReceiptGuard})? Bez zaúčtované nebo převzaté
                 // úhrady zálohy čerpání POST odmítne (advance_receipt_not_posted).
-                'receipt_posted' => $receipts->covers($supplierId, $id, 0.0, $doubleEntry),
+                'receipt_posted' => $receipts->covers($supplierId, $id, 0.0, $postsAccounting),
             ];
         }
         return $out;

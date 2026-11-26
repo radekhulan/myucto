@@ -161,6 +161,32 @@ final class OpeningBalanceAdvanceSettlementTest extends BankPostingTestCase
         self::assertSame(422, $this->callOpening('markInvoice', 'PUT', $proforma)['status'], 'Záloha z doby po otevření knih se nepřevezme.');
     }
 
+    /**
+     * Firma s podvojným účetnictvím, která má vypnuté „Vést účetnictví" (účetnictví vede externí
+     * účetní), konečnou fakturu nezaúčtuje. Kontrola zaúčtované úhrady zálohy proto neplatí:
+     * zálohu jde čerpat i vyúčtovat s úhradou, kterou deník nenese.
+     */
+    public function testAdvanceWithoutPostedReceiptIsUsableWhenAccountingDisabled(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET accounting_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
+        $client = $this->client('Odběratel bez vedení účetnictví');
+
+        $proforma = $this->document('proforma', 'ZL-VU-1', $client, 500.00, 60.00, self::YEAR . '-02-01');
+        $this->manualPayment($proforma, self::YEAR . '-02-02', 560.00);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_total = 560 WHERE id = ?")->execute([$proforma]);
+        $this->document('tax_document', 'DD-VU-1', $client, 500.00, 60.00, self::YEAR . '-02-02', $proforma);
+        self::assertGreaterThan(0, $this->container->get(FinalFromProformaCreator::class)->create($proforma, $this->userId, self::YEAR . '-02-10'));
+
+        $drawn = $this->document('proforma', 'ZL-VU-2', $client, 500.00, 60.00, self::YEAR . '-02-01');
+        $this->manualPayment($drawn, self::YEAR . '-02-02', 560.00);
+        $this->document('tax_document', 'DD-VU-2', $client, 500.00, 60.00, self::YEAR . '-02-02', $drawn);
+        $final = $this->draft($client, 1500.00, 180.00);
+        $drawdown = $this->container->get(AdvancePartialDrawdown::class);
+        $candidates = array_column($drawdown->candidates($this->supplierId, $final), null, 'id');
+        self::assertTrue($candidates[$drawn]['receipt_posted']);
+        $drawdown->apply($this->supplierId, $final, $drawn, 560.00);
+    }
+
     public function testFinalFromProformaRefusesAdvanceWithoutPostedReceipt(): void
     {
         $client = $this->client('Odběratel vyúčtování k záloze');

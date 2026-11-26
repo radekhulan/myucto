@@ -14,8 +14,9 @@ use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
  * ({@see AdvanceSettlementEvidenceReader::advanceReceived()}, týž zdroj jako zaúčtování).
  * Záloha jen s ruční úhradou by konečnou fakturu nechala vystavenou a nezaúčtovatelnou,
  * proto ji odmítne už čerpání ({@see AdvancePartialDrawdown}) i vystavení faktury k záloze
- * ({@see FinalFromProformaCreator}). Daňová evidence zúčtování záloh nevede, tam platí
- * dosavadní chování.
+ * ({@see FinalFromProformaCreator}). Daňová evidence zúčtování záloh nevede a firma
+ * s vypnutým „Vést účetnictví" konečnou fakturu nezaúčtuje, tam kontrola neplatí
+ * (stejná podmínka jako {@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner::hasActiveDoubleEntry()}).
  */
 final class AdvanceReceiptGuard
 {
@@ -27,9 +28,9 @@ final class AdvanceReceiptGuard
      * Pokrývá přijatá záloha (v měně proformy) částku `$required`? Nulová částka znamená
      * „aspoň nějaká přijatá záloha".
      */
-    public function covers(int $supplierId, int $proformaId, float $required = 0.0, ?bool $doubleEntry = null): bool
+    public function covers(int $supplierId, int $proformaId, float $required = 0.0, ?bool $postsAccounting = null): bool
     {
-        if (!($doubleEntry ?? $this->isDoubleEntry($supplierId))) {
+        if (!($postsAccounting ?? $this->postsAccounting($supplierId))) {
             return true;
         }
         $received = (new AdvanceSettlementEvidenceReader($this->db))->advanceReceived($supplierId, $proformaId);
@@ -48,10 +49,13 @@ final class AdvanceReceiptGuard
         }
     }
 
-    public function isDoubleEntry(int $supplierId): bool
+    /** Vede firma podvojné účetnictví a má zapnuté „Vést účetnictví"? Jen tehdy se konečná faktura zaúčtuje. */
+    public function postsAccounting(int $supplierId): bool
     {
-        $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
-        $mode->execute([$supplierId]);
-        return (string) $mode->fetchColumn() === 'double_entry';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM supplier WHERE id = ? AND accounting_mode = 'double_entry' AND accounting_enabled = 1"
+        );
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() !== false;
     }
 }
