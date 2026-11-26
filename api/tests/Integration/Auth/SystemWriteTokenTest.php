@@ -683,6 +683,8 @@ final class SystemWriteTokenTest extends TestCase
             ['GET', '/api/auth/webauthn/credentials'],
             ['GET', '/api/v1/admin/users'],
             ['GET', '/api/license/status'],
+            ['GET', '/api/dashboard-widgets/catalog'],
+            ['POST', '/api/v1/dashboard-widgets/query', ['board' => 'portal', 'widgets' => []]],
         ] as $call) {
             $res = $this->call($token, $call[0], $call[1], $call[2] ?? null);
             self::assertSame(403, $res['status'], $call[1]);

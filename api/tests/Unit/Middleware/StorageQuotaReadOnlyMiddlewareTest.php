@@ -31,6 +31,15 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
 {
     private const MB = 1024 * 1024;
 
+    public function testDashboardBatchReadRemainsAvailableWithoutOpeningOtherPosts(): void
+    {
+        $middleware = $this->middleware(StorageQuotaState::EXHAUSTED, 100);
+        self::assertSame(204, $middleware->process($this->request('POST', '/api/dashboard-widgets/query'), $this->okHandler())->getStatusCode());
+        foreach (['/api/dashboard-widgets/query/write', '/api/dashboard-widgets/catalog', '/api/user/dashboard-layouts/portal'] as $path) {
+            self::assertSame(StorageQuotaPolicy::HTTP_STATUS, $middleware->process($this->request('POST', $path), $this->okHandler())->getStatusCode(), $path);
+        }
+    }
+
     public function testCatalogReadPostsRemainAvailableAtQuotaLimit(): void
     {
         $middleware = $this->middleware(StorageQuotaState::EXHAUSTED, 100);
