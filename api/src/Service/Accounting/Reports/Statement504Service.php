@@ -89,15 +89,16 @@ final class Statement504Service
             foreach ($this->definitions->rows504((int) $version['id']) as $row) $rows[$row['sentence']][] = $row;
             $maps[$type] = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
             $allowed = [];
-            foreach (Statement504Catalog::accountMap($type) as $map) {
+            $catalogMap = Statement504Catalog::accountMap($type);
+            foreach ($catalogMap as $map) {
                 $allowed[$map['row_code']][substr($map['account_prefix'], 0, 2)][$map['sign']] = true;
             }
             foreach ($maps[$type] as $map) {
                 if ($map['target'] !== 'gross' || !isset($allowed[$map['row_code']][substr($map['account_prefix'], 0, 2)][$map['sign']])) {
                     throw new ReportException('statement_mapping_invalid', 'Mapování účtu neodpovídá účtové skupině nebo řádku výkazu 504.');
                 }
-                if (($map['source'] ?? '') === 'override') {
-                    $standard = StatementMapResolver::longestMatching(Statement504Catalog::accountMap($type), $map['account_prefix']);
+                if (($map['source'] ?? '') === 'override' && !Statement504Catalog::isGroupAccount($map['account_prefix'])) {
+                    $standard = StatementMapResolver::longestMatching($catalogMap, $map['account_prefix']);
                     if ($standard !== [] && !in_array($map['row_code'], array_column($standard, 'row_code'), true)) {
                         throw new ReportException('statement_mapping_invalid', 'Vlastní mapování účtu nesmí změnit předepsaný řádek výkazu 504.');
                     }

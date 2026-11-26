@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\ChartOfAccountsTemplate504;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\Statement504Builder;
+use MyInvoice\Service\Accounting\Reports\Statement504Catalog;
+use MyInvoice\Service\Accounting\Reports\StatementMapper;
 use PHPUnit\Framework\TestCase;
 
 final class Statement504BuilderTest extends TestCase
@@ -66,6 +69,58 @@ final class Statement504BuilderTest extends TestCase
         } catch (ReportException $e) {
             self::assertSame('statement_activity_invalid', $e->errorCode);
         }
+    }
+
+    public function testOtherGroupAccountsRollUpFromDetailsInBothScopes(): void
+    {
+        $builder = new Statement504Builder();
+        $posted = [
+            ['code' => '640.000', 'activity' => 'main', 'balance_cents' => -12_345],
+            ['code' => '540.000', 'activity' => 'economic', 'balance_cents' => 2_345],
+            ['code' => '644.000', 'activity' => 'main', 'balance_cents' => -500],
+        ];
+        $full = $builder->incomeStatement($posted, 'full');
+        $rows = array_column($full['rows'], null, 'row_code');
+        self::assertSame(123.45, $rows['UT.54']['main']);
+        self::assertSame(23.45, $rows['UT.28']['economic']);
+        self::assertSame(5.0, $rows['UT.51']['main']);
+        self::assertSame(105.0, $rows['UT.63']['total']);
+        self::assertTrue($full['checks']['profit_matches']);
+
+        $reduced = $builder->incomeStatement($posted, 'small');
+        $rows = array_column($reduced['rows'], null, 'row_code');
+        self::assertSame(128.45, $rows['UT.48']['main']);
+        self::assertSame(23.45, $rows['UT.21']['economic']);
+        self::assertTrue($reduced['checks']['profit_matches']);
+    }
+
+    public function testMapsCoverEveryReportableTemplateAccount(): void
+    {
+        $mapper = new StatementMapper();
+        $balance = Statement504Catalog::accountMap('balance_sheet');
+        $income = Statement504Catalog::accountMap('income_statement');
+        $outsideStatements = [];
+        foreach (ChartOfAccountsTemplate504::ACCOUNTS as $account) {
+            $code = $account['code'];
+            if ($account['report_rows'] === []) {
+                $outsideStatements[] = $code;
+                self::assertSame([], $mapper->entriesFor($balance, $code, null), $code);
+                self::assertSame([], $mapper->entriesFor($income, $code, null), $code);
+                continue;
+            }
+
+            $map = in_array($account['type'], ['revenue', 'expense'], true) ? $income : $balance;
+            $expectedRows = array_map(static fn (string $row): string => str_replace(':', '.', $row), $account['report_rows']);
+            if ($code === '221') {
+                $expectedRows[] = 'US.39';
+            }
+            foreach ([1, -1] as $amount) {
+                $entries = $mapper->entriesFor($map, $code, $amount);
+                self::assertCount(1, $entries, $code);
+                self::assertContains($entries[0]['row_code'], $expectedRows, $code);
+            }
+        }
+        self::assertSame(['395', '398', '961', '962', '971', '981', '991', '999'], $outsideStatements);
     }
 
     public function testArbitraryActivityNameCannotBecomeMain(): void

@@ -172,16 +172,19 @@ final class MoneyS3NonprofitImportTest extends MoneyS3ImportTestCase
         self::assertTrue(array_column($years[2025]['checks'], 'ok', 'key')['balance_sheet_balanced']);
     }
 
-    public function testGroupAccountWithoutStatementRowIsNamed(): void
+    public function testGroupRevenueReconcilesAndAppearsInOtherRevenue(): void
     {
         $supplier = $this->supplier504();
         $this->useFixture(SyntheticAgenda::filesNonprofit(groupRevenue: true));
         $protocol = $this->import($supplier);
-        $failed = $this->messages($protocol)['nonprofit_statement_failed'] ?? null;
-        self::assertNotNull($failed, $this->explain($protocol));
-        self::assertStringContainsString('Účet 640.000.', $failed['text']);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertArrayNotHasKey('nonprofit_statement_failed', $this->messages($protocol), $this->explain($protocol));
         $years = array_column($protocol->get('reconciliation'), null, 'year');
-        self::assertSame(['640.000'], array_column($years[2025]['unmapped_accounts'], 'account'));
+        self::assertSame([], $years[2025]['unmapped_accounts']);
+        self::assertTrue(array_column($years[2025]['checks'], 'ok', 'key')['balance_sheet_balanced']);
+        $statement = $this->container(FinancialStatementService::class)
+            ->incomeStatement($supplier, $this->periodId($supplier, 2025), null, 'full');
+        self::assertSame(5.0, array_column($statement['rows'], 'main', 'row_code')['UT.54']);
     }
 
     private function supplier504(): int

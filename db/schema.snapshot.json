@@ -1254,7 +1254,8 @@
         "2348_invoice_tags.sql",
         "2349_supplier_tags_enabled.sql",
         "2350_clients_advance_paid_accounts.sql",
-        "2351_other_item_offset_settlement.sql"
+        "2351_other_item_offset_settlement.sql",
+        "2352_statement_504_group_accounts.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

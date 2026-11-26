@@ -7,10 +7,13 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\StatementDefinitionRepository;
+use MyInvoice\Repository\StatementOverrideRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
+use MyInvoice\Service\Accounting\Reports\Statement504Catalog;
 use PHPUnit\Framework\TestCase;
 
 final class Statement504Test extends TestCase
@@ -42,7 +45,7 @@ final class Statement504Test extends TestCase
         foreach (['221' => 'asset', '022' => 'asset', '082' => 'asset', '315' => 'asset', '379' => 'liability',
             '901' => 'equity', '931' => 'equity', '932' => 'equity', '933' => 'equity',
             '501' => 'expense', '518' => 'expense', '551' => 'expense', '602' => 'revenue',
-            '649' => 'revenue', '682' => 'revenue', '684' => 'revenue', '691' => 'revenue'] as $code => $type) {
+            '640' => 'revenue', '649' => 'revenue', '682' => 'revenue', '684' => 'revenue', '691' => 'revenue'] as $code => $type) {
             $this->pdo->prepare('INSERT INTO chart_of_accounts (supplier_id,account_code,name,account_type) VALUES (?,?,?,?)')
                 ->execute([$this->supplier, (string) $code, 'Synthetic ' . $code, $type]);
             $this->accounts[$code] = (int) $this->pdo->lastInsertId();
@@ -324,6 +327,21 @@ final class Statement504Test extends TestCase
         }
     }
 
+    public function testGroupAccountKeepsCompanyOverrideWithinItsGroup(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $version = $container->get(StatementDefinitionRepository::class)->findVersion('income_statement', '2099-06-30', 'cz_504');
+        $container->get(StatementOverrideRepository::class)->create($this->supplier, $version['id'], [
+            'account_prefix' => '640', 'row_code' => 'UT.51', 'target' => 'gross',
+            'balance_condition' => 'any', 'sign' => -1, 'note' => 'Synthetic interest override',
+        ], null);
+        $this->post('2099-01-01', '221', '640', 100, 'main');
+        $statement = $this->statements->incomeStatement($this->supplier, $this->period, '2099-06-30', 'full');
+        $rows = array_column($statement['rows'], 'main', 'row_code');
+        self::assertSame(100.0, $rows['UT.51']);
+        self::assertSame(0.0, $rows['UT.54']);
+    }
+
     public function testWrongAccountTypeCannotHideExpenseFromActivityChecks(): void
     {
         $this->pdo->prepare("UPDATE chart_of_accounts SET account_type='asset' WHERE id=?")->execute([$this->accounts['518']]);
@@ -338,11 +356,25 @@ final class Statement504Test extends TestCase
 
     public function test504DefinitionsAreDatedAndDoNotDisplace500(): void
     {
-        $definitions = Bootstrap::buildContainer()->get(\MyInvoice\Repository\StatementDefinitionRepository::class);
+        $definitions = Bootstrap::buildContainer()->get(StatementDefinitionRepository::class);
         foreach (['balance_sheet', 'income_statement'] as $type) {
             self::assertSame('vyhl500-2002/2024', $definitions->findVersion($type, '2026-12-31')['version_code']);
             self::assertSame('vyhl504-2002/2016', $definitions->findVersion($type, '2026-12-31', 'cz_504')['version_code']);
             self::assertNull($definitions->findVersion($type, '2023-12-31', 'cz_504'));
+        }
+    }
+
+    public function test504DatabaseMapsMatchCatalog(): void
+    {
+        $definitions = Bootstrap::buildContainer()->get(StatementDefinitionRepository::class);
+        foreach (['balance_sheet', 'income_statement'] as $type) {
+            $version = $definitions->findVersion($type, '2024-01-01', 'cz_504');
+            self::assertNotNull($version, $type);
+            $actual = array_map(static function (array $entry): array {
+                unset($entry['id']);
+                return $entry;
+            }, $definitions->accountMap($version['id']));
+            self::assertEqualsCanonicalizing(Statement504Catalog::accountMap($type), $actual, $type);
         }
     }
 

@@ -8,6 +8,18 @@ final class Statement504Catalog
 {
     public const VERSION = 'vyhl504-2002/2016';
 
+    private const GROUP_PROFIT_MAP = [
+        '510' => 8, '530' => 20, '540' => 28, '560' => 10, '580' => 36, '590' => 38,
+        '600' => 47, '640' => 54, '690' => 42,
+    ];
+
+    private const GROUP_BALANCE_MAP = [
+        '220' => 'UR.75', '230' => 'US.39', '240' => 'US.44', '260' => 'UR.80', '350' => 'UR.66',
+        '900' => 'US.3', '910' => 'US.4', '920' => 'US.5', '940' => 'US.12',
+    ];
+
+    private const BANK_ACCOUNTS = ['220', '221'];
+
     /** @return list<array<string,mixed>> */
     public static function rows(string $sentence): array
     {
@@ -39,7 +51,7 @@ final class Statement504Catalog
             '641' => 49, '642' => 49, '643' => 50, '644' => 51, '645' => 52,
             '648' => 53, '649' => 54, '652' => 56, '653' => 57, '654' => 58,
             '655' => 59, '657' => 60,
-        ];
+        ] + self::GROUP_PROFIT_MAP;
     }
 
     /** @return array<string,string> */
@@ -73,7 +85,13 @@ final class Statement504Catalog
             '379' => 'US.38', '231' => 'US.39', '232' => 'US.40', '241' => 'US.41',
             '255' => 'US.42', '389' => 'US.43', '249' => 'US.44',
             '383' => 'US.46', '384' => 'US.47',
-        ];
+        ] + self::GROUP_BALANCE_MAP;
+    }
+
+    public static function isGroupAccount(string $code): bool
+    {
+        $synthetic = substr($code, 0, 3);
+        return isset(self::GROUP_PROFIT_MAP[$synthetic]) || isset(self::GROUP_BALANCE_MAP[$synthetic]);
     }
 
     public static function balanceRow(string $code, int $balance): ?string
@@ -86,7 +104,7 @@ final class Statement504Catalog
         if (isset($dual[$synthetic])) {
             return $balance >= 0 ? 'UR.' . $dual[$synthetic][0] : 'US.' . $dual[$synthetic][1];
         }
-        if ($synthetic === '221' && $balance < 0) {
+        if (in_array($synthetic, self::BANK_ACCOUNTS, true) && $balance < 0) {
             return 'US.39';
         }
         return self::balanceMap()[$synthetic] ?? null;
@@ -96,7 +114,7 @@ final class Statement504Catalog
     {
         $out = [];
         $add = static function (string $code, string $row, string $condition = 'any') use (&$out): void {
-            $out[] = ['account_prefix' => $code, 'row_code' => $row, 'target' => 'gross',
+            $out[] = ['row_code' => $row, 'account_prefix' => $code, 'target' => 'gross',
                 'balance_condition' => $condition,
                 'sign' => str_starts_with($row, 'US.') || str_starts_with($code, '6') ? -1 : 1];
         };
@@ -104,9 +122,12 @@ final class Statement504Catalog
             foreach (self::profitMap() as $code => $number) $add((string) $code, 'UT.' . $number);
         } else {
             foreach (self::balanceMap() as $code => $row) {
-                $add((string) $code, $row, (string) $code === '221' ? 'debit' : 'any');
+                $bankAccount = in_array((string) $code, self::BANK_ACCOUNTS, true);
+                $add((string) $code, $row, $bankAccount ? 'debit' : 'any');
+                if ($bankAccount) {
+                    $add((string) $code, self::balanceRow((string) $code, -1), 'credit');
+                }
             }
-            $add('221', 'US.39', 'credit');
             foreach (['336', '341', '342', '343', '345', '346', '348', '373'] as $code) {
                 $add($code, self::balanceRow($code, 1), 'debit');
                 $add($code, self::balanceRow($code, -1), 'credit');
