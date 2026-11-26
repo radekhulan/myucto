@@ -404,6 +404,34 @@ final class PamicaPostingImportTest extends TestCase
         $this->expectApplyError('converted_month');
     }
 
+    /**
+     * Měsíc, jehož mzdy převzal převod z POHODY (POHODA je vede z téhož dataPacku PAMICY),
+     * PAMICA znovu nenačte: předpis mezd je v deníku a druhé načtení by ho zdvojilo.
+     */
+    public function testMonthConvertedFromPohodaIsRejected(): void
+    {
+        $periodId = (int) $this->row('SELECT id FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = 2099', [$this->supplierId])['id'];
+        $accounts = [];
+        foreach (['521', '331'] as $code) {
+            $accounts[$code] = (int) $this->row('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?', [$this->supplierId, $code])['id'];
+        }
+        $this->pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, posted_at)
+            VALUES (?, ?, '2099-03-31', '99IN0003', 'Mzdy 3/2099', 'manual', NOW())")->execute([$this->supplierId, $periodId]);
+        $id = (int) $this->pdo->lastInsertId();
+        $line = $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, line_no, account_id, side, amount) VALUES (?, ?, ?, ?, ?, 30000)');
+        $line->execute([$this->supplierId, $id, 1, $accounts['521'], 'debit']);
+        $line->execute([$this->supplierId, $id, 2, $accounts['331'], 'credit']);
+        self::assertArrayNotHasKey('converted_month', array_column($this->service->preview($this->supplierId, $this->xml)['checks'], 'level', 'code'),
+            'Ruční zápis na 331 načtení nebrání.');
+
+        $this->pdo->prepare("INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', ?, ?)")
+            ->execute([$this->supplierId, '2099|Interní doklady|99IN0003|2099-03-31', $id]);
+        $check = array_column($this->service->preview($this->supplierId, $this->xml)['checks'], null, 'code')['converted_month'] ?? null;
+        self::assertSame('error', $check['level'] ?? null);
+        self::assertStringContainsString('POHODY', (string) $check['message']);
+        $this->expectApplyError('converted_month');
+    }
+
     private function expectApplyErrorKeepingData(string $code): void
     {
         try {

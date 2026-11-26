@@ -27,6 +27,15 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
  */
 final class PamicaPostingParser
 {
+    /**
+     * Párovací symbol měsíce zaúčtování mezd z PAMICY (`MZ` + rok a měsíc, např. MZ202603).
+     * Podle něj převod z POHODY pozná doklady téhož měsíce ({@see \MyInvoice\Service\Migration\Pohoda\OtherItemImporter}).
+     */
+    public static function isMonthSymbol(string $symbol): bool
+    {
+        return preg_match('/^MZ\d{4}(0[1-9]|1[0-2])$/D', $symbol) === 1;
+    }
+
     public const NS_DAT = 'http://www.stormware.cz/schema/version_2/data.xsd';
     public const NS_INT = 'http://www.stormware.cz/schema/version_2/intDoc.xsd';
     public const NS_INV = 'http://www.stormware.cz/schema/version_2/invoice.xsd';

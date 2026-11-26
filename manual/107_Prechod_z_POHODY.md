@@ -766,7 +766,41 @@ Ostatní závazek bez členění DPH a s nulovou daní (u mzdových dokladů ho 
 export z MDB) je doklad mimo přiznání, ne přijatá faktura. Protokol převodu uvádí
 počet mzdových závazků v kroku ostatních pohledávek a závazků. Předpisy DPH (343)
 a doplatky daně z příjmů (341) zůstávají jen v deníku, zálohy na daň z příjmů
-převod převezme jako předpisy záloh.
+převod převezme jako předpisy záloh. Ostatní pohledávka nebo závazek nese variabilní
+symbol, partnera a účet protistrany z dokladu POHODY, podle nich se nabídne
+k párování s platbou z banky.
+
+**Doplnění mzdových závazků u převedené firmy.** Když mzdové závazky firmy, která už
+účtuje v MyÚčtu, v agendě Ostatní pohledávky a závazky chybí a jsou jen v deníku,
+doplní je správce instalace příkazem
+`php api/bin/pohoda-backfill-payroll-items.php --supplier=<id firmy> --export=<ZIP exportu nebo složka agendy>`.
+Potřebuje export POHODY, ze kterého se firma převáděla, MyÚčto ho po převodu nedrží.
+Založí jen chybějící mzdové závazky stejně jako převod: závazek s vlastním zápisem
+ho převezme bez nového zaúčtování, mzda zaměstnance a závazek z počátečního stavu
+se uloží jako potvrzené bez zápisu a úhrady z POHODY se přiřadí k převzatým pohybům
+banky a pokladny. Do deníku nic nezapíše a opakované spuštění nic nezdvojí. Bez
+`--commit` běží nanečisto. Vypíše založené závazky, vynechané s důvodem (například
+zápis smazaný v deníku nebo převzatý jiným dokladem) a porovnání zůstatku účtů 331,
+336 a 342 v deníku s otevřenými položkami ke konci roku agendy a k dnešku. Příkaz
+s `--all` bez exportu vypíše firmy, kterým převod mzdové závazky vynechal. Běh se
+zapíše do historie převodů. Mzdové závazky měsíce načteného z PAMICY doplnění ani
+převod nezakládá, stejně jako závazek bez vlastního zápisu, jehož předpis už
+interní doklady mezd jeho měsíce pokrývají jinými závazky (tentýž závazek v POHODĚ
+dvakrát); protokol ho uvede k ověření.
+
+Parametr `--check` (bez exportu) zkontroluje mzdové závazky převedené firmy:
+duplicitní závazky, závazky bez předpisu v deníku, měsíce s předpisem mezd v deníku
+dvakrát (převzatý z POHODY i načtený z PAMICY) a srážky 331 v zápisech ostatních
+závazků. Opravy běží jen výslovně a bez `--commit` nanečisto: `--cancel-duplicates`
+zruší duplicitní závazky z převodu bez úhrad a bez předpisu, deník se nemění.
+`--reverse-pamica-overlap` stornuje zaúčtování mezd z PAMICY za měsíce, které už
+nese převzatý deník POHODY. Mění deník, proto ho spouštějte jen se souhlasem
+vlastníka firmy a s `--user=<id autora>`. Načtení, jehož předpis na 331 se od
+převzatého deníku liší o víc než 5 Kč, ani načtení s uhrazeným závazkem se
+nestornuje; příkaz pak skončí nenulovým kódem. Měsíc mzdového závazku určuje párovací
+symbol dokladu, a když ho doklad nemá, měsíc předpisu mezd (mzda za leden s datem
+výplaty v únoru patří k lednu). Položky založené v uzavřeném účetním období výpis
+uvede zvlášť.
 
 **Samovyměření jen na interních dokladech.** Někdy účetní vede přijatou fakturu
 v členění mimo přiznání (například `PN`) a výstup i odpočet zachytí až dvojicí

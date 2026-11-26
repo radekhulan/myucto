@@ -93,6 +93,29 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Převzal převod z POHODY zaúčtování mezd měsíce? Převzatý zápis deníku s předpisem na 331
+     * (Dal) v rozsahu `[from, until)`. Stejné pravidlo jako u Money S3
+     * ({@see MoneyS3ImportRepository::payrollMonthConverted()}): načtení mezd z PAMICY za
+     * takový měsíc by předpis mezd i mzdové závazky zdvojilo.
+     */
+    public function payrollMonthConverted(int $supplierId, string $from, string $until): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts ca ON ca.id = l.account_id AND ca.supplier_id = l.supplier_id
+              WHERE e.supplier_id = ? AND e.entry_date >= ? AND e.entry_date < ?
+                AND e.source_type NOT IN ('opening', 'closing') AND e.reversed_by IS NULL
+                AND l.side = 'credit' AND (ca.account_code = '331' OR ca.account_code LIKE '331.%')
+                AND EXISTS (SELECT 1 FROM pohoda_import_map m
+                             WHERE m.supplier_id = e.supplier_id AND m.kind = 'journal_entry' AND m.target_id = e.id)
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $from, $until]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     protected function runsTable(): string
     {
         return 'pohoda_imports';

@@ -368,6 +368,119 @@ final class SyntheticPohodaExport
             self::bank('BAN0010030', 'expense', '2026-02-18', 6000, '', 'Správa sociálního zabezpečení Test'));
     }
 
+    /** Daň ze mzdy s vlastním zápisem 331/342, variabilním symbolem a účtem finančního úřadu ({@see withPayrollTaxLiability()}). */
+    public const PAYROLL_TAX = '26OZF0001';
+    public const PAYROLL_TAX_VS = '7720001234';
+
+    /**
+     * Doplní agendu z {@see withPayrollItems()} o neuhrazenou daň ze mzdy jako ostatní závazek
+     * s vlastním zápisem 331/342, variabilním symbolem a účtem protistrany
+     * ({@see PARTNER_ACCOUNT}/{@see PARTNER_BANK}). Úhradu dostane až v MyÚčtu. `$symPar` =
+     * párovací symbol dokladu (dataPack PAMICY ho do POHODY předává).
+     */
+    public static function withPayrollTaxLiability(string $dir, string $symPar = ''): void
+    {
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . self::PAYROLL_TAX . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>' . self::PAYROLL_TAX_VS . '</inv:symVar>'
+            . ($symPar !== '' ? '<inv:symPar>' . $symPar . '</inv:symPar>' : '')
+            . '<inv:date>2026-03-05</inv:date><inv:dateAccounting>2026-03-05</inv:dateAccounting><inv:dateDue>2026-03-20</inv:dateDue>'
+            . '<inv:text>Daň ze mzdy 2/2026</inv:text><inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Finanční úřad Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:paymentAccount><typ:accountNo>' . self::PARTNER_ACCOUNT . '</typ:accountNo><typ:bankCode>' . self::PARTNER_BANK . '</typ:bankCode></inv:paymentAccount>'
+            . '<inv:liquidation><typ:amountHome>2500</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>2500</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>');
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Ostatní závazky', self::PAYROLL_TAX, 'Daň ze mzdy 2/2026', 2500, '331000', '342000', '2026-03-05'));
+    }
+
+    /** Tatáž mzda zaměstnance v POHODĚ podruhé, jiným číslem ({@see withDuplicatePayrollWage()}). */
+    public const PAYROLL_WAGE_DUPLICATE = '26MZ0002';
+
+    /**
+     * Doplní agendu z {@see withPayrollItems()} o druhý závazek téže mzdy (jiné číslo, stejný
+     * zaměstnanec, částka i měsíc, předkontace „bez"). Předpis v interním dokladu mezd je jen
+     * jeden, druhý závazek ho nemá.
+     */
+    public static function withDuplicatePayrollWage(string $dir): void
+    {
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . self::PAYROLL_WAGE_DUPLICATE . '</typ:numberRequested></inv:number>'
+            . '<inv:date>2026-02-08</inv:date><inv:dateAccounting>2026-02-08</inv:dateAccounting><inv:dateDue>2026-02-20</inv:dateDue>'
+            . '<inv:text>Mzda zaměstnance 1/2026</inv:text><inv:accounting><typ:ids>BEZ331000</typ:ids></inv:accounting>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Zaměstnanci Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>20000</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>20000</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>');
+    }
+
+    /** Mzda za prosinec minulého roku vyplacená v lednu ({@see withDecemberWagePaidInJanuary()}). */
+    public const PAYROLL_DECEMBER_WAGE = '26MZ0099';
+
+    /**
+     * Doplní agendu z {@see withPayrollItems()} o mzdu za prosinec minulého roku s datem výplaty
+     * 10. 1. (předkontace „bez"). Předpis je v počátečním stavu, lednový předpis mezd (31. 1.)
+     * patří lednové mzdě.
+     */
+    public static function withDecemberWagePaidInJanuary(string $dir): void
+    {
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . self::PAYROLL_DECEMBER_WAGE . '</typ:numberRequested></inv:number>'
+            . '<inv:date>2026-01-10</inv:date><inv:dateAccounting>2026-01-10</inv:dateAccounting><inv:dateDue>2026-01-15</inv:dateDue>'
+            . '<inv:text>Mzda zaměstnance 12/2025</inv:text><inv:accounting><typ:ids>BEZ331000</typ:ids></inv:accounting>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Zaměstnanci Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>20000</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>20000</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>');
+    }
+
+    /** Mzda druhého zaměstnance se stejnou částkou a nižším číslem dokladu ({@see withSecondEmployeeWage()}). */
+    public const PAYROLL_SECOND_WAGE = '26MZ0000';
+
+    /**
+     * Doplní agendu z {@see withPayrollItems()} o mzdu druhého zaměstnance (jiný partner,
+     * stejná částka 20 000 Kč a datum) a lednový předpis mezd v interním dokladu pro ni.
+     */
+    public static function withSecondEmployeeWage(string $dir): void
+    {
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . self::PAYROLL_SECOND_WAGE . '</typ:numberRequested></inv:number>'
+            . '<inv:date>2026-02-08</inv:date><inv:dateAccounting>2026-02-08</inv:dateAccounting><inv:dateDue>2026-02-20</inv:dateDue>'
+            . '<inv:text>Mzda zaměstnance 1/2026</inv:text><inv:accounting><typ:ids>BEZ331000</typ:ids></inv:accounting>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Zaměstnanec Druhý Test</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>20000</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>20000</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>');
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Interní doklady', '26IN0012', 'Mzdy 1/2026 druhý zaměstnanec', 20000, '521000', '331000', '2026-01-31'));
+    }
+
+    /**
+     * Interní doklad na začátku února se srážkou na Má dáti 331 (331/342), bez předpisu mezd
+     * na Dal 331 ({@see withPayrollItems()}). Měsíc lednové mzdy s datem 8. 2. nemění.
+     */
+    public static function withEarlyFebruaryDeduction(string $dir): void
+    {
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Interní doklady', '26IN0014', 'Srážka ze mzdy', 1000, '331000', '342000', '2026-02-03'));
+    }
+
     /** Ostatní závazek uhrazený v minulém roce ({@see withOtherItemSettlements()}). */
     public const OTHER_ITEM_PAID_EARLIER = '26OZP0001';
     /** Ostatní závazek uhrazený pokladnou ({@see withOtherItemSettlements()}). */

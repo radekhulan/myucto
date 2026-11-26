@@ -34,6 +34,13 @@ final class MigratedOtherItemPolicy
         return in_array(self::synthetic($account), self::PAYROLL_ACCOUNTS, true);
     }
 
+    /** Oba účty patří ke stejnému syntetickému účtu (analytiku a tvar zápisu nerozlišuje). */
+    public static function sameSynthetic(string $a, string $b): bool
+    {
+        $synthetic = self::synthetic($a);
+        return $synthetic !== '' && $synthetic === self::synthetic($b);
+    }
+
     private static function synthetic(string $account): string
     {
         return substr(preg_replace('/\D+/', '', $account) ?? '', 0, 3);

@@ -12,6 +12,7 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\PayrollPostingImportRepository;
+use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
@@ -69,6 +70,7 @@ final class PamicaPostingImportService
         private readonly PayrollPostingImportRepository $imports,
         private readonly PamicaPostingCodeMap $codeMap,
         private readonly MoneyS3ImportRepository $moneyS3,
+        private readonly PohodaImportRepository $pohoda,
     ) {}
 
     /**
@@ -247,10 +249,16 @@ final class PamicaPostingImportService
         }
         // Tentýž měsíc převzatý převodem z Money S3: mzdy i mzdové závazky už jsou v deníku.
         $monthStart = $parsed['period'] . '-01';
-        if ($this->moneyS3->payrollMonthConverted($supplierId, $monthStart, (new \DateTimeImmutable($monthStart))->modify('+1 month')->format('Y-m-d'))) {
+        $monthEnd = (new \DateTimeImmutable($monthStart))->modify('+1 month')->format('Y-m-d');
+        if ($this->moneyS3->payrollMonthConverted($supplierId, $monthStart, $monthEnd)) {
             $checks[] = self::check('converted_month', 'error',
                 'Zaúčtování mezd za ' . self::monthLabel($parsed['period']) . ' převzal převod z Money S3 (předpis mezd i mzdové závazky jsou v deníku). '
                 . 'Načtení z PAMICY by je zdvojilo.');
+        } elseif ($this->pohoda->payrollMonthConverted($supplierId, $monthStart, $monthEnd)) {
+            // POHODA vede mzdy z PAMICY stejným dataPackem: převedený deník je už nese.
+            $checks[] = self::check('converted_month', 'error',
+                'Zaúčtování mezd za ' . self::monthLabel($parsed['period']) . ' převzal převod z POHODY (předpis mezd je v deníku). '
+                . 'Načtení z PAMICY by předpis i mzdové závazky zdvojilo. Chybějící mzdové závazky doplní správce instalace z exportu POHODY.');
         }
 
         // Účty: PAMICA → osnova firmy.

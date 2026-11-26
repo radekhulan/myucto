@@ -90,6 +90,51 @@ final class PayrollPostingImportRepository
         return $out;
     }
 
+    /**
+     * Načtená zaúčtování mezd, jejichž některý doklad platí: měsíce (`YYYY-MM`) a párovací
+     * symboly. Převod z jiného účetního programu za ně mzdové závazky nezakládá
+     * ({@see \MyInvoice\Service\Migration\Pohoda\OtherItemImporter}).
+     *
+     * `dates` = den zaúčtování (nejdřívější interní doklad) načteného měsíce.
+     *
+     * @return array{periods:array<string,true>,sym_pars:array<string,true>,dates:array<string,string>}
+     */
+    public function activeImports(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT period, sym_par, internal_document_ids, other_item_ids FROM payroll_posting_imports WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $out = ['periods' => [], 'sym_pars' => [], 'dates' => []];
+        $documents = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['internal_document_ids'] = self::ids($row['internal_document_ids']);
+            $row['other_item_ids'] = self::ids($row['other_item_ids']);
+            if ($this->hasActiveDocuments($supplierId, $row)) {
+                $out['periods'][(string) $row['period']] = true;
+                if ((string) $row['sym_par'] !== '') {
+                    $out['sym_pars'][(string) $row['sym_par']] = true;
+                }
+                foreach ($row['internal_document_ids'] as $id) {
+                    $documents[$id] = (string) $row['period'];
+                }
+            }
+        }
+        if ($documents !== []) {
+            $dates = $this->db->pdo()->prepare('SELECT id, entry_date FROM internal_documents WHERE supplier_id = ? AND id IN ('
+                . implode(',', array_fill(0, count($documents), '?')) . ") AND status = 'posted'");
+            $dates->execute([$supplierId, ...array_keys($documents)]);
+            foreach ($dates->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $period = $documents[(int) $row['id']];
+                $date = (string) $row['entry_date'];
+                if (!isset($out['dates'][$period]) || $date < $out['dates'][$period]) {
+                    $out['dates'][$period] = $date;
+                }
+            }
+        }
+        return $out;
+    }
+
     public function delete(int $supplierId, int $id): void
     {
         $this->db->pdo()->prepare('DELETE FROM payroll_posting_imports WHERE id = ? AND supplier_id = ?')

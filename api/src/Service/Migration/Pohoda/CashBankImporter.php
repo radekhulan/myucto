@@ -633,6 +633,54 @@ final class CashBankImporter
         return $out;
     }
 
+    /**
+     * Pokladní doklady a bankovní pohyby exportu, které převod už převzal, pro párování úhrad
+     * bez nového převodu banky a pokladny (doplnění mzdových závazků,
+     * {@see PohodaPayrollItemBackfill}). Klíče mapy jsou stejné jako v {@see importCash()}
+     * a {@see importBank()}; nic nezapisuje. Pohyby se stejným číslem i datem na jednom účtu
+     * se k id dokladu POHODY nepřiřadí (pořadí, ve kterém je převod číslo rozlišil, se tu
+     * neopakuje), úhrada na ně zůstane nespárovaná.
+     */
+    public function rememberConverted(PohodaContext $ctx): void
+    {
+        $cash = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT);
+        foreach ($ctx->export->records('cash', 'voucher') as $r) {
+            $h = PohodaXml::get($r, 'voucherHeader');
+            $number = PohodaXml::text($h, 'number/numberRequested');
+            $issue = PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'datePayment');
+            if ($number === '' || $issue === null || $ctx->skipsDate($issue) || !isset($cash['cash|' . $number . '|' . $issue])) {
+                continue;
+            }
+            $id = (int) $cash['cash|' . $number . '|' . $issue];
+            $ctx->cashDocuments[$number] = $id;
+            self::rememberCashId($ctx, $h, $id);
+        }
+
+        $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION);
+        $periodStart = $ctx->periodStart();
+        $rows = [];
+        $seen = [];
+        foreach ($ctx->export->records('bank', 'bank') as $r) {
+            $h = PohodaXml::get($r, 'bankHeader');
+            $date = PohodaXml::date($h, 'datePayment') ?? PohodaXml::date($h, 'dateStatement');
+            if ($date === null || $ctx->skipsDate($date) || self::isOpeningBalance($h, $date, $periodStart)) {
+                continue;
+            }
+            $number = PohodaXml::text($h, 'number');
+            $key = 'bank|' . (PohodaXml::text($h, 'account/ids') ?: 'BANKA') . '|' . $number . '|' . $date;
+            $seen[$key] = ($seen[$key] ?? 0) + 1;
+            $rows[] = [$r, $number, $date, $key];
+        }
+        foreach ($rows as [$r, $number, $date, $key]) {
+            if ($seen[$key] > 1 || !isset($existing[$key])) {
+                continue;
+            }
+            $id = (int) $existing[$key];
+            $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date, 'amount' => PohodaForeignBank::documentAmounts($r)['czk']];
+            self::rememberReferences($ctx, $r, $id);
+        }
+    }
+
     /** Id pokladního dokladu POHODY, na které míří úhrady dokladů (`Uhrady.RelIDU`). */
     private static function rememberCashId(PohodaContext $ctx, array $header, int $cashId): void
     {
