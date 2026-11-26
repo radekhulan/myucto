@@ -119,14 +119,14 @@ final class OtherItemMonthlyCheck
         $roots = [];
         foreach ($codes as $code) {
             foreach (array_keys($roots) as $root) {
-                if (str_starts_with($code, $root)) {
+                if (str_starts_with((string) $code, (string) $root)) {
                     $roots[$root] += $byAccount[$code];
                     continue 2;
                 }
             }
             $roots[$code] = $byAccount[$code];
         }
-        $balances = $this->closing->accountBalances($supplierId, array_keys($roots), $rangeTo);
+        $balances = $this->closing->accountBalances($supplierId, array_map('strval', array_keys($roots)), $rangeTo);
 
         $accounts = [];
         foreach ($roots as $code => $openItems) {
