@@ -9,6 +9,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Support\Sql\CzkAmountExpr;
@@ -146,14 +147,10 @@ final class VatLedgerService
         $saleIds = $documentIds === null ? null : ($documentIds['sale'] ?? []);
         $purchaseIds = $documentIds === null ? null : ($documentIds['purchase'] ?? []);
         if ($saleIds !== []) {
-            foreach ($this->fetchSales($supplierId, $start, $end, $includeDrafts, $saleIds, $sourceLines) as $r) {
-                yield $this->normalize($r, 'sale', $map, $bucket);
-            }
+            yield from $this->normalizeDocuments($this->fetchSales($supplierId, $start, $end, $includeDrafts, $saleIds, $sourceLines), 'sale', $map, $bucket);
         }
         if ($purchaseIds !== []) {
-            foreach ($this->fetchPurchases($supplierId, $start, $end, $includeDrafts, $purchaseIds, $sourceLines) as $r) {
-                yield $this->normalize($r, 'purchase', $map, $bucket);
-            }
+            yield from $this->normalizeDocuments($this->fetchPurchases($supplierId, $start, $end, $includeDrafts, $purchaseIds, $sourceLines), 'purchase', $map, $bucket);
         }
         if ($documentIds === null) {
             foreach ($this->fetchCash($supplierId, $start, $end, $includeDrafts, null, null, $sourceLines) as $r) {
@@ -241,11 +238,85 @@ final class VatLedgerService
         $fetched = $source === 'sale'
             ? $this->fetchSales($supplierId, $start, $end, $includeDrafts, [$invoiceId])
             : $this->fetchPurchases($supplierId, $start, $end, $includeDrafts, [$invoiceId]);
-        $rows = [];
-        foreach ($fetched as $r) {
-            $rows[] = $this->normalize($r, $source, $map, $bucket);
+        return iterator_to_array($this->normalizeDocuments($fetched, $source, $map, $bucket), false);
+    }
+
+    /**
+     * Normalizované řádky vydaných nebo přijatých dokladů z {@see fetchSales()} či
+     * {@see fetchPurchases()}. Oba dotazy řadí řádky podle dokladu, takže se v paměti drží
+     * vždy jen řádky jednoho dokladu. Doklad v cizí měně dostane Kč po skupinách sazby
+     * ({@see alignForeignCurrencyGroups()}).
+     *
+     * @param iterable<array<string,mixed>> $raw
+     * @param 'sale'|'purchase' $source
+     * @return \Generator<int, array<string,mixed>>
+     */
+    private function normalizeDocuments(iterable $raw, string $source, array $map, float $bucket): \Generator
+    {
+        $document = null;
+        $buffer = [];
+        foreach ($raw as $r) {
+            $id = (int) $r['invoice_id'];
+            if ($document !== null && $id !== $document) {
+                yield from $this->alignForeignCurrencyGroups($buffer, $source, $map, $bucket);
+                $buffer = [];
+            }
+            $document = $id;
+            $buffer[] = $r;
         }
-        return $rows;
+        if ($buffer !== []) {
+            yield from $this->alignForeignCurrencyGroups($buffer, $source, $map, $bucket);
+        }
+    }
+
+    /**
+     * Řádky jednoho dokladu. U dokladu v cizí měně jsou Kč základu a daně v každé sazbě
+     * přepočtem SOUČTU sazby, rozděleným na řádky ({@see CzkRecap::splitGroup()}), tedy
+     * přesně částky rekapitulace DPH v Kč na daňovém dokladu ({@see CzkRecap::build()}).
+     * Přepočet po řádcích se od ní lišil o haléře a o ty se pak rozcházelo přiznání, KH
+     * i kniha DPH s dokladem. Řádky s převzatými Kč, s krácením § 75 a samovyměřená daň
+     * (počítá se ze základu v Kč) se kurzem nenásobí a do skupiny nevstupují
+     * ({@see normalize()}), stejně jako převzaté Kč v rekapitulaci.
+     *
+     * @param list<array<string,mixed>> $raws
+     * @param 'sale'|'purchase' $source
+     * @return list<array<string,mixed>>
+     */
+    private function alignForeignCurrencyGroups(array $raws, string $source, array $map, float $bucket): array
+    {
+        $rows = [];
+        $groups = [];
+        foreach ($raws as $i => $r) {
+            $row = $this->normalize($r, $source, $map, $bucket);
+            $fx = $row['_fx'] ?? null;
+            unset($row['_fx']);
+            $rows[$i] = $row;
+            if ($fx === null) {
+                continue;
+            }
+            $groups[$fx['group']]['rate'] = $fx['rate'];
+            foreach (['base', 'vat'] as $kind) {
+                if ($fx[$kind] !== null) {
+                    $groups[$fx['group']][$kind][$i] = $fx[$kind];
+                }
+            }
+        }
+        $overrides = [];
+        foreach ($groups as $group) {
+            foreach (['base', 'vat'] as $kind) {
+                foreach (CzkRecap::splitGroup($group[$kind] ?? [], $group['rate']) as $i => $czk) {
+                    if (abs($czk - (float) $rows[$i][$kind . '_czk']) >= 0.005) {
+                        $overrides[$i]['fx_' . $kind . '_czk'] = $czk;
+                    }
+                }
+            }
+        }
+        foreach ($overrides as $i => $override) {
+            $row = $this->normalize($override + $raws[$i], $source, $map, $bucket);
+            unset($row['_fx']);
+            $rows[$i] = $row;
+        }
+        return array_values($rows);
     }
 
     /**
@@ -492,12 +563,15 @@ final class VatLedgerService
         $map = $this->classificationMap($supplierId);
         $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
         $docs = [];
-        foreach ($this->fetchPurchases($supplierId, $start, $end, true) as $raw) {
-            $id = (int) $raw['invoice_id'];
-            if (!isset($pending[$id])) {
-                continue;
+        $pendingRows = (static function (iterable $raw) use ($pending): \Generator {
+            foreach ($raw as $r) {
+                if (isset($pending[(int) $r['invoice_id']])) {
+                    yield $r;
+                }
             }
-            $row = $this->normalize($raw, 'purchase', $map, $bucket);
+        })($this->fetchPurchases($supplierId, $start, $end, true));
+        foreach ($this->normalizeDocuments($pendingRows, 'purchase', $map, $bucket) as $row) {
+            $id = $row['invoice_id'];
             $doc = $docs[$id] ?? [
                 'invoice_id'            => $id,
                 'doc_number'            => $row['doc_number'],
@@ -1517,10 +1591,17 @@ final class VatLedgerService
             }
         }
 
+        // Částky, které se kurzem dokladu násobí, a proto patří do přepočtu po skupinách
+        // sazby ({@see alignForeignCurrencyGroups()}): `fx_*_czk` je díl skupiny, který sem
+        // vrací druhé volání. Krácení § 75 násobí kurzem už zkrácenou částku, zůstává po řádku.
+        $foreignCurrency = !$isCzk && !$exchangeRateMissing;
         $sourceBaseCzk = $r['import_tax_base_czk'] ?? null;
+        $fxBase = $foreignCurrency && $sourceBaseCzk === null && !($isPartialDeduction && !$rcSelfAssess) ? $baseRaw : null;
         $baseCzk = $sourceBaseCzk !== null
             ? round((float) $sourceBaseCzk * ($isPartialDeduction && !$rcSelfAssess ? $deductionRatio : 1.0), 2)
-            : round($baseRaw * $rate, 2);
+            : ($fxBase !== null && isset($r['fx_base_czk']) ? (float) $r['fx_base_czk'] : round($baseRaw * $rate, 2));
+        $fxVat = $foreignCurrency && $projectionVatCzk === null && !$rcSelfAssess && $sourceVatCzk === null && !$isPartialDeduction
+            ? $vatRaw : null;
         // Daň u RC samovyměření = ZÁKLAD přepočtený na CZK × sazba (§ 37 odst. 1:
         // „daň se vypočte ze základu daně" — a základem je hodnota v Kč). Počítat ji
         // z cizoměnové daně přenásobené kurzem by dvojím zaokrouhlením rozešlo KH
@@ -1533,7 +1614,7 @@ final class VatLedgerService
                 ? round($baseCzk * $vatRate / 100, 2)
                 : ($sourceVatCzk !== null
                     ? round((float) $sourceVatCzk * ($isPartialDeduction ? $deductionRatio : 1.0), 2)
-                    : round($vatRaw * $rate, 2)));
+                    : ($fxVat !== null && isset($r['fx_vat_czk']) ? (float) $r['fx_vat_czk'] : round($vatRaw * $rate, 2))));
         $deductionBaseCzk = $rcSelfAssess && $isPartialDeduction
             ? round($baseCzk * $deductionRatio, 2)
             : $baseCzk;
@@ -1649,7 +1730,10 @@ final class VatLedgerService
             'is_fixed_asset'        => (bool) $r['is_fixed_asset'],
             'exchange_rate'         => $rate,
             'exchange_rate_missing' => $exchangeRateMissing,
-        ] + (array_key_exists('line_id', $r) ? [
+        ] + ($fxBase !== null || $fxVat !== null ? [
+            // Jen pro {@see alignForeignCurrencyGroups()}, ven se nevrací.
+            '_fx' => ['group' => number_format((float) $r['vat_rate'], 2, '.', ''), 'rate' => $rate, 'base' => $fxBase, 'vat' => $fxVat],
+        ] : []) + (array_key_exists('line_id', $r) ? [
             // Zdrojový řádek dokladu (položka faktury, rozpis DPH přijatého dokladu, řádek
             // DPH pokladního dokladu) jen pro rozpad podle dimenze ({@see ledgerRows()}).
             'line_id'               => (int) $r['line_id'],

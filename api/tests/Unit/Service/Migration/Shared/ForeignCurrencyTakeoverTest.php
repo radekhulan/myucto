@@ -112,6 +112,25 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         self::assertSame('základ dokladu celkem 2,00 × kurz 25,126 nedává 50,26 Kč ze zdroje', ForeignCurrencyTakeover::check(25.126, $items, 55.28));
     }
 
+    /**
+     * Evidence DPH přepočítává doklad v cizí měně po sazbách (součet sazby, ne položky).
+     * Položky i součty dokladu tu kurzem dávají Kč zdroje, sazby ale ne: 21 % po položkách
+     * 11 596,34 Kč, za sazbu 11 596,33; 12 % po položkách 30 238,55, za sazbu 30 238,56.
+     * Doklad v měně by přiznání posunul o haléř proti zdroji v každé sazbě.
+     */
+    public function testEachRateMustConvertAsGroup(): void
+    {
+        $items = [];
+        foreach ([[21.0, [[467.35, 11384.65], [8.35, 203.41], [0.34, 8.28]]], [12.0, [[1218.75, 29688.75], [21.79, 530.80], [0.78, 19.0]]]] as [$rate, $lines]) {
+            foreach ($lines as [$foreign, $home]) {
+                $items[] = ['rate' => $rate, 'base' => $home, 'vat' => 0.0, 'foreign_base' => $foreign, 'foreign_vat' => 0.0];
+            }
+        }
+        self::assertSame('základ sazby 21 % celkem 476,04 × kurz 24,36 nedává 11 596,34 Kč ze zdroje', ForeignCurrencyTakeover::check(24.36, $items, 41834.89));
+        $withoutRates = array_map(static fn (array $i): array => array_diff_key($i, ['rate' => true]), $items);
+        self::assertNull(ForeignCurrencyTakeover::check(24.36, $withoutRates, 41834.89), 'Bez sazeb zůstává kontrola po položkách a dokladu.');
+    }
+
     public function testItemsWithoutForeignAmountsKeepCrowns(): void
     {
         $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0], ['base' => 1.0, 'vat' => 0.0]];

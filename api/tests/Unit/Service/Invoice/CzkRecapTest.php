@@ -178,4 +178,23 @@ final class CzkRecapTest extends TestCase
             sprintf('%s × %s se od round() neliší — případ nic nedokazuje.', $amount, $rate),
         );
     }
+
+    /**
+     * Rozdělení skupiny sazby na řádky dá v součtu Kč rekapitulace, ne součet přepočtů
+     * řádků (467,35 + 8,35 + 0,34 EUR po řádcích 11 596,34 Kč, za skupinu 11 596,33 Kč).
+     */
+    public function testSplitGroupSumsToRecapOfTheGroup(): void
+    {
+        $recap = CzkRecap::build([['rate' => 21.0, 'base' => 476.04, 'vat' => 99.96]], 24.36, '2026-05-03');
+        $split = CzkRecap::splitGroup([467.35, 8.35, 0.34], 24.36);
+        self::assertSame(11596.33, $recap['breakdown'][0]['base_czk']);
+        self::assertSame([11384.64, 203.41, 8.28], $split, 'Haléř ubere řádek s největší částkou ze shodných zbytků.');
+        self::assertSame(11596.33, round(array_sum($split), 2));
+
+        self::assertSame([29688.75, 530.81, 19.0], CzkRecap::splitGroup([1218.75, 21.79, 0.78], 24.36), 'Haléř navíc dostane řádek zaokrouhlený nejvíc dolů.');
+        self::assertSame([-29688.75, -530.81, -19.0], CzkRecap::splitGroup([-1218.75, -21.79, -0.78], 24.36), 'Dobropis zrcadlí doklad.');
+        self::assertSame(['a' => 0.0, 'b' => 243.65], CzkRecap::splitGroup(['a' => 0.0, 'b' => 10.0], 24.365), 'Nulový řádek haléř nedostane, klíče zůstávají.');
+        self::assertSame([511.67], CzkRecap::splitGroup([21.0], 24.365), 'Jeden řádek = přesný HALF_UP přepočet.');
+        self::assertSame([], CzkRecap::splitGroup([], 24.36));
+    }
 }

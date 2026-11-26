@@ -20,9 +20,10 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
  * dokladu spočítá PŘESNĚ tytéž koruny, které má zdroj, a to na haléř:
  *  - u každé položky základ i daň, a to oběma způsoby, kterými aplikace cizí měnu
  *    přepočítává - bcmath HALF_UP ({@see CzkRecap::multiplyHalfUp()}, rekapitulace dokladu,
- *    SQL `ROUND(částka × kurz, 2)`) i `round(částka × kurz, 2)` evidence DPH
- *    ({@see \MyInvoice\Service\Report\VatLedgerService::normalize()}); evidence počítá po
- *    položkách, takže DPH, KH i OSS zůstávají v korunách beze změny;
+ *    SQL `ROUND(částka × kurz, 2)`) i `round(částka × kurz, 2)` (OSS, zápis po položkách);
+ *  - u každé sazby součet základu a daně: evidence DPH přepočítává doklad v cizí měně po
+ *    sazbách jako rekapitulace ({@see CzkRecap::splitGroup()}), takže DPH i KH zůstávají
+ *    v korunách zdroje jen tehdy, když je dává i přepočet součtu sazby;
  *  - celkem dokladu (evidence z něj bere hranici 10 000 Kč pro KH, převod podle něj
  *    kontroluje doklady proti deníku a páruje úhrady).
  * Kurz se bere zaokrouhlený na 6 míst, tak jak ho uloží sloupec `exchange_rate`.
@@ -141,6 +142,7 @@ final class ForeignCurrencyTakeover
         }
         $foreignTotal = 0.0;
         $sums = ['základ' => [0.0, 0.0], 'daň' => [0.0, 0.0]];
+        $groups = [];
         $n = 0;
         foreach ($items as $item) {
             $n++;
@@ -156,10 +158,26 @@ final class ForeignCurrencyTakeover
                 }
             }
             $foreignTotal += (float) $fb + (float) $fv;
+            if (isset($item['rate']) && is_numeric($item['rate'])) {
+                $rateKey = number_format((float) $item['rate'], 2, '.', '');
+                $groups[$rateKey] ??= ['základ' => [0.0, 0.0], 'daň' => [0.0, 0.0]];
+                $groups[$rateKey]['základ'][0] += (float) $fb;
+                $groups[$rateKey]['základ'][1] += (float) $item['base'];
+                $groups[$rateKey]['daň'][0] += (float) $fv;
+                $groups[$rateKey]['daň'][1] += (float) $item['vat'];
+            }
             $sums['základ'][0] += (float) $fb;
             $sums['základ'][1] += (float) $item['base'];
             $sums['daň'][0] += (float) $fv;
             $sums['daň'][1] += (float) $item['vat'];
+        }
+        foreach ($groups as $rateKey => $group) {
+            foreach ($group as $what => [$foreign, $home]) {
+                if (self::cents(CzkRecap::multiplyHalfUp(round($foreign, 2), $rate)) !== self::cents(round($home, 2))) {
+                    return sprintf('%s sazby %s %% celkem %s × kurz %s nedává %s Kč ze zdroje', $what, self::amount((float) $rateKey, 6),
+                        self::amount(round($foreign, 2)), self::amount($rate, 6), self::amount(round($home, 2)));
+                }
+            }
         }
         // Součty dokladu: část aplikace (obrat § 4a, rekapitulace hlavičky) přepočítává
         // základ a daň z hlavičky, ne po položkách - i ty musí dát koruny zdroje.
@@ -356,6 +374,11 @@ final class ForeignCurrencyTakeover
         $cents = (int) round($home * 100);
         return (int) round(CzkRecap::multiplyHalfUp($foreign, $rate) * 100) === $cents
             && (int) round(round($foreign * $rate, 2) * 100) === $cents;
+    }
+
+    private static function cents(float $amount): int
+    {
+        return (int) round($amount * 100);
     }
 
     private static function amount(float $value, int $decimals = 2): string

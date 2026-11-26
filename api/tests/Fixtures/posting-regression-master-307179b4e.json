@@ -50,7 +50,12 @@
         {
             "account_code": "343.200",
             "side": "credit",
-            "amount": 820.84
+            "amount": 820.83
+        },
+        {
+            "account_code": "648",
+            "side": "credit",
+            "amount": 0.01
         }
     ],
     "header_discount": [

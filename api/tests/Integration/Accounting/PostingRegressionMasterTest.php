@@ -18,6 +18,10 @@ use PHPUnit\Framework\TestCase;
  * z hlavičky, prodej majetku, vyúčtování proformy s odpočtem § 37a, přijatá faktura
  * s druhem výdaje, pořízení DHM, nedaňový náklad a razítkování dimenzí. Položky jsou
  * navázané na kartu a kategorii bez účtu a dimenzí.
+ *
+ * Jediná vědomá změna proti masteru: daň dokladu v cizí měně (343) je přepočet součtu
+ * sazby jako v rekapitulaci dokladu (32,67 EUR × 25,125 = 820,83 Kč, po položkách
+ * 820,84), haléř do celku dokladu jde na zaokrouhlení 648.
  */
 #[Group('integration')]
 final class PostingRegressionMasterTest extends TestCase

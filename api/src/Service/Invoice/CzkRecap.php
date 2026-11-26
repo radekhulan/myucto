@@ -118,6 +118,66 @@ final class CzkRecap
         return $rows;
     }
 
+    /**
+     * Přepočet jedné skupiny sazby rozdělený na řádky dokladu: Kč řádků dají v součtu
+     * přesně Kč skupiny z rekapitulace ({@see build()}), tedy přepočet SOUČTU skupiny,
+     * ne součet přepočtů řádků. Ty se rozcházejí o haléře (467,35 + 8,35 + 0,34 EUR
+     * × 24,36 = 11 384,65 + 203,41 + 8,28 = 11 596,34 Kč po řádcích, 476,04 × 24,36
+     * = 11 596,33 Kč za skupinu) a daňový doklad uvádí částku skupiny.
+     *
+     * Rozdíl se rozdělí metodou největšího zbytku: haléř dostane řádek, jehož přesný
+     * součin zaokrouhlení posunulo nejdál opačným směrem. Řádek s nulovou částkou haléř
+     * nedostane nikdy. Převzaté Kč (`import_tax_*_czk`) sem nepatří: rekapitulace je ke
+     * skupině přičítá přímo a kurzem násobí jen zbytek, volající proto předává jen řádky
+     * bez nich.
+     *
+     * @param array<array-key,float> $foreign částky řádků skupiny v měně dokladu
+     * @return array<array-key,float> Kč řádků se stejnými klíči
+     */
+    public static function splitGroup(array $foreign, float $exchangeRate): array
+    {
+        if ($foreign === []) {
+            return [];
+        }
+        $cents = [];
+        $remainders = [];
+        $sum = 0.0;
+        foreach ($foreign as $key => $amount) {
+            $amount = (float) $amount;
+            $sum += $amount;
+            $rounded = self::multiplyHalfUp($amount, $exchangeRate);
+            $cents[$key] = (int) round($rounded * 100);
+            $remainders[$key] = self::remainderUnits($amount, $exchangeRate, $rounded);
+        }
+        $diff = (int) round(self::multiplyHalfUp(round($sum, 2), $exchangeRate) * 100) - array_sum($cents);
+        if ($diff !== 0) {
+            $order = array_keys(array_filter($foreign, static fn ($amount): bool => abs((float) $amount) >= 0.005));
+            $position = array_flip($order);
+            usort($order, static fn ($a, $b): int => $diff > 0
+                ? [$remainders[$b], abs((float) $foreign[$b]), $position[$a]] <=> [$remainders[$a], abs((float) $foreign[$a]), $position[$b]]
+                : [$remainders[$a], -abs((float) $foreign[$a]), $position[$a]] <=> [$remainders[$b], -abs((float) $foreign[$b]), $position[$b]]);
+            $step = $diff > 0 ? 1 : -1;
+            for ($i = 0, $n = count($order); $diff !== 0 && $n > 0; $i++) {
+                $cents[$order[$i % $n]] += $step;
+                $diff -= $step;
+            }
+        }
+        return array_map(static fn (int $c): float => $c / 100, $cents);
+    }
+
+    /**
+     * Přesný součin částky a kurzu minus jeho zaokrouhlení, v jednotkách 1e-10 Kč (celé
+     * číslo, aby shodné zbytky dvou řádků rozhodlo pořadí, ne šum floatu).
+     */
+    private static function remainderUnits(float $amount, float $exchangeRate, float $rounded): int
+    {
+        if (function_exists('bcmul')) {
+            $product = bcmul(sprintf('%.6F', $amount), sprintf('%.6F', $exchangeRate), 10);
+            return (int) bcmul(bcsub($product, sprintf('%.2F', $rounded), 10), '10000000000', 0);
+        }
+        return (int) round(($amount * $exchangeRate - $rounded) * 1e10);
+    }
+
     /** @param list<array<string,mixed>> $items */
     private static function importedByRate(array $items): array
     {
