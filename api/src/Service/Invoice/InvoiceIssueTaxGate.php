@@ -127,7 +127,7 @@ final class InvoiceIssueTaxGate
         if ($client === false || (int) $client['simplified_only'] !== 1) {
             return null;
         }
-        if (!$this->vatStatus->isVatPayerAt((int) $invoice['supplier_id'], self::vatStatusDate($invoice))) {
+        if (!$this->issuesTaxDocument($invoice)) {
             return null;
         }
         $name = (string) $client['company_name'];
@@ -275,15 +275,33 @@ final class InvoiceIssueTaxGate
     }
 
     /**
-     * § 30 odst. 1 a 2 ZDPH: limit zjednodušeného dokladu a jeho výjimky
-     * ({@see SimplifiedDocumentPolicy}).
+     * Vystavuje firma tímto dokladem daňový doklad? Jen plátce DPH k rozhodnému datu dokladu.
      *
-     * @param array<string,mixed> $invoice hlavička se `total_with_vat`, `reverse_charge`, `vat_classification_code`
+     * Neplátce daňové doklady nevystavuje (§ 28 ZDPH ukládá tu povinnost plátci), takže
+     * pravidla § 29 a § 30 ZDPH se na jeho doklad nevztahují. Jeho faktura je účetní doklad
+     * (§ 11 ZÚ), příznak `is_simplified` na něm jen říká, že nenese údaje odběratele, a PDF
+     * ho tiskne jako fakturu. Společná podmínka bran {@see simplifiedRejection()}
+     * a {@see simplifiedOnlyClientRejection()}; volá ji i úprava vystaveného dokladu.
+     *
+     * @param array<string,mixed> $invoice hlavička se `supplier_id` a `issue_date`/`tax_date`
+     */
+    public function issuesTaxDocument(array $invoice): bool
+    {
+        return $this->vatStatus->isVatPayerAt((int) $invoice['supplier_id'], self::vatStatusDate($invoice));
+    }
+
+    /**
+     * § 30 odst. 1 a 2 ZDPH: limit zjednodušeného dokladu a jeho výjimky
+     * ({@see SimplifiedDocumentPolicy}). Jen pro plátce, viz {@see issuesTaxDocument()}:
+     * neplátce smí vystavit doklad bez údajů odběratele i nad limit 10 000 Kč.
+     *
+     * @param array<string,mixed> $invoice hlavička se `supplier_id`, `issue_date`/`tax_date`,
+     *                                     `total_with_vat`, `reverse_charge`, `vat_classification_code`
      * @return array{code:string, message:string, status:int}|null
      */
     public function simplifiedRejection(array $invoice): ?array
     {
-        if (empty($invoice['is_simplified'])) {
+        if (empty($invoice['is_simplified']) || !$this->issuesTaxDocument($invoice)) {
             return null;
         }
         $reason = SimplifiedDocumentPolicy::rejectionReason(

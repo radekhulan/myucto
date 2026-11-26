@@ -5910,7 +5910,7 @@ paths:
             Doklad neprošel zákonnou kontrolou — bez položek (`no_items`), storno
             se nevystavuje (`invalid_type`), chybí DIČ odběratele u přenesené daňové
             povinnosti (`reverse_charge_dic_missing`, § 29/2 ZDPH), zjednodušený doklad
-            nesplňuje podmínky (`simplified_document_not_allowed`, § 30 ZDPH), odběratel je
+            plátce DPH nesplňuje podmínky (`simplified_document_not_allowed`, § 30 ZDPH), odběratel je
             drobný zákazník bez adresy (`simplified_only`) a doklad není zjednodušená faktura
             (`simplified_only_client_requires_simplified`) nebo přesahuje limit § 30 odst. 1
             (`simplified_only_client_over_limit`; řešením je doplnit kartu odběratele, nebo
@@ -7185,8 +7185,9 @@ paths:
         tržba EET:
 
         - bez `client_id` zjednodušený daňový doklad (§ 30 ZDPH) na koncového
-          zákazníka; nad limit zjednodušeného dokladu 422 `client_required`
-          (vyberte odběratele, vystaví se běžný daňový doklad),
+          zákazníka; u plátce DPH nad limit zjednodušeného dokladu 422
+          `client_required` (vyberte odběratele, vystaví se běžný daňový doklad),
+          neplátce daňový doklad nevystavuje a limit se ho netýká,
         - číslo z řady dokladů (vlastní řada zjednodušených dokladů, je-li
           nastavená), DPH a rekapitulace z řádků, sazby z číselníku k dnešku,
         - `cash` s pokladnou (`cash_register_id`, jinak pokladna zařízení EET):
