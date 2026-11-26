@@ -115,7 +115,8 @@ const disabledReason = computed(() => {
 function checkClass(check: PayrollPostingCheck): string {
   return check.level === 'error' ? 'border-danger-500/40 bg-danger-50 text-danger-600'
     : check.level === 'warning' ? 'border-warning-500/40 bg-warning-50 text-warning-700'
-      : 'border-success-500/40 bg-success-50 text-success-600'
+      : check.level === 'info' ? 'border-primary-500/40 bg-primary-50 text-primary-700'
+        : 'border-success-500/40 bg-success-50 text-success-600'
 }
 function accountStatus(status: string): string {
   return t(`payroll_posting_import.account_status.${status}`)

@@ -1091,6 +1091,7 @@ nimi jsou kontroly:
 | Závazek na účtu hrubých mezd | Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy (typicky 331). Obvykle jde o prohozené účty MD a Dal u zkratky (daň správně `331 / 342`, pojistné `331 / 336`). Načtení zastaví; čisté mzdy bez zaúčtování se netýká. |
 | Účet protistrany | Neplatné číslo účtu náhled ohlásí; závazek se načte bez něj a účet doplníte v jeho detailu. |
 | Variabilní symbol | Symbol pro platbu smí mít 1 až 10 číslic. Jinou hodnotu import uloží do poznámky závazku a náhled upozorní, že je třeba před úhradou doplnit správný symbol. |
+| Činnost (vyhláška 504) | Jen u firmy, která účtuje podle vyhlášky 504. Informuje, že mzdové náklady dostanou v dimenzi Činnost hodnotu Hlavní činnost (§ 108.10.3). Má-li firma vypnuté dimenze, načtení je zapne. |
 
 **Účty.** PAMICA uvádí účty šestimístně. MyÚčto hledá v účtové osnově
 nejdřív stejný kód, potom analytiku s tečkou (`336001` → `336.001`)
@@ -1127,6 +1128,15 @@ vrátí vše zpět):
 - **Závazky bez zaúčtování** (čisté mzdy) se jen potvrdí, vlastní zápis
   v deníku nemají a leží na účtu 331. Výplata z banky je pak zaúčtuje
   `331 / 221` a účet 331 se vyrovná.
+
+**Firma podle vyhlášky 504.** Neziskové organizace musí mít u nákladů
+a výnosů vyplněnou dimenzi **Činnost**. PAMICA činnost nezná, proto řádky
+na účtech tříd 5 a 6 (mzdové náklady, pojistné placené firmou) dostanou
+**Hlavní činnost**. Přednost má nastavení firmy: pravidlo dimenzí s výchozí
+činností pro daný účet (`Firma → Dimenze → Pravidla`), výchozí dimenze
+partnera závazku a výchozí dimenze druhu závazku. Mzdové náklady
+hospodářské činnosti účetní po načtení přeřadí v dimenzích zápisu
+interního dokladu nebo v dimenzích závazku.
 
 Protistranu dohledá MyÚčto v adresáři podle názvu, jinak založí novou kartu.
 U zaměstnance se na kartu zapíše jen jméno; adresa ani jiné osobní údaje

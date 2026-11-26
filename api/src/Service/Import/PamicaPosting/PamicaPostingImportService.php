@@ -6,9 +6,18 @@ namespace MyInvoice\Service\Import\PamicaPosting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\PayrollPostingImportRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleEngine;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
+use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
@@ -39,6 +48,11 @@ use MyInvoice\Service\Import\ClientResolver;
  *
  * Zkratky předkontací POHODY (7Int, 4Oz) překládá na účty mapování firmy
  * ({@see PamicaPostingCodeMap}); jeho účty jsou už kódy osnovy MyÚčta a hledají se přímo.
+ *
+ * Firma v rámci vyhlášky 504 musí mít u nákladů a výnosů systémovou dimenzi Činnost
+ * ({@see \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy}). PAMICA činnost
+ * nezná, proto řádky 5xx a 6xx dostanou hlavní činnost, pokud ji neurčí nastavení firmy
+ * ({@see activityResolver()}). Hospodářskou činnost účetní přeřadí v dimenzích zápisu.
  */
 final class PamicaPostingImportService
 {
@@ -109,6 +123,8 @@ final class PamicaPostingImportService
         $pdo = $this->db->pdo();
         return TransactionFailure::retrying($pdo, function () use ($pdo, $supplierId, $parsed, $bytes, $fileName, $createMissingAccounts, $audit, $userId): array {
             $ownTx = !$pdo->inTransaction();
+            // Nový pokus po odvolané transakci nesmí vzít id dimenzí založených v tom předchozím.
+            $activity = $this->activityResolver($supplierId, $userId);
             if ($ownTx) $pdo->beginTransaction();
             try {
                 $previous = $this->imports->find($supplierId, self::APPLICATION, $parsed['ico'], $parsed['sym_par'], true);
@@ -131,14 +147,14 @@ final class PamicaPostingImportService
                 $internalIds = [];
                 $internalNumbers = [];
                 foreach ($parsed['internal_documents'] as $doc) {
-                    $posted = $this->postInternalDocument($supplierId, $doc, $parsed, $map, $audit);
+                    $posted = $this->postInternalDocument($supplierId, $doc, $parsed, $map, $audit, $activity);
                     $internalIds[] = (int) $posted['id'];
                     $internalNumbers[] = (string) $posted['document_no'];
                 }
                 $itemIds = [];
                 $items = [];
                 foreach ($parsed['commitments'] as $commitment) {
-                    $item = $this->createCommitment($supplierId, $commitment, $parsed, $map, $userId);
+                    $item = $this->createCommitment($supplierId, $commitment, $parsed, $map, $userId, $activity);
                     $itemIds[] = (int) $item['id'];
                     $items[] = ['id' => (int) $item['id'], 'document_no' => $item['document_no'], 'status' => $item['status'],
                         'title' => $item['title'], 'partner_name' => $item['partner_name'], 'amount' => (float) $item['amount']];
@@ -216,6 +232,8 @@ final class PamicaPostingImportService
             }
         }
         $checks[] = $periodProblem ?? self::check('period_open', 'ok', 'Měsíc ' . self::monthLabel($parsed['period']) . ' je otevřený.');
+        $nonprofit = $this->nonprofitActivityCheck($supplierId, $dates);
+        if ($nonprofit !== null) $checks[] = $nonprofit;
 
         // Duplicita: stejný měsíc (IČO + symPar) už načtený a jeho doklady platí.
         $previous ??= $forApply ? null : $this->imports->find($supplierId, self::APPLICATION, $parsed['ico'], $parsed['sym_par']);
@@ -469,10 +487,12 @@ final class PamicaPostingImportService
      * @param array<string,mixed> $parsed
      * @param array<string,?string> $map
      * @param array<string,mixed> $audit
+     * @param \Closure(string):?array{type:int,main:int,rules:list<array<string,mixed>>} $activity
      * @return array<string,mixed>
      */
-    private function postInternalDocument(int $supplierId, array $doc, array $parsed, array $map, array $audit): array
+    private function postInternalDocument(int $supplierId, array $doc, array $parsed, array $map, array $audit, \Closure $activity): array
     {
+        $nonprofit = $activity($doc['accounting_date']);
         $pairs = [];
         foreach ($doc['lines'] as $line) {
             $pair = [
@@ -482,6 +502,17 @@ final class PamicaPostingImportService
             ];
             $text = trim($line['text'] . ($line['note'] !== null ? ' ' . $line['note'] : ''));
             if ($text !== '') $pair['line_text'] = mb_substr($text, 0, 255);
+            if ($nonprofit !== null) {
+                // Interní doklad je ruční zápis: výchozí hodnotu pravidla dimenzí doplní zaúčtování
+                // samo, hlavní činnost dostane jen dvojice, které pravidlo nepokryje celou.
+                $result = array_filter([$pair['debit_account_code'], $pair['credit_account_code']], self::isResultAccount(...));
+                foreach ($result as $code) {
+                    if (self::ruleActivity($nonprofit, $code, $doc['accounting_date']) === null) {
+                        $pair['dimensions'] = [$nonprofit['type'] => $nonprofit['main']];
+                        break;
+                    }
+                }
+            }
             $pairs[] = $pair;
         }
         $draft = $this->internalDocuments->create($supplierId, [
@@ -499,9 +530,10 @@ final class PamicaPostingImportService
      * @param array<string,mixed> $c
      * @param array<string,mixed> $parsed
      * @param array<string,?string> $map
+     * @param \Closure(string):?array{type:int,main:int,rules:list<array<string,mixed>>} $activity
      * @return array<string,mixed>
      */
-    private function createCommitment(int $supplierId, array $c, array $parsed, array $map, ?int $userId): array
+    private function createCommitment(int $supplierId, array $c, array $parsed, array $map, ?int $userId, \Closure $activity): array
     {
         $partnerId = null;
         if ($c['partner'] !== null) {
@@ -552,7 +584,100 @@ final class PamicaPostingImportService
             'amount' => $line['amount'],
         ], $c['lines']);
         $draft = $this->otherItems->create($supplierId, $input, $userId);
+        $nonprofit = $activity($c['accounting_date']);
+        if ($nonprofit !== null) {
+            $this->stampCommitmentActivity($supplierId, (int) $draft['id'], $input, $nonprofit, $c['accounting_date']);
+        }
         return $this->otherItems->post($supplierId, (int) $draft['id'], $userId);
+    }
+
+    /**
+     * Činnost rámce 504 k datu účetního případu: typ, hodnota hlavní činnosti a pravidla
+     * dimenzí firmy s výchozí činností. Firmě v rámci 504 založí systémové dimenze a zapne
+     * dimenze ({@see SystemDimensionCatalog::ensureForFramework()}), jinak vrátí null.
+     * Volá se až při načtení, náhled nic nezakládá.
+     *
+     * @return \Closure(string):?array{type:int,main:int,rules:list<array<string,mixed>>}
+     */
+    private function activityResolver(int $supplierId, ?int $userId): \Closure
+    {
+        $cache = [];
+        return function (string $date) use (&$cache, $supplierId, $userId): ?array {
+            if (array_key_exists($date, $cache)) return $cache[$date];
+            $activity = (new SystemDimensionCatalog($this->db))->ensureForFramework($supplierId, $date, $userId)['activity'] ?? null;
+            if ($activity === null) return $cache[$date] = null;
+            $type = (int) $activity['id'];
+            $rules = array_values(array_filter((new DimensionRuleService($this->db))->usableRules($supplierId),
+                static fn (array $r): bool => (int) $r['dimension_type_id'] === $type && $r['default_value_id'] !== null));
+            return $cache[$date] = ['type' => $type, 'main' => (int) $activity['values']['main'], 'rules' => $rules];
+        };
+    }
+
+    /**
+     * Výchozí činnost, kterou účtu dá pravidlo dimenzí firmy (specifičtější maska vyhrává).
+     *
+     * @param array{type:int,main:int,rules:list<array<string,mixed>>} $activity
+     * @return array{value:int,origin:array<string,mixed>}|null
+     */
+    private static function ruleActivity(array $activity, string $code, string $date): ?array
+    {
+        if ($activity['rules'] === []) return null;
+        $line = DimensionRuleEngine::apply($activity['rules'], [['account_code' => $code]], $date, null)['lines'][0];
+        $value = $line['dimensions'][$activity['type']] ?? null;
+        return $value === null ? null : ['value' => (int) $value, 'origin' => (array) ($line['dimension_origins'][$activity['type']] ?? [])];
+    }
+
+    /**
+     * Činnost do hlavičky závazku s náklady nebo výnosy. Pravidla dimenzí se na zápis
+     * ostatní položky nevztahují a hlavička platí pro všechny řádky, proto: činnost z profilu
+     * druhu nebo výchozí dimenze partnera zůstává, jinak hodnota pravidla, na které se shodnou
+     * všechny výsledkové účty závazku, jinak hlavní činnost.
+     *
+     * @param array<string,mixed> $input
+     * @param array{type:int,main:int,rules:list<array<string,mixed>>} $activity
+     */
+    private function stampCommitmentActivity(int $supplierId, int $id, array $input, array $activity, string $date): void
+    {
+        $codes = array_values(array_filter([(string) $input['account_code'], ...array_map(
+            static fn (array $l): string => (string) $l['account_code'], $input['posting_lines'])], self::isResultAccount(...)));
+        if ($codes === []) return;
+        if (isset((new DimensionDefaults($this->db))->effectiveHeader($supplierId, 'other_item', $id)[$activity['type']])) return;
+        $rule = null;
+        foreach ($codes as $code) {
+            $found = self::ruleActivity($activity, $code, $date);
+            if ($found === null || ($rule !== null && $rule['value'] !== $found['value'])) {
+                $rule = null;
+                break;
+            }
+            $rule ??= $found;
+        }
+        (new DimensionAssignmentRepository($this->db))->addHeaderDimensionIfMissing($supplierId, 'other_item', $id, $activity['type'],
+            $rule['value'] ?? $activity['main'], $rule['origin'] ?? ['origin' => 'module', 'ref' => 'pamica_import']);
+    }
+
+    private static function isResultAccount(string $code): bool
+    {
+        return preg_match('/^[56]/', $code) === 1;
+    }
+
+    /**
+     * Upozornění náhledu u firmy v rámci 504: co import nastaví v dimenzi Činnost.
+     *
+     * @param list<string> $dates data účetních případů v souboru
+     * @return array{code:string,level:string,message:string,context:array<string,mixed>}|null
+     */
+    private function nonprofitActivityCheck(int $supplierId, array $dates): ?array
+    {
+        $frameworks = new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db));
+        $nonprofit = array_filter($dates, static fn (string $date): bool => $frameworks->forDate($supplierId, $date) === AccountingFrameworkService::CZ_504);
+        if ($nonprofit === []) return null;
+        $message = 'Firma účtuje podle vyhlášky 504: mzdové náklady dostanou v dimenzi Činnost hodnotu Hlavní činnost, '
+            . 'pokud ji neurčí pravidlo dimenzí, výchozí dimenze partnera nebo druh závazku. '
+            . 'Hospodářskou činnost může účetní po načtení přeřadit v dimenzích zápisu.';
+        if (!(new DimensionRepository($this->db))->enabled($supplierId)) {
+            $message .= ' Načtení firmě zapne dimenze, vyhláška 504 je u nákladů a výnosů vyžaduje.';
+        }
+        return self::check('nonprofit_activity_main', 'info', $message);
     }
 
     /**
@@ -715,6 +840,9 @@ final class PamicaPostingImportService
         }
         if ($e instanceof OtherItemException) {
             return new PamicaPostingException('other_item_' . $e->errorCode, 'Ostatní závazek: ' . $e->getMessage(), 409);
+        }
+        if ($e instanceof DimensionException) {
+            return new PamicaPostingException($e->errorCode, $e->getMessage(), 409);
         }
         if ($e instanceof \MyInvoice\Service\Accounting\PostingException
             || $e instanceof \MyInvoice\Service\Accounting\Closing\ClosingException
