@@ -40,7 +40,7 @@ export async function runHosted(input, fetcher) {
       return { tools: exposed.map((tool) => ({
         name: tool.name,
         title: tool.title,
-        description: tool.write
+        description: tool.write && tool.mutatesData !== false
           ? `${tool.description}\n\n⚠️ Tento nástroj MĚNÍ DATA v ostré instanci.`
             + (tool.destructive ? ' Jde o NEVRATNOU operaci; vyžaduje `confirm: true`.' : '')
           : tool.description,
@@ -59,9 +59,9 @@ export async function runHosted(input, fetcher) {
             },
         annotations: {
           title: tool.title,
-          readOnlyHint: !tool.write,
+          readOnlyHint: !tool.write || tool.mutatesData === false,
           destructiveHint: Boolean(tool.destructive),
-          idempotentHint: !tool.write,
+          idempotentHint: !tool.write || tool.mutatesData === false,
           openWorldHint: true,
         },
       })) };

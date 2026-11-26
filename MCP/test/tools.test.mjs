@@ -750,13 +750,7 @@ test('úprava hlavičky změní jen zadaná pole a zachová položky', async () 
   }, 'update_invoice');
 
   const body = putOf(client);
-  assert.equal(body.due_date, '2026-10-28');
-  assert.equal(body.note_below_items, 'Splatnost prodloužena');
-  assert.equal(body.issue_date, '2026-09-30');
-  assert.equal(body.currency_id, 1);
-  assert.equal(body.items.length, 3);
-  assert.equal(body.items[0].vat_classification_code, '1');
-  assert.equal(body.items[2].oss_consumer_country, 'DE');
+  assert.deepEqual(body, { due_date: '2026-10-28', note_below_items: 'Splatnost prodloužena' });
   assert.deepEqual(result.changed, { due_date: '2026-10-28', note_below_items: 'Splatnost prodloužena' });
 });
 
@@ -785,7 +779,7 @@ test('stejná měna se jako změna neposílá', async () => {
   const client = draftClient();
   await tool('update_invoice').run(client, { invoice_id: 42, currency: 'czk', due_date: '2026-11-01' }, 'update_invoice');
   const body = putOf(client);
-  assert.equal(body.currency_id, 1);
+  assert.equal('currency_id' in body, false);
   assert.equal('currency' in body, false);
 });
 
@@ -888,4 +882,52 @@ test('založení osoby nenutí měsíční režim a nepředstírá podporu hodin
   assert.equal(client.calls[0].body.monthly_gross, undefined);
   assert.equal(tool('create_payroll_person').inputSchema.properties.hourly_rate_minor, undefined);
   assert.match(tool('get_payroll_person').description, /NULL\/monthly\/hourly/);
+});
+
+const storedStockLine = {
+  id: 31, stock_item_id: 8, qty: '1.000', unit_cost: '120.00', sku: 'SYN-8',
+  invoice_item_id: null, purchase_invoice_item_id: 9, purchase_order_line_id: 10,
+  source_description: 'Syntetická položka', source_qty: '1.000', fill_intrastat: true,
+  tracking_allocations: [{
+    quantity: '1.000', stock_tracking_unit_id: null, serial_number: 'SYN-1',
+    lot_code: null, expires_on: null, location_id: 3, location_to_id: null,
+  }],
+};
+
+test('editace skladového řádku doplní vynechané zdrojové vazby a alokace z detailu', async () => {
+  const client = new FakeClient({ 'GET /stock/documents/7': { lines: [storedStockLine] } });
+  const update = tool('update_stock_document');
+  const lines = [{ id: 31, stock_item_id: 8, qty: '1.000', note: 'Nová poznámka' }, { stock_item_id: 11, qty: 2 }];
+  await update.run(client, validateToolArguments(update, { id: 7, lines }), update.name);
+  const { id, sku, ...writableLine } = storedStockLine;
+  assert.deepEqual(client.calls, [
+    { method: 'GET', path: '/stock/documents/7', query: null, tool: update.name },
+    { method: 'PUT', path: '/stock/documents/7', body: {
+      lines: [{ ...writableLine, note: 'Nová poznámka' }, lines[1]],
+    }, tool: update.name },
+  ]);
+});
+
+test('editace skladového dokladu odmítne neúplný seznam s chybějící vazbou nebo alokací', async () => {
+  const client = new FakeClient({ 'GET /stock/documents/7': { lines: [storedStockLine] } });
+  const update = tool('update_stock_document');
+  const args = { id: 7, lines: [{ stock_item_id: 8, qty: 1 }] };
+  await assert.rejects(update.run(client, validateToolArguments(update, args), update.name), /řádek #31.*vazbu nebo alokaci/);
+  assert.deepEqual(client.calls.map(({ method }) => method), ['GET']);
+});
+
+test('editace skladového dokladu respektuje výslovně zadané hodnoty a samostatná změna hlavičky nečte řádky', async () => {
+  const client = new FakeClient({ 'GET /stock/documents/7': { lines: [storedStockLine] } });
+  const update = tool('update_stock_document');
+  const args = { id: 7, lines: [{
+    id: 31, stock_item_id: 8, qty: 1, tracking_allocations: [], purchase_order_line_id: null,
+  }] };
+  await update.run(client, validateToolArguments(update, args), update.name);
+  assert.deepEqual(client.calls[1].body.lines[0].tracking_allocations, []);
+  assert.equal(client.calls[1].body.lines[0].purchase_order_line_id, null);
+  client.calls.length = 0;
+  await update.run(client, { id: 7, description: 'Nový popis' }, update.name);
+  assert.deepEqual(client.calls, [
+    { method: 'PUT', path: '/stock/documents/7', body: { description: 'Nový popis' }, tool: update.name },
+  ]);
 });

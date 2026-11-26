@@ -32,6 +32,27 @@ export class RecordingClient {
       items: [item, { ...item, id: 8 }], next_run_date: '2026-02-01', currency: this.currency, currency_id: 7,
       ic: '00000000', hourly_rate: this.projectRate, pdf_path: this.pdfPath };
     if (method !== 'GET') return row;
+    if (path.startsWith('/stock/documents/')) return { ...row, lines: [] };
+    if (path === '/document-folders') return { folders: [{ id: 7, name: 'Syntetická složka', parent_id: null }] };
+    if (path === '/documents') return { documents: [] };
+    if (path === '/logbook/trips') return { data: [], meta: { total: 0, pages: 0 } };
+    if (path.startsWith('/logbook/trips/')) return { ...row, car_id: 7, trip_date: '2026-01-01' };
+    if (path.endsWith('/tracking-units')) return { data: [{ id: 1 }], meta: { pages: 1 } };
+    if (/^\/(eshop\/pricing\/matrix|eshop\/jobs)\/\d+\/items$/.test(path)) {
+      return { job: row, items: [], pagination: { total: 0 } };
+    }
+    if (['/logbook/odometer-gaps', '/logbook/odometer-readings', '/logbook/trip-templates',
+      '/logbook/trip-categories', '/stock/item-templates'].includes(path)) return [row];
+    if (path.startsWith('/payroll/people/')) return { employments: [{ id: 7, row_version: 1 }] };
+    if (path === '/stock/purchase-orders/7/receipt') return { lines: [{ purchase_order_line_id: 7, remaining_qty: 2 }] };
+    if (path === '/accounting/other-items/7') {
+      return { ...row, side: 'receivable', issued_on: '2026-01-01', due_on: '2026-03-01', amount: 100 };
+    }
+    if (path === '/accounting/other-items/7/installments') return { items: [{ due_on: '2026-02-01', amount: 50 }] };
+    if (this.name === 'unlink_purchase_advance') return { ...row, linked_advance: { id: 8, total_with_vat: 100, currency: 'CZK' } };
+    if (/^\/purchase-invoices\/\d+$/.test(path)) {
+      return { ...row, vendor_invoice_number: 'SYN-7', due_date: '2026-02-01' };
+    }
     if (path === '/clients') return { data: [{ ...row, ic: '', dic: '' }] };
     if (path === '/projects') return { data: [row] };
     if (path === '/invoices') return { data: [row] };
@@ -46,7 +67,6 @@ export class RecordingClient {
     if (/billing-preview$/.test(path)) return { items: [], fingerprint: 'a'.repeat(64) };
     if (path.includes('/journal/for-document/')) return { items: [] };
     if (this.name === 'unlink_invoice_advance') return { ...row, parent_invoice_id: 8, advance_paid_amount: 100 };
-    if (this.name === 'unlink_purchase_advance') return { ...row, linked_advance: { id: 8, total_with_vat: 100, currency: 'CZK' } };
     return row;
   }
 
@@ -65,16 +85,26 @@ export class RecordingClient {
 
 function sample(schema) {
   if (schema.enum) return schema.enum[0];
-  if (schema.type === 'object') return Object.fromEntries((schema.required ?? []).map((key) => [key, sample(schema.properties[key])]));
-  if (schema.type === 'array') return Array.from({ length: schema.minItems ?? 1 }, () => sample(schema.items));
-  if (schema.type === 'integer' || schema.type === 'number') return Math.max(1, schema.minimum ?? 1);
-  if (schema.type === 'boolean') return true;
+  const type = Array.isArray(schema.type) ? schema.type.find((value) => value !== 'null') : schema.type;
+  if (type === 'object') return Object.fromEntries((schema.required ?? []).map((key) => [key, sample(schema.properties[key])]));
+  if (type === 'array') {
+    const entry = sample(schema.items);
+    const count = schema.minItems ?? Math.min(1, schema.maxItems ?? 1);
+    return Array.from({ length: count }, (_, index) => schema.uniqueItems && typeof entry === 'number' ? entry + index : entry);
+  }
+  if (type === 'integer' || type === 'number') {
+    return Math.min(schema.maximum ?? Infinity, Math.max(schema.minimum ?? 1, (schema.exclusiveMinimum ?? 0) + 1));
+  }
+  if (type === 'boolean') return true;
+  if (type === 'null') return null;
   if (schema.format === 'date') return '2026-01-01';
   return STRING_SAMPLES.find((value) => fitsString(schema, value)) ?? 'Syntetický údaj';
 }
 
-/** První vzorek, který projde omezeními schématu; obecný text má přednost. */
-const STRING_SAMPLES = ['Syntetický údaj', '2026-01-01', '2026-01', '2026-01-01T00:00:00Z', '1', 'CZK', 'cs', '311', 'A1', '9001010000'];
+const STRING_SAMPLES = [
+  'Syntetický údaj', '2026-01-01', '2026-01', '2026-01-01T00:00:00Z', '1', 'CZK', 'CZ',
+  'cs', '311', 'A1', '9001010000', 'manufacturer', '00000000-0000-4000-8000-000000000001', 'a'.repeat(64),
+];
 
 function fitsString(schema, value) {
   return (!Number.isInteger(schema.minLength) || value.length >= schema.minLength)
@@ -83,19 +113,43 @@ function fitsString(schema, value) {
 }
 
 function basicArgs(tool) {
-  const common = { id: 7, invoice_id: 7, item_id: 7, payment_id: 7, attachment_id: 7, row: 1, confirm: true,
+  const common = { id: 7, vat_id: 'CZ00000000', invoice_id: 7, item_id: 7, payment_id: 7, attachment_id: 7, row: 1, confirm: true,
     description: 'Syntetická práce', name: 'Syntetický projekt', company_name: 'Syntetický klient',
     street: 'Syntetická 1', city: 'Praha', zip: '11000', currency: 'CZK', hours: 2, rate: 1500,
     quantity: 2, unit_price_without_vat: 100, unit_price: 100, vat_rate_id: 7, client_id: 7,
     payment_due_days: 14, registration: 'SYNTHETIC', car_id: 7, trip_date: '2026-01-01', category_id: 7,
     distance_km: 10, fueled_date: '2026-01-01', amount_with_vat: 100,
     filename: 'synthetic.pdf', content_base64: Buffer.from('%PDF-synthetic').toString('base64') };
-  return { ...sample(tool.inputSchema), ...Object.fromEntries(Object.entries(common).filter(([key]) => key in tool.inputSchema.properties)) };
+  const overrides = Object.entries(common).filter(([key, value]) => {
+    const property = tool.inputSchema.properties[key];
+    return property && !(typeof value === 'number' && property.type === 'string');
+  });
+  return { ...sample(tool.inputSchema), ...Object.fromEntries(overrides) };
 }
 
 export function scenarios(tool) {
   const args = basicArgs(tool);
   const cases = [{ args }];
+  if (tool.api === false && args.confirm === true) cases.push({ args: { ...args, confirm: false } });
+  if (tool.name === 'change_payroll_salary') {
+    cases.push({ args: { ...args, employment_id: 7, effective_from: '2026-01-01' } });
+    cases.push({ args: { ...args, employment_id: 7, change_kind: 'correction' } });
+  }
+  if (tool.name === 'set_other_item_installments') {
+    cases.push({ args: { item_id: 7, installments: [
+      { due_on: '2026-02-01', amount: 50 },
+      { due_on: '2026-03-01', amount: 50 },
+    ] } });
+  }
+  if (tool.name === 'get_payroll_run_results') cases.push({ args: { ...args, employee_id: 7 } });
+  if (tool.name === 'migration_data_checks') cases.push({ args: { ...args, check: 'bank_balances' } });
+  if (tool.name === 'vat_filing_checks') {
+    cases.push({ args: { check: 'related_parties', from: '2026-01-01', to: '2026-03-31' } });
+    cases.push({ args: { check: 'vat_coefficient', year: 2026 } });
+  }
+  if (tool.name === 'small_assets_report') {
+    cases.push({ args: { kind: 'movements', from: '2026-01-01', to: '2026-03-31' } });
+  }
   // Dohledání konceptu musí být otestované v obou větvích i u starších fakturačních nástrojů.
   if ('project' in tool.inputSchema.properties && 'invoice_id' in tool.inputSchema.properties) {
     for (const lookup of ['project', 'client']) {
@@ -114,6 +168,7 @@ export function scenarios(tool) {
   if (tool.name === 'create_client') cases.push({ args: { ...args, ic: '00000000', dic: 'CZ00000000' } });
   if (tool.name === 'update_client') cases.push({ args: { ...args, refresh_from_ares: true } });
   if (tool.name === 'create_purchase_invoice') cases.push({ args: { ...args, currency: 'EUR' } });
+  if (tool.name === 'update_stock_document') cases.push({ args: { ...args, lines: [{ stock_item_id: 7, qty: 1 }] } });
   if (tool.name === 'update_purchase_invoice') {
     cases.push({ args: { id: args.id, note: 'Syntetická poznámka' } });
     cases.push({ args: { id: args.id, currency_id: 8 } });
@@ -142,6 +197,8 @@ export function scenarios(tool) {
     allocate_other_item_payment: { bank_transaction_id: 7 },
     get_payroll_salary_result: { period: '2026-01' },
     match_bank_transaction: { invoice_ids: [7] },
+    match_bank_payment_to_document: { invoice_id: 7 },
+    match_bank_payments_batch: { invoice_id: 7, transaction_ids: [7, 8], confirm_version: 'a'.repeat(64) },
     create_document_request: { description: 'Syntetický doklad' },
     find_bank_payments_for_document: { invoice_id: 7 },
     create_analytic_account: { account_code: '378.800' },

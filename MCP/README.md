@@ -11,28 +11,35 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, koncepty vydaných a přijatých faktur včetně účtů, předkontací, členění DPH a dimenzí položek, vystavování, odesílání, evidence úhrad, upomínky, zápočet dobropisu, vratka, oprava nároku na odpočet přijaté faktury, náhled zaúčtování; storno jen nezaúčtovaného dokladu |
-| Číselníky dokladů | **jen čtení** (`src/codebook-tools.mjs`): kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů |
+| Fakturace | čtení, koncepty vydaných a přijatých faktur včetně účtů, předkontací, členění DPH a dimenzí položek, vystavování, odesílání, evidence úhrad, upomínky, zápočet dobropisu, vratka, oprava nároku na odpočet přijaté faktury, náhled zaúčtování; archiv PDF, položky, aktivita, štítky, vazby na sklad a hromadné kopie do konceptů; čtení odpočtových řádků záloh, zdrojů přijatých faktur a souvisejících dokumentů; návrh a vytvoření konceptu skladové příjemky z přijaté faktury; storno jen nezaúčtovaného dokladu |
+| Číselníky dokladů | **jen čtení** (`src/codebook-tools.mjs`): kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů, měrné jednotky, státní svátky, platné sazby DPH k datu, sazby OSS a činnosti NACE |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
-| Zakázky | čtení i zápis — založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky (seznam, založení), tagy, soubory dokumentu, našeptávač vazeb; nahrání a stažení originálu. Koš, mazání a hromadné operace ne |
-| Požadavky na doklady | čtení; založení (i k bankovnímu pohybu), uzavření a znovuotevření; mazání ne |
-| Banka | výpisy a jejich transakce, zůstatky účtů, přehled a detail pohybů napříč účty, kandidáti párování (i sloučená úhrada), volné platby k dokladu, náhled zaúčtování; **zápis jen párování**: spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z odchozí platby (`src/bank-tools.mjs`). Párování do deníku nezapisuje, viz níže |
-| Partneři | čtení i zápis karty; bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace (`src/client-tools.mjs`); přidání bankovního účtu a smazání karty ne |
-| Kniha jízd | čtení i zápis — vozidla, jízdy, tankování; daňový souhrn jen ke čtení |
+| Zakázky | čtení i zápis — založení, úprava, archivace a rozpočty; čtení ziskovosti a výchozích dimenzí |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky (seznam, založení, přejmenování a přesun), tagy, soubory dokumentu, našeptávač vazeb; nahrání a stažení originálu. Přesun do koše a obnova dokumentů i složek, stažení konkrétního souboru, změna primárního souboru |
+| Požadavky na doklady | čtení; založení (i k bankovnímu pohybu), uzavření, znovuotevření a potvrzené zrušení požadavku |
+| Banka | výpisy a jejich transakce, zůstatky účtů, přehled a detail pohybů napříč účty, kandidáti párování (i sloučená úhrada), volné platby k dokladu, náhled zaúčtování; **zápis jen párování**: spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z odchozí platby a skupina volných pohybů k jedné faktuře s verzovaným náhledem. Čtení zahrnuje vlastní účty, pravidla banky, vyúčtování GoPay a dostupná PDF výpisů (`src/bank-tools.mjs`). Párování do deníku nezapisuje, viz níže |
+| Partneři | čtení i zápis karty; bankovní účty partnera, ověření DIČ ve VIES a účtů zveřejněných v registru plátců DPH, zakázky klienta, duplicitní karty, archivace, čtení výchozích dimenzí (`src/client-tools.mjs`); smazání karty ne |
+| Kniha jízd | čtení i zápis — vozidla, jízdy, tankování, šablony cest a stavy tachometru. Čtení zahrnuje kontrolu návaznosti kilometrů, kandidáty na podklady tankování a daňový souhrn. Jednotlivá tankování lze přiřadit k existujícím dokladům |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
-| Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty |
-| Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník a kontext zápisu, zápisy faktury, otevřené položky, fronty zaúčtování (ruční i banka), nálezy kontrol období, vypořádání DPH, měsíční přehled pro klienta (`src/accounting-read-tools.mjs`) |
-| Pokladna a majetek | **jen čtení** — pokladny, pokladní doklady, pokladní kniha s průběžným zůstatkem; majetkové karty a plány odpisů, drobný majetek (karty, soupis, pohyby), přijaté faktury na majetek bez karty |
-| Ostatní pohledávky a závazky | čtení; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
-| SVJ | **jen čtení**: registr a předpisy, karta jednotky s hrubými pohledávkami a oddělenými kredity, doložené role dlužníků a ručitelů, historie úhrad a rekonciliace |
-| Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel; zápis jen ke konceptu faktury (`src/document-dimension-tools.mjs`) a ostatní položky |
+| Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty, evidence a archiv OSS s rekonciliací, doklady podaného KH a náhled obnovení daně podle § 46 |
+| Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník a kontext zápisu, zápisy faktury, otevřené položky, fronty zaúčtování (ruční i banka), nálezy kontrol období, karty účtů, interní doklady, účetní šablony, související přílohy, plány časového rozlišení, náhledy uzávěrky a rozdělení výsledku, vypořádání DPH a měsíční přehled pro klienta (`src/accounting-read-tools.mjs`) |
+| Pokladna a majetek | **jen čtení** — pokladny, pokladní doklady, pokladní kniha s průběžným zůstatkem; majetkové karty včetně inventární karty PDF a plánů odpisů, souhrny neodpisovaného majetku a drobný majetek (karty, soupis, pohyby, náklad 501), přijaté faktury na majetek bez karty |
+| Ostatní pohledávky a závazky | čtení včetně kandidátů banky, kontačních profilů a náhledu příštího názvu; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
+| SVJ | **jen čtení**: registr a předpisy, karta jednotky s hrubými pohledávkami a oddělenými kredity, doložené role dlužníků a ručitelů, historie úhrad, osobní saldo a rekonciliace |
+| Neziskové organizace | **jen čtení**: souhrny podkladů daňového posouzení, potvrzené posouzení, evidence zdrojů a čerpání a členské sestavy |
+| Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů, výchozí dimenze a kontrola pravidel; zápis dimenzí je dostupný jen u konceptů vydaných a přijatých faktur a ostatních pohledávek a závazků |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | Všechny firmy | **jen čtení**: manažerské součty za přesné období, vývoj, roční predikce, prognóza toků, zůstatky a rizika přístupných firem přes `group_dashboard`; původní měny i samostatný přepočet CZK |
-| E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury; **jen čtení** — balení, individuální ceny zákazníků, cenové hladiny, nacenění pro odběratele, šarže a sériová čísla, lokace, prodejní objednávky, cyklické inventury |
+| E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury, balení, individuální ceny a cenové hladiny, sady, master produkty a varianty, údaje šarží, lokace, prodejní objednávky, vychystání a cyklické inventury. Nacenění pro odběratele je čtecí |
 | Ceník služeb | **jen čtení** — položky, ceny po měnách, individuální ceny zákazníků a výsledná cena (jen firmy bez skladového modulu) |
 | Mzdy | čtení osob, běhů a výsledků po zaměstnancích; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
+
+Vytvoření náhledu cenové matice zakládá úlohu na pozadí a vyžaduje oprávnění
+k zápisu. Změnu cen spustí až potvrzené použití hotového náhledu.
+
+Dotazy do VIES a registru zveřejněných účtů plátce DPH vyžadují přístup
+v rozsahu **Čtení a zápis**. Vrací údaje z registru.
 
 Mzdové nástroje zachovávají rozlišení sjednání: `remuneration_type: null`
 znamená dosavadní režim, `monthly` výslovné měsíční a `hourly` hodinové
@@ -74,12 +81,12 @@ storna zaúčtované faktury odmítnou nástroje i server (`SessionOnlyAccountin
 protože by stornovaly nebo mazaly zápis v deníku.
 
 Úprava konceptu faktury posílá položky zpět celé, server je nahrazuje (DELETE +
-INSERT). Seznamy polí položek (`INVOICE_ITEM_FIELDS`, `PURCHASE_ITEM_FIELDS`,
-`RECURRING_ITEM_FIELDS`) proto musí znát každý sloupec, který server ukládá; hlídá
+INSERT). Seznamy polí položek (`INVOICE_ITEM_FIELDS`, `PURCHASE_ITEM_FIELDS`) proto musí znát každý sloupec, který server ukládá; hlídá
 to `test/item-field-coverage.test.mjs` proti `db/schema.snapshot.json`. Nový sloupec
 tabulky položek přidej do seznamu, nebo do výjimek testu se zdůvodněním. Položky
 nesou i své `id`, podle kterého server drží vazbu na výkaz práce a dimenze položek
-po vložení nebo odebrání řádku.
+po vložení nebo odebrání řádku. Úpravy poznámek, splatnosti, šablony pravidelné
+fakturace a samotného rozpisu plateb používají částečný PUT bez položek.
 
 Párování banky (`match_bank_transaction`, `resolve_bank_match_suggestion`) server
 povoluje, ale tokenem **nezaúčtuje**. V aplikaci po spárování automatika podle
@@ -231,8 +238,9 @@ Argumenty se před `run()` ověří proti `inputSchema` (`additionalProperties: 
 je povinné), takže `run()` dostane jen deklarované parametry. Hodnotu z argumentů
 skládanou do cesty API vždy obal `seg()` z `tool-shared.mjs`.
 
-Přidání nástroje = jeden záznam v `TOOLS`. `write: true` u čehokoli, co mění data —
-podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v popisu.
+Každý nástroj je jeden záznam v `TOOLS`. Příznak `write: true` vyžaduje rozsah
+Čtení a zápis a skryje nástroj v režimu jen pro čtení. Dotaz, který tento rozsah
+vyžaduje a data nemění, může mít zároveň `mutatesData: false`.
 `destructive: true` navíc u mazání a nevratných kroků; k tomu patří `confirm: CONFIRM`
 ve schématu a `confirmed()` / `requireConfirm()` v `run()`, které bez potvrzení
 místo zápisu vrátí náhled dotčeného záznamu.

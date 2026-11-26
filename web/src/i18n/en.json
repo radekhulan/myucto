@@ -36352,6 +36352,9 @@
       }
     },
     "tool_groups": {
+      "bank": "Banking and matching",
+      "property": "Homeowners associations",
+      "nonprofit": "Nonprofit organisations",
       "projects": "Projects",
       "documents": "Documents",
       "logbook": "Logbook",

@@ -9,7 +9,7 @@
  * token nepřepáruje ani neodpáruje (403 `token_write_forbidden`). Zaúčtování
  * (`post`), jeho zrušení (`unpost`), smazání výpisu a AI kontace v katalogu nejsou.
  */
-import { CONFIRM, confirmed, seg } from './tool-shared.mjs';
+import { CONFIRM, confirmed, requireConfirm, seg } from './tool-shared.mjs';
 import {
   bool, custom, id, ids, int, PAGING, pick, read, str,
 } from './tool-schema.mjs';
@@ -21,6 +21,18 @@ const DEFERRED_POSTING = 'Spárování přes MCP do účetního deníku NEZAPISU
   + '`posting.action = "deferred"` a pohyb zaúčtuje uživatel v aplikaci (Automat, K zaúčtování) nebo ranní '
   + 'přepočet fronty podle politiky automatického účtování firmy. Pohyb, který už má zápis v deníku, '
   + 'nástroj nepřepáruje ani neodpáruje (chyba token_write_forbidden, změnu udělá účetní v aplikaci).';
+
+const DOCUMENT_TARGET = {
+  invoice_id: id('ID vystavené faktury.'),
+  purchase_invoice_id: id('ID přijaté faktury.'),
+};
+
+function documentTarget(a) {
+  if ((a.invoice_id === undefined) === (a.purchase_invoice_id === undefined)) {
+    throw new Error('Zadej právě jedno z invoice_id a purchase_invoice_id.');
+  }
+  return pick(a, Object.keys(DOCUMENT_TARGET));
+}
 
 const describeTx = (row) => {
   const amount = row?.amount !== undefined ? `${row.amount} ${row.currency ?? ''}`.trim() : 'neznámá částka';
@@ -69,16 +81,39 @@ export const BANK_TOOLS = [
     'Opačný směr než bank_transaction_match_candidates: k vystavené (`invoice_id`) nebo přijaté (`purchase_invoice_id`) '
     + 'faktuře najde volné bankovní pohyby správného směru, které ještě nejsou spárované. Zadej právě jeden doklad. '
     + 'Nic nemění.', {
-      invoice_id: id('ID vystavené faktury.'),
-      purchase_invoice_id: id('ID přijaté faktury.'),
+      ...DOCUMENT_TARGET,
       search: str('Hledaný text: protistrana, VS, popis nebo přesná částka.', { maxLength: 100 }),
       page: PAGING.page,
-    }, [], false, (c, a, tool) => {
-      if ((a.invoice_id === undefined) === (a.purchase_invoice_id === undefined)) {
-        throw new Error('Zadej právě jedno z invoice_id a purchase_invoice_id.');
+      batch: bool('Jen pohyby použitelné pro hromadné párování.'),
+    }, [], false, (c, a, tool) => c.get('/bank-transactions/payment-candidates', {
+      ...documentTarget(a), ...pick(a, ['search', 'page']), ...(a.batch ? { batch: 1 } : {}),
+    }, tool)),
+  custom('match_bank_payment_to_document', 'Spárovat volnou platbu s fakturou',
+    'K vybranému dokladu přiřadí dosud volný bankovní pohyb z find_bank_payments_for_document. '
+    + `Zadej právě jeden druh dokladu. ${DEFERRED_POSTING}`, {
+      id: id('ID bankovního pohybu.'), ...DOCUMENT_TARGET,
+    }, ['id'], true, (c, a, tool) => c.post(
+      `/bank-transactions/${seg(a.id)}/match-document`, documentTarget(a), tool,
+    )),
+  custom('match_bank_payments_batch', 'Spárovat více volných plateb s fakturou',
+    'Nejprve vrať náhled bez confirm_version a předlož ho uživateli. Pro spárování použij stejný výběr, '
+    + 'version z náhledu jako confirm_version a confirm: true. Při změně zůstatku nebo výběru pořídíš nový náhled. '
+    + DEFERRED_POSTING, {
+      ...DOCUMENT_TARGET,
+      transaction_ids: ids('Vybrané bankovní pohyby z výpisu.', { minItems: 2, maxItems: 100 }),
+      confirm_version: str('Otisk z odpovědi čerstvého náhledu.', { pattern: '^[a-f0-9]{64}$' }),
+      confirm: CONFIRM,
+    }, ['transaction_ids'], true, (c, a, tool) => {
+      const target = documentTarget(a);
+      if (a.confirm_version !== undefined) {
+        requireConfirm(a, 'Spárovat se mají bankovní pohyby', a.transaction_ids.join(', '));
+      } else if (a.confirm === true) {
+        throw new Error('K potvrzení spárování je povinné confirm_version z náhledu.');
       }
-      return c.get('/bank-transactions/payment-candidates', pick(a, ['invoice_id', 'purchase_invoice_id', 'search', 'page']), tool);
-    }),
+      return c.post('/bank-transactions/match-document-batch', {
+        ...target, ...pick(a, ['transaction_ids', 'confirm_version']),
+      }, tool);
+    }, { destructive: true }),
   read('bank_transaction_posting_preview', 'Náhled zaúčtování pohybu',
     'Jen podvojné účetnictví: ukáže, jak by se pohyb zaúčtoval (řádky MD/D, zdroj kontace), bez zápisu do deníku. '
     + 'Slouží ke kontrole před tím, než účetní pohyb zaúčtuje v aplikaci. Vyžaduje oprávnění k zaúčtování banky.',

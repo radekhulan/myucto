@@ -304,3 +304,20 @@ test('zápočet dobropisu: započtení bez potvrzení, zrušení s potvrzením',
     ['DELETE', '/purchase-invoices/41/credit-note-offset'],
   ]);
 });
+
+test('přidání a odebrání práce zachovává přesnou délku stávajících řádků výkazu', async () => {
+  const retained = { description: 'Práce', hours: 0.02, duration_minutes: 1, rate: 1500, work_date: '2026-02-01' };
+  const report = { title: 'Syntetický výkaz', items: [retained, { description: 'Další práce', hours: 1, rate: 1500 }] };
+  const responses = {
+    'GET /invoices/42': { id: 42, status: 'draft' },
+    'GET /invoices/42/work-report': report,
+  };
+  for (const [name, args] of [
+    ['add_work_report_entry', { invoice_id: 42, description: 'Nová práce', hours: 1, rate: 1500 }],
+    ['remove_work_report_entry', { invoice_id: 42, row: 2 }],
+  ]) {
+    const client = new FakeClient(responses);
+    await run(client, name, args);
+    assert.deepEqual(client.writes()[0].body.items[0], retained);
+  }
+});

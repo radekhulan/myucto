@@ -158,7 +158,7 @@ async function main() {
     tools: exposed.map((t) => ({
       name: t.name,
       title: t.title,
-      description: t.write
+      description: t.write && t.mutatesData !== false
         ? `${t.description}\n\n⚠️ Tento nástroj MĚNÍ DATA v ostré instanci.`
           + (t.destructive
             ? ' Jde o NEVRATNOU operaci — bez `confirm: true` se neprovede a jen se '
@@ -168,11 +168,11 @@ async function main() {
       inputSchema: t.inputSchema,
       annotations: {
         title: t.title,
-        readOnlyHint: !t.write,
+        readOnlyHint: !t.write || t.mutatesData === false,
         // Mazání a storna se od běžného zápisu liší tím, že se nedají vzít
         // zpět — klient na ně umí upozornit jinak než na obyčejnou změnu.
         destructiveHint: Boolean(t.destructive),
-        idempotentHint: !t.write,
+        idempotentHint: !t.write || t.mutatesData === false,
         openWorldHint: true,
       },
     })),

@@ -27,8 +27,8 @@ export const DOCUMENT_ENTITY_TYPES = [
  * v `create_client`: bez výslovného souhlasu se operace neprovede.
  */
 export const CONFIRM = bool(
-  'Potvrzení nevratné operace. Bez `true` se NIC nesmaže — nástroj jen vrátí, '
-  + 'čeho by se změna týkala. Ten výpis ukaž uživateli a zavolej nástroj znovu '
+  'Výslovné potvrzení operace. Bez `true` nástroj vrátí jen náhled nebo popis plánované změny. '
+  + 'Výsledek ukaž uživateli a zavolej nástroj znovu '
   + 's `confirm: true` teprve po jeho souhlasu.',
 );
 

@@ -325,34 +325,37 @@ Podstatné vlastnosti:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky včetně účtů, předkontací, členění DPH a dimenzí), vystavování, odesílání a příjemci, storno nezaúčtovaného dokladu a dobropis, zápočet dobropisu, vratka odběrateli, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, výkaz práce do položek, náhled zaúčtování, ISDOC, upomínky jednotlivě i hromadně |
+| Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky včetně účtů, předkontací, členění DPH a dimenzí), vystavování, odesílání a příjemci, storno nezaúčtovaného dokladu a dobropis, zápočet dobropisu, vratka odběrateli, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, výkaz práce do položek, náhled zaúčtování, ISDOC, upomínky jednotlivě i hromadně, historie a verzovaný archiv PDF. Více dokladů lze zkopírovat do samostatných konceptů |
 | Pravidelná fakturace | čtení šablon a vygenerovaných faktur, založení, úprava, smazání, pozastavení, obnovení, přeplánování a ruční vygenerování faktury |
-| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES, bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace a obnovení karty |
-| Banka | výpisy, zůstatky účtů, přehled a detail pohybů, kandidáti párování, ruční spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z platby; **párování se přes MCP nezaúčtuje** (viz [§ 105.8.8.7](#105887-banka-a-parovani-plateb)) |
-| Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky včetně účtů, předkontací a dimenzí), přijetí, úhrada, storno nezaúčtovaného dokladu, zálohy, zápočet dobropisu, zakázka, druh nákladu a účet po položkách, oprava nároku na odpočet, náhled zaúčtování, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 105.8.8.4](#105884-prijate-faktury)) |
+| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES, bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace a obnovení karty, čtení výchozích dimenzí |
+| Banka | výpisy, zůstatky účtů, přehled a detail pohybů, kandidáti párování, ruční spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z platby, vlastní účty a vyúčtování GoPay. Více volných pohybů k jedné faktuře lze nejprve zobrazit v náhledu a poté potvrdit s verzí tohoto náhledu. **Párování se přes MCP nezaúčtuje** (viz [§ 105.8.8.7](#105887-banka-a-parovani-plateb)) |
+| Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky včetně účtů, předkontací a dimenzí), přijetí, úhrada, storno nezaúčtovaného dokladu, zálohy, zápočet dobropisu, zakázka, druh nákladu a účet po položkách, oprava nároku na odpočet, náhled zaúčtování, účet dodavatele, příprava příkazu k úhradě, čtení podkladů odpočtu zálohy a vytvoření konceptu skladové příjemky. Zaúčtování a odeslání do banky ne (viz [§ 105.8.8.4](#105884-prijate-faktury)) |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
-| Zakázky | **čtení i zápis** - založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky, tagy a soubory dokumentu; nahrání a stažení originálu |
-| Požadavky na doklady | čtení, vyžádání dokladu od klienta (i k bankovnímu pohybu), uzavření a znovuotevření požadavku |
+| Zakázky | **čtení i zápis** - založení, úprava, archivace a rozpočty; čtení ziskovosti a výchozích dimenzí |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky a štítky, stažení jednotlivých souborů a změna primárního souboru. Dokument i složku lze přesunout do koše a obnovit |
+| Požadavky na doklady | čtení, vyžádání dokladu od klienta (i k bankovnímu pohybu), uzavření, znovuotevření a zrušení požadavku |
 | Soubory a přílohy | stažení PDF a ISDOC vydané faktury, příloh, PDF přijaté faktury a originálu dokumentu; nahrání přílohy faktury, PDF přijaté faktury, dokumentu a obrázku ke zboží; založení přijaté faktury ze souboru ISDOC (viz [§ 105.8.8.6](#105886-soubory-a-prilohy)) |
-| Kniha jízd | **čtení i zápis** - vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
+| Kniha jízd | **čtení i zápis** - vozidla, jízdy, tankování, šablony cest a stavy tachometru. Kontrola návaznosti kilometrů, podklady tankování a daňový souhrn jsou čtecí. Jednotlivá tankování lze přiřadit k existujícím dokladům |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
-| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty - **jen čtení** |
-| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy, historie a vazby zápisu, zápisy faktury, otevřené položky, fronty zaúčtování, nálezy kontrol období, vypořádání DPH a měsíční přehled pro klienta: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
+| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty, evidence a archiv OSS s rekonciliací, zdroje podaného KH a obnovení daně podle § 46 - **jen čtení** |
+| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy, historie a vazby zápisu, zápisy faktury, otevřené položky, fronty zaúčtování, nálezy kontrol období, karty účtů, interní doklady, účetní šablony, náhledy uzávěrky, plány časového rozlišení, vypořádání DPH a měsíční přehled pro klienta: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
 | Ostatní pohledávky a závazky | čtení dokladů, úhrad, opakování a splátek; **zápis jen konceptů**: založení, úprava, smazání, splátkový kalendář (i vyčtený ze smlouvy), opakování bez automatického účtování, dimenze a připojení smlouvy. Nic se nezaúčtuje ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
-| Pokladna a majetek | pokladny, pokladní doklady a pokladní kniha, majetkové karty a plány odpisů, drobný majetek, přijaté faktury na majetek bez karty - **jen čtení** |
-| Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel - **jen čtení**; zápis jen ke konceptu faktury a ostatní položky |
-| Číselníky dokladů | kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů, cenové hladiny, pokladny, kategorie nákladů - jen čtení |
+| Pokladna a majetek | pokladny, pokladní doklady a pokladní kniha, majetkové karty, plány odpisů, inventární karty PDF, drobný majetek, přijaté faktury na majetek bez karty - **jen čtení** |
+| Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech, výchozí dimenze a kontrola pravidel - **jen čtení**; zápis dimenzí je dostupný jen u konceptů vydaných a přijatých faktur a ostatních pohledávek a závazků |
+| Číselníky dokladů | kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů, cenové hladiny, pokladny, kategorie nákladů, měrné jednotky, svátky, platné sazby DPH k datu a činnosti NACE - jen čtení |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | Všechny firmy | manažerské součty přístupných firem za přesné období, měsíční vývoj, roční predikce, cashflow, zůstatky a rizika přes `group_dashboard`; původní měny i samostatný přepočet CZK |
-| E-shop a sklad | **kompletní správa včetně zápisu** - zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 105.8.9](#10589-e-shop-a-sklad)) |
+| E-shop a sklad | **čtení i zápis** - zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 105.8.9](#10589-e-shop-a-sklad)) |
 | Objednávky u dodavatele | **čtení i zápis** - založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 105.8.9](#10589-e-shop-a-sklad)) |
 | Mzdy | čtení zaměstnanců, pracovních podmínek, mzdových běhů a výsledků po zaměstnancích; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
+| SVJ | **jen čtení** - osobní saldo pohledávek a kreditů, karta jednotky a historie úhrad |
+| Neziskové organizace | **jen čtení** - podklady a potvrzené daňové posouzení, podklady k darům a členské přehledy |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
-V režimu jen pro čtení (`MYUCTO_READ_ONLY=1`, [§ 105.8.4](#10584-nastaveni))
-server nezveřejňuje nástroje, které mění data. Každé použití nástroje dále omezují
-aktuální práva uživatele. Přesný počet vypíše server při startu do `stderr`
+Režim jen pro čtení (`MYUCTO_READ_ONLY=1`, [§ 105.8.4](#10584-nastaveni))
+skrývá nástroje pro zápis. Také ověření DIČ ve VIES a vyhledání zveřejněných
+účtů plátce DPH vyžadují rozsah Čtení a zápis. Každé použití nástroje
+dále omezují aktuální práva uživatele. Přesný počet vypíše server při startu do `stderr`
 ([§ 105.8.3](#10583-zprovozneni), krok 4).
 
 #### Dotazy podle dimenzí
@@ -1219,10 +1222,10 @@ opravdu potřebujete. Na otázku, co je v dokumentu napsané, stačí vytěžen�
 
 | Agenda | Stažení | Nahrání a mazání |
 |---|---|---|
-| **Vydané faktury** | PDF faktury, ISDOC (jen vystavená faktura), přílohy | přidat přílohu, smazat přílohu |
-| **Přijaté faktury** | archivované PDF originálu | nahrát PDF nebo fotku dokladu, smazat PDF, založit fakturu ze souboru ISDOC |
+| **Vydané faktury** | PDF faktury, původní importované PDF, archivované verze, ISDOC a přílohy | přidat přílohu, smazat přílohu |
+| **Přijaté faktury** | archivované PDF originálu, PDF z dat, ISDOC a uložený zdrojový soubor | nahrát PDF nebo fotku dokladu, smazat PDF, založit fakturu ze souboru ISDOC |
 | **Dokumenty** | originál dokumentu i další soubory dokladu | nahrát soubor do složky, rovnou s názvem, popisem, tagy a vazbou na záznam |
-| **E-shop** | nic | nahrát obrázek nebo PDF ke kartě zboží |
+| **E-shop a sklad** | PDF skladového dokladu, objednávky a inventurního soupisu | nahrát obrázek nebo PDF ke kartě zboží |
 
 **Velikost.** Lokální server přenese soubor do 10 MB (mění se proměnnou
 `MYUCTO_MAX_FILE_MB`, [§ 105.8.4](#10584-nastaveni)), serverový MCP do 5 MB, protože
@@ -1309,15 +1312,15 @@ může navazovat podle nastavení firmy; přímé účetní operace katalog MCP 
 | **Zboží - skladová karta** | seznam, našeptávač, detail, skladová kniha (pohyby) | založit, upravit (SKU, název, MJ, sazba DPH, minimální zásoba, aktivita), smazat |
 | **Zboží - obsah pro e-shop** | karta i s kategoriemi, štítky a parametry; jazykové verze | výrobce, záruka, dodací lhůta, hmotnost, publikace, překlady, kategorie, štítky, parametry, poplatky |
 | **Ceny** | ceny po měnách, marže; individuální ceny zákazníků a ceny v cenových hladinách na kartě; nacenění řádků pro konkrétního odběratele, měnu, datum a balení | uložit cenotvorbu (přirážka / pevná cena / zaokrouhlení), vynutit přepočet |
-| **Balení a šarže** | balení karty (poměr, EAN balení, výchozí prodejní jednotka), šarže a sériová čísla s expirací a historií | - |
+| **Balení a šarže** | balení karty (poměr, EAN balení, výchozí prodejní jednotka), šarže a sériová čísla s expirací a historií | upravit balení a převodní jednotky, údaje šarží a nastavení sledování zboží |
 | **Dodavatelé zboží** | seznam s nákupní cenou a dodací lhůtou | nahradit seznam dodavatelů zboží |
 | **Nabídky dodavatelů („u dodavatele")** | přehled dvojic zboží × dodavatel napříč katalogem - nákupní cena a měna, kód u dodavatele, dodací lhůta, minimální odběr, balení a množství hlášené dodavatelem | založit a upravit nabídku (upsert podle dvojice zboží × dodavatel), odebrat nabídku |
 | **Média** | seznam obrázků a příloh | nahrání obrázku nebo PDF, popisky, pořadí, hlavní obrázek, smazání |
 | **Kategorie** | strom, detail, překlady | založit, upravit, přesunout v stromu, uložit překlady, smazat |
 | **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty; balení, cenové hladiny i s pravidly, jazyky a prodejní měny | výrobci, štítky, typy poplatků a parametry: založit / upravit / smazat |
-| **Sklady** | seznam, detail, hodnota zásob, skladové lokace | založit, upravit, smazat |
-| **Prodejní objednávky** | seznam se stavem obchodu, platby a expedice, detail s rezervacemi, fronta objednávek čekajících na zboží | - |
-| **Cyklické inventury** | seznam, detail s řádky | - |
+| **Sklady** | seznam, detail, hodnota zásob, skladové lokace | založit a upravit sklad i lokaci, smazat sklad |
+| **Prodejní objednávky** | seznam se stavem obchodu, platby a expedice, detail s rezervacemi, fronta objednávek čekajících na zboží | založit, upravit, rezervovat zásoby, zrušit a založit koncept faktury. Evidence požadavku na vratku |
+| **Cyklické inventury** | seznam a detail s řádky | založit, zapsat množství a uzavřít s potvrzením |
 | **Zásoby** | stav, dostupnost s rezervacemi, sestava stavu, ocenění k datu | - |
 | **Množstevní pohledy** | všechny čtyři veličiny najednou (skladem, rezervováno, prodejné, na cestě), rozpad „na cestě" na konkrétní objednávky a rozpad rezervací na konkrétní faktury | - |
 | **Doplnění zásob** | návrh, co a kolik doobjednat (zboží pod minimem) | hromadně z návrhu založit objednávky seskupené po dodavatelích |
@@ -1364,8 +1367,10 @@ jen pro čtení.
 > „Které cenové hladiny máme a jakou slevu dává Gold?“
 > „Má tahle karta nějaké smluvní ceny zákazníků?“
 
-Individuální ceny zákazníků, cenové hladiny, balení a číselník balení asistent
-jen čte. Nastavují se v aplikaci na kartě zboží a v číselnících e-shopu.
+V e-shopu lze přes MCP upravovat také individuální ceny zákazníků, cenové
+hladiny a jejich pravidla i číselník balení.
+Náhled cenové matice se počítá v úloze na pozadí a vyžaduje přístup pro čtení
+a zápis. Ceny se změní až po potvrzeném použití výsledku.
 
 Firmy bez skladového modulu mají místo cen na kartách **ceník služeb**.
 Asistent z něj umí vypsat položky, jejich ceny po měnách, individuální ceny
@@ -1392,11 +1397,12 @@ změna týkala:
 > Operace je nevratná. Ukaž to uživateli a teprve po jeho souhlasu zavolej
 > nástroj znovu s `confirm: true`.
 
-Funguje to tedy jako **suchý běh**: uvidíte konkrétní záznam včetně kódu a názvu,
-ne jen to, co si asistent myslí, že maže. Teprve druhé volání s potvrzením
-operaci provede. U médií a hodnot parametrů se navíc kontroluje, že záznam
-opravdu patří ke zboží (resp. parametru), které jste uvedli - překlep v čísle tak
-nesmaže fotku cizímu zboží.
+Je-li dostupný detail záznamu, náhled zobrazí jeho aktuální údaje. U hromadných
+operací uvádí počet a výpis položek. Rozsáhlý výpis může zobrazit jen prvních
+50 položek s uvedením celkového počtu. Tam, kde detail nelze načíst, náhled
+popíše zadané parametry. Teprve volání s potvrzením operaci provede.
+U médií a hodnot parametrů se navíc kontroluje, zda záznam patří k uvedenému
+zboží nebo parametru.
 
 Praktický dopad: **asistent se vás před smazáním vždycky zeptá.** Řetězec „ukliď
 nepoužívané štítky“ neproběhne jedním vrzem, ale jako výpis a dotaz.
@@ -1412,6 +1418,10 @@ načíst, do něj vložit změnu a poslat zpátky **kompletní** seznam. Když s
 jistí, řekněte si o vypsání současného stavu předem:
 
 > „Ukaž ceny toho zboží, pak k nim přidej eurovou cenu s marží 25 %.“
+
+Při úpravě skladového dokladu použijte ID stávajících řádků z detailu dokladu.
+Nástroj tak převezme vynechané hodnoty včetně zdrojových vazeb a alokací šarží
+a sériových čísel. Řádky s těmito vazbami nebo alokacemi musí v seznamu zůstat.
 
 #### 105.8.9.6 Skladové doklady mají dvě fáze
 

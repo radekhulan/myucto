@@ -18,10 +18,10 @@
 
 import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import {
-  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, requireConfirm, confirmed, changed, merged, seg,
+  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, requireConfirm, confirmed, changed, seg,
 } from './tool-shared.mjs';
 import {
-  invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
+  loadDraftInvoice, draftResult,
 } from './tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -254,23 +254,6 @@ const RECURRING_FIELDS = [
   'draft_open_mode', 'reminder_days_before', 'note_above_items', 'note_below_items',
   'increment_month_in_descriptions', 'auto_issue', 'auto_send_email', 'payment_variable_symbol',
 ];
-
-/**
- * Pole řádku šablony, která server při náhradě položek ukládá (`RecurringTemplateRepository::replaceItems`).
- * Úplnost hlídá `item-field-coverage.test.mjs` proti `recurring_invoice_template_items`.
- */
-export const RECURRING_ITEM_FIELDS = [
-  'item_kind', 'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
-  'catalog_source_currency_code', 'catalog_source_unit_price', 'catalog_exchange_rate',
-  'catalog_exchange_rate_date', 'description', 'quantity', 'duration_minutes', 'unit',
-  'unit_price_without_vat', 'vat_rate_id', 'vat_classification_code', 'order_index',
-  'revenue_account_code', 'stock_item_id', 'warehouse_id',
-  'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
-];
-
-const recurringLine = (item) => Object.fromEntries(
-  RECURRING_ITEM_FIELDS.filter((key) => item[key] !== undefined).map((key) => [key, item[key]]),
-);
 
 const RECURRING_ITEMS = {
   type: 'array',
@@ -835,13 +818,7 @@ export const INVOICE_TOOLS = [
         );
       }
 
-      // Položky jdou zpět všechny i se skrytými poli: PUT je nahrazuje celé.
-      const lines = invoiceLines(invoice).map((item) => lineForPut(item));
-      const saved = await c.put(
-        `/invoices/${seg(invoiceId)}`,
-        { ...draftPayload(invoice, {}, lines), payment_schedule: rows },
-        tool,
-      );
+      const saved = await c.put(`/invoices/${seg(invoiceId)}`, { payment_schedule: rows }, tool);
       return draftResult(invoiceId, {
         payment_schedule: rows,
         previous_payment_schedule: invoice.payment_schedule ?? [],
@@ -1125,29 +1102,15 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'update_recurring_invoice',
-    api: [
-      ['GET', '/api/recurring/{id}'],
-      ['PUT', '/api/recurring/{id}'],
-    ],
+    api: [['PUT', '/api/recurring/{id}']],
     title: 'Upravit pravidelnou fakturaci',
     description:
-      'Změní šablonu pravidelné fakturace. Zadaná pole se změní, ostatní zůstanou; nástroj '
-      + 'si šablonu načte a pošle ji celou. `items` NAHRADÍ všechny položky šablony; bez nich '
-      + 'zůstanou stávající položky beze změny. Už vystavené faktury se nemění. Stav (pozastavení) '
-      + 'mění `pause_recurring_invoice` a `resume_recurring_invoice`, termín příští faktury '
-      + '`reschedule_recurring_invoice`.',
+      'Změní zadaná pole šablony pravidelné fakturace. Pole `items` nahradí všechny položky šablony. '
+      + 'Stav mění `pause_recurring_invoice` a `resume_recurring_invoice`, termín příští faktury '
+      + '`reschedule_recurring_invoice`. Už vystavené faktury se nemění.',
     inputSchema: schema({ id: id('ID šablony.'), ...RECURRING_INPUT }, ['id']),
     write: true,
-    run: async (c, a, tool) => {
-      const current = await c.get(`/recurring/${seg(a.id)}`, null, tool);
-      const changes = recurringInput(a);
-      const body = merged(current, changes, RECURRING_FIELDS);
-      // Den v měsíci a „poslední den měsíce" se vylučují; platí to, co uživatel zadal.
-      if (changes.end_of_month === true) body.day_of_month = null;
-      if (changes.day_of_month !== undefined) body.end_of_month = false;
-      body.items = changes.items ?? (current?.items ?? []).map(recurringLine);
-      return c.put(`/recurring/${seg(a.id)}`, body, tool);
-    },
+    run: (c, a, tool) => c.put(`/recurring/${seg(a.id)}`, recurringInput(a), tool),
   },
   {
     name: 'delete_recurring_invoice',

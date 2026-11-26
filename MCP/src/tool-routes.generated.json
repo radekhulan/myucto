@@ -206,6 +206,36 @@
       ]
     ]
   },
+  "apply_eshop_price_matrix": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/pricing/matrix/{id}/items"
+      ],
+      [
+        "POST",
+        "/api/eshop/pricing/matrix/{id}/apply"
+      ]
+    ]
+  },
+  "apply_eshop_product_content_transfer": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/jobs/{id}/items"
+      ],
+      [
+        "GET",
+        "/api/eshop/product-masters/{id}"
+      ],
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/content-transfer/apply"
+      ]
+    ]
+  },
   "apply_invoice_advance_drawdown": {
     "write": true,
     "api": [
@@ -243,6 +273,23 @@
       [
         "GET",
         "/api/accounting/assets/purchase-candidates"
+      ]
+    ]
+  },
+  "attach_eshop_product_variants": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/product-masters/{id}"
+      ],
+      [
+        "GET",
+        "/api/stock/items/{id}"
+      ],
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/variants"
       ]
     ]
   },
@@ -384,6 +431,19 @@
       ]
     ]
   },
+  "cancel_stock_sales_order": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sales-orders/{id}"
+      ],
+      [
+        "POST",
+        "/api/stock/sales-orders/{id}/cancel"
+      ]
+    ]
+  },
   "cash_flow_forecast": {
     "write": false,
     "api": [
@@ -426,6 +486,14 @@
       [
         "GET",
         "/api/payroll/people/{id}"
+      ],
+      [
+        "PATCH",
+        "/api/payroll/employments/{id}/terms/current"
+      ],
+      [
+        "PUT",
+        "/api/payroll/employments/{id}/terms"
       ]
     ]
   },
@@ -444,6 +512,15 @@
       [
         "GET",
         "/api/clients/{id}/vat-status"
+      ]
+    ]
+  },
+  "check_posting_rules_against_chart": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/posting-rules/chart-alignment"
       ]
     ]
   },
@@ -499,6 +576,32 @@
       ]
     ]
   },
+  "clone_invoice_drafts_bulk": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/invoices/bulk-reissue"
+      ]
+    ]
+  },
+  "close_stock_cycle_count": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/cycle-counts/{id}"
+      ],
+      [
+        "POST",
+        "/api/stock/cycle-counts/{id}/close"
+      ]
+    ]
+  },
   "close_stock_take": {
     "write": true,
     "api": [
@@ -518,6 +621,19 @@
       [
         "GET",
         "/api/reports/cnb-rate-audit"
+      ]
+    ]
+  },
+  "confirm_stock_sales_order": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sales-orders/{id}"
+      ],
+      [
+        "POST",
+        "/api/stock/sales-orders/{id}/confirm"
       ]
     ]
   },
@@ -587,6 +703,33 @@
       ]
     ]
   },
+  "create_eshop_packaging_unit": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/packaging-units"
+      ]
+    ]
+  },
+  "create_eshop_price_level": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/price-levels"
+      ]
+    ]
+  },
+  "create_eshop_product_master": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/product-masters"
+      ]
+    ]
+  },
   "create_fee_type": {
     "write": true,
     "api": [
@@ -605,6 +748,24 @@
       ]
     ]
   },
+  "create_fueling_from_cash_document": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/logbook/fuel-cash-documents/{id}/assign"
+      ]
+    ]
+  },
+  "create_fueling_from_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/logbook/fuel-invoices/{id}/assign"
+      ]
+    ]
+  },
   "create_invoice": {
     "write": true,
     "api": [
@@ -615,6 +776,24 @@
       [
         "POST",
         "/api/invoices"
+      ]
+    ]
+  },
+  "create_invoice_from_stock_receipt": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/documents/{id}/invoice"
+      ]
+    ]
+  },
+  "create_invoice_from_stock_sales_order": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/sales-orders/{id}/invoice"
       ]
     ]
   },
@@ -633,6 +812,24 @@
       [
         "POST",
         "/api/invoices/{id}/refund-order"
+      ]
+    ]
+  },
+  "create_logbook_trip_category": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/logbook/trip-categories"
+      ]
+    ]
+  },
+  "create_logbook_trip_template": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/logbook/trip-templates"
       ]
     ]
   },
@@ -752,6 +949,15 @@
       ]
     ]
   },
+  "create_purchase_invoice_stock_receipt": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/stock-receipt"
+      ]
+    ]
+  },
   "create_purchase_payment_order": {
     "write": true,
     "api": [
@@ -770,6 +976,15 @@
       ]
     ]
   },
+  "create_stock_cycle_count": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/cycle-counts"
+      ]
+    ]
+  },
   "create_stock_document": {
     "write": true,
     "api": [
@@ -779,12 +994,70 @@
       ]
     ]
   },
+  "create_stock_fulfillment_task": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/fulfillment/tasks"
+      ]
+    ]
+  },
+  "create_stock_item_from_template": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/item-templates"
+      ],
+      [
+        "POST",
+        "/api/stock/item-templates/{id}/apply"
+      ]
+    ]
+  },
+  "create_stock_location": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/locations"
+      ]
+    ]
+  },
+  "create_stock_sales_order": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/sales-orders"
+      ]
+    ]
+  },
+  "create_stock_set": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/sets"
+      ]
+    ]
+  },
   "create_stock_take": {
     "write": true,
     "api": [
       [
         "POST",
         "/api/stock/takes"
+      ]
+    ]
+  },
+  "create_stock_vendor_offer": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/vendor-offers"
       ]
     ]
   },
@@ -829,6 +1102,58 @@
       [
         "GET",
         "/api/eshop/categories/{id}"
+      ]
+    ]
+  },
+  "delete_document_request": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/document-requests/{id}"
+      ],
+      [
+        "GET",
+        "/api/document-requests/{id}"
+      ]
+    ]
+  },
+  "delete_eshop_packaging_unit": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/eshop/packaging-units/{id}"
+      ],
+      [
+        "GET",
+        "/api/eshop/packaging-units/{id}"
+      ]
+    ]
+  },
+  "delete_eshop_price_level": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/eshop/price-levels/{id}"
+      ],
+      [
+        "GET",
+        "/api/eshop/price-levels/{id}"
+      ]
+    ]
+  },
+  "delete_eshop_product_currency_price": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/eshop/products/{id}/prices/{value}"
+      ],
+      [
+        "GET",
+        "/api/eshop/products/{id}/prices"
       ]
     ]
   },
@@ -888,6 +1213,19 @@
       ]
     ]
   },
+  "delete_invoice_work_report": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/invoices/{id}/work-report"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}/work-report"
+      ]
+    ]
+  },
   "delete_logbook_car": {
     "write": true,
     "api": [
@@ -914,6 +1252,19 @@
       ]
     ]
   },
+  "delete_logbook_odometer_reading": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/logbook/odometer-readings/{id}"
+      ],
+      [
+        "GET",
+        "/api/logbook/odometer-readings"
+      ]
+    ]
+  },
   "delete_logbook_trip": {
     "write": true,
     "api": [
@@ -924,6 +1275,32 @@
       [
         "DELETE",
         "/api/logbook/trips/{id}"
+      ]
+    ]
+  },
+  "delete_logbook_trip_category": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/logbook/trip-categories/{id}"
+      ],
+      [
+        "GET",
+        "/api/logbook/trip-categories"
+      ]
+    ]
+  },
+  "delete_logbook_trip_template": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/logbook/trip-templates/{id}"
+      ],
+      [
+        "GET",
+        "/api/logbook/trip-templates"
       ]
     ]
   },
@@ -1083,6 +1460,19 @@
       ]
     ]
   },
+  "delete_stock_item_template": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/stock/item-templates/{id}"
+      ],
+      [
+        "GET",
+        "/api/stock/item-templates"
+      ]
+    ]
+  },
   "delete_warehouse": {
     "write": true,
     "api": [
@@ -1093,6 +1483,15 @@
       [
         "GET",
         "/api/stock/warehouses/{id}"
+      ]
+    ]
+  },
+  "detach_eshop_product_variant": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/variants/{id}/detach"
       ]
     ]
   },
@@ -1141,6 +1540,28 @@
       ]
     ]
   },
+  "dismiss_purchase_invoice_advance_suggestion": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/advance-suggestion"
+      ],
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "dispatch_stock_shipment": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/fulfillment/shipments/{id}/dispatch"
+      ]
+    ]
+  },
   "document_completeness": {
     "write": false,
     "api": [
@@ -1159,6 +1580,24 @@
       ]
     ]
   },
+  "download_asset_depreciation_card": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/assets/{id}/depreciation-card"
+      ]
+    ]
+  },
+  "download_bank_statement_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/{id}/pdf"
+      ]
+    ]
+  },
   "download_document": {
     "write": false,
     "api": [
@@ -1168,12 +1607,39 @@
       ]
     ]
   },
+  "download_document_file": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/documents/{id}/files/{id}/download"
+      ]
+    ]
+  },
+  "download_invoice_archived_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/pdfs/{id}"
+      ]
+    ]
+  },
   "download_invoice_attachment": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/attachments/{item_id}"
+      ]
+    ]
+  },
+  "download_invoice_imported_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/imported-pdf"
       ]
     ]
   },
@@ -1195,12 +1661,75 @@
       ]
     ]
   },
+  "download_journal_entry_attachment": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/{id}/attachments/{id}"
+      ]
+    ]
+  },
+  "download_purchase_invoice_isdoc": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/isdoc"
+      ]
+    ]
+  },
   "download_purchase_invoice_pdf": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/purchase-invoices/{id}/pdf"
+      ]
+    ]
+  },
+  "download_purchase_invoice_rendered_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/our-pdf"
+      ]
+    ]
+  },
+  "download_purchase_invoice_source": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/source"
+      ]
+    ]
+  },
+  "download_stock_document_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/documents/{id}/pdf"
+      ]
+    ]
+  },
+  "download_stock_purchase_order_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/purchase-orders/{id}/pdf"
+      ]
+    ]
+  },
+  "download_stock_take_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/takes/{id}/pdf"
       ]
     ]
   },
@@ -1217,12 +1746,43 @@
       ]
     ]
   },
+  "duplicate_stock_item": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/items/{id}/duplicate"
+      ]
+    ]
+  },
+  "estimate_logbook_fueling_odometers": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/logbook/fuelings/estimate-odometers"
+      ]
+    ]
+  },
   "expense_breakdown": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/crm/expense-breakdown"
+      ]
+    ]
+  },
+  "fill_logbook_odometer_gap": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/odometer-gaps"
+      ],
+      [
+        "POST",
+        "/api/logbook/odometer-gaps/fill"
       ]
     ]
   },
@@ -1244,12 +1804,30 @@
       ]
     ]
   },
+  "get_account_card": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/accounts/{id}"
+      ]
+    ]
+  },
   "get_accounting_context": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/accounting/catalog/context"
+      ]
+    ]
+  },
+  "get_accounting_entity_category": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/entity-category"
       ]
     ]
   },
@@ -1262,12 +1840,57 @@
       ]
     ]
   },
+  "get_accrual_schedule": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/accruals/{id}/schedule"
+      ]
+    ]
+  },
   "get_asset": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/accounting/assets/{id}"
+      ]
+    ]
+  },
+  "get_auto_posting_policy": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/auto-posting-policy"
+      ]
+    ]
+  },
+  "get_balance_sheet_inventory_account": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/balance-inventory/account/{id}"
+      ]
+    ]
+  },
+  "get_bank_account_dimensions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-accounts/{id}/dimensions"
+      ]
+    ]
+  },
+  "get_bank_posting_rule_history": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-posting-rules/{id}/history"
       ]
     ]
   },
@@ -1388,6 +2011,24 @@
       ]
     ]
   },
+  "get_dimension_account_map": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/account-map"
+      ]
+    ]
+  },
+  "get_dimension_company_group": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/group"
+      ]
+    ]
+  },
   "get_document": {
     "write": false,
     "api": [
@@ -1439,12 +2080,102 @@
       ]
     ]
   },
+  "get_eshop_category_dimensions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/categories/{id}/dimensions"
+      ]
+    ]
+  },
+  "get_eshop_currency": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/currencies/{id}"
+      ]
+    ]
+  },
+  "get_eshop_locale": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/locales/{id}"
+      ]
+    ]
+  },
+  "get_eshop_packaging_unit": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/packaging-units/{id}"
+      ]
+    ]
+  },
+  "get_eshop_product_effective_price": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}/effective-price"
+      ]
+    ]
+  },
+  "get_eshop_product_master": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/product-masters/{id}"
+      ]
+    ]
+  },
+  "get_expense_rule": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/expense-rules/{id}"
+      ]
+    ]
+  },
   "get_fee_type": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/eshop/fee-types/{id}"
+      ]
+    ]
+  },
+  "get_fx_rate_policy": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/fx-rate-settings"
+      ]
+    ]
+  },
+  "get_gopay_clearing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/gopay/clearings/{id}"
+      ]
+    ]
+  },
+  "get_internal_document": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/internal-documents/{id}"
       ]
     ]
   },
@@ -1472,6 +2203,15 @@
       [
         "GET",
         "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "get_invoice_opening_balance": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/opening-balance"
       ]
     ]
   },
@@ -1557,6 +2297,49 @@
       ]
     ]
   },
+  "get_journal_posting_origin": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/posting-origin/bank-transactions/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-origin/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-origin/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "get_journal_repost_plan": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/repost-plan/bank-transactions/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/repost-plan/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/repost-plan/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "get_journal_template": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal-templates/{id}"
+      ]
+    ]
+  },
   "get_manufacturer": {
     "write": false,
     "api": [
@@ -1620,6 +2403,42 @@
       ]
     ]
   },
+  "get_nonprofit_tax_assessment_summary": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/nonprofit-tax"
+      ]
+    ]
+  },
+  "get_nonprofit_tax_source_summary": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/nonprofit-tax/source"
+      ]
+    ]
+  },
+  "get_offset_agreement": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/offsets/{id}"
+      ]
+    ]
+  },
+  "get_open_item_pairing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/open-items/pairings/{id}"
+      ]
+    ]
+  },
   "get_other_item": {
     "write": false,
     "api": [
@@ -1647,6 +2466,15 @@
       ]
     ]
   },
+  "get_parallel_run_check": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/parallel-run/checks/{id}"
+      ]
+    ]
+  },
   "get_payroll_person": {
     "write": false,
     "api": [
@@ -1666,6 +2494,10 @@
       [
         "GET",
         "/api/payroll/runs/{id}/people"
+      ],
+      [
+        "GET",
+        "/api/payroll/runs/{id}/people/{id}"
       ]
     ]
   },
@@ -1688,6 +2520,24 @@
       [
         "GET",
         "/api/payroll/time/month"
+      ]
+    ]
+  },
+  "get_period_financial_statement_notes": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/statement-notes"
+      ]
+    ]
+  },
+  "get_posting_date_lock": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/period-lock"
       ]
     ]
   },
@@ -1911,6 +2761,15 @@
       ]
     ]
   },
+  "get_purchase_invoice_opening_balance": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/opening-balance"
+      ]
+    ]
+  },
   "get_purchase_invoice_payment": {
     "write": false,
     "api": [
@@ -1938,6 +2797,24 @@
       ]
     ]
   },
+  "get_reporting_settings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reporting-settings"
+      ]
+    ]
+  },
+  "get_revenue_rule": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/revenue-rules/{id}"
+      ]
+    ]
+  },
   "get_sales_order": {
     "write": false,
     "api": [
@@ -1956,6 +2833,42 @@
       ]
     ]
   },
+  "get_stock_fulfillment_task": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/fulfillment/tasks/{id}"
+      ]
+    ]
+  },
+  "get_stock_item_dimensions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/dimensions"
+      ]
+    ]
+  },
+  "get_stock_item_posting_defaults": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/posting-defaults"
+      ]
+    ]
+  },
+  "get_stock_set": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sets/{id}"
+      ]
+    ]
+  },
   "get_stock_take": {
     "write": false,
     "api": [
@@ -1965,12 +2878,51 @@
       ]
     ]
   },
+  "get_submitted_vat_control_evidence": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/submissions/{id}/kh-evidence"
+      ]
+    ]
+  },
+  "get_supplier": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/suppliers/{id}"
+      ]
+    ]
+  },
   "get_tax_constants": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/codebooks/tax-constants"
+      ]
+    ]
+  },
+  "get_tax_evidence_cash_journal_notes": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/tax-evidence/cash-journal/notes/bank/{id}"
+      ],
+      [
+        "GET",
+        "/api/tax-evidence/cash-journal/notes/cash/{id}"
+      ],
+      [
+        "GET",
+        "/api/tax-evidence/cash-journal/notes/gopay/{id}"
+      ],
+      [
+        "GET",
+        "/api/tax-evidence/cash-journal/notes/{value}/{id}"
       ]
     ]
   },
@@ -2184,6 +3136,15 @@
       ]
     ]
   },
+  "list_bank_accounts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-accounts"
+      ]
+    ]
+  },
   "list_bank_match_suggestions": {
     "write": false,
     "api": [
@@ -2211,6 +3172,24 @@
       [
         "GET",
         "/api/accounting/bank-posting-unposted/count"
+      ]
+    ]
+  },
+  "list_bank_posting_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-posting-rules"
+      ]
+    ]
+  },
+  "list_bank_rule_templates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-rule-templates"
       ]
     ]
   },
@@ -2250,6 +3229,33 @@
       ]
     ]
   },
+  "list_cash_documents_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/cash-documents/number-series"
+      ]
+    ]
+  },
+  "list_cash_documents_rule_presets": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/cash-documents/rule-presets"
+      ]
+    ]
+  },
+  "list_cash_documents_unpaid": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/cash-documents/unpaid"
+      ]
+    ]
+  },
   "list_cash_registers": {
     "write": false,
     "api": [
@@ -2283,6 +3289,24 @@
       [
         "GET",
         "/api/clients/{id}/projects"
+      ]
+    ]
+  },
+  "list_codebooks_units": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/units"
+      ]
+    ]
+  },
+  "list_cost_centers": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/cost-centers"
       ]
     ]
   },
@@ -2375,6 +3399,15 @@
       ]
     ]
   },
+  "list_document_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/document-series"
+      ]
+    ]
+  },
   "list_document_tags": {
     "write": false,
     "api": [
@@ -2390,6 +3423,15 @@
       [
         "GET",
         "/api/documents"
+      ]
+    ]
+  },
+  "list_effective_vat_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/vat-rates"
       ]
     ]
   },
@@ -2423,6 +3465,69 @@
       ]
     ]
   },
+  "list_eshop_price_matrix_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/pricing/matrix/{id}/items"
+      ]
+    ]
+  },
+  "list_eshop_pricing_exchange_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/pricing/exchange-rates"
+      ]
+    ]
+  },
+  "list_eshop_pricing_profiles": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/pricing/profiles"
+      ]
+    ]
+  },
+  "list_eshop_pricing_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/pricing/rules"
+      ]
+    ]
+  },
+  "list_eshop_product_masters": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/product-masters"
+      ]
+    ]
+  },
+  "list_eshop_product_promo_prices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}/promo-prices"
+      ]
+    ]
+  },
+  "list_eshop_product_relations": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}/relations"
+      ]
+    ]
+  },
   "list_expense_categories": {
     "write": false,
     "api": [
@@ -2450,6 +3555,60 @@
       ]
     ]
   },
+  "list_fuel_purchase_invoice_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuel-invoices/{id}/items"
+      ]
+    ]
+  },
+  "list_gopay_clearings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/gopay/clearings"
+      ]
+    ]
+  },
+  "list_gopay_pending": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/gopay/pending"
+      ]
+    ]
+  },
+  "list_internal_documents": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/internal-documents"
+      ]
+    ]
+  },
+  "list_internal_documents_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/internal-documents/number-series"
+      ]
+    ]
+  },
+  "list_invoice_activity": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/activity"
+      ]
+    ]
+  },
   "list_invoice_advance_candidates": {
     "write": false,
     "api": [
@@ -2468,12 +3627,39 @@
       ]
     ]
   },
+  "list_invoice_archived_pdfs": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/pdfs"
+      ]
+    ]
+  },
   "list_invoice_attachments": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "list_invoice_item_tracking_choices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/tracking-choices"
+      ]
+    ]
+  },
+  "list_invoice_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/items"
       ]
     ]
   },
@@ -2486,12 +3672,57 @@
       ]
     ]
   },
+  "list_invoice_other_item_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/other-item-candidates"
+      ]
+    ]
+  },
   "list_invoice_payments": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/payments"
+      ]
+    ]
+  },
+  "list_invoice_source_receipts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/source-receipts"
+      ]
+    ]
+  },
+  "list_invoice_stock_documents": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/stock-documents"
+      ]
+    ]
+  },
+  "list_invoice_tax_document_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/tax-document-advance-candidates"
+      ]
+    ]
+  },
+  "list_invoice_years": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/years"
       ]
     ]
   },
@@ -2540,6 +3771,24 @@
       ]
     ]
   },
+  "list_journal_entry_attachments": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/{id}/attachments"
+      ]
+    ]
+  },
+  "list_journal_templates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal-templates"
+      ]
+    ]
+  },
   "list_logbook_cars": {
     "write": false,
     "api": [
@@ -2550,6 +3799,33 @@
       [
         "GET",
         "/api/logbook/cars/{id}"
+      ]
+    ]
+  },
+  "list_logbook_drivers": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/drivers"
+      ]
+    ]
+  },
+  "list_logbook_fuel_cash_documents": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuel-cash-documents"
+      ]
+    ]
+  },
+  "list_logbook_fuel_invoices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuel-invoices"
       ]
     ]
   },
@@ -2566,12 +3842,57 @@
       ]
     ]
   },
+  "list_logbook_fuelings_link_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuelings/link-candidates"
+      ]
+    ]
+  },
+  "list_logbook_fuelings_warnings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuelings/warnings"
+      ]
+    ]
+  },
+  "list_logbook_odometer_gaps": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/odometer-gaps"
+      ]
+    ]
+  },
+  "list_logbook_odometer_readings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/odometer-readings"
+      ]
+    ]
+  },
   "list_logbook_trip_categories": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/logbook/trip-categories"
+      ]
+    ]
+  },
+  "list_logbook_trip_templates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trip-templates"
       ]
     ]
   },
@@ -2603,6 +3924,24 @@
       [
         "GET",
         "/api/eshop/manufacturers"
+      ]
+    ]
+  },
+  "list_monthly_accounting_report_history": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/monthly-report/history"
+      ]
+    ]
+  },
+  "list_new_purchase_invoice_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/advance-candidates"
       ]
     ]
   },
@@ -2651,6 +3990,33 @@
       ]
     ]
   },
+  "list_offsets": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/offsets"
+      ]
+    ]
+  },
+  "list_offsets_open": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/offsets/open"
+      ]
+    ]
+  },
+  "list_offsets_partners": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/offsets/partners"
+      ]
+    ]
+  },
   "list_open_items": {
     "write": false,
     "api": [
@@ -2664,12 +4030,30 @@
       ]
     ]
   },
+  "list_oss_member_state_vat_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/oss-member-state-rates"
+      ]
+    ]
+  },
   "list_other_item_allocations": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/accounting/other-items/{id}/allocations"
+      ]
+    ]
+  },
+  "list_other_item_kind_posting_profiles": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/other-items/kinds/{id}/posting-profiles"
       ]
     ]
   },
@@ -2700,12 +4084,48 @@
       ]
     ]
   },
+  "list_other_items_bank_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/other-items/bank-candidates"
+      ]
+    ]
+  },
+  "list_other_items_settings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/other-items/settings"
+      ]
+    ]
+  },
   "list_packaging_units": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/eshop/packaging-units"
+      ]
+    ]
+  },
+  "list_parallel_run_checks": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/parallel-run/checks"
+      ]
+    ]
+  },
+  "list_parallel_run_sources": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/parallel-run/sources"
       ]
     ]
   },
@@ -2898,6 +4318,15 @@
       ]
     ]
   },
+  "list_property_receivable_parties": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/property/catalog/payments/reconciliation/parties"
+      ]
+    ]
+  },
   "list_property_registry": {
     "write": false,
     "api": [
@@ -2951,12 +4380,57 @@
       ]
     ]
   },
+  "list_public_holidays": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/public-holidays"
+      ]
+    ]
+  },
   "list_purchase_advance_candidates": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/purchase-invoices/{id}/advance-candidates"
+      ]
+    ]
+  },
+  "list_purchase_advance_deduction_lines": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/advance-deduction-lines"
+      ]
+    ]
+  },
+  "list_purchase_invoice_documents": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/documents"
+      ]
+    ]
+  },
+  "list_purchase_invoice_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
+  "list_purchase_invoice_stock_receipts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/stock-receipts"
       ]
     ]
   },
@@ -2975,6 +4449,15 @@
       [
         "GET",
         "/api/purchase-invoices/number-series"
+      ]
+    ]
+  },
+  "list_purchase_order_receipts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/purchase-orders/{id}/receipts"
       ]
     ]
   },
@@ -3014,12 +4497,120 @@
       ]
     ]
   },
+  "list_repo_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/repo-rates"
+      ]
+    ]
+  },
+  "list_reports_oss_evidence": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/oss/evidence"
+      ]
+    ]
+  },
+  "list_reports_oss_submissions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/oss/submissions"
+      ]
+    ]
+  },
+  "list_reports_related_parties_adjustments": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/related-parties/adjustments"
+      ]
+    ]
+  },
+  "list_reports_statement_function_map": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/statement-function-map"
+      ]
+    ]
+  },
+  "list_reports_statement_overrides": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/statement-overrides"
+      ]
+    ]
+  },
+  "list_reports_tax_base_adjustments": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/tax-base-adjustments"
+      ]
+    ]
+  },
   "list_revenue_categories": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/revenue-categories"
+      ]
+    ]
+  },
+  "list_revenue_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/revenue-rules"
+      ]
+    ]
+  },
+  "list_saldo_settlements_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/saldo-settlements/advance-candidates"
+      ]
+    ]
+  },
+  "list_saldo_settlements_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/saldo-settlements/candidates"
+      ]
+    ]
+  },
+  "list_saldo_settlements_residual_lines": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/saldo-settlements/residual-lines"
+      ]
+    ]
+  },
+  "list_saldo_settlements_suggestions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/saldo-settlements/suggestions"
       ]
     ]
   },
@@ -3038,6 +4629,42 @@
       [
         "GET",
         "/api/stock/sales-orders"
+      ]
+    ]
+  },
+  "list_service_currency_prices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items/{id}/prices"
+      ]
+    ]
+  },
+  "list_service_customer_prices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items/{id}/customer-overrides"
+      ]
+    ]
+  },
+  "list_settings_currencies": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/settings/currencies"
+      ]
+    ]
+  },
+  "list_settlements": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/settlements"
       ]
     ]
   },
@@ -3063,12 +4690,48 @@
       ]
     ]
   },
+  "list_stock_fulfillment_tasks": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/fulfillment/tasks"
+      ]
+    ]
+  },
+  "list_stock_item_lots": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/tracking-units"
+      ]
+    ]
+  },
+  "list_stock_item_templates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/item-templates"
+      ]
+    ]
+  },
   "list_stock_locations": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/stock/locations"
+      ]
+    ]
+  },
+  "list_stock_sets": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sets"
       ]
     ]
   },
@@ -3103,12 +4766,48 @@
       ]
     ]
   },
+  "list_tax_evidence_bank_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/tax-evidence/bank-rules"
+      ]
+    ]
+  },
+  "list_tax_foreign_income_catalog": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/tax/foreign-income/catalog"
+      ]
+    ]
+  },
+  "list_tax_payment_alerts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/crm/action-items/tax-balance"
+      ]
+    ]
+  },
   "list_tax_submissions": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/reports/submissions"
+      ]
+    ]
+  },
+  "list_trashed_documents": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/documents/trash"
       ]
     ]
   },
@@ -3152,6 +4851,15 @@
       ]
     ]
   },
+  "list_work_report_billing_templates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/work-report-billing-templates"
+      ]
+    ]
+  },
   "logbook_summary": {
     "write": false,
     "api": [
@@ -3167,6 +4875,24 @@
       [
         "POST",
         "/api/clients/lookup-ares"
+      ]
+    ]
+  },
+  "lookup_vat_id_in_vies": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/clients/lookup-vies"
+      ]
+    ]
+  },
+  "lookup_vat_registry_bank_accounts": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/clients/lookup-bank"
       ]
     ]
   },
@@ -3197,6 +4923,24 @@
       ]
     ]
   },
+  "match_bank_payment_to_document": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/{id}/match-document"
+      ]
+    ]
+  },
+  "match_bank_payments_batch": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/match-document-batch"
+      ]
+    ]
+  },
   "match_bank_transaction": {
     "write": true,
     "api": [
@@ -3212,6 +4956,10 @@
       [
         "GET",
         "/api/accounting/migration-checks"
+      ],
+      [
+        "GET",
+        "/api/accounting/migration-checks/{value}"
       ]
     ]
   },
@@ -3230,6 +4978,19 @@
       [
         "POST",
         "/api/eshop/categories/{id}/move"
+      ]
+    ]
+  },
+  "move_document_folder": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/document-folders"
+      ],
+      [
+        "POST",
+        "/api/document-folders/{id}/move"
       ]
     ]
   },
@@ -3312,6 +5073,15 @@
       ]
     ]
   },
+  "pack_stock_shipment": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/fulfillment/tasks/{id}/shipments"
+      ]
+    ]
+  },
   "pause_recurring_invoice": {
     "write": true,
     "api": [
@@ -3375,12 +5145,129 @@
       ]
     ]
   },
+  "preview_closing_balance_sheet_inventory": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/inventory"
+      ]
+    ]
+  },
+  "preview_closing_deferred_revenue": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/deferred-revenue-accrual-preview"
+      ]
+    ]
+  },
+  "preview_closing_deferred_tax": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/deferred-tax-preview"
+      ]
+    ]
+  },
+  "preview_closing_income_tax": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/income-tax-preview"
+      ]
+    ]
+  },
+  "preview_closing_prepaid_expenses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/prepaid-expense-accrual-preview"
+      ]
+    ]
+  },
+  "preview_closing_receivable_provisions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/provisions-preview"
+      ]
+    ]
+  },
+  "preview_closing_small_asset_accrual": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/small-asset-accrual-preview"
+      ]
+    ]
+  },
+  "preview_eshop_price_matrix": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/pricing/matrix/preview"
+      ]
+    ]
+  },
+  "preview_eshop_product_content_transfer": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/content-transfer/preview"
+      ]
+    ]
+  },
   "preview_invoice_penalty": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/penalty/preview"
+      ]
+    ]
+  },
+  "preview_other_item_recurrence_title": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/other-items/{id}/schedule/title-preview"
+      ]
+    ]
+  },
+  "preview_period_profit_distribution": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/profit-distribution/preview"
+      ]
+    ]
+  },
+  "preview_purchase_invoice_stock_receipt": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/stock-receipt"
+      ]
+    ]
+  },
+  "preview_s46_vat_restorations": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/s46/restorations"
       ]
     ]
   },
@@ -3586,6 +5473,10 @@
       [
         "GET",
         "/api/stock/purchase-orders/{id}/receipt"
+      ],
+      [
+        "POST",
+        "/api/stock/purchase-orders/{id}/receipt"
       ]
     ]
   },
@@ -3634,6 +5525,19 @@
       ]
     ]
   },
+  "recalculate_logbook_trip_odometers": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips"
+      ],
+      [
+        "POST",
+        "/api/logbook/trips/recalculate-odometer"
+      ]
+    ]
+  },
   "receive_purchase_invoice": {
     "write": true,
     "api": [
@@ -3647,12 +5551,30 @@
       ]
     ]
   },
+  "receive_stock_shipment_return": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/fulfillment/shipments/{id}/returns"
+      ]
+    ]
+  },
   "recompute_product_prices": {
     "write": true,
     "api": [
       [
         "POST",
         "/api/eshop/products/{id}/prices/recompute"
+      ]
+    ]
+  },
+  "reconcile_oss_submission": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/oss/reconciliation"
       ]
     ]
   },
@@ -3730,6 +5652,15 @@
       ]
     ]
   },
+  "rename_document_folder": {
+    "write": true,
+    "api": [
+      [
+        "PATCH",
+        "/api/document-folders/{id}"
+      ]
+    ]
+  },
   "reorder_product_media": {
     "write": true,
     "api": [
@@ -3739,12 +5670,103 @@
       ]
     ]
   },
+  "replace_eshop_price_level_rules": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/price-levels/{id}/rules"
+      ],
+      [
+        "PUT",
+        "/api/eshop/price-levels/{id}/rules"
+      ]
+    ]
+  },
+  "replace_eshop_product_promo_prices": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}/promo-prices"
+      ],
+      [
+        "PUT",
+        "/api/eshop/products/{id}/promo-prices"
+      ]
+    ]
+  },
+  "replace_eshop_product_relations": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}/relations"
+      ],
+      [
+        "PUT",
+        "/api/eshop/products/{id}/relations"
+      ]
+    ]
+  },
+  "replace_stock_item_customer_prices": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/customer-prices"
+      ],
+      [
+        "PUT",
+        "/api/stock/items/{id}/customer-prices"
+      ]
+    ]
+  },
+  "replace_stock_item_unit_conversions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}"
+      ],
+      [
+        "PUT",
+        "/api/stock/items/{id}/units"
+      ]
+    ]
+  },
+  "replace_stock_set_definition": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sets/{id}"
+      ],
+      [
+        "PUT",
+        "/api/stock/sets/{id}"
+      ]
+    ]
+  },
   "replenishment_suggest": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/stock/replenishment"
+      ]
+    ]
+  },
+  "request_stock_sales_order_return": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/sales-orders/{id}"
+      ],
+      [
+        "POST",
+        "/api/stock/sales-orders/{id}/returns"
       ]
     ]
   },
@@ -3780,6 +5802,24 @@
       [
         "GET",
         "/api/price-list-items/{id}/resolve"
+      ]
+    ]
+  },
+  "restore_document": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/documents/{id}/restore"
+      ]
+    ]
+  },
+  "restore_document_folder": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/document-folders/{id}/restore"
       ]
     ]
   },
@@ -3906,6 +5946,19 @@
       ]
     ]
   },
+  "save_logbook_odometer_reading": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/odometer-readings"
+      ],
+      [
+        "POST",
+        "/api/logbook/odometer-readings"
+      ]
+    ]
+  },
   "save_logbook_trip": {
     "write": true,
     "api": [
@@ -3949,6 +6002,33 @@
       ]
     ]
   },
+  "save_stock_cycle_count_quantities": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/stock/cycle-counts/{id}"
+      ]
+    ]
+  },
+  "save_stock_item_template": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/items/{id}/templates"
+      ]
+    ]
+  },
+  "scan_stock_fulfillment_item": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/fulfillment/tasks/{id}/scan"
+      ]
+    ]
+  },
   "search": {
     "write": false,
     "api": [
@@ -3976,12 +6056,39 @@
       ]
     ]
   },
+  "search_invoice_tags": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/tags"
+      ]
+    ]
+  },
+  "search_nace_codes": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/settings/nace-codes"
+      ]
+    ]
+  },
   "search_products": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/stock/items/search"
+      ]
+    ]
+  },
+  "search_recurring_invoice_tags": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/tags"
       ]
     ]
   },
@@ -4006,6 +6113,10 @@
   "send_invoice_reminders_bulk": {
     "write": true,
     "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
       [
         "POST",
         "/api/invoices/bulk-reminder"
@@ -4057,6 +6168,23 @@
       [
         "POST",
         "/api/document-requests/{id}/resolve"
+      ]
+    ]
+  },
+  "set_eshop_product_master_lifecycle": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/product-masters/{id}"
+      ],
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/archive"
+      ],
+      [
+        "POST",
+        "/api/eshop/product-masters/{id}/restore"
       ]
     ]
   },
@@ -4140,6 +6268,10 @@
       [
         "GET",
         "/api/accounting/other-items/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/other-items/{id}/installments"
       ]
     ]
   },
@@ -4287,6 +6419,32 @@
       ]
     ]
   },
+  "set_stock_item_lifecycle": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}"
+      ],
+      [
+        "POST",
+        "/api/stock/items/{id}/lifecycle"
+      ]
+    ]
+  },
+  "set_stock_item_packaging": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/packaging"
+      ],
+      [
+        "PUT",
+        "/api/stock/items/{id}/packaging"
+      ]
+    ]
+  },
   "set_stock_take_counts": {
     "write": true,
     "api": [
@@ -4396,6 +6554,96 @@
       [
         "GET",
         "/api/stock/reports/valuation"
+      ]
+    ]
+  },
+  "suggest_closing_accrued_expenses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/closing/estimates-suggest"
+      ]
+    ]
+  },
+  "suggest_fixed_cnb_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/fx-rate-settings/cnb-prefill"
+      ]
+    ]
+  },
+  "suggest_joint_allocation_by_revenue": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/joint-allocations/revenue-proposal"
+      ]
+    ]
+  },
+  "suggest_logbook_trip_places": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips/places"
+      ]
+    ]
+  },
+  "suggest_logbook_trip_purposes": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips/purposes"
+      ]
+    ]
+  },
+  "suggest_net_turnover_accounts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reporting-settings/net-turnover-hints"
+      ]
+    ]
+  },
+  "suggest_purchase_invoice_item_expenses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/purchase-invoices/{id}/expense-suggestions"
+      ]
+    ]
+  },
+  "suggest_statement_account_overrides": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/statement-overrides/suggestions"
+      ]
+    ]
+  },
+  "summarize_asset_accounts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/assets/account-summary"
+      ]
+    ]
+  },
+  "summarize_small_asset_expenses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/small-assets/expense-breakdown"
       ]
     ]
   },
@@ -4520,6 +6768,36 @@
       [
         "POST",
         "/api/invoices/{id}/work-report/billing-transfer"
+      ]
+    ]
+  },
+  "trash_document": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/documents/{id}"
+      ],
+      [
+        "GET",
+        "/api/documents/{id}"
+      ]
+    ]
+  },
+  "trash_document_folder": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/document-folders/{id}"
+      ],
+      [
+        "GET",
+        "/api/document-folders"
+      ],
+      [
+        "GET",
+        "/api/documents"
       ]
     ]
   },
@@ -4676,6 +6954,73 @@
       ]
     ]
   },
+  "update_document_file": {
+    "write": true,
+    "api": [
+      [
+        "PATCH",
+        "/api/documents/{id}/files/{id}"
+      ]
+    ]
+  },
+  "update_eshop_packaging_unit": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/eshop/packaging-units/{id}"
+      ]
+    ]
+  },
+  "update_eshop_price_level": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/eshop/price-levels/{id}"
+      ]
+    ]
+  },
+  "update_eshop_product_card": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/eshop/products/{id}"
+      ],
+      [
+        "PUT",
+        "/api/eshop/products/{id}/editor"
+      ]
+    ]
+  },
+  "update_eshop_product_currency_prices": {
+    "write": true,
+    "api": [
+      [
+        "PATCH",
+        "/api/eshop/products/{id}/prices"
+      ]
+    ]
+  },
+  "update_eshop_product_master": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/eshop/product-masters/{id}"
+      ]
+    ]
+  },
+  "update_eshop_product_variant": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/eshop/product-masters/{id}/variants/{id}"
+      ]
+    ]
+  },
   "update_fee_type": {
     "write": true,
     "api": [
@@ -4720,6 +7065,24 @@
       [
         "PUT",
         "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "update_logbook_trip_category": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/logbook/trip-categories/{id}"
+      ]
+    ]
+  },
+  "update_logbook_trip_template": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/logbook/trip-templates/{id}"
       ]
     ]
   },
@@ -4837,10 +7200,6 @@
     "write": true,
     "api": [
       [
-        "GET",
-        "/api/recurring/{id}"
-      ],
-      [
         "PUT",
         "/api/recurring/{id}"
       ]
@@ -4850,8 +7209,56 @@
     "write": true,
     "api": [
       [
+        "GET",
+        "/api/stock/documents/{id}"
+      ],
+      [
         "PUT",
         "/api/stock/documents/{id}"
+      ]
+    ]
+  },
+  "update_stock_item_lot": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/tracking-units"
+      ],
+      [
+        "PUT",
+        "/api/stock/items/{id}/tracking-units/{id}"
+      ]
+    ]
+  },
+  "update_stock_item_price_level_rules": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/price-levels"
+      ],
+      [
+        "PUT",
+        "/api/stock/items/{id}/price-levels"
+      ]
+    ]
+  },
+  "update_stock_location": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/stock/locations/{id}"
+      ]
+    ]
+  },
+  "update_stock_sales_order": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/stock/sales-orders/{id}"
       ]
     ]
   },
@@ -4901,6 +7308,15 @@
       [
         "POST",
         "/api/purchase-invoices/{id}/pdf"
+      ]
+    ]
+  },
+  "upsert_stock_sets_bulk": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/stock/sets/bulk"
       ]
     ]
   },

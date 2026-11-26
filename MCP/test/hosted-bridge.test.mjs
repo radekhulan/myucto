@@ -31,6 +31,18 @@ test('hostovaný katalog vrací všechny povolené nástroje v jedné odpovědi'
   }
 });
 
+test('hostovaný katalog nabízí dotazy do registrů pouze s rozsahem čtení a zápis', () => {
+  const read = list('read');
+  const readWrite = list('read_write');
+  for (const name of ['lookup_vat_id_in_vies', 'lookup_vat_registry_bank_accounts']) {
+    assert.equal(read.tools.some((tool) => tool.name === name), false);
+    const lookup = readWrite.tools.find((tool) => tool.name === name);
+    assert.ok(lookup);
+    assert.equal(lookup.annotations.readOnlyHint, true);
+    assert.match(lookup.description, /Čtení a zápis/);
+  }
+});
+
 test('interní PHP požadavky nepoužívají OPcache file cache hostitele', (t) => {
   const php = process.env.MYINVOICE_MCP_PHP_BINARY || 'php';
   if (spawnSync(php, ['-v']).error) return t.skip('PHP CLI není dostupné.');

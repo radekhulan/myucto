@@ -59,8 +59,8 @@ export class ApiError extends Error {
 export class ReadOnlyError extends Error {
   constructor(tool) {
     super(
-      `Nástroj "${tool}" zapisuje data, ale server běží v režimu jen pro čtení `
-      + '(MYUCTO_READ_ONLY=1). Zápis povolíte odebráním té proměnné — token musí mít scope "čtení a zápis".',
+      `Nástroj "${tool}" vyžaduje přístup pro čtení a zápis, ale server běží v režimu jen pro čtení. `
+      + 'Pro lokální připojení vypněte MYUCTO_READ_ONLY a použijte token pro čtení a zápis.',
     );
     this.name = 'ReadOnlyError';
   }

@@ -1273,10 +1273,6 @@
     "write": true,
     "api": [
       [
-        "GET",
-        "/api/recurring/{id}"
-      ],
-      [
         "PUT",
         "/api/recurring/{id}"
       ]

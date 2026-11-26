@@ -20,6 +20,7 @@ class Client {
 
   get(path, query) { return this.#call('GET', path, query); }
   post(path, body) { return this.#call('POST', path, body); }
+  put(path, body) { return this.#call('PUT', path, body); }
   patch(path, body) { return this.#call('PATCH', path, body); }
 }
 
@@ -174,7 +175,7 @@ test('čtení účetnictví volá správné cesty', async () => {
     ['get_cash_register_book', { id: 1, doc_type: 'out', query: 'benzín' }, '/accounting/cash-registers/1/book', { doc_type: 'out', q: 'benzín' }],
     ['list_small_assets', { status: 'in_use' }, '/accounting/small-assets', { status: 'in_use' }],
     ['list_small_assets', { id: 4 }, '/accounting/small-assets/4', null],
-    ['small_assets_report', { kind: 'movements', from: '2026-01-01' }, '/accounting/reports/small-assets/movements', { from: '2026-01-01' }],
+    ['small_assets_report', { kind: 'movements', from: '2026-01-01', to: '2026-01-31' }, '/accounting/reports/small-assets/movements', { from: '2026-01-01', to: '2026-01-31' }],
     ['asset_purchase_candidates', {}, '/accounting/assets/purchase-candidates', null],
     ['monthly_report_preview', { year: 2026, month: 3, accrual_spread: false }, '/accounting/reports/monthly-report/preview', { year: 2026, month: 3, accrual_spread: 0 }],
     ['vat_filing_checks', { check: 'post_filing_changes', year: 2026, month: 3, period: 'quarterly', as_of: '2026-01-01' }, '/reports/dphdp3/post-filing-changes', { year: 2026, month: 3, period: 'quarterly' }],
@@ -193,10 +194,10 @@ test('čtení účetnictví volá správné cesty', async () => {
 });
 
 test('otevřené položky, podání a mzdový běh skládají víc čtení', async () => {
-  const open = await run('list_open_items', { account_id: 8, only_open: false, include_suggestions: true, days: 30 });
+  const open = await run('list_open_items', { account_id: 8, as_of: '2026-03-31', only_open: false, include_suggestions: true, days: 30 });
   assert.deepEqual(open.client.calls.map((call) => [call.path, call.payload]), [
-    ['/accounting/open-items/8', { only_open: 0 }],
-    ['/accounting/open-items/8/suggestions', { days: 30 }],
+    ['/accounting/open-items/8', { as_of: '2026-03-31', only_open: 0 }],
+    ['/accounting/open-items/8/suggestions', { as_of: '2026-03-31', days: 30 }],
   ]);
   const submission = await run('get_tax_submission', { id: 3, include_payment: true });
   assert.deepEqual(submission.client.calls.map((call) => call.path), ['/reports/submissions/3', '/reports/submissions/3/payment']);
@@ -218,4 +219,66 @@ test('manifest rout zachytí všechny větve nástrojů s výčtem i přímou re
   assert.deepEqual(paths('resolve_bank_match_suggestion'), ['POST /api/bank-match-suggestions/{id}/accept', 'POST /api/bank-match-suggestions/{id}/reject']);
   assert.ok(paths('update_document').includes('POST /api/documents/{id}/move'));
   assert.ok(paths('list_small_assets').includes('GET /api/accounting/small-assets'));
+});
+
+test('pohyby drobného majetku a spojené osoby vyžadují obě data', async () => {
+  const dates = { from: '2026-01-01', to: '2026-03-31' };
+  for (const [name, args, path] of [
+    ['small_assets_report', { kind: 'movements' }, '/accounting/reports/small-assets/movements'],
+    ['vat_filing_checks', { check: 'related_parties' }, '/reports/related-parties'],
+  ]) {
+    await assert.rejects(run(name, args), /from.*to/);
+    const { client } = await run(name, { ...args, ...dates });
+    assert.deepEqual(client.calls, [{ method: 'GET', path, payload: dates }]);
+  }
+});
+
+test('párování volné platby použije zvolený doklad a odmítne nejednoznačný cíl', async () => {
+  const { client } = await run('match_bank_payment_to_document', { id: 9, purchase_invoice_id: 7 });
+  assert.deepEqual(client.calls, [{ method: 'POST', path: '/bank-transactions/9/match-document', payload: { purchase_invoice_id: 7 } }]);
+  await assert.rejects(run('match_bank_payment_to_document', { id: 9, invoice_id: 7, purchase_invoice_id: 7 }), /právě jedno/);
+});
+
+test('hromadné párování posílá verzi náhledu až po potvrzení', async () => {
+  const args = { invoice_id: 7, transaction_ids: [9, 10] };
+  const path = '/bank-transactions/match-document-batch';
+  const confirm_version = 'a'.repeat(64);
+  const preview = await run('match_bank_payments_batch', args);
+  assert.deepEqual(preview.client.calls, [{ method: 'POST', path, payload: args }]);
+  await assert.rejects(run('match_bank_payments_batch', { ...args, confirm: true }), /povinné confirm_version/);
+  await assert.rejects(run('match_bank_payments_batch', { ...args, confirm_version }), /NEPROVEDENO/);
+  await assert.rejects(run('match_bank_payments_batch', { ...args, transaction_ids: [9, 9] }), /nesmí opakovat/);
+  const confirmed = await run('match_bank_payments_batch', { ...args, confirm_version, confirm: true });
+  assert.deepEqual(confirmed.client.calls, [{ method: 'POST', path, payload: { ...args, confirm_version } }]);
+});
+
+test('úprava klienta mapuje splatnost ve dnech a ostatní údaje ponechá serveru', async () => {
+  const responses = { 'GET /clients/7': { id: 7, payment_due_default: 1, payment_due_unit: 'month' } };
+  const changed = await run('update_client', { id: 7, payment_due_days: 21 }, responses);
+  assert.deepEqual(changed.client.calls[1], {
+    method: 'PUT', path: '/clients/7', payload: { payment_due_default: 21, payment_due_unit: 'days' },
+  });
+  const unrelated = await run('update_client', { id: 7, phone: '+420 000 000 000' }, responses);
+  assert.deepEqual(unrelated.client.calls[1].payload, { phone: '+420 000 000 000' });
+});
+
+test('dotazy do registrů vyžadují rozsah čtení a zápis a posílají normalizované DIČ', async () => {
+  for (const [name, key, path] of [
+    ['lookup_vat_id_in_vies', 'vat_id', '/clients/lookup-vies'],
+    ['lookup_vat_registry_bank_accounts', 'dic', '/clients/lookup-bank'],
+  ]) {
+    assert.equal(tool(name).write, true);
+    assert.equal(tool(name).mutatesData, false);
+    await assert.rejects(run(name, { [key]: 'chybné DIČ' }), /neodpovídá tvaru/);
+    const { client } = await run(name, { [key]: 'cz00000000' });
+    assert.deepEqual(client.calls, [{ method: 'POST', path, payload: { [key]: 'CZ00000000' } }]);
+  }
+});
+
+test('otevřené položky vyžadují rozhodný den a koeficient DPH rok', async () => {
+  await assert.rejects(run('list_open_items', { account_id: 1 }), /as_of/);
+  await assert.rejects(run('open_items_listing', {}), /as_of/);
+  await assert.rejects(run('vat_filing_checks', { check: 'vat_coefficient' }), /year/);
+  const { client } = await run('vat_filing_checks', { check: 'vat_coefficient', year: 2026 });
+  assert.deepEqual(client.calls, [{ method: 'GET', path: '/reports/vat-coefficient', payload: { year: 2026 } }]);
 });

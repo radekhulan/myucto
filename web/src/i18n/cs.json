@@ -36352,6 +36352,9 @@
       }
     },
     "tool_groups": {
+      "bank": "Banka a párování",
+      "property": "SVJ",
+      "nonprofit": "Neziskové organizace",
       "projects": "Zakázky",
       "documents": "Dokumenty",
       "logbook": "Kniha jízd",

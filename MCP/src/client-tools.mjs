@@ -2,9 +2,7 @@
  * Karta obchodního partnera, složky a soubory dokumentů, požadavky na doklady
  * a obecné číselníky (země, daňové konstanty).
  *
- * Záměrně tu není: přidání bankovního účtu partnerovi (cíl budoucích plateb mění
- * jen člověk), smazání klienta, odkazy na výkaz posílané e-mailem, koš a hromadné
- * operace dokumentů, mazání složek a požadavků.
+ * Bankovní spojení na kartě slouží při přípravě platby. Dotazy do registrů ho nemění.
  */
 import { seg } from './tool-shared.mjs';
 import {
@@ -14,6 +12,15 @@ import {
 const LINK_TYPES = ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document', 'other_item', 'internal_document'];
 
 export const CLIENT_TOOLS = [
+  custom('lookup_vat_id_in_vies', 'Ověřit DIČ v registru VIES',
+    'Ověří evropské DIČ a vrátí dostupné registrační údaje z VIES. Vyžaduje přístup s rozsahem Čtení a zápis.', {
+      vat_id: str('DIČ včetně dvojpísmenného předčíslí státu.', { pattern: '^[a-zA-Z]{2}[a-zA-Z0-9]{2,14}$' }),
+    }, ['vat_id'], true, (c, a, tool) => c.post('/clients/lookup-vies', { vat_id: a.vat_id.toUpperCase() }, tool), { mutatesData: false }),
+  custom('lookup_vat_registry_bank_accounts', 'Zveřejněné účty plátce DPH',
+    'Podle DIČ načte účty zveřejněné v registru plátců DPH a údaj o nespolehlivosti plátce. Vyžaduje přístup s rozsahem Čtení a zápis.', {
+      dic: str('České DIČ, s předponou CZ nebo bez ní.', { pattern: '^(?:[cC][zZ])?[0-9]{8,10}$' }),
+    }, ['dic'], true, (c, a, tool) => c.post('/clients/lookup-bank', { dic: a.dic.toUpperCase() }, tool), { mutatesData: false }),
+
   read('get_client_bank_accounts', 'Bankovní účty obchodního partnera',
     'Aktivní bankovní účty partnera s nezávislými příznaky původu: `source_vat_registry` (zveřejněný v registru plátců '
     + 'DPH), `source_bank_statement` (viděný na bankovním výpisu) a `source_manual` (zadaný ručně). Použij před platbou '

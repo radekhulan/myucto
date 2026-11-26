@@ -519,39 +519,44 @@ const TOOL_GROUPS = computed(() => [
     title: 'Fakturace a pohledávky',
     tools: 'list_invoices, list_unpaid_invoices, get_invoice, list_invoice_payments, '
       + 'list_purchase_invoices, get_purchase_invoice, create_invoice, issue_invoice, '
-      + 'send_invoice, mark_invoice_paid, send_invoice_reminder',
+      + 'send_invoice, mark_invoice_paid, send_invoice_reminder, list_invoice_items, list_invoice_activity, '
+      + 'list_invoice_archived_pdfs, clone_invoice_drafts_bulk, create_purchase_invoice_stock_receipt',
   },
   {
     title: 'Výkazy práce a materiálu',
     tools: 'get_work_report, add_work_report_entry, add_work_report_material, '
-      + 'remove_work_report_entry, list_projects',
+      + 'remove_work_report_entry, delete_invoice_work_report, list_work_report_billing_templates',
   },
   {
     title: t('mcp_server_page.tool_groups.projects'),
     tools: 'list_projects, get_project, project_stats, project_profitability, '
-      + 'save_project, archive_project, delete_project',
+      + 'save_project, archive_project, delete_project, get_project_dimensions',
   },
   {
     title: t('mcp_server_page.tool_groups.documents'),
     tools: 'list_documents, search_documents, get_document, list_entity_documents, '
-      + 'update_document, link_document, unlink_document',
+      + 'update_document, link_document, unlink_document, download_document_file, list_trashed_documents, '
+      + 'move_document_folder, restore_document, restore_document_folder',
   },
   {
     title: t('mcp_server_page.tool_groups.logbook'),
     tools: 'list_logbook_cars, save_logbook_car, delete_logbook_car, '
       + 'list_logbook_trip_categories, list_logbook_trips, save_logbook_trip, '
       + 'delete_logbook_trip, list_logbook_fuelings, save_logbook_fueling, '
-      + 'delete_logbook_fueling, logbook_summary',
+      + 'delete_logbook_fueling, logbook_summary, list_logbook_odometer_readings, save_logbook_odometer_reading, '
+      + 'list_logbook_odometer_gaps, list_logbook_trip_templates',
   },
   {
     title: 'Daně — jen čtení',
     tools: 'vat_return_preview, vat_trend, vat_drafts_prediction, vat_control_statement_preview, '
-      + 'vat_ledger, vat_summary_report_preview, income_tax_analysis, list_tax_submissions, tax_calendar',
+      + 'vat_ledger, vat_summary_report_preview, income_tax_analysis, list_tax_submissions, tax_calendar, '
+      + 'list_reports_oss_evidence, reconcile_oss_submission, get_submitted_vat_control_evidence',
   },
   {
     title: 'Účetnictví — jen čtení',
     tools: 'list_accounting_periods, trial_balance, balance_sheet, income_statement, general_ledger, '
-      + 'account_statement, saldo, chart_of_accounts, list_journal_entries, get_journal_entry, journal_entry_form, cash_journal',
+      + 'account_statement, saldo, chart_of_accounts, list_journal_entries, get_journal_entry, journal_entry_form, cash_journal, '
+      + 'get_account_card, list_internal_documents, get_accrual_schedule, download_asset_depreciation_card',
   },
   {
     title: 'Statistika a přehledy',
@@ -563,22 +568,37 @@ const TOOL_GROUPS = computed(() => [
   {
     title: 'E-shop a sklad',
     tools: 'search_products, list_products, get_product, get_product_prices, set_product_prices, '
-      + 'list_categories, list_manufacturers, stock_levels, stock_availability, stock_valuation, list_warehouses',
+      + 'list_categories, list_manufacturers, stock_levels, stock_availability, stock_valuation, list_warehouses, '
+      + 'list_stock_sets, list_eshop_product_masters, create_stock_sales_order, create_stock_fulfillment_task',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.bank'),
+    tools: 'list_bank_accounts, list_bank_transactions, find_bank_payments_for_document, '
+      + 'match_bank_payment_to_document, match_bank_payments_batch, list_gopay_clearings',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.property'),
+    tools: 'property_receivable_card, property_receivable_reconciliation, list_property_receivable_parties',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.nonprofit'),
+    tools: 'get_nonprofit_tax_assessment_summary, get_nonprofit_tax_source_summary, nonprofit_tax_assessment_page',
   },
   {
     title: t('mcp_server_page.tool_groups.payroll'),
     tools: 'list_payroll_people, get_payroll_person, change_payroll_salary, list_payroll_components, '
       + 'list_payroll_inputs, create_payroll_input, update_payroll_input, list_payroll_runs, '
-      + 'get_payroll_salary_result, get_payroll_time_month, save_payroll_time_entry, '
+      + 'get_payroll_salary_result, get_payroll_run_results, get_payroll_time_month, save_payroll_time_entry, '
       + 'list_payroll_absences, list_payroll_average_earnings, create_payroll_absence',
   },
   {
     title: 'Odběratelé a ARES',
-    tools: 'search_clients, get_client, create_client, update_client, lookup_company_in_ares',
+    tools: 'search_clients, get_client, create_client, update_client, get_client_dimensions, '
+      + 'lookup_company_in_ares, lookup_vat_id_in_vies, lookup_vat_registry_bank_accounts',
   },
   {
     title: 'Hledání a číselníky',
-    tools: 'search, list_vat_rates, list_suppliers, whoami',
+    tools: 'search, list_vat_rates, list_effective_vat_rates, list_codebooks_units, list_public_holidays, list_suppliers, whoami',
   },
 ])
 

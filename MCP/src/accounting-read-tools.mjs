@@ -93,12 +93,12 @@ export const ACCOUNTING_READ_TOOLS = [
     'Saldokonto jednoho účtu k datu: řádky deníku spárované do okruhů (doklad, úhrady, zůstatek). S `include_suggestions` '
     + 'přidá návrhy, které otevřené položky k sobě patří. Návrhy nepoužije ani nic nespáruje.', {
       account_id: id('ID účtu z chart_of_accounts (ne číslo účtu).'),
-      as_of: date('K datu, jinak dnes.'),
+      as_of: date('K rozhodnému datu.'),
       only_open: bool('Jen neuzavřené okruhy (výchozí true).'),
       include_suggestions: bool('Přidat návrhy párování.'),
       days: int('Jen návrhy: okno ± dní pro hledání protipoložky.', { minimum: 1, maximum: 366 }),
       ...PAGING,
-    }, ['account_id'], false, async (c, a, tool) => {
+    }, ['account_id', 'as_of'], false, async (c, a, tool) => {
       const path = `/accounting/open-items/${seg(a.account_id)}`;
       const query = { ...pick(a, ['as_of', 'page', 'per_page']), ...(a.only_open === undefined ? {} : { only_open: a.only_open ? 1 : 0 }) };
       const items = await c.get(path, query, tool);
@@ -108,9 +108,9 @@ export const ACCOUNTING_READ_TOOLS = [
   custom('open_items_listing', 'Soupis otevřených položek',
     'Soupis otevřených položek více účtů k datu (podklad inventarizace pohledávek a závazků), např. 311, 321, 314, 324. '
     + 'Nic nemění.', {
-      as_of: date('K datu, jinak dnes.'),
+      as_of: date('K rozhodnému datu.'),
       account_codes: { type: 'array', description: 'Čísla syntetických nebo analytických účtů, jinak výchozí sada.', items: str('Číslo účtu.', { pattern: '^[0-9]{3}[0-9.]*$' }), uniqueItems: true },
-    }, [], false, (c, a, tool) => c.get('/accounting/reports/open-items-list', {
+    }, ['as_of'], false, (c, a, tool) => c.get('/accounting/reports/open-items-list', {
       ...pick(a, ['as_of']), ...(a.account_codes ? { codes: a.account_codes.join(',') } : {}),
     }, tool)),
   read('vat_clearing_status', 'Vypořádání DPH za měsíc',
@@ -148,9 +148,13 @@ export const ACCOUNTING_READ_TOOLS = [
       kind: str('Druh sestavy.', { enum: ['inventory', 'movements'] }),
       as_of: date('Jen inventory: k datu.'),
       from: date('Jen movements: od data.'), to: date('Jen movements: do data.'),
-    }, ['kind'], false, (c, a, tool) => (a.kind === 'movements'
-      ? c.get('/accounting/reports/small-assets/movements', pick(a, ['from', 'to']), tool)
-      : c.get('/accounting/reports/small-assets/inventory', pick(a, ['as_of']), tool))),
+    }, ['kind'], false, (c, a, tool) => {
+      if (a.kind === 'inventory') {
+        return c.get('/accounting/reports/small-assets/inventory', pick(a, ['as_of']), tool);
+      }
+      if (!a.from || !a.to) throw new Error('Pro pohyby zadej `from` a `to`.');
+      return c.get('/accounting/reports/small-assets/movements', pick(a, ['from', 'to']), tool);
+    }),
   read('asset_purchase_candidates', 'Přijaté faktury na majetek bez karty',
     'Přijaté faktury označené jako pořízení majetku, ke kterým ještě nevznikla majetková karta. Kartu nezakládá.',
     {}, '/accounting/assets/purchase-candidates'),
@@ -174,6 +178,12 @@ export const ACCOUNTING_READ_TOOLS = [
       period: str('Zdaňovací období.', { enum: ['monthly', 'quarterly'] }),
       as_of: date('K datu.'), from: date('Od data.'), to: date('Do data.'),
     }, ['check'], false, (c, a, tool) => {
+      if (a.check === 'related_parties' && (!a.from || !a.to)) {
+        throw new Error('Pro obchody se spojenými osobami zadej `from` a `to`.');
+      }
+      if (a.check === 'vat_coefficient' && a.year === undefined) {
+        throw new Error('Pro koeficient DPH zadej `year`.');
+      }
       const [path, keys] = VAT_CHECKS[a.check];
       return c.get(path, keys.length ? pick(a, keys) : null, tool);
     }),

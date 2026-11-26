@@ -282,7 +282,7 @@ const calendarClient = (invoice = calendarDraft()) => new FakeClient({
   'PUT /invoices/42': { id: 42, status: 'draft', total_with_vat: 12100 },
 });
 
-test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async () => {
+test('rozpis plateb pošle jen splátky a nepřepisuje položky dokladu', async () => {
   const client = calendarClient();
   const result = await run(client, 'set_invoice_payment_schedule', {
     invoice_id: 42,
@@ -296,28 +296,10 @@ test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async 
   assert.equal(puts.length, 1);
   assert.equal(puts[0].method, 'PUT');
   assert.equal(puts[0].path, '/invoices/42');
-  const body = puts[0].body;
-  assert.equal(body.invoice_type, 'rent_calendar');
-  assert.equal(body.calendar_contract_ref, 'Nájemní smlouva 1/2026');
-  assert.equal(body.client_id, 8);
-  assert.equal(body.project_id, 3);
-  assert.equal(body.note_below_items, 'Splátky podle smlouvy');
-  assert.equal(body.discount_percent, 10);
-  // Slevový řádek generuje server; ostatní položky jdou zpět i se skrytými poli.
-  assert.equal(body.items.length, 1);
-  assert.deepEqual(body.items[0], {
-    id: 101, revenue_account_code: '613', counter_account_code: '315', posting_rule_key: 'najem.kancelare',
-    description: 'Nájem kanceláře', quantity: 12, duration_minutes: null, unit: 'měs',
-    unit_price_without_vat: 1000, list_unit_price: 1200, vat_rate_id: 1, order_index: 0, item_kind: 'standard', vat_classification_code: '1',
-    stock_item_id: null, warehouse_id: null, small_asset_id: null, asset_id: null,
-    accrual_from: '2026-10-01', accrual_to: '2027-09-30',
-    oss_applicable: false, oss_consumer_country: null,
-    tracking_allocations: [{ quantity: '1.000', serial_number: 'VIN-A', lot_code: null, expires_on: null }],
-  });
-  assert.deepEqual(body.payment_schedule, [
+  assert.deepEqual(puts[0].body, { payment_schedule: [
     { due_on: '2026-10-15', total_amount: 6050, tax_date: '2026-10-01', base_amount: 5000, vat_amount: 1050, note: 'první splátka' },
     { due_on: '2026-11-15', total_amount: 6050, base_amount: 5000, vat_amount: 1050 },
-  ]);
+  ] });
   assert.equal(result.invoice_id, 42);
   assert.equal(result.previous_payment_schedule.length, 1);
 });
@@ -361,7 +343,7 @@ test('platební kalendář DUZP splátky odmítne, bez něj rozpis uloží', asy
     invoice_id: 42,
     payment_schedule: [{ due_on: '2026-10-15', base_amount: 10000, vat_amount: 2100 }],
   });
-  assert.equal(client.writes()[0].body.invoice_type, 'advance_calendar');
+  assert.equal('invoice_type' in client.writes()[0].body, false);
   assert.deepEqual(client.writes()[0].body.payment_schedule, [
     { due_on: '2026-10-15', total_amount: 12100, base_amount: 10000, vat_amount: 2100 },
   ]);
@@ -514,47 +496,28 @@ test('založení pravidelné fakturace posílá zadání a pořadí položek', a
   });
 });
 
-test('úprava pravidelné fakturace pošle celou šablonu a zachová položky', async () => {
-  const client = new FakeClient({ 'GET /recurring/5': recurringTemplate() });
+test('úprava hlavičky pravidelné fakturace ponechá uložené položky serveru', async () => {
+  const client = new FakeClient();
   await run(client, 'update_recurring_invoice', { id: 5, end_of_month: true, note_below_items: 'Nová poznámka' });
 
+  assert.equal(client.calls.length, 1);
   const [put] = client.writes();
   assert.equal(put.method, 'PUT');
   assert.equal(put.path, '/recurring/5');
-  assert.equal(put.body.client_id, 8);
-  assert.equal(put.body.project_id, 3);
-  assert.equal(put.body.name, 'Měsíční paušál');
-  assert.equal(put.body.anchor_date, '2026-01-05');
-  assert.equal(put.body.currency_id, 1);
-  assert.equal(put.body.payment_due_days, 14);
-  assert.equal(put.body.increment_month_in_descriptions, true);
-  assert.equal(put.body.end_of_month, true);
-  assert.equal(put.body.day_of_month, null, 'Den v měsíci se s koncem měsíce vylučuje.');
-  assert.equal(put.body.note_below_items, 'Nová poznámka');
-  assert.equal('status' in put.body, false);
-  assert.equal('next_run_date' in put.body, false);
-  // BEZ OPRAVY PADÁ: úprava hlavičky smazala výnosový účet, skladovou vazbu i druh řádku šablony.
-  assert.deepEqual(put.body.items, [{
-    item_kind: 'standard', price_list_item_id: null, catalog_policy: 'fixed', description_source: 'template',
-    description: 'Správa serveru', quantity: 1, duration_minutes: null, unit: 'měs',
-    unit_price_without_vat: 5000, vat_rate_id: 1, vat_classification_code: '1', order_index: 0,
-    revenue_account_code: '602.100', stock_item_id: 44, warehouse_id: 2,
-    oss_applicable: false, oss_consumer_country: null,
-  }]);
+  assert.deepEqual(put.body, { end_of_month: true, note_below_items: 'Nová poznámka' });
 });
 
 test('úprava pravidelné fakturace s položkami je nahradí a zakázku jde odebrat', async () => {
-  const client = new FakeClient({ 'GET /recurring/5': recurringTemplate() });
+  const client = new FakeClient();
   await run(client, 'update_recurring_invoice', {
     id: 5, project_id: 0,
     items: [{ description: 'Nová položka', quantity: 2, unit_price_without_vat: 100, vat_rate_id: 1 }],
   });
   const [put] = client.writes();
-  assert.equal(put.body.project_id, null);
-  assert.equal(put.body.day_of_month, 5);
-  assert.deepEqual(put.body.items, [
-    { unit: 'ks', description: 'Nová položka', quantity: 2, unit_price_without_vat: 100, vat_rate_id: 1, order_index: 0 },
-  ]);
+  assert.deepEqual(put.body, {
+    project_id: null,
+    items: [{ unit: 'ks', description: 'Nová položka', quantity: 2, unit_price_without_vat: 100, vat_rate_id: 1, order_index: 0 }],
+  });
 });
 
 test('přeplánování pošle očekávaný současný termín', async () => {

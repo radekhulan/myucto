@@ -73,6 +73,36 @@ import { ACCOUNTING_READ_TOOLS } from './accounting-read-tools.mjs';
 import { CODEBOOK_TOOLS } from './codebook-tools.mjs';
 import { DOCUMENT_DIMENSION_TOOLS } from './document-dimension-tools.mjs';
 
+import { API_INVOICES_TOOLS } from './invoices-api-tools.mjs';
+
+import { API_BANK_TOOLS } from './bank-api-tools.mjs';
+
+import { API_PURCHASE_TOOLS } from './purchase-api-tools.mjs';
+
+
+
+import { API_DOCUMENTS_TOOLS } from './documents-api-tools.mjs';
+
+import { API_LOGBOOK_TOOLS } from './logbook-api-tools.mjs';
+
+import { API_ACCOUNTING_TOOLS } from './accounting-api-tools.mjs';
+
+import { API_ASSETS_TOOLS } from './assets-api-tools.mjs';
+
+import { API_REPORTS_TOOLS } from './reports-api-tools.mjs';
+
+import { API_OTHER_ITEMS_TOOLS } from './other-items-api-tools.mjs';
+
+import { API_CODEBOOKS_TOOLS } from './codebooks-api-tools.mjs';
+
+import { API_SUPPLIERS_TOOLS } from './suppliers-api-tools.mjs';
+
+import { API_PROPERTY_TOOLS } from './property-api-tools.mjs';
+
+import { API_NONPROFIT_TOOLS } from './nonprofit-api-tools.mjs';
+
+import { API_STOCK_TOOLS } from './stock-api-tools.mjs';
+
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
 const num = (description, extra = {}) => ({ type: 'number', description, ...extra });
@@ -584,6 +614,16 @@ function checkCashRegister(paymentMethod, cashRegisterId) {
 export const draftResult = (invoiceId, summary, saved) => ({ invoice_id: invoiceId, ...summary, invoice: saved });
 
 /** Název výkazu podle období dokladu — stejný tvar, jaký nabízí aplikace. */
+function workReportLine(item) {
+  return {
+    description: item.description,
+    work_date: item.work_date ?? null,
+    hours: Number(item.hours),
+    rate: Number(item.rate),
+    ...(item.duration_minutes == null ? {} : { duration_minutes: Number(item.duration_minutes) }),
+  };
+}
+
 function defaultReportTitle(invoice) {
   const period = String(invoice?.tax_date || invoice?.issue_date || '').slice(0, 7);
   return period ? `Výkaz práce ${period}` : 'Výkaz práce';
@@ -675,21 +715,62 @@ const STOCK_DOC_LINES = arrayOf(
     qty: num('Množství v měrné jednotce karty. Vždy kladné, směr pohybu určuje `doc_type`.', { exclusiveMinimum: 0 }),
     unit_cost: num('Pořizovací cena za MJ bez DPH. Jen u příjemky (`receipt`) — u výdeje a převodky si ji doplní zaúčtování.'),
     extra_cost: num('Vedlejší pořizovací náklady rozpočítané na řádek (doprava, clo). Jen u příjemky.'),
-    purchase_invoice_item_id: int('Řádek přijaté faktury, ze kterého příjemka vznikla. Při úpravě příjemky z faktury ho pošli zpět, jinak se vazba ztratí.'),
     fill_intrastat: {
       type: 'boolean',
-      description: 'Jen `true`: po zaúčtování doplní na kartu KN8 a zemi původu z řádku faktury (`purchase_invoice_item_id` té faktury, ze které příjemka vznikla), pokud tam chybí. Nastavit vyžaduje právo upravovat skladové karty. Při úpravě konceptu pošli zpět, jinak se volba zruší.',
+      description: 'Po zaúčtování doplní na kartu chybějící kód KN8 a zemi původu ze zdrojového řádku přijaté faktury. Nastavení vyžaduje právo upravovat skladové karty.',
     },
-    note: str('Poznámka k řádku.'),
-    purchase_invoice_item_id: int('Řádek přijaté faktury, ze kterého příjemka vznikla. Při úpravě příjemky z faktury ho pošli zpět, jinak se vazba ztratí.'),
+    note: str('Poznámka k řádku.', { type: ['string', 'null'] }),
+    source_description: str('Popis ze zdrojového dokladu.', { type: ['string', 'null'] }),
+    source_qty: num('Množství ze zdrojového dokladu.', { type: ['number', 'null'], exclusiveMinimum: 0 }),
+    tracking_allocations: arrayOf('Rozdělení množství mezi šarže, sériová čísla a skladové lokace.', {
+      quantity: num('Množství v alokaci.', { exclusiveMinimum: 0 }),
+      stock_tracking_unit_id: int('ID existující šarže nebo sériového kusu.', { type: ['integer', 'null'], minimum: 1 }),
+      unit_code: str('Kód měrné jednotky alokace.', { maxLength: 20 }),
+      serial_number: str('Sériové číslo.', { type: ['string', 'null'], maxLength: 184 }),
+      lot_code: str('Kód šarže.', { type: ['string', 'null'], maxLength: 100 }),
+      expires_on: str('Datum expirace.', { type: ['string', 'null'], format: 'date' }),
+      location_id: int('Zdrojová lokace.', { type: ['integer', 'null'], minimum: 1 }),
+      location_to_id: int('Cílová lokace.', { type: ['integer', 'null'], minimum: 1 }),
+    }, ['quantity'], { maxItems: 10000 }),
+    invoice_item_id: int('ID zdrojového řádku vydané faktury.', { type: ['integer', 'null'], minimum: 1 }),
+    purchase_order_line_id: int('ID řádku nákupní objednávky, ke kterému se příjem počítá.', { type: ['integer', 'null'], minimum: 1 }),
+    purchase_invoice_item_id: int('ID zdrojového řádku přijaté faktury, ze kterého příjemka vznikla.', { type: ['integer', 'null'], minimum: 1 }),
     remember_seller_code: {
       type: 'boolean',
-      description: 'Jen `true`: po zaúčtování uloží kód z řádku faktury (`purchase_invoice_item_id` té faktury, ze které příjemka vznikla) ke kartě pro tohoto dodavatele a odebere ho z jeho ostatních karet. Nastavit vyžaduje právo upravovat skladové karty. Při úpravě konceptu pošli zpět, jinak se volba zruší.',
+      description: 'Po zaúčtování uloží ke kartě dodavatelský kód ze zdrojového řádku přijaté faktury a odebere ho z ostatních karet téhož dodavatele. Nastavení vyžaduje právo upravovat skladové karty.',
     },
   },
   ['stock_item_id', 'qty'],
   { minItems: 1 },
 );
+
+const STOCK_DOC_LINE_FIELDS = Object.keys(STOCK_DOC_LINES.items.properties);
+const STOCK_DOC_SOURCE_FIELDS = [
+  'invoice_item_id', 'purchase_invoice_item_id', 'purchase_order_line_id', 'source_description', 'source_qty',
+];
+
+function mergeStockDocumentLines(current, proposed) {
+  if (!Array.isArray(current)) throw new Error('Detail skladového dokladu neobsahuje řádky. Změna se neprovedla.');
+  const byId = new Map(current.map((line) => [line.id, line]));
+  const seen = new Set();
+  const lines = proposed.map(({ id, ...input }) => {
+    if (id === undefined) return input;
+    const stored = byId.get(id);
+    if (!stored || seen.has(id)) throw new Error(`Řádek #${id} na dokladu chybí nebo byl zadán vícekrát. Načtěte znovu get_stock_document.`);
+    if (stored.stock_item_id !== input.stock_item_id) {
+      throw new Error(`Řádek #${id} patří k jiné skladové kartě. Pro novou kartu zadejte nový řádek bez ID.`);
+    }
+    seen.add(id);
+    return merged(stored, input, STOCK_DOC_LINE_FIELDS);
+  });
+  for (const line of current) {
+    if (seen.has(line.id)) continue;
+    if (line.tracking_allocations?.length || STOCK_DOC_SOURCE_FIELDS.some((key) => line[key] != null)) {
+      throw new Error(`Chybí řádek #${line.id}, který má zdrojovou vazbu nebo alokaci. Zahrňte jej s původním ID z get_stock_document.`);
+    }
+  }
+  return lines;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Číselníky e-shopu
@@ -796,6 +877,20 @@ export const TOOLS = [
   ...ACCOUNTING_READ_TOOLS,
   ...CODEBOOK_TOOLS,
   ...DOCUMENT_DIMENSION_TOOLS,
+  ...API_STOCK_TOOLS,
+  ...API_NONPROFIT_TOOLS,
+  ...API_PROPERTY_TOOLS,
+  ...API_SUPPLIERS_TOOLS,
+  ...API_CODEBOOKS_TOOLS,
+  ...API_OTHER_ITEMS_TOOLS,
+  ...API_REPORTS_TOOLS,
+  ...API_ASSETS_TOOLS,
+  ...API_ACCOUNTING_TOOLS,
+  ...API_LOGBOOK_TOOLS,
+  ...API_DOCUMENTS_TOOLS,
+  ...API_PURCHASE_TOOLS,
+  ...API_BANK_TOOLS,
+  ...API_INVOICES_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────
@@ -1432,7 +1527,7 @@ export const TOOLS = [
     title: 'Upravit odběratele',
     description:
       'Změní údaje existujícího odběratele. Uveď jen to, co se má změnit — zbytek '
-      + 'karty se zachová (nástroj si ji načte a pošle zpět kompletní).\n\n'
+      + 'karty se zachová.\n\n'
       + '`refresh_from_ares: true` znovu natáhne název, adresu a DIČ z rejstříku '
       + 'podle IČO na kartě. Ručně zadané hodnoty mají i tady přednost před tím, '
       + 'co vrátí ARES. Plátcovství DPH (`is_vat_payer`) se mění VÝHRADNĚ '
@@ -1479,35 +1574,17 @@ export const TOOLS = [
         }
       }
 
-      // Pořadí priorit: zadání uživatele → ARES → současný stav karty.
-      // Server validuje celý payload (company_name, street, city, zip jsou povinné),
-      // takže neposíláme jen změněná pole, ale kompletní kartu.
-      const pick = (key, aresKey = key) => a[key] ?? ares?.[aresKey] ?? current[key];
-
-      const payload = {
-        company_name: pick('company_name'),
-        street: pick('street'),
-        city: pick('city'),
-        zip: pick('zip'),
-        country_iso2: pick('country_iso2') || 'CZ',
-        ic: a.ic ?? current.ic ?? '',
-        dic: pick('dic'),
-        main_email: a.main_email ?? current.main_email ?? '',
-        phone: a.phone ?? current.phone ?? null,
-        language: a.language ?? current.language ?? 'cs',
-        currency_default_id: current.currency_default_id,
-        is_customer: a.is_customer ?? current.is_customer,
-        is_vendor: a.is_vendor ?? current.is_vendor,
-        // Jen explicitně poslaná hodnota — refresh_from_ares plátcovství NEPŘEPISUJE
-        // (tichá změna flagu by se propsala do nových dokladů; stávající nesou snapshot).
-        is_vat_payer: a.is_vat_payer ?? current.is_vat_payer,
-        note: a.note ?? current.note ?? '',
-        simplified_only: a.simplified_only ?? current.simplified_only ?? false,
-      };
-      if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
-      else if (current.hourly_rate !== undefined) payload.hourly_rate = current.hourly_rate;
-      if (a.payment_due_days !== undefined) payload.payment_due_days = Number(a.payment_due_days);
-      else if (current.payment_due_days !== undefined) payload.payment_due_days = current.payment_due_days;
+      const payload = changed(a, [
+        'company_name', 'street', 'city', 'zip', 'country_iso2', 'ic', 'dic', 'main_email', 'phone',
+        'language', 'hourly_rate', 'is_customer', 'is_vendor', 'is_vat_payer', 'note', 'simplified_only',
+      ]);
+      for (const key of ['company_name', 'street', 'city', 'zip', 'country_iso2', 'dic']) {
+        if (payload[key] === undefined && ares?.[key] !== undefined) payload[key] = ares[key];
+      }
+      if (a.payment_due_days !== undefined) {
+        payload.payment_due_default = a.payment_due_days;
+        payload.payment_due_unit = 'days';
+      }
 
       const updated = await c.put(`/clients/${seg(a.id)}`, payload, tool);
       return { ares: aresNote, client: updated };
@@ -1833,14 +1910,16 @@ export const TOOLS = [
         changes.project_id = null;
       }
 
-      // Položky se posílají vždy: server z nich přegeneruje slevový řádek a po změně
-      // dat, typu nebo přenesené povinnosti i daňové zařazení řádků.
       const rederive = INVOICE_TAX_CONTEXT.some(
         (key) => changes[key] !== undefined && changes[key] !== invoice[key],
       );
-      const lines = invoiceLines(invoice).map((item) => lineForPut(item, { rederive }));
+      const recalculate = rederive || ['discount_percent', 'prices_include_vat', 'currency', 'price_level_id']
+        .some((key) => changes[key] !== undefined);
+      const payload = recalculate
+        ? draftPayload(invoice, changes, invoiceLines(invoice).map((item) => lineForPut(item, { rederive })), { rederive })
+        : changes;
 
-      const saved = await c.put(`/invoices/${seg(invoiceId)}`, draftPayload(invoice, changes, lines, { rederive }), tool);
+      const saved = await c.put(`/invoices/${seg(invoiceId)}`, payload, tool);
       return draftResult(invoiceId, { changed: changes }, saved);
     },
   },
@@ -2309,12 +2388,7 @@ export const TOOLS = [
         }
       }
 
-      const items = (report?.items ?? []).map((it) => ({
-        description: it.description,
-        work_date: it.work_date ?? null,
-        hours: Number(it.hours),
-        rate: Number(it.rate),
-      }));
+      const items = (report?.items ?? []).map(workReportLine);
 
       items.push({
         description: String(a.description).trim(),
@@ -2441,12 +2515,7 @@ export const TOOLS = [
 
       const kept = items
         .filter((_, i) => i !== row - 1)
-        .map((it) => ({
-          description: it.description,
-          work_date: it.work_date ?? null,
-          hours: Number(it.hours),
-          rate: Number(it.rate),
-        }));
+        .map(workReportLine);
 
       const saved = await c.put(`/invoices/${seg(a.invoice_id)}/work-report`, {
         project_id: report?.project_id ?? invoice?.project_id ?? null,
@@ -5799,8 +5868,8 @@ export const TOOLS = [
     description:
       'Přepíše rozpracovaný doklad. Zaúčtovaný ani stornovaný doklad upravit NEJDE (422) — '
       + 'tam se chyba řeší stornem přes `reverse_stock_document`.\n\n'
-      + 'Pošleš-li `lines`, nahradí se řádky dokladu KOMPLETNĚ tímto seznamem; '
-      + 'načti si proto nejdřív `get_stock_document`.',
+      + 'Pokud předáš `lines`, použij celý výsledný seznam. U stávajících řádků zadej jejich `id` z `get_stock_document`. '
+      + 'Vynechaná pole těchto řádků se převezmou z detailu. Řádky se zdrojovou vazbou nebo alokací musí zůstat v seznamu se svým ID.',
     inputSchema: schema({
       id: int('ID skladového dokladu (musí být ve stavu `draft`).'),
       doc_date: date('Datum dokladu (RRRR-MM-DD).'),
@@ -5808,12 +5877,27 @@ export const TOOLS = [
       warehouse_id: int('ID skladu.'),
       warehouse_to_id: int('ID cílového skladu u převodky.'),
       partner_name: str('Protistrana.'),
-      lines: STOCK_DOC_LINES,
+      lines: {
+        ...STOCK_DOC_LINES,
+        items: {
+          ...STOCK_DOC_LINES.items,
+          properties: {
+            id: int('ID stávajícího řádku z detailu skladového dokladu. U nového řádku vynechte.', { minimum: 1 }),
+            ...STOCK_DOC_LINES.items.properties,
+          },
+        },
+      },
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/documents/${seg(a.id)}`, changed(a, [
-      'doc_date', 'description', 'warehouse_id', 'warehouse_to_id', 'partner_name', 'lines',
-    ]), tool),
+    run: async (c, a, tool) => {
+      const path = `/stock/documents/${seg(a.id)}`;
+      const body = changed(a, ['doc_date', 'description', 'warehouse_id', 'warehouse_to_id', 'partner_name']);
+      if (a.lines !== undefined) {
+        const current = await c.get(path, null, tool);
+        body.lines = mergeStockDocumentLines(current.lines, a.lines);
+      }
+      return c.put(path, body, tool);
+    },
   },
   {
     name: 'post_stock_document',

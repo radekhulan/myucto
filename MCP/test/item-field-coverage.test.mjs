@@ -4,7 +4,6 @@ import test from 'node:test';
 
 import { INVOICE_ITEM_FIELDS } from '../src/tools.mjs';
 import { PURCHASE_ITEM_FIELDS } from '../src/purchase-tools.mjs';
-import { RECURRING_ITEM_FIELDS } from '../src/invoice-tools.mjs';
 
 /**
  * Úprava konceptu přes MCP posílá položky zpět celé, protože server je nahrazuje
@@ -54,15 +53,6 @@ const TABLES = [
       import_tax_excluded: 'otisk importu, replaceItems neukládá',
       import_tax_vat_czk: 'otisk importu, replaceItems neukládá',
       purchase_order_line_id: 'vazbu na objednávku replaceItems neukládá',
-    },
-  },
-  {
-    table: 'recurring_invoice_template_items',
-    fields: RECURRING_ITEM_FIELDS,
-    aliases: {},
-    serverOwned: {
-      id: 'řádky šablony se nepárují podle ID',
-      template_id: 'vazba na šablonu z cesty',
     },
   },
 ];

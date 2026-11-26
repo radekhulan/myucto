@@ -45,13 +45,10 @@ test('verzovaný manifest rout pokrývá celý katalog včetně nástrojů mimo 
 });
 
 test('zápisové nástroje mají v manifestu rout i zápisovou operaci', () => {
-  // Scénáře těchto nástrojů zatím nedojdou za kontrolu syntetických dat k zápisu;
-  // nabídka je pak podle čtecí routy volnější a zápis odmítne až API. Seznam se smí jen zmenšovat.
-  const pendingScenarios = ['change_payroll_salary', 'purchase_orders_receipt', 'set_other_item_installments'];
   const routes = JSON.parse(readFileSync(new URL('../src/tool-routes.generated.json', import.meta.url), 'utf8'));
   const readOnly = Object.entries(routes).filter(([, entry]) => entry.write && entry.api.length > 0
     && entry.api.every(([method]) => method === 'GET')).map(([name]) => name);
-  assert.deepEqual(readOnly.toSorted(), pendingScenarios.toSorted());
+  assert.deepEqual(readOnly, []);
 });
 
 test('šablona zaznamenané cesty skryje ID i hodnoty z argumentů', () => {

@@ -123,7 +123,7 @@ export function fileInput(a, allowed, label) {
 
 const kb = (bytes) => (Number.isFinite(Number(bytes)) ? `${Math.round(Number(bytes) / 1024)} kB` : '? kB');
 
-function download(name, title, description, properties, required, path, { query, uri, meta, api = false }) {
+export function download(name, title, description, properties, required, path, { query, uri, meta, api = false }) {
   return {
     name,
     api,
