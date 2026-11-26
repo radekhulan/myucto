@@ -39,6 +39,7 @@ final readonly class J6AssessmentConfirmationService
         private J6FundingDependencyGuard $laterFunding,
         private J6FundingCapacity $fundingCapacity,
         private NonprofitGiftElectionGuard $giftElections,
+        private J6LegalProfileMatch $legalProfiles,
     ) {}
 
     public function confirm(J6DraftContext $context, string $idempotencyKey, string $reason, ?int $expectedAssessmentId): J6AssessmentCompletion
@@ -74,6 +75,8 @@ final readonly class J6AssessmentConfirmationService
                 || !hash_equals($draft['source_input_hash'], $context->sourceInputHash)) {
                 throw new NonprofitTaxAssessmentException('nonprofit_tax_draft_changed', 'Koncept posouzení nebo jeho účetní podklad se změnil.', 409);
             }
+            // Potvrzení profilu zamyká stejná období, proto jeho souběžná změna počká nebo se tu projeví.
+            J6LegalProfileMatch::assertMatches($draft['header'], $this->legalProfiles->context($context->supplierId, $context->periodId, true));
             $previous = $this->assessments->latest($context->supplierId, $context->periodId, true);
             $currentConfirmedId = ($previous['status'] ?? null) === 'confirmed' ? $previous['id'] : null;
             if ($currentConfirmedId !== $expectedAssessmentId) {

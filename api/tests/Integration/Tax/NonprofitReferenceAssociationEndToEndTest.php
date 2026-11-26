@@ -313,15 +313,22 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
     public function testReadinessReportsProfileConflictWithSourcesInOrder(): void
     {
         $this->postReferenceYear();
-        $request = $this->legalRequest('tj-legal-conflict');
+        // Koncept s jiným postavením po potvrzení profilu už J6 nepustí (#402 krok 2); konflikt vznikne
+        // změnou postavení v profilu po potvrzení posouzení.
+        $profiles = new NonprofitLegalProfileService($this->db);
+        $profiles->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-conflict'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-conflict-' . $this->supplier);
+        $request = $this->legalRequest('tj-legal-conflict-2');
+        $request['expected_revision'] = 1;
         $request['profile'] = ['kind' => 'non_vpp', 'entity_type' => 'other_non_vpp', 'main_activity_nonbusiness' => true,
             'legal_basis' => 'zdp_17a', 'evidence' => 'Syntetické stanovy spolku bez statusu veřejně prospěšného poplatníka'];
-        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $request, $this->actor);
-        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-conflict-' . $this->supplier);
+        $profiles->confirm($this->supplier, $this->period, $request, $this->actor);
         $caps = $this->readiness();
         self::assertSame(['sources' => 'ok', 'legal_profile' => 'ok', 'profile_match' => 'failed', 'return_data' => 'not_evaluated'],
             array_column($caps['readiness_steps'], 'status', 'step'));
         self::assertSame(['nonprofit_dppo_profile_conflict'], array_column($caps['preparation_findings'], 'code'));
+        $match = array_column($caps['readiness_steps'], null, 'step')['profile_match'];
+        self::assertSame([1, 2], [$match['pinned_profile_revision'], $match['current_profile_revision']]);
     }
 
     public function testReadinessOfCompleteYearKeepsCalculationFlowAndConfirmedChoices(): void

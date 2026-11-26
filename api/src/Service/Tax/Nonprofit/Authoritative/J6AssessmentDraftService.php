@@ -18,9 +18,11 @@ final readonly class J6AssessmentDraftService
         private DimensionPeriodGuard $periods,
         private NonprofitTaxSnapshotMaterializer $materializer,
         private NonprofitTaxSnapshotManifestRepository $snapshots,
+        private J6LegalProfileMatch $legalProfiles,
     ) {}
 
-    public function openCurrent(int $supplierId, int $periodId, array $profile, ?array $method, int $actor): array
+    /** $profile null = postavení převezme potvrzený právní profil DPPO období (J6LegalProfileMatch::adopt). */
+    public function openCurrent(int $supplierId, int $periodId, ?array $profile, ?array $method, int $actor): array
     {
         if ($actor <= 0) throw new \InvalidArgumentException('Draft actor is invalid.');
         return $this->periods->transaction(function () use ($supplierId, $periodId, $profile, $method, $actor): array {
@@ -31,7 +33,7 @@ final readonly class J6AssessmentDraftService
     }
 
     public function resetCurrent(int $supplierId, int $periodId, int $draftId, int $expectedRevision,
-        array $profile, ?array $method, int $actor): array
+        ?array $profile, ?array $method, int $actor): array
     {
         if ($actor <= 0 || $draftId <= 0) throw new \InvalidArgumentException('Draft mutation identity is invalid.');
         return $this->periods->transaction(function () use ($supplierId, $periodId, $draftId, $expectedRevision, $profile, $method, $actor): array {
@@ -42,6 +44,28 @@ final readonly class J6AssessmentDraftService
             }
             [$sourceManifestId, $sourceInputHash, $header] = $this->capture($supplierId, $periodId, $profile, $method);
             return $this->drafts->reset($supplierId, $draftId, $expectedRevision, $sourceInputHash, $header, $sourceManifestId);
+        });
+    }
+
+    /**
+     * Připne aktuální revizi potvrzeného profilu stejného postavení; mění jen hlavičku
+     * (revize konceptu +1), rozhodnutí, činnosti a financování zůstanou.
+     */
+    public function pinLegalProfile(int $supplierId, int $periodId, int $draftId, int $expectedRevision, int $actor): array
+    {
+        return $this->mutate($supplierId, $periodId, $draftId, $actor, function () use ($supplierId, $periodId, $draftId, $expectedRevision): array {
+            $draft = $this->drafts->find($supplierId, $draftId, true);
+            $context = $this->legalProfiles->context($supplierId, $periodId, true);
+            // Už připnutá aktuální revize: beze změny revize konceptu (opakovaný požadavek nezneplatní náhled).
+            if (J6LegalProfileMatch::pinsCurrent($draft['header'], $context)) {
+                if ($draft['revision_no'] !== $expectedRevision) {
+                    throw new NonprofitTaxAssessmentException('nonprofit_tax_draft_changed', 'Koncept posouzení mezitím změnila jiná operace.', 409);
+                }
+                return $draft;
+            }
+            $header = J6LegalProfileMatch::repin($draft['header'], $context);
+            NonprofitTaxRules::assessment($header);
+            return $this->drafts->replaceHeader($supplierId, $draftId, $expectedRevision, $header);
         });
     }
 
@@ -93,16 +117,16 @@ final readonly class J6AssessmentDraftService
             fn (): array => $this->drafts->patchMembers($supplierId, $draftId, $expectedRevision, $poolKind, $anchor, $upserts, $deletes));
     }
 
-    private function capture(int $supplierId, int $periodId, array $profile, ?array $method): array
+    private function capture(int $supplierId, int $periodId, ?array $profile, ?array $method): array
     {
         if ($this->materializer === null || $this->snapshots === null) throw new \LogicException('Current J6 source capture is not configured.');
+        // Profil se čte pod zámkem období (openPeriod) stejně jako při jeho potvrzení.
+        $header = J6LegalProfileMatch::adopt($this->legalProfiles->context($supplierId, $periodId, true), $profile, $method);
+        NonprofitTaxRules::assessment($header);
         $source = $this->materializer->materializeCurrent($supplierId, $periodId);
         $manifest = $this->snapshots->manifest($supplierId, $source->id, true);
         $period = (array) ($manifest['header']['period'] ?? []);
-        $header = ['profile' => $profile];
-        if ($method !== null) $header['method'] = $method;
-        NonprofitTaxRules::assessment($header);
-        $method === null ? NonprofitTaxRules::profile($profile, $period) : NonprofitTaxRules::documentedProfile($header, $period);
+        $method === null ? NonprofitTaxRules::profile($header['profile'], $period) : NonprofitTaxRules::documentedProfile($header, $period);
         return [$source->id, $source->inputHash, $header];
     }
 
@@ -141,6 +165,8 @@ final readonly class J6AssessmentDraftService
             || !is_array($header['profile'] ?? null) || (isset($header['method']) && !is_array($header['method']))) {
             throw new \InvalidArgumentException('Draft header is invalid.');
         }
+        // I hlavička předaná přímo musí mít platný tvar připnutí profilu (NonprofitTaxRules::assessment).
+        NonprofitTaxRules::assessment($header);
     }
 }
 

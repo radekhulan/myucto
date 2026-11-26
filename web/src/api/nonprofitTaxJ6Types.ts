@@ -6,7 +6,20 @@ export type J6FrozenKind = 'decision' | 'result' | 'coverage' | 'usage'
 
 export interface J6Profile { kind: J6ProfileKind; evidence: string; entity_kind?: string }
 export interface J6Method { mode: 'documented_manual'; valid_from: string; valid_to: string; legal_basis: string; evidence: string }
-export interface J6DraftHeader { profile: J6Profile; method?: J6Method }
+/** Připnutá revize právního profilu DPPO, ze které koncept převzal postavení. */
+export interface J6LegalProfilePin { id: number; revision_no: number; record_hash: string }
+export interface J6DraftHeader { profile: J6Profile; method?: J6Method; legal_profile?: J6LegalProfilePin }
+export type J6LegalProfileState = 'none' | 'manual' | 'pinned_current' | 'pinned_same_kind_outdated' | 'conflict' | 'unavailable'
+/** Shoda konceptu s potvrzeným právním profilem DPPO období; bez konceptu je state null. */
+export interface J6LegalProfileStatus {
+  state: J6LegalProfileState | null
+  current: { id: number; revision_no: number; kind: Exclude<J6ProfileKind, 'documented'>; entity_type: string | null } | null
+  pinned: { id: number; revision_no: number } | null
+  /** Koncept tvrdí postavení profilu a lze připnout jeho aktuální revizi. */
+  pinnable: boolean
+  /** Jen u stavu unavailable (a bez konceptu): právní profil období nejde načíst. */
+  error?: { code: string; message: string }
+}
 export interface J6Draft {
   id: number
   supplier_id: number
@@ -20,7 +33,7 @@ export interface J6Draft {
   updated_at: string
 }
 export interface J6Capabilities { can_edit: boolean; can_preview: boolean; can_confirm: boolean; source_complete: boolean; reason_code: string | null }
-export interface J6DraftEnvelope { draft: J6Draft; capabilities: J6Capabilities }
+export interface J6DraftEnvelope { draft: J6Draft; capabilities: J6Capabilities; legal_profile: J6LegalProfileStatus }
 export interface J6Period { id: number; fiscal_year: number; starts_on: string; ends_on: string }
 export interface J6SnapshotHeader {
   schema: 'nonprofit-j6-source.v2'
@@ -144,12 +157,13 @@ export interface J6AssessmentSummary {
   source_input_hash: string | null
   snapshot_input_hash: string | null
   receipt_hash: string | null
+  legal_profile?: J6LegalProfilePin | null
   conversion_required?: boolean
 }
 export interface J6HistoryHead { assessment_id: number | null; revision_no: number; status: J6AssessmentStatus | null }
 export interface J6AssessmentHistoryPage { head: J6HistoryHead; rows: J6AssessmentSummary[]; after: string | null }
 export interface J6PeriodSummary { source: J6CurrentSourceHeader; latest: J6AssessmentSummary | null }
-export interface J6CurrentDraft { draft: J6Draft | null; capabilities: J6Capabilities | null }
+export interface J6CurrentDraft { draft: J6Draft | null; capabilities: J6Capabilities | null; legal_profile: J6LegalProfileStatus }
 export interface J6AssessmentCompletion { assessment_id: number; supplier_id: number; period_id: number; revision: number; status: J6AssessmentStatus; request_hash: string; receipt: Record<string, unknown> }
 export interface J6WithdrawRequest { reason: string; idempotency_key: string }
 export interface J6ConvertRequest { expected_storage_version: J6StorageVersion; expected_input_hash: string; reason: string }
@@ -157,6 +171,8 @@ export type J6DocumentFormat = 'pdf' | 'xlsx'
 export interface J6FrozenSourcePage { rows: J6SourceRow[]; findings: J6SourceFinding[]; after: string | null }
 export interface J6FrozenCalculationPage { kind: J6FrozenKind; rows: Record<string, unknown>[]; after: string | null }
 
-export interface J6DraftOpenRequest { profile: J6Profile; method?: J6Method }
+/** Postavení vynechte, je-li potvrzený právní profil DPPO: server ho převezme a připne revizi. */
+export interface J6DraftOpenRequest { profile?: J6Profile; method?: J6Method }
+export interface J6PinLegalProfileRequest { expected_revision: number }
 export interface J6DraftResetRequest extends J6DraftOpenRequest { expected_revision: number }
 export interface J6ConfirmRequest { expected_revision: number; expected_assessment_id: number | null; reason: string; idempotency_key: string }

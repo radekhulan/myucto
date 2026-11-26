@@ -17,6 +17,7 @@ final readonly class J6AssessmentPreviewService
         private J6CurrentProviderFactory $sources,
         private J6AuthoritativeCalculator $calculator,
         private J6PreviewCache $cache,
+        private J6LegalProfileMatch $legalProfiles,
     ) {}
 
     public function prepare(J6DraftContext $context): J6CalculationReceipt
@@ -34,8 +35,10 @@ final readonly class J6AssessmentPreviewService
                 || !hash_equals($draft['source_input_hash'], $context->sourceInputHash)) {
                 throw new NonprofitTaxAssessmentException('nonprofit_tax_draft_changed', 'Koncept posouzení nebo jeho účetní podklad se změnil.', 409);
             }
+            $legal = $this->legalProfiles->context($context->supplierId, $context->periodId, true);
+            J6LegalProfileMatch::assertMatches($draft['header'], $legal);
             $identity = new J6PreviewIdentity($context->actor, $context->supplierId, $context->periodId,
-                $context->draftId, $context->revision, $context->sourceInputHash);
+                $context->draftId, $context->revision, $context->sourceInputHash, J6LegalProfileMatch::headHash($legal));
             return $this->calculator->calculate($this->sources->create($context->supplierId, $context->periodId, true),
                 new DraftJ6DecisionProvider($this->drafts, $context), $this->cache->createSink($identity));
         });
@@ -43,7 +46,9 @@ final readonly class J6AssessmentPreviewService
 
     public function page(string $token, J6DraftContext $context, string $kind, int $page): array
     {
+        // Nová revize právního profilu náhled zneplatní stejně jako nová revize konceptu.
         return $this->cache->read($token, new J6PreviewIdentity($context->actor, $context->supplierId,
-            $context->periodId, $context->draftId, $context->revision, $context->sourceInputHash), $kind, $page);
+            $context->periodId, $context->draftId, $context->revision, $context->sourceInputHash,
+            J6LegalProfileMatch::headHash($this->legalProfiles->context($context->supplierId, $context->periodId))), $kind, $page);
     }
 }

@@ -224,15 +224,27 @@ final readonly class NonprofitTaxPagedAssessmentRepository
             $row['graph_receipt'] = J6AssessmentGraphReceipt::fromArray(json_decode($row['j6_receipt_json'], true, flags: JSON_THROW_ON_ERROR));
         }
         unset($row['j6_receipt_json']);
+        // Připnutá revize právního profilu z hlavičky rozhodnutí (J6LegalProfileMatch); odvolání ani legacy ji nemají.
+        $legal = $row['legal_profile_json'] ?? null;
+        $legal = is_string($legal) ? json_decode($legal, true, flags: JSON_THROW_ON_ERROR) : null;
+        $row['legal_profile'] = is_array($legal) ? $legal : null;
+        unset($row['legal_profile_json']);
         return $row;
     }
 
     private function columns(string $alias = ''): string
     {
         $prefix = $alias === '' ? '' : $alias . '.';
+        $table = $alias === '' ? 'nonprofit_tax_assessments' : $alias;
         return implode(',', array_map(static fn (string $column): string => $prefix . $column,
             ['id', 'supplier_id', 'period_id', 'revision_no', 'previous_id', 'status', 'reason', 'ruleset', 'storage_version',
-                'input_hash', 'request_hash', 'idempotency_key', 'created_by', 'created_at', 'j6_receipt_json']));
+                'input_hash', 'request_hash', 'idempotency_key', 'created_by', 'created_at', 'j6_receipt_json']))
+            // Připnutí z hlavičky rozhodnutí v manifestu potvrzené revize, stejný zdroj jako dokument posouzení
+            // (HistoricJ6DecisionProvider::header). assessment_json (u legacy celá rozhodnutí) se nečte vůbec;
+            // odvolání odkazuje na manifest předchozí revize, připnutí proto nenese.
+            . ",CASE WHEN {$table}.storage_version='paged_v2' AND {$table}.status='confirmed' THEN (SELECT JSON_EXTRACT(m.header_json,'$.decision_header.legal_profile')
+                FROM nonprofit_tax_calculation_manifests m
+                WHERE m.supplier_id={$table}.supplier_id AND m.id={$table}.decision_manifest_id AND m.chunk_kind='decision') END AS legal_profile_json";
     }
 
     private function currentRead(bool $currentRead): void

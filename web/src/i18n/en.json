@@ -41841,8 +41841,28 @@
     "currentSource": "Current source evidence",
     "rows": "{count} accounting rows",
     "findings": "{count} findings",
-    "profile": "Legal profile",
-    "profileEvidence": "Legal profile evidence",
+    "profile": "Taxpayer posture",
+    "profileEvidence": "Posture evidence",
+    "legalProfile": {
+      "adopted": "The posture and its evidence are taken from the CIT legal profile, revision {revision}. They can only change by confirming a new profile revision.",
+      "outdated": "The draft is pinned to legal profile revision {pinned}; the current revision {current} has the same posture. Decisions in the draft stay valid; pin to take over the current revision.",
+      "unpinned": "The draft was created before the legal profile was confirmed (current revision {current}). The posture matches; pin it to record which revision it relies on.",
+      "conflictTitle": "The draft posture does not match the CIT legal profile",
+      "conflict": "The draft assesses the posture “{draft}”, the confirmed profile of the period states “{profile}”. Preview and confirmation are not possible. “Capture sources again” takes over the current profile and deletes the existing decisions.",
+      "none": "The period has no confirmed CIT legal profile. Enter the posture manually or confirm the legal profile first.",
+      "open": "Open the CIT legal profile",
+      "confirm": "Confirm the legal profile",
+      "pin": "Pin the current revision",
+      "evidenceFromProfile": "Taken from the CIT legal profile",
+      "unverified": "The manual draft without a documented organisation type was created before the legal profile was confirmed (current revision {current}) and is not compared with it. “Capture sources again” takes over the posture from the profile.",
+      "svjModule": "The draft assesses the posture “{draft}”, but the period has the SVJ module enabled, which requires the SVJ posture. Choose the SVJ posture and use “Capture sources again”; existing decisions are deleted.",
+      "unavailable": "The CIT legal profile of the period cannot be verified now: {message} Creating and resetting the draft, preview and confirmation wait until the profile is fixed by a new confirmation.",
+      "latest": "posture from CIT legal profile revision {revision}",
+      "refreshFailed": "The entered posture does not match the confirmed CIT legal profile and the profile state could not be loaded. Reload the overview and repeat the action.",
+      "errors": {
+        "nonprofit_dppo_legal_profile_invalid": "The posture in the profile does not match the documented legal form or the enabled SVJ module."
+      }
+    },
     "entityKind": "Documented entity kind",
     "choose": "Choose",
     "profiles": {
@@ -41976,7 +41996,10 @@
       "nonprofit_tax_gift_election_locked": "The gift exemption election can no longer be changed in this revision.",
       "nonprofit_tax_facts_incomplete": "Required facts or their evidence are missing.",
       "nonprofit_tax_framework_unsupported": "The accounting framework or period is not supported for this calculation.",
-      "nonprofit_tax_preview_not_found": "The preview expired or no longer belongs to the current revision. Prepare a new preview."
+      "nonprofit_tax_preview_not_found": "The preview expired or no longer belongs to the current revision. Prepare a new preview.",
+      "nonprofit_tax_legal_profile_conflict": "The draft posture does not match the confirmed CIT legal profile. Use “Capture sources again” to take over the current profile.",
+      "nonprofit_tax_legal_profile_mismatch": "The entered posture does not match the confirmed CIT legal profile. The form was refreshed from the profile; repeat the action.",
+      "nonprofit_tax_legal_profile_missing": "The period has no confirmed CIT legal profile to pin."
     },
     "sourceFindings": {
       "title": "Source findings",
@@ -44450,6 +44473,7 @@
     "reductionUncertain": "The save outcome is unknown. Verify the current draft. The same request can only be repeated against the original unchanged revision.",
     "readiness": {
       "title": "Calculation readiness",
+      "profileRevisions": "the assessment relies on profile revision {pinned}, the current revision is {current}",
       "steps": {
         "sources": "Sources and tax assessment",
         "legal_profile": "Legal profile",

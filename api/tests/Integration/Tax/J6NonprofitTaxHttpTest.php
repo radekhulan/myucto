@@ -295,6 +295,135 @@ final class J6NonprofitTaxHttpTest extends TestCase
         self::assertSame(3, $summary['latest']['revision_no']);
     }
 
+    /** #402 krok 2, A13: převzetí profilu přes HTTP, připnutí revize a jeho práva. */
+    public function testResetWithoutPostureAndWithoutLegalProfileIsRejectedWithoutWriting(): void
+    {
+        [$status, $opened] = $this->http('POST', $this->base() . '/draft', ['profile' => ['kind' => 'narrow_vpp', 'evidence' => 'Syntetické stanovy']]);
+        self::assertSame(200, $status, json_encode($opened));
+        $path = $this->base() . '/drafts/' . $opened['draft']['id'];
+        [$status, $reset] = $this->http('POST', $path . '/reset', ['expected_revision' => $opened['draft']['revision_no']]);
+        self::assertSame(422, $status, json_encode($reset));
+        self::assertSame('nonprofit_tax_facts_incomplete', $reset['error']['code']);
+        [$status, $after] = $this->http('GET', $path);
+        self::assertSame(200, $status, json_encode($after));
+        self::assertSame($opened['draft']['revision_no'], $after['draft']['revision_no']);
+        self::assertEquals(['kind' => 'narrow_vpp', 'evidence' => 'Syntetické stanovy'], $after['draft']['header']['profile']);
+    }
+
+    public function testLegalProfileIsAdoptedPinnedAndGuardedOverHttp(): void
+    {
+        [$status, $empty] = $this->http('GET', $this->base() . '/draft');
+        self::assertSame(200, $status);
+        self::assertSame(['state' => null, 'current' => null, 'pinned' => null, 'pinnable' => false], $empty['legal_profile']);
+        // Bez profilu ani postavení v těle: chybí doložené postavení.
+        [$status, $missing] = $this->http('POST', $this->base() . '/draft');
+        self::assertSame(422, $status, json_encode($missing));
+        self::assertSame('nonprofit_tax_facts_incomplete', $missing['error']['code']);
+        // Cizí nebo neexistující období: čtení konceptu zůstává 200 bez konceptu, chyba profilu jen ve stavu.
+        [$status, $foreign] = $this->http('GET', '/periods/999999999/nonprofit-tax/draft');
+        self::assertSame(200, $status, json_encode($foreign));
+        self::assertNull($foreign['draft']);
+        self::assertSame('nonprofit_legal_profile_period_not_found', $foreign['legal_profile']['error']['code']);
+
+        $legal = $this->confirmLegalProfile('narrow_vpp', 'association', 0, 'http-legal-1');
+        [$status, $empty] = $this->http('GET', $this->base() . '/draft');
+        self::assertSame(['id' => $legal['id'], 'revision_no' => 1, 'kind' => 'narrow_vpp', 'entity_type' => 'association'], $empty['legal_profile']['current']);
+
+        [$status, $mismatch] = $this->http('POST', $this->base() . '/draft', ['profile' => ['kind' => 'broad_vpp', 'evidence' => 'Syntetické']]);
+        self::assertSame(422, $status);
+        self::assertSame('nonprofit_tax_legal_profile_mismatch', $mismatch['error']['code']);
+        $count = $this->pdo->prepare('SELECT COUNT(*) FROM nonprofit_tax_drafts WHERE supplier_id=?');
+        $count->execute([$this->supplier]);
+        self::assertSame(0, (int) $count->fetchColumn());
+
+        [$status, $opened] = $this->http('POST', $this->base() . '/draft');
+        self::assertSame(200, $status, json_encode($opened));
+        self::assertEquals(['kind' => 'narrow_vpp', 'evidence' => 'Synthetic statutes'], $opened['draft']['header']['profile']);
+        self::assertEquals(['id' => $legal['id'], 'revision_no' => 1, 'record_hash' => $legal['record_hash']], $opened['draft']['header']['legal_profile']);
+        self::assertSame('pinned_current', $opened['legal_profile']['state']);
+
+        $this->confirmLegalProfile('narrow_vpp', 'association', 1, 'http-legal-2');
+        $pinPath = $this->base() . '/drafts/' . $opened['draft']['id'] . '/legal-profile';
+        $body = ['expected_revision' => $opened['draft']['revision_no']];
+        foreach (['bearer', ''] as $auth) {
+            [$status, $denied] = $this->http('POST', $pinPath, $body, auth: $auth);
+            self::assertSame(403, $status);
+            self::assertSame('nonprofit_tax_session_only', $denied['error']['code']);
+        }
+        [$status] = $this->http('POST', $pinPath, $body, permissions: ['accounting' => 1]);
+        self::assertSame(403, $status);
+        [$status] = $this->http('POST', $pinPath, $body, csrf: false);
+        self::assertSame(403, $status);
+        [$status] = $this->http('POST', $pinPath, $body, actor: $this->actor + 100000);
+        self::assertSame(404, $status);
+        [$status] = $this->http('POST', $pinPath, $body + ['profile' => $this->profile()]);
+        self::assertSame(400, $status);
+        foreach ([(string) $body['expected_revision'], 0] as $invalid) {
+            [$status] = $this->http('POST', $pinPath, ['expected_revision' => $invalid]);
+            self::assertSame(400, $status);
+        }
+        [$status, $outdated] = $this->http('GET', $this->base() . '/drafts/' . $opened['draft']['id']);
+        self::assertSame('pinned_same_kind_outdated', $outdated['legal_profile']['state']);
+        self::assertSame(1, $outdated['legal_profile']['pinned']['revision_no']);
+        self::assertSame(2, $outdated['legal_profile']['current']['revision_no']);
+
+        [$status, $pinned] = $this->http('POST', $pinPath, $body);
+        self::assertSame(200, $status, json_encode($pinned));
+        self::assertSame('pinned_current', $pinned['legal_profile']['state']);
+        self::assertSame($opened['draft']['revision_no'] + 1, $pinned['draft']['revision_no']);
+        [$status, $stale] = $this->http('POST', $pinPath, $body);
+        self::assertSame(409, $status);
+        self::assertSame('nonprofit_tax_draft_changed', $stale['error']['code']);
+
+        // Skutečná změna postavení: připnout nejde, reset bez postavení v těle převezme nový profil.
+        $this->confirmLegalProfile('broad_vpp', 'public_benefit_company', 2, 'http-legal-3');
+        [$status, $conflict] = $this->http('POST', $pinPath, ['expected_revision' => $pinned['draft']['revision_no']]);
+        self::assertSame(409, $status);
+        self::assertSame('nonprofit_tax_legal_profile_conflict', $conflict['error']['code']);
+        [$status, $preview] = $this->http('POST', $this->base() . '/drafts/' . $opened['draft']['id'] . '/preview', ['expected_revision' => $pinned['draft']['revision_no']]);
+        self::assertSame(409, $status);
+        self::assertSame('nonprofit_tax_legal_profile_conflict', $preview['error']['code']);
+        [$status, $reset] = $this->http('POST', $this->base() . '/drafts/' . $opened['draft']['id'] . '/reset', ['expected_revision' => $pinned['draft']['revision_no']]);
+        self::assertSame(200, $status, json_encode($reset));
+        self::assertSame('broad_vpp', $reset['draft']['header']['profile']['kind']);
+        self::assertSame(3, $reset['draft']['header']['legal_profile']['revision_no']);
+        self::assertSame('pinned_current', $reset['legal_profile']['state']);
+
+        // Modul SVJ zapnutý po potvrzení profilu jiného postavení: profil nejde doložit. Čtení a provedená
+        // mutace konceptu vrací stav `unavailable` s kódem chyby (ne 500), náhled chybu vrátí jako 4xx.
+        (new \MyInvoice\Repository\Property\PropertyProfileRepository($this->db))->save($this->supplier, ['expected_revision' => 0,
+            'effective_from' => '2026-01-01T00:00:00Z', 'effective_to' => null, 'enabled' => true, 'reason' => 'Synthetic SVJ module',
+            'title_ref' => 'Synthetic legal title', 'idempotency_key' => 'http-svj-' . $this->supplier], $this->actor);
+        $draftPath = $this->base() . '/drafts/' . $opened['draft']['id'];
+        [$status, $read] = $this->http('GET', $draftPath);
+        self::assertSame(200, $status, json_encode($read));
+        self::assertSame('unavailable', $read['legal_profile']['state']);
+        self::assertSame('nonprofit_dppo_legal_profile_invalid', $read['legal_profile']['error']['code']);
+        [$status, $patched] = $this->http('PATCH', $draftPath . '/activities', ['expected_revision' => $reset['draft']['revision_no'],
+            'upserts' => [['activity_kind_id' => 'synthetic-http-activity', 'payload' => ['kind' => 'nonbusiness']]], 'deletes' => []]);
+        self::assertSame(200, $status, json_encode($patched));
+        self::assertSame($reset['draft']['revision_no'] + 1, $patched['draft']['revision_no']);
+        self::assertSame('unavailable', $patched['legal_profile']['state']);
+        [$status, $blocked] = $this->http('POST', $draftPath . '/preview', ['expected_revision' => $patched['draft']['revision_no']]);
+        self::assertSame(422, $status);
+        self::assertSame('nonprofit_dppo_legal_profile_invalid', $blocked['error']['code']);
+        // Nový koncept ani reset postavení z nedoložitelného profilu nepřevezmou: 422 s důvodem, koncept beze změny.
+        [$status, $reopen] = $this->http('POST', $this->base() . '/draft');
+        self::assertSame([422, 'nonprofit_dppo_legal_profile_invalid'], [$status, $reopen['error']['code']]);
+        [$status, $failedReset] = $this->http('POST', $draftPath . '/reset', ['expected_revision' => $patched['draft']['revision_no']]);
+        self::assertSame([422, 'nonprofit_dppo_legal_profile_invalid'], [$status, $failedReset['error']['code']]);
+        [$status, $unchanged] = $this->http('GET', $draftPath);
+        self::assertSame($patched['draft']['revision_no'], $unchanged['draft']['revision_no']);
+    }
+
+    private function confirmLegalProfile(string $kind, string $entity, int $expected, string $key): array
+    {
+        return (new \MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period,
+            ['expected_revision' => $expected, 'idempotency_key' => $key . '-' . $this->supplier, 'reason' => 'Synthetic review',
+                'profile' => ['kind' => $kind, 'entity_type' => $entity, 'main_activity_nonbusiness' => true,
+                    'legal_basis' => 'zdp_17a', 'evidence' => 'Synthetic statutes']], $this->actor);
+    }
+
     private function dml(): array
     {
         $out = [];

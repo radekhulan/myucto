@@ -15,10 +15,22 @@ final class J6AssessmentDocumentRendererTest extends TestCase
         $payload = $this->payload();
         $tables = $renderer->tables($payload);
         self::assertSame(['Posouzení', 'Přechod výsledku'], array_keys($tables));
-        self::assertCount(14, $tables['Posouzení'][1]);
+        self::assertCount(15, $tables['Posouzení'][1]);
+        self::assertContains(['Původ postavení', 'Bez připnuté revize právního profilu DPPO'], $tables['Posouzení'][1]);
+        $payload['legal_profile'] = ['id' => 5, 'revision_no' => 2, 'record_hash' => str_repeat('d', 64)];
+        self::assertContains(['Původ postavení', 'Právní profil DPPO, revize 2 (otisk ' . str_repeat('d', 64) . ')'],
+            $renderer->tables($payload)['Posouzení'][1]);
         self::assertSame(['Výsledek klasifikačního posouzení', '400.00'], $tables['Přechod výsledku'][1][3]);
         self::assertStringStartsWith('%PDF-', $renderer->render($payload));
         self::assertStringStartsWith('PK', $renderer->xlsx($payload));
+    }
+
+    public function testDocumentedAssessmentNamesTheAdoptedIdentity(): void
+    {
+        $payload = $this->payload();
+        $payload['profile'] = ['kind' => 'documented', 'evidence' => 'Synthetic statutes', 'entity_kind' => 'svj'];
+        self::assertContains(['Postavení poplatníka', 'Uživatelem doložené postavení pro dané období (Společenství vlastníků jednotek)'],
+            (new J6AssessmentDocumentRenderer())->tables($payload)['Posouzení'][1]);
     }
 
     public function testBridgeMustReconcileExactly(): void

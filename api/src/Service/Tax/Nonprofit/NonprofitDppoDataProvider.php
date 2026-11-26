@@ -42,6 +42,8 @@ final class NonprofitDppoDataProvider
             if($legal===null)throw self::legalProfileRequired();
             if($passed!==null)$passed('legal_profile');
             if(isset($snapshot)){[$assessment,$j6Receipt]=$this->assessmentSource->current($supplier,$period,$snapshot);if($passed!==null)$passed('sources');}
+            // Shoda podle postavení ve výsledku J6, ne podle J6LegalProfileMatch::asserted: ruční posouzení (documented,
+            // i s převzatým entity_kind) metodika DPPO 504 nepřijímá a skončí konfliktem.
             if($assessment['result']['profile']!==$legal['profile']['kind'])throw new TaxReturnException('nonprofit_dppo_profile_conflict','Posouzení J6 nesouhlasí s právním profilem období.',409);
             if($passed!==null)$passed('profile_match');
             $elections=$inputs['nonprofit']??[];if(!is_array($elections))$this->invalid();

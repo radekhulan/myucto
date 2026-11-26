@@ -14,6 +14,7 @@ use MyInvoice\Service\Tax\Nonprofit\Authoritative\DraftJ6DecisionProvider;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6AssessmentDraftService;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6AssessmentDraftQueryService;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6DraftContext;
+use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6LegalProfileMatch;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentException;
 use MyInvoice\Service\Tax\Nonprofit\Snapshot\NonprofitTaxSnapshotHasher;
 use MyInvoice\Service\Tax\Nonprofit\Snapshot\NonprofitTaxSnapshotMaterializer;
@@ -48,7 +49,8 @@ final class J6AssessmentDraftServiceTest extends TestCase
         $this->sourceHash = hash('sha256', 'synthetic-j6-source');
         $this->repository = new NonprofitTaxDraftRepository($this->db);
         $this->service = new J6AssessmentDraftService($this->repository, new DimensionPeriodGuard($this->db),
-            $container->get(NonprofitTaxSnapshotMaterializer::class), new NonprofitTaxSnapshotManifestRepository($this->db, new NonprofitTaxSnapshotHasher()));
+            $container->get(NonprofitTaxSnapshotMaterializer::class), new NonprofitTaxSnapshotManifestRepository($this->db, new NonprofitTaxSnapshotHasher()),
+            $container->get(J6LegalProfileMatch::class));
     }
 
     protected function tearDown(): void

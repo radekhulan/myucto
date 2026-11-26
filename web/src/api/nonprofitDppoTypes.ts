@@ -22,7 +22,15 @@ export interface LegalCapabilities {
   readiness_steps?: ReadinessStep[]
 }
 export type ReadinessStepKey = 'sources' | 'legal_profile' | 'profile_match' | 'return_data'
-export interface ReadinessStep { step: ReadinessStepKey; status: 'ok' | 'failed' | 'not_evaluated'; code: string | null; message: string | null }
+export interface ReadinessStep {
+  step: ReadinessStepKey
+  status: 'ok' | 'failed' | 'not_evaluated'
+  code: string | null
+  message: string | null
+  /** Jen u profile_match: revize profilu připnutá potvrzeným posouzením J6 a aktuální revize. */
+  pinned_profile_revision?: number | null
+  current_profile_revision?: number | null
+}
 export interface LegalOverview { period: AccountingPeriod; latest: LegalRevision | null; entity_types: string[]; kinds: LegalKind[]; capabilities: LegalCapabilities }
 export interface LegalReadiness { period: AccountingPeriod; capabilities: LegalCapabilities }
 export interface AcceptanceRevision {

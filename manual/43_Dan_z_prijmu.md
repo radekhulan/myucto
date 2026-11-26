@@ -840,7 +840,9 @@ ještě před podáním.
 V nabídce Účetnictví otevřete **DPPO neziskové organizace** a vyberte účetní období.
 Právní profil obsahuje výslovně zvolené postavení poplatníka, druh organizace a doložené
 rozhodné skutečnosti. Oprávněný uživatel jej může potvrdit; předchozí potvrzení zůstávají
-v historii. Změna podkladů vyžaduje nové potvrzení profilu a příslušného daňového posouzení.
+v historii. Změna podkladů vyžaduje nové potvrzení profilu. Daňové posouzení přebírá postavení
+z profilu a připíná jeho revizi; nová revize se stejným postavením potvrzené posouzení nezneplatní,
+jiné postavení vyžaduje reset konceptu a nové posouzení ([§ 72.13](72_Uzaverka.md#7213-danove-posouzeni-cinnosti-v-ramci-504)).
 
 Výpočet vyžaduje podvojné účetnictví a rámec 504 v celém skutečném období,
 potvrzený právní profil a aktuální potvrzené daňové posouzení. Podporovaný
@@ -863,7 +865,8 @@ výpočtu** ukáže samostatně čtyři kroky se stavem a důvodem:
   posouzení. Odkaz vede do daňového posouzení období.
 - **Právní profil:** potvrzený profil vybraného období.
 - **Shoda profilu s posouzením:** postavení v posouzení odpovídá právnímu profilu.
-  Odkaz vede do daňového posouzení.
+  Krok ukáže také revizi profilu připnutou potvrzeným posouzením a aktuální revizi;
+  jiná revize se stejným postavením chybou není. Odkaz vede do daňového posouzení.
 - **Návaznost na výkazy:** výsledek posouzení navazuje na řádek 62 výsledovky
   a podklady výpočtu DPPO jsou úplné. Úpravy, dary a snížení zadané v přiznání
   ověří až výpočet přiznání, kde je také opravíte.

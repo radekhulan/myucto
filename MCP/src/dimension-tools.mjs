@@ -105,7 +105,7 @@ export const DIMENSION_TOOLS = [
       limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Velikost stránky; výchozí 100.' } }, ['period_id'],
     (c, a, tool) => c.get(`/accounting/periods/${seg(a.period_id)}/nonprofit-tax/history`, { after: a.after, limit: a.limit }, tool)),
   read('get_nonprofit_tax_assessment', 'Revize daňového posouzení',
-    'Souhrn konkrétní neměnné revize: stav, důvod, výsledek klasifikačního mostu v haléřích a otisky zmrazených podkladů. Historická revize není automaticky aktuálním potvrzením.',
+    'Souhrn konkrétní neměnné revize: stav, důvod, výsledek klasifikačního mostu v haléřích, otisky zmrazených podkladů a připnutá revize právního profilu DPPO, ze které postavení pochází. Historická revize není automaticky aktuálním potvrzením.',
     { assessment_id: int('ID revize z historie posouzení.') }, ['assessment_id'],
     (c, a, tool) => c.get(`/accounting/nonprofit-tax-assessments/${seg(a.assessment_id)}`, null, tool)),
   read('nonprofit_tax_assessment_page', 'Stránka podkladů revize posouzení',

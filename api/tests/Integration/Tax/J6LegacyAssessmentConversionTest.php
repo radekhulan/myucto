@@ -87,6 +87,24 @@ final class J6LegacyAssessmentConversionTest extends TestCase
         }
     }
 
+    /**
+     * Připnutí právního profilu (#402) se čte z hlavičky rozhodnutí v manifestu potvrzené revize.
+     * Převedená legacy revize je paged_v2 s celým historickým assessment_json; připnutí nemá,
+     * protože převod do hlavičky rozhodnutí přenáší jen profile a method.
+     */
+    public function testConvertedLegacyRevisionHasNoLegalProfilePin(): void
+    {
+        [$id, $inputHash] = $this->legacyAssessment();
+        $this->conversion->convert($this->supplier, $this->period, $id,
+            'legacy_json_v1', $inputHash, 'Syntetický převod historického grafu', $this->actor);
+
+        $repository = new \MyInvoice\Repository\NonprofitTaxPagedAssessmentRepository($this->db);
+        self::assertSame('paged_v2', $repository->find($this->supplier, $id)['storage_version']);
+        self::assertNull($repository->find($this->supplier, $id)['legal_profile']);
+        self::assertNull($repository->latest($this->supplier, $this->period)['legal_profile']);
+        self::assertNull($repository->historyPage($this->supplier, $this->period)[0]['legal_profile']);
+    }
+
     public function testRecomputedLegacyResultMutationFailsParityAndPublishesNothing(): void
     {
         [$id, $inputHash] = $this->legacyAssessment(static function (array $result): array {

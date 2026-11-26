@@ -85,4 +85,14 @@ describe('bounded nonprofit J6 HTTP v2 client', () => {
     expect(() => nonprofitTaxJ6Api.draftSource(4, 7, 11, null, 101)).toThrow('nonprofitTaxJ6.pageLimit')
     expect(calls.get).toHaveBeenCalledTimes(before)
   })
+
+  it('opens without a posture and pins the current legal profile revision of the draft', async () => {
+    const before = calls.post.mock.calls.length
+    await nonprofitTaxJ6Api.openDraft(4, 7, {})
+    await nonprofitTaxJ6Api.pinLegalProfile(4, 7, 11, { expected_revision: 5 })
+    expect(calls.post.mock.calls.slice(before).map(call => [call[0], call[1]])).toEqual([
+      ['/accounting/periods/7/nonprofit-tax/draft', {}],
+      ['/accounting/periods/7/nonprofit-tax/drafts/11/legal-profile', { expected_revision: 5 }],
+    ])
+  })
 })

@@ -58,6 +58,13 @@ final class NonprofitTaxDraftRepository
         return $this->find($supplierId, $draftId, true);
     }
 
+    /** Nová hlavička bez změny podkladů a rozhodnutí (připnutí revize právního profilu). */
+    public function replaceHeader(int $supplierId, int $draftId, int $expectedRevision, array $header): array
+    {
+        $this->advance($supplierId, $draftId, $expectedRevision, ['header_json' => NonprofitTaxRules::canonicalJson($header)]);
+        return $this->find($supplierId, $draftId, true);
+    }
+
     public function patchRecords(int $supplierId, int $draftId, int $expectedRevision, string $kind, array $upserts, array $deletes): array
     {
         $this->assertBatch($upserts, $deletes);

@@ -47,6 +47,9 @@ final class NonprofitTaxAssessmentService
     {
         $this->validateMutation($reason, $key, $actor);
         if (!preg_match('/^[a-f0-9]{64}$/D', $inputHash)) NonprofitTaxRules::invalid('Chybí platný otisk zkontrolovaných podkladů.');
+        // Připnutí právního profilu vzniká jen převzetím na stránkované cestě (J6LegalProfileMatch); legacy tělo ho nesmí podvrhnout,
+        // jinak by ho převod revize přenesl do hlavičky rozhodnutí jako doložený původ postavení.
+        if (array_key_exists('legal_profile', $assessment)) NonprofitTaxRules::invalid('Připnutí právního profilu nelze zadat ručně.');
         $requestHash = NonprofitTaxRules::hash(['action' => 'confirm', 'period_id' => $periodId, 'assessment' => $assessment,
             'input_hash' => $inputHash, 'reason' => $reason, 'actor' => $actor, 'expected_assessment_id' => $expectedAssessmentId]);
         return $this->periodGuard->transaction(function () use ($supplierId, $periodId, $assessment, $inputHash, $reason, $key, $actor, $requestHash, $expectedAssessmentId): array {

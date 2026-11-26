@@ -70,6 +70,21 @@ final class J6PreviewCacheTest extends TestCase
         $this->cache->read('../escape', $this->identity, 'result', 0, 1001);
     }
 
+    public function testLegalProfileHashMustBeEmptyOrSha256(): void
+    {
+        self::assertSame('', $this->identity->legalProfileHash);
+        $hash = str_repeat('b', 64);
+        self::assertSame($hash, (new J6PreviewIdentity(7, 11, 13, 17, 19, $this->identity->inputHash, $hash))->legalProfileHash);
+        foreach (['xyz', str_repeat('B', 64), str_repeat('b', 63)] as $invalid) {
+            try {
+                new J6PreviewIdentity(7, 11, 13, 17, 19, $this->identity->inputHash, $invalid);
+                self::fail('Invalid legal profile hash must be rejected: ' . $invalid);
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testPartialFailureCleansOnlyOwnedWorkspaceAndRetentionKeepsThree(): void
     {
         $sink = $this->cache->createSink($this->identity, 2000);
