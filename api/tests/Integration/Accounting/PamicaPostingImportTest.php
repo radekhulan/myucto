@@ -13,6 +13,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
+use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Import\InvoiceImportService;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingCodeMap;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingException;
@@ -184,6 +186,150 @@ final class PamicaPostingImportTest extends TestCase
         self::assertSame('23520.00', $this->balance('331'));
         self::assertSame(0.0, round(array_sum(array_map(fn (array $i): float => $this->entryTotal($i['journal_entry_id']), $items)) - 16620.0, 2));
         self::assertSame(1, $this->rowCount('payroll_posting_imports'));
+    }
+
+    /**
+     * Rámec 504 vyžaduje činnost na nákladech. PAMICA ji nezná: mzdové náklady interního
+     * dokladu i závazků dostanou hlavní činnost, jinak by načtení skončilo na povinné dimenzi.
+     */
+    public function testNonprofitFirmGetsMainActivityOnPayrollCosts(): void
+    {
+        $activity = $this->nonprofit();
+
+        $result = $this->service->apply($this->supplierId, $this->xml, 'mzdy.xml', true, $this->audit());
+
+        $entries = $this->importedEntries($result);
+        $lines = $this->resultLineActivities($entries, $activity['id']);
+        self::assertSame(['521', '524', '524'], array_column($lines, 'account_code'));
+        self::assertSame([$activity['values']['main']], array_values(array_unique(array_column($lines, 'value_id'))));
+        // Závazky nesou činnost v hlavičce, aby ji měl i přeúčtovaný zápis.
+        foreach (array_slice($this->items(), 1, 2) as $item) {
+            self::assertSame($activity['values']['main'], $this->headerActivity((int) $item['id'], $activity['id']));
+        }
+    }
+
+    /** Náhled firmy v rámci 504 řekne, jakou činnost načtení nastaví a kde ji přeřadit. */
+    public function testNonprofitPreviewExplainsActivity(): void
+    {
+        $this->nonprofit();
+        $check = array_column($this->service->preview($this->supplierId, $this->xml)['checks'], null, 'code')['nonprofit_activity_main'] ?? null;
+        self::assertNotNull($check);
+        self::assertSame('info', $check['level']);
+        self::assertStringContainsString('Hlavní činnost', $check['message']);
+        self::assertStringNotContainsString('zapne dimenze', $check['message']);
+
+        $this->pdo->prepare('UPDATE supplier SET dimensions_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
+        $message = array_column($this->service->preview($this->supplierId, $this->xml)['checks'], 'message', 'code')['nonprofit_activity_main'] ?? '';
+        self::assertStringContainsString('zapne dimenze', $message);
+    }
+
+    /** Pravidlo dimenzí firmy s výchozí činností má přednost před hlavní činností importu. */
+    public function testNonprofitDimensionRuleWinsOverMainActivity(): void
+    {
+        $activity = $this->nonprofit();
+        $economic = $activity['values']['economic'];
+        $this->container->get(DimensionRuleService::class)->create($this->supplierId, [
+            'dimension_type_id' => $activity['id'], 'account_mask' => '52', 'enforcement' => 'error', 'default_value_id' => $economic,
+        ], $this->userId);
+
+        $result = $this->service->apply($this->supplierId, $this->xml, 'mzdy.xml', true, $this->audit());
+
+        $internal = $this->resultLineActivities([(int) $this->row('SELECT journal_entry_id FROM internal_documents WHERE id = ? AND supplier_id = ?',
+            [$result['internal_documents'][0]['id'], $this->supplierId])['journal_entry_id']], $activity['id']);
+        self::assertSame([['account_code' => '521', 'value_id' => $economic]], $internal);
+        $all = $this->resultLineActivities($this->importedEntries($result), $activity['id']);
+        self::assertSame([$economic], array_values(array_unique(array_column($all, 'value_id'))));
+    }
+
+    /** Firma v rámci 500 činnost nedostane a systémové dimenze jí import nezaloží. */
+    public function testFirmUnderFramework500GetsNoActivity(): void
+    {
+        self::assertArrayNotHasKey('nonprofit_activity_main', array_column($this->service->preview($this->supplierId, $this->xml)['checks'], null, 'code'));
+
+        $result = $this->service->apply($this->supplierId, $this->xml, 'mzdy.xml', true, $this->audit());
+
+        self::assertSame(0, $this->countWhere('dimension_types', 'system_key IS NOT NULL'));
+        $entries = $this->importedEntries($result);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id
+            WHERE l.supplier_id = ? AND l.entry_id IN (' . implode(',', array_fill(0, count($entries), '?')) . ')');
+        $stmt->execute([$this->supplierId, ...$entries]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    /**
+     * Firma v rámci 504 s vypnutými dimenzemi (stav z doby před pojistkou): kontrola činnosti
+     * platí i tak, načtení dimenze zapne a náklady dostanou hlavní činnost.
+     */
+    public function testNonprofitFirmWithDimensionsDisabledImports(): void
+    {
+        $activity = $this->nonprofit();
+        $this->pdo->prepare('UPDATE supplier SET dimensions_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
+
+        $result = $this->service->apply($this->supplierId, $this->xml, 'mzdy.xml', true, $this->audit());
+
+        self::assertSame(1, (int) $this->row('SELECT dimensions_enabled FROM supplier WHERE id = ?', [$this->supplierId])['dimensions_enabled']);
+        $lines = $this->resultLineActivities($this->importedEntries($result), $activity['id']);
+        self::assertSame(['521', '524', '524'], array_column($lines, 'account_code'));
+        self::assertSame([$activity['values']['main']], array_values(array_unique(array_column($lines, 'value_id'))));
+    }
+
+    /**
+     * Firma v rámci 504 se systémovými dimenzemi, jako ji založí volba rámce v nastavení.
+     *
+     * @return array{id:int,values:array<string,int>}
+     */
+    private function nonprofit(): array
+    {
+        $this->pdo->prepare('DELETE FROM supplier_accounting_frameworks WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_504')")
+            ->execute([$this->supplierId]);
+        $activity = (new SystemDimensionCatalog($this->db))->ensureForFramework($this->supplierId, '2099-03-31')['activity'] ?? null;
+        self::assertIsArray($activity);
+        return $activity;
+    }
+
+    /**
+     * @param array<string,mixed> $result výsledek apply
+     * @return list<int> zápisy interních dokladů a zaúčtovaných závazků
+     */
+    private function importedEntries(array $result): array
+    {
+        $ids = [];
+        foreach ($result['internal_documents'] as $doc) {
+            $ids[] = (int) $this->row('SELECT journal_entry_id FROM internal_documents WHERE id = ? AND supplier_id = ?', [$doc['id'], $this->supplierId])['journal_entry_id'];
+        }
+        foreach ($this->items() as $item) {
+            if ($item['journal_entry_id'] !== null) $ids[] = (int) $item['journal_entry_id'];
+        }
+        self::assertCount(4, $ids);
+        return $ids;
+    }
+
+    /**
+     * Řádky nákladů a výnosů zápisů a jejich činnost (null = bez činnosti).
+     *
+     * @param list<int> $entries
+     * @return list<array{account_code:string,value_id:?int}>
+     */
+    private function resultLineActivities(array $entries, int $typeId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT ca.account_code, d.dimension_value_id AS value_id
+              FROM journal_entry_lines l JOIN chart_of_accounts ca ON ca.id = l.account_id
+              LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = ?
+             WHERE l.supplier_id = ? AND l.entry_id IN (' . implode(',', array_fill(0, count($entries), '?')) . ")
+               AND ca.account_code REGEXP '^[56]' ORDER BY ca.account_code, l.id");
+        $stmt->execute([$typeId, $this->supplierId, ...$entries]);
+        return array_map(static fn (array $r): array => ['account_code' => (string) $r['account_code'],
+            'value_id' => $r['value_id'] !== null ? (int) $r['value_id'] : null], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    private function headerActivity(int $itemId, int $typeId): ?int
+    {
+        $stmt = $this->pdo->prepare("SELECT dimension_value_id FROM document_dimensions
+            WHERE supplier_id = ? AND doc_type = 'other_item' AND doc_id = ? AND item_no = 0 AND dimension_type_id = ?");
+        $stmt->execute([$this->supplierId, $itemId, $typeId]);
+        $value = $stmt->fetchColumn();
+        return $value === false ? null : (int) $value;
     }
 
     public function testSecondImportOfSameMonthIsRejected(): void

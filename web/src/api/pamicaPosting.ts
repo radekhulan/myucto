@@ -6,7 +6,7 @@ import { api } from './client'
  * nahraný soubor rozpozná server jako zaúčtování mezd.
  */
 
-export type PayrollPostingCheckLevel = 'ok' | 'warning' | 'error'
+export type PayrollPostingCheckLevel = 'ok' | 'info' | 'warning' | 'error'
 
 export interface PayrollPostingCheck {
   code: string
