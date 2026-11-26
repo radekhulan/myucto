@@ -2282,12 +2282,15 @@ final class PostingService
         // {@see PurchaseAdvanceDeduction}). Zrcadlo vydané strany ({@see advanceDeduction}):
         // základ odpočtu nejde na náklad, vrací se do nákladu i závazku a zálohu z 314
         // zúčtuje {@see appendAdvanceSettlementPurchase}. Daň odpočtu vrací odpočet z DDKP.
+        // Krácený nárok § 76 se v průběhu roku účtuje jako plný (celá daň na 343, krácení
+        // až vypořádacím koeficientem), takže zálohu vyúčtuje stejně. Poměrný nárok § 75,
+        // bez nároku a přenesení povinnosti mění daň už v zápisu dokladu: zůstávají ruční.
         $deduction = $this->purchaseAdvanceDeduction($supplierId, $purchaseInvoiceId, $pi, $rate);
-        if ($deduction['active'] && ($isRc || $vatDeduction !== 'full')) {
+        if ($deduction['active'] && ($isRc || !in_array($vatDeduction, ['full', 'reduced'], true))) {
             throw new PostingException(
                 'advance_settlement_ambiguous',
-                'Přijatá faktura #' . $purchaseInvoiceId . ' odečítá zálohu s daňovým dokladem k platbě, ale nemá plný nárok '
-                    . 'na odpočet nebo jde o přenesenou daňovou povinnost. Takové vyúčtování zálohy se automaticky neúčtuje, '
+                'Přijatá faktura #' . $purchaseInvoiceId . ' odečítá zálohu s daňovým dokladem k platbě, ale nemá plný ani krácený '
+                    . 'nárok na odpočet nebo jde o přenesenou daňovou povinnost. Takové vyúčtování zálohy se automaticky neúčtuje, '
                     . 'zaúčtujte ho ručně.',
             );
         }
@@ -2423,6 +2426,8 @@ final class PostingService
         } elseif ($deduction['active']) {
             // Daň konečné faktury a vrácení odpočtu z DDKP jako dva řádky 343: v účtu je
             // vidět plná daň plnění i daň, kterou už uplatnil DDKP. Součet = daň z evidence.
+            // Základ i daň obsahují záporný odpočtový řádek (plný nárok z evidence, krácený
+            // z položek, {@see purchaseItemTotals}), proto se odpočet výš přičítá jen jednou.
             $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
             $ownVat = round($vat + $deduction['vat'], 2);
             $deductionByRate = $deduction['vat_by_rate'];

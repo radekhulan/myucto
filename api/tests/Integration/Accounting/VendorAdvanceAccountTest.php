@@ -101,12 +101,15 @@ final class VendorAdvanceAccountTest extends BankPostingTestCase
 
     /**
      * Úhrada 314.610 MD 890,00, DDKP 314.611 D 154,46. Konečná faktura zúčtuje 321 MD /
-     * 314.610 D zbytek 735,54 a daň DDKP převede 314.611 MD / 314.610 D 154,46.
+     * 314.610 D zbytek 735,54 a daň DDKP převede 314.611 MD / 314.610 D 154,46. Krácený
+     * nárok § 76 se v průběhu roku účtuje jako plný, zúčtování je stejné.
      */
-    public function testSettlementClearsBothVendorAnalytics(): void
+    #[\PHPUnit\Framework\Attributes\TestWith(['full'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['reduced'])]
+    public function testSettlementClearsBothVendorAnalytics(string $vatDeduction): void
     {
-        [$advance, $txEntry, $ddkpEntry] = $this->paidAdvanceWithDdkp('ZPF-SET', $this->vendorWithAccounts('Dodavatel vyúčtování'));
-        $final = $this->finalInvoice('PF-SET', $advance);
+        [$advance, $txEntry, $ddkpEntry] = $this->paidAdvanceWithDdkp('ZPF-SET', $this->vendorWithAccounts('Dodavatel vyúčtování'), $vatDeduction);
+        $final = $this->finalInvoice('PF-SET', $advance, $vatDeduction);
 
         $entryId = $this->postFinal($final);
         $byAcc = $this->linesByAccountCode($entryId);
@@ -270,11 +273,11 @@ final class VendorAdvanceAccountTest extends BankPostingTestCase
     }
 
     /** @return array{0:int, 1:int, 2:int} záloha, zápis úhrady, zápis DDKP */
-    private function paidAdvanceWithDdkp(string $number, int $vendor): array
+    private function paidAdvanceWithDdkp(string $number, int $vendor, string $vatDeduction = 'full'): array
     {
         $advance = $this->purchase($number, $vendor, 'advance', null, null, '2099-09-05', [[890.00, 0.00]]);
         $txEntry = $this->payAdvance($advance, 890.00, '2099-09-05');
-        $ddkp = $this->purchase('DDKP-' . $number, $vendor, 'tax_document', null, $advance, '2099-09-10', [[735.54, 154.46]]);
+        $ddkp = $this->purchase('DDKP-' . $number, $vendor, 'tax_document', null, $advance, '2099-09-10', [[735.54, 154.46]], $vatDeduction);
         $ddkpEntry = $this->posting->postDocument(
             $this->supplierId,
             'purchase_invoice',
@@ -285,16 +288,16 @@ final class VendorAdvanceAccountTest extends BankPostingTestCase
         return [$advance, $txEntry, $ddkpEntry];
     }
 
-    private function finalInvoice(string $number, int $advance): int
+    private function finalInvoice(string $number, int $advance, string $vatDeduction = 'full'): int
     {
         $vendor = (int) $this->db->pdo()->query('SELECT vendor_id FROM purchase_invoices WHERE id = ' . $advance)->fetchColumn();
-        $id = $this->purchase($number, $vendor, 'invoice', $advance, null, '2099-10-15', [[665.66, 139.79], [-735.54, -154.46, $advance]]);
+        $id = $this->purchase($number, $vendor, 'invoice', $advance, null, '2099-10-15', [[665.66, 139.79], [-735.54, -154.46, $advance]], $vatDeduction);
         $this->db->pdo()->prepare('UPDATE purchase_invoices SET rounding = 0.17 WHERE id = ?')->execute([$id]);
         return $id;
     }
 
     /** @param list<array{0:float, 1:float, 2?:?int}> $items základ, daň, záloha odpočtu */
-    private function purchase(string $number, int $vendorId, string $kind, ?int $advanceId, ?int $parentId, string $date, array $items): int
+    private function purchase(string $number, int $vendorId, string $kind, ?int $advanceId, ?int $parentId, string $date, array $items, string $vatDeduction = 'full'): int
     {
         $base = round(array_sum(array_column($items, 0)), 2);
         $vat = round(array_sum(array_column($items, 1)), 2);
@@ -304,8 +307,8 @@ final class VendorAdvanceAccountTest extends BankPostingTestCase
                 (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, advance_purchase_invoice_id,
                  parent_purchase_invoice_id, vat_deduction, issue_date, tax_date, due_date, received_at, currency_id,
                  reverse_charge, is_fixed_asset, total_without_vat, total_vat, total_with_vat, status, vat_classification_code, created_by)
-             VALUES (?, ?, ?, "{}", ?, ?, ?, "full", ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, "received", ?, ?)'
-        )->execute([$this->supplierId, $vendorId, $number, $kind, $advanceId, $parentId, $date, $date, $date, $date,
+             VALUES (?, ?, ?, "{}", ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, "received", ?, ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $kind, $advanceId, $parentId, $vatDeduction, $date, $date, $date, $date,
             $this->currencyId, $base, $vat, round($base + $vat, 2), $kind === 'advance' ? null : '40', $this->userId]);
         $id = (int) $pdo->lastInsertId();
         $insert = $pdo->prepare(

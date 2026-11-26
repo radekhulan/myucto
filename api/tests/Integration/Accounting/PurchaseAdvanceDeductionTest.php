@@ -253,19 +253,98 @@ final class PurchaseAdvanceDeductionTest extends BankPostingTestCase
         }
     }
 
+    /**
+     * Krácený nárok § 76 (energie u firmy s osvobozenými plněními): v průběhu roku se
+     * účtuje jako plný nárok, daň jde celá na 343 a krácí se až vypořádacím koeficientem.
+     * Konečná faktura s odpočtem zálohy z DDKP se proto zaúčtuje stejně jako u plného nároku.
+     *
+     * Záloha 7 090,00 (5 859,50 + 1 230,50) zaplacená v září, DDKP v září, konečná faktura
+     * v říjnu: spotřeba 14 725,19 + 3 092,29 ve třech řádcích, odpočet zálohy −5 859,50
+     * −1 230,50, k úhradě 10 727,48.
+     */
+    public function testReducedDeductionFinalWithAdvanceDeductionPostsLikeFull(): void
+    {
+        [$advance, $txEntry, $ddkpEntry] = $this->paidAdvanceWithDdkp('ZPF-RED', 7090.00, [5859.50, 1230.50], 'reduced');
+        $vendor = (int) $this->piRow($advance)['vendor_id'];
+        $final = $this->purchase('PF-RED', $vendor, 'invoice', $advance, null, '2099-10-15', [
+            [10000.00, 2100.00], [4000.00, 840.00], [725.19, 152.29], [-5859.50, -1230.50, $advance],
+        ], 'reduced');
+
+        $entryId = $this->postFinal($final);
+        $byAcc = $this->linesByAccountCode($entryId);
+
+        $expense = $this->expenseAccount($byAcc);
+        self::assertSame(1472519, self::cents($byAcc[$expense]['debit']), 'Náklad = celá spotřeba bez odpočtu zálohy.');
+        self::assertSame(0, self::cents($byAcc[$expense]['credit']), 'Odpočet zálohy na náklad nesmí jít.');
+        self::assertSame(309229, self::cents($byAcc['343.100']['debit']), '343 MD = celá DPH konečné faktury.');
+        self::assertSame(123050, self::cents($byAcc['343.100']['credit']), '343 D = vrácení odpočtu z DDKP.');
+        self::assertSame(1658698, self::cents($byAcc['321']['credit']), '321 D = závazek bez odpočtu zálohy.');
+        self::assertSame(585950, self::cents($byAcc['321']['debit']), '321 MD = zúčtování zbytku zálohy.');
+        self::assertSame(585950, self::cents($byAcc['314']['credit']), '314 D = zbytek zálohy po DDKP.');
+        self::assertArrayNotHasKey('548', $byAcc, 'Bez haléřového dorovnání.');
+        self::assertArrayNotHasKey('648', $byAcc, 'Bez haléřového dorovnání.');
+        $this->assertBalanced($entryId);
+
+        $sum = $this->accountSums([$txEntry, $ddkpEntry, $entryId]);
+        self::assertSame(0, self::cents($sum['314'] ?? 0), 'Poskytnutá záloha 314 po vyúčtování na nule.');
+        self::assertSame(-1072748, self::cents($sum['321'] ?? 0), '321 D = k úhradě 10 727,48.');
+        self::assertSame(309229, self::cents($sum['343.100'] ?? 0), '343 = celá daň plnění, krácení až koeficientem.');
+
+        // Evidence DPH se zaúčtováním nemění: obě daně ve sloupci krácený odpočet ř. 40.
+        $this->db->pdo()->prepare('INSERT INTO vat_coefficients (supplier_id, year, provisional_percent) VALUES (?, ?, 80)')
+            ->execute([$this->supplierId, self::YEAR]);
+        $dp = (new \SimpleXMLElement($this->container->get(DphPriznaniBuilder::class)->build($this->supplierId, self::YEAR, 10, 'monthly')['xml']))->DPHDP3;
+        self::assertSame('8866', (string) $dp->Veta4['pln23'], 'ř. 40 základ 14 725,19 − 5 859,50.');
+        self::assertSame('1862', (string) $dp->Veta4['odp_tuz23'], 'ř. 40 krácený odpočet 3 092,29 − 1 230,50.');
+        self::assertSame('', (string) $dp->Veta4['odp_tuz23_nar'], 'Plný odpočet ř. 40 zůstává prázdný.');
+    }
+
+    /**
+     * Poměrný nárok § 75, bez nároku a přenesení daňové povinnosti krátí nebo samovyměřují
+     * daň už v zápisu dokladu; odpočet zálohy z DDKP se u nich automaticky neúčtuje.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('manualDeductionModes')]
+    public function testFinalWithAdvanceDeductionStaysManualForPartialNoneAndReverseCharge(string $mode, bool $reverseCharge): void
+    {
+        [$advance] = $this->paidAdvanceWithDdkp('ZPF-MAN-' . $mode . (int) $reverseCharge);
+        $final = $this->finalInvoice('PF-MAN-' . $mode . (int) $reverseCharge, $advance, true);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET vat_deduction = ?, vat_deduction_percent = ?, reverse_charge = ? WHERE id = ?')
+            ->execute([$mode, $mode === 'proportional' ? 60 : 100, (int) $reverseCharge, $final]);
+
+        try {
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final);
+            self::fail('Vyúčtování zálohy s DDKP v režimu ' . $mode . ($reverseCharge ? ' + RC' : '') . ' se má účtovat ručně.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+            self::assertStringContainsString('přenesenou daňovou povinnost', $e->getMessage(), 'Hláška pojistky nároku, ne jiná nejasnost zúčtování.');
+        }
+    }
+
+    /** @return array<string, array{0:string, 1:bool}> */
+    public static function manualDeductionModes(): array
+    {
+        return [
+            'poměrný § 75' => ['proportional', false],
+            'bez nároku' => ['none', false],
+            'přenesení plný' => ['full', true],
+            'přenesení krácený' => ['reduced', true],
+        ];
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
 
     /**
      * Záloha 890 zaplacená v září, DDKP 735,54 + 154,46 v září, obojí zaúčtované.
      *
+     * @param array{0:float, 1:float} $ddkpItem základ a daň DDKP
      * @return array{0:int, 1:int, 2:int} záloha, zápis úhrady, zápis DDKP
      */
-    private function paidAdvanceWithDdkp(string $number): array
+    private function paidAdvanceWithDdkp(string $number, float $paid = 890.00, array $ddkpItem = [735.54, 154.46], string $vatDeduction = 'full'): array
     {
         $vendor = $this->client('Dodavatel ' . $number);
-        $advance = $this->purchase($number, $vendor, 'advance', null, null, '2099-09-05', [[890.00, 0.00]]);
-        $txEntry = $this->payAdvance($advance, 890.00, '2099-09-05');
-        $ddkp = $this->purchase('DDKP-' . $number, $vendor, 'tax_document', null, $advance, '2099-09-10', [[735.54, 154.46]]);
+        $advance = $this->purchase($number, $vendor, 'advance', null, null, '2099-09-05', [[$paid, 0.00]]);
+        $txEntry = $this->payAdvance($advance, $paid, '2099-09-05');
+        $ddkp = $this->purchase('DDKP-' . $number, $vendor, 'tax_document', null, $advance, '2099-09-10', [$ddkpItem], $vatDeduction);
         $ddkpEntry = $this->posting->postDocument(
             $this->supplierId,
             'purchase_invoice',
@@ -293,7 +372,7 @@ final class PurchaseAdvanceDeductionTest extends BankPostingTestCase
     }
 
     /** @param list<array{0:float, 1:float, 2?:?int}> $items základ, daň, záloha odpočtu */
-    private function purchase(string $number, int $vendorId, string $kind, ?int $advanceId, ?int $parentId, string $date, array $items): int
+    private function purchase(string $number, int $vendorId, string $kind, ?int $advanceId, ?int $parentId, string $date, array $items, string $vatDeduction = 'full'): int
     {
         $base = 0.0;
         $vat = 0.0;
@@ -309,8 +388,8 @@ final class PurchaseAdvanceDeductionTest extends BankPostingTestCase
                 (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, advance_purchase_invoice_id,
                  parent_purchase_invoice_id, vat_deduction, issue_date, tax_date, due_date, received_at, currency_id,
                  reverse_charge, is_fixed_asset, total_without_vat, total_vat, total_with_vat, status, vat_classification_code, created_by)
-             VALUES (?, ?, ?, "{}", ?, ?, ?, "full", ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, "received", ?, ?)'
-        )->execute([$this->supplierId, $vendorId, $number, $kind, $advanceId, $parentId, $date, $date, $date, $date,
+             VALUES (?, ?, ?, "{}", ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, "received", ?, ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $kind, $advanceId, $parentId, $vatDeduction, $date, $date, $date, $date,
             $this->currencyId, $base, $vat, round($base + $vat, 2), $kind === 'advance' ? null : '40', $this->userId]);
         $id = (int) $pdo->lastInsertId();
         $insert = $pdo->prepare(
