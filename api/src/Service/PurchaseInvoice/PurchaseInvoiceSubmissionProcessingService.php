@@ -125,7 +125,11 @@ final class PurchaseInvoiceSubmissionProcessingService
                         403,
                     );
                 }
-                $result = $this->ai->extractAndCreate($supplierId, $userId, $bytes, null, $name, withoutItems: $withoutItems);
+                $result = $this->ai->extractAndCreate(
+                    $supplierId, $userId, $bytes, null, $name,
+                    withoutItems: $withoutItems,
+                    uploadedOn: substr((string) $submission['created_at'], 0, 10),
+                );
                 $buyer = (array) (($result['ai_data'] ?? [])['customer'] ?? []);
                 if (!$result['ok'] || (int) ($result['purchase_invoice_id'] ?? 0) <= 0) {
                     throw new PurchaseInvoiceSubmissionException(

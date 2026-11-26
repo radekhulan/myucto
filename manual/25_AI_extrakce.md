@@ -246,6 +246,9 @@ Při AI extrakci z PDF se po importu automaticky spustí **sanity check**: sečt
 daně, který AI přečetla z PDF „K úhradě". Pokud se hodnoty liší o víc než 2 %, faktura získá příznak **Ke kontrole** a uživatel
 by měl řádky před zaúčtováním ověřit.
 
+Hlášení dostanete také při podezřelém roku data přijatého dokladu. Aplikace rok opraví, pokud jiné čitelné datum v dokladu
+nebo v názvu souboru jednoznačně potvrzuje správný rok při stejném dni a měsíci.
+
 Indikátory v aplikaci:
 
 - **Žluté zvýraznění řádku** a ikona varování vedle čísla faktury v seznamu přijatých faktur.

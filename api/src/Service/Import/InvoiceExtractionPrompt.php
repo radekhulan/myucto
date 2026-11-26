@@ -111,6 +111,9 @@ JSON schema:
 DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`):
 - Na faktuře je typicky VÍC dat. Přiřaď je VÝHRADNĚ podle POPISKU u data,
   NIKDY podle pořadí/pozice na stránce.
+- Datum může být rozdělené mezi řádky, i uprostřed roku. Pokud je to možné, spoj
+  části data u jeho popisku a dej přednost čitelnému čtyřmístnému roku u data
+  se stejným dnem a měsícem na jiném místě dokladu, například na dokladu z terminálu.
 - `issue_date` = DATUM VYSTAVENÍ dokladu. Ber ho VÝHRADNĚ z popisků: "Datum vystavení",
   "Vystaveno", "Datum vystavení dokladu", "Vystavená dňa"/"Dátum vystavenia" (SK),
   "Date of issue", "Invoice date", "Issued".

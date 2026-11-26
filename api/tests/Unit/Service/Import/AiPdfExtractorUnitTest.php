@@ -18,6 +18,7 @@ use MyInvoice\Service\Import\IsdocToPurchaseInvoiceMapper;
 use MyInvoice\Service\Import\ImageToPdfConverter;
 use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Service\Import\PdfIsdocExtractor;
+use MyInvoice\Service\Import\PdfTotalExtractor;
 use MyInvoice\Service\Import\PurchaseInvoicePdfArchiver;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
@@ -99,6 +100,7 @@ final class AiPdfExtractorUnitTest extends TestCase
             null, // uložení vytěžení importu — helpery ho nepotřebují
             null, // automatika plateb kartou — helpery ji nepotřebují
             null, // automatické pravidlo nákladů — helpery ho nepotřebují
+            new PdfTotalExtractor(new PdfIsdocExtractor()),
             new NullLogger(),
         );
     }
@@ -266,6 +268,43 @@ final class AiPdfExtractorUnitTest extends TestCase
     {
         yield 'client keeps company default' => [false];
         yield 'staff keeps automatic upgrade' => [true];
+    }
+
+    public function testChecksDatesAgainstOriginalUploadUsingPdfText(): void
+    {
+        $pdf = new \Mpdf\Mpdf(['tempDir' => sys_get_temp_dir(), 'default_font' => 'dejavusans']);
+        $pdf->WriteHTML('Datum vystaveni: 17.11.20<br>23 12:01:03<br>Terminal: 17.11.2023 12:01:01');
+        $pdfBytes = $pdf->Output('', \Mpdf\Output\Destination::STRING_RETURN);
+        $this->anthropic->expects(self::once())->method('extractInvoice')->willReturn([
+            'ok' => true,
+            'data' => [
+                'vendor' => ['company_name' => 'Testovací dodavatel'],
+                'currency' => 'CZK',
+                'items' => [['description' => 'Testovací položka', 'quantity' => 1, 'unit_price_without_vat' => 10]],
+                'issue_date' => '2020-11-17',
+                'tax_date' => '2020-11-17',
+                'due_date' => '2020-11-17',
+                'customer' => ['ic' => '10000010'],
+            ],
+        ]);
+        $pdo = $this->createStub(\PDO::class);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql): \PDOStatement {
+            $stmt = $this->createStub(\PDOStatement::class);
+            $stmt->method('fetchColumn')->willReturn(match (true) {
+                str_contains($sql, 'accounting_starts_on') => '2023-01-01',
+                str_contains($sql, 'SELECT ic FROM supplier') => '12345679',
+                default => false,
+            });
+            return $stmt;
+        });
+        $this->conn->method('pdo')->willReturn($pdo);
+
+        $result = $this->extractor->extractAndCreate(42, 1, $pdfBytes, originalFilename: 'uctenka.pdf', uploadedOn: '2023-11-19');
+
+        self::assertSame('wrong_tenant', $result['source']);
+        self::assertSame('2023-11-17', $result['ai_data']['issue_date']);
+        self::assertSame('2023-11-17', $result['ai_data']['tax_date']);
+        self::assertSame('2023-11-17', $result['ai_data']['due_date']);
     }
 
     // ── detectWeakExtraction ────────────────────────────────────────────────

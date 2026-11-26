@@ -75,6 +75,7 @@ final class AiPdfExtractor
         // Pravidlo nákladů v režimu „Použít automaticky" se na řádek zapíše hned po importu,
         // ne až při zaúčtování. Nullable jen kvůli unit testům čistých helperů.
         private readonly ?\MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier $expenseAutoClassifier,
+        private readonly PdfTotalExtractor $pdfText,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -99,13 +100,15 @@ final class AiPdfExtractor
      * @param bool $withoutItems Jednorázová volba při nahrání: AI vytěžený doklad se uloží bez
      *        rozpisu položek, jen s jedním řádkem na sazbu DPH ({@see summaryLinesByRate}).
      *        Strukturovaný ISDOC se zakládá vždy z vlastních položek.
+     * @param string|null $uploadedOn Den nahrání ve formátu YYYY-MM-DD, pokud je známý z podatelny.
      *
      * @return array{ok:bool, purchase_invoice_id?:int, vendor_id?:int, source:string,
      *               error?:string, ai_data?:array<string,mixed>, model?:string,
      *               usage?:array<string,int>}
      */
-    public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null, bool $requireReview = false, bool $allowModelUpgrade = true, bool $withoutItems = false): array
+    public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null, bool $requireReview = false, bool $allowModelUpgrade = true, bool $withoutItems = false, ?string $uploadedOn = null): array
     {
+        $uploadedOn = $uploadedOn !== null && IsoDate::isValid($uploadedOn) ? $uploadedOn : date('Y-m-d');
         // Hlavička PDF posunutá o prázdný řádek / BOM (dompdf za PHP skriptem s mezerou)
         // — oprav na vstupu, ať ISDOC, AI klienti i archivace dostanou PDF od `%PDF-`.
         // ZIP může mít nekomprimované PDF hned na začátku; normalizace by usekla
@@ -250,7 +253,14 @@ final class AiPdfExtractor
                 }
             }
         }
-        $data = self::withIssueDateFallback($extracted['data'], date('Y-m-d'));
+        $yearCheck = AiPurchaseDocumentYear::check(
+            $extracted['data'],
+            $uploadedOn,
+            fn (): ?string => $this->pdfText->extractText($pdfBytes),
+            $originalFilename,
+            $this->accountingStart($supplierId),
+        );
+        $data = self::withIssueDateFallback($yearCheck['data'], date('Y-m-d'));
         $data = (new AiExtractedDataClipper($this->db))->clipPurchase($data);
 
         $validationError = $this->validateAiData($data);
@@ -371,6 +381,9 @@ final class AiPdfExtractor
                     'duplicate'           => true,
                     'message'             => 'Faktura je již v systému jako faktura #' . $invoiceId,
                 ];
+            }
+            if ($yearCheck['warning'] !== null) {
+                $this->repo->appendExtractionWarning($invoiceId, $supplierId, $yearCheck['warning']);
             }
             // Attach PDF — uložit do archive a updatnout pdf_path/hash/size na faktuře
             $this->attachPdf($invoiceId, $supplierId, $pdfBytes, $originalFilename);
@@ -2298,6 +2311,18 @@ final class AiPdfExtractor
         $ic = $stmt->fetchColumn();
         if ($ic === false || $ic === '' || $ic === null) return null;
         return $this->normalizeIc((string) $ic);
+    }
+
+    private function accountingStart(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(s.accounting_starts_on, (
+                SELECT MIN(ap.starts_on) FROM accounting_periods ap WHERE ap.supplier_id = s.id
+            )) FROM supplier s WHERE s.id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $start = $stmt->fetchColumn();
+        return is_string($start) && IsoDate::isValid($start) ? $start : null;
     }
 
     /**
