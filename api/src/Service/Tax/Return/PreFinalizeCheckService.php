@@ -15,14 +15,15 @@ use MyInvoice\Service\Tax\TaxFamilyIdentifierService;
 /**
  * Předfinalizační kontrolní checklist přiznání k dani z příjmů („závěrková kontrola
  * účetní", Fáze E audit 2026-07, návrh E10). Vzor {@see \MyInvoice\Service\Accounting\Closing\ClosingService::buildChecks}
- * (D8 Měsíční kontrola) — každá kontrola má klíč, závažnost (info|warning),
+ * (D8 Měsíční kontrola) — každá kontrola má klíč, závažnost (info|warning|blocker),
  * příznak ok a proklikatelný `value`. Kalkulátor slepě věří deníku; tyto kontroly
  * odhalí nezaúčtované odpisy, dary mimo účet 543, rozjetý VH, neuzavřené období,
  * nedaňové účty s obratem a nepodaná DPH přiznání DŘÍV, než se přiznání zmrazí.
  *
  * Kontroly (dle povahy poplatníka — účtující vs. daňová evidence):
  *   1. period_status         — účetní období roku je uzavřené (closed/approved)
- *   2. depreciation_551       — obrat 551 = Σ účetních odpisů (depreciation_entries)
+ *   2. depreciation_551       — obrat 551 = účetní odpisy karet majetku v knihách (BookedAccountingDepreciation)
+ *   2a. draft_assets_551      — karty v konceptu nemají odpisy na 551 (DPPO, blokuje finalizaci)
  *   3. donations_543          — obrat 543 = zadané dary §20/8 (PO)
  *   4. vh_vs_statement        — VH z přiznání = VH z výsledovky (jiná cesta výpočtu)
  *   5. non_deductible_accounts — výčet nedaňových účtů s nenulovým obratem (drill-down)
@@ -33,6 +34,9 @@ use MyInvoice\Service\Tax\TaxFamilyIdentifierService;
 final class PreFinalizeCheckService
 {
     private const EPS = 0.5; // tolerance shody v Kč (haléřové rozdíly zaokrouhlení)
+
+    /** Závažnost kontroly, která při nesplnění blokuje finalizaci. */
+    public const BLOCKING = 'blocker';
 
     public function __construct(
         private readonly Connection $db,
@@ -63,7 +67,12 @@ final class PreFinalizeCheckService
 
         $checks = [];
         $checks[] = $this->checkPeriodStatus($period, $isDoubleEntry);
-        $checks[] = $this->checkDepreciation551($supplierId, $year, $startsOn, $endsOn, $isDoubleEntry);
+        // Bez účetního období jako dřív v kalendářním roce (hranice výše).
+        $booked = $isDoubleEntry
+            ? (new BookedAccountingDepreciation($this->db))->forPeriod($supplierId, $year, $startsOn, $endsOn)
+            : null;
+        $checks[] = $this->checkDepreciation551($supplierId, $startsOn, $endsOn, $isDoubleEntry, $booked);
+        $checks[] = $this->checkDraftAssets551($type, $booked, ($podklady['accounting_decree'] ?? null) === '504');
         $checks[] = $this->checkDonations543($supplierId, $type, $inputs, $startsOn, $endsOn, $year);
         $checks[] = $this->checkVhVsStatement($supplierId, $type, $period, $podklady, $isDoubleEntry);
         $checks[] = $this->checkNonDeductibleAccounts($supplierId, $startsOn, $endsOn, $isDoubleEntry);
@@ -82,6 +91,8 @@ final class PreFinalizeCheckService
                 $summary['na']++;
             } elseif ($c['ok']) {
                 $summary['ok']++;
+            } elseif (($c['severity'] ?? '') === self::BLOCKING) {
+                $summary['blocker']++;
             } else {
                 $summary['warning']++;
             }
@@ -90,7 +101,8 @@ final class PreFinalizeCheckService
         return [
             'checks' => $checks,
             'summary' => $summary,
-            'can_finalize' => true,
+            // Nesplněná kontrola se závažností blocker finalizaci blokuje ({@see TaxReturnService::finalize}).
+            'can_finalize' => $summary['blocker'] === 0,
         ];
     }
 
@@ -256,19 +268,56 @@ final class PreFinalizeCheckService
         ];
     }
 
-    private function checkDepreciation551(int $supplierId, int $year, string $startsOn, string $endsOn, bool $isDoubleEntry): array
+    /**
+     * Obrat 551 proti účetním odpisům karet majetku, se kterými počítá rozdíl odpisů v přiznání
+     * ({@see BookedAccountingDepreciation}). Upozorní i na kartu, jejíž rok je celý v převzatém
+     * deníku a modul majetku ho zaúčtoval znovu (`duplicates`).
+     *
+     * @param array<string,mixed>|null $booked
+     */
+    private function checkDepreciation551(int $supplierId, string $startsOn, string $endsOn, bool $isDoubleEntry, ?array $booked): array
     {
-        if (!$isDoubleEntry) {
+        if (!$isDoubleEntry || $booked === null) {
             return ['key' => 'depreciation_551', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => null];
         }
         $turnover = $this->accountTurnover($supplierId, '551', $startsOn, $endsOn);
-        $entries = $this->depreciationAccounting($supplierId, $year);
+        $entries = (float) $booked['total'];
         $diff = round($turnover - $entries, 2);
         return [
             'key' => 'depreciation_551',
             'severity' => 'warning',
-            'ok' => abs($diff) < self::EPS,
-            'value' => ['account' => '551', 'turnover' => $turnover, 'accounting_entries' => $entries, 'diff' => $diff],
+            'ok' => abs($diff) < self::EPS && $booked['duplicates'] === [],
+            'value' => [
+                'account' => '551', 'turnover' => $turnover, 'accounting_entries' => $entries, 'diff' => $diff,
+                'duplicates' => $booked['duplicates'],
+            ],
+        ];
+    }
+
+    /**
+     * Karty majetku v konceptu s účetními odpisy na 551 v deníku roku: náklad snižuje základ
+     * daně, ale přiznání k němu nemá daňový odpis z karty (rozdíl odpisů je u konceptu
+     * neutrální). Blokuje finalizaci DPPO, jen když jde o kladný odpis v zápisech převzatých
+     * z jiného programu: tam je vazba podle inventárního čísla spolehlivá (převod tak číslo
+     * dokladu zapisuje). Ruční zápis, který jen náhodou nese stejné číslo jako karta (krátká
+     * čísla „1", „15"), záporný zůstatek (storno) i nezisková organizace dostanou varování.
+     *
+     * @param array<string,mixed>|null $booked
+     */
+    private function checkDraftAssets551(string $type, ?array $booked, bool $nonprofit): array
+    {
+        if ($type !== 'po' || $booked === null) {
+            return ['key' => 'draft_assets_551', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => null];
+        }
+        $drafts = $booked['drafts'];
+        $amount = round((float) $drafts['amount'], 2);
+        $takenOver = round((float) ($drafts['taken_over'] ?? 0.0), 2);
+        $blocking = !$nonprofit && $takenOver >= 0.005;
+        return [
+            'key' => 'draft_assets_551',
+            'severity' => $blocking ? self::BLOCKING : 'warning',
+            'ok' => abs($amount) < 0.005 && abs($takenOver) < 0.005,
+            'value' => ['assets' => (int) $drafts['assets'], 'amount' => $amount, 'taken_over' => $takenOver],
         ];
     }
 
@@ -479,17 +528,6 @@ final class PreFinalizeCheckService
                 AND a.account_code LIKE ?"
         );
         $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE, $codePrefix . '%']);
-        return round((float) $stmt->fetchColumn(), 2);
-    }
-
-    private function depreciationAccounting(int $supplierId, int $fiscalYear): float
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(amount), 0)
-               FROM depreciation_entries
-              WHERE supplier_id = ? AND fiscal_year = ? AND kind = 'accounting'"
-        );
-        $stmt->execute([$supplierId, $fiscalYear]);
         return round((float) $stmt->fetchColumn(), 2);
     }
 

@@ -10,6 +10,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
+use MyInvoice\Service\Tax\Return\BookedAccountingDepreciation;
 use MyInvoice\Service\Tax\Return\SecuritiesSaleCostLimit;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -60,7 +61,7 @@ final class TaxBaseReportAction
                     'starts_on' => (string) $period['starts_on'],
                     'ends_on'   => (string) $period['ends_on'],
                 ],
-                'depreciation' => $this->depreciationDiff($supplierId, $fiscalYear),
+                'depreciation' => $this->depreciationDiff($supplierId, $fiscalYear, $period),
                 'disposals'    => $this->disposals($supplierId, $period),
                 // Stejná čísla, se kterými počítá ř. 40 přiznání DPPO (§ 24/2/w ZDP).
                 'securities'   => (new SecuritiesSaleCostLimit($this->db))
@@ -79,29 +80,30 @@ final class TaxBaseReportAction
 
     /**
      * (a) Σ daňových vs. účetních odpisů roku. Kladný rozdíl (daňové > účetní)
-     * = snížení základu daně, záporný = zvýšení (§24/2/a, §23/3 ZDP).
+     * = snížení základu daně, záporný = zvýšení (§24/2/a, §23/3 ZDP). Účetní odpisy
+     * jsou ty v knihách, stejně jako v přiznání DPPO ({@see BookedAccountingDepreciation}).
      *
-     * @return array{tax_total:float, accounting_total:float, difference:float, note:string}
+     * @param array<string,mixed> $period
+     * @return array{tax_total:float, accounting_total:float, difference:float, warnings:list<string>, note:string}
      */
-    private function depreciationDiff(int $supplierId, int $fiscalYear): array
+    private function depreciationDiff(int $supplierId, int $fiscalYear, array $period): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT kind, COALESCE(SUM(amount), 0) AS total
+            "SELECT COALESCE(SUM(amount), 0)
                FROM depreciation_entries
-              WHERE supplier_id = ? AND fiscal_year = ?
-              GROUP BY kind'
+              WHERE supplier_id = ? AND fiscal_year = ? AND kind = 'tax'"
         );
         $stmt->execute([$supplierId, $fiscalYear]);
-        $sums = ['tax' => 0.0, 'accounting' => 0.0];
-        foreach ($stmt->fetchAll() as $row) {
-            $sums[(string) $row['kind']] = (float) $row['total'];
-        }
-        $diff = round($sums['tax'] - $sums['accounting'], 2);
+        $booked = (new BookedAccountingDepreciation($this->db))
+            ->forPeriod($supplierId, $fiscalYear, (string) $period['starts_on'], (string) $period['ends_on']);
+        $tax = round((float) $stmt->fetchColumn() + $booked['tax_taken_over'], 2);
+        $diff = round($tax - $booked['total'], 2);
 
         return [
-            'tax_total'        => round($sums['tax'], 2),
-            'accounting_total' => round($sums['accounting'], 2),
+            'tax_total'        => $tax,
+            'accounting_total' => $booked['total'],
             'difference'       => $diff,
+            'warnings'         => BookedAccountingDepreciation::warnings($booked),
             'note'             => $diff >= 0
                 ? 'Daňové odpisy převyšují účetní o ' . number_format($diff, 2, ',', ' ') . ' Kč — základ daně se snižuje.'
                 : 'Účetní odpisy převyšují daňové o ' . number_format(-$diff, 2, ',', ' ') . ' Kč — základ daně se zvyšuje.',

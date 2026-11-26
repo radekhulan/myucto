@@ -108,6 +108,9 @@ function deductibilityClass(d: string): string {
           </div>
         </div>
         <p class="text-xs text-neutral-500">{{ data.depreciation.note }}</p>
+        <ul v-if="data.depreciation.warnings?.length" class="mt-2 space-y-1 text-xs text-warning-700">
+          <li v-for="(w, i) in data.depreciation.warnings" :key="i">{{ w }}</li>
+        </ul>
       </div>
 
       <!-- (b) vyřazený majetek -->

@@ -459,6 +459,11 @@ final class TaxReturnService
         $this->losses->assertExact($candidatePlan);
         if(isset($computation['podklady']['nonprofit_calculation']))DppoLossAppendix::assertPlan($computation['podklady']['nonprofit_calculation']['data']['loss_appendix'],$candidatePlan,$candidateYearLoss);
         $preFinalize = $this->preFinalizeChecks->run($supplierId, $year, $type, (array) $row['inputs'], $computation);
+        if (($preFinalize['can_finalize'] ?? true) !== true) {
+            $blocking = array_values(array_filter($preFinalize['checks'], static fn (array $c): bool =>
+                ($c['severity'] ?? '') === PreFinalizeCheckService::BLOCKING && !($c['ok'] ?? false)));
+            throw new TaxReturnException('prefinalize_blocked', self::blockingMessage($blocking), 422);
+        }
         $snapshot = [
             'computed' => $computation['result'],
             'podklady' => $computation['podklady'],
@@ -1893,6 +1898,28 @@ final class TaxReturnService
     }
 
     /**
+     * Text chyby finalizace blokované předfinalizační kontrolou.
+     *
+     * @param list<array<string,mixed>> $checks nesplněné blokující kontroly
+     */
+    private static function blockingMessage(array $checks): string
+    {
+        $parts = [];
+        foreach ($checks as $check) {
+            $value = (array) ($check['value'] ?? []);
+            $parts[] = $check['key'] === 'draft_assets_551'
+                ? sprintf(
+                    'Karty majetku v konceptu (%d) mají v deníku roku účetní odpisy %s Kč, ke kterým přiznání nemá daňový odpis. '
+                    . 'Karty doplňte a zařaďte do užívání (Majetek), pak přiznání finalizujte.',
+                    (int) ($value['assets'] ?? 0),
+                    number_format((float) ($value['amount'] ?? 0), 2, ',', ' '),
+                )
+                : 'Předfinalizační kontrola ' . $check['key'] . ' blokuje finalizaci.';
+        }
+        return 'Přiznání nejde finalizovat. ' . implode(' ', $parts);
+    }
+
+    /**
      * @param array<string,mixed> $inputs
      * @return array{result:array<string,mixed>,podklady:array<string,mixed>,warnings:list<string>}
      */
@@ -1915,6 +1942,7 @@ final class TaxReturnService
                 'vh' => $data['vh'],
                 'non_deductible_costs' => $data['non_deductible_costs'],
                 'depreciation' => $data['depreciation'],
+                'depreciation_warnings' => $data['depreciation_warnings'] ?? [],
                 'disposal_nondeductible_residual' => $data['disposal_nondeductible_residual'],
                 'disposals' => $data['disposals'],
                 'securities_sale' => $data['securities_sale'] ?? SecuritiesSaleCostLimit::empty(),

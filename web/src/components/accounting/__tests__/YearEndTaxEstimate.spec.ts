@@ -101,6 +101,15 @@ describe('YearEndTaxEstimate', () => {
     expect(w.find('[data-test="estimate-projection-warnings"]').exists()).toBe(false)
   })
 
+  it('lists depreciation warnings from the DPPO preview', async () => {
+    getYearEndTaxEstimate.mockResolvedValue(estimate({ depreciation_warnings: ['Karty majetku v konceptu (2) se neodpisují.'] }))
+    const w = mountBlock()
+    await flushPromises()
+    const box = w.find('[data-test="estimate-depreciation-warnings"]')
+    expect(box.exists()).toBe(true)
+    expect(box.text()).toContain('Karty majetku v konceptu (2) se neodpisují.')
+  })
+
   it('renders nothing for a closed year or a posted income tax', async () => {
     getYearEndTaxEstimate.mockResolvedValue(estimate({ applicable: false, reason: 'income_tax_posted' }))
     const w = mountBlock()

@@ -866,7 +866,7 @@ export interface DepreciationBookResult {
 export interface TaxBaseAdjustments {
   fiscal_year: number
   period: { id: number; starts_on: string; ends_on: string }
-  depreciation: { tax_total: number; accounting_total: number; difference: number; note: string }
+  depreciation: { tax_total: number; accounting_total: number; difference: number; warnings?: string[]; note: string }
   disposals: TaxBaseDisposalRow[]
   /** § 24/2/w ZDP — stejná čísla jako ř. 40 přiznání DPPO (SecuritiesSaleCostLimit). */
   securities?: {

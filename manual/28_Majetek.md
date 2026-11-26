@@ -79,6 +79,11 @@ popisuje [§ 28.12.14](#281214-majetek-v-danove-evidenci).
 **Jak poznáte, že je hotovo:** karta je rovnou ve stavu **V užívání** s historií. Pole historie už nejde po uložení měnit.
 Počáteční daňové oprávky nesmějí přesáhnout vstupní cenu a počáteční účetní oprávky spolu s účetní zbytkovou hodnotou ji také
 nesmějí překročit. Stejná kontrola platí při importu karet.
+Rok, který počáteční účetní oprávky pokrývají celý (měsíce od zařazení až do konce roku), se účetně neodpisuje ani u karty
+s účetními odpisy podle daňových: jeho odpis už je v deníku převzatém z původního programu. Když takový rok daňově odepsaný
+ještě není (karta převzatá s odpisy běžného roku), první další rok srovná účetní oprávky s daňovými (odečte náskok, nebo
+dožene zaostávání), takže se karta na konci plánu odepíše celá. Rok s už zaúčtovaným nebo potvrzeným účetním odpisem se
+tím nemění. U ručně zadaného historického majetku zůstává účetní odpis daňový a zaostávání se nedohání.
 
 ## 28.4 Krok za krokem: zařadit majetek do užívání
 

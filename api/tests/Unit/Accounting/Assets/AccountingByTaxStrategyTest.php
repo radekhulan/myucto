@@ -168,12 +168,63 @@ final class AccountingByTaxStrategyTest extends TestCase
         self::assertSame(0.0, round((float) end($last)['residual_end'], 2));
     }
 
+    /**
+     * Převzatá karta, jejíž účetní plán původního programu zaostával za daňovým: počáteční
+     * účetní oprávky pokrývají celý rok 2026 (odpisy jsou v převzatém deníku), ale jsou nižší
+     * než daňové oprávky po roce 2026. Rok 2026 se nedorovnává, jinak by se jeho odpis
+     * v deníku zaúčtoval podruhé; zaostávání 93 000 dožene rok 2027 a plán skončí s nulovou
+     * účetní zůstatkovou cenou.
+     */
+    public function testYearCoveredByOpeningIsNotTopUpAndLagIsCaughtUpNextYear(): void
+    {
+        $ctx = $this->ctx([
+            'inputPrice' => 1200000.0,
+            'putIntoUseDate' => '2023-06-15',
+            'openingTaxYears' => 3,
+            'openingTaxAmount' => 666000.0,
+            'openingAccMonths' => 42,
+            'openingAccAmount' => 840000.0,
+        ]);
+        $strategy = $this->strategy();
+        $acc = $this->byYear($strategy->plan($ctx));
+
+        self::assertSame(0.0, $acc[2026]);
+        self::assertSame(0.0, round((float) $strategy->yearRow($ctx, 2026)['amount'], 2));
+        self::assertSame(360000.0, round((float) $strategy->yearRow($ctx, 2027)['amount'], 2));
+        self::assertSame(360000.0, $acc[2027]);
+        self::assertSame(1200000.0, round(840000.0 + array_sum($acc), 2), 'Oprávky dosáhnou vstupní ceny.');
+        $plan = $strategy->plan($ctx);
+        self::assertSame(0.0, round((float) end($plan)['residual_end'], 2));
+    }
+
+    /**
+     * Ručně zadaný historický majetek: počáteční účetní oprávky (3 měsíce) zaostávají za
+     * daňovými, žádný rok plánu ale nepokrývají. Zaostávání se nedohání, odpis zůstává
+     * daňový (beze změny proti dřívějšímu chování).
+     */
     public function testOpeningAccountingBehindTaxKeepsTaxAmounts(): void
     {
         $ctx = $this->ctx(['openingTaxYears' => 1, 'openingTaxAmount' => 127273.0, 'openingAccMonths' => 3, 'openingAccAmount' => 57852.0]);
 
         self::assertSame(257439.0, $this->byYear($this->strategy()->plan($ctx))[2026]);
         self::assertSame(257439.0, round((float) $this->strategy()->yearRow($ctx, 2026)['amount'], 2));
+    }
+
+    /** Potvrzený nebo zaúčtovaný účetní odpis roku dorovnání nepřepočítá. */
+    public function testCatchUpNeverRecomputesConfirmedYear(): void
+    {
+        $ctx = $this->ctx([
+            'inputPrice' => 1200000.0,
+            'putIntoUseDate' => '2023-06-15',
+            'openingTaxYears' => 3,
+            'openingTaxAmount' => 666000.0,
+            'openingAccMonths' => 42,
+            'openingAccAmount' => 840000.0,
+            'confirmedEntries' => [['fiscal_year' => 2027, 'kind' => 'accounting', 'amount' => 267000.0, 'full_amount' => 267000.0, 'is_paused' => false, 'is_half' => false]],
+        ]);
+
+        self::assertSame(267000.0, round((float) $this->strategy()->yearRow($ctx, 2027)['amount'], 2));
+        self::assertSame(267000.0, $this->byYear($this->strategy()->plan($ctx))[2027]);
     }
 
     public function testTaxMethodNoneYieldsEmptyPlan(): void

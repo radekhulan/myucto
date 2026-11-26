@@ -83,6 +83,11 @@ function signed(value: number, sign: number): string {
       </ul>
     </div>
 
+    <ul v-if="estimate.applicable && (estimate.depreciation_warnings ?? []).length"
+      class="mx-3 mt-2 bg-warning-50 border border-warning-500/40 rounded-md p-2.5 text-xs text-warning-700 list-disc list-inside space-y-1" data-test="estimate-depreciation-warnings">
+      <li v-for="(w, i) in estimate.depreciation_warnings" :key="i">{{ w }}</li>
+    </ul>
+
     <div v-if="estimate.applicable" class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="text-xs text-neutral-500 uppercase tracking-wide">

@@ -374,6 +374,44 @@ final class DppoReturnDataProviderTest extends TestCase
         return (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE account_code = '{$code}'")->fetchColumn();
     }
 
+    /**
+     * Rozdíl odpisů počítá jen odpisy karet: zápisy modulu, nezaúčtované řádky bez zápisu
+     * a převzaté měsíce karty z počátečního stavu (zápisy deníku s jejím inventárním číslem).
+     * U karty „daňový = účetní" jsou převzaté měsíce i daňovým odpisem. Zůstatková cena
+     * likvidace z modulu, uzávěrka, zaúčtovaný řádek bez zápisu ani ruční 551 mimo karty
+     * do něj nevstupují; ruční 551 jen hlásí upozornění.
+     */
+    public function testDepreciationComesFromCardsInBooksWithoutDoubleCounting(): void
+    {
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
+        $this->pdo->exec("INSERT INTO chart_of_accounts (id, account_code, account_type, tax_deductibility, name) VALUES
+            (1,'551.001','expense','deductible','Odpisy'),(2,'082','asset','deductible','Oprávky'),(3,'710','closing','deductible','Účet zisků a ztrát')");
+        $this->pdo->exec("INSERT INTO assets (id, supplier_id, inventory_number, name, kind, input_price, status, tax_method, asset_account_code, accumulated_account_code, put_into_use_date, opening_acc_months, opening_acc_amount)
+            VALUES (1,1,'A1','A1','tangible',100000,'in_use','straight','022','082','2024-01-10',0,0),
+                   (2,1,'A2','A2','tangible',100000,'in_use','straight','022','082','2024-01-10',0,0),
+                   (3,1,'P1','P1','intangible',60000,'in_use','by_accounting','013','073','2024-01-15',23,24000)");
+        $this->pdo->exec("INSERT INTO depreciation_entries (id, supplier_id, asset_id, kind, fiscal_year, amount, residual_value_end, status) VALUES
+            (50,1,1,'accounting',2025,7000,0,'posted'),(51,1,2,'accounting',2025,900,0,'confirmed'),(52,1,2,'tax',2025,4000,0,'confirmed'),
+            (53,1,1,'accounting',2025,333,0,'posted')");
+        // zápis odpisu modulu k řádku 50; řádek 53 je zaúčtovaný, ale svůj zápis nemá
+        $this->plEntry(1, '2025-12-31', 'depreciation', 1, 'debit', 7000, 50);
+        // převzatý deník: měsíční odpisy karty P1 (pokrytá počátečním stavem do 12/2025)
+        for ($m = 1; $m <= 12; $m++) {
+            $this->plEntry(100 + $m, sprintf('2025-%02d-28', $m), 'manual', 1, 'debit', 1000, null, 'P1');
+        }
+        // ruční 551 mimo karty, ZC likvidace z modulu a uzávěrka
+        $this->plEntry(2, '2025-06-30', 'manual', 1, 'debit', 2000);
+        $this->plEntry(4, '2025-09-30', 'asset_disposal', 1, 'debit', 2500, 2);
+        $this->plEntry(5, '2025-12-31', 'closing', 1, 'credit', 23500, 1);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(['tax' => 16000.0, 'accounting' => 19900.0], $result['depreciation'], 'Účetní 7 000 + 900 + 12 000, daňové 4 000 + 12 000.');
+        self::assertSame(12000.0, $result['depreciation_by_group']['intangible']);
+        self::assertSame(4000.0, $result['depreciation_by_group']['unclassified']);
+        self::assertStringContainsString('Obrat účtu 551 mimo odpisy karet majetku je 2 000,00 Kč', implode("\n", $result['warnings']));
+        self::assertSame($result['depreciation_warnings'], array_values(array_intersect($result['warnings'], $result['depreciation_warnings'])));
+    }
+
     /** Bez ClosingService (unit test / autowire fallback) je projekce prázdná: vh_projected == vh_posted. */
     public function testProjectionIsEmptyWithoutClosingService(): void
     {
@@ -388,10 +426,10 @@ final class DppoReturnDataProviderTest extends TestCase
         self::assertSame([], $projection['items']);
     }
 
-    private function plEntry(int $id, string $date, string $sourceType, int $accountId, string $side, float $amount, ?int $sourceId = null): void
+    private function plEntry(int $id, string $date, string $sourceType, int $accountId, string $side, float $amount, ?int $sourceId = null, ?string $documentNo = null): void
     {
-        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,?,?,?,?,NULL)")
-            ->execute([$id, $date, $sourceType, $sourceId ?? $id, $date]);
+        $this->pdo->prepare("INSERT INTO journal_entries (id, supplier_id, entry_date, source_type, source_id, posted_at, reversed_by, document_no) VALUES (?,1,?,?,?,?,NULL,?)")
+            ->execute([$id, $date, $sourceType, $sourceId ?? $id, $date, $documentNo]);
         $this->pdo->prepare("INSERT INTO journal_entry_lines VALUES (?,1,?,?,?,?)")
             ->execute([$id, $id, $accountId, $side, $amount]);
     }
@@ -404,9 +442,9 @@ final class DppoReturnDataProviderTest extends TestCase
              VALUES (?,1,?,?,'tangible','2025-06-30',?,100000,0,'disposed','straight','022','082')"
         );
         $stmt->execute([$id, $number, $number, $type]);
-        $this->pdo->prepare("INSERT INTO depreciation_entries VALUES (?,1,?,'tax',2025,0,?)")
+        $this->pdo->prepare("INSERT INTO depreciation_entries (id, supplier_id, asset_id, kind, fiscal_year, amount, residual_value_end) VALUES (?,1,?,'tax',2025,0,?)")
             ->execute([$id, $id, $taxResidual]);
-        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,'2025-06-30','asset_disposal',?,'2025-06-30',NULL)")
+        $this->pdo->prepare("INSERT INTO journal_entries (id, supplier_id, entry_date, source_type, source_id, posted_at, reversed_by) VALUES (?,1,'2025-06-30','asset_disposal',?,'2025-06-30',NULL)")
             ->execute([$id, $id]);
         if ($bookResidual > 0) {
             $this->pdo->prepare("INSERT INTO journal_entry_lines VALUES (?,1,?,?, 'debit',?)")
@@ -458,7 +496,7 @@ final class DppoReturnDataProviderTest extends TestCase
     private function ledgerEntry(int $id, string $date, string $debit, string $credit, float $amount): void
     {
         $account = fn (string $code): int => (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE account_code = '{$code}'")->fetchColumn();
-        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,?,'manual',NULL,?,NULL)")->execute([$id, $date, $date]);
+        $this->pdo->prepare("INSERT INTO journal_entries (id, supplier_id, entry_date, source_type, source_id, posted_at, reversed_by) VALUES (?,1,?,'manual',NULL,?,NULL)")->execute([$id, $date, $date]);
         $this->pdo->prepare("INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (1,?,?,'debit',?)")
             ->execute([$id, $account($debit), $amount]);
         $this->pdo->prepare("INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (1,?,?,'credit',?)")
@@ -481,15 +519,15 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec('CREATE TABLE supplier_accounting_frameworks (id INTEGER, supplier_id INTEGER, effective_from TEXT, accounting_framework TEXT, created_at TEXT, created_by INTEGER)');
         $this->pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT, created_reason TEXT)');
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, name TEXT)');
-        $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
+        $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER, document_no TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL)');
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER, vendor_id INTEGER, status TEXT, document_kind TEXT, effective_cost_date TEXT, total_without_vat REAL)');
         $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER,
             disposal_date TEXT, disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
             opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT,
-            disposal_entry_id INTEGER)');
+            disposal_entry_id INTEGER, put_into_use_date TEXT, opening_acc_months INTEGER DEFAULT 0)');
         $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, completed_on TEXT, amount REAL)');
-        $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
+        $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL, status TEXT, detail TEXT)');
         // Podklady pro VetaD/spoj_zahr (relatedPartyCountryFlag) a VetaNP (bankAccount) —
         // v téhle testovací třídě prázdné, gather() je ale pořád volá, tabulky musí existovat.
         $this->pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, client_id INTEGER, status TEXT, invoice_type TEXT, effective_tax_date TEXT, total_without_vat REAL)');

@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   canRead: true,
   taxpayerType: 'po' as 'po' | 'fo',
   get: vi.fn(),
+  prefinalizeCheck: vi.fn(),
   download: vi.fn(),
   reportPdfUrl: vi.fn(),
 }))
@@ -17,6 +18,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@/api/taxReturn', () => ({
   taxReturnApi: {
     get: m.get,
+    prefinalizeCheck: m.prefinalizeCheck,
     reportPdfUrl: m.reportPdfUrl,
     xmlUrl: () => '/api/tax-return/po/2025/xml',
     previewXmlUrl: () => '/api/tax-return/fo/2025/xml/preview',
@@ -107,12 +109,33 @@ describe('IncomeTaxReport.vue: upozornění DPPO', () => {
     m.canRead = true
     m.taxpayerType = 'po'
     m.get.mockReset()
+    m.prefinalizeCheck.mockReset()
   })
 
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
     document.body.innerHTML = ''
+  })
+
+  it('shows a blocking pre-finalize check and refreshes it when the browser tab is visible again', async () => {
+    const blocked = {
+      checks: [{ key: 'draft_assets_551', severity: 'blocker', ok: false, value: { assets: 1, amount: 12000, taken_over: 12000 } }],
+      summary: { ok: 0, warning: 0, blocker: 1, na: 0 },
+      can_finalize: false,
+    }
+    const w = await mountPage({ ...makeState('po'), prefinalize_check: blocked })
+    expect(w.find('[data-test="prefinalize-blockers"]').exists()).toBe(true)
+
+    m.prefinalizeCheck.mockResolvedValue({
+      checks: [{ key: 'draft_assets_551', severity: 'warning', ok: true, value: { assets: 0, amount: 0, taken_over: 0 } }],
+      summary: { ok: 1, warning: 0, blocker: 0, na: 0 },
+      can_finalize: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(m.prefinalizeCheck).toHaveBeenCalled()
+    expect(w.find('[data-test="prefinalize-blockers"]').exists()).toBe(false)
   })
 
   it('warns when the books changed after the return was finalized', async () => {

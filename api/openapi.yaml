@@ -32646,7 +32646,9 @@ paths:
       description: >-
         Vyžaduje oprávnění `reports.finalize`. Pro DPFO i DPPO uloží neměnný výpočet
         a XML včetně příloh s výsledkem XSD kontroly. Neúspěšné XSD a obsahové
-        kontroly se uloží jako varování a finalizaci nezakazují. Nová finalizace
+        kontroly se uloží jako varování a finalizaci nezakazují. Nesplněná předfinalizační
+        kontrola se severity blocker (DPPO: karta majetku v konceptu s odpisy na 551
+        v převzatém deníku roku) finalizaci zakáže chybou 422 prefinalize_blocked. Nová finalizace
         po znovuotevření vytváří další revizi snapshotu. Nativní504 navíc vyžaduje session, shodný nonprofit_filing_proof_hash z posledního výpočtu a úspěšné nativní XSD. Změna jakéhokoli právního či účetního důkazu vrací409. Skutečná úspora§20(7) se ukládá atomicky se snapshotem.
       requestBody:
         required: true
@@ -32663,6 +32665,7 @@ paths:
         '400': { description: Neplatný typ/rok/variant }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Přiznání není v konceptu / row_version nesedí, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'prefinalize_blocked: nesplněná blokující předfinalizační kontrola (severity blocker), případně jiná obsahová chyba výpočtu', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/tax-return/{type}/{year}/reopen:
     parameters:
@@ -32700,7 +32703,12 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Předfinalizační kontrolní checklist (E10, audit 2026-07)
-      description: Nálezy jsou poradní; can_finalize je true a summary.blocker je 0. Neúspěšné kontroly mají severity warning.
+      description: >-
+        Nálezy jsou poradní (severity warning), kromě kontrol se severity blocker: nesplněná
+        blokující kontrola se počítá do summary.blocker a nastaví can_finalize na false
+        (finalizace pak vrátí 422 prefinalize_blocked). U DPPO je blokující draft_assets_551
+        (karta majetku v konceptu s odpisy na 551 v převzatém deníku roku, mimo neziskové
+        organizace).
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '400': { description: Neplatný typ/rok/variant }
@@ -62020,6 +62028,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/YearEndClosingItem'
+        depreciation_warnings:
+          type: array
+          description: Upozornění k rozdílu účetních a daňových odpisů (karty majetku v konceptu, obrat 551 mimo odpisy karet, odhad převzatých odpisů).
+          items:
+            type: string
         projection_warnings:
           type: array
           description: Kroky uzávěrky, jejichž náhled selhal. Projekce VH a daně je bez nich neúplná.

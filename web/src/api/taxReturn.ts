@@ -336,6 +336,10 @@ export const taxReturnApi = {
   finalize: (type: TaxpayerType, year: number, rowVersion: number, variant?: TaxReturnVariant, seq?: number, nonprofitFilingProofHash?: string) =>
     api.post<TaxReturnState>(`/tax-return/${type}/${year}/finalize${vsQuery(variant, seq)}`, { row_version: rowVersion, ...(nonprofitFilingProofHash ? { nonprofit_filing_proof_hash: nonprofitFilingProofHash } : {}) }).then(r => r.data),
 
+  // Předfinalizační kontrola znovu (po návratu na stránku se mohly změnit karty majetku a deník).
+  prefinalizeCheck: (type: TaxpayerType, year: number, variant?: TaxReturnVariant, seq?: number) =>
+    api.get<PreFinalizeCheckResult>(`/tax-return/${type}/${year}/prefinalize-check${vsQuery(variant, seq)}`).then(r => r.data),
+
   reopen: (type: TaxpayerType, year: number, rowVersion: number, variant?: TaxReturnVariant, seq?: number) =>
     api.post<TaxReturnState>(`/tax-return/${type}/${year}/reopen${vsQuery(variant, seq)}`, { row_version: rowVersion }).then(r => r.data),
 

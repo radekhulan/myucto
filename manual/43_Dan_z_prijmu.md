@@ -409,6 +409,25 @@ technických uzávěrkových zápisů. Základ upravují nedaňové náklady, ru
 rozdíl daňových a účetních odpisů a rozdíl zůstatkových cen vyřazeného majetku.
 Následují ztráty, dary a slevy.
 
+Rozdíl odpisů (**ř. 50** a **ř. 150**) porovnává po kartách majetku daňové odpisy
+s účetními odpisy, které jsou v knihách: odpisy zaúčtované modulem majetku (i se stornem)
+a u karty převzaté z jiného programu měsíce roku, které pokrývá její počáteční stav.
+Ty jsou v převzatém deníku a přiznání je najde podle čísla dokladu rovného inventárnímu
+číslu karty; storno takového zápisu patří ke stejné kartě. Když zápisy karty v deníku
+nejsou, odhadne odpis z počátečního stavu karty (nejvýš do obratu 551, který žádné kartě
+nepatří) a upozorní na to. Zůstatkovou cenu vyřazené převzaté karty pozná v zápisu
+vyřazení s číslem karty v měsíci vyřazení nebo v měsíci před a po něm (připsání na
+majetkový účet karty a odepsání oprávek) a do odpisů ji nepočítá; odpis posledního měsíce
+(MD 551 / D 08x) v témže zápisu zůstává odpisem a storno zápisu vyřazení vrací i jeho
+zůstatkovou cenu. Když ji z řádků zápisu určit nejde, nechá celý zápis mimo odpisy
+a upozorní. U nehmotného
+majetku s daňovým odpisem rovným účetnímu (§ 32a) jsou převzaté měsíce i daňovým odpisem.
+Karty v konceptu se nepočítají účetně ani daňově a obrat účtu 551 mimo odpisy karet
+(zůstatková cena vyřazeného majetku, opravné položky, ruční zápisy) do rozdílu odpisů
+nevstupuje. Podklady, podklad úprav základu daně i odhad daně do konce roku to ukážou
+jako upozornění s částkou, stejně jako odpis roku, který je v převzatém deníku a modul
+majetku ho zaúčtoval znovu.
+
 Rozdíl zůstatkových cen prodaného nebo zlikvidovaného majetku jde podle pokynů
 k přiznání na dva řádky: účetní ZC vyšší než daňová zvyšuje základ na **ř. 40**,
 daňová ZC vyšší než účetní ho snižuje na **ř. 160** (se zvláštní přílohou podle účtové
@@ -437,7 +456,9 @@ uzávěrkových kroků, které v neuzavřeném roce ještě zaúčtované nejsou
 drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení
 z minulého roku, konečný stav zásob (způsob B) a odpisy roku podle odpisového plánu.
 Účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150
-stejně jako u zaúčtovaných odpisů. Opravné a dohadné položky jsou jen návrhy
+stejně jako u zaúčtovaných odpisů. Rok, jehož účetní odpisy pokrývá počáteční stav
+karty převzaté z jiného programu (odpisy jsou v převzatém deníku), se účetně znovu
+neodpisuje; projekce v něm přidá jen daňový odpis. Opravné a dohadné položky jsou jen návrhy
 k potvrzení, zobrazí se šedě a do projekce se nesčítají. Každá položka odkazuje na
 uzávěrku období, odpisy na Majetek. Zaúčtovaný krok z projekce zmizí, takže se nic
 nezapočte dvakrát. Když náhled některého kroku selže (například kvůli neplatnému
@@ -488,9 +509,15 @@ stav **OK / upozornění** (nebo **nerelevantní** tam, kde se netýká daného 
 u problémů rovnou ukáže **částky a prokliknutelný rozpad**:
 
 - **Účetní období uzavřeno** - období roku má být `uzavřené`/`schválené`, ne otevřené.
-- **Obrat účtu 551 = účetní odpisy** - zaúčtované účetní odpisy (551) musí odpovídat odpisům
-  evidovaným v modulu majetku; rozdíl = odpisy nezaúčtované nebo zaúčtované ručně jinou částkou
-  (řádek 50/150 by pak zkreslil základ).
+- **Obrat účtu 551 = účetní odpisy** - obrat účtu 551 musí odpovídat účetním odpisům karet
+  majetku, se kterými počítá rozdíl odpisů (ř. 50/150); rozdíl = zápisy na 551 mimo odpisy karet,
+  například karty v konceptu, zůstatková cena vyřazeného majetku nebo ruční zápis. Upozorní i na
+  odpis roku, který je v převzatém deníku a modul majetku ho zaúčtoval podruhé.
+- **Karty majetku v konceptu bez odpisů na 551** (jen DPPO) - karta v konceptu, k níž jsou v deníku
+  roku účetní odpisy, snižuje základ bez daňového odpisu. Jde-li o kladné odpisy v deníku převzatém
+  z jiného programu, je kontrola **blokující**: přiznání nejde finalizovat, dokud karty nedoplníte
+  a nezařadíte do užívání. Ruční zápis se stejným číslem jako karta, záporný zůstatek (storno)
+  a nezisková organizace dostanou jen upozornění.
 - **Obrat účtu 543 = zadané dary (§ 20/8)** - dary na účtu 543 musí sedět s dary zadanými do přiznání.
 - **VH přiznání = VH výsledovky** - výsledek hospodaření z přiznání se porovná s výsledovkou
   (nezávislá cesta výpočtu přes výkaz zisku a ztráty); rozdíl signalizuje chybu v mapování osnovy.

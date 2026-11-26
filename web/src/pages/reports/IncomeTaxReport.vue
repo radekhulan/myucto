@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onActivated, onBeforeUnmount, watch, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type FiledImportResult, type TaxReturnBankAccount, type PreFinalizeCheck } from '@/api/taxReturn'
@@ -168,11 +168,13 @@ const prefinalize = computed(() => state.value?.prefinalize_check ?? null)
 function checkTone(c: { ok: boolean; severity: string; na?: boolean }): string {
   if (c.na) return 'bg-neutral-50 text-neutral-500 border-neutral-200'
   if (c.ok) return 'bg-success-50 text-success-700 border-success-500/30'
+  if (c.severity === 'blocker') return 'bg-danger-50 text-danger-700 border-danger-500/40'
   return 'bg-warning-50 text-warning-700 border-warning-500/40'
 }
 function checkStatusLabel(c: { ok: boolean; severity: string; na?: boolean }): string {
   if (c.na) return t('taxReturn.check_na')
   if (c.ok) return t('taxReturn.check_ok')
+  if (c.severity === 'blocker') return t('taxReturn.check_blocker')
   return t('taxReturn.check_warning')
 }
 
@@ -192,8 +194,13 @@ const regularSummary = computed(() => ({
   // Stejná pravidla jako v PreFinalizeCheckService::run(): rozhoduje `ok`, ne závažnost.
   // Nerelevantní kontroly (`na`) se do souhrnu nepočítají vůbec.
   ok: regularChecks.value.filter((c) => c.ok).length,
-  warning: regularChecks.value.filter((c) => !c.ok && !c.na).length,
+  warning: regularChecks.value.filter((c) => !c.ok && !c.na && c.severity !== 'blocker').length,
+  blocker: regularChecks.value.filter((c) => !c.ok && !c.na && c.severity === 'blocker').length,
 }))
+function depreciationDuplicates(c: PreFinalizeCheck): { inventory_number: string; amount: number }[] {
+  const list = c.value?.duplicates
+  return Array.isArray(list) ? (list as { inventory_number: string; amount: number }[]) : []
+}
 function caseText(c: PreFinalizeCheck, field: 'message' | 'action'): string {
   return String(c.value?.[field] ?? '')
 }
@@ -770,7 +777,26 @@ onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { /* účetní období nemusí být dostupná (tax_evidence) */ }
   await load()
   await loadOverridesOverview()
+  document.addEventListener('visibilitychange', onVisible)
 })
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible))
+
+// Předfinalizační kontrola (i blokující) závisí na kartách majetku a deníku, které se mění
+// jinde: po návratu na stránku (KeepAlive), do záložky prohlížeče nebo do záložky přiznání
+// se načte znovu, aby tlačítko Finalizovat nezůstalo zakázané podle starého stavu.
+async function refreshPrefinalize() {
+  if (!state.value || isFinal.value || loading.value || saving.value) return
+  try {
+    const check = await taxReturnApi.prefinalizeCheck(type.value, year.value, variant.value, seqParam())
+    if (state.value && !isFinal.value) state.value.prefinalize_check = check
+  } catch { /* kontrola zůstane podle posledního načtení */ }
+}
+function onVisible() {
+  if (document.visibilityState === 'visible') void refreshPrefinalize()
+}
+let activatedOnce = false
+onActivated(() => { if (activatedOnce) void refreshPrefinalize(); activatedOnce = true })
+watch(activeTab, () => { void refreshPrefinalize() })
 
 type ItemList = 'manual_increase_items' | 'manual_decrease_items' | 'donation_items'
 function addItem(list: ItemList) {
@@ -788,7 +814,7 @@ const actions = computed<ActionItem[]>(() => {
     a.push({ key: 'save', label: t('taxReturn.save'), icon: 'check', tier: 'primary', variant: 'primary',
       show: auth.canWrite('reports'), disabled: (!dirty.value && !profileDirty.value) || saving.value, loading: saving.value, run: save })
     a.push({ key: 'finalize', label: t('taxReturn.finalize'), icon: 'clipboardCheck', tier: 'secondary', variant: 'success',
-      show: auth.canWrite('reports.finalize'), disabled: saving.value, run: finalize })
+      show: auth.canWrite('reports.finalize'), disabled: saving.value || prefinalize.value?.can_finalize === false, run: finalize })
   } else {
     a.push({ key: 'reopen', label: t('taxReturn.reopen'), icon: 'doc', tier: 'secondary', variant: 'warning',
       show: auth.canWrite('reports.reopen'), disabled: saving.value, run: reopen })
@@ -889,6 +915,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
         <span class="text-xs">
           <span class="text-success-700">{{ regularSummary.ok }} {{ t('taxReturn.check_ok') }}</span>
           <span v-if="regularSummary.warning" class="text-warning-700 ml-2">{{ regularSummary.warning }} {{ t('taxReturn.check_warning') }}</span>
+          <span v-if="regularSummary.blocker" class="text-danger-700 ml-2" data-test="prefinalize-blockers">{{ regularSummary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
         </span>
       </div>
       <ul class="space-y-2">
@@ -907,6 +934,12 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <template v-else-if="c.key === 'depreciation_551' && !c.na">
               551: {{ formatMoney(Number(c.value?.turnover ?? 0), 'CZK') }} · {{ t('taxReturn.check_dep_entries') }}: {{ formatMoney(Number(c.value?.accounting_entries ?? 0), 'CZK') }}
               <span v-if="!c.ok"> · {{ t('taxReturn.check_diff') }}: {{ formatMoney(Number(c.value?.diff ?? 0), 'CZK') }}</span>
+              <div v-if="depreciationDuplicates(c).length">
+                {{ t('taxReturn.check_dep_duplicates') }}: {{ depreciationDuplicates(c).map((d) => d.inventory_number + ' ' + formatMoney(d.amount, 'CZK')).join(', ') }}
+              </div>
+            </template>
+            <template v-else-if="c.key === 'draft_assets_551' && !c.na">
+              {{ t('taxReturn.check_draft_assets_detail', { count: Number(c.value?.assets ?? 0), amount: formatMoney(Number(c.value?.amount ?? 0), 'CZK') }) }}
             </template>
             <template v-else-if="c.key === 'donations_543' && !c.na">
               543: {{ formatMoney(Number(c.value?.turnover ?? 0), 'CZK') }} · {{ t('taxReturn.donations') }}: {{ formatMoney(Number(c.value?.donations_input ?? 0), 'CZK') }}

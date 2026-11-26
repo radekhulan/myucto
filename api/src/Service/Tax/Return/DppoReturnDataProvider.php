@@ -21,7 +21,8 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  * Zdroje (podvojné účetnictví, posted zápisy období):
  *   - VH před zdaněním  = Σ výnosy (6xx) − Σ náklady (5xx mimo 59x)
  *   - nedaňové náklady   = Σ nákladů na účtech tax_deductibility='non_deductible' (§25)
- *   - rozdíl odpisů      = depreciation_entries kind tax vs accounting za fiscal_year
+ *   - rozdíl odpisů      = odpisy karet majetku za fiscal_year, účetní tak, jak jsou v knihách
+ *                          ({@see BookedAccountingDepreciation}, i převzaté z deníku původního programu)
  *   - můstek ZC          = rozdíl účetní a daňové ZC prodaného/likvidovaného majetku
  *   - prodané podíly     = převis 561P nad 661 (§24/2/w, {@see SecuritiesSaleCostLimit})
  *
@@ -103,6 +104,7 @@ final class DppoReturnDataProvider
                 'non_deductible_costs' => 0.0,
                 'depreciation' => ['tax' => 0.0, 'accounting' => 0.0],
                 'depreciation_by_group' => ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0],
+                'depreciation_warnings' => [],
                 'related_party_country_flag' => 'N',
                 'related_party_appendix' => [],
                 'bank_account' => $bankAccount,
@@ -128,8 +130,10 @@ final class DppoReturnDataProvider
 
         $vh = $this->profitBeforeTax($supplierId, $startsOn, $endsOn);
         $nonDeductible = $this->nonDeductibleCosts($supplierId, $startsOn, $endsOn);
-        $dep = $this->depreciation($supplierId, $year);
-        $depByGroup = $this->depreciationByGroup($supplierId, $year);
+        $booked = (new BookedAccountingDepreciation($this->db))->forPeriod($supplierId, $year, $startsOn, $endsOn);
+        $dep = $this->depreciation($supplierId, $year, $booked);
+        $depWarnings = BookedAccountingDepreciation::warnings($booked);
+        $depByGroup = $this->depreciationByGroup($supplierId, $year, $booked['tax_taken_over_by_group']);
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
@@ -174,6 +178,8 @@ final class DppoReturnDataProvider
             'non_deductible_costs' => $nonDeductible,
             'depreciation' => $dep,
             'depreciation_by_group' => $depByGroup,
+            // Upozornění k rozdílu odpisů zvlášť (jsou i ve `warnings`) pro odhad do konce roku.
+            'depreciation_warnings' => $depWarnings,
             'related_party_country_flag' => $relatedPartyFlag,
             'related_party_appendix' => $relatedPartyAppendix,
             'bank_account' => $bankAccount,
@@ -190,7 +196,7 @@ final class DppoReturnDataProvider
             'closing_projection' => $projection,
             'legal_provisions' => $legalProvisions,
             'suggestions' => $suggestions,
-            'warnings' => array_merge($warnings, $disposalWarnings, $securitiesWarnings),
+            'warnings' => array_merge($warnings, $depWarnings, $disposalWarnings, $securitiesWarnings),
         ];
     }
 
@@ -529,9 +535,11 @@ final class DppoReturnDataProvider
      * hmotného majetku bez vyplněné odpisové skupiny na kartě — do tabulky B se promítnout
      * nedají, builder z toho udělá varování místo tichého vynechání.
      *
+     * @param array{tangible:array<int,float>,intangible:float,unclassified:float} $takenOver daňové
+     *   odpisy převzatých měsíců karet „daňový = účetní" ({@see BookedAccountingDepreciation})
      * @return array{tangible: array<int,float>, intangible: float, unclassified: float}
      */
-    private function depreciationByGroup(int $supplierId, int $fiscalYear): array
+    private function depreciationByGroup(int $supplierId, int $fiscalYear, array $takenOver): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT a.kind, a.tax_group, COALESCE(SUM(de.amount), 0) AS total
@@ -541,9 +549,9 @@ final class DppoReturnDataProvider
               GROUP BY a.kind, a.tax_group'
         );
         $stmt->execute([$supplierId, $fiscalYear]);
-        $tangible = [];
-        $intangible = 0.0;
-        $unclassified = 0.0;
+        $tangible = $takenOver['tangible'];
+        $intangible = $takenOver['intangible'];
+        $unclassified = $takenOver['unclassified'];
         foreach ($stmt->fetchAll() as $row) {
             $amount = round((float) $row['total'], 2);
             if ($amount === 0.0) {
@@ -734,24 +742,26 @@ final class DppoReturnDataProvider
         return $accounts[0];
     }
 
-    /** @return array{tax:float,accounting:float} */
-    private function depreciation(int $supplierId, int $fiscalYear): array
+    /**
+     * Daňové odpisy roku z karet majetku (řádky `depreciation_entries` a u karet „daňový =
+     * účetní" převzaté měsíce roku), účetní odpisy karet tak, jak jsou v knihách, i převzaté
+     * z deníku původního programu ({@see BookedAccountingDepreciation}).
+     *
+     * @param array{total:float,tax_taken_over:float} $booked
+     * @return array{tax:float,accounting:float}
+     */
+    private function depreciation(int $supplierId, int $fiscalYear, array $booked): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT kind, COALESCE(SUM(amount), 0) AS total
+            "SELECT COALESCE(SUM(amount), 0)
                FROM depreciation_entries
-              WHERE supplier_id = ? AND fiscal_year = ?
-              GROUP BY kind'
+              WHERE supplier_id = ? AND fiscal_year = ? AND kind = 'tax'"
         );
         $stmt->execute([$supplierId, $fiscalYear]);
-        $sums = ['tax' => 0.0, 'accounting' => 0.0];
-        foreach ($stmt->fetchAll() as $row) {
-            $kind = (string) $row['kind'];
-            if (isset($sums[$kind])) {
-                $sums[$kind] = round((float) $row['total'], 2);
-            }
-        }
-        return $sums;
+        return [
+            'tax' => round((float) $stmt->fetchColumn() + $booked['tax_taken_over'], 2),
+            'accounting' => $booked['total'],
+        ];
     }
 
     /**
