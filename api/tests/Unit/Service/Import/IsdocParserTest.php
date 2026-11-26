@@ -467,6 +467,56 @@ XML;
         self::assertSame(0.0, $result['invoices'][0]['items'][0]['vat_rate']);
     }
 
+    public function testNonTaxFlagContradictedByDeclaredVatImportsAsTaxDocument(): void
+    {
+        // mPOHODA (1. pololetí 2026): VATApplicable=false na dokladu i řádcích, přitom
+        // Percent 21, LineExtensionTaxAmount i TaxTotal vyplněné. Platí částky.
+        $xml = str_replace(
+            [
+                '<LocalCurrencyCode>CZK</LocalCurrencyCode>',
+                '<Percent>21</Percent>',
+                '</InvoiceLines>',
+            ],
+            [
+                '<VATApplicable>false</VATApplicable><LocalCurrencyCode>CZK</LocalCurrencyCode>',
+                '<Percent>21</Percent><VATCalculationMethod>0</VATCalculationMethod><VATApplicable>false</VATApplicable>',
+                '</InvoiceLines><TaxTotal><TaxSubTotal><TaxableAmount>15000</TaxableAmount><TaxAmount>3150</TaxAmount>'
+                    . '<TaxCategory><Percent>21</Percent><VATApplicable>false</VATApplicable></TaxCategory></TaxSubTotal>'
+                    . '<TaxAmount>3150</TaxAmount></TaxTotal>',
+            ],
+            $this->minimalIsdoc()
+        );
+        $xml = str_replace('<UnitPrice>1500</UnitPrice>', '<LineExtensionAmount>15000</LineExtensionAmount>'
+            . '<LineExtensionTaxAmount>3150</LineExtensionTaxAmount><UnitPrice>1500</UnitPrice>', $xml);
+
+        $inv = $this->parser->parse($xml)['invoices'][0];
+
+        self::assertSame(21.0, $inv['items'][0]['vat_rate']);
+        self::assertSame('percent_flag_contradicted', $inv['items'][0]['vat_rate_source']);
+        self::assertSame(['21.00' => ['base' => 15000.0, 'vat' => 3150.0]], $inv['vat_recap']);
+        self::assertCount(1, $inv['file_issues']);
+        self::assertStringContainsString('nedaňový', $inv['file_issues'][0]);
+    }
+
+    public function testNonTaxDocumentWithZeroTaxTotalStaysNonTax(): void
+    {
+        // Skutečný nedaňový doklad (neplátce) může mít TaxTotal s nulou → zůstává 0 %.
+        $xml = str_replace(
+            ['<LocalCurrencyCode>CZK</LocalCurrencyCode>', '</InvoiceLines>'],
+            [
+                '<VATApplicable>false</VATApplicable><LocalCurrencyCode>CZK</LocalCurrencyCode>',
+                '</InvoiceLines><TaxTotal><TaxAmount>0</TaxAmount></TaxTotal>',
+            ],
+            $this->minimalIsdoc()
+        );
+
+        $inv = $this->parser->parse($xml)['invoices'][0];
+
+        self::assertSame(0.0, $inv['items'][0]['vat_rate']);
+        self::assertSame('non_tax_document', $inv['items'][0]['vat_rate_source']);
+        self::assertSame([], $inv['file_issues']);
+    }
+
     // ─── Round-trip se schema-validním ISDOC 6.0.2 (od v3.6.2) ──────────────
     //
     // Tyto testy chrání proti regresi z 2026-05-18: exporter byl ve v3.6.2

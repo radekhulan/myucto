@@ -177,6 +177,15 @@ final class IsdocParser
         // jsou pak nedaňové i všechny řádky → sazbu i rekapitulaci importujeme jako 0.
         // Chybějící element = daňový doklad (legacy, default true).
         $isTaxDocument = strtolower($this->text($xpath, 'i:VATApplicable', $root)) !== 'false';
+        // Příznak „nedaňový" si ale soubor sám vyvrací, když v rekapitulaci uvádí nenulovou
+        // DPH. mPOHODA takhle exportovala daňové doklady plátce (VATApplicable=false na
+        // dokladu i řádcích, přitom Percent 21 a TaxAmount vyplněné). Částky jsou silnější
+        // důkaz než příznak: nedaňový doklad DPH nemá. Bez téhle pojistky se doklad uložil
+        // s nulovou DPH a k úhradě jen základ.
+        $vatFlagContradicted = !$isTaxDocument && $this->declaresNonZeroTax($xpath, $root, $currency !== $localCur);
+        if ($vatFlagContradicted) {
+            $isTaxDocument = true;
+        }
 
         // Klient: AccountingCustomerParty/Party
         $partyEl = $xpath->query('i:AccountingCustomerParty/i:Party', $root)->item(0);
@@ -220,6 +229,12 @@ final class IsdocParser
         }
         // Nedaňový doklad (VATApplicable=false) DPH nepřiznává → prázdná rekapitulace.
         $recap = $isTaxDocument ? $this->parseTaxRecap($xpath, $root) : [];
+        $fileIssues = self::recapConflicts($items, $recap);
+        if ($vatFlagContradicted || in_array('percent_flag_contradicted', array_column($items, 'vat_rate_source'), true)) {
+            array_unshift($fileIssues, 'Doklad je v souboru označený jako nedaňový (VATApplicable=false), '
+                . 'ale zároveň uvádí sazbu a částku DPH. Importuje se jako daňový doklad se sazbami '
+                . 'z řádků, zkontrolujte DPH proti PDF.');
+        }
 
         return [
             'invoice_type'   => $invoiceType,
@@ -260,7 +275,7 @@ final class IsdocParser
             // override (PurchaseVatRecapSeeder), aby naše evidence seděla na doklad.
             'vat_recap'      => $recap,
             // Rozpory MEZI řádky a rekapitulací TÉHOŽ souboru (§ G2).
-            'file_issues'    => self::recapConflicts($items, $recap),
+            'file_issues'    => $fileIssues,
         ];
     }
 
@@ -579,8 +594,12 @@ final class IsdocParser
         $lineVatApplicable = strtolower($this->text($xpath, 'i:ClassifiedTaxCategory/i:VATApplicable', $line));
         if (!$isTaxDocument) {
             [$vatRate, $rateSource] = [0.0, 'non_tax_document'];
-        } elseif ($lineVatApplicable === 'false') {
+        } elseif ($lineVatApplicable === 'false' && !$this->lineDeclaresTax($xpath, $line, $hasForeignCurrency)) {
             [$vatRate, $rateSource] = [0.0, 'non_tax_line'];
+        } elseif ($lineVatApplicable === 'false') {
+            // Řádek se prohlašuje za nedaňový, ale sám uvádí kladnou sazbu i nenulovou DPH
+            // (mPOHODA). Platí částky, příznak je vadný.
+            [$vatRate, $rateSource] = [(float) $this->text($xpath, 'i:ClassifiedTaxCategory/i:Percent', $line), 'percent_flag_contradicted'];
         } else {
             // Chybějící <Percent> naproti tomu prohlášení NENÍ — je to mlčení. Přetyp na
             // 0.0 z něj dělal osvobozené plnění, které invariant proti úniku cizí daně
@@ -705,6 +724,47 @@ final class IsdocParser
         }
 
         return $out;
+    }
+
+    /**
+     * Uvádí rekapitulace dokladu nenulovou DPH? (`TaxTotal/TaxAmount` nebo součet
+     * `TaxSubTotal/TaxAmount`, u cizoměnového dokladu i `*Curr`.)
+     */
+    private function declaresNonZeroTax(\DOMXPath $xpath, \DOMElement $root, bool $foreignCurrency): bool
+    {
+        $exprs = ['i:TaxTotal/i:TaxAmount', 'i:TaxTotal/i:TaxSubTotal/i:TaxAmount'];
+        if ($foreignCurrency) {
+            $exprs[] = 'i:TaxTotal/i:TaxAmountCurr';
+            $exprs[] = 'i:TaxTotal/i:TaxSubTotal/i:TaxAmountCurr';
+        }
+        foreach ($exprs as $expr) {
+            foreach ($xpath->query($expr, $root) ?: [] as $el) {
+                $val = trim($el->textContent);
+                if (is_numeric($val) && abs((float) $val) > 0.005) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Uvádí řádek kladnou sazbu a zároveň nenulovou DPH řádku? Jen tehdy je jeho
+     * `VATApplicable=false` v rozporu s vlastními částkami.
+     */
+    private function lineDeclaresTax(\DOMXPath $xpath, \DOMElement $line, bool $foreignCurrency): bool
+    {
+        $percent = $this->text($xpath, 'i:ClassifiedTaxCategory/i:Percent', $line);
+        if (!is_numeric($percent) || (float) $percent <= 0.0) {
+            return false;
+        }
+        $tax = $foreignCurrency ? $this->text($xpath, 'i:LineExtensionTaxAmountCurr', $line) : '';
+        if ($tax === '') {
+            $tax = $this->text($xpath, 'i:LineExtensionTaxAmount', $line);
+        }
+
+        return is_numeric($tax) && abs((float) $tax) > 0.005;
     }
 
     private function text(\DOMXPath $xpath, string $expr, \DOMNode $context): string

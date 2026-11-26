@@ -251,6 +251,16 @@ final class IsdocToPurchaseInvoiceMapper
             }
         }
 
+        // Rozpory souboru se sebou samým (příznak nedaňového dokladu proti uvedené DPH,
+        // řádky proti rekapitulaci). Import nezastaví, ale uživatel je musí vidět.
+        foreach ((array) ($parsed['file_issues'] ?? []) as $issue) {
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, (string) $issue);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená.
+            }
+        }
+
         // Auto-ČNB kurz pro non-CZK fakturu pokud ISDOC neobsahoval explicitní kurz
         $this->cnbApplier->applyIfMissing(
             $id,
@@ -302,6 +312,18 @@ final class IsdocToPurchaseInvoiceMapper
                 $this->repo->setRounding($id, $supplierId, $isCredit ? -1.0 * $diff : $diff);
             } catch (\Throwable) {
                 // rounding je „nice to have" — faktura je vytvořená správně i bez něj.
+            }
+        } elseif ($diff >= 1.0) {
+            // K úhradě víc než součet položek: zálohy úhradu jen snižují, takže položky
+            // dokladu něco chybí (typicky DPH). Neopravujeme, jen hlásíme.
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, sprintf(
+                    'Částka k úhradě v souboru (%s) je vyšší než součet dokladu (%s). '
+                        . 'Zkontrolujte sazby a částky DPH proti PDF.',
+                    number_format($payable, 2, ',', ' '),
+                    number_format($exactTotal, 2, ',', ' '),
+                ));
+            } catch (\Throwable) {
             }
         }
     }
