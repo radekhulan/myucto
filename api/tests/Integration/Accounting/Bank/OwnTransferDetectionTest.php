@@ -409,6 +409,9 @@ final class OwnTransferDetectionTest extends BankPostingTestCase
         self::assertSame($periodId, $period === null ? null : (int) $period['id']);
         if (!$legacyPeriod) {
             $this->periods->create($this->supplierId, $year, $year . '-01-01', $year . '-12-31');
+            $retryInManualPeriod = $this->service->handleTransaction($tx, $this->userId);
+            self::assertSame(['suggested', 'period_before_start'], [$retryInManualPeriod['action'], $retryInManualPeriod['reason']]);
+            self::assertSame(0, $this->entryCountForTx($tx));
             $entryId = $this->service->approveSuggestion($this->supplierId, (int) $first['suggestion_id'], $this->meta());
             self::assertSame($entryId, (int) $this->journal->findBySource($this->supplierId, 'bank', $tx)['id']);
         }

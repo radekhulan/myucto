@@ -113,7 +113,7 @@ final class TransferPairService
         return ['action' => 'posted', 'reason' => 'own_transfer', 'entry_id' => $entryId, 'suggestion_id' => $suggestionId];
     }
 
-    public function postLeg(int $supplierId, int $txId, ?int $userId): int
+    private function postLeg(int $supplierId, int $txId, ?int $userId, bool $explicitApproval = false): int
     {
         $tx = $this->loadTx($txId);
         if ($tx === null) {
@@ -130,11 +130,11 @@ final class TransferPairService
         $periods = new AccountingPeriodRepository($this->db);
         $start = $periods->knownAccountingStart($supplierId);
         if ($start !== null && $entryDate < $start) {
-            $period = $periods->findForDate($supplierId, $entryDate);
+            $period = $explicitApproval ? $periods->findForDate($supplierId, $entryDate) : null;
             if ($period === null || $period['created_reason'] === AccountingPeriodProvisioner::REASON_POSTING) {
                 throw new PostingException(
                     'period_before_start',
-                    'Převod je před začátkem účetnictví firmy. Pokud patří do deníku, založte období ručně v Nástroje → Uzávěrka.',
+                    'Převod je před začátkem účetnictví firmy. Pokud patří do deníku, schvalte návrh v ručně založeném nebo převedeném otevřeném období.',
                 );
             }
         }
@@ -213,7 +213,7 @@ final class TransferPairService
             throw new PostingException('cross_currency_manual_only', 'Převod mezi měnami se účtuje ručně.', 409);
         }
         $txId = (int) $suggestion['bank_transaction_id'];
-        $entryId = $this->postLeg($supplierId, $txId, $meta['user_id'] ?? null);
+        $entryId = $this->postLeg($supplierId, $txId, $meta['user_id'] ?? null, explicitApproval: true);
         if (!$this->suggestions->markApproved(
             $supplierId,
             (int) $suggestion['id'],
