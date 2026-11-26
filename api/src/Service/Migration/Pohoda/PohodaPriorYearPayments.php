@@ -123,6 +123,48 @@ final class PohodaPriorYearPayments
     }
 
     /**
+     * Nastaví úhradu minulých let dokladu absolutně na `$amount` v měně dokladu (oprava podle
+     * knihy pohledávek, {@see PohodaPriorYearPaymentRepair::runBalances()}): stejně jako
+     * {@see record()} platbu založí, změní, nebo pod 0,01 smaže. Další platby s poznámkou
+     * {@see NOTE} (k dokladu má být nejvýš jedna) smaže. Uhrazenou částku ani stav dokladu
+     * nepřepočítává. Volat UVNITŘ transakce volajícího.
+     *
+     * @return 'inserted'|'updated'|'deleted'|'unchanged'
+     */
+    public function set(int $supplierId, int $invoiceId, string $periodStart, float $amount, string $currency, ?int $userId): string
+    {
+        $pdo = $this->db->pdo();
+        $amount = round($amount, 2);
+        $own = $pdo->prepare('SELECT id, amount FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND source = ? AND note = ? ORDER BY id FOR UPDATE');
+        $own->execute([$invoiceId, $supplierId, self::SOURCE, self::NOTE]);
+        $rows = $own->fetchAll(PDO::FETCH_ASSOC);
+        $delete = $pdo->prepare('DELETE FROM invoice_payments WHERE id = ? AND supplier_id = ?');
+        $first = array_shift($rows);
+        foreach ($rows as $extra) {
+            $delete->execute([(int) $extra['id'], $supplierId]);
+        }
+        if ($first === null) {
+            if ($amount < 0.01) {
+                return 'unchanged';
+            }
+            $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$supplierId, $invoiceId, self::paidOn($periodStart), number_format($amount, 2, '.', ''), $currency, self::NOTE, self::SOURCE, $userId]);
+            return 'inserted';
+        }
+        if ($amount < 0.01) {
+            $delete->execute([(int) $first['id'], $supplierId]);
+            return 'deleted';
+        }
+        if ($rows === [] && abs($amount - (float) $first['amount']) < 0.005) {
+            return 'unchanged';
+        }
+        $pdo->prepare('UPDATE invoice_payments SET amount = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([number_format($amount, 2, '.', ''), (int) $first['id'], $supplierId]);
+        return 'updated';
+    }
+
+    /**
      * Doplnění platby u dokladu převedeného dřív, než ji převod zakládal: rozdíl uhrazené
      * částky (`paid_total`) proti součtu evidovaných plateb. Existující platbu s poznámkou
      * {@see NOTE} navýší, jinak založí novou. Volat UVNITŘ transakce volajícího.
