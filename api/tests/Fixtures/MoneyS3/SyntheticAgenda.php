@@ -1930,6 +1930,42 @@ final class SyntheticAgenda
     }
 
     /**
+     * Vydaná faktura v EUR, dodání zboží do EU (`19Ř20`, ř. 20), se zaokrouhlením dokladu.
+     * Položky Money (`VFaktPol`) dávají 5 599,70 EUR, doklad je zaokrouhlený na 5 600,00 EUR.
+     * Money zaokrouhlení nevede zvlášť: je součástí základu sazby v měně (`ValutyZak0`
+     * 5 600,00) i v Kč (`Zaklad_0` 5 600,00 × 24,39 = 136 584,00), z něj staví přiznání.
+     * Tak vypadají cizoměnové doklady se zaokrouhlením v zálohách Money S3.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithForeignEuSupplyRounding(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $date = '2025-06-10';
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak0', 'E', 10], ['ValutyKUhr', 'E', 10]]), [[
+            'Cislo' => 660, 'Doklad' => 'FV25060', 'VarSymbol' => '2025660', 'O_DIC' => 'PL5260000001',
+            'O_Nazev' => 'Odbiorca Delta Sp. z o.o.', 'O_Ulice' => 'Testowa 1', 'O_Mesto' => 'Warszawa', 'O_Psc' => '00-001',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => '19Ř20', 'Uhrada' => 'převodem',
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => '2025-06-24',
+            'Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 24.39, 'Zaklad_0' => 136584.0, 'CelkemSDPH' => 136584.0,
+            'ValutyZak0' => 5600.0, 'ValutyKUhr' => 5600.0, 'Popis' => 'Dodání zboží do EU',
+        ]]);
+        $files['ROK.002/VFaktPol.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['CisloPoloz', 'L', 4], ['Popis', 'C', 50], ['TextMJ', 'C', 10], ['PocetMJ', 'E', 10],
+            ['SazbaDPH', 'E', 10], ['Cena', 'E', 10], ['Valuty', 'E', 10], ['KodDPH', 'C', 12],
+        ], [
+            ['Cislo' => 660, 'CisloPoloz' => 1, 'Popis' => 'Granulát A', 'TextMJ' => 'kg', 'PocetMJ' => 12662.0, 'SazbaDPH' => 0.0, 'Cena' => 8.5365, 'Valuty' => 0.35, 'KodDPH' => ''],
+            ['Cislo' => 660, 'CisloPoloz' => 2, 'Popis' => 'Granulát B', 'TextMJ' => 'kg', 'PocetMJ' => 4672.0, 'SazbaDPH' => 0.0, 'Cena' => 6.0975, 'Valuty' => 0.25, 'KodDPH' => ''],
+        ]);
+        return $files;
+    }
+
+    /**
      * Agenda, ve které licence z EU FP25005 zní na 1 030 Kč (kurz faktury), ale samovyměření
      * ICH25001 má základ 1 000 Kč (kurz ke dni plnění). Rozdíl 30 Kč je jen kurzový.
      *

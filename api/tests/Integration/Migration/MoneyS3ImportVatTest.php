@@ -392,6 +392,36 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Dodání zboží do EU v EUR se zaokrouhlením dokladu (položky 5 599,70 EUR, doklad
+     * 5 600,00 EUR, kurz 24,39). Money vede zaokrouhlení v základu sazby (`ValutyZak0`
+     * 5 600,00, `Zaklad_0` 136 584,00 Kč) a z něj staví ř. 20. Převzatý doklad v EUR musí
+     * mít celkem 5 600,00 EUR a ř. 20 přesně 136 584,00 Kč jako Money, ne 5 599,70 × 24,39
+     * = 136 576,68 Kč.
+     */
+    public function testForeignEuSupplyKeepsMoneyRoundingInLine20(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'EUR', 'EUR', '€', 'Euro', 'Euro', 2, 1, 0)"
+        )->execute([$supplierId]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/eu-rounding.lz', SyntheticAgenda::filesWithForeignEuSupplyRounding());
+        $backup = Ms3Backup::extract($this->tmp . '/eu-rounding.lz', $this->tmp . '/eu-rounding');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $doc = $this->db->pdo()->prepare(
+            "SELECT c.code, i.exchange_rate, i.total_with_vat + i.rounding, i.vat_classification_code, SUM(ii.import_tax_base_czk)
+               FROM invoices i JOIN currencies c ON c.id = i.currency_id JOIN invoice_items ii ON ii.invoice_id = i.id
+              WHERE i.supplier_id = ? AND i.varsymbol = 'FV25060' AND i.status <> 'draft' GROUP BY i.id"
+        );
+        $doc->execute([$supplierId]);
+        self::assertSame(['EUR', '24.390000', '5600.00', '20', '136584.00'], $doc->fetch(PDO::FETCH_NUM) ?: [], $this->explain($protocol));
+
+        $june = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 6, 'monthly')['summary']['lines'];
+        self::assertSame(136584.0, round((float) ($june['20']['base'] ?? 0), 2), 'Ř. 20 jako v Money.');
+    }
+
+    /**
      * Doklad v cizí měně FP25004 (100 + 21 EUR, kurz 25 = 2 500 + 525 Kč z Money) se ve firmě
      * s eurem v číselníku měn převezme v EUR; firma bez eura ho převezme v Kč jako dřív.
      * Vydaná FV25001 má daň 8,39 EUR a 210 Kč (rozdíl 0,25 Kč). Přiznání DPH, KH,
