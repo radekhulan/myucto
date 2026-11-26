@@ -285,6 +285,7 @@ final class ClosingService
         // Nativní zdroj DPPO 504 pro návrh daně v kroku Daň z příjmů (#400). Mimo 504 ho
         // DppoReturnDataProvider::gather nepoužije, takže ostatní firmy počítají jako dosud.
         private readonly \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider $nonprofitDppo,
+        private readonly AssetSaleDerecognitionCheck $assetSaleDerecognition,
     ) {}
 
     /**
@@ -6185,6 +6186,18 @@ final class ClosingService
                 'ok' => $missingDepRows === [],
                 'value' => ['count' => count($missingDepRows), 'items' => $missingDepRows],
             ];
+        }
+
+        // Tržba z prodeje majetku bez odúčtování zůstatkové ceny. Od začátku období, ne jen
+        // za zvolený měsíc: odúčtování se páruje s prodeji postupně podle data, takže
+        // zapomenutý zápis z minulého měsíce se neschová za řádný zápis v tomto.
+        if ($wants(AssetSaleDerecognitionCheck::KEY)) {
+            $checks[] = $this->assetSaleDerecognition->check(
+                $supplierId,
+                $startsOn,
+                $rangeTo,
+                $this->roleProfile($supplierId, $rangeTo)->framework,
+            );
         }
 
         // Otevřené cizoměnové položky nesou i SEZNAM. Dřív se posílal jen `count`, takže

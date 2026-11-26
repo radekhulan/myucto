@@ -150,6 +150,7 @@ const DOC_CHECK_LIST: Record<string, RouteLocationRaw> = {
   attachment_mismatch: { name: 'scan-attach', hash: '#attachment-discrepancies' },
   card_payments_unmatched: { name: 'payment-cards', query: { tab: 'unmatched' } },
   card_clearing_open: { name: 'payment-cards', query: { tab: 'unmatched' } },
+  asset_sale_without_derecognition: { name: 'accounting-internal-documents' },
 }
 
 const BALANCE_CHECK_CODES: Record<string, string[]> = {

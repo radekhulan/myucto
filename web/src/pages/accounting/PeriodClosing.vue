@@ -302,6 +302,7 @@ const DOC_CHECK_LIST: Record<string, RouteLocationRaw> = {
   unposted_purchases: { path: '/purchase-invoices', query: { booked: '0' } },
   attachment_vat_period: { name: 'scan-attach', hash: '#attachment-discrepancies' },
   attachment_mismatch: { name: 'scan-attach', hash: '#attachment-discrepancies' },
+  asset_sale_without_derecognition: { name: 'accounting-internal-documents' },
 }
 
 function docListLink(key: string): RouteLocationRaw | null {

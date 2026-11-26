@@ -22732,6 +22732,7 @@
         "purchase_final_missing_advance_deduction": "Konečné přijaté faktury k záloze s daňovým dokladem k platbě bez odpočtu zálohy (hrozí dvojí odpočet DPH)",
         "settled_but_unpaid": "Doklady se stavem Odeslaná, ale s úhradou už v deníku (aktualizujte stav na Zaplacená)",
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
+        "asset_sale_without_derecognition": "Prodej dlouhodobého majetku bez odúčtování zůstatkové ceny (chybí interní doklad MD 541 / D 0xx, např. u prodeje pozemku D 031)",
         "entries_without_description": "Zaúčtované zápisy bez obsahu účetního případu (§ 11 odst. 1 písm. b) ZoÚ) - doplňte popis",
         "section18_statements_required": "Kategorie účetní jednotky vyžaduje i přehled o peněžních tocích a o změnách vlastního kapitálu (§ 18 odst. 2 ZoÚ) - bez nich není závěrka úplná",
         "entity_category_unavailable": "Kategorii účetní jednotky nelze určit, a proto ani ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. Důvod je uveden u kontroly",

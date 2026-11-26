@@ -196,6 +196,7 @@ Součástí běhu jsou také:
 
 - karta majetku v užívání bez účetního odpisu za fiskální rok,
 - majetkové účty bez odpovídajících oprávek,
+- prodej dlouhodobého majetku (641) bez odúčtování zůstatkové ceny (popis níže),
 - nesoulad evidence drobného majetku proti obratu účtu 501.200,
 - zůstatek účtu 343 proti přiznání k DPH za zvolený interval,
 - oprávněnost čtvrtletního zdaňovacího období podle obratu minulého roku,
@@ -205,6 +206,33 @@ Součástí běhu jsou také:
 - povinnost a vnitřní návaznost přehledu o peněžních tocích a změnách vlastního
   kapitálu u příslušné kategorie účetní jednotky,
 - informační připomínka k zaúčtování splatné daně z příjmů přes krok uzávěrky.
+
+**Prodej dlouhodobého majetku bez odúčtování zůstatkové ceny** (varování) hlídá
+zapomenuté odúčtování prodaného majetku, typicky pozemku. Tržba z prodeje (účet 641)
+se zaúčtuje s fakturou, ostatní položkou nebo pokladním dokladem, odúčtování
+zůstatkové ceny (MD 541 / D 031, u odpisovaného majetku D 02x) je ale samostatný
+interní doklad. Pozemky často nejsou v evidenci majetku, takže je nepohlídá ani
+vyřazení karty. Kontrola čte deník:
+
+- prodej je zaúčtovaný zápis s tržbou na 641 od začátku účetního období do data
+  **Do**, ať pochází z faktury, ostatní položky, pokladny nebo ručního zápisu.
+  Faktura vystavená jen kvůli DPH, jejíž tržbu nese jiný doklad, se tak nepočítá
+  dvakrát,
+- odúčtování je zápis s řádkem MD 541 nebo s řádkem Dal na majetkovém účtu 01x až
+  03x (prodej plně odepsaného majetku 541 nemá). Zápis MD 541 / D 031 pokryje jeden
+  prodej, interní doklad s více řádky pozemků pokryje tolik prodejů, kolik má řádků,
+- odúčtování se přiřazují k prodejům postupně podle data. Nepokryté zůstanou
+  nejnovější prodeje a ty kontrola vypíše s odkazem na doklad a na zápis tržby
+  v deníku,
+- prodej fakturou navázanou na vyřazenou kartu majetku se nehlásí, vyřazení karty
+  odúčtování zaúčtovalo,
+- u neziskových účetních jednotek (rámec 504) jde o účty 652 a 552.
+
+Nález vyřešíte interním dokladem (tlačítko **Otevřít seznam** vede na
+`Účetnictví → Interní doklady`) s datem prodeje: MD 541 / D 031 v ocenění pozemku.
+Kontrola páruje počty, ne částky ani čísla dokladů, takže zelený stav neověřuje
+správnost zůstatkové ceny. Pokud jeden řádek interního dokladu odúčtovává více
+pozemků najednou, rozepište ho po pozemcích.
 
 Kontrola ceny mezi spojenými osobami tvrdí odchylku jen tam, kde má srovnání
 stejné položky vůči nespojeným osobám. Samostatný seznam transakcí se

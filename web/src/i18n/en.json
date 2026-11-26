@@ -22724,6 +22724,7 @@
         "purchase_final_missing_advance_deduction": "Final purchase invoices for an advance with a tax document on payment that do not deduct the advance (VAT may be deducted twice)",
         "settled_but_unpaid": "Documents in the Sent state but with a payment already in the journal (update the status to Paid)",
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
+        "asset_sale_without_derecognition": "Sale of fixed assets without derecognition of the net book value (missing internal document Dr 541 / Cr 0xx, e.g. Cr 031 for a land sale)",
         "entries_without_description": "Posted journal entries with no description of the accounting case (§ 11(1)(b) of the Accounting Act) — add a description",
         "section18_statements_required": "The entity category also requires a cash flow statement and a statement of changes in equity (§ 18(2) of the Accounting Act) — without them the financial statements are incomplete",
         "entity_category_unavailable": "The accounting entity category cannot be determined, so the statements required by Section 18(2) of the Accounting Act cannot be verified either. The reason is shown with the check",

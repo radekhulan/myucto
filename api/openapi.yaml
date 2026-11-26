@@ -21608,6 +21608,11 @@ paths:
         období bez zápisů v deníku před známým začátkem účetnictví firmy.
         Kontrola `posting_period_after_horizon` vrací období založená zaúčtováním
         od 1. ledna aktuálního kalendářního roku + 2 včetně počtu zápisů.
+        Kontrola `asset_sale_without_derecognition` (varování) vrací zápisy tržeb
+        z prodeje dlouhodobého majetku (641, u rámce 504 účet 652) od začátku období
+        do `date_to`, které nepokrývá žádné odúčtování (řádek MD 541/552 nebo Dal
+        na 01x až 03x). Hodnota nese i `sales`, `derecognitions`, `revenue_account`
+        a `residual_account`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
