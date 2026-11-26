@@ -99,6 +99,7 @@ final class OtherItemMonthlyCheckTest extends TestCase
     public function testBalanceMatchingOpenItemsIsOkAndLedgerDifferenceWarns(): void
     {
         $this->item('Úvěr', [['06-10', 1500], ['07-10', 1500]]);
+        $this->item('Jiný závazek', [['06-10', 200], ['07-10', 200]], '379');
         $ok = $this->check('other_item_account_balance', '03-31');
         self::assertTrue($ok['ok'], json_encode($ok));
 
@@ -110,6 +111,7 @@ final class OtherItemMonthlyCheckTest extends TestCase
         $warn = $this->check('other_item_account_balance', '03-31');
         self::assertFalse($warn['ok']);
         self::assertSame('warning', $warn['severity']);
+        self::assertSame(1, $warn['value']['count']);
         self::assertSame('325', $warn['value']['findings'][0]['account_code']);
         self::assertSame(1000.0, $warn['value']['findings'][0]['amount']);
     }
@@ -124,14 +126,14 @@ final class OtherItemMonthlyCheckTest extends TestCase
     }
 
     /** @param list<array{0:string,1:float|int}> $installments MM-DD v roce testu */
-    private function item(string $title, array $installments): int
+    private function item(string $title, array $installments, ?string $accountCode = null): int
     {
         $total = array_sum(array_column($installments, 1));
         $draft = $this->items->create($this->supplierId, [
             'side' => 'payable', 'kind' => 'loan', 'title' => $title,
             'issued_on' => self::YEAR . '-01-02', 'accounting_on' => self::YEAR . '-01-02',
             'due_on' => self::YEAR . '-12-31', 'currency' => 'CZK', 'amount' => $total,
-            'counter_account_code' => '221',
+            'account_code' => $accountCode, 'counter_account_code' => '221',
         ], $this->userId);
         $id = (int) $draft['id'];
         $this->schedules->setInstallments($this->supplierId, $id, array_map(
