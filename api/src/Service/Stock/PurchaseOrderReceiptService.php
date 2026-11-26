@@ -268,10 +268,10 @@ final class PurchaseOrderReceiptService
     /**
      * Ceny z řádků přijatých faktur napárovaných na řádky objednávky.
      *
-     * Vazba `purchase_invoice_items.purchase_order_line_id` je křehká (editace
-     * faktury je replace-all a vazbu zahodí), ale tady vadí jen tolik, že se
-     * cena degraduje zpátky na odhad z objednávky — nikdy nevzniká špatné číslo.
-     * Autoritou o PŘIJATÉM MNOŽSTVÍ zůstává příjemka, ne tohle.
+     * Vazbu `purchase_invoice_items.purchase_order_line_id` náhrada položek faktury
+     * zachová ({@see \MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns}).
+     * Bez ní se cena jen degraduje zpátky na odhad z objednávky — nikdy nevzniká
+     * špatné číslo. Autoritou o PŘIJATÉM MNOŽSTVÍ zůstává příjemka, ne tohle.
      *
      * @return array<int,string>
      */

@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\ItemPostingAccounts;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
@@ -17,9 +18,11 @@ use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
+use MyInvoice\Service\PurchaseInvoice\PurchaseItemReferences;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberingDate;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
+use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Support\ExchangeRateSources;
@@ -565,15 +568,17 @@ final class PurchaseInvoiceRepository
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
                     pii.seller_item_code, pii.item_ean,
                     pii.intrastat_cn8_code, pii.intrastat_country_of_origin, pii.advance_purchase_invoice_id,
+                    pii.purchase_order_line_id,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
                     sa.id AS small_asset_id, sa.name AS small_asset_name, sa.status AS small_asset_status
                FROM purchase_invoice_items pii
                JOIN vat_rates vr ON vr.id = pii.vat_rate_id
                LEFT JOIN stock_items si ON si.id = pii.stock_item_id
-               -- Karta drobného majetku vzniklá z téhle položky (§DM) — vazba
-               -- purchase_invoice_item_id → small_assets existovala, ale bez ní se karta
-               -- musela dohledávat ručně. Detail dokladu teď rovnou nabídne vyřazení prodejem.
-               LEFT JOIN small_assets sa ON sa.purchase_invoice_item_id = pii.id
+               -- Detail položky má místo pro jednu kartu, i když jich z řádku vzniklo víc.
+               LEFT JOIN small_assets sa ON sa.id = (
+                   SELECT linked.id FROM small_assets linked
+                    WHERE linked.purchase_invoice_item_id = pii.id ORDER BY linked.id LIMIT 1
+               )
               WHERE pii.purchase_invoice_id = ?
               ORDER BY pii.order_index, pii.id'
         );
@@ -2304,7 +2309,7 @@ final class PurchaseInvoiceRepository
     }
 
     /**
-     * Přepíše items (smaže staré + insertne nové).
+     * Přepíše items a přesměruje vazby před smazáním starých řádků.
      * Volá se z SetItems action; následuje recompute z PurchaseInvoiceCalculator.
      *
      * @param bool $keepDomesticItemCodes viz {@see reconcileReverseChargeItemCodes()}
@@ -2312,9 +2317,46 @@ final class PurchaseInvoiceRepository
     public function replaceItems(int $purchaseInvoiceId, array $items, bool $keepDomesticItemCodes = false): void
     {
         $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->replaceItemsInTransaction($purchaseInvoiceId, $items, $keepDomesticItemCodes);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function replaceItemsInTransaction(int $purchaseInvoiceId, array $items, bool $keepDomesticItemCodes): void
+    {
+        $pdo = $this->db->pdo();
+        $header = $pdo->prepare('SELECT supplier_id, status FROM purchase_invoices WHERE id = ? FOR UPDATE');
+        $header->execute([$purchaseInvoiceId]);
+        $invoice = $header->fetch(PDO::FETCH_ASSOC);
+        $supplierId = (int) ($invoice['supplier_id'] ?? 0);
+
+        $columns = implode(', ', StoredPurchaseItemColumns::COLUMNS);
+        $old = $pdo->prepare(
+            "SELECT id, description, {$columns} FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? ORDER BY order_index, id FOR UPDATE"
+        );
+        $old->execute([$purchaseInvoiceId]);
+        $stored = $old->fetchAll(PDO::FETCH_ASSOC);
+        $storedOrder = array_map('intval', array_column($stored, 'id'));
+        $items = array_values($items);
+        $matches = StoredPurchaseItemColumns::match($items, $stored);
+        PurchaseItemReferences::guardReceipts($pdo, $supplierId, array_values(array_diff_key($storedOrder, array_flip($matches))));
+        $items = StoredPurchaseItemColumns::carryOver($items, $stored, $matches);
         $items = array_map(
             static fn (array $item): array => TimeBilling::normalizeInvoiceItem($item),
-            array_values($items),
+            $items,
         );
         // Uložené řádky s tuzemským kódem a jejich daň PŘED přepisem: nezměněný řádek
         // si kód 40/41 smí nechat, jen když už nesl daň dodavatele.
@@ -2325,7 +2367,7 @@ final class PurchaseInvoiceRepository
                 "SELECT description, quantity, duration_minutes, unit, unit_price_without_vat, vat_rate_id,
                         vat_classification_code, total_vat
                    FROM purchase_invoice_items
-                  WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks})"
+                  WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks}) FOR UPDATE"
             );
             $old->execute([$purchaseInvoiceId, ...self::MIXED_DOCUMENT_DOMESTIC_CODES]);
             foreach ($old->fetchAll(PDO::FETCH_ASSOC) ?: [] as $o) {
@@ -2342,19 +2384,13 @@ final class PurchaseInvoiceRepository
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?
                 AND (import_tax_base_czk IS NOT NULL OR import_tax_vat_czk IS NOT NULL OR import_projection_vat_czk IS NOT NULL OR import_tax_excluded <> 0)
-              ORDER BY order_index, id'
+              ORDER BY order_index, id FOR UPDATE'
         );
         $sourceTax->execute([$purchaseInvoiceId]);
         $storedSourceTax = $sourceTax->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $storedOrder = [];
-        if ($storedSourceTax !== []) {
-            $order = $pdo->prepare('SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index, id');
-            $order->execute([$purchaseInvoiceId]);
-            $storedOrder = array_map('intval', $order->fetchAll(PDO::FETCH_COLUMN) ?: []);
-        }
         $keepItemIds = [];
-        $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')
-            ->execute([$purchaseInvoiceId]);
+        $replacementIds = [];
+        $newOrder = [];
 
         $stmt = $pdo->prepare(
             'INSERT INTO purchase_invoice_items
@@ -2364,8 +2400,8 @@ final class PurchaseInvoiceRepository
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
                  counter_account_code, posting_rule_key,
                  accrual_from, accrual_to, stock_item_id, seller_item_code, item_ean,
-                 intrastat_cn8_code, intrastat_country_of_origin, advance_purchase_invoice_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 intrastat_cn8_code, intrastat_country_of_origin, advance_purchase_invoice_id, purchase_order_line_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -2407,7 +2443,6 @@ final class PurchaseInvoiceRepository
         // Skladová karta na řádku (volitelná, Epic SKLAD/ESHOP) — jen NAZNAČUJE
         // kartu pro předvyplnění příjemkového wizardu; skutečný pohyb dělá až
         // příjemka. Guard vlastnictví: přijmeme jen id patřící témuž tenantovi.
-        $supplierId = (int) ($meta['supplier_id'] ?? 0);
         $ownedStock = [];
         $stockIds = [];
         foreach ($items as $it) {
@@ -2425,6 +2460,7 @@ final class PurchaseInvoiceRepository
             $ownedStock = array_flip(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []));
         }
         $ownedAdvances = $this->ownedDeductibleAdvances($supplierId, $items);
+        $ownedOrderLines = $this->ownedPurchaseOrderLines($supplierId, $items);
         // Základní sazba pro rok dokladu (číselník daňových konstant) — určuje, kdy
         // sazba znamená "tuzemská základní" v auto-klasifikaci.
         $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
@@ -2484,6 +2520,7 @@ final class PurchaseInvoiceRepository
             [$accrualFrom, $accrualTo] = self::normalizeAccrualRange($item['accrual_from'] ?? null, $item['accrual_to'] ?? null);
             $posting = ItemPostingAccounts::normalizeInput($item);
 
+            $orderIndex = (int) ($item['order_index'] ?? $i);
             $stmt->execute([
                 $purchaseInvoiceId,
                 (string) ($item['description'] ?? ''),
@@ -2493,7 +2530,7 @@ final class PurchaseInvoiceRepository
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 $vatRateId,
                 $rate,
-                (int) ($item['order_index'] ?? $i),
+                $orderIndex,
                 $code !== null ? (string) $code : null,
                 $isFixedAsset,
                 $kind?->value,
@@ -2517,7 +2554,18 @@ final class PurchaseInvoiceRepository
                 isset($ownedAdvances[(int) ($item['advance_purchase_invoice_id'] ?? 0)])
                     ? (int) $item['advance_purchase_invoice_id']
                     : null,
+                // Řádek objednávky (migrace 1331): z něj bere cenu příjem z objednávky
+                // a příjem z faktury jím uzavírá objednávku. Jen řádek objednávky firmy.
+                isset($ownedOrderLines[(int) ($item['purchase_order_line_id'] ?? 0)])
+                    ? (int) $item['purchase_order_line_id']
+                    : null,
             ]);
+
+            $newId = (int) $pdo->lastInsertId();
+            $newOrder[$newId] = $orderIndex;
+            if (isset($matches[$i])) {
+                $replacementIds[$storedOrder[$matches[$i]]] = $newId;
+            }
 
             if ($storedSourceTax !== []) {
                 $kept = self::unchangedSourceTax($storedSourceTax, $storedOrder, $item, $i, $vatRateId, $code !== null ? (string) $code : null);
@@ -2525,7 +2573,7 @@ final class PurchaseInvoiceRepository
                     $pdo->prepare('UPDATE purchase_invoice_items SET import_tax_base_czk = ?, import_tax_vat_czk = ?, import_projection_vat_czk = ?, import_tax_excluded = ?
                                     WHERE id = ? AND purchase_invoice_id = ?')
                         ->execute([$kept['import_tax_base_czk'], $kept['import_tax_vat_czk'], $kept['import_projection_vat_czk'],
-                            (int) $kept['import_tax_excluded'], (int) $pdo->lastInsertId(), $purchaseInvoiceId]);
+                            (int) $kept['import_tax_excluded'], $newId, $purchaseInvoiceId]);
                 }
             }
 
@@ -2541,8 +2589,30 @@ final class PurchaseInvoiceRepository
                     ? abs((float) array_shift($storedDomestic[$sig])) > 0.0
                     : $rate > 0.0;
                 if ($carriesSupplierVat) {
-                    $keepItemIds[] = (int) $pdo->lastInsertId();
+                    $keepItemIds[] = $newId;
                 }
+            }
+        }
+
+        if ($storedOrder !== []) {
+            PurchaseItemReferences::remap($pdo, $supplierId, $purchaseInvoiceId, $replacementIds);
+            $pdo->prepare(
+                "DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?
+                  AND id IN (SELECT id FROM JSON_TABLE(?, '$[*]' COLUMNS(id BIGINT UNSIGNED PATH '$')) old_rows)"
+            )->execute([$purchaseInvoiceId, json_encode($storedOrder, JSON_THROW_ON_ERROR)]);
+
+            if ($invoice['status'] === 'draft') {
+                asort($newOrder, SORT_NUMERIC);
+                $newPositions = array_flip(array_keys($newOrder));
+                $positionMap = [];
+                foreach ($storedOrder as $index => $oldId) {
+                    if (isset($replacementIds[$oldId])) {
+                        $positionMap[$index + 1] = $newPositions[$replacementIds[$oldId]] + 1;
+                    }
+                }
+                (new DraftItemDimensionRealign($this->db))->realignPositions(
+                    $supplierId, 'purchase_invoice', $purchaseInvoiceId, count($storedOrder), $positionMap,
+                );
             }
         }
 
@@ -2580,6 +2650,31 @@ final class PurchaseInvoiceRepository
               WHERE supplier_id = ? AND id IN ({$ph})
                 AND (document_kind = 'advance' OR (document_kind = 'tax_document' AND parent_purchase_invoice_id IS NULL))"
         );
+        $q->execute([$supplierId, ...array_values($ids)]);
+        return array_fill_keys(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
+    }
+
+    /**
+     * Řádky nákupních objednávek firmy, na které smí řádek faktury odkazovat. Cizí nebo
+     * neexistující id se zahodí, stejně jako skladová karta jiné firmy.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return array<int,true>
+     */
+    private function ownedPurchaseOrderLines(int $supplierId, array $items): array
+    {
+        $ids = [];
+        foreach ($items as $it) {
+            $id = is_array($it) && is_numeric($it['purchase_order_line_id'] ?? null) ? (int) $it['purchase_order_line_id'] : 0;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        if ($ids === [] || $supplierId <= 0) {
+            return [];
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare("SELECT id FROM purchase_order_lines WHERE supplier_id = ? AND id IN ({$ph})");
         $q->execute([$supplierId, ...array_values($ids)]);
         return array_fill_keys(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
     }
@@ -4466,8 +4561,10 @@ final class PurchaseInvoiceRepository
             if (isset($row[$f])) $row[$f] = (int) $row[$f];
         }
         $row['duration_minutes'] = $row['duration_minutes'] !== null ? (int) $row['duration_minutes'] : null;
-        if (array_key_exists('advance_purchase_invoice_id', $row)) {
-            $row['advance_purchase_invoice_id'] = $row['advance_purchase_invoice_id'] !== null ? (int) $row['advance_purchase_invoice_id'] : null;
+        foreach (['advance_purchase_invoice_id', 'purchase_order_line_id'] as $f) {
+            if (array_key_exists($f, $row)) {
+                $row[$f] = $row[$f] !== null ? (int) $row[$f] : null;
+            }
         }
         foreach ([
             'quantity', 'unit_price_without_vat', 'vat_rate_snapshot',

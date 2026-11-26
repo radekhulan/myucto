@@ -200,9 +200,7 @@ final class StockReceiptService
             'has_lines_to_receive'     => $unmatchedLines !== [] || $receivableUncoded
                 || array_filter($stockLines, static fn (array $l): bool => (float) $l['remaining_qty'] > 0) !== [],
             'cost_candidates'          => $costCandidates,
-            // B6: existuje posted příjemka k této PF, jejíž zdrojový řádek PF byl
-            // od té doby přepsán (SetPurchaseInvoiceItemsAction je replace-all,
-            // purchase_invoice_item_id → NULL) — „zbývá přijmout" pak nespolehlivé.
+            // Historická příjemka může mít z dřívějšího přepisu faktury odpojený řádek.
             'pf_changed_after_receipt' => $this->hasOrphanedReceiptLines($supplierId, $piId),
         ];
     }

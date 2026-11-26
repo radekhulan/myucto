@@ -23619,6 +23619,8 @@
     },
     "duplicate_number_confirm": "{message}\n\nPokud jde o další platbu téhož dokladu (například platebního kalendáře), můžete doklad uložit i se stejným číslem. Uložit přesto?",
     "duplicate_number_confirm_cancelled": "{message}\n\nOK uloží nový doklad se stejným číslem. Chcete-li místo toho obnovit původní doklad, zvolte Zrušit a otevřete ho přes odkaz v chybové hlášce (akce „Vrátit ze storna“).",
+    "purchase_item_already_received": "Řádek je přijatý na sklad. Nejdřív stornujte příjemku.",
+    "purchase_item_on_draft_receipt": "Řádek je na rozpracované příjemce. Nejdřív ho z příjemky odeberte.",
     "duplicate_cancelled_open": "Otevřít stornovaný doklad (lze ho vrátit ze storna)",
     "list_status": "Stav",
     "subtitle": "Doklady od dodavatelů - náklady firmy.",

@@ -187,6 +187,8 @@ export interface PurchaseInvoiceItem {
   intrastat_country_of_origin?: string | null
   /** Odpočet poskytnuté zálohy s DDKP (migrace 2307): záloha, kterou záporný řádek odečítá. FE ho MUSÍ posílat zpět. */
   advance_purchase_invoice_id?: number | null
+  /** Řádek nákupní objednávky, ke kterému položka patří. FE ho MUSÍ posílat zpět (DELETE+INSERT). */
+  purchase_order_line_id?: number | null
   /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
   small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }

@@ -159,6 +159,10 @@ Počáteční zásoby naskladníte podle [§ 37.4.3](#3743-pocatecni-stav-zasob)
 **Jak poznáte, že je hotovo:** příjemka s původem **Přijatá faktura** je
 zaúčtovaná a zásoba vzrostla.
 
+Při úpravě popisu nebo ceny položky faktury zůstane příjemka u položky a přijaté
+množství se dál započítává. Chcete-li přijatou položku z faktury odstranit,
+nejdřív stornujte příjemku. U rozpracované příjemky stačí řádek z příjemky odebrat.
+
 ### 37.4.3 Počáteční stav zásob
 
 1. Otevřete `Sklad → Příjemky a výdejky` a klikněte na **Import počátečních zásob**.

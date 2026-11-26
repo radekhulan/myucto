@@ -1871,6 +1871,7 @@ function buildPayload(): PurchaseInvoicePayload {
       vat_overrides: buildVatOverridesPayload(),
       vat_allocations: vatAllocations.value.map((a, i) => ({ ...a, order_index: i })),
       items: form.value.items.map((it, i) => ({
+        ...(isEdit.value && it.id != null ? { id: it.id } : {}),
         description: it.description,
         quantity: itemQuantity(it),
         duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
@@ -1891,6 +1892,7 @@ function buildPayload(): PurchaseInvoicePayload {
         intrastat_cn8_code: it.intrastat_cn8_code ?? null,
         intrastat_country_of_origin: it.intrastat_country_of_origin ?? null,
         advance_purchase_invoice_id: it.advance_purchase_invoice_id ?? null,
+        purchase_order_line_id: it.purchase_order_line_id ?? null,
       })),
     }
 }
@@ -2016,7 +2018,13 @@ async function handleSubmitError(e: any) {
     if (data?.fields) {
       fieldErrors.value = data.fields
     }
-    error.value = apiErrorMessage(e)
+    if (data?.code === 'purchase_item_already_received') {
+      error.value = t('purchase_invoice.purchase_item_already_received')
+    } else if (data?.code === 'purchase_item_on_draft_receipt') {
+      error.value = t('purchase_invoice.purchase_item_on_draft_receipt')
+    } else {
+      error.value = apiErrorMessage(e)
+    }
     // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit
     // a jinak by validační chybu vůbec neviděl (jen tichý 422).
     toast.error(error.value)

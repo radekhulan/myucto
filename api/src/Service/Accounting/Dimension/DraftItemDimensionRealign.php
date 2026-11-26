@@ -96,14 +96,20 @@ final class DraftItemDimensionRealign
                 $map[$oldPosition[$oldId] + 1] = $newPosition[(int) $inserted[$k]['id']] + 1;
             }
         }
-        $identity = array_all($map, static fn (int $new, int $old): bool => $new === $old);
-        if ($identity && count($map) === count($before)) {
+        $this->realignPositions($supplierId, $docType, $docId, count($before), $map);
+    }
+
+    /** @param array<int,int> $map Stará pozice => nová pozice (obě od 1). */
+    public function realignPositions(int $supplierId, string $docType, int $docId, int $oldCount, array $map): void
+    {
+        if (count($map) === $oldCount && array_all($map, static fn (int $new, int $old): bool => $new === $old)) {
             return;
         }
 
+        $pdo = $this->db->pdo();
         foreach (['document_dimensions', 'document_dimension_splits'] as $dimTable) {
             $select = $pdo->prepare(
-                "SELECT * FROM {$dimTable} WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? AND item_no > 0"
+                "SELECT * FROM {$dimTable} WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? AND item_no > 0 FOR UPDATE"
             );
             $select->execute([$supplierId, $docType, $docId]);
             $stored = $select->fetchAll(PDO::FETCH_ASSOC) ?: [];

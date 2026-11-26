@@ -16,7 +16,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
-use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
+use MyInvoice\Service\PurchaseInvoice\PurchaseItemReferenceException;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -37,7 +37,6 @@ final class SetPurchaseInvoiceItemsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
-        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
         private readonly \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction $advanceDeduction,
         private readonly PurchaseAdvanceLinks $advanceLinks,
         private readonly Connection $db,
@@ -97,12 +96,6 @@ final class SetPurchaseInvoiceItemsAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        // Hlavička se tu nemění: přenesení v ní už bylo, kód 40/41 je vědomá tuzemská
-        // položka smíšeného dokladu ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}).
-        $items = StoredPurchaseItemColumns::carryOver($items, (array) ($existing['items'] ?? []));
-        // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
-        $isDraft = (string) ($existing['status'] ?? '') === 'draft';
-        $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
         // Řádky a přepočet záloh faktury (PurchaseAdvanceLinks::sync) v jedné transakci:
         // odpočet zálohy nad její částku řádky neuloží a doklad zůstane beze změny.
         $pdo = $this->db->pdo();
@@ -112,9 +105,6 @@ final class SetPurchaseInvoiceItemsAction
         }
         try {
             $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
-            if ($isDraft) {
-                $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
-            }
             $this->calc->recompute($id);
             $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
             $this->advanceLinks->sync($supplierId, $id);
@@ -132,6 +122,9 @@ final class SetPurchaseInvoiceItemsAction
             }
             if ($e instanceof PurchaseAdvanceLinkException) {
                 return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
+            }
+            if ($e instanceof PurchaseItemReferenceException) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), 409);
             }
             throw $e;
         }

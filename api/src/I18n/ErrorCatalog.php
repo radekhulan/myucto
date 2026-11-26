@@ -18,6 +18,8 @@ final class ErrorCatalog
 {
     /** @var array<string,string> CZ → EN */
     private const MAP = [
+        'Řádek je přijatý na sklad. Nejdřív stornujte příjemku.' => 'This line has been received into stock. Reverse the goods receipt first.',
+        'Řádek je na rozpracované příjemce. Nejdřív ho z příjemky odeberte.' => 'This line is on a draft goods receipt. Remove it from the receipt first.',
         'Neplatný model.' => 'Invalid model.',
         'OpenAI API klíč není uložený.' => 'No OpenAI API key is saved.',
         'OpenAI endpoint nesplňuje požadavek na EU rezidenci.' => 'The OpenAI endpoint does not meet the EU data residency requirement.',

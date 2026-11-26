@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign;
 use MyInvoice\Tests\Support\OtherDocumentsPostingScenarios;
@@ -109,6 +110,17 @@ final class DraftItemDimensionRealignTest extends TestCase
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
 
         self::assertSame([1 => $b, 2 => $c], $this->itemDims('purchase_invoice', $id));
+    }
+
+    public function testPurchaseItemsWithoutIdsKeepDimensionsWithMatchedDescriptions(): void
+    {
+        $id = $this->purchaseDraft();
+        [$a, $b] = $this->tagItems('purchase_invoice', $id);
+        $this->container->get(PurchaseInvoiceRepository::class)->replaceItems($id, [
+            $this->line('A', 1), $this->line('B', 0), $this->line('Nová', 2),
+        ]);
+
+        self::assertSame([1 => $b, 2 => $a], $this->itemDims('purchase_invoice', $id));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

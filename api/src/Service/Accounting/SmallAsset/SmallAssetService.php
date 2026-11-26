@@ -157,10 +157,8 @@ final class SmallAssetService
      * Založí karty ze VŠECH řádků dokladu klasifikovaných jako drobný majetek (1092).
      *
      * IDEMPOTENCE PŘES PŘIROZENÝ KLÍČ (doklad + název + cena), ne přes id řádku:
-     * PurchaseInvoiceRepository::replaceItems() smaže a znovu vloží všechny položky při
-     * každé editaci dokladu, takže `purchase_invoice_item_id` na kartě se po nevinné
-     * opravě překlepu vynuluje. Kdyby idempotence stála na něm, druhé spuštění by po
-     * editaci založilo duplicitní karty a soupis k inventarizaci by lhal.
+     * Starší karty nebo karty bez odpovídajícího řádku mohou mít `purchase_invoice_item_id`
+     * prázdné. Samotná řádková vazba by dovolila duplicitní karty.
      *
      * ZÁPORNÉ ŘÁDKY NEJSOU MAJETEK. Sleva ani vratka není věc, kterou lze evidovat,
      * natož „vzít do užívání" — karta se zápornou cenou je nesmysl. Řeší se dvěma

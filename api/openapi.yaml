@@ -12046,7 +12046,8 @@ paths:
         v konceptu (`draft`) odstraní všechny položky, stejně jako dedikovaný
         `PUT /api/v1/purchase-invoices/{id}/items`. U nedraftového dokladu s položkami
         se odmítne s 422 `no_items`, i při `force=1`. Poslané neprázdné `items` řádky
-        nahradí (DELETE + INSERT), takže payload musí nést kompletní seznam.
+        nahradí, takže payload musí nést kompletní seznam. Vazby na ponechané řádky
+        se přenesou podle jejich původního `id`, bez `id` podle pořadí a shodného popisu.
 
         Částečná aktualizace (viz úvod). Schéma `PurchaseInvoicePayload` je sdílené s POST, kde jsou
         povinné `vendor_id`, `vendor_invoice_number`, `issue_date`, `due_date`, `currency_id` a
@@ -12127,6 +12128,9 @@ paths:
             provede jen správce firmy v aplikaci, jinak `period_filed` (i API token s plným
             zápisem). Token s plným zápisem dostane při `force=1` v uzavřeném, uzavíraném
             nebo zamčeném období `period_closed`.
+            Chybí-li jednoznačná náhrada řádku na příjemce, vrátí se
+            `purchase_item_already_received` pro zaúčtovanou příjemku nebo
+            `purchase_item_on_draft_receipt` pro rozpracovanou příjemku.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -12203,8 +12207,8 @@ paths:
       description: |
         Klíč `items` je povinný — na rozdíl od hlavičkového `PUT /purchase-invoices/{id}`
         tu není „nepošlu = neměň", takže jeho vynechání vrátí 400. Prázdné pole `items: []`
-        naopak projde a řádky draftu smaže; je to jednoznačný pokyn a doklad bez řádků je
-        u konceptu pracovní stav.
+        odstraní řádky konceptu, pokud na ně neodkazuje aktivní příjemka. Vazby na
+        ponechané řádky se přenesou podle původního `id`, bez `id` podle pořadí a shodného popisu.
       parameters:
         - in: path
           name: id
@@ -12233,7 +12237,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-        '409': { description: Položky lze upravovat jen u konceptu }
+        '409':
+          description: |
+            Položky lze upravovat jen u konceptu (`not_editable`). Chybí-li jednoznačná
+            náhrada řádku na příjemce, vrátí se `purchase_item_already_received` pro zaúčtovanou
+            příjemku nebo `purchase_item_on_draft_receipt` pro rozpracovanou příjemku.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/purchase-invoices/{id}/exchange-rate:
     post:
@@ -58594,6 +58605,7 @@ components:
         stock_item_id:
           type: [integer, "null"]
           description: "FK na skladovou kartu (Epic SKLAD). NULL = volný text/služba, bez vazby na sklad."
+        purchase_order_line_id: { type: [integer, "null"], format: int64, description: "Řádek nákupní objednávky, ke kterému položka patří. Příjem na sklad z faktury jím uzavírá objednávku a příjem z objednávky z něj bere pořizovací cenu. NULL = bez vazby." }
         stock_sku: { type: [string, "null"], description: "SKU navázané skladové karty (jen pro zobrazení, denormalizováno)" }
         stock_name: { type: [string, "null"], description: "Název navázané skladové karty (jen pro zobrazení, denormalizováno)" }
         small_asset:
@@ -58606,10 +58618,10 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
-      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code`, `posting_rule_key` a `advance_purchase_invoice_id`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
+      description: "Uložení nahrazuje celý seznam položek. U jednoznačně spárované položky se převezmou vynechané hodnoty `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code`, `posting_rule_key`, `accrual_from`, `accrual_to`, `advance_purchase_invoice_id` a `purchase_order_line_id`. Explicitní `null` hodnotu smaže. Řádek se páruje podle `id`, bez něj podle pořadí při shodném popisu."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
-        id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
+        id: { type: integer, description: "ID uloženého řádku z detailu dokladu. Uveďte ho, pokud měníte popis nebo pořadí. Slouží k přenosu vazeb a vynechaných sloupců na řádek s novým ID." }
         description: { type: string }
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet." }
@@ -58630,6 +58642,7 @@ components:
         intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         advance_purchase_invoice_id: { type: [integer, "null"], description: "Označí záporný řádek jako odpočet poskytnuté zálohy (zálohová faktura nebo samostatný DDKP firmy, jinak se uloží null). Záloha musí být některá z těch, které faktura vyúčtovává, jinak zaúčtování vrátí `advance_settlement_ambiguous`. Vynechání a `null` stejně jako u `seller_item_code`." }
+        purchase_order_line_id: { type: [integer, "null"], format: int64, description: "Řádek nákupní objednávky firmy (`purchase_orders_get`), ke kterému položka patří; cizí nebo neexistující řádek se uloží jako null. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |

@@ -52,7 +52,6 @@ const TABLES = [
       import_tax_base_czk: 'otisk importu, replaceItems neukládá',
       import_tax_excluded: 'otisk importu, replaceItems neukládá',
       import_tax_vat_czk: 'otisk importu, replaceItems neukládá',
-      purchase_order_line_id: 'vazbu na objednávku replaceItems neukládá',
     },
   },
 ];

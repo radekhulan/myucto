@@ -9,10 +9,12 @@ namespace MyInvoice\Service\PurchaseInvoice;
  *
  * ── Co to opravuje ──────────────────────────────────────────────────────────────────
  * `PurchaseInvoiceRepository::replaceItems()` je DELETE + INSERT. Klient API, který o kódu
- * položky dodavatele, EAN, Intrastatu, vazbě na skladovou kartu ani o účtech a předkontaci
- * řádku neví, je v PUT neposílá, a náhrada je tiše vynulovala. Na těch sloupcích přitom
- * stojí párování řádku s kartou při příjemce ({@see \MyInvoice\Service\Stock\PurchaseLineStockMatcher}),
- * hlášení Intrastat a zaúčtování řádku, které nastavila účetní. Editor i MCP je posílají
+ * položky dodavatele, EAN, Intrastatu, vazbě na skladovou kartu, na řádek nákupní objednávky
+ * ani o účtech a předkontaci řádku neví, je v PUT neposílá, a náhrada je tiše vynulovala.
+ * Na těch sloupcích přitom stojí párování řádku s kartou při příjemce
+ * ({@see \MyInvoice\Service\Stock\PurchaseLineStockMatcher}), uzavření objednávky příjmem
+ * z faktury a cena příjmu z objednávky, hlášení Intrastat a zaúčtování řádku, které
+ * nastavila účetní. Editor i MCP je posílají
  * vždy, takže na ně se pravidlo nevztahuje.
  *
  * ── Pravidla ────────────────────────────────────────────────────────────────────────
@@ -25,9 +27,7 @@ namespace MyInvoice\Service\PurchaseInvoice;
  *    ale jen na řádek se stejným popisem. Po smazání nebo přeřazení řádků by jinak EAN
  *    a skladová karta jednoho zboží přeskočily na jiné.
  *
- * Volají ho obě akce, které položky přijaté faktury nahrazují:
- * {@see \MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction} (PUT dokladu)
- * a {@see \MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceItemsAction} (PUT položek).
+ * Stejné párování používá {@see PurchaseItemReferences} pro vazby na řádky.
  */
 final class StoredPurchaseItemColumns
 {
@@ -40,57 +40,55 @@ final class StoredPurchaseItemColumns
         'expense_account_code',
         'counter_account_code',
         'posting_rule_key',
+        'accrual_from',
+        'accrual_to',
         'advance_purchase_invoice_id',
+        'purchase_order_line_id',
     ];
 
     /**
-     * @param array<int|string,mixed> $items       položky z těla požadavku
-     * @param array<int,mixed>        $storedItems položky uloženého dokladu (s `id`)
-     *
-     * @return array<int|string,mixed> položky se stejnými klíči, chybějící sloupce doplněné
+     * @param list<array<string,mixed>> $items
+     * @param list<array<string,mixed>> $stored
+     * @return array<int,int> nová pozice => stará pozice, pouze jednoznačné shody
      */
-    public static function carryOver(array $items, array $storedItems): array
+    public static function match(array $items, array $stored): array
     {
-        $stored = array_values(array_filter($storedItems, 'is_array'));
-        if ($stored === []) {
-            return $items;
-        }
         $byId = [];
-        foreach ($stored as $row) {
-            if ((int) ($row['id'] ?? 0) > 0) {
-                $byId[(int) $row['id']] = $row;
-            }
+        foreach ($stored as $index => $row) {
+            $byId[(int) $row['id']] = $index;
         }
 
-        $position = 0;
-        foreach ($items as $key => $item) {
-            $index = $position++;
-            if (!is_array($item)) {
-                continue;
-            }
-            $missing = array_diff(self::COLUMNS, array_keys($item));
-            if ($missing === []) {
-                continue;
-            }
-
-            $source = null;
+        $matches = [];
+        foreach ($items as $index => $item) {
             $itemId = $item['id'] ?? null;
             if (is_numeric($itemId) && (int) $itemId > 0) {
-                $source = $byId[(int) $itemId] ?? null;
+                if (isset($byId[(int) $itemId])) {
+                    $matches[$index] = $byId[(int) $itemId];
+                }
             } elseif (isset($stored[$index])
                 && self::sameDescription($item['description'] ?? null, $stored[$index]['description'] ?? null)) {
-                $source = $stored[$index];
+                $matches[$index] = $index;
             }
-            if ($source === null) {
-                continue;
-            }
+        }
+        $claims = array_count_values($matches);
 
-            foreach ($missing as $column) {
-                if (array_key_exists($column, $source)) {
-                    $item[$column] = $source[$column];
+        return array_filter($matches, static fn (int $index): bool => $claims[$index] === 1);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @param list<array<string,mixed>> $stored
+     * @param array<int,int> $matches viz {@see match()}
+     * @return list<array<string,mixed>>
+     */
+    public static function carryOver(array $items, array $stored, array $matches): array
+    {
+        foreach ($matches as $new => $old) {
+            foreach (self::COLUMNS as $column) {
+                if (!array_key_exists($column, $items[$new])) {
+                    $items[$new][$column] = $stored[$old][$column];
                 }
             }
-            $items[$key] = $item;
         }
 
         return $items;

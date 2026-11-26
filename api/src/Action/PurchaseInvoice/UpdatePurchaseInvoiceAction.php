@@ -35,9 +35,9 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
+use MyInvoice\Service\PurchaseInvoice\PurchaseItemReferenceException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
-use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Vat\PurchaseFiledVatPeriod;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
@@ -76,7 +76,6 @@ final class UpdatePurchaseInvoiceAction
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
         private readonly PurchaseFiledVatPeriod $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
-        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
     ) {}
 
     /**
@@ -401,17 +400,7 @@ final class UpdatePurchaseInvoiceAction
             // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
             $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
-                // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
-                $isDraft = (string) ($existing['status'] ?? '') === 'draft';
-                $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
-                $this->repo->replaceItems(
-                    $id,
-                    StoredPurchaseItemColumns::carryOver((array) $body['items'], (array) ($existing['items'] ?? [])),
-                    $keepDomesticItemCodes,
-                );
-                if ($isDraft) {
-                    $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, (array) $body['items']);
-                }
+                $this->repo->replaceItems($id, (array) $body['items'], $keepDomesticItemCodes);
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).
@@ -454,6 +443,12 @@ final class UpdatePurchaseInvoiceAction
             $this->repo->reprefixVarsymbol($id, $supplierId);
             $this->clients->markAsVendor((int) $vendor['id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (PurchaseItemReferenceException $e) {
+            if (!$ownTransaction && $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+                throw $e;
+            }
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (PurchaseAdvanceLinkException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);

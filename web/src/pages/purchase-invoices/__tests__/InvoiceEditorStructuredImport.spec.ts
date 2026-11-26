@@ -329,6 +329,7 @@ describe('InvoiceEditor — strukturovaný import', () => {
     await flushPromises()
     const payload = m.updateInvoice.mock.calls[0][1]
     expect(payload.items[0]).toMatchObject({
+      id: 5,
       quantity: 1 / 3,
       duration_minutes: 20,
       unit_price_without_vat: 333.333333,
