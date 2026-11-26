@@ -763,6 +763,33 @@ final class JournalEntryRepository
     }
 
     /**
+     * Úhrada ostatní položky zápočtem (migrace 2351) platí k datu svého zápisu, stejně jako
+     * rozpad zápisu na faktury, který saldokonto počítá k `entry_date`. Změna data zápisu
+     * proto posune i datum úhrady (stav položky, měsíční kontrola, platby kryté faktury).
+     */
+    private function followOffsetPaymentDate(int $supplierId, int $entryId, string $entryDate): void
+    {
+        $pdo = $this->db->pdo();
+        $items = $pdo->prepare(
+            "SELECT DISTINCT a.other_item_id FROM journal_settlement_allocations ja
+               JOIN other_item_allocations a ON a.journal_allocation_id = ja.id AND a.supplier_id = ja.supplier_id
+              WHERE ja.supplier_id = ? AND ja.entry_id = ? AND ja.doc_type = 'other_item' AND a.payment_on <> ?"
+        );
+        $items->execute([$supplierId, $entryId, $entryDate]);
+        $itemIds = array_map('intval', $items->fetchAll(\PDO::FETCH_COLUMN));
+        if ($itemIds === []) {
+            return;
+        }
+        $pdo->prepare(
+            "UPDATE other_item_allocations a
+               JOIN journal_settlement_allocations ja ON ja.id = a.journal_allocation_id AND ja.supplier_id = a.supplier_id
+                SET a.payment_on = ?
+              WHERE ja.supplier_id = ? AND ja.entry_id = ? AND ja.doc_type = 'other_item'"
+        )->execute([$entryDate, $supplierId, $entryId]);
+        \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, $itemIds);
+    }
+
+    /**
      * Přepíše existující zápis in-place (idempotentní re-post v otevřeném období):
      * aktualizuje hlavičku, smaže staré řádky a zapíše nové, zvýší row_version.
      * PŘEDPOKLAD: volající drží transakci (PostingService) — celé to musí být atomické.
@@ -828,6 +855,7 @@ final class JournalEntryRepository
                 'Zápis #' . $id . ' byl mezitím stornován — přepis není možný (§35).',
             );
         }
+        $this->followOffsetPaymentDate((int) $header['supplier_id'], $id, (string) $header['entry_date']);
 
         $this->deleteLines($id, (int) $header['supplier_id']);
         $this->insertLines($pdo, $id, $header, $lines);

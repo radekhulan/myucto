@@ -205,8 +205,44 @@ export interface OtherItemAllocation {
   bank_statement_id?: number | null
   /** Číslo pokladního dokladu úhrady. */
   cash_doc_number?: string | null
-  /** Živý zápis úhrady v deníku; null bez zaúčtování nebo bez práva číst deník. */
+  /** Živý zápis úhrady v deníku (u zápočtu jeho zápis); null bez zaúčtování nebo bez práva číst deník. */
   journal_entry_id?: number | null
+  /** Vyrovnání zápočtem: rozpad řádku deníku, který položku hradí. */
+  journal_allocation_id?: number | null
+  /** Interní doklad zápočtu zaúčtovaný z položky (ruší se stornem). */
+  internal_document_id?: number | null
+  /** Číslo zápisu zápočtu. */
+  offset_document_no?: string | null
+}
+
+/** Podklady dialogu „Vyrovnat zápočtem". */
+export interface OtherItemOffsetContext {
+  supported: boolean
+  account: { id: number; code: string } | null
+  side: 'debit' | 'credit'
+  remaining: number
+  suggested_accounts: Array<{ account_id: number; account_code: string; name: string }>
+}
+
+/** Volný řádek deníku na účtu položky (zápočet zaúčtovaný jinde). */
+export interface OtherItemOffsetLine {
+  line_id: number
+  entry_id: number
+  line_no: number
+  account_code: string
+  side: 'debit' | 'credit'
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  line_amount: number
+  free_amount: number
+}
+
+export interface OtherItemOffsetPayload {
+  account_id: number
+  date: string
+  amount: number
+  note?: string | null
 }
 
 export type OtherItemAutoMatchReason = 'other_item_vs_account' | 'other_item_vs_installment' | 'other_item_vs_remaining'
@@ -354,6 +390,18 @@ export const otherItemsApi = {
     api.post<OtherItem>(`/accounting/other-items/${id}/allocations`, payload).then(r => r.data),
   unallocate: (id: number, allocationId: number) =>
     api.delete<OtherItem>(`/accounting/other-items/${id}/allocations/${allocationId}`).then(r => r.data),
+  offsetContext: (id: number) =>
+    api.get<OtherItemOffsetContext>(`/accounting/other-items/${id}/offset`).then(r => r.data),
+  offsetLines: (id: number, q = '') =>
+    api.get<{ items: OtherItemOffsetLine[] }>(`/accounting/other-items/${id}/offset/lines`, { params: q ? { q } : {} }).then(r => r.data.items),
+  offset: (id: number, payload: OtherItemOffsetPayload) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/offset`, payload).then(r => r.data),
+  attachOffset: (id: number, payload: { line_id: number; amount: number }) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/offset/attach`, payload).then(r => r.data),
+  detachOffset: (id: number, allocationId: number) =>
+    api.delete<OtherItem>(`/accounting/other-items/${id}/offset/${allocationId}`).then(r => r.data),
+  cancelOffset: (id: number, allocationId: number, payload: { reason: string; entry_date?: string | null }) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/offset/${allocationId}/cancel`, payload).then(r => r.data),
   /** Otevřené položky pro dialog „Spárovat" u bankovního pohybu. */
   bankCandidates: (bankTransactionId: number, q = '') =>
     api.get<{ candidates: MatchCandidate[] }>('/accounting/other-items/bank-candidates', {

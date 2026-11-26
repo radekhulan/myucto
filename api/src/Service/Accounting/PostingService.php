@@ -1374,6 +1374,10 @@ final class PostingService
                     throw new PostingException('pair_already_reversed', 'Dvojice #' . $pairNo . ' už byla stornována nebo přeúčtována.', 409);
                 }
             }
+            // Storno dvojic jen opravným zápisem: rozpad na doklad (fakturu, zápočet ostatní
+            // položky) by vyrovnání dál počítal, ač hlavní kniha řádek zrušila. Storno celého
+            // zápisu rozpad smí, saldokonto ho po datu storna nepočítá.
+            (new JournalSettlementUseGuard($this->db))->assertLinesUnallocated($supplierId, $entryId, $origLines);
         } elseif ($reversedPairs !== []) {
             $origLines = array_values(array_filter(
                 $origLines,
@@ -1463,6 +1467,25 @@ final class PostingService
                         InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, $column, (int) $original['source_id']));
                 }
             }
+            // Vyrovnání ostatní položky zápisem (zápočet, migrace 2351): storno zápisu stornuje
+            // i úhradu položky ke dni storna, stejně jako u banky a pokladny. Rozpad řádku
+            // zůstává, saldokonto k dřívějšímu dni vyrovnání dál počítá.
+            $offsetItems = $pdo->prepare(
+                "SELECT DISTINCT a.other_item_id FROM journal_settlement_allocations ja
+                   JOIN other_item_allocations a ON a.journal_allocation_id = ja.id AND a.supplier_id = ja.supplier_id
+                  WHERE ja.supplier_id = ? AND ja.entry_id = ? AND ja.doc_type = 'other_item' AND a.reversed_on IS NULL"
+            );
+            $offsetItems->execute([$supplierId, $entryId]);
+            $offsetItemIds = array_map('intval', $offsetItems->fetchAll(\PDO::FETCH_COLUMN));
+            if ($offsetItemIds !== []) {
+                $pdo->prepare(
+                    "UPDATE other_item_allocations a
+                       JOIN journal_settlement_allocations ja ON ja.id = a.journal_allocation_id AND ja.supplier_id = a.supplier_id
+                        SET a.reversed_on = ?
+                      WHERE ja.supplier_id = ? AND ja.entry_id = ? AND ja.doc_type = 'other_item' AND a.reversed_on IS NULL"
+                )->execute([$reversalDate, $supplierId, $entryId]);
+                InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, $offsetItemIds);
+            }
 
             $this->activity->log(
                 'accounting.reversed',
@@ -1524,7 +1547,17 @@ final class PostingService
         $next->execute([$supplierId, $entryId, $pairNo]);
         $link = $next->fetch(PDO::FETCH_ASSOC);
         if ($link === false) {
-            $this->reverseOnce($supplierId, $entryId, $meta, [$pairNo]);
+            try {
+                $this->reverseOnce($supplierId, $entryId, $meta, [$pairNo]);
+            } catch (PostingException $e) {
+                // Rozpad leží na opravném zápisu přeúčtované dvojice, ne na stornovaném zápisu:
+                // hláška musí říct, kde je a kde ho zrušit, jinak ho uživatel hledá v původním.
+                if ($e->errorCode !== JournalSettlementUseGuard::CODE) throw $e;
+                throw new PostingException(JournalSettlementUseGuard::CODE,
+                    'Zápis nejde stornovat celý: přeúčtovaná dvojice leží v opravném zápisu #' . $entryId
+                        . ' (dvojice ' . $pairNo . ') a její řádek je rozepsaný na doklad saldokonta. ' . $e->getMessage(),
+                    409, ['correction_entry_id' => $entryId, 'pair_no' => $pairNo]);
+            }
             return;
         }
         if ($link['replacement_pair_no'] !== null) {

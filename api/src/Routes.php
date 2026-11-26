@@ -3565,6 +3565,12 @@ final class Routes
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
             $g->post  ('/other-items/{id:[0-9]+}/match-bank-transaction', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'matchBankTransaction']);
             $g->delete('/other-items/{id:[0-9]+}/allocations/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'unallocate']);
+            $g->get   ('/other-items/{id:[0-9]+}/offset',       [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'context']);
+            $g->get   ('/other-items/{id:[0-9]+}/offset/lines', [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'lines']);
+            $g->post  ('/other-items/{id:[0-9]+}/offset',       [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'create']);
+            $g->post  ('/other-items/{id:[0-9]+}/offset/attach', [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'attach']);
+            $g->delete('/other-items/{id:[0-9]+}/offset/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'detach']);
+            $g->post  ('/other-items/{id:[0-9]+}/offset/{allocation_id:[0-9]+}/cancel', [\MyInvoice\Action\Accounting\OtherItemOffsetAction::class, 'cancel']);
             // Měsíční zaúčtování mezd z PAMICY: interní doklad + ostatní závazky (migrace 2300).
             $g->post  ('/payroll-posting-imports/preview',          [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'preview']);
             $g->post  ('/payroll-posting-imports/apply',            [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'apply']);

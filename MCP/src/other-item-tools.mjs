@@ -343,7 +343,8 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu s odkazem na výpis (`bank_statement_id`), číslem pokladního '
     + 'dokladu (`cash_doc_number`) a živým zaúčtovaným zápisem platby (`journal_entry_id`, jen s právem číst '
-    + 'účetnictví). Párování se dělá ve webovém rozhraní.',
+    + 'účetnictví). Vyrovnání zápočtem (`journal_allocation_id`, zápis `journal_entry_id`, číslo `offset_document_no`, '
+    + 'interní doklad zápočtu `internal_document_id`) vrací jen s právem číst účetnictví. Párování se dělá ve webovém rozhraní.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}/allocations`, () => null, ['id']),
   read('other_item_payment_candidates', 'Kandidáti úhrady ostatní položky',
     'Volné bankovní a pokladní platby v Kč, které by mohly doklad uhradit. Jen k přehledu, nic nepáruje. '

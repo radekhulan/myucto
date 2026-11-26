@@ -11,6 +11,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\JournalSettlementUseGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\PostingService;
@@ -146,7 +147,10 @@ final class JournalPairCorrectionService
                 409,
             );
         }
-
+        // Až po kontrole celého zápisu (ten se stornuje celý a rozpad smí). Řádek s rozpadem
+        // na doklad saldokonta (faktura, zápočet ostatní položky) by po stornu dvojice zůstal
+        // ve vyrovnání, ač ho hlavní kniha zrušila.
+        (new JournalSettlementUseGuard($this->db))->assertLinesUnallocated($supplierId, $entryId, $selected);
         [$date, $period] = $this->correctionDate($supplierId, $entry, $meta);
         $mirror = $this->mirror($supplierId, $selected);
         $renumber = array_flip($pairNos);
@@ -220,6 +224,9 @@ final class JournalPairCorrectionService
         if ((string) $entry['source_type'] === 'payroll') {
             throw self::payrollForbidden();
         }
+        // Opravný zápis původní dvojici zruší; rozpad jejího řádku by vyrovnání dál počítal.
+        // Přeúčtování na místě hlídá JournalEntryRepository (assertEntryChange).
+        (new JournalSettlementUseGuard($this->db))->assertLinesUnallocated($supplierId, $entryId, $old);
         [$date, $period] = $this->correctionDate($supplierId, $entry, $meta);
         $correctionLines = [];
         foreach ($this->mirror($supplierId, $old) as $line) {

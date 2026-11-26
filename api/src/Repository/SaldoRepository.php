@@ -309,7 +309,7 @@ final class SaldoRepository
                            AND payment_item.supplier_id = a.supplier_id
                      WHERE a.supplier_id = {$supplierId}
                        AND (a.reversed_on IS NULL OR a.reversed_on > ?)
-                       AND EXISTS (
+                       AND ((a.journal_allocation_id IS NULL AND EXISTS (
                            SELECT 1 FROM journal_entries pe
                            JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
                            LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
@@ -330,7 +330,27 @@ final class SaldoRepository
                                    AND item_line.account_id = pl.account_id
                                    AND item_line.side = CASE WHEN payment_item.side = 'receivable' THEN 'debit' ELSE 'credit' END
                             )
-                       )
+                       )) OR (a.journal_allocation_id IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM journal_settlement_allocations oja
+                           JOIN journal_entries pe ON pe.id = oja.entry_id AND pe.supplier_id = oja.supplier_id
+                           " . JournalSettlementAllocationSql::lineJoin('oja', 'pl') . "
+                           LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                          WHERE oja.id = a.journal_allocation_id AND oja.supplier_id = a.supplier_id
+                            AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                            AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                            AND oja.side = CASE WHEN payment_item.side = 'receivable' THEN 'credit' ELSE 'debit' END
+                            AND EXISTS (
+                                SELECT 1 FROM journal_entries item_entry
+                                JOIN journal_entry_lines item_line ON item_line.entry_id = item_entry.id
+                                     AND item_line.supplier_id = item_entry.supplier_id
+                                 WHERE item_entry.supplier_id = payment_item.supplier_id
+                                   AND item_entry.source_type = 'other_item'
+                                   AND item_entry.source_id = payment_item.id
+                                   AND item_entry.posted_at IS NOT NULL
+                                   AND item_line.account_id = oja.account_id
+                                   AND item_line.side = CASE WHEN payment_item.side = 'receivable' THEN 'debit' ELSE 'credit' END
+                            )
+                       )))
                      GROUP BY a.other_item_id
                   ) paid ON paid.other_item_id = oi.id
                  WHERE e.supplier_id = {$supplierId} AND e.source_type = 'other_item'
@@ -425,7 +445,7 @@ final class SaldoRepository
                                                 WHERE oja.supplier_id = {$supplierId} AND oja.doc_type = 'other_item'
                                                   AND oja.kind = 'origin')
                        AND (a.reversed_on IS NULL OR a.reversed_on > ?)
-                       AND EXISTS (
+                       AND ((a.journal_allocation_id IS NULL AND EXISTS (
                            SELECT 1 FROM journal_entries pe
                            JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
                            JOIN chart_of_accounts pca ON pca.id = pl.account_id
@@ -437,7 +457,18 @@ final class SaldoRepository
                             AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
                             AND pl.side = CASE WHEN payment_item.side = 'receivable' THEN 'credit' ELSE 'debit' END
                             AND (pca.id = {$accountId} OR pca.parent_id = {$accountId})
-                       )
+                       )) OR (a.journal_allocation_id IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM journal_settlement_allocations oja
+                           JOIN journal_entries pe ON pe.id = oja.entry_id AND pe.supplier_id = oja.supplier_id
+                           " . JournalSettlementAllocationSql::lineJoin('oja', 'pl') . "
+                           JOIN chart_of_accounts pca ON pca.id = pl.account_id
+                           LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                          WHERE oja.id = a.journal_allocation_id AND oja.supplier_id = a.supplier_id
+                            AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                            AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                            AND oja.side = CASE WHEN payment_item.side = 'receivable' THEN 'credit' ELSE 'debit' END
+                            AND (pca.id = {$accountId} OR pca.parent_id = {$accountId})
+                       )))
                      GROUP BY a.other_item_id
                   ) paid ON paid.other_item_id = oi.id
                  WHERE ja.supplier_id = {$supplierId} AND ja.kind = 'origin' AND ja.doc_type = 'other_item'

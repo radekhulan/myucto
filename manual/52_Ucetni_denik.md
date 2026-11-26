@@ -329,6 +329,8 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
+**Úhrada zápočtem.** Nevyrovnaly-li dluh peníze, ale zápočet (například pojistné plnění na 315 započtené proti přijaté faktuře), použijte v podvojném účetnictví akci **Vyrovnat zápočtem** v detailu položky. Zaúčtuje interní doklad proti zvolenému protiúčtu a položku vyrovná, i částečně. Je-li zápočet v deníku už zaúčtovaný, vyberte v témže dialogu jeho zápis na záložce **Přiřadit zápis z deníku** ([§ 52.14.14.5](#5214145-uhrady)).
+
 Přehled vybraných položek k tisku nebo do tabulky (Kniha ostatních pohledávek a závazků) stáhnete tlačítkem **Kniha položek** nad seznamem ([§ 52.14.14.1](#5214141-prehled)).
 
 > [!WARNING]
@@ -1839,10 +1841,36 @@ Přiřazení zrušíte tlačítkem **Odpojit úhradu**. Stornovaný bankovní z�
 přiřazení označí jako stornované; pokladní doklad přiřazený k položce stornovat
 nejde, nejdřív ho odpojte.
 
+**Vyrovnání zápočtem.** V podvojném účetnictví vyrovná položku i zápočet, tedy zápis
+v deníku místo banky a pokladny. Akce **Vyrovnat zápočtem** v detailu potvrzené nebo
+zaúčtované položky v Kč otevře dialog se dvěma záložkami:
+
+- **Zaúčtovat zápočet**: vyberte protiúčet (dialog nabídne obvyklé 395, 379, 321 a 311;
+  jen rozvahový účet, ne DPH 343, náklady, výnosy, podrozvahu ani účet položky), datum
+  (ne dřívější než vznik položky), částku (výchozí je zbývající dluh, zadat jde i menší)
+  a poznámku. Vznikne interní
+  doklad druhu Zápočet: u pohledávky protiúčet MD / účet pohledávky D, u závazku účet
+  závazku MD / protiúčet D, s partnerem a dimenzemi položky. Dialog ukáže kontaci předem.
+- **Přiřadit zápis z deníku**: zápočet už je zaúčtovaný (ruční zápis, interní doklad).
+  Dialog nabídne volné řádky ručních zápisů na účtu položky na straně, která saldo snižuje
+  (u pohledávky D, u závazku MD); vyberte řádek a částku. Nový zápis nevznikne.
+
+Zápočet se v seznamu **Přiřazené úhrady** ukáže s číslem zápisu a sníží zbývající dluh,
+stav položky, splátky, předpověď, měsíční kontrolu i saldokonto k datu zápisu. Zrušíte ho
+v témže seznamu: zápočet zaúčtovaný z položky tlačítkem **Stornovat zápočet** (stornuje
+interní doklad protizápisem k zadanému datu, úhrada zůstane v seznamu jako stornovaná),
+přiřazený cizí zápis tlačítkem **Odebrat** (zápis v deníku zůstane). Zápis s přiřazeným
+zápočtem nejde v deníku přeúčtovat ani smazat a jeho dvojici se zápočtem nejde stornovat
+ani přeúčtovat opravným zápisem; storno celého zápisu v deníku úhradu položky stornuje samo.
+Úhrada zápočtem platí k datu svého zápisu, změní-li se datum zápisu, posune se s ním.
+Úhradu zápočtem vidí jen uživatel s právem číst účetnictví. Zápis v uzavřeném období přiřadit ani odebrat nejde, zaúčtování a storno
+hlídají otevřené období a uzamčené datum jako každý jiný zápis. Zápočet snižuje jen
+jistinu: úrok a poplatek rozdělené splátky se účtují s úhradou.
+
 Přiřazené úhrady vidíte i v deníku v panelu **Souvisí**
 ([52.14.3.2](#521432-souvisi-doklad-a-jeho-uhrada)): u zápisu položky jako bankovní
 pohyby a pokladní doklady, u zápisu banky nebo pokladny jako položky, které platba
-hradí. Rozdělená platba ukáže všechny své položky, každou s částkou, která na ni připadá
+hradí, u zápisu zápočtu jako položky, které zápočet vyrovnává. Rozdělená platba ukáže všechny své položky, každou s částkou, která na ni připadá
 (u splátky úvěru včetně úroku a poplatku). Stornované přiřazení se neukazuje.
 
 - **Položka převzatá ze zůstatku** nemá vlastní zápis. Jako její zaúčtování panel ukáže
@@ -2034,7 +2062,9 @@ a storno v podvojném účetnictví a každé přeúčtování potřebují naví
 v deníku. **Smazat i se zápisem** potřebuje stejná oprávnění jako smazání zápisu
 v deníku: zápis do agendy, do účetnictví, do deníku a zaúčtování v deníku.
 Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřazení
-pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
+pokladního dokladu přístup k pokladně. Vyrovnání zápočtem novým interním dokladem
+a jeho storno potřebují navíc oprávnění zaúčtovat v deníku, přiřazení a odebrání
+existujícího zápisu oprávnění zápisu do deníku a čtení účetnictví. Připojené dokumenty vidí uživatel
 s přístupem k dokumentům. Druhy zakládá, skrývá a přejmenovává uživatel se zápisem
 do agendy; zapnutí a vypnutí vlastní řady navíc potřebuje oprávnění upravovat
 účetnictví, stejně jako úprava číselných řad v Nástrojích. Účetní profil druhu

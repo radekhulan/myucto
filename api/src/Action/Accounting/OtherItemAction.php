@@ -320,8 +320,12 @@ final class OtherItemAction
             $canReadCash = RequestAuthorization::allows($request, 'cash', AccessLevel::READ);
             $canReadJournal = RequestAuthorization::allows($request, 'accounting', AccessLevel::READ);
             $rows = $this->service->allocations($this->currentSupplierId($request), (int) $args['id']);
-            $visible = array_filter($rows, static fn (array $row): bool =>
-                $row['bank_transaction_id'] !== null ? $canReadBank : $canReadCash);
+            // Úhradu vidí, kdo smí číst její zdroj: banku, pokladnu, u zápočtu deník (migrace 2351).
+            $visible = array_filter($rows, static fn (array $row): bool => match (true) {
+                $row['journal_allocation_id'] !== null => $canReadJournal,
+                $row['bank_transaction_id'] !== null => $canReadBank,
+                default => $canReadCash,
+            });
             // Odkaz do deníku jen tomu, kdo deník smí číst.
             return ['items' => array_values(array_map(static fn (array $row): array =>
                 $canReadJournal ? $row : ['journal_entry_id' => null] + $row, $visible))];

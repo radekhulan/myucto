@@ -23444,6 +23444,159 @@ paths:
         '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/{id}/offset:
+    get:
+      tags: [Accounting]
+      summary: Podklady pro vyrovnání položky zápočtem
+      description: >-
+        Účet, na kterém v deníku leží předpis položky, strana řádku, která saldo snižuje,
+        zbývá k vyrovnání a předvolby protiúčtu zápočtu (395, 379, 321, 311), které firma
+        v osnově má. `supported` = položka je potvrzená, v CZK, má předpis v deníku a firma
+        vede podvojné účetnictví.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Podklady
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [supported, account, side, remaining, suggested_accounts]
+                properties:
+                  supported: { type: boolean }
+                  account: { type: [object, 'null'], properties: { id: { type: integer, format: int64 }, code: { type: string } } }
+                  side: { type: string, enum: [debit, credit], description: 'Strana řádku, která saldo položky snižuje (pohledávka: Dal, závazek: MD).' }
+                  remaining: { type: number }
+                  suggested_accounts:
+                    type: array
+                    items: { type: object, properties: { account_id: { type: integer, format: int64 }, account_code: { type: string }, name: { type: string } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Accounting]
+      summary: Vyrovná položku zápočtem novým interním dokladem
+      description: >-
+        Zaúčtuje interní doklad druhu `offset` (pohledávka: protiúčet MD / účet položky D,
+        závazek obráceně; partner a dimenze z položky) a jeho řádek na účtu položky přiřadí
+        jako úhradu. Částečné vyrovnání je povolené. Jen podvojné účetnictví, vyžaduje
+        `accounting.journal.post`. Chyby zápočtu nesou podrobnost v `error.details`
+        (`remaining`, `item_date`, `document_no`, `account`, `free`). Přes API token
+        nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id, date, amount]
+              properties:
+                account_id: { type: integer, format: int64, description: Protiúčet zápočtu z osnovy firmy. }
+                date: { type: string, format: date }
+                amount: { type: number, exclusiveMinimum: 0 }
+                note: { type: [string, 'null'], maxLength: 500 }
+      responses:
+        '201': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Položku nelze vyrovnat (`other_items.error.overpayment|not_posted|offset_not_posted|currency_unsupported|offset_posting_mismatch`) nebo zaúčtování odmítlo období (`period_not_open`, `date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný vstup (`other_items.error.invalid_amount|invalid_date|offset_account_required|offset_account_same|offset_account_inactive|offset_account_not_balance|offset_account_vat|offset_date_before_item`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/offset/lines:
+    get:
+      tags: [Accounting]
+      summary: Řádky deníku, které lze k položce přiřadit jako zápočet
+      description: >-
+        Volné řádky ručních zápisů (interní doklady, ruční zápisy) na účtu položky a na straně,
+        která saldo snižuje. Volnou částku řádku počítá stejně jako saldokonto (bez rozpadů
+        na faktury a jiné položky). Vyžaduje právo `accounting` ke čtení.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: q, schema: { type: string }, description: Hledání v textu a čísle zápisu. }
+      responses:
+        '200':
+          description: Řádky
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        line_id: { type: integer, format: int64 }
+                        entry_id: { type: integer, format: int64 }
+                        line_no: { type: integer }
+                        account_code: { type: string }
+                        side: { type: string, enum: [debit, credit] }
+                        entry_date: { type: string, format: date }
+                        document_no: { type: [string, 'null'] }
+                        description: { type: [string, 'null'] }
+                        line_amount: { type: number }
+                        free_amount: { type: number }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/offset/attach:
+    post:
+      tags: [Accounting]
+      summary: Přiřadí položce zápočet zaúčtovaný jinde
+      description: >-
+        Řádek deníku se jen přiřadí, nový zápis nevzniká. Vyžaduje `accounting.journal.write`.
+        Zápis v uzavřeném období přiřadit nelze. Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [line_id, amount], properties: { line_id: { type: integer, format: int64 }, amount: { type: number, exclusiveMinimum: 0 } } } } }
+      responses:
+        '201': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Řádek nelze přiřadit (`other_items.error.offset_line_account|offset_line_overallocated|offset_line_used|offset_line_source|offset_entry_linked|offset_period_closed|offset_date_before_item|overpayment`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/offset/{allocation_id}:
+    delete:
+      tags: [Accounting]
+      summary: Odebere přiřazený zápočet (zápis v deníku zůstává)
+      description: >-
+        Jen přiřazení zápisu zaúčtovaného jinde; zápočet zaúčtovaný z položky se ruší stornem
+        (`other_items.error.offset_cancel_required`). Vyžaduje `accounting.journal.write`.
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: allocation_id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Zrušit nelze (`other_items.error.offset_cancel_required|offset_period_closed`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/offset/{allocation_id}/cancel:
+    post:
+      tags: [Accounting]
+      summary: Stornuje zápočet zaúčtovaný z položky
+      description: >-
+        Stornuje interní doklad zápočtu protizápisem; úhrada položky se stornuje ke dni storna
+        a v detailu zůstane jako stornovaná. Vyžaduje `accounting.journal.post`.
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: allocation_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3, maxLength: 500 }, entry_date: { type: [string, 'null'], format: date, description: Datum storna; bez něj datum původního zápisu. } } } } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Stornovat nelze (`other_items.error.offset_not_own|offset_already_reversed`, `period_not_open`, `date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/other-items/{id}/payment-candidates:
     get:
       tags: [Accounting]
@@ -48251,6 +48404,10 @@ components:
         installment_id: { type: [integer, 'null'], format: int64, description: Splátka, kterou úhrada hradí (přesná shoda částky s otevřenou splátkou, jinak první otevřená). Přebytek pokrývá další otevřené splátky podle pořadí. Null u položky bez splátek. }
         bank_transaction_id: { type: [integer, 'null'], format: int64 }
         cash_document_id: { type: [integer, 'null'], format: int64 }
+        journal_allocation_id: { type: [integer, 'null'], format: int64, description: 'Vyrovnání zápočtem: rozpad řádku deníku, který položku hradí (migrace 2351). Null u banky a pokladny.' }
+        internal_document_id: { type: [integer, 'null'], format: int64, description: Interní doklad zápočtu zaúčtovaný z položky; ruší se jeho stornem. Null u přiřazeného zápisu zaúčtovaného jinde. }
+        offset_document_no: { type: [string, 'null'], description: Číslo zápisu zápočtu. }
+        offset_account_code: { type: [string, 'null'], description: Účet položky na řádku zápočtu. }
         amount: { type: number, description: Jistina, o kterou úhrada snižuje saldo položky (u nerozdělené splátky celá úhrada). }
         interest_amount: { type: number, description: Úrok rozdělené splátky uhrazený touto platbou. }
         fee_amount: { type: number, description: Poplatek rozdělené splátky uhrazený touto platbou. }
@@ -48263,7 +48420,7 @@ components:
         reversed_on: { type: [string, 'null'], format: date }
         bank_statement_id: { type: [integer, 'null'], format: int64, description: Bankovní výpis pohybu úhrady. Null u pokladní platby. }
         cash_doc_number: { type: [string, 'null'], description: Číslo pokladního dokladu úhrady. Null u bankovní platby. }
-        journal_entry_id: { type: [integer, 'null'], format: int64, description: Živý (nestornovaný) zaúčtovaný zápis platby v deníku. Null bez zaúčtování platby, u stornované úhrady nebo bez práva číst účetnictví. }
+        journal_entry_id: { type: [integer, 'null'], format: int64, description: Živý (nestornovaný) zaúčtovaný zápis platby v deníku, u zápočtu jeho zápis. Null bez zaúčtování platby, u stornované úhrady nebo bez práva číst účetnictví. }
     OtherItemBankCandidate:
       type: object
       description: Ostatní položka nabídnutá k bankovnímu pohybu; tvar odpovídá kandidátům faktur v párování pohybu.

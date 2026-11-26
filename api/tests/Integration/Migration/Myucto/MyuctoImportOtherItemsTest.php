@@ -153,6 +153,42 @@ final class MyuctoImportOtherItemsTest extends TestCase
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ?', $this->target));
     }
 
+    public function testOffsetPaymentKeepsItsJournalLineAllocation(): void
+    {
+        // Úhrada zápočtem (migrace 2351) odkazuje na rozpad řádku ručního zápisu; obnova převezme
+        // zápis, rozpad i úhradu a vazby přemapuje na cílovou firmu.
+        $s = $this->source;
+        $posted = $this->scalar("SELECT id FROM other_items WHERE supplier_id = ? AND document_no = 'OP-SYN-1'", $s);
+        $period = $this->scalar('SELECT id FROM accounting_periods WHERE supplier_id = ?', $s);
+        $account = fn (string $code): int => $this->scalar("SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '{$code}'", $s);
+        $this->pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, posted_at)
+            VALUES (?, ?, '2090-01-25', 'ID-SYN-1', 'Syntetický zápočet', 'manual', '2090-01-25 10:00:00')")->execute([$s, $period]);
+        $entry = (int) $this->pdo->lastInsertId();
+        $line = $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, line_no, side, amount) VALUES (?, ?, ?, ?, ?, ?)');
+        $line->execute([$s, $entry, $account('221'), 1, 'debit', '200.00']);
+        $line->execute([$s, $entry, $account('378'), 2, 'credit', '200.00']);
+        $this->pdo->prepare("INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, kind, doc_type, doc_id, amount)
+            VALUES (?, ?, 2, ?, 'credit', 'settlement', 'other_item', ?, 200)")->execute([$s, $entry, $account('378'), $posted]);
+        $jsa = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO other_item_allocations (supplier_id, other_item_id, journal_allocation_id, amount, payment_on)
+            VALUES (?, ?, ?, 200, '2090-01-25')")->execute([$s, $posted, $jsa]);
+
+        $this->exportAndImport();
+
+        $target = $this->target;
+        $targetItem = $this->scalar("SELECT id FROM other_items WHERE supplier_id = ? AND document_no = 'OP-SYN-1'", $target);
+        self::assertSame([[(string) $targetItem, '200.00', 'ID-SYN-1', '378', 'credit', (string) $targetItem]], $this->rows(
+            "SELECT a.other_item_id, a.amount, e.document_no, ca.account_code, ja.side, ja.doc_id
+               FROM other_item_allocations a
+               JOIN journal_settlement_allocations ja ON ja.id = a.journal_allocation_id AND ja.supplier_id = a.supplier_id
+               JOIN journal_entries e ON e.id = ja.entry_id AND e.supplier_id = a.supplier_id
+               JOIN chart_of_accounts ca ON ca.id = ja.account_id AND ca.supplier_id = a.supplier_id
+              WHERE a.supplier_id = ?", $target));
+        self::assertSame('300.00', (string) $this->pdo->query(
+            'SELECT amount - (SELECT SUM(amount) FROM other_item_allocations WHERE other_item_id = ' . $targetItem . ' AND reversed_on IS NULL)
+               FROM other_items WHERE id = ' . $targetItem)->fetchColumn(), 'Zbývá uhradit po úhradě z banky a zápočtem.');
+    }
+
     /** @return array<string,mixed> */
     private function exportAndImport(): array
     {

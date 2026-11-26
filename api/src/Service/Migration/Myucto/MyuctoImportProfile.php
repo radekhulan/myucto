@@ -48,10 +48,10 @@ final class MyuctoImportProfile
         'bank_rule_templates', 'auto_posting_policy',
         // Ostatní pohledávky a závazky: druhy (před číselnými řadami druhů), doklady, splátky, úhrady,
         // opakování a kontace. Zaúčtované se převezmou se svými zápisy deníku, znovu se neúčtují.
-        'other_item_kinds', 'other_items', 'other_item_installments', 'other_item_allocations',
+        // Rozpad řádků zápisů na doklady saldokonta a předpisy ostatních položek ze zůstatku jde
+        // před úhrady: úhrada zápočtem na rozpad odkazuje (migrace 2351).
+        'other_item_kinds', 'other_items', 'other_item_installments', 'journal_settlement_allocations', 'other_item_allocations',
         'other_item_schedules', 'other_item_schedule_occurrences', 'other_item_posting_profiles', 'other_item_posting_overrides',
-        // Rozpad řádků zápisů na doklady saldokonta a předpisy ostatních položek ze zůstatku.
-        'journal_settlement_allocations',
         // Nastavení dimenzí firmy: pravidla povinnosti, mapa účtotvorné dimenze, výchozí dimenze karet.
         'dimension_account_rules', 'dimension_account_map', 'dimension_defaults',
         'accounting_corrections', 'accounting_closing_steps',

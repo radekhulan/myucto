@@ -193,7 +193,8 @@ final class JournalLinkService
                 if (self::isOwnDocument((string) $r['doc_type'], (int) $r['doc_id'], $r['source_type'], $r['source_id'])) continue;
                 $linked[(int) $r['entry_id']] = true;
             }
-            // Zápis s řádkem původu ostatní položky převzaté ze zůstatku (jakýkoli typ zápisu).
+            // Zápis s řádkem původu ostatní položky převzaté ze zůstatku (jakýkoli typ zápisu)
+            // nebo se zápočtem, který položku hradí (nezrušená úhrada nad rozpadem, migrace 2351).
             // EXISTS skončí na prvním předpisu: počáteční zápis jich může nést tisíce.
             if ($access->otherItems) {
                 foreach ($this->rows(
@@ -202,7 +203,11 @@ final class JournalLinkService
                         AND EXISTS (SELECT 1 FROM journal_settlement_allocations a
                                       JOIN other_items i ON i.id = a.doc_id AND i.supplier_id = a.supplier_id AND i.deleted_at IS NULL
                                      WHERE a.supplier_id = e.supplier_id AND a.entry_id = e.id
-                                       AND a.doc_type = 'other_item' AND a.kind = 'origin' AND a.released_on IS NULL)",
+                                       AND a.doc_type = 'other_item'
+                                       AND (a.kind = 'origin' AND a.released_on IS NULL
+                                            OR a.kind = 'settlement' AND EXISTS (
+                                                SELECT 1 FROM other_item_allocations oa
+                                                 WHERE oa.journal_allocation_id = a.id AND oa.reversed_on IS NULL)))",
                     array_merge([$supplierId], $pageIds)
                 ) as $r) {
                     $linked[(int) $r['entry_id']] = true;
@@ -478,6 +483,8 @@ final class JournalLinkService
             // úhradami a krytými fakturami. Typ zápisu nehraje roli (obvykle ruční).
             if ($access->otherItems) {
                 $this->addOtherItems($refs, $supplierId, $this->originItemsOfEntry($supplierId, $entryId), $access, true);
+                // Zápočet (interní doklad, ruční zápis) → položky, které hradí, jako platba.
+                $this->addOtherItems($refs, $supplierId, $this->offsetItemsOfEntry($supplierId, $entryId), $access, false);
             }
         }
 
@@ -928,6 +935,31 @@ final class JournalLinkService
             // Hromadná platba může hradit stovky položek; panel jich ukáže nejvýš MAX_ITEMS
             // a kontext (kryté faktury) se nedotahuje pro všechny.
             [$supplierId, $paymentId]
+        ) as $r) {
+            $this->addRef($refs, 'other_item', (int) $r['other_item_id'], 'document', (float) $r['paid']);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Položky, které zápis hradí zápočtem: nezrušená úhrada položky nad rozpadem řádku
+     * (`other_item_allocations.journal_allocation_id`, migrace 2351). Samotný rozpad
+     * druhu `settlement` bez úhrady (převod) položku nehradí.
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function offsetItemsOfEntry(int $supplierId, int $entryId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            "SELECT oa.other_item_id, SUM(" . self::allocationTotal('oa') . ") AS paid
+               FROM journal_settlement_allocations a
+               JOIN other_item_allocations oa ON oa.journal_allocation_id = a.id AND oa.supplier_id = a.supplier_id
+              WHERE a.supplier_id = ? AND a.entry_id = ? AND a.doc_type = 'other_item' AND a.kind = 'settlement'
+                AND oa.reversed_on IS NULL
+              GROUP BY oa.other_item_id ORDER BY oa.other_item_id
+              LIMIT " . (self::MAX_ITEMS + 1),
+            [$supplierId, $entryId]
         ) as $r) {
             $this->addRef($refs, 'other_item', (int) $r['other_item_id'], 'document', (float) $r['paid']);
         }

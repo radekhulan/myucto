@@ -446,6 +446,10 @@ final class ArchiveService
                 },
             ];
         }
+        // Vyrovnání ostatní položky zápočtem (migrace 2351) nese rozpad řádku deníku
+        // (`journal_settlement_allocations`), který archiv nepřenáší (stejně jako rozpady
+        // na faktury); bez něj by obnovený řádek neměl cíl.
+        $specs['other_item_allocations']['where'] = 'supplier_id = ? AND journal_allocation_id IS NULL';
         foreach (self::DIMENSION_ASSIGNMENT_TABLES as $table => [$partition, $keyset]) {
             $specs[$table] = [
                 'where' => 'supplier_id = ?',

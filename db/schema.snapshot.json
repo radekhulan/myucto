@@ -1253,7 +1253,8 @@
         "2347_entity_tags_recurring_templates.sql",
         "2348_invoice_tags.sql",
         "2349_supplier_tags_enabled.sql",
-        "2350_clients_advance_paid_accounts.sql"
+        "2350_clients_advance_paid_accounts.sql",
+        "2351_other_item_offset_settlement.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -11363,6 +11364,8 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "installment_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "interest_amount": "decimal(14,2) NOT NULL DEFAULT 0.00",
+                "internal_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "journal_allocation_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "other_item_id": "bigint(20) unsigned NOT NULL",
                 "payment_on": "date NOT NULL",
                 "reversed_on": "date NULL DEFAULT NULL",
@@ -11375,7 +11378,9 @@
                 "idx_other_allocation_bank": "BTREE (bank_transaction_id)",
                 "idx_other_allocation_cash": "BTREE (cash_document_id)",
                 "idx_other_allocation_installment": "BTREE (installment_id)",
+                "idx_other_allocation_internal_doc": "BTREE (internal_document_id)",
                 "idx_other_allocation_supplier": "BTREE (supplier_id, payment_on)",
+                "uq_other_allocation_journal": "UNIQUE BTREE (journal_allocation_id)",
                 "uq_other_item_bank": "UNIQUE BTREE (other_item_id, bank_transaction_id)",
                 "uq_other_item_cash": "UNIQUE BTREE (other_item_id, cash_document_id)"
             },
@@ -11383,13 +11388,15 @@
                 "fk_other_allocation_bank": "(bank_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_cash": "(cash_document_id) -> cash_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_installment": "(installment_id) -> other_item_installments (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_allocation_internal_doc": "(internal_document_id) -> internal_documents (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_allocation_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_other_allocation_journal": "(journal_allocation_id) -> journal_settlement_allocations (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
                 "chk_other_allocation_amounts": "`amount` >= 0 and `interest_amount` >= 0 and `fee_amount` >= 0 and `amount` + `interest_amount` + `fee_amount` > 0",
-                "chk_other_allocation_target": "`bank_transaction_id` is not null <> (`cash_document_id` is not null)"
+                "chk_other_allocation_target": "(`bank_transaction_id` is not null) + (`cash_document_id` is not null) + (`journal_allocation_id` is not null) = 1"
             }
         },
         "other_item_auto_match_blocks": {

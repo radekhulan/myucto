@@ -16,8 +16,12 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
  * rozpad odneslo kaskádou a ostatní položka založená ze zůstatku by osiřela.
  *
  * Proto se taková změna odmítne: nejdřív je potřeba přiřazení zrušit v saldokontu (předpis
- * ostatní položky stornem položky). Chybový kód začíná `allocation_`, takže ho akce deníku
- * mapují jako ostatní zámky řádků.
+ * ostatní položky stornem položky, zápočet ostatní položky v jejím detailu). Chybový kód
+ * začíná `allocation_`, takže ho akce deníku mapují jako ostatní zámky řádků.
+ *
+ * Totéž platí pro storno a přeúčtování jednotlivých dvojic opravným zápisem
+ * ({@see assertLinesUnallocated()}): původní řádek by v hlavní knize zmizel, rozpad by
+ * vyrovnání dál počítal.
  */
 final class JournalSettlementUseGuard
 {
@@ -28,8 +32,55 @@ final class JournalSettlementUseGuard
     /** Zápisy se smí smazat jen bez rozpadu (ani zrušeného předpisu, ten nese historii). */
     public function assertEntriesFree(int $supplierId, array $entryIds): void
     {
-        if ($this->allocatedEntry($supplierId, $entryIds) !== null) {
-            throw self::inUse();
+        $allocations = (new JournalSettlementRepository($this->db))->forEntries($supplierId, $entryIds);
+        if ($allocations !== []) {
+            throw self::inUse(self::offsetsOtherItem($allocations));
+        }
+    }
+
+    /**
+     * Odmítnutí pro volající, kteří ho vracejí jako výsledek: hláška podle toho, zda
+     * zápis nese zápočet ostatní položky (ten se ruší v detailu položky, ne v saldokontu).
+     *
+     * @param list<int> $entryIds
+     * @return array{code:string, message:string}
+     */
+    public function blockFor(int $supplierId, array $entryIds): array
+    {
+        return self::block(self::offsetsOtherItem((new JournalSettlementRepository($this->db))->forEntries($supplierId, $entryIds)));
+    }
+
+    /**
+     * Storno nebo přeúčtování vybraných řádků zápisu opravným zápisem (dvojice): žádný z nich
+     * nesmí nést rozpad. Platí pro rozpady na faktury i pro zápočty ostatních položek;
+     * zrušený předpis ostatní položky ze zůstatku už řádek nedrží.
+     *
+     * @param list<array<string,mixed>> $lines řádky s `line_no`, `account_id`, `side`
+     */
+    public function assertLinesUnallocated(int $supplierId, int $entryId, array $lines): void
+    {
+        if ($lines === []) {
+            return;
+        }
+        $allocations = (new JournalSettlementRepository($this->db))->forEntries($supplierId, [$entryId]);
+        if ($allocations === []) {
+            return;
+        }
+        $selected = [];
+        foreach ($lines as $line) {
+            $selected[(int) $line['line_no'] . ':' . (int) $line['account_id'] . ':' . (string) $line['side']] = true;
+        }
+        $hit = [];
+        foreach ($allocations as $a) {
+            if ($a['kind'] === 'origin' && $a['released_on'] !== null) {
+                continue;
+            }
+            if (isset($selected[$a['line_no'] . ':' . $a['account_id'] . ':' . $a['side']])) {
+                $hit[] = $a;
+            }
+        }
+        if ($hit !== []) {
+            throw self::inUse(self::offsetsOtherItem($hit));
         }
     }
 
@@ -58,6 +109,7 @@ final class JournalSettlementUseGuard
         if ($allocations === []) {
             return;
         }
+        $inUse = self::inUse(self::offsetsOtherItem($allocations));
         $byNo = [];
         foreach (array_values($lines) as $i => $line) {
             $byNo[(int) ($line['line_no'] ?? $i)][] = $line;
@@ -74,12 +126,12 @@ final class JournalSettlementUseGuard
             [$no, $account, $side] = explode(':', $key);
             $candidates = $byNo[(int) $no] ?? [];
             if (count($candidates) !== 1) {
-                throw self::inUse();
+                throw $inUse;
             }
             $line = $candidates[0];
             if ((int) $line['account_id'] !== (int) $account || (string) $line['side'] !== $side || !empty($line['is_red_storno'])
                 || (int) round((float) JournalLineAmount::decimal($line['amount']) * 100) < $cents) {
-                throw self::inUse();
+                throw $inUse;
             }
         }
     }
@@ -106,23 +158,40 @@ final class JournalSettlementUseGuard
         }
         foreach ($allocations as $a) {
             if (isset($removed[$a['line_no'] . ':' . $a['account_id'] . ':' . $a['side']])) {
-                throw self::inUse();
+                throw self::inUse(self::offsetsOtherItem([$a]));
             }
         }
     }
 
-    /** @return array{code:string, message:string} */
-    public static function block(): array
+    /**
+     * @param bool $otherItemOffset řádek vyrovnává ostatní položku zápočtem (migrace 2351):
+     *                              ruší se v detailu položky, saldokonto ho zrušit neumí
+     * @return array{code:string, message:string}
+     */
+    public static function block(bool $otherItemOffset = false): array
     {
         return [
             'code'    => self::CODE,
-            'message' => 'Řádek zápisu je v saldokontu přiřazený dokladům nebo ostatní položce. Nejdřív přiřazení zrušte v saldokontu (předpis ostatní položky stornem položky).',
+            'message' => $otherItemOffset
+                ? 'Řádek zápisu vyrovnává zápočtem ostatní pohledávku nebo závazek. Nejdřív zápočet zrušte v detailu položky (Ostatní pohledávky a závazky): odeberte přiřazení, nebo stornujte interní doklad zápočtu.'
+                : 'Řádek zápisu je v saldokontu přiřazený dokladům nebo ostatní položce. Nejdřív přiřazení zrušte v saldokontu (předpis ostatní položky stornem položky).',
         ];
     }
 
-    private static function inUse(): PostingException
+    /** @param list<array{kind:string, doc_type?:string}> $allocations */
+    private static function offsetsOtherItem(array $allocations): bool
     {
-        $block = self::block();
+        foreach ($allocations as $a) {
+            if ($a['kind'] === 'settlement' && ($a['doc_type'] ?? null) === 'other_item') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function inUse(bool $otherItemOffset = false): PostingException
+    {
+        $block = self::block($otherItemOffset);
         return new PostingException($block['code'], $block['message'], 409);
     }
 }

@@ -176,11 +176,62 @@ final class JournalSettlementRepository
     }
 
     /**
+     * Vyrovnává zápis starou vazbou bez částky ({@see \MyInvoice\Support\Sql\LinkedManualSettlementSql})
+     * doklad, jehož saldokontní účet je účet `$accountId` nebo jeho syntetika? Saldokonto
+     * přičte doklad celý pohyb zápisu na účtu, na kterém doklad svým zaúčtováním visí
+     * (účet bloku a jeho analytiky), proto je řádek na tomto účtu už použitý. Řádek na jiném
+     * účtu vazba nespotřebuje. Účet dokladu se bere z jeho zaúčtování (strana předpisu),
+     * takže platí i pro firmu, která vede faktury na 315 nebo 378.
+     */
+    public function hasCountedLinkOnAccount(int $supplierId, int $entryId, int $accountId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::countedLinkOnAccountSql('?', '?', '(SELECT COALESCE(xa.parent_id, xa.id) FROM chart_of_accounts xa WHERE xa.id = ?)')
+        );
+        $stmt->execute([$supplierId, $entryId, $accountId]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /**
+     * `EXISTS`: zápis `$entryExpr` je jediným odkazem navázaný na fakturu (vazbu počítá
+     * saldokonto, rozpad na ten druh doklad nemá) a faktura svým zaúčtováním visí na účtu
+     * se syntetikou `$syntheticIdExpr`. Strana předpisu: vydaná MD, přijatá Dal.
+     */
+    public static function countedLinkOnAccountSql(string $supplierExpr, string $entryExpr, string $syntheticIdExpr): string
+    {
+        return "EXISTS (
+                   SELECT 1 FROM journal_entry_document_links cdl
+                    WHERE cdl.supplier_id = {$supplierExpr} AND cdl.entry_id = {$entryExpr}
+                      AND cdl.doc_type IN ('invoice', 'purchase_invoice')
+                      AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links cdo
+                                       WHERE cdo.supplier_id = cdl.supplier_id AND cdo.entry_id = cdl.entry_id
+                                         AND cdo.doc_type = cdl.doc_type AND cdo.doc_id <> cdl.doc_id)
+                      AND " . JournalSettlementAllocationSql::noAllocationSql('cdl.supplier_id', 'cdl.entry_id', 'cdl.doc_type') . "
+                      AND EXISTS (
+                          SELECT 1 FROM journal_entries de
+                            JOIN journal_entry_lines dln ON dln.entry_id = de.id AND dln.supplier_id = de.supplier_id
+                            JOIN chart_of_accounts dca ON dca.id = dln.account_id
+                           WHERE de.supplier_id = cdl.supplier_id AND de.posted_at IS NOT NULL
+                             AND (de.source_type = cdl.doc_type AND de.source_id = cdl.doc_id
+                                  OR EXISTS (SELECT 1 FROM journal_document_postings djp
+                                              WHERE djp.supplier_id = cdl.supplier_id AND djp.entry_id = de.id
+                                                AND djp.doc_type = cdl.doc_type AND djp.doc_id = cdl.doc_id))
+                             AND dln.side = CASE WHEN cdl.doc_type = 'invoice' THEN 'debit' ELSE 'credit' END
+                             AND COALESCE(dca.parent_id, dca.id) = {$syntheticIdExpr}
+                      )
+               )";
+    }
+
+    /**
      * Řádky ručních zápisů na účtech `$accountIds` a straně `$side`, které mají k `$asOf`
      * volnou (nerozepsanou) částku. Vynechá zápis, který je předpisem dokladu (skupina
      * zaúčtování), storno a stornovaný zápis, červené storno, zápis se zápočtem převzatým
      * z jiného programu, řádek se zdvojeným pořadím a zápis, který doklad druhu `$docType`
      * vyrovnává už starou vazbou.
+     *
+     * `$countedLinkByAccount`: stará vazba bez částky vyloučí jen řádek na saldokontním účtu
+     * navázaného dokladu ({@see countedLinkOnAccountSql()}), ne celý zápis. Vyrovnání ostatní
+     * položky tak smí vzít řádek 315 ze zápočtu MD 321 / D 315 navázaného na přijatou fakturu.
      *
      * `$search` zúží výběr na text nebo číslo zápisu. `$score` (volitelné) přidá sloupce shody s dokladem a řadí podle nich:
      * `amount_match` (volná částka = zbývá), `doc_match` (číslo dokladu v textu zápisu nebo
@@ -201,6 +252,7 @@ final class JournalSettlementRepository
         int $limit,
         ?array $score = null,
         ?string $search = null,
+        bool $countedLinkByAccount = false,
     ): array {
         if ($accountIds === []) {
             return [];
@@ -220,8 +272,10 @@ final class JournalSettlementRepository
             $params[] = '%' . self::likeEscape(mb_substr($search, 0, 100)) . '%';
             $params[] = '%' . self::likeEscape(mb_substr($search, 0, 100)) . '%';
         }
-        $linkTypes = $docType === null ? ['invoice', 'purchase_invoice'] : [$docType];
-        $countedLink = [];
+        $linkTypes = $countedLinkByAccount ? [] : ($docType === null ? ['invoice', 'purchase_invoice'] : [$docType]);
+        $countedLink = $countedLinkByAccount
+            ? ['NOT ' . self::countedLinkOnAccountSql('e.supplier_id', 'e.id', 'COALESCE(ca.parent_id, ca.id)')]
+            : [];
         foreach ($linkTypes as $type) {
             $countedLink[] = "NOT ((SELECT COUNT(*) FROM journal_entry_document_links cdl
                                     WHERE cdl.supplier_id = e.supplier_id AND cdl.entry_id = e.id AND cdl.doc_type = '{$type}') = 1
@@ -413,7 +467,7 @@ final class JournalSettlementRepository
      * Rozpady zápisů (zamčené), pro hlídání přeúčtování a mazání zápisu.
      *
      * @param list<int> $entryIds
-     * @return list<array{id:int, entry_id:int, line_no:int, account_id:int, side:string, kind:string, amount:float, released_on:?string}>
+     * @return list<array{id:int, entry_id:int, line_no:int, account_id:int, side:string, kind:string, doc_type:string, amount:float, released_on:?string}>
      */
     public function forEntries(int $supplierId, array $entryIds): array
     {
@@ -422,7 +476,7 @@ final class JournalSettlementRepository
             return [];
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, entry_id, line_no, account_id, side, kind, amount, released_on
+            'SELECT id, entry_id, line_no, account_id, side, kind, doc_type, amount, released_on
                FROM journal_settlement_allocations
               WHERE supplier_id = ? AND entry_id IN (' . implode(',', $ids) . ') ORDER BY id FOR UPDATE'
         );
@@ -430,6 +484,7 @@ final class JournalSettlementRepository
         return array_map(static fn (array $r): array => [
             'id' => (int) $r['id'], 'entry_id' => (int) $r['entry_id'], 'line_no' => (int) $r['line_no'],
             'account_id' => (int) $r['account_id'], 'side' => (string) $r['side'], 'kind' => (string) $r['kind'],
+            'doc_type' => (string) $r['doc_type'],
             'amount' => round((float) $r['amount'], 2), 'released_on' => $r['released_on'] !== null ? (string) $r['released_on'] : null,
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }

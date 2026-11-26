@@ -148,7 +148,7 @@ final class DocumentJournalPurge
         }
         $allocated = (new JournalSettlementUseGuard($this->db))->allocatedEntry($supplierId, $entryIds);
         if ($allocated !== null) {
-            return self::blocked($entrySource[$allocated], $allocated, JournalSettlementUseGuard::block());
+            return self::blocked($entrySource[$allocated], $allocated, (new JournalSettlementUseGuard($this->db))->blockFor($supplierId, [$allocated]));
         }
         (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, $entryIds);
         (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, $entryIds);
@@ -365,7 +365,7 @@ final class DocumentJournalPurge
             return JournalPairingUseGuard::block($paired);
         }
         if ((new JournalSettlementUseGuard($this->db))->allocatedEntry($supplierId, [$entryId]) !== null) {
-            return JournalSettlementUseGuard::block();
+            return (new JournalSettlementUseGuard($this->db))->blockFor($supplierId, [$entryId]);
         }
         return $block;
     }

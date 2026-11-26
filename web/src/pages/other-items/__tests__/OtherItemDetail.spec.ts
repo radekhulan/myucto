@@ -179,6 +179,60 @@ describe('OtherItemDetail', () => {
     expect(wrapper.find('[data-test="counterparty-edit"]').exists()).toBe(false)
   })
 
+  it('zápočet nabídne v liště a u úhrad rozliší storno vlastního zápočtu a odebrání přiřazeného zápisu', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({
+      id: 9, side: 'receivable', kind: 'insurance', title: 'Syntetické pojistné plnění', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 1500, remaining_amount: 1500, status: 'posted',
+      document_no: 'OP2099001', journal_entry_id: 77,
+    })
+    m.allocations.mockResolvedValue([
+      { id: 1, bank_transaction_id: null, cash_document_id: null, journal_allocation_id: 11, internal_document_id: 5,
+        offset_document_no: 'ID2099001', journal_entry_id: 80, amount: 1000, total_amount: 1000, payment_on: '2099-02-10', reversed_on: null },
+      { id: 2, bank_transaction_id: null, cash_document_id: null, journal_allocation_id: 12, internal_document_id: null,
+        offset_document_no: 'ID2099002', journal_entry_id: 81, amount: 500, total_amount: 500, payment_on: '2099-02-12', reversed_on: null },
+    ])
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+
+    const offset = (wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'offset')!
+    expect(offset.show).toBe(true)
+    expect(offset.label).toBe('other_items.offset.action')
+    const rows = wrapper.findAll('[data-test="allocation"]')
+    expect(rows[0].get('[data-test="allocation-source"]').text()).toContain('other_items.offset.payment ID2099001')
+    expect(rows[0].get('[data-test="allocation-source"]').attributes('data-to')).toContain('accounting-internal-document-detail')
+    expect(rows[0].find('[data-test="offset-cancel"]').exists()).toBe(true)
+    expect(rows[0].find('[data-test="allocation-unlink"]').exists()).toBe(false)
+    expect(rows[1].find('[data-test="offset-detach"]').exists()).toBe(true)
+    expect(rows[1].find('[data-test="offset-cancel"]').exists()).toBe(false)
+  })
+
+  it('zápočet se řídí zbývající jistinou a stornovaný řádek už nejde odebrat', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({
+      id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 3000, remaining_amount: 0, status: 'posted',
+      remaining_payment: 70, has_split_installments: true, document_no: 'OZ2099001', journal_entry_id: 77,
+    })
+    m.allocations.mockResolvedValue([
+      { id: 2, bank_transaction_id: null, cash_document_id: null, journal_allocation_id: 12, internal_document_id: null,
+        offset_document_no: 'ID2099002', journal_entry_id: null, amount: 500, total_amount: 500, payment_on: '2099-02-12', reversed_on: '2099-03-01' },
+    ])
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    const offset = (wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'offset')!
+    expect(offset.show).toBe(false)
+    expect(wrapper.find('[data-test="offset-detach"]').exists()).toBe(false)
+  })
+
+  it('zápočet v daňové evidenci nenabízí', async () => {
+    m.allocations.mockResolvedValue([])
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    const offset = (wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'offset')!
+    expect(offset.show).toBe(false)
+  })
+
   it('u úvěru s rozdělenými splátkami ukáže zbývající jistinu, celou platbu a rozdělení úhrady', async () => {
     m.get.mockResolvedValue({
       id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',

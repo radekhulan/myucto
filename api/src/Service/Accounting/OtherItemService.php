@@ -913,10 +913,12 @@ final class OtherItemService
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.id, a.installment_id, a.bank_transaction_id, a.cash_document_id, a.amount, a.interest_amount, a.fee_amount,
+            "SELECT a.id, a.installment_id, a.bank_transaction_id, a.cash_document_id, a.journal_allocation_id,
+                    a.internal_document_id, a.amount, a.interest_amount, a.fee_amount,
                     a.amount + a.interest_amount + a.fee_amount AS total_amount, a.payment_on, a.auto_match_reason,
                     a.reversed_on, a.created_at, bs.id bank_statement_id, cd.doc_number cash_doc_number,
-                    je.id journal_entry_id
+                    COALESCE(je.id, ja.entry_id) journal_entry_id, oe.document_no offset_document_no,
+                    ca.account_code offset_account_code
                FROM other_item_allocations a
           LEFT JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
           LEFT JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = a.supplier_id
@@ -925,11 +927,14 @@ final class OtherItemService
                 AND je.source_type = IF(a.bank_transaction_id IS NULL, 'cash', 'bank')
                 AND je.active_source_id = COALESCE(a.bank_transaction_id, a.cash_document_id)
                 AND je.posted_at IS NOT NULL AND a.reversed_on IS NULL
+          LEFT JOIN journal_settlement_allocations ja ON ja.id = a.journal_allocation_id AND ja.supplier_id = a.supplier_id
+          LEFT JOIN journal_entries oe ON oe.id = ja.entry_id AND oe.supplier_id = ja.supplier_id
+          LEFT JOIN chart_of_accounts ca ON ca.id = ja.account_id AND ca.supplier_id = ja.supplier_id
               WHERE a.supplier_id = ? AND a.other_item_id = ? ORDER BY a.payment_on, a.id"
         );
         $stmt->execute([$supplierId, $id]);
         return array_map(static function (array $row): array {
-            foreach (['bank_statement_id', 'journal_entry_id'] as $key) {
+            foreach (['bank_statement_id', 'journal_entry_id', 'journal_allocation_id', 'internal_document_id'] as $key) {
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }
             return $row;
@@ -1334,10 +1339,15 @@ final class OtherItemService
         try {
             $this->items->find($supplierId, $id, true)
                 ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
-            $payment = $pdo->prepare('SELECT bank_transaction_id, cash_document_id FROM other_item_allocations
+            $payment = $pdo->prepare('SELECT bank_transaction_id, cash_document_id, journal_allocation_id FROM other_item_allocations
                 WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $payment->execute([$allocationId, $supplierId, $id]);
             $paymentRow = $payment->fetch(PDO::FETCH_ASSOC);
+            // Vyrovnání zápisem nese rozpad řádku deníku; ruší ho OtherItemOffsetService.
+            if ($paymentRow !== false && $paymentRow['journal_allocation_id'] !== null) {
+                throw new OtherItemException('offset_use_detach',
+                    'Vyrovnání zápisem zrušte v detailu položky (odebráním přiřazení nebo stornem interního dokladu zápočtu).', 409);
+            }
             // Dimenze, které úhrada od položky převzala; po odpojení se z jejích řádků odeberou.
             $itemDims = (new DimensionDefaults($this->db))->effectiveDimensions($supplierId, 'other_item', $id);
             $released = $itemDims['header'] + array_fill_keys(array_keys($itemDims['splits']), null);
@@ -1445,6 +1455,33 @@ final class OtherItemService
         }
         $account = $this->accounts->findById($supplierId, $this->settlementAccountId($supplierId, $item));
         return $account === null ? null : (string) $account['account_code'];
+    }
+
+    /**
+     * Účet, na kterém v deníku leží předpis položky (účet řádku jejího zápisu, u položky ze
+     * zůstatku řádek převzatého zápisu); null, když položka v účetnictví předpis nemá.
+     * Vyrovnání zápisem ({@see OtherItemOffsetService}) míří právě na tento účet.
+     *
+     * @param array<string,mixed> $item
+     * @return array{id:int, code:string}|null
+     */
+    public function ledgerAccount(int $supplierId, array $item): ?array
+    {
+        if ($item['journal_entry_id'] !== null) {
+            $id = $this->settlementAccountId($supplierId, $item);
+        } else {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT account_id FROM journal_settlement_allocations
+                  WHERE supplier_id = ? AND doc_type = 'other_item' AND doc_id = ? AND kind = 'origin' AND released_on IS NULL
+                  ORDER BY id LIMIT 1"
+            );
+            $stmt->execute([$supplierId, (int) $item['id']]);
+            $found = $stmt->fetchColumn();
+            if ($found === false) return null;
+            $id = (int) $found;
+        }
+        $account = $this->accounts->findById($supplierId, $id);
+        return $account === null ? null : ['id' => $id, 'code' => (string) $account['account_code']];
     }
 
     /** Zaúčtování pohybu pokrývá částku na účtu položky; položka bez účtu se nekontroluje. */

@@ -282,6 +282,12 @@ final class JournalSettlementService
                 throw new JournalSettlementException('origin_allocation',
                     'Předpis ostatní položky ze zůstatku zrušíte stornem položky v agendě Ostatní pohledávky a závazky.', 409);
             }
+            // Vyrovnání ostatní položky zápočtem nese i úhradu položky a případně vlastní
+            // interní doklad; ruší se v detailu položky (OtherItemOffsetService).
+            if ($allocation['doc_type'] === 'other_item') {
+                throw new JournalSettlementException('other_item_offset',
+                    'Vyrovnání ostatní položky zápočtem zrušíte v detailu položky v agendě Ostatní pohledávky a závazky.', 409);
+            }
             $this->repo->delete($supplierId, $id);
             if ($ownTx) $pdo->commit();
             return $allocation;

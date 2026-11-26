@@ -27,6 +27,7 @@ import { formDateInput } from '@/components/ui/formStyles'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 import OtherItemPostingRules from '@/components/accounting/OtherItemPostingRules.vue'
+import OtherItemOffsetModal from '@/components/accounting/OtherItemOffsetModal.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
@@ -81,6 +82,13 @@ const canEdit = computed(() => item.value?.status === 'draft' && auth.canWrite('
 const canPost = computed(() => auth.canWrite('other_items') && (!isDoubleEntry.value || auth.canWrite('accounting.journal.post')))
 const canManageBankPayment = computed(() => auth.canRead('bank') && auth.canWrite('bank.match'))
 const canManageCashPayment = computed(() => auth.canRead('cash') && auth.canWrite('cash.document.write'))
+/** Zápočet: zaúčtování interního dokladu chce právo zaúčtování, přiřazení zápisu právo zápisu do deníku. */
+const canOffsetPost = computed(() => isDoubleEntry.value && auth.canWrite('other_items') && auth.canWrite('accounting.journal.post'))
+const canOffsetAttach = computed(() => isDoubleEntry.value && auth.canWrite('other_items') && auth.canWrite('accounting.journal.write') && auth.canRead('accounting'))
+const offsetOpen = ref(false)
+const offsetCancel = ref<OtherItemAllocation | null>(null)
+const offsetCancelReason = ref('')
+const offsetCancelDate = ref(appIsoDate())
 const canAllocate = computed(() => auth.canWrite('other_items') && (canManageBankPayment.value || canManageCashPayment.value) && item.value?.currency === 'CZK'
   && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && payableAmount.value > 0)
 /** Sekce Zaúčtování čte deník (právo accounting); bez něj ukazuje vznik a přeúčtování část Účtování. */
@@ -432,6 +440,49 @@ async function unallocate(allocation: OtherItemAllocation) {
   }
 }
 
+async function offsetDone(updated: OtherItem) {
+  offsetOpen.value = false
+  item.value = updated
+  await load()
+}
+
+/** Přiřazený zápis zaúčtovaný jinde se jen odebere, zápis v deníku zůstává. */
+async function detachOffset(allocation: OtherItemAllocation) {
+  if (busy.value || !window.confirm(t('other_items.offset.confirm_detach'))) return
+  busy.value = true
+  try {
+    await otherItemsApi.detachOffset(id.value, allocation.id)
+    toast.success(t('other_items.offset.detached'))
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
+function openOffsetCancel(allocation: OtherItemAllocation) {
+  offsetCancelReason.value = ''
+  offsetCancelDate.value = appIsoDate()
+  offsetCancel.value = allocation
+}
+
+async function cancelOffset() {
+  const allocation = offsetCancel.value
+  if (!allocation || busy.value) return
+  busy.value = true
+  try {
+    await otherItemsApi.cancelOffset(id.value, allocation.id, { reason: offsetCancelReason.value, entry_date: offsetCancelDate.value || null })
+    offsetCancel.value = null
+    toast.success(t('other_items.offset.cancelled'))
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
 async function post() {
   if (!item.value || busy.value) return
   busy.value = true
@@ -560,6 +611,7 @@ async function remove() {
 /** Datum v úzké kartě se nesmí zlomit uvnitř; období se zalomí jen mezi začátkem a koncem. */
 const unbreakable = (text: string) => text.replace(/ /g, '\u00a0')
 const editingSomething = computed(() => busy.value || postOpen.value || reverseOpen.value || repostOpen.value || deleteOpen.value
+  || offsetOpen.value || !!offsetCancel.value
   || counterpartyEditing.value || noteEditing.value || accrualEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
   || plansState.value.editing)
 useWindowRefresh(refresh, () => !loading.value && !editingSomething.value)
@@ -580,6 +632,11 @@ const actions = computed<ActionItem[]>(() => {
       show: plansState.value.canSchedule, disabled: busy.value, run: () => plans.value?.openSchedule() },
     { key: 'installments', label: t('other_items.plans.split_action'), icon: 'calendar', tier: 'overflow', group: t('other_items.plans.group'), variant: 'neutral',
       show: plansState.value.canSplit, disabled: busy.value, run: () => plans.value?.openInstallments() },
+    { key: 'offset', label: t('other_items.offset.action'), icon: 'swap', tier: 'secondary', variant: 'success',
+      // Zápočet snižuje jen jistinu: řídí se zbývající jistinou, ne platbou s úrokem a poplatkem.
+      show: (current.status === 'posted' || current.status === 'confirmed') && current.currency === 'CZK' && Number(current.remaining_amount) > 0
+        && (canOffsetPost.value || canOffsetAttach.value),
+      disabled: busy.value, run: () => { offsetOpen.value = true } },
     { key: 'reverse', label: t(isDoubleEntry.value ? 'other_items.reverse' : 'other_items.cancel'), icon: 'uturn', tier: 'overflow', variant: 'warning',
       show: (current.status === 'posted' || current.status === 'confirmed') && canPost.value,
       disabled: busy.value || Number(current.paid_amount) > 0,
@@ -839,6 +896,10 @@ onMounted(load)
                 <span v-else class="font-medium">{{ t('other_items.bank_payment') }} #{{ allocation.bank_transaction_id }}</span>
               </template>
               <RouterLink v-else-if="allocation.cash_document_id" :to="cashDocumentLink(allocation.cash_document_id)" class="font-medium text-primary-700 hover:underline" data-test="allocation-source">{{ t('other_items.cash_payment') }} {{ allocation.cash_doc_number || `#${allocation.cash_document_id}` }}</RouterLink>
+              <template v-else-if="allocation.journal_allocation_id">
+                <RouterLink v-if="allocation.internal_document_id && auth.canRead('accounting')" :to="{ name: 'accounting-internal-document-detail', params: { id: allocation.internal_document_id } }" class="font-medium text-primary-700 hover:underline" data-test="allocation-source">{{ t('other_items.offset.payment') }} {{ allocation.offset_document_no || '' }}</RouterLink>
+                <span v-else class="font-medium" data-test="allocation-source">{{ t('other_items.offset.payment') }} {{ allocation.offset_document_no || '' }}</span>
+              </template>
               <span class="ml-2 text-neutral-500">{{ formatDate(allocation.payment_on) }}</span>
               <RouterLink v-if="allocation.journal_entry_id" :to="journalEntryLink(allocation.journal_entry_id)" class="ml-2 text-xs text-primary-700 hover:underline" data-test="allocation-journal">{{ t('other_items.open_journal') }}</RouterLink>
               <span v-if="allocation.auto_match_reason" class="ml-2 inline-flex rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700" data-test="allocation-auto" :title="t(`other_items.auto_match_reason.${allocation.auto_match_reason}`)">{{ t('other_items.auto_matched') }}</span>
@@ -849,10 +910,20 @@ onMounted(load)
                 {{ t('other_items.allocation_split', { principal: formatMoney(allocation.amount, item.currency), interest: formatMoney(allocation.interest_amount ?? 0, item.currency), fee: formatMoney(allocation.fee_amount ?? 0, item.currency) }) }}
               </span>
               <strong class="tabular-nums" :class="allocation.reversed_on ? 'line-through text-neutral-500' : ''">{{ formatMoney(allocation.total_amount ?? allocation.amount, item.currency) }}</strong>
-              <button v-if="auth.canWrite('other_items') && (allocation.bank_transaction_id ? canManageBankPayment : canManageCashPayment)" type="button" :disabled="busy"
+              <button v-if="!allocation.journal_allocation_id && auth.canWrite('other_items') && (allocation.bank_transaction_id ? canManageBankPayment : canManageCashPayment)" type="button" :disabled="busy"
                 :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="allocation-unlink" @click="unallocate(allocation)">
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
                 {{ t('other_items.unlink_payment') }}
+              </button>
+              <button v-else-if="allocation.journal_allocation_id && allocation.internal_document_id && !allocation.reversed_on && canOffsetPost" type="button" :disabled="busy"
+                :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="offset-cancel" @click="openOffsetCancel(allocation)">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+                {{ t('other_items.offset.cancel') }}
+              </button>
+              <button v-else-if="allocation.journal_allocation_id && !allocation.internal_document_id && !allocation.reversed_on && canOffsetAttach" type="button" :disabled="busy"
+                :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="offset-detach" @click="detachOffset(allocation)">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                {{ t('other_items.offset.detach') }}
               </button>
             </div>
           </div>
@@ -979,6 +1050,31 @@ onMounted(load)
       </template>
     </Modal>
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
+    <OtherItemOffsetModal v-if="offsetOpen && item" :item="item" :can-post="canOffsetPost" :can-attach="canOffsetAttach"
+                          @close="offsetOpen = false" @done="offsetDone" />
+    <Modal v-if="offsetCancel" :title="t('other_items.offset.cancel_title')" width-class="max-w-lg" @close="offsetCancel = null">
+      <form id="other-item-offset-cancel" class="space-y-4" data-test="offset-cancel-form" @submit.prevent="cancelOffset">
+        <p class="text-sm text-neutral-600">{{ t('other_items.offset.cancel_intro', { number: offsetCancel.offset_document_no || '' }) }}</p>
+        <label class="block text-sm font-medium">{{ t('other_items.reverse_reason') }}
+          <textarea v-model="offsetCancelReason" required minlength="3" maxlength="500" rows="3" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface p-2" />
+        </label>
+        <label class="block text-sm font-medium">{{ t('other_items.reverse_date') }}
+          <DateInput v-model="offsetCancelDate" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
+        </label>
+      </form>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="offsetCancel = null">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" form="other-item-offset-cancel" :disabled="busy" :class="btnFilled('warning')" class="whitespace-nowrap">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+            {{ t('other_items.offset.cancel') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
     <Modal v-if="reverseOpen" :title="t(isDoubleEntry ? 'other_items.reverse' : 'other_items.cancel')" width-class="max-w-lg" @close="reverseOpen = false">
       <form id="other-item-reverse" class="space-y-4" @submit.prevent="reverse">
         <p class="text-sm text-neutral-600">{{ t(isDoubleEntry ? 'other_items.confirm_reverse' : 'other_items.confirm_cancel') }}</p>
