@@ -53,6 +53,11 @@ final class ImportedPaidPurchase
      */
     public static function releaseForPayment(PDO $pdo, int $supplierId, int $purchaseId): void
     {
+        $covered = $pdo->prepare('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $covered->execute([$purchaseId, $supplierId]);
+        if ((float) ($covered->fetchColumn() ?: 0) <= 0.0) {
+            return;
+        }
         $settled = PurchaseSettledExpr::settled('pi', currentRead: true);
         $pdo->prepare(
             "UPDATE purchase_invoices pi
