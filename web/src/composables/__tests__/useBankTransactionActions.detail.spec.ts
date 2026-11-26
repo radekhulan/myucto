@@ -396,4 +396,55 @@ describe('actions opened from bank transaction detail', () => {
     await confirm().trigger('click')
     expect(wrapper.emitted('confirm')).toEqual([[[{ invoice_id: 1, amount_cents: 10 }, { invoice_id: 2, amount_cents: 20 }]]])
   })
+
+  it('pays the last document partially with the rest of the transfer and rejects overpaying a row', async () => {
+    const document = { currency: 'CZK', issue_date: '2099-01-01', invoice_type: 'invoice' }
+    mocks.searchOpen.mockResolvedValue([
+      { ...document, id: 11, client_id: 1, amount_to_pay: 1955.63, remaining_amount: 1955.63 },
+      { ...document, id: 12, client_id: 2, amount_to_pay: 34011.77, remaining_amount: 34011.77 },
+    ])
+    const wrapper = mount(BankPayoutDialog, {
+      props: { transaction: { ...payoutRow(), amount: 29165.05 }, saving: false, error: '' },
+      global: { stubs: { Modal: { template: '<section><slot /><slot name="footer" /></section>' }, SearchableSelect: true } },
+    })
+    wrappers.push(wrapper)
+    const picker = () => wrapper.getComponent({ name: 'SearchableSelect' })
+    const button = (label: string) => wrapper.findAll('button').find(candidate => candidate.text() === label)
+    const select = async (id: number) => {
+      picker().vm.$emit('search', 'Synthetic')
+      await flushPromises()
+      picker().vm.$emit('update:modelValue', id)
+      await flushPromises()
+    }
+    await select(11)
+    await select(12)
+    expect(button('bank.payout.confirm')!.attributes('disabled')).toBeDefined()
+
+    await button('bank.payout.pay_last_partially')!.trigger('click')
+    const inputs = wrapper.findAll('ul input')
+    expect((inputs[1].element as HTMLInputElement).value).toBe('27209.42')
+    expect(button('bank.payout.pay_last_partially')).toBeUndefined()
+    expect(button('bank.payout.confirm')!.attributes('disabled')).toBeUndefined()
+
+    await inputs[0].setValue('1955.64')
+    await inputs[1].setValue('27209.41')
+    expect(wrapper.text()).toContain('bank.payout.invalid_amount')
+    expect(button('bank.payout.confirm')!.attributes('disabled')).toBeDefined()
+
+    await inputs[0].setValue('1955.63')
+    await inputs[1].setValue('27209.424')
+    expect(wrapper.text()).toContain('bank.payout.invalid_amount')
+    expect(button('bank.payout.confirm')!.attributes('disabled')).toBeDefined()
+
+    await inputs[0].setValue('1955.60')
+    await inputs[1].setValue('27209.45')
+    expect(wrapper.text()).toContain('bank.payout.settle_rest')
+    expect(button('bank.payout.confirm')!.attributes('disabled')).toBeDefined()
+
+    await inputs[0].setValue('1955.63')
+    await inputs[1].setValue('27209.42')
+    expect(wrapper.text()).not.toContain('bank.payout.settle_rest')
+    await button('bank.payout.confirm')!.trigger('click')
+    expect(wrapper.emitted('confirm')).toEqual([[[{ invoice_id: 11, amount_cents: 195563 }, { invoice_id: 12, amount_cents: 2720942 }]]])
+  })
 })

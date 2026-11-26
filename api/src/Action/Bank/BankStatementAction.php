@@ -3318,6 +3318,16 @@ final class BankStatementAction
         return $this->manualMatchSplit($request, $response, $txId, array_keys($amounts), $amounts);
     }
 
+    /**
+     * Částečná úhrada by nechala zbytek v toleranci úhrady, takže by
+     * {@see InvoicePaymentService::recomputeLocked()} doklad uzavřel jako uhrazený.
+     */
+    private static function payoutLeavesSettledRest(int $remainingCents, int $amountCents): bool
+    {
+        $rest = $remainingCents - $amountCents;
+        return $rest > 0 && $rest <= (int) round(InvoicePaymentService::TOLERANCE * 100);
+    }
+
     /** @param array<int,int> $amounts */
     private function payoutMatchReplay(
         Response $response, int $supplierId, int $txId, string $postedAt, array $amounts,
@@ -3832,7 +3842,9 @@ final class BankStatementAction
      *   - jen příchozí platba (amount > 0); přijaté faktury split neřeší (mají vlastní cestu);
      *   - s invoice_ids musí všechny faktury patřit stejnému klientovi;
      *   - každá faktura se uhradí svým plným zbytkem. Běžné párování má toleranci jako
-     *     návrhy, výslovný rozpad v CZK vyžaduje přesné částky dokladů i pohybu.
+     *     návrhy. Výslovný rozpad v CZK (payout_allocations) nese částku každého dokladu:
+     *     smí být nižší než zbytek (částečná úhrada), nikdy vyšší, a součet musí přesně
+     *     odpovídat pohybu.
      *
      * Každá faktura dostane řádek v invoice_payments se stejným bank_transaction_id
      * (migrace 0119 uvolnila UNIQUE na (bank_transaction_id, invoice_id)). Zaplacená
@@ -3938,11 +3950,16 @@ final class BankStatementAction
                     return Json::error($response, 'currency_mismatch', 'Všechny doklady souhrnné úhrady musí být v CZK.', 409, ['invoice_id' => $iid]);
                 }
                 if ($payoutReplay) continue;
-                if ($inv['status'] === 'paid' || (int) round($remaining * 100) !== $payoutAmounts[$iid]) {
-                    return Json::error($response, 'payout_amount_mismatch', 'Částka souhrnné úhrady musí odpovídat zbývající částce dokladu.', 409, ['invoice_id' => $iid]);
+                // Doklad lze uhradit i částečně (typicky poslední v rozpadu), přeplatit ne.
+                if ($inv['status'] === 'paid' || $payoutAmounts[$iid] > (int) round($remaining * 100)) {
+                    return Json::error($response, 'payout_amount_mismatch', 'Částka souhrnné úhrady nesmí převýšit zbývající částku dokladu.', 409, ['invoice_id' => $iid]);
                 }
-                $toPay[$iid] = $remaining;
-                $sumConverted += $remaining;
+                if (self::payoutLeavesSettledRest((int) round($remaining * 100), $payoutAmounts[$iid])) {
+                    return Json::error($response, 'payout_amount_mismatch',
+                        'Částečná úhrada nesmí nechat zbytek do 0,05 Kč, doklad by se uzavřel jako uhrazený. Uhraďte celý zbytek dokladu.', 409, ['invoice_id' => $iid]);
+                }
+                $toPay[$iid] = $payoutAmounts[$iid] / 100;
+                $sumConverted += $toPay[$iid];
                 continue;
             }
             if ($clientId === null) {
@@ -4047,6 +4064,18 @@ final class BankStatementAction
                     return Json::error($response, 'state_changed',
                         'Stav faktur se mezitím změnil (faktura už nemá co uhradit). Zkus párování znovu.', 409);
                 }
+                if ($payoutAmounts !== null) {
+                    // Rozpad nese vlastní částku dokladu (může být částečná); pod zámkem jen
+                    // ověř, že ji zbývající dluh pořád pokryje.
+                    if ($payoutAmounts[$iid] > (int) round($rem * 100)
+                        || self::payoutLeavesSettledRest((int) round($rem * 100), $payoutAmounts[$iid])) {
+                        self::rollbackAtomic($pdo, $own, $savepoint);
+                        return Json::error($response, 'state_changed',
+                            'Stav faktur se mezitím změnil (částka převyšuje zbývající dluh). Zkus párování znovu.', 409);
+                    }
+                    $sumLocked += $toPay[$iid];
+                    continue;
+                }
                 $conv = $this->remainingInTxCurrency(
                     $rem, (string) $byId[$iid]['currency'], IssuedCzkAmounts::settlementRate($byId[$iid]), $txCcy
                 );
@@ -4089,6 +4118,13 @@ final class BankStatementAction
                     'bank_reference'      => isset($txRow['bank_ref']) ? (string) $txRow['bank_ref'] : null,
                     'created_by'          => $userId,
                 ]);
+                // recordPayment ořízne bankovní platbu na zbytek podle součtu plateb, kontrola
+                // pod zámkem ale vychází z paid_total. Rozpad musí zapsat přesně zadanou částku.
+                if ($payoutAmounts !== null && (int) round($recorded['amount'] * 100) !== $payoutAmounts[$iid]) {
+                    self::rollbackAtomic($pdo, $own, $savepoint);
+                    return Json::error($response, 'state_changed',
+                        'Stav faktur se mezitím změnil (částka převyšuje zbývající dluh). Zkus párování znovu.', 409, ['invoice_id' => $iid]);
+                }
                 if ($recorded['became_paid']) {
                     $paidInvoiceIds[] = $iid;
                 }

@@ -145,6 +145,150 @@ final class BankMatchTokenPostingTest extends BankPostingTestCase
         self::assertSame(0, (int) $payments->fetchColumn());
     }
 
+    public function testPayoutPaysLastDocumentPartiallyAndRejectsOverpayment(): void
+    {
+        $a = $this->saleInvoice('PARTPAY1', $this->client('Odběratel A částečné úhrady'), 1955.63);
+        $b = $this->saleInvoice('PARTPAY2', $this->client('Odběratel B částečné úhrady'), 34011.77);
+        $c = $this->saleInvoice('PARTPAY3', $this->client('Odběratel C částečné úhrady'), 500.00);
+        $this->postPredpis('invoice', $a, '311', '602', 1955.63);
+        $this->postPredpis('invoice', $b, '311', '602', 34011.77);
+        $this->postPredpis('invoice', $c, '311', '602', 500.00);
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, 29165.05);
+
+        $matched = $this->call('manualMatch', $tx, ['payout_allocations' => [
+            ['invoice_id' => $a, 'amount_cents' => 195563],
+            ['invoice_id' => $b, 'amount_cents' => 2720942],
+        ]], false);
+        self::assertSame(200, $matched['status'], json_encode($matched['body']));
+        self::assertSame('posted', $matched['body']['posting']['action'] ?? null, json_encode($matched['body']));
+
+        $payments = $this->db->pdo()->prepare('SELECT invoice_id, amount, source FROM invoice_payments WHERE bank_transaction_id = ? ORDER BY id');
+        $payments->execute([$tx]);
+        $rows = $payments->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertSame([$a, $b], array_map('intval', array_column($rows, 'invoice_id')));
+        self::assertSame([1955.63, 27209.42], array_map('floatval', array_column($rows, 'amount')));
+        self::assertSame(['paid', 1955.63], $this->invoiceState($a));
+        self::assertSame(['issued', 27209.42], $this->invoiceState($b), 'částečně uhrazený doklad nesmí přejít do stavu uhrazeno');
+
+        $entryId = (int) $this->db->pdo()->query(
+            "SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId}
+              AND source_type = 'bank' AND source_id = {$tx} AND reversed_by IS NULL"
+        )->fetchColumn();
+        $lines = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(29165.05, $lines['221']['debit'], 0.001);
+        self::assertEqualsWithDelta(29165.05, $lines['311']['credit'], 0.001);
+
+        $over = $this->transaction($statement, 7302.36);
+        $rejected = $this->call('manualMatch', $over, ['payout_allocations' => [
+            ['invoice_id' => $b, 'amount_cents' => 680236],
+            ['invoice_id' => $c, 'amount_cents' => 50000],
+        ]], false);
+        self::assertSame(409, $rejected['status'], json_encode($rejected['body']));
+        self::assertSame('payout_amount_mismatch', $rejected['body']['error']['code']);
+        self::assertSame($b, $rejected['body']['error']['invoice_id']);
+        $payments->execute([$over]);
+        self::assertSame([], $payments->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertSame('unmatched', $this->txStatus($over));
+
+        $rest = $this->transaction($statement, 7302.35);
+        $settled = $this->call('manualMatch', $rest, ['payout_allocations' => [
+            ['invoice_id' => $b, 'amount_cents' => 680235],
+            ['invoice_id' => $c, 'amount_cents' => 50000],
+        ]], false);
+        self::assertSame(200, $settled['status'], json_encode($settled['body']));
+        self::assertSame(['paid', 34011.77], $this->invoiceState($b));
+        self::assertSame(['paid', 500.0], $this->invoiceState($c));
+    }
+
+    public function testPayoutRejectsPartialRestWithinSettlementTolerance(): void
+    {
+        $a = $this->saleInvoice('PARTTOL1', $this->client('Odběratel A tolerance'), 500.00);
+        $b = $this->saleInvoice('PARTTOL2', $this->client('Odběratel B tolerance'), 100.00);
+        $statement = $this->statement();
+        foreach ([1, 5] as $restCents) {
+            $tx = $this->transaction($statement, (60000 - $restCents) / 100);
+            $rejected = $this->call('manualMatch', $tx, ['payout_allocations' => [
+                ['invoice_id' => $b, 'amount_cents' => 10000],
+                ['invoice_id' => $a, 'amount_cents' => 50000 - $restCents],
+            ]], false);
+            self::assertSame(409, $rejected['status'], json_encode($rejected['body']));
+            self::assertSame('payout_amount_mismatch', $rejected['body']['error']['code']);
+            self::assertSame($a, $rejected['body']['error']['invoice_id']);
+            self::assertSame('unmatched', $this->txStatus($tx));
+        }
+        self::assertSame(['issued', 0.0], $this->invoiceState($a));
+        self::assertSame(['issued', 0.0], $this->invoiceState($b));
+
+        $tx = $this->transaction($statement, 599.94);
+        $accepted = $this->call('manualMatch', $tx, ['payout_allocations' => [
+            ['invoice_id' => $b, 'amount_cents' => 10000],
+            ['invoice_id' => $a, 'amount_cents' => 49994],
+        ]], false);
+        self::assertSame(200, $accepted['status'], json_encode($accepted['body']));
+        self::assertSame(['issued', 499.94], $this->invoiceState($a), 'zbytek 0,06 Kč nad tolerancí doklad neuzavře');
+        self::assertSame(['paid', 100.0], $this->invoiceState($b));
+    }
+
+    public function testPayoutPaysProformaPartiallyWithoutFinalInvoice(): void
+    {
+        $proforma = $this->saleInvoice('PARTPRO1', $this->client('Odběratel zálohy'), 1000.00, 'proforma');
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                    vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+             VALUES (?, 'Syntetická záloha', 1, 'ks', 1000, (SELECT id FROM vat_rates ORDER BY id LIMIT 1), 0, 1000, 0, 1000, 0)"
+        )->execute([$proforma]);
+        $invoice = $this->saleInvoice('PARTPRO2', $this->client('Odběratel faktury'), 200.00);
+        $tx = $this->transaction($this->statement(), 700.00);
+
+        $matched = $this->call('manualMatch', $tx, ['payout_allocations' => [
+            ['invoice_id' => $invoice, 'amount_cents' => 20000],
+            ['invoice_id' => $proforma, 'amount_cents' => 50000],
+        ]], false);
+        self::assertSame(200, $matched['status'], json_encode($matched['body']));
+        self::assertArrayNotHasKey('final_draft_ids', $matched['body'], 'částečně uhrazená záloha nezakládá finální fakturu');
+        self::assertSame(['issued', 500.0], $this->invoiceState($proforma));
+        self::assertSame(['paid', 200.0], $this->invoiceState($invoice));
+        $payments = $this->db->pdo()->prepare('SELECT invoice_id, amount FROM invoice_payments WHERE bank_transaction_id = ? ORDER BY id');
+        $payments->execute([$tx]);
+        self::assertSame([[$invoice, 200.0], [$proforma, 500.0]], array_map(
+            static fn (array $row): array => [(int) $row['invoice_id'], (float) $row['amount']],
+            $payments->fetchAll(\PDO::FETCH_ASSOC),
+        ));
+    }
+
+    public function testPayoutRollsBackWhenPaymentWouldBeTrimmed(): void
+    {
+        $a = $this->saleInvoice('PARTTRIM1', $this->client('Odběratel A oříznutí'), 500.00);
+        $b = $this->saleInvoice('PARTTRIM2', $this->client('Odběratel B oříznutí'), 100.00);
+        // Platba bez přepočtu paid_total: kontrola pod zámkem vidí celý dluh, zápis platby jen zbytek 200 Kč.
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source)
+             VALUES (?, ?, ?, 300.00, "CZK", "manual")'
+        )->execute([$this->supplierId, $a, self::YEAR . '-06-12']);
+        $tx = $this->transaction($this->statement(), 500.00);
+
+        $result = $this->call('manualMatch', $tx, ['payout_allocations' => [
+            ['invoice_id' => $b, 'amount_cents' => 10000],
+            ['invoice_id' => $a, 'amount_cents' => 40000],
+        ]], false);
+        self::assertSame(409, $result['status'], json_encode($result['body']));
+        self::assertSame('state_changed', $result['body']['error']['code']);
+        self::assertSame($a, $result['body']['error']['invoice_id']);
+        self::assertSame('unmatched', $this->txStatus($tx));
+        $payments = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id = ?');
+        $payments->execute([$tx]);
+        self::assertSame(0, (int) $payments->fetchColumn());
+        self::assertSame(['issued', 0.0], $this->invoiceState($b), 'rollback vrátí i úhradu ostatních dokladů rozpadu');
+    }
+
+    /** @return array{0:string, 1:float} */
+    private function invoiceState(int $invoiceId): array
+    {
+        $row = $this->db->pdo()->query("SELECT status, paid_total FROM invoices WHERE id = {$invoiceId}")->fetch(\PDO::FETCH_ASSOC);
+        return [(string) $row['status'], (float) $row['paid_total']];
+    }
+
     public function testTokenMatchSupersedesStalePendingSuggestion(): void
     {
         [$tx, $invoice] = $this->paidInvoiceScenario('TOKSUP1', 500.00);

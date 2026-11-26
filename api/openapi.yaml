@@ -8601,9 +8601,11 @@ paths:
 
         - `payout_allocations`: výslovný rozpad příchozího pohybu z bankovního
           výpisu v CZK na 2 až 100 vystavených faktur nebo zálohových listů téže
-          firmy, i od různých odběratelů. Každý doklad uveďte právě jednou a
-          jeho plný zůstatek zadejte v celých haléřích. Součet musí přesně
-          odpovídat převodu. Požadavek s tímto polem nesmí obsahovat další pole.
+          firmy, i od různých odběratelů. Každý doklad uveďte právě jednou
+          s částkou v celých haléřích. Částka smí být nižší než zbývající částka
+          dokladu (doklad zůstane částečně uhrazený), nikdy vyšší, a nesmí nechat
+          zbytek do 0,05 Kč (ten by doklad uzavřel jako uhrazený). Součet musí
+          přesně odpovídat převodu. Požadavek s tímto polem nesmí obsahovat další pole.
           Vyžaduje interní roli, čtení banky a faktur a zápis `bank.match`
           a `invoices.mark_paid`. Opakování shodného rozpadu vrátí stav
           existujícího spárování s `replayed: true`.
@@ -8650,7 +8652,7 @@ paths:
                     required: [invoice_id, amount_cents]
                     properties:
                       invoice_id: { type: integer, format: int64, minimum: 1 }
-                      amount_cents: { type: integer, format: int64, minimum: 1, maximum: 999999999999, description: Plný zůstatek dokladu v haléřích. }
+                      amount_cents: { type: integer, format: int64, minimum: 1, maximum: 999999999999, description: Hrazená částka dokladu v haléřích, nejvýše jeho zbývající částka. }
                   example: [{ invoice_id: 123, amount_cents: 33600 }, { invoice_id: 124, amount_cents: 22400 }]
                 invoice_id:
                   type: integer
@@ -8753,8 +8755,10 @@ paths:
             (`nothing_to_pay`, `cannot_reconcile`). `invoice_already_settled` =
             fakturu už evidované platby plně kryjí, druhá platba by ji přeplatila.
             Platba vyšší než zbývající částka se zaeviduje jen do výše zbytku.
-            Pro souhrnnou úhradu je `payout_amount_mismatch` nesoulad s plným
-            zůstatkem dokladu a `payment_unavailable` obsazený pohyb.
+            Pro souhrnnou úhradu je `payout_amount_mismatch` částka vyšší než
+            zbývající částka dokladu, zbytek do 0,05 Kč po částečné úhradě nebo už
+            uhrazený doklad a `payment_unavailable`
+            obsazený pohyb.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
