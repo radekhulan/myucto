@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
+import type { PreFinalizeCheckResult, TaxReturnState, taxReturnApi } from '@/api/taxReturn'
 
 // Upozornění v detailu DPPO: finalizované přiznání, jehož účetnictví se po finalizaci
 // změnilo, a neúplná projekce uzávěrky, když náhled některého kroku selhal.
@@ -10,7 +11,7 @@ const m = vi.hoisted(() => ({
   canRead: true,
   taxpayerType: 'po' as 'po' | 'fo',
   get: vi.fn(),
-  prefinalizeCheck: vi.fn(),
+  prefinalizeCheck: vi.fn<typeof taxReturnApi.prefinalizeCheck>(),
   download: vi.fn(),
   reportPdfUrl: vi.fn(),
 }))
@@ -87,7 +88,7 @@ function makeState(type: 'po' | 'fo', status: 'draft' | 'final' = 'draft') {
     },
     warnings: [],
     tax_losses: { losses: [], available_total: 0, suggested: 0, carry_years: 5 },
-    prefinalize_check: null,
+    prefinalize_check: null as TaxReturnState['prefinalize_check'],
     snapshot: null,
     constants_year: 2025,
   }
@@ -119,7 +120,7 @@ describe('IncomeTaxReport.vue: upozornění DPPO', () => {
   })
 
   it('shows a blocking pre-finalize check and refreshes it when the browser tab is visible again', async () => {
-    const blocked = {
+    const blocked: PreFinalizeCheckResult = {
       checks: [{ key: 'draft_assets_551', severity: 'blocker', ok: false, value: { assets: 1, amount: 12000, taken_over: 12000 } }],
       summary: { ok: 0, warning: 0, blocker: 1, na: 0 },
       can_finalize: false,
