@@ -101,6 +101,9 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(20000, $c['bad_debt_small_receivable_limit']);
         self::assertSame(100000, $c['bad_debt_small_receivable_debtor_year_limit']);
         self::assertSame(3, $c['bad_debt_small_receivable_months']);
+        // § 74b odst. 3 ZDPH ve znění zák. č. 180/2026 Sb.: třetí měsíc po splatnosti.
+        self::assertSame(3, $c['s74b_aging_months']);
+        self::assertSame(6, TaxConstants::forYear(2026)['s74b_aging_months']);
         self::assertSame(30840, $c['credit_taxpayer']);
         self::assertSame([15204, 22320, 27840], $c['child_credits']);
         self::assertSame(0.21, $c['corporate_tax_rate']);

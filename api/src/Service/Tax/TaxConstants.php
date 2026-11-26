@@ -1792,7 +1792,10 @@ final class TaxConstants
             'unpaid_liability_aging_months' => 30,
             'advance_employment_exempt_share' => 0.50,
             'advance_employment_half_share' => 0.15,
-            's74b_aging_months' => 6,
+            // § 74b odst. 3 ZDPH ve znění zák. č. 180/2026 Sb. (§ 32 bod 10), účinné od
+            // 1. 1. 2027: třetí kalendářní měsíc po měsíci splatnosti. Pro plnění před tímto
+            // datem vybírá Section74bService dosavadní lhůtu podle § 33 bodu 1 téže novely.
+            's74b_aging_months' => 3,
             's79_claim_window_months' => 12,
             'vat_adjustment_period_years' => [5, 10],
             'vat_adjustment_tolerance_points' => 10,

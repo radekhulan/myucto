@@ -3212,7 +3212,7 @@ final readonly class PayrollRegistrationEventService
      * v číselníku ročníku, kterým věta odejde. Ročník volí
      * {@see PayrollRegistrationSchemaCatalog::versionFor()} nad finálními daty
      * události, tedy až s datem skončení 10224 z withRegisteredEnd(): změna
-     * vyhotovená od 23. 12. 2026 u vztahu skončeného v roce 2026 jde jako
+     * vyhotovená od 24. 12. 2026 u vztahu skončeného v roce 2026 jde jako
      * REGZEC25 a kód se ověří proti číselníku 2026, ne 2027. Bez data
      * skončení rozhoduje den vyhotovení (odpověď ČSSZ 13).
      *

@@ -1113,9 +1113,9 @@ final readonly class PayrollRegistrationSubmissionService
     }
 
     /**
-     * REGZEC27 přijímá ostrá ČSSZ od 23. 12. 2026 (ČSSZ, Otázky a odpovědi
-     * k NV2027, odpověď 5: „REGZEC 2027 tak bude umožněno posílat již ode dne
-     * 23. 12. 2026", aby šlo přihlásit před nástupem 1. 1. 2027). REGZEC25
+     * REGZEC27 přijímá ostrá ČSSZ od 24. 12. 2026 (ČSSZ, Otázky a odpovědi
+     * k NV2027, odpověď 22: „REGZEC 2027 bude zpřístupněn až od 24.12.2026",
+     * viz {@see JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON}). REGZEC25
      * s rozhodným datem od 1. 1. 2027 ČSSZ zamítne (EDV 1.4.0.7, Slovník,
      * záhlaví REGZEC 2025), takže dřív takovou událost podat nejde vůbec.
      * Testovací prostředí ČSSZ přijímá REGZEC27 už teď (fáze 2 od 2. 11. 2026).
@@ -1136,9 +1136,9 @@ final readonly class PayrollRegistrationSubmissionService
             'Událost s rozhodným datem '
                 . (new \DateTimeImmutable($decisiveOn))->format('j. n. Y')
                 . ' se hlásí formulářem REGZEC27 (specifikace JMHZ 2027), který'
-                . ' ostrá ČSSZ přijímá až od 23. 12. 2026. Starší formulář REGZEC25'
+                . ' ostrá ČSSZ přijímá až od 24. 12. 2026. Starší formulář REGZEC25'
                 . ' ČSSZ pro takovou událost odmítne. Podání připravte a odešlete'
-                . ' 23. 12. 2026 nebo později.',
+                . ' 24. 12. 2026 nebo později.',
         );
     }
 

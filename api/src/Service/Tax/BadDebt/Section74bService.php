@@ -14,7 +14,8 @@ use MyInvoice\Service\Report\VatLedgerService;
  * § 74b ZDPH — korekce odpočtu u neuhrazených závazků dlužníka (audit §2.5, PODVOJNE-AUDIT.md).
  *
  * Od 1. 1. 2025 musí dlužník-plátce snížit dříve uplatněný odpočet u přijatého zdanitelného
- * plnění, které neuhradil a uplynulo 6 kalendářních měsíců následujících po měsíci splatnosti;
+ * plnění, které neuhradil a uplynulo 6 kalendářních měsíců následujících po měsíci splatnosti
+ * (3 měsíce u plnění od 1. 1. 2027 podle § 32 bodu 10 a § 33 bodu 1 zákona č. 180/2026 Sb.);
  * po (částečné) úhradě se odpočet ve stejném poměru obnoví.
  *
  * ── MODEL VÝPOČTU (netting) ─────────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ use MyInvoice\Service\Report\VatLedgerService;
  *
  *     target = aged ? round(claimed_deduction_vat × unpaid_ratio, 2) : 0
  *
- * kde `aged` = uplynulo 6 kal. měsíců po měsíci splatnosti, `unpaid_ratio` = neuhrazená část
+ * kde `aged` = uplynula lhůta § 74b odst. 3 po měsíci splatnosti, `unpaid_ratio` = neuhrazená část
  * / celková částka s DPH (0..1), `claimed_deduction_vat` = původně uplatněný odpočet z dokladu
  * (respektuje poměrný/krácený/žádný odpočet §75/§76). Pohyb v běžném období:
  *
@@ -58,9 +59,10 @@ final class Section74bService
 {
     /**
      * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
-     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok korekce.
+     * Primárně se čte {@see TaxConstantsRepository::forYear()}.
      */
     private const AGING_MONTHS = 6;
+    private const SHORT_AGING_FROM_YEAR = 2027;
 
     public function __construct(
         private readonly Connection $db,
@@ -81,6 +83,9 @@ final class Section74bService
     public function previewAging(int $supplierId, int $year, int $month): array
     {
         $agingMonths = (int) ($this->taxConstants->forYear($year)['s74b_aging_months'] ?? self::AGING_MONTHS);
+        $legacyAgingMonths = $year < self::SHORT_AGING_FROM_YEAR
+            ? $agingMonths
+            : (int) ($this->taxConstants->forYear(self::SHORT_AGING_FROM_YEAR - 1)['s74b_aging_months'] ?? self::AGING_MONTHS);
         $periodEnd = self::monthEnd($year, $month);
         $candidates = $this->fetchCandidates($supplierId, $periodEnd);
 
@@ -116,7 +121,9 @@ final class Section74bService
             $unpaid = max(0.0, $totalWithVat - $realPaid);
             $unpaidRatio = $totalWithVat > 0.0 ? min(1.0, $unpaid / $totalWithVat) : 0.0;
 
-            $aged = self::correctionPeriodYm((string) $c['due_date'], $agingMonths) <= $periodYm;
+            $taxYear = (int) substr((string) ($c['tax_date'] ?? $c['issue_date']), 0, 4);
+            $invoiceAgingMonths = $taxYear < self::SHORT_AGING_FROM_YEAR ? $legacyAgingMonths : $agingMonths;
+            $aged = self::correctionPeriodYm((string) $c['due_date'], $invoiceAgingMonths) <= $periodYm;
             $target = $aged ? round($claimed * $unpaidRatio, 2) : 0.0;
             $delta = round($target - $netCorrected, 2);
 
@@ -247,7 +254,7 @@ final class Section74bService
         // amount_to_pay (= total_with_vat − advance_paid_amount), který úhrady neodráží.
         $vendorDic = VatLedgerService::purchaseCounterpartyDicExpr($this->db, 'pi', 'c');
         $sql =
-            "SELECT pi.id, pi.vendor_id, pi.tax_date, pi.due_date,
+            "SELECT pi.id, pi.vendor_id, pi.tax_date, pi.issue_date, pi.due_date,
                     pi.total_vat, pi.total_with_vat, pi.advance_paid_amount,
                     pi.paid_at, pi.status, pi.reverse_charge, pi.vendor_invoice_number,
                     pi.vat_classification_code, pi.vat_deduction, pi.vat_deduction_percent,
@@ -299,9 +306,7 @@ final class Section74bService
 
     /**
      * Období (year*12+month), do kterého náleží poslední den lhůty §74b a od kterého tak
-     * u dokladu se splatností `dueDate` vzniká korekce odpočtu (§74b odst. 1 ZDPH):
-     * pohledávka neuhrazená do posledního dne 6. kalendářního měsíce následujícího po měsíci
-     * splatnosti; oprava se provádí za období, do kterého náleží poslední den lhůty.
+     * u dokladu se splatností `dueDate` vzniká korekce odpočtu (§ 74b odst. 3 ZDPH).
      * Např. splatnost 2025-01 → 6 následujících měsíců únor–červenec → poslední den lhůty
      * 31. 7. 2025 → korekce za období 2025-07 (M + AGING_MONTHS).
      */

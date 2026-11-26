@@ -441,6 +441,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertTrue($result['jmhz_state_prosecutor']);
         self::assertNull($this->validator()->terms($this->terms())['jmhz_state_prosecutor']);
 
+        // Místo bez čísla popisného i evidenčního: 10552 = 9999 (ČSSZ, Otázky
+        // a odpovědi k NV2027, odpověď 23 z 23. 11. 2026).
+        $withoutNumber = $terms;
+        $withoutNumber['jmhz_workplace_house_number'] = '9999';
+        self::assertSame('9999', $this->validator()->terms($withoutNumber)['jmhz_workplace_house_number']);
+
         foreach ([
             ['jmhz_workplace_postal_code', '1100'],
             ['jmhz_workplace_house_number', '0'],

@@ -110,7 +110,7 @@ const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const transport =ref<PayrollJmhzTransportPoll | null>(null)
 const transportBusy = ref<'send' | 'poll' | 'close' | 'reprepare' | null>(null)
-/** Odeslání odmítlo zastaralý formát věty (REGZEC25 od 23. 12. 2026). */
+/** Odeslání odmítlo zastaralý formát věty (REGZEC25 od 24. 12. 2026). */
 const staleSendRejected = ref(false)
 const transportMessage = ref('')
 const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
@@ -1471,7 +1471,7 @@ const canSend = computed(() => transportAttempt.value === null || [
 ].includes(transportAttempt.value.status))
 
 /**
- * Změna nebo oprava připravená ve formátu REGZEC25, kterou ČSSZ od 23. 12. 2026
+ * Změna nebo oprava připravená ve formátu REGZEC25, kterou ČSSZ od 24. 12. 2026
  * nepřijme: místo odeslání se nabízí Připravit znovu.
  */
 const vintageExpired = computed(() => submission.value !== null

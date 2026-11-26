@@ -13,8 +13,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
  * Přihlásit jde nejdřív osm dnů před nástupem (§ 19 odst. 1 písm. a) zákona
  * č. 323/2025 Sb.; EDV REGZEC, ID 10223), a to částečně (PREZEC P1) i plně
  * (REGZEC A1): obě cesty mají totéž okno. Nástup od 1. 1. 2027 se navíc hlásí
- * formulářem REGZEC27, který ostrá ČSSZ přijímá od 23. 12. 2026. Platí
- * pozdější z obou dnů. Dřív každá kontrola hlásila svůj den a radila cestu,
+ * formulářem REGZEC27, který ostrá ČSSZ přijímá od 24. 12. 2026. Platí
+ * pozdější z obou dnů; od přesunu příjmu REGZEC27 na 24. 12. 2026 (odpověď
+ * 22 k NV2027) vychází osmidenní okno vždy stejně nebo později, spodní mez
+ * zůstává jako pojistka pro případ dalšího posunu. Dřív každá kontrola hlásila svůj den a radila cestu,
  * kterou zavírala ta druhá.
  */
 final class PayrollRegistrationEarliestFiling
@@ -53,8 +55,7 @@ final class PayrollRegistrationEarliestFiling
             . ' dnů před nástupem a podat ji je potřeba před nástupem.'
             . ($startOn < JmhzSpecVersion::FIRST_2027_EVENT_DATE
                 ? ''
-                : ' Formulář REGZEC27 pro nástupy od 1. 1. 2027 přijímá ostrá ČSSZ'
-                    . ' už od 23. 12. 2026, rozhoduje pozdější z obou dnů.')
+                : ' Nástup od 1. 1. 2027 se hlásí formulářem REGZEC27.')
             . ' Už teď můžete vyplnit a uložit profil registrace A1 na kartě'
             . ' pracovního vztahu, podání se pak jen připraví a odešle. Vztah'
             . ' najdete také v Mzdy → Podání → Přihlášky k podání (A1), kde'

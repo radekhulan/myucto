@@ -66,7 +66,7 @@ final class PayrollRegistrationSchemaCatalog
      * REGZEC27; platnost 10009 ani datum opravovaného oznámení se
      * nezohledňují, takže i změna údajů z roku 2026 u trvajícího vztahu jde
      * jako REGZEC27. Prázdné 10224 ale ostrá ČSSZ v REGZEC27 přijme až od
-     * 23. 12. 2026 (odpověď 5), proto u něj rozhoduje den vyhotovení
+     * 24. 12. 2026 (odpověď 22), proto u něj rozhoduje den vyhotovení
      * ({@see JmhzSpecVersion::forRegistrationChangeWithoutEnd()}).
      * Ostatní akce jdou podle {@see self::decisiveDate()}.
      *
@@ -95,10 +95,10 @@ final class PayrollRegistrationSchemaCatalog
     /**
      * Zmrazená změna nebo oprava (A3, A4) bez data skončení 10224, jejíž
      * ročník už neodpovídá dni odeslání. Typicky REGZEC25 připravená před
-     * 23. 12. 2026 a odesílaná 23. 12. 2026 nebo později: tehdy už ČSSZ
+     * 24. 12. 2026 a odesílaná 24. 12. 2026 nebo později: tehdy už ČSSZ
      * změnu aktivního vztahu přijímá jen jako REGZEC27 (Otázky a odpovědi
-     * k NV2027, odpovědi 4, 5 a 13). Opačný případ nenastane, REGZEC27 bez
-     * 10224 se před 23. 12. 2026 nepřipraví. Jediné pravidlo pro bránu
+     * k NV2027, odpovědi 4, 13 a 22). Opačný případ nenastane, REGZEC27 bez
+     * 10224 se před 24. 12. 2026 nepřipraví. Jediné pravidlo pro bránu
      * odeslání i pro seznam podání.
      */
     public static function changeVintageExpired(
@@ -141,7 +141,7 @@ final class PayrollRegistrationSchemaCatalog
 
     public static function staleChangeMessage(): string
     {
-        return 'Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026'
+        return 'Podání bylo připraveno ve formátu REGZEC25; od 24. 12. 2026'
             . ' ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27.'
             . ' Připravte ho znovu.';
     }

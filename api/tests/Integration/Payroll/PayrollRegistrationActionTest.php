@@ -2017,8 +2017,8 @@ final class PayrollRegistrationActionTest extends TestCase
 
     /**
      * Plná přihláška s nástupem 4. 1. 2027 je REGZEC27. Testovací ČSSZ ji
-     * přijímá už teď, ostrá od 23. 12. 2026 (ČSSZ, Otázky a odpovědi
-     * k NV2027, odpověď 5); REGZEC25 by ostrá ČSSZ pro takový nástup
+     * přijímá už teď, ostrá od 24. 12. 2026 (ČSSZ, Otázky a odpovědi
+     * k NV2027, odpověď 22); REGZEC25 by ostrá ČSSZ pro takový nástup
      * odmítla (EDV 1.4.0.7, Slovník).
      */
     public function testFullRegistrationForStartIn2027IsRegzec27AndWaitsForProductionStart(): void
@@ -2041,14 +2041,14 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         self::assertSame(422, $production->getStatusCode(), (string) $production->getBody());
         // Jediný den pro obě pravidla (osm dnů před nástupem, příjem REGZEC27
-        // od 23. 12. 2026): 22. 12. rozhoduje pozdější z nich, 27. 12. 2026.
+        // od 24. 12. 2026): 22. 12. rozhoduje pozdější z nich, 27. 12. 2026.
         self::assertSame('registration_regzec_a1_start_window_invalid', $this->json($production)['error']['code']);
         self::assertStringContainsString(
             'nejdřív 27. 12. 2026',
             (string) $this->json($production)['error']['message'],
         );
         self::assertStringNotContainsString(
-            '23. 12. 2026 nebo později',
+            '24. 12. 2026 nebo později',
             (string) $this->json($production)['error']['message'],
         );
         self::assertSame(0, $this->countSubmissions());
@@ -2073,11 +2073,11 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
-     * Ostrá ČSSZ přijímá REGZEC27 od 23. 12. 2026 (ČSSZ, Otázky a odpovědi
-     * k NV2027, odpověď 5). Ten den už přihlášku nezastaví brána ročníku,
+     * Ostrá ČSSZ přijímá REGZEC27 od 24. 12. 2026 (ČSSZ, Otázky a odpovědi
+     * k NV2027, odpověď 22). Ten den už přihlášku nezastaví brána ročníku,
      * jen zákonné okno nejvýš osmi dnů před nástupem; 27. 12. projde.
      */
-    public function testFullRegistrationForStartIn2027IsAcceptedInProductionFrom23December(): void
+    public function testFullRegistrationForStartIn2027IsAcceptedInProductionFrom24December(): void
     {
         $startOn = '2027-01-04';
         $this->db->pdo()->prepare(
@@ -2094,7 +2094,7 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         );
 
-        self::$todayOverride = '2026-12-23';
+        self::$todayOverride = '2026-12-24';
         $opening = $prepare();
         self::assertSame(422, $opening->getStatusCode(), (string) $opening->getBody());
         self::assertSame(
@@ -2125,18 +2125,24 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
-     * Přechodné okno: REGZEC27 přijímá ČSSZ od 23. 12. 2026 (odpověď 5),
-     * do té doby jde změna trvajícího vztahu jako REGZEC25.
+     * Přechodné okno: REGZEC27 přijímá ČSSZ od 24. 12. 2026 (odpověď 22),
+     * do té doby jde změna trvajícího vztahu jako REGZEC25, 23. 12. ještě také.
      */
-    public function testA3OfActiveEmploymentPreparedBefore23DecemberIsRegzec25(): void
+    public function testA3OfActiveEmploymentPreparedBefore24DecemberIsRegzec25(): void
     {
         $before = $this->preparedA3Xml('2026-12-01', '2026-12-10', 'synthetic-a3-before-opening');
         self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $before);
     }
 
-    public function testA3OfActiveEmploymentPreparedOn23DecemberIsRegzec27(): void
+    public function testA3OfActiveEmploymentPreparedOn23DecemberIsStillRegzec25(): void
     {
-        $opening = $this->preparedA3Xml('2026-12-01', '2026-12-23', 'synthetic-a3-on-opening');
+        $dayBefore = $this->preparedA3Xml('2026-12-01', '2026-12-23', 'synthetic-a3-day-before-opening');
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $dayBefore);
+    }
+
+    public function testA3OfActiveEmploymentPreparedOn24DecemberIsRegzec27(): void
+    {
+        $opening = $this->preparedA3Xml('2026-12-01', '2026-12-24', 'synthetic-a3-on-opening');
         self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2027 . '"', $opening);
     }
 
@@ -2488,7 +2494,7 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
-     * Změna připravená 10. 12. 2026 jako REGZEC25 bez 10224 se od 23. 12.
+     * Změna připravená 10. 12. 2026 jako REGZEC25 bez 10224 se od 24. 12.
      * neodesílá; „Připravit znovu" ze stejné události vyrobí REGZEC27
      * a původní podání zruší. Den předtím přepříprava není potřeba.
      */
@@ -2510,11 +2516,11 @@ final class PayrollRegistrationActionTest extends TestCase
             );
         };
 
-        $tooEarly = $reprepare('2026-12-22');
+        $tooEarly = $reprepare('2026-12-23');
         self::assertSame(422, $tooEarly->getStatusCode(), (string) $tooEarly->getBody());
         self::assertSame('registration_reprepare_not_needed', $this->json($tooEarly)['error']['code']);
 
-        self::$todayOverride = '2026-12-23';
+        self::$todayOverride = '2026-12-24';
         $this->action = $this->buildAction($this->container, true);
         $replay = $this->json(($this->action)->prepare(
             $this->request('POST')->withParsedBody([
@@ -2527,7 +2533,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame($stale['submission_id'], $replay['submission_id']);
         self::assertTrue($replay['vintage_expired']);
 
-        $again = $reprepare('2026-12-23');
+        $again = $reprepare('2026-12-24');
         self::assertSame(201, $again->getStatusCode(), (string) $again->getBody());
         $body = $this->json($again);
         self::assertNotSame($stale['submission_id'], $body['submission_id']);

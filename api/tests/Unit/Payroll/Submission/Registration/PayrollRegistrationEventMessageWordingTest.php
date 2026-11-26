@@ -262,7 +262,7 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
      * Postavení v zaměstnání v A3/A4 se kontroluje proti číselníku ročníku
      * věty: REGZEC 2025 slovník 1.4.1.6 (2119), REGZEC 2027 ČSÚ (2219).
      * U aktivního vztahu rozhoduje podle odpovědi ČSSZ 13 den vyhotovení
-     * (od 23. 12. 2026 REGZEC27), ne den platnosti změny. U vztahu skončeného
+     * (od 24. 12. 2026 REGZEC27), ne den platnosti změny. U vztahu skončeného
      * u ČSSZ rozhoduje datum skončení 10224, které doplní withRegisteredEnd(),
      * takže se kód ověřuje až nad finálními daty.
      */

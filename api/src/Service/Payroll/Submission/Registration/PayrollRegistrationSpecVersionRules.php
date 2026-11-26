@@ -135,7 +135,7 @@ final class PayrollRegistrationSpecVersionRules
                 . ($expected === JmhzSpecVersion::V2027 ? 'REGZEC27' : 'REGZEC25')
                 . ', ČSSZ jiný ročník odmítne (hranice 1. 1. 2027, u změny'
                 . ' a opravy bez data skončení rozhoduje den vyhotovení,'
-                . ' REGZEC27 od 23. 12. 2026). Připravte podání znovu.',
+                . ' REGZEC27 od 24. 12. 2026). Připravte podání znovu.',
         );
     }
 

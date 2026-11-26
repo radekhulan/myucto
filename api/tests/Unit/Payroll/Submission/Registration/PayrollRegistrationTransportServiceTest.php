@@ -701,11 +701,11 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
     }
 
     /**
-     * Změna A3 připravená jako REGZEC25 bez data skončení: od 23. 12. 2026
-     * ji ČSSZ přijme jen jako REGZEC27 (odpovědi 4, 5 a 13 k NV2027), proto
+     * Změna A3 připravená jako REGZEC25 bez data skončení: od 24. 12. 2026
+     * ji ČSSZ přijme jen jako REGZEC27 (odpovědi 4, 13 a 22 k NV2027), proto
      * se neodešle a účetní ji připraví znovu.
      */
-    public function testStaleRegzec25ChangeWithoutEndIsNotSentFrom23December(): void
+    public function testStaleRegzec25ChangeWithoutEndIsNotSentFrom24December(): void
     {
         $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
         $frozen->method('bytes')->willReturn(self::regzecChangeXml(null));
@@ -718,7 +718,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
                 $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
                 $frozen,
                 $dispatch,
-                self::clock('2026-12-23'),
+                self::clock('2026-12-24'),
             ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'stale-a3', 7);
             self::fail('Zastaralá změna REGZEC25 se nesmí odeslat.');
         } catch (JmhzTransportException $exception) {
@@ -729,7 +729,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
 
     /** Den před otevřením příjmu REGZEC27 a změna s 10224 odejdou beze změny. */
     #[DataProvider('acceptedChanges')]
-    public function testRegzec25ChangeIsSentBefore23DecemberOrWithEndDate(?string $endOn, string $today): void
+    public function testRegzec25ChangeIsSentBefore24DecemberOrWithEndDate(?string $endOn, string $today): void
     {
         $xml = self::regzecChangeXml($endOn);
         $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
@@ -755,7 +755,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
     /** @return iterable<string,array{?string,string}> */
     public static function acceptedChanges(): iterable
     {
-        yield 'bez 10224 22. 12. 2026' => [null, '2026-12-22'];
+        yield 'bez 10224 23. 12. 2026' => [null, '2026-12-23'];
         yield 'skončený vztah v roce 2026, odesláno 2027' => ['2026-11-30', '2027-01-05'];
     }
 

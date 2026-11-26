@@ -5461,7 +5461,7 @@ export interface PayrollRegistrationSubmission {
   created: boolean
   /**
    * Připravená změna nebo oprava bez data skončení ve formátu REGZEC25, kterou
-   * ČSSZ od 23. 12. 2026 odmítne. Místo odeslání se nabízí Připravit znovu.
+   * ČSSZ od 24. 12. 2026 odmítne. Místo odeslání se nabízí Připravit znovu.
    */
   vintage_expired?: boolean
   /** Podání, které nová věta nahradila (zrušené jako `cancelled_in_time`). */

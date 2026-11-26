@@ -1221,8 +1221,10 @@ pruh ukazuje navazující agendy a údaje **Ze zákonné evidence osoby**.
 **Adresa místa výkonu práce.** Měsíční hlášení za období od ledna 2027 uvádí
 u pracoviště v ČR i plnou adresu: **Ulice**, **Číslo popisné**, **Číslo
 orientační**, **PSČ** a nepovinně **Kód adresního místa** (RÚIAN). Pole se
-ukážou po výběru obce pracoviště; vyplňte aspoň číslo popisné a PSČ. U
-pracoviště mimo ČR (kód obce 111111) se adresa nevyplňuje. Bez adresy se
+ukážou po výběru obce pracoviště; vyplňte aspoň číslo popisné a PSČ. Nemá-li
+místo výkonu práce přidělené číslo popisné ani evidenční (například čerpací
+stanice nebo podchod), uveďte jako číslo popisné **9999**. U pracoviště mimo
+ČR (kód obce 111111) se adresa nevyplňuje. Bez adresy se
 hlášení za rok 2027 nesestaví.
 
 **Státní zástupce.** U druhu činnosti K až S nabídne skupina **Místo výkonu

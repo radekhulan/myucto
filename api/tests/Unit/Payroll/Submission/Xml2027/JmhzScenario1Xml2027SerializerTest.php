@@ -163,6 +163,19 @@ final class JmhzScenario1Xml2027SerializerTest extends TestCase
         self::assertSame('143', self::value($xpath, '//f:riziko/f:hodinyOdpracovanePocet'));
     }
 
+    public function testWorkplaceWithoutAssignedNumberSerializes9999(): void
+    {
+        $payload = self::fullPayload();
+        $term = &$payload['people'][0]['employments'][0]['term'];
+        $term[Jmhz2027DocumentContract::TERM_HOUSE_NUMBER] = '9999';
+        $term[Jmhz2027DocumentContract::TERM_ADDRESS_POINT] = null;
+        $term[Jmhz2027DocumentContract::TERM_ORIENTATION_NUMBER] = null;
+        unset($term);
+
+        $result = $this->validator()->dryRun(self::resolution($payload), self::envelope());
+        self::assertSame('9999', self::value(self::xpath($result['xml']), '//f:mistoVykonuPrace/f:cisloPopisne'));
+    }
+
     public function testWorkplaceAbroadOmitsCzechAddress(): void
     {
         $payload = self::fullPayload();

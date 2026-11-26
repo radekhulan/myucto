@@ -54,12 +54,17 @@ final class JmhzSpecVersionTest extends TestCase
         self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationEventDate('2027-01-01'));
     }
 
-    /** ČSSZ, Otázky a odpovědi k NV2027, odpověď 5: REGZEC27 od 23. 12. 2026. */
+    /**
+     * ČSSZ, Otázky a odpovědi k NV2027, odpověď 22 (23. 11. 2026): REGZEC27
+     * je zpřístupněn až od 24. 12. 2026, do té doby změna aktivního vztahu
+     * jde jako REGZEC25 (starší odpověď 5 uváděla 23. 12.).
+     */
     public function testChangeWithoutEndFollowsTheDayRegzec27IsAccepted(): void
     {
-        self::assertSame('2026-12-23', JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON);
+        self::assertSame('2026-12-24', JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON);
         self::assertSame(JmhzSpecVersion::V2026, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-22'));
-        self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-23'));
+        self::assertSame(JmhzSpecVersion::V2026, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-23'));
+        self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-24'));
         self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2027-01-05'));
     }
 

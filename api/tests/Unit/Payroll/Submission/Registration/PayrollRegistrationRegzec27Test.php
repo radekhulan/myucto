@@ -356,9 +356,9 @@ final class PayrollRegistrationRegzec27Test extends TestCase
     }
 
     /**
-     * ČSSZ, Otázky a odpovědi k NV2027, odpovědi 4, 5 a 13: u A3/A4 rozhoduje
+     * ČSSZ, Otázky a odpovědi k NV2027, odpovědi 4, 13 a 22: u A3/A4 rozhoduje
      * výhradně 10224. Prázdné znamená REGZEC27, ten ale ostrá ČSSZ přijímá až
-     * od 23. 12. 2026, do té doby jde věta jako REGZEC25.
+     * od 24. 12. 2026, do té doby jde věta jako REGZEC25.
      */
     public function testChangeVintageFollowsOnlyEndDateAndWithoutItThePreparationDay(): void
     {
@@ -366,8 +366,8 @@ final class PayrollRegistrationRegzec27Test extends TestCase
         self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-15', $active, '2027-01-05'));
         self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(4, '2026-06-01', $active, '2027-01-05'));
         self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-10'));
-        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-22'));
-        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-23'));
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-23'));
+        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-24'));
 
         $ended2026 = ['delta' => ['employment' => ['end_on' => '2026-11-30']]];
         self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-11-20', $ended2026, '2027-01-05'));
@@ -400,7 +400,11 @@ final class PayrollRegistrationRegzec27Test extends TestCase
             'registration_spec_version_mismatch',
             self::eventPayload(3, $data, preparedOn: '2026-12-10', effectiveOn: '2026-12-01'),
         );
-        self::validated(self::eventPayload(3, $data, preparedOn: '2026-12-23', effectiveOn: '2026-12-01'));
+        self::assertCode(
+            'registration_spec_version_mismatch',
+            self::eventPayload(3, $data, preparedOn: '2026-12-23', effectiveOn: '2026-12-01'),
+        );
+        self::validated(self::eventPayload(3, $data, preparedOn: '2026-12-24', effectiveOn: '2026-12-01'));
     }
 
     /** Odpověď 4: změna u skončeného vztahu nese 10224 a ročník podle něj. */

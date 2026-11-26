@@ -90,6 +90,7 @@ final class Section74bServiceTest extends TestCase
         bool $reverseCharge = false,
         string $vatDeduction = 'full',
         float $vatDeductionPercent = 100.0,
+        ?string $taxDate = null,
     ): int {
         $base = round($withVat - $vat, 2);
         $stmt = $this->db->pdo()->prepare(
@@ -101,7 +102,7 @@ final class Section74bServiceTest extends TestCase
              VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, ?, "{}", ?, ?, ?, ?, "received", "40", ?, ?, ?)'
         );
         $stmt->execute([
-            $this->supplierId, $this->vendorId, $number, $dueDate, $dueDate, $dueDate, $dueDate,
+            $this->supplierId, $this->vendorId, $number, $dueDate, $taxDate ?? $dueDate, $dueDate, $dueDate,
             $this->currencyId, $reverseCharge ? 1 : 0, $base, $vat, $withVat, $advance,
             $vatDeduction, $vatDeductionPercent, $this->userId,
         ]);
@@ -160,6 +161,31 @@ final class Section74bServiceTest extends TestCase
         self::assertArrayHasKey($id, $rows7, 'V období posledního dne lhůty §74b korekce vzniká.');
         self::assertSame('reduction', $rows7[$id]['movement']);
         self::assertSame(2100.0, $rows7[$id]['target_reduction']);
+    }
+
+    // ── od 1. 1. 2027 lhůta tři měsíce (§ 74b odst. 3 ZDPH ve znění zák. č. 180/2026 Sb.) ──
+    public function testAgingBoundaryFrom2027IsThirdFollowingMonth(): void
+    {
+        $id = $this->seed('PF-2027', '2027-01-15', 2100.0, 12100.0, taxDate: '2027-01-01');
+        // 2027-03 (M+2) — poslední den lhůty (30. 4. 2027) ještě nenastal.
+        self::assertArrayNotHasKey($id, $this->previewRows(2027, 3),
+            'Před posledním dnem 3. měsíce po splatnosti se §74b neuplatní.');
+        // 2027-04 (M+3) — korekce vzniká, za staré lhůty by to bylo až 2027-07.
+        $rows = $this->previewRows(2027, 4);
+        self::assertArrayHasKey($id, $rows, 'Od 2027 vzniká korekce ve 3. měsíci po splatnosti.');
+        self::assertSame('reduction', $rows[$id]['movement']);
+        self::assertSame(2100.0, $rows[$id]['target_reduction']);
+    }
+
+    public function testTransitionKeepsSixMonthsFor2026TaxPoint(): void
+    {
+        $september = $this->seed('PF-2026-09', '2026-09-15', 2100.0, 12100.0);
+        self::assertArrayNotHasKey($september, $this->previewRows(2027, 2));
+        self::assertSame(2100.0, $this->previewRows(2027, 3)[$september]['target_reduction']);
+
+        $december = $this->seed('PF-2026-12', '2027-01-15', 2100.0, 12100.0, taxDate: '2026-12-31');
+        self::assertArrayNotHasKey($december, $this->previewRows(2027, 6));
+        self::assertSame(2100.0, $this->previewRows(2027, 7)[$december]['target_reduction']);
     }
 
     // ── částečná úhrada → poměrné snížení ─────────────────────────────────────

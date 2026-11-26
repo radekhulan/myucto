@@ -82,11 +82,11 @@ final class PayrollRegistrationRegisteredEndTest extends TestCase
         self::assertFalse(PayrollRegistrationRegisteredEnd::carriesTerminationParts(3, Matrix::VARIANT_OST));
     }
 
-    /** Odpovědi ČSSZ 4, 5 a 13 k NV2027: REGZEC25 bez 10224 od 23. 12. 2026 zastarává. */
-    public function testFrozenChangeWithoutEndExpiresOn23December(): void
+    /** Odpovědi ČSSZ 4, 13 a 22 k NV2027: REGZEC25 bez 10224 od 24. 12. 2026 zastarává. */
+    public function testFrozenChangeWithoutEndExpiresOn24December(): void
     {
-        self::assertFalse(PayrollRegistrationSchemaCatalog::changeVintageExpired(3, false, JmhzSpecVersion::V2026, '2026-12-22'));
-        self::assertTrue(PayrollRegistrationSchemaCatalog::changeVintageExpired(3, false, JmhzSpecVersion::V2026, '2026-12-23'));
+        self::assertFalse(PayrollRegistrationSchemaCatalog::changeVintageExpired(3, false, JmhzSpecVersion::V2026, '2026-12-23'));
+        self::assertTrue(PayrollRegistrationSchemaCatalog::changeVintageExpired(3, false, JmhzSpecVersion::V2026, '2026-12-24'));
         self::assertTrue(PayrollRegistrationSchemaCatalog::changeVintageExpired(4, false, JmhzSpecVersion::V2026, '2027-01-05'));
         self::assertFalse(PayrollRegistrationSchemaCatalog::changeVintageExpired(4, true, JmhzSpecVersion::V2026, '2027-01-05'));
         self::assertFalse(PayrollRegistrationSchemaCatalog::changeVintageExpired(3, false, JmhzSpecVersion::V2027, '2027-01-05'));

@@ -41,7 +41,8 @@ final class PayrollRegistrationEarliestFilingTest extends TestCase
         self::assertStringContainsString('profil registrace A1', $message);
         self::assertStringContainsString('Přihlášky k podání (A1)', $message);
         // Jediné datum pokynu: den příjmu REGZEC27 smí zaznít jen jako vysvětlení.
-        self::assertStringNotContainsString('23. 12. 2026 nebo později', $message);
+        self::assertStringNotContainsString('24. 12. 2026 nebo později', $message);
+        self::assertStringContainsString('REGZEC27', $message);
         self::assertStringNotContainsString('podejte rovnou plnou registraci', $message);
     }
 

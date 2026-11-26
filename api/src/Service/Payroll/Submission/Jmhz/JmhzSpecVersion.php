@@ -49,11 +49,14 @@ enum JmhzSpecVersion: string
     /**
      * První den, kdy ostrá ČSSZ přijímá REGZEC27. Nejde o rozhodné datum
      * ročníku ({@see self::FIRST_2027_EVENT_DATE}), ale o otevření příjmu:
-     * ČSSZ, Otázky a odpovědi k NV2027 (developers.mpsv.cz), odpověď 5:
-     * „REGZEC 2027 tak bude umožněno posílat již ode dne 23. 12. 2026", aby
-     * šlo přihlásit před nástupem 1. 1. 2027.
+     * ČSSZ, Otázky a odpovědi k NV2027 (developers.mpsv.cz), odpověď 22
+     * z 23. 11. 2026: „REGZEC 2027 bude zpřístupněn až od 24.12.2026. Od
+     * tohoto data pak budou i starší neukončená PPV hlásit změny / opravy přes
+     * REGZEC 2027." Starší odpověď 5 uváděla 23. 12. 2026; platí pozdější den,
+     * dřív odeslaný REGZEC27 by ČSSZ nepřijala. Pro přihlášku k nástupu
+     * 1. 1. 2027 to nic nemění, osmidenní okno se otevírá také 24. 12. 2026.
      */
-    public const FIRST_REGZEC27_ACCEPTED_ON = '2026-12-23';
+    public const FIRST_REGZEC27_ACCEPTED_ON = '2026-12-24';
 
     /** Kódy agendy měsíčního hlášení s ročníkem; všechny znamenají totéž hlášení. */
     public const MONTHLY_AGENDA_CODES = ['JMHZ25', 'JMHZ27'];
@@ -159,7 +162,7 @@ enum JmhzSpecVersion: string
      * Změna nebo oprava (A3, A4) bez data skončení 10224. ČSSZ, Otázky
      * a odpovědi k NV2027, odpovědi 4 a 13: rozhoduje výhradně 10224, prázdné
      * znamená REGZEC27 bez ohledu na platnost 10009 i na datum opravovaného
-     * oznámení. REGZEC27 ale ostrá ČSSZ přijímá až od 23. 12. 2026 (odpověď 5),
+     * oznámení. REGZEC27 ale ostrá ČSSZ přijímá až od 24. 12. 2026 (odpověď 22),
      * takže věta vyhotovená dřív jde jako REGZEC25. Tohle je jediné místo,
      * kde o ročníku rozhoduje den vyhotovení (`YYYY-MM-DD`).
      */

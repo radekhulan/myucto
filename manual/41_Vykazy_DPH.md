@@ -774,7 +774,7 @@ Přiznání k DPH hlásí varování se seznamem dokladů u řádků, které zů
 
 Stránka pro zvolený měsíc nejprve vytvoří náhled nanečisto. Vybírá tuzemské přijaté zdanitelné doklady s uplatněným odpočtem, vylučuje reverse charge a stornované doklady a porovnává je s evidovanými úhradami. Do úhrady vstupuje záloha, bankovní párování i pokladna. Stav **Zaplaceno** je autoritativní signál plné úhrady i u starších dokladů bez detailní historie plateb.
 
-Korekce vzniká po uplynutí šesti kalendářních měsíců následujících po měsíci splatnosti. Aplikace počítá:
+Korekce vzniká po uplynutí šesti kalendářních měsíců následujících po měsíci splatnosti u plnění s datem uskutečnění v roce 2025 nebo 2026. U plnění uskutečněných od 1. 1. 2027 platí tříměsíční lhůta (§ 74b odst. 3 ZDPH a § 33 bod 1 zákona č. 180/2026 Sb.). Například při splatnosti v lednu 2027 vychází první korekce za červenec u plnění z prosince 2026 a za duben u plnění z ledna 2027. Aplikace počítá:
 
 `cílová korekce = původně uplatněný odpočet × neuhrazená část / částka s DPH`
 
