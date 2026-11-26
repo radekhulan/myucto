@@ -6,9 +6,11 @@ namespace MyInvoice\Service\Accounting\Bank;
 
 use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\OperationType;
@@ -81,6 +83,9 @@ final class TransferPairService
         try {
             $entryId = $this->postLeg($supplierId, $txId, $userId);
         } catch (PostingException $e) {
+            if (in_array($e->errorCode, ['period_before_start', 'period_after_horizon', 'period_gap'], true)) {
+                return $this->suggest($supplierId, $tx, $detected['direction'], $e->errorCode);
+            }
             if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'date_locked'], true)) {
                 return $this->suggest($supplierId, $tx, $detected['direction'], 'period_closed');
             }
@@ -121,6 +126,18 @@ final class TransferPairService
         if ($detected['cross_currency']) {
             throw new PostingException('cross_currency_manual_only', 'Převod mezi měnami se účtuje ručně.', 409);
         }
+        $entryDate = (string) $tx['posted_at'];
+        $periods = new AccountingPeriodRepository($this->db);
+        $start = $periods->knownAccountingStart($supplierId);
+        if ($start !== null && $entryDate < $start) {
+            $period = $periods->findForDate($supplierId, $entryDate);
+            if ($period === null || $period['created_reason'] === AccountingPeriodProvisioner::REASON_POSTING) {
+                throw new PostingException(
+                    'period_before_start',
+                    'Převod je před začátkem účetnictví firmy. Pokud patří do deníku, založte období ručně v Nástroje → Uzávěrka.',
+                );
+            }
+        }
         $duplicate = $this->manualDuplicate($supplierId, $tx, $detected['direction']);
         if ($duplicate !== null) {
             throw new PostingException('duplicate_suspect', 'Podobný ruční zápis přes účet 261 už existuje.', 409);
@@ -133,7 +150,7 @@ final class TransferPairService
         if ($currency !== 'CZK') {
             $fx = $this->pairedFxRate($supplierId, $txId);
             if ($fx === null) {
-                $rate = $this->cnb->getRate($currency, new DateTimeImmutable((string) $tx['posted_at']));
+                $rate = $this->cnb->getRate($currency, new DateTimeImmutable($entryDate));
                 if ($rate === null || (float) $rate['rate'] <= 0) {
                     throw new PostingException('fx_rate_unavailable', 'Kurz ČNB pro měnu ' . $currency . ' není k dispozici.');
                 }
@@ -150,8 +167,8 @@ final class TransferPairService
         // #35 — bankovní noha ('221') na dedikovanou analytiku vlastního účtu (261 clearing zůstává).
         $lines = $this->bankAnalytics?->apply($supplierId, $tx, $lines) ?? $lines;
         $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
-            'entry_date' => (string) $tx['posted_at'],
-            'document_date' => (string) $tx['posted_at'],
+            'entry_date' => $entryDate,
+            'document_date' => $entryDate,
             'description' => $this->entryDescription($tx),
             'posted' => true,
             'user_id' => $userId,
@@ -451,7 +468,7 @@ final class TransferPairService
             'amount' => round(abs((float) $tx['amount']), 2),
             'description' => $this->entryDescription($tx),
             'note' => $note,
-            'status' => $note === 'cross_currency' || $note === 'period_closed'
+            'status' => in_array($note, ['cross_currency', 'period_closed', 'period_before_start', 'period_after_horizon', 'period_gap'], true)
                 ? 'blocked' : (str_starts_with((string) $note, 'duplicate_suspect') ? 'needs_input' : 'pending'),
             'confidence' => 0.95,
             'detector' => 'own_transfer',

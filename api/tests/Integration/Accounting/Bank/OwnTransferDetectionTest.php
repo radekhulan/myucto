@@ -8,6 +8,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Bank\TransferAutoPolicyInterface;
 use MyInvoice\Service\Accounting\Bank\TransferPairService;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
 #[Group('integration')]
@@ -357,6 +358,60 @@ final class OwnTransferDetectionTest extends BankPostingTestCase
         self::assertSame($this->initialTransferMatchCount + 1, $this->transferMatchCount());
         self::assertNotNull($this->journal->findBySource($this->supplierId, 'bank', $outTx));
         self::assertNotNull($this->journal->findBySource($this->supplierId, 'bank', $inTx));
+    }
+
+    public static function historicalPeriods(): array
+    {
+        return [
+            'rok před převodem po odstranění období' => [self::YEAR . '-01-01', false],
+            'starší automaticky založené období před setupem' => [null, true],
+        ];
+    }
+
+    #[DataProvider('historicalPeriods')]
+    public function testGpcOwnTransferBeforeAccountingStartStaysUnpostedOnRetry(?string $startsOn, bool $legacyPeriod): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE supplier SET accounting_starts_on = ? WHERE id = ?')
+            ->execute([$startsOn, $this->supplierId]);
+        $pdo->prepare("UPDATE accounting_periods SET created_reason = CASE WHEN id = ? THEN 'setup' ELSE 'posting' END WHERE supplier_id = ?")
+            ->execute([$this->periodId, $this->supplierId]);
+        $year = self::YEAR - 1;
+        $periodId = $legacyPeriod ? $this->periods->create(
+            $this->supplierId, $year, $year . '-01-01', $year . '-12-31', 'posting',
+        ) : null;
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $pdo->prepare("UPDATE auto_posting_policy SET level = 'auto' WHERE supplier_id = ? AND operation_type IN ('bank.transfer.own', 'detector.own_transfer')")
+            ->execute([$this->supplierId]);
+        $statementId = $this->statement();
+        $pdo->prepare("UPDATE bank_statements SET source = 'gpc' WHERE id = ?")->execute([$statementId]);
+        $tx = $this->transaction($statementId, -12345.67, [
+            'posted_at' => $year . '-12-10',
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+
+        $first = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame(['suggested', 'period_before_start'], [$first['action'], $first['reason']]);
+        self::assertSame('blocked', $this->suggestionRow((int) $first['suggestion_id'])['status']);
+        $retry = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame(['suggested', 'period_before_start', $first['suggestion_id']], [
+            $retry['action'], $retry['reason'], $retry['suggestion_id'],
+        ]);
+        try {
+            $this->service->approveSuggestion($this->supplierId, (int) $first['suggestion_id'], $this->meta());
+            self::fail('Schválení nesmí zaúčtovat převod před začátkem účetnictví.');
+        } catch (PostingException $e) {
+            self::assertSame('period_before_start', $e->errorCode);
+        }
+        self::assertSame(0, $this->entryCountForTx($tx));
+        $period = $this->periods->findByYear($this->supplierId, $year);
+        self::assertSame($periodId, $period === null ? null : (int) $period['id']);
+        if (!$legacyPeriod) {
+            $this->periods->create($this->supplierId, $year, $year . '-01-01', $year . '-12-31');
+            $entryId = $this->service->approveSuggestion($this->supplierId, (int) $first['suggestion_id'], $this->meta());
+            self::assertSame($entryId, (int) $this->journal->findBySource($this->supplierId, 'bank', $tx)['id']);
+        }
     }
 
     /**

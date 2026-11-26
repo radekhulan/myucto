@@ -534,31 +534,42 @@ final class AccountingPeriodRepository
         );
     }
 
+    public function knownAccountingStart(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(s.accounting_starts_on, (
+                SELECT MIN(setup.starts_on) FROM accounting_periods setup
+                 WHERE setup.supplier_id = s.id AND setup.created_reason = 'setup'
+            )) FROM supplier s WHERE s.id = ?"
+        );
+        $stmt->execute([$supplierId]);
+        $start = $stmt->fetchColumn();
+        return is_string($start) ? $start : null;
+    }
+
     /**
-     * Otevřená období bez zápisu v deníku, která celá předcházejí známému začátku
-     * účetnictví. U starších instalací bez data aktivace lze použít období ze setupu.
-     * Bez těchto údajů se začátek z obsahu deníku neodhaduje.
+     * Otevřená období bez zápisu v deníku, která celá předcházejí známému začátku účetnictví.
      *
      * @return list<array<string,mixed>>
      */
     public function emptyBeforeAccountingStart(int $supplierId): array
     {
+        $start = $this->knownAccountingStart($supplierId);
+        if ($start === null) {
+            return [];
+        }
         $stmt = $this->db->pdo()->prepare(
             "SELECT ap.id, ap.fiscal_year, ap.starts_on, ap.ends_on
                FROM accounting_periods ap
-               JOIN supplier s ON s.id = ap.supplier_id
               WHERE ap.supplier_id = ? AND ap.status = 'open' AND ap.approved_at IS NULL
                 AND (ap.created_reason IS NULL OR ap.created_reason = 'posting')
-                AND ap.ends_on < COALESCE(s.accounting_starts_on, (
-                    SELECT MIN(setup.starts_on) FROM accounting_periods setup
-                     WHERE setup.supplier_id = ap.supplier_id AND setup.created_reason = 'setup'
-                ))
+                AND ap.ends_on < ?
                 AND NOT EXISTS (
                     SELECT 1 FROM journal_entries je WHERE je.supplier_id = ap.supplier_id AND je.period_id = ap.id
                 )
               ORDER BY ap.starts_on, ap.id"
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute([$supplierId, $start]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

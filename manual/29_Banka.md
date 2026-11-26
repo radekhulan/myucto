@@ -637,6 +637,8 @@ Variabilní symbol pro spárování převodu potřeba není. Za jistou shodu My�
 
 Převod mezi účty v různých měnách systém pouze označí k ručnímu zaúčtování, protože je potřeba zohlednit kurzový rozdíl. Pokud už existuje podobný ruční zápis přes 261, automatika upozorní na možné zdvojení a bez kontroly jej nezaúčtuje. Stejné varování se zobrazí při ručním zadání převodu, ke kterému už existuje bankovní transakce.
 
+Vlastní převod s datem před známým začátkem účetnictví zůstane ve výpisu bez zaúčtování. Platí to i pro starší období, které dříve vzniklo automaticky při zaúčtování. Pokud starší převod patří do deníku, lze návrh schválit v odpovídajícím otevřeném období založeném ručně nebo převodem účetnictví.
+
 ### 29.13.16 Odvody ČSSZ, zdravotním pojišťovnám a finančnímu úřadu
 
 Odchozí korunové platby na účty vedené u ČNB (**kód banky 0710**) MyÚčto rozpoznává samostatně. Nejprve hledá odpovídající předpis zálohy na daň, sociální nebo zdravotní pojištění podle variabilního symbolu, data splatnosti a částky. Pokud předpis nenajde, určí druh odvodu z variabilního symbolu firmy a předčíslí účtu finančního úřadu. Platby mimo banku 0710 tento detektor nikdy nepřebírá.
