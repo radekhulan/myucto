@@ -10,6 +10,9 @@ use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\AccountingRoleProfile;
+use MyInvoice\Service\Accounting\Closing\OpeningTakeoverComparison;
 
 /**
  * Uzávěrka historických let po převodu.
@@ -17,12 +20,12 @@ use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
  * Money roky uzavřelo, převod je naveze otevřené (deník se nepřepočítává). Tady je
  * MyÚčto uzavře vlastním průvodcem ({@see ClosingService}) od nejstaršího, a JEN když
  * konečné stavy roku N sedí účet po účtu na počáteční stavy roku N+1, které přišly
- * z Money — včetně výsledku hospodaření na 431. Při rozdílu se rok neuzavře a pozdější
+ * z Money, včetně výsledku hospodaření na 431 nebo 931. Při rozdílu se rok neuzavře a pozdější
  * roky také ne (stojí na něm). Poslední rok zůstává otevřený.
  *
- * Uzávěrkové zápisy Money (`XZ`) podmínkou NEJSOU: Money otevře další rok s počátečními
- * stavy i bez uzávěrky a na reálných agendách chybí XZ u většiny let, která byla podaná.
- * Rok uzavřený bez nich převod jen ohlásí (`closed_without_money_closing`).
+ * U rámce 504 je XZ podkladem pro převzetí historické uzávěrky bez nového daňového
+ * posouzení. U rámce 500 lze uzavřít i rok bez XZ s upozorněním
+ * (`closed_without_money_closing`).
  *
  * Porovnání NEPOČÍTÁ samo: bere ho z průvodce uzávěrkou (`opening_takeover` ve
  * {@see ClosingService::state()}), tedy z téhož výpočtu, podle kterého otevření roku
@@ -83,7 +86,7 @@ final class HistoricalYearCloser
     public function run(ImportContext $ctx): void
     {
         $periods = self::periods($ctx);
-        (new AccountingFrameworkImportGuard($this->db))->assertCz500Periods($ctx->supplierId, array_values($periods));
+        (new AccountingFrameworkImportGuard($this->db, $ctx->nonprofit(), 'Money S3'))->assertCz500Periods($ctx->supplierId, array_values($periods));
         $p = $ctx->protocol;
         $years = array_keys($periods);
         sort($years);
@@ -100,7 +103,7 @@ final class HistoricalYearCloser
             }
             // Poslední převáděný rok před rokem jen s počátečními stavy.
             $last = $next === $openingOnlyYear;
-            $state = $this->closing->state($ctx->supplierId, $periodId);
+            $state = $this->closing->state($ctx->supplierId, $periodId, $ctx->nonprofit());
             if (in_array((string) $state['period']['status'], ['closed', 'approved', 'reviewed'], true)) {
                 if (empty($state['can_open_next'])) {
                     $results[] = ['year' => $year, 'status' => 'already_closed'];
@@ -159,6 +162,12 @@ final class HistoricalYearCloser
                 $blocked = true;
                 continue;
             }
+            if ($ctx->nonprofit() && $ctx->options->closeHistory && !$blocked && ($ctx->yearEndClosingRows[$year] ?? 0) === 0) {
+                $p->warn(self::STEP, 'nonprofit_no_money_closing', "Rok {$year} navazuje na rok {$next}, ale v Money S3 nemá uzávěrkové zápisy (XZ). Uzávěrku dokončete v MyÚčtu.", ['year' => $year]);
+                $results[] = $row + ['status' => 'verified'];
+                $blocked = true;
+                continue;
+            }
             if (!$ctx->options->closeHistory || $blocked) {
                 $results[] = $row + ['status' => $blocked ? 'blocked' : 'verified'];
                 continue;
@@ -196,6 +205,10 @@ final class HistoricalYearCloser
                 }
                 $results[] = $row + ['status' => 'closed', 'profit' => $closed['profit'] ?? null];
                 $p->count(self::STEP, 'closed');
+                if (isset($closed['nonprofit_tax_assessment_skipped'])) {
+                    $p->info(self::STEP, 'nonprofit_historical_tax_assessment_skipped',
+                        "Rok {$year}: uzávěrka navazuje na převzatý deník a ověřené počáteční stavy. Převod daňové posouzení činností k této historické uzávěrce v MyÚčtu neprovádí.", ['year' => $year]);
+                }
                 if (($ctx->yearEndClosingRows[$year] ?? null) === 0) {
                     $withoutMoneyClosing[] = $year;
                 }
@@ -257,7 +270,7 @@ final class HistoricalYearCloser
         }
         try {
             $meta = ['user_id' => $ctx->userId > 0 ? $ctx->userId : null, 'posted_by' => $ctx->userId > 0 ? $ctx->userId : null];
-            $this->frameworkMutation($ctx, fn () => $this->closing->openNext($ctx->supplierId, $periodId, $rowVersion, $meta));
+            $this->frameworkMutation($ctx, fn () => $this->closing->openNext($ctx->supplierId, $periodId, $rowVersion, $meta, moneyS3History: $ctx->nonprofit()));
             $after = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
             if (count($this->repo->openingEntriesInPeriod($ctx->supplierId, $nextPeriodId)) !== 1 || self::differs($before, $after)) {
                 throw new MoneyS3Exception('opening_changed', 'po otevření dalšího roku se počáteční stavy liší od převzatých z Money.');
@@ -392,14 +405,17 @@ final class HistoricalYearCloser
             }
         }
         if (!$isDone('fx_revaluation')) {
-            if (self::hasFxItems($this->closing->fxPreview($supplierId, $periodId, []))) {
+            $preview = $this->closing->fxPreview($supplierId, $periodId, []);
+            $decision = array_intersect_key($preview, ['snapshot_hash' => true]);
+            if (self::hasFxItems($preview) || ($decision !== [] && (!$preview['complete'] || $preview['positions'] !== []))) {
                 throw new MoneyS3Exception('fx_required', 'rok má co přeceňovat kurzem, jinak by se deník rozešel s Money.');
             }
-            $this->frameworkMutation($ctx, fn () => $this->closing->runFxRevaluation($supplierId, $periodId, [], $rv(), $meta));
+            $this->frameworkMutation($ctx, fn () => $this->closing->runFxRevaluation($supplierId, $periodId, [], $rv(), $meta, $decision));
         }
 
         $state = $this->closing->state($supplierId, $periodId);
-        if (empty($state['can_close'])) {
+        $assessmentOnly = $ctx->nonprofit() && ($state['close_blockers'] ?? []) === ['nonprofit_tax_assessment'];
+        if (empty($state['can_close']) && !$assessmentOnly) {
             $pending = [];
             foreach ($state['steps'] as $s) {
                 if (!in_array($s['status'], ['done', 'skipped'], true)
@@ -411,8 +427,17 @@ final class HistoricalYearCloser
         }
 
         $reason = $this->unpostedFromMoney($ctx, $periodId);
-        $result = $this->frameworkMutation($ctx, fn () => $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta, $reason !== null, $reason));
-        $this->frameworkMutation($ctx, fn () => $this->closing->openNext($supplierId, $periodId, $rv(), $meta));
+        $close = fn (): array => $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta, $reason !== null, $reason, moneyS3History: $ctx->nonprofit());
+        $open = fn (): array => $this->closing->openNext($supplierId, $periodId, $rv(), $meta, moneyS3History: $ctx->nonprofit());
+        if ($ctx->nonprofit()) {
+            return $this->frameworkMutation($ctx, static function () use ($close, $open): array {
+                $result = $close();
+                $open();
+                return $result;
+            });
+        }
+        $result = $this->frameworkMutation($ctx, $close);
+        $this->frameworkMutation($ctx, $open);
         return $result;
     }
 
@@ -462,7 +487,7 @@ final class HistoricalYearCloser
 
     private function frameworkMutation(ImportContext $ctx, callable $write): mixed
     {
-        return (new AccountingFrameworkImportGuard($this->db))->writeCz500Periods($ctx->supplierId, array_values(self::periods($ctx)), $write);
+        return (new AccountingFrameworkImportGuard($this->db, $ctx->nonprofit(), 'Money S3'))->writeCz500Periods($ctx->supplierId, array_values(self::periods($ctx)), $write);
     }
 
     /**
@@ -490,6 +515,20 @@ final class HistoricalYearCloser
     {
         if ($ctx->openingOnlyBalances === null) {
             return [];
+        }
+        if ($ctx->nonprofit()) {
+            $profile = new AccountingRoleProfile(AccountingFrameworkService::CZ_504);
+            $moneyLines = [];
+            foreach ($ctx->openingOnlyBalances as $code => $balance) {
+                $moneyLines[] = ['account_code' => (string) $code, 'side' => $balance < 0 ? 'credit' : 'debit', 'amount' => abs($balance)];
+            }
+            $comparison = OpeningTakeoverComparison::compare(
+                $moneyLines, $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId), $profile, moneyS3: true,
+            );
+            return array_map(static fn (array $diff): array => [
+                'account_code' => $diff['account_code'], 'existing' => $diff['existing'],
+                'money' => $diff['expected'], 'difference' => $diff['difference'],
+            ], $comparison['diff']);
         }
         $existing = [];
         foreach ($this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId) as $code => $balance) {

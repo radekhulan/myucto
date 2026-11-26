@@ -37,7 +37,7 @@ final class SupplierCreator
      * @return int id nové firmy
      * @throws \MyInvoice\Service\License\LicenseCompanyLimitExceeded
      */
-    public function create(array $b, int $creatorUserId, bool $assignCreator): int
+    public function create(array $b, int $creatorUserId, bool $assignCreator, bool $nonprofit = false): int
     {
         $b['person_title'] = SupplierPersonTitle::normalize($b['person_title'] ?? null);
         $pdo = $this->db->pdo();
@@ -55,7 +55,7 @@ final class SupplierCreator
         $isIdentified = !empty($b['is_identified']);
         $isVatPayer = self::isVatPayer($b);
         // Režim účetnictví a zdaňovací období stejně jako prvotní setup.
-        $taxpayerType = SupplierInitializer::taxpayerType($b);
+        $taxpayerType = $nonprofit ? 'po' : SupplierInitializer::taxpayerType($b);
         $accountingMode = SupplierInitializer::accountingMode($taxpayerType);
         $vatPeriod = SupplierInitializer::vatPeriod($isVatPayer, $b['vat_period'] ?? null);
 
@@ -67,6 +67,7 @@ final class SupplierCreator
             $defaultVatId,
             $creatorUserId,
             $assignCreator,
+            $nonprofit,
             $isIdentified,
             $isVatPayer,
             $taxpayerType,
@@ -176,6 +177,7 @@ final class SupplierCreator
                     $isVatPayer,
                     $isIdentified,
                     $creatorUserId > 0 ? $creatorUserId : null,
+                    $nonprofit,
                 );
                 if ($assignCreator) {
                     $pdo->prepare(

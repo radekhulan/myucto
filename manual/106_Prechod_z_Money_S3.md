@@ -26,9 +26,9 @@
 
 ## 106.2 Než začnete
 
-Účetní převody z Money S3, PREMIERU a Stereo NX podporují pouze období vedená po celou dobu podle vyhlášky 500. Historické období 500 lze převést i tehdy, když firma později přešla na rámec 504. Převod zahrnující rámec 504 se odmítne před zápisem účetnictví. Samostatný převod dokladů toto omezení nepřebírá. POHODA má vlastní podporu převodu neziskové osnovy do rámce 504, viz [§ 107.2](107_Prechod_z_POHODY.md#1072-nez-zacnete).
-
-Převody Money S3, PREMIER a Stereo NX nebyly ověřeny pro neziskové organizace (spolky, nadace, ústavy, SVJ a další účetní jednotky podle vyhlášky 504/2002 Sb.). Neznají osnovu a výkazy podle vyhlášky 504, hlavní a hospodářskou činnost ani fondy. Je-li cílová firma podle právní formy nezisková organizace nebo SVJ, nebo vedla-li někdy účetnictví podle vyhlášky 504, ukáže průvodce těchto převodů výrazné upozornění. V takovém případě před převodem kontaktujte podporu.
+Převádějte podnikatelskou agendu do období vedených podle vyhlášky 500
+a neziskovou agendu do období vedených podle vyhlášky 504. Rozhoduje rámec
+každého převáděného období. Nesoulad průvodce ohlásí před zápisem.
 
 1. **Podvojné účetnictví, nebo daňová evidence v Money.** Agendu podvojného
    účetnictví převod převede s účetním deníkem. Agendu, kterou Money vede jako
@@ -59,6 +59,23 @@ Převody Money S3, PREMIER a Stereo NX nebyly ověřeny pro neziskové organizac
 > kontakt na podporu, která převod provede nebo upraví na míru. Převzatá data
 > si ověřte vždy.
 
+### Neziskové organizace podle vyhlášky 504
+
+Převod převezme deník včetně počátečních stavů, používané účty, doklady,
+banku a pokladnu. Fondy, dotace a členské příspěvky se převezmou jako účetní
+zápisy. Jejich samostatnou evidenci založte podle potřeby v MyÚčtu.
+
+Náklady a výnosy bez přiřazené činnosti dostanou hlavní činnost. Podle
+skutečnosti přeřaďte zápisy hospodářské činnosti a nastavte zdanitelnost
+výnosů a daňovou uznatelnost nákladů. Počet doplněných řádků najdete
+v protokolu. Chcete-li činnost upravit i v historických obdobích, ponechte
+je při převodu otevřená.
+
+Převod ověří předvahu proti deníku Money a rovnováhu rozvahy podle vyhlášky
+504. Nahrané sestavy z Money pro tento rámec při rekonciliaci nepoužívá.
+Protokol také popisuje, které historické roky navazují a které vyžadují
+ruční dokončení uzávěrky.
+
 ## 106.3 Krok za krokem: záloha agendy v Money S3
 
 1. V Money S3 otevřete agendu firmy, kterou chcete převést.
@@ -66,9 +83,9 @@ Převody Money S3, PREMIER a Stereo NX nebyly ověřeny pro neziskové organizac
    soubor s příponou `.lz`, jehož jméno obsahuje IČO firmy a číslo agendy,
    například `12345678ag001.lz`. Jedna záloha obsahuje všechny roky agendy.
 3. Soubor nerozbalujte. Přijímá se i stejný soubor s příponou `.zip`.
-4. Chcete-li při kontrole porovnat výsledek se sestavou z Money, vyexportujte
-   z Money ke každému převáděnému roku obratovou předvahu do CSV (účet v prvním
-   sloupci, dál PS MD, PS D, obrat MD, obrat D, KS MD, KS D).
+4. Pro porovnání se sestavou z Money u agendy podle vyhlášky 500 vyexportujte
+   za každý převáděný rok obratovou předvahu do CSV (účet v prvním sloupci,
+   dál PS MD, PS D, obrat MD, obrat D, KS MD, KS D).
 
 **Jak poznáte, že je hotovo:** Máte soubor `.lz` (případně CSV s předvahami).
 Instalace Money se zálohou nijak nemění.
@@ -94,7 +111,7 @@ Instalace Money se zálohou nijak nemění.
    - **Uzavřít historické roky průvodcem uzávěrkou** (výchozí zapnuto),
    - **Začátek prvního účetního období** jen u firmy založené během prvního
      převáděného roku,
-   - volitelně sestavy z Money v části **Sestavy z Money ke kontrole**
+   - pro rámec 500 volitelně sestavy z Money v části **Sestavy z Money ke kontrole**
      (**Nahrát předvahu {rok}**; předvaha patří k účetnímu roku firmy, se
      kterým ji porovná rekonciliace).
 5. Klikněte na **Pokračovat**.
@@ -592,7 +609,7 @@ s počty, upozornění a chyby a pro každý rok rekonciliaci:
 
 - obratová předvaha MyÚčta proti předvaze spočtené přímo z deníku Money
   v záloze, po syntetických účtech, počáteční stav, obrat a konečný stav na haléř,
-- obratová předvaha proti sestavě z Money, pokud jste ji nahráli,
+- obratová předvaha proti nahrané sestavě z Money u agendy podle vyhlášky 500,
 - obraty MD = D, předvaha = deník, vyrovnané počáteční stavy, žádné rozpracované zápisy,
 - doklady proti deníku: přijaté faktury proti 321, vydané proti 311, pokladna
   proti 211 a banka proti 221.

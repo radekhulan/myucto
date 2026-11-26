@@ -2047,6 +2047,92 @@ final class SyntheticAgenda
         return $files;
     }
 
+    /** @return array<string,string> */
+    public static function filesNonprofit(float $openingProfit = 95.0, bool $distributeResult = true, bool $groupRevenue = false): array
+    {
+        $files = array_filter(self::files(), static fn (string $path): bool =>
+            !str_starts_with($path, 'ROK.') || str_ends_with($path, '/SzUcPokl.DAT'), ARRAY_FILTER_USE_KEY);
+        $chart = [
+            '221001' => 'Běžný účet', '311000' => 'Odběratelé', '321000' => 'Dodavatelé', '343000' => 'DPH',
+            '518100' => 'Služby', '538000' => 'Ostatní daně',
+            '602000' => 'Tržby', '640000' => 'Ostatní výnosy', '682100' => 'Přijaté dary',
+            '901000' => 'Vlastní jmění', '961000' => 'Počáteční účet rozvažný',
+        ];
+        $row = static fn (string $date, string $source, string $doc, string $md, string $d, float $amount): array => [
+            'Datum' => $date, 'Zdroj' => $source, 'Doklad' => $doc, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount,
+        ];
+        $journals = [
+            'ROK.001' => [
+                $row('2024-01-01', 'XP', '', '221001', '961000', 315),
+                $row('2024-01-01', 'XP', '', '961000', '901000', 307),
+                $row('2024-01-01', 'XP', '', '961000', '931100', 8),
+                $row('2024-01-19', 'ID', 'ID-N2401', '931100', '932013', 8),
+                $row('2024-02-12', 'FV', 'FV-N2401', '311000', '602000', 137),
+                $row('2024-03-12', 'BK', 'BK-N2401', '221001', '311000', 137),
+                $row('2024-05-08', 'ID', 'ID-N2402', '518100', '221001', 42),
+                $row('2024-12-31', 'XZ', '', '602000', '963000', 137),
+                $row('2024-12-31', 'XZ', '', '963000', '518100', 42),
+                $row('2024-12-31', 'XZ', '', '963000', '962000', 95),
+            ],
+            'ROK.002' => [
+                $row('2025-01-01', 'XP', '', '221001', '961000', 315 + $openingProfit),
+                $row('2025-01-01', 'XP', '', '961000', '901000', 307),
+                $row('2025-01-01', 'XP', '', '961000', '932000', 8),
+                $row('2025-01-01', 'XP', '', '961000', '931000', $openingProfit),
+                ...($distributeResult ? [$row('2025-01-23', 'ID', 'ID-N2501', '931000', '932000', $openingProfit)] : []),
+                $row('2025-02-18', 'BK', 'BK-N2501', '221001', '682100', 69),
+                ...($groupRevenue ? [$row('2025-03-03', 'ID', 'ID-N2502', '682100', '640000', 5)] : []),
+                $row('2025-07-19', 'FP', 'FP25071', '518100', '321000', 41),
+                $row('2025-07-19', 'ID', 'RC25071', '538000', '343000', 8.61),
+            ],
+        ];
+        foreach ($journals as $dir => $rows) {
+            $pending = $dir === 'ROK.001' ? '931100' : '931000';
+            $retained = $dir === 'ROK.001' ? '932013' : '932000';
+            $accounts = $chart + [$pending => 'Výsledek ve schvalovacím řízení', $retained => 'Nerozdělený výsledek'];
+            $files[$dir . '/UcOsnova.DAT'] = Ms3FixtureWriter::table(
+                array_merge(self::CHART_FIELDS, [['Typ', 'L', 4], ['DruhCin', 'L', 4]]),
+                array_map(static fn ($code, $name): array => ['Ucet' => $code, 'Nazev' => $name, 'Typ' => 1, 'DruhCin' => 1], array_keys($accounts), array_values($accounts)),
+            );
+            foreach ($rows as $index => &$line) {
+                $line['Cislo'] = $index + 1;
+            }
+            unset($line);
+            $files[$dir . '/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
+            $path = $dir . '/SzUcPokl.DAT';
+            $banks = iterator_to_array(Ms3Table::fromString($files[$path], 'SZUCPOKL')->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table(self::REGISTER_FIELDS, array_values(array_filter($banks, static fn (array $bank): bool => $bank['Zkrat'] === 'BU')));
+        }
+        $files['ROK.001/VFaktury.DAT'] = Ms3FixtureWriter::table(self::ISSUED_FIELDS, [[
+            'Doklad' => 'FV-N2401', 'O_Nazev' => 'Syntetický odběratel', 'Druh' => 'N', 'Vystaveno' => '2024-02-12',
+            'DatUcPr' => '2024-02-12', 'Splatno' => '2024-03-12', 'Uhrazeno' => '2024-03-12', 'UDoklad' => 'BK-N2401',
+            'Zaklad_0' => 137, 'CelkemSDPH' => 137,
+        ]]);
+        $files['ROK.002/PFaktury.DAT'] = Ms3FixtureWriter::table(self::PURCHASE_FIELDS, [[
+            'Doklad' => 'FP25071', 'D_Nazev' => 'Syntetický dodavatel EU', 'D_DIC' => 'DE123456789',
+            'Druh' => 'N', 'KodDPH' => '19Ř00P', 'Vystaveno' => '2025-07-19', 'DatUcPr' => '2025-07-19',
+            'PlnenoDPH' => '2025-07-19', 'Splatno' => '2025-08-19', 'SazbaDPH2' => 21,
+            'Zaklad_2' => 41, 'CelkemSDPH' => 41,
+        ]]);
+        $files['ROK.002/IntDokl.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
+        ], [[
+            'Cislo' => 1, 'Doklad' => 'RC25071', 'Popis' => 'Samovyměření k FP25071',
+            'DatUcPr' => '2025-07-19', 'DatUplDPH' => '2025-07-19',
+        ]]);
+        $files['ROK.002/PolUcDID.DAT'] = Ms3FixtureWriter::table([
+            ['CISLO', 'L', 4], ['Cena', 'E', 10], ['SazbaDPH', 'E', 10], ['PocetMJ', 'L', 4], ['Cleneni', 'C', 12],
+        ], [[
+            'CISLO' => 1, 'Cena' => 41, 'SazbaDPH' => 21, 'PocetMJ' => 1, 'Cleneni' => '19Ř05,06',
+        ]]);
+        foreach (['ROK.001' => ['BK-N2401', '2024-03-12', 137], 'ROK.002' => ['BK-N2501', '2025-02-18', 69]] as $dir => [$doc, $date, $amount]) {
+            $files[$dir . '/BankKnih.DAT'] = Ms3FixtureWriter::table(self::BANK_FIELDS, [[
+                'Doklad' => $doc, 'Ucet' => 'BU', 'DatUcPr' => $date, 'DatPlat' => $date, 'Celkem' => $amount, 'Vypis' => 1,
+            ]]);
+        }
+        return $files;
+    }
+
     /**
      * Agenda s osnovou, která nese daňovou uznatelnost (`Typ` 1 = daňový, 0 = nedaňový):
      * bankovní poplatky 568000 jsou v Money vedené jako nedaňové, ostatní náklady daňové.

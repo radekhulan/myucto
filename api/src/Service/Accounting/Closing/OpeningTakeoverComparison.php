@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\AccountingRoleProfile;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 
@@ -18,15 +19,19 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  *
  * Klíč účtu: rozvažné účty 70x se vynechávají (v obou zápisech končí na nule, liší se
  * jen tím, jak kdo řádky párovat), 431 se srovnává za syntetiku — průvodce dává VH na
- * `431`, jiný systém ho často vede na analytice.
+ * `431`, jiný systém ho často vede na analytice. U převzatého otevření Money S3
+ * v rámci 504 platí porovnání po syntetice pro skupinu 93.
  */
 final class OpeningTakeoverComparison
 {
-    public static function accountKey(string $code, ?AccountingRoleProfile $profile = null): ?string
+    public static function accountKey(string $code, ?AccountingRoleProfile $profile = null, bool $moneyS3 = false): ?string
     {
         $profile ??= new AccountingRoleProfile();
         if ($profile->isClosingAccount($code)) {
             return null;
+        }
+        if ($moneyS3 && $profile->framework === AccountingFrameworkService::CZ_504 && str_starts_with($code, '93')) {
+            return substr($code, 0, 3);
         }
         return str_starts_with($code, $profile->account('result.pending_approval'))
             ? $profile->account('result.pending_approval')
@@ -38,11 +43,11 @@ final class OpeningTakeoverComparison
      * @param array<string,float> $existingBalances účet => signed netto převzatých zápisů (MD kladně)
      * @return array{diff: list<array{account_code:string, expected:float, existing:float, difference:float}>, accounts:int}
      */
-    public static function compare(array $expectedLines, array $existingBalances, ?AccountingRoleProfile $profile = null): array
+    public static function compare(array $expectedLines, array $existingBalances, ?AccountingRoleProfile $profile = null, bool $moneyS3 = false): array
     {
         $expected = [];
         foreach ($expectedLines as $line) {
-            $key = self::accountKey((string) $line['account_code'], $profile);
+            $key = self::accountKey((string) $line['account_code'], $profile, $moneyS3);
             if ($key === null) {
                 continue;
             }
@@ -52,7 +57,7 @@ final class OpeningTakeoverComparison
 
         $existing = [];
         foreach ($existingBalances as $code => $balance) {
-            $key = self::accountKey((string) $code, $profile);
+            $key = self::accountKey((string) $code, $profile, $moneyS3);
             if ($key !== null) {
                 $existing[$key] = ($existing[$key] ?? 0) + self::cents((float) $balance);
             }
@@ -81,7 +86,7 @@ final class OpeningTakeoverComparison
         ];
     }
 
-    public static function compareWithDimensions(array $expectedLines, array $existingBalances, array $linkedDimensionTypes = [], ?AccountingRoleProfile $profile = null): array
+    public static function compareWithDimensions(array $expectedLines, array $existingBalances, array $linkedDimensionTypes = [], ?AccountingRoleProfile $profile = null, bool $moneyS3 = false): array
     {
         $existingLines = [];
         $totals = [];
@@ -94,9 +99,14 @@ final class OpeningTakeoverComparison
                 'amount' => abs((float) $row['bal']),
             ] + array_intersect_key($row, ['dimensions' => true, 'dimension_splits' => true, 'cost_center' => true, 'project_id' => true]);
         }
-        $comparison = self::compare($expectedLines, $totals, $profile);
+        $comparison = self::compare($expectedLines, $totals, $profile, $moneyS3);
         if ($comparison['diff'] !== []) {
             return $comparison;
+        }
+        if ($moneyS3 && $profile?->framework === AccountingFrameworkService::CZ_504) {
+            $outsideResult = static fn (array $line): bool => !str_starts_with((string) $line['account_code'], '93');
+            $expectedLines = array_filter($expectedLines, $outsideResult);
+            $existingLines = array_filter($existingLines, $outsideResult);
         }
         $expectedLines = self::allocatedLines($expectedLines, $linkedDimensionTypes, $profile);
         $existingLines = self::allocatedLines($existingLines, $linkedDimensionTypes, $profile);

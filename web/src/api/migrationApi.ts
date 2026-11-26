@@ -7,7 +7,7 @@ import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
  */
 export interface MigrationNonprofitNotice {
   level: 'warning'
-  code: 'migration_nonprofit_untested'
+  code: 'migration_nonprofit_untested' | 'migration_nonprofit_504'
   message: string
   context?: { entity_profile: 'nonprofit' | 'svj' | 'unknown'; framework_504: boolean }
 }

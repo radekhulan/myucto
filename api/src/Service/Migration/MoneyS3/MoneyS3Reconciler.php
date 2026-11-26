@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Invoice\IssuedCzkAmounts;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
@@ -40,6 +41,10 @@ final class MoneyS3Reconciler
     public function run(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
+        if ($ctx->nonprofit()) {
+            $p->info(self::STEP, 'nonprofit_money_reports_skipped',
+                'Výkazy podle vyhlášky 504 se se sestavami Money S3 neporovnávají. Předvaha se ověřuje po účtech proti převzatému deníku.');
+        }
         $years = [];
         $moneyByYear = $this->moneyTrialBalances($ctx);
         foreach ($ctx->periods as $year => $period) {
@@ -107,7 +112,7 @@ final class MoneyS3Reconciler
 
         $report = null;
         $reportPath = $ctx->options->moneyReports[$year] ?? null;
-        if ($reportPath !== null && is_file($reportPath)) {
+        if (!$ctx->nonprofit() && $reportPath !== null && is_file($reportPath)) {
             $parsed = $this->reports->parse((string) file_get_contents($reportPath));
             $reportDiffs = self::compare($mine, $parsed['accounts']);
             $report = [
@@ -123,7 +128,16 @@ final class MoneyS3Reconciler
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
         }
 
-        $balanceSheet = TrialBalanceReconciliation::balanceSheet($this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full'));
+        try {
+            $balanceSheet = TrialBalanceReconciliation::balanceSheet(
+                $this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full'), framework504: $ctx->nonprofit(),
+            );
+        } catch (ReportException $e) {
+            if (!$ctx->nonprofit()) {
+                throw $e;
+            }
+            $balanceSheet = self::nonprofitStatementUnavailable($ctx, $year, $e);
+        }
         $unmapped = $balanceSheet['unmapped'];
         $checks[] = $balanceSheet['check'];
 
@@ -241,6 +255,31 @@ final class MoneyS3Reconciler
      * Druh dokladu v kontrole dokladů proti deníku: tabulka, částka dokladu, druh v mapě,
      * typ vazby, účet a znaménko řádku (jako ve {@see documentsAgainstJournal()}).
      */
+    /**
+     * Výkaz 504 se nesestavil. Rok před 2024 a nevypořádaný výsledek ve schvalovacím řízení
+     * (běžný stav, než účetní jednotka rozdělí výsledek minulého roku) nejsou chybou převodu:
+     * vyrovnanost ověřila předvaha. Účet bez řádku výkazu chybou je a jmenuje se.
+     *
+     * @return array{check:array{key:string,ok:bool},unmapped:list<array{account:string,name:string,balance:float}>,negative_net_rows:list<mixed>}
+     */
+    private static function nonprofitStatementUnavailable(ImportContext $ctx, int $year, ReportException $e): array
+    {
+        $skipped = in_array($e->errorCode, ['statement_version_missing', 'statement_result_pending_approval_unresolved'], true);
+        $unmapped = [];
+        if ($e->errorCode === 'statement_account_unmapped' && isset($e->context['account_code'])) {
+            $unmapped[] = ['account' => (string) $e->context['account_code'], 'name' => '', 'balance' => 0.0];
+        }
+        $text = "Rok {$year}: výkaz podle vyhlášky 504 nejde sestavit: {$e->getMessage()}"
+            . ($unmapped !== [] ? " Účet {$unmapped[0]['account']}." : '')
+            . ($skipped ? ' Vyrovnanost ověřila předvaha.' : '');
+        if ($skipped) {
+            $ctx->protocol->info(self::STEP, 'nonprofit_statement_skipped', $text, ['year' => $year, 'reason' => $e->errorCode]);
+        } else {
+            $ctx->protocol->warn(self::STEP, 'nonprofit_statement_failed', $text, ['year' => $year, 'reason' => $e->errorCode]);
+        }
+        return ['check' => ['key' => 'balance_sheet_balanced', 'ok' => $skipped], 'unmapped' => $unmapped, 'negative_net_rows' => []];
+    }
+
     private static function sources(): array
     {
         $total = self::documentTotal();

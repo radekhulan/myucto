@@ -6,7 +6,9 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Accounting\ChartOfAccounts504Policy;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\ChartOfAccountsTemplate504;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 
 /**
@@ -45,7 +47,7 @@ final class ChartImporter
             if ($code !== '' && ctype_digit($code) && $name !== '') {
                 $names[$code] = $name;
             }
-            $flag = self::deductibility($code, $r);
+            $flag = $ctx->nonprofit() ? null : self::deductibility($code, $r);
             if ($flag !== null) {
                 $deductibility[$code] = $flag;
             }
@@ -110,6 +112,7 @@ final class ChartImporter
             }
             $id = (new ChartAccountCreator($this->accounts))->createAnalytic(
                 $ctx->supplierId, $target, $names[$moneyCode] ?? ($names[str_replace('.', '', $target)] ?? ('Analytika ' . $moneyCode)), $parent,
+                taxDeductibility: $ctx->nonprofit() ? ChartOfAccountsTemplate504::taxDeductibility($target) : null,
             );
             $ctx->accountIds[$target] = $id;
             $p->count(self::STEP, 'created');
@@ -127,6 +130,10 @@ final class ChartImporter
             // by se to projevilo celým obratem, proto seznam na očích.
             $p->info(self::STEP, 'non_deductible_accounts', 'Daňově neuznatelné náklady podle osnovy Money (DPPO ř. 40): '
                 . implode(', ', array_map('trim', $nonDeductible)) . '. Ověřte proti podanému přiznání.', ['accounts' => $nonDeductible]);
+        }
+        if ($ctx->nonprofit()) {
+            $p->info(self::STEP, 'nonprofit_tax_assessment_manual',
+                'Zdanitelnost výnosů a daňovou uznatelnost nákladů neziskové organizace nastaví účetní podle skutečné činnosti.');
         }
         $p->finish(self::STEP);
     }
@@ -168,8 +175,15 @@ final class ChartImporter
      */
     private function createSynthetic(ImportContext $ctx, string $synthetic, array $names): ?array
     {
-        $created = (new ChartAccountCreator($this->accounts))
-            ->createSynthetic($ctx->supplierId, $synthetic, $names[$synthetic . '000'] ?? ('Účet ' . $synthetic), $ctx->protocol, self::STEP, true);
+        $default = $ctx->nonprofit() ? ChartOfAccounts504Policy::defaultAccount($synthetic) : null;
+        $created = (new ChartAccountCreator($this->accounts))->createSynthetic(
+            $ctx->supplierId, $synthetic, $names[$synthetic . '000'] ?? $default['name'] ?? ('Účet ' . $synthetic), $ctx->protocol, self::STEP,
+            typeFromInContext: true,
+            sourceAccountType: $default['type'] ?? null,
+            sourceNormalSide: $default['normal_side'] ?? null,
+            useSourceNormalSide: $default !== null,
+            taxDeductibility: $ctx->nonprofit() ? ChartOfAccountsTemplate504::taxDeductibility($synthetic) : null,
+        );
         if ($created === null) {
             return null;
         }

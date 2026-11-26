@@ -36,6 +36,12 @@ describe('MigrationNonprofitNotice', () => {
     expect(wrapper.find('[data-testid="migration-nonprofit-notice"]').exists()).toBe(true)
   })
 
+  it('průvodce s podporou 504 ukáže podmínky převodu ještě před nahráním zálohy', () => {
+    const text = render({ accounting_framework: 'cz_504', entity_profile: 'nonprofit' }, { supports504: true }).text()
+    expect(text).toContain('migration_nonprofit_notice.title_504')
+    expect(text).toContain('migration_nonprofit_notice.body_504')
+  })
+
   it('převod z exportu MyÚčto má vlastní text', () => {
     const text = render({ accounting_framework: 'cz_504', entity_profile: 'nonprofit' }, { native: true }).text()
     expect(text).toContain('migration_nonprofit_notice.body_native')

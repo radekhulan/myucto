@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Migration\Shared\NonprofitChart;
+
 /**
  * Rozbalená záloha agendy Money S3 (soubor `.lz` = ZIP z funkce „Zálohovat agendu")
  * a přístup k jejím tabulkám.
@@ -32,6 +34,7 @@ final class Ms3Backup
     private const RESERVED_NAMES = '/^(con|prn|aux|nul|com\d|lpt\d)$/i';
 
     private string $dir;
+    private ?bool $nonprofitChart = null;
 
     private function __construct(string $dir)
     {
@@ -359,6 +362,15 @@ final class Ms3Backup
                 yield $row;
             }
         }
+    }
+
+    public function hasNonprofitChart(): bool
+    {
+        return $this->nonprofitChart ??= NonprofitChart::matches((function (): \Generator {
+            foreach ($this->rowsAcrossYears('UcOsnova', ['Ucet']) as $row) {
+                yield trim((string) ($row['Ucet'] ?? ''));
+            }
+        })());
     }
 
     /** Klíč z INI / Agenda.DAT bez diakritiky a velikosti písmen („Název" → „nazev"). */

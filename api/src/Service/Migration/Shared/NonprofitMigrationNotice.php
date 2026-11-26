@@ -13,20 +13,16 @@ use MyInvoice\Service\Accounting\LegalFormProfileRecommendation;
  * Upozornění průvodců převodem z cizího programu, že cílová firma je nezisková
  * organizace nebo SVJ (právní forma, nebo rámec vyhlášky 504 kdykoli v historii).
  *
- * Převody umí účetnictví jen v rámci vyhlášky 500: období v rámci 504 odmítne
- * {@see \MyInvoice\Service\Accounting\AccountingFrameworkImportGuard}, ale firma
- * s právní formou NNO a dosud rámcem 500 by převod prošla a převzala osnovu
- * a výkazy podnikatele bez rozlišení hlavní a hospodářské činnosti. Průvodce proto
- * u takové firmy výrazně upozorní, že převod pro neziskové organizace nebyl
- * ověřen. Běžné firmě se do odpovědi nic nepřidá.
+ * Znění upozornění zohledňuje, zda průvodce umí přenést neziskovou osnovu.
  */
 final class NonprofitMigrationNotice
 {
     public const CODE = 'migration_nonprofit_untested';
+    public const CODE_504 = 'migration_nonprofit_504';
     public const RESPONSE_KEY = 'nonprofit_notice';
 
     /** @return array{level:string,code:string,message:string,context:array{entity_profile:string,framework_504:bool}}|null */
-    public static function forSupplier(Connection $db, int $supplierId): ?array
+    public static function forSupplier(Connection $db, int $supplierId, bool $supports504 = false): ?array
     {
         if ($supplierId <= 0) {
             return null;
@@ -48,8 +44,10 @@ final class NonprofitMigrationNotice
         }
         return [
             'level' => 'warning',
-            'code' => self::CODE,
-            'message' => 'Převod dat pro neziskové organizace (spolky, nadace, ústavy, SVJ a další účetní jednotky podle vyhlášky 504/2002 Sb.) nebyl ověřen. '
+            'code' => $supports504 ? self::CODE_504 : self::CODE,
+            'message' => $supports504
+                ? 'Převod převezme agendu podle vyhlášky 504 do firmy se stejným účetním rámcem. Náklady a výnosy zařadí do hlavní činnosti, účetní hospodářskou činnost přeřadí podle skutečnosti. Fondy, dotace a členské příspěvky se převezmou jako účetní zápisy. Samostatná evidence se nezakládá. Zdanitelnost výnosů a uznatelnost nákladů nastaví účetní.'
+                : 'Převod dat pro neziskové organizace (spolky, nadace, ústavy, SVJ a další účetní jednotky podle vyhlášky 504/2002 Sb.) nebyl ověřen. '
                 . 'Převod nezná osnovu a výkazy podle vyhlášky 504, hlavní a hospodářskou činnost ani fondy. Před převodem kontaktujte podporu.',
             'context' => ['entity_profile' => $profile, 'framework_504' => $framework504],
         ];
@@ -61,9 +59,9 @@ final class NonprofitMigrationNotice
      * @param array<string,mixed> $payload
      * @return array<string,mixed>
      */
-    public static function attach(Connection $db, int $supplierId, array $payload): array
+    public static function attach(Connection $db, int $supplierId, array $payload, bool $supports504 = false): array
     {
-        $notice = self::forSupplier($db, $supplierId);
+        $notice = self::forSupplier($db, $supplierId, $supports504);
         if ($notice !== null) {
             $payload[self::RESPONSE_KEY] = $notice;
         }

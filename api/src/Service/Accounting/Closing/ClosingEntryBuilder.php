@@ -118,7 +118,7 @@ final class ClosingEntryBuilder
      * @param list<array{account_id:int, account_code:string, name:string, bal:float}> $bsBalances
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null, int $carriedResidueCents = 0): array
+    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null, int $carriedResidueCents = 0, bool $preserveRetainedResult = false): array
     {
         $profile ??= new AccountingRoleProfile();
         $lines = [];
@@ -129,7 +129,7 @@ final class ClosingEntryBuilder
                 continue;
             }
             $amount = abs($cents) / 100;
-            $code = $profile->openingAccount((string) $row['account_code']);
+            $code = $preserveRetainedResult ? (string) $row['account_code'] : $profile->openingAccount((string) $row['account_code']);
             if ($cents > 0) {
                 $lines[] = self::line($code, 'debit', $amount, $row);
                 $lines[] = self::line($profile->account('closing.opening_balance'), 'credit', $amount, $row);

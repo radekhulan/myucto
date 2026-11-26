@@ -190,7 +190,7 @@ final class Statement504Builder
         $map = $this->maps[$type] ?? Statement504Catalog::accountMap($type);
         $matches = (new StatementMapper())->entriesFor($map, $code, $balance);
         if (count($matches) !== 1) {
-            throw new ReportException('statement_account_unmapped', 'Účet nemá jednoznačné přiřazení k řádku výkazu 504.');
+            throw new ReportException('statement_account_unmapped', 'Účet nemá jednoznačné přiřazení k řádku výkazu 504.', context: ['account_code' => $code]);
         }
         return $matches[0];
     }

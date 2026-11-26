@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\AccountingRoleProfile;
+use MyInvoice\Service\Accounting\Closing\OpeningTakeoverComparison;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
@@ -234,6 +237,7 @@ final class JournalImporter
     private static function openingBalances(Ms3Backup $backup, string $dir): array
     {
         $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $dir);
+        $profile = $backup->hasNonprofitChart() ? new AccountingRoleProfile(AccountingFrameworkService::CZ_504) : null;
         $out = [];
         foreach ($table !== null ? $table->rows(['Zdroj', 'Castka', 'UcMD', 'UcD']) : [] as $r) {
             $effect = Ms3Journal::isOpening($r) ? Ms3Journal::effect($r) : null;
@@ -242,7 +246,7 @@ final class JournalImporter
             }
             foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
                 $code = AccountCode::fromMoney((string) $code) ?? (string) $code;
-                if (!str_starts_with($code, '7')) {
+                if ($profile === null ? !str_starts_with($code, '7') : !$profile->isClosingAccount($code)) {
                     $out[$code] = ($out[$code] ?? 0.0) + $sign * $effect['amount'];
                 }
             }
@@ -1040,12 +1044,14 @@ final class JournalImporter
      * jdou přepsat ručně, starý rok může být v agendě jen zčásti), uzávěrka MyÚčta ne —
      * rok s rozdílem nepůjde uzavřít a s ním ani žádný pozdější. Porovnávají se rozvahové
      * účty tříd 0–4 bez 43x (výsledek hospodaření přechází do dalšího roku až uzávěrkou)
-     * a bez 70x.
+     * a bez 70x. U 504 se porovnávají třídy 0–3 a rozvahové účty třídy 9 mimo výsledek
+     * ve schvalovacím řízení a uzávěrkové účty.
      *
      * @return list<array{year:int,next:int,next_has_opening:bool,accounts:array<string,float>}>
      */
     public function chainBreaks(Ms3Backup $backup, ImportOptions $options, ?FiscalCalendar $calendar = null): array
     {
+        $profile = $backup->hasNonprofitChart() ? new AccountingRoleProfile(AccountingFrameworkService::CZ_504) : null;
         $years = [];
         foreach ($this->plan($backup, $options, $calendar) as $item) {
             $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
@@ -1061,8 +1067,15 @@ final class JournalImporter
                 }
                 foreach ([[$effect['debit'], 1], [$effect['credit'], -1]] as [$code, $sign]) {
                     $code = (string) $code;
-                    if ($code === '' || $code[0] > '4' || str_starts_with($code, '43')) {
+                    if ($code === '' || ($profile === null && ($code[0] > '4' || str_starts_with($code, '43')))) {
                         continue;
+                    }
+                    if ($profile !== null) {
+                        if (($code[0] > '3' && $code[0] !== '9') || $profile->isTransientAccount($code)
+                            || str_starts_with($code, $profile->account('result.pending_approval')) || ($code[0] === '9' && substr($code, 0, 2) >= '97')) {
+                            continue;
+                        }
+                        $code = OpeningTakeoverComparison::accountKey($code, $profile, moneyS3: true);
                     }
                     if (Ms3Journal::isOpening($r)) {
                         $opening[$code] = ($opening[$code] ?? 0.0) + $sign * $effect['amount'];

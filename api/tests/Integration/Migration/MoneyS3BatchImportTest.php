@@ -186,6 +186,20 @@ final class MoneyS3BatchImportTest extends TestCase
         self::assertSame(0, $this->rows('cash_documents', $supplierId, "issue_date >= '2025-01-01'"));
     }
 
+    public function testBatchCreatesNonprofitCompanyInFramework504WithoutRegistry(): void
+    {
+        $files = SyntheticAgenda::forCompany(SyntheticAgenda::filesNonprofit(), self::ICO_A, 'Syntetický spolek');
+        SyntheticAgenda::writeLzFiles($this->tmp . '/spolek.lz', $files);
+        [$result] = $this->runBatch(['spolek.lz'], $this->options(self::LIVE));
+        self::assertTrue($result['summary']['converted'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame('created', $result['company_action']);
+        $supplier = $this->supplierRow(self::ICO_A);
+        self::assertSame('double_entry', $supplier['accounting_mode']);
+        self::assertSame(1, $this->rows('supplier_accounting_frameworks', (int) $supplier['id'], "accounting_framework = 'cz_504'"));
+        self::assertSame(1, $this->rows('chart_of_accounts', (int) $supplier['id'], "account_code = '901'"));
+        self::assertSame(0, $this->rows('chart_of_accounts', (int) $supplier['id'], "account_code = '411'"));
+    }
+
     public function testRepeatedBatchUpdatesExistingCompaniesWithoutDuplicatesOrSkipsThem(): void
     {
         $first = $this->runBatch(['alfa.lz'], $this->options(self::LIVE));

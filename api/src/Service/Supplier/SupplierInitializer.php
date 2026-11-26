@@ -119,9 +119,11 @@ final class SupplierInitializer
         bool $isVatPayer,
         bool $isIdentified = false,
         ?int $userId = null,
+        bool $nonprofit = false,
     ): void {
         VatStatusService::seedInitialStatus($pdo, $supplierId, $isVatPayer, $isIdentified);
-        $this->accountingFramework->initializeCz500Baseline($supplierId, $userId);
+        $this->accountingFramework->initializeBaseline($supplierId,
+            $nonprofit ? AccountingFrameworkService::CZ_504 : AccountingFrameworkService::CZ_500, $userId);
 
         // ⚠️ Historie účetního režimu musí vzniknout spolu s firmou — jinak dotazy
         // „jaký režim platil v roce X" padají na dnešní `supplier.accounting_mode`.

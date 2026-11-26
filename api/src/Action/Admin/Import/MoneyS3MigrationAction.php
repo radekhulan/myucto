@@ -148,7 +148,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             ['agenda_ico' => $agenda->ico, 'version' => $agenda->version, 'years' => $agenda->fiscalYears()],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + ['preflight' => $preflight, 'reports' => []]), 201);
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + ['preflight' => $preflight, 'reports' => []], supports504: true), 201);
     }
 
     /** @param array<string,string> $args */
@@ -180,7 +180,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             'status' => MoneyS3Uploads::STATUS_READY,
             'preflight' => $preflight,
             'reports' => array_map('intval', array_keys(MoneyS3Uploads::reports($supplierId, $token))),
-        ]));
+        ], supports504: true));
     }
 
     /** @param array<string,string> $args */

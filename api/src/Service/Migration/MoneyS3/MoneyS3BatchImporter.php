@@ -123,6 +123,7 @@ final class MoneyS3BatchImporter
                 throw new MoneyS3Exception('create_forbidden', "Firma s IČO {$ico} v MyÚčtu není a zakládat firmy nemáte oprávnění.");
             }
 
+            $nonprofit = !$agenda->taxRecordsOnly() && $backup->hasNonprofitChart();
             $perYear = FiledDppoFiling::latestPerYear($filings, $ico, static fn (array $e): string => (string) ($e['file'] ?? ''));
             $fromYear = $this->fromYear($backup, $options, $targetId, $relink);
             $summary['from_year_auto'] = $options->fromYear === MoneyS3BatchOptions::FROM_YEAR_AUTO;
@@ -139,9 +140,9 @@ final class MoneyS3BatchImporter
             try {
                 $action = 'existing';
                 if ($targetId === null) {
-                    $identity = $this->identity($ico, $agenda, $backup, $perYear, $options);
+                    $identity = $this->identity($ico, $agenda, $backup, $perYear, $options, $nonprofit);
                     $summary['identity'] = $identity->toArray();
-                    $targetId = $this->companies->create($identity, $actor->userId, $actor->assignCreator, $options->useRegistry);
+                    $targetId = $this->companies->create($identity, $actor->userId, $actor->assignCreator, $options->useRegistry, $nonprofit);
                     $action = 'created';
                 }
                 if ($options->groupId !== null && !$relink) {
@@ -275,7 +276,7 @@ final class MoneyS3BatchImporter
     /**
      * @param array<int,array{filing:FiledDppoFiling}> $perYear
      */
-    private function identity(string $ico, AgendaInfo $agenda, Ms3Backup $backup, array $perYear, MoneyS3BatchOptions $options): MigrationCompanyIdentity
+    private function identity(string $ico, AgendaInfo $agenda, Ms3Backup $backup, array $perYear, MoneyS3BatchOptions $options, bool $nonprofit): MigrationCompanyIdentity
     {
         $latest = $perYear !== [] ? $perYear[array_key_last($perYear)]['filing'] : null;
         $registry = $options->useRegistry ? $this->companies->lookupRegistry($ico, $agenda->dic !== '' ? $agenda->dic : (string) $latest?->dic) : ['ares' => null, 'vat_payer' => null];
@@ -285,7 +286,7 @@ final class MoneyS3BatchImporter
             $latest,
             $registry['ares'],
             $registry['vat_payer'],
-            $registry['vat_payer'] === null ? self::journalUsesVat($backup) : null,
+            $registry['vat_payer'] === null && !$nonprofit ? self::journalUsesVat($backup) : null,
             FiledDppoFiling::firstPeriodStart($perYear),
         );
     }

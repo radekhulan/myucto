@@ -2796,6 +2796,8 @@
     "reports_vat_by_dimension": "VAT by dimension"
   },
   "migration_nonprofit_notice": {
+    "title_504": "Transferring a non-profit organisation’s accounts",
+    "body_504": "A ledger kept under Decree 504 can be transferred to a company with the same accounting framework. The transfer assigns all imported income and expenses to the main activity. Your accountant should reassign entries that belong to economic activities. Funds, grants and membership fees are transferred as journal entries. Separate registers are not created. Your accountant sets the tax treatment of income and expenses.",
     "title": "Data transfer has not been verified for non-profit organisations",
     "body": "This company is a non-profit organisation or another accounting unit under Decree 504/2002 Coll. (association, foundation, institute, owners' association). The data transfer assumes the business chart of accounts and statements under Decree 500/2002 Coll. and does not know main and economic activities, funds or the Decree 504 statements. Transferring accounting into a period kept under Decree 504 is refused. Please contact support before the transfer.",
     "body_native": "This company is a non-profit organisation or another accounting unit under Decree 504/2002 Coll. (association, foundation, institute, owners' association). A MyÚčto export transfers the chart of accounts and the journal only into a company with the same accounting framework (Decree 500 or 504) and does not transfer members and fees, grants, capital or the non-profit income tax records. The transfer has not been verified for non-profit organisations, so please contact support before the transfer.",

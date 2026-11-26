@@ -28,7 +28,7 @@ final class ChartAccountCreator
      * @param bool $useSourceNormalSide použít i null ze zdroje místo strany sourozence
      * @return array{id:int,sibling:string}|null null = sourozenec není, chyba je v protokolu
      */
-    public function createSynthetic(int $supplierId, string $synthetic, string $name, ImportProtocol $protocol, string $step, bool $typeFromInContext = false, ?string $sourceAccountType = null, ?string $sourceNormalSide = null, bool $useSourceNormalSide = false): ?array
+    public function createSynthetic(int $supplierId, string $synthetic, string $name, ImportProtocol $protocol, string $step, bool $typeFromInContext = false, ?string $sourceAccountType = null, ?string $sourceNormalSide = null, bool $useSourceNormalSide = false, ?string $taxDeductibility = null): ?array
     {
         $sibling = null;
         if ($sourceAccountType === null) {
@@ -53,6 +53,7 @@ final class ChartAccountCreator
             'is_synthetic' => true,
             'parent_id' => null,
             'is_active' => true,
+            'tax_deductibility' => $taxDeductibility ?? 'deductible',
         ]);
         if ($sibling !== null) {
             $protocol->warn($step, 'synthetic_created', "Syntetický účet {$synthetic} v osnově chyběl, založen s typem podle účtu {$sibling['account_code']}. Zkontrolujte jeho zařazení do výkazů.",
@@ -67,7 +68,7 @@ final class ChartAccountCreator
      * @param array<string,mixed> $parent řádek syntetického účtu
      * @param bool $useSourceNormalSide použít i null ze zdroje místo strany rodiče
      */
-    public function createAnalytic(int $supplierId, string $code, string $name, array $parent, ?string $sourceNormalSide = null, bool $useSourceNormalSide = false): int
+    public function createAnalytic(int $supplierId, string $code, string $name, array $parent, ?string $sourceNormalSide = null, bool $useSourceNormalSide = false, ?string $taxDeductibility = null): int
     {
         return $this->accounts->insert($supplierId, [
             'account_code' => $code,
@@ -77,6 +78,7 @@ final class ChartAccountCreator
             'is_synthetic' => false,
             'parent_id' => (int) $parent['id'],
             'is_active' => true,
+            'tax_deductibility' => $taxDeductibility ?? 'deductible',
         ]);
     }
 }

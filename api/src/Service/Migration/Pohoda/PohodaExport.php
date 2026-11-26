@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
+use MyInvoice\Service\Migration\Shared\NonprofitChart;
 use MyInvoice\Support\CompanyIdNormalizer;
 
 /**
@@ -180,18 +181,11 @@ final class PohodaExport
      */
     public function hasNonprofitChart(): bool
     {
-        if ($this->nonprofitChart !== null) {
-            return $this->nonprofitChart;
-        }
-        $equity504 = false;
-        foreach ($this->records('chart', 'itemAccount') as $r) {
-            $code = (string) ($r['@code'] ?? '');
-            if (str_starts_with($code, '411')) {
-                return $this->nonprofitChart = false;
+        return $this->nonprofitChart ??= NonprofitChart::matches((function (): \Generator {
+            foreach ($this->records('chart', 'itemAccount') as $row) {
+                yield (string) ($row['@code'] ?? '');
             }
-            $equity504 = $equity504 || str_starts_with($code, '901') || str_starts_with($code, '931');
-        }
-        return $this->nonprofitChart = $equity504;
+        })());
     }
 
     /**

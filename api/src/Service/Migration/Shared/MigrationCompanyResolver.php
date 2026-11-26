@@ -110,10 +110,10 @@ final class MigrationCompanyResolver
      * @param bool $useRegistry obohatit firmu z ARES a registru plátců (síť)
      * @throws \MyInvoice\Service\License\LicenseCompanyLimitExceeded
      */
-    public function create(MigrationCompanyIdentity $identity, int $userId, bool $assignCreator, bool $useRegistry): int
+    public function create(MigrationCompanyIdentity $identity, int $userId, bool $assignCreator, bool $useRegistry, bool $nonprofit = false): int
     {
         $input = $identity->supplierInput();
-        $supplierId = $this->creator->create($input, $userId, $assignCreator);
+        $supplierId = $this->creator->create($input, $userId, $assignCreator, $nonprofit);
 
         if ($identity->nace !== null) {
             $this->db->pdo()->prepare("UPDATE supplier SET cz_nace_code = ? WHERE id = ? AND (cz_nace_code IS NULL OR cz_nace_code = '')")

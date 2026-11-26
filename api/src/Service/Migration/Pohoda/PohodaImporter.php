@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AccountingFrameworkException;
 use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
-use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
+use MyInvoice\Service\Migration\Shared\NonprofitActivityDefault;
 use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
@@ -301,32 +301,11 @@ final class PohodaImporter
      */
     private function stampNonprofitActivity(PohodaContext $ctx): void
     {
-        $periodIds = $ctx->periodIds();
-        if (!$ctx->export->hasNonprofitChart() || $periodIds === []) {
-            return;
-        }
-        $pdo = $this->db->pdo();
-        $activity = (new SystemDimensionCatalog($this->db))->ensureForFramework($ctx->supplierId, $ctx->periodStart(), $ctx->userOrNull())['activity'] ?? null;
-        if ($activity === null) {
-            return;
-        }
-        $periodFilter = implode(',', array_fill(0, count($periodIds), '?'));
-        $stmt = $pdo->prepare("INSERT IGNORE INTO journal_entry_line_dimensions
-                (line_id, dimension_type_id, supplier_id, dimension_value_id, assignment_origin, assignment_origin_ref)
-            SELECT l.id, ?, l.supplier_id, ?, 'explicit', 'pohoda_import'
-              FROM journal_entry_lines l
-              JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-             WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND a.account_code REGEXP '^[56]'
-               AND e.period_id IN ({$periodFilter})
-               AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits sp WHERE sp.line_id = l.id AND sp.dimension_type_id = ?)");
-        $stmt->execute([$activity['id'], $activity['values']['main'], $ctx->supplierId, ...$periodIds, $activity['id']]);
-        $lines = $stmt->rowCount() + $ctx->nonprofitLines;
-        if ($lines > 0) {
-            $ctx->protocol->warn(PohodaReconciler::STEP, 'nonprofit_activity_default', sprintf(
-                '%d řádkům nákladů a výnosů převod nastavil hlavní činnost, hlavní a hospodářskou činnost z POHODY neodvozuje (činnosti POHODY převádí do samostatné dimenze Činnost POHODY). Účetní přeřadí hospodářskou činnost podle skutečnosti, ovlivňuje to výkazy i daň z příjmů.',
-                $lines,
-            ), ['lines' => $lines]);
+        if ($ctx->export->hasNonprofitChart()) {
+            (new NonprofitActivityDefault($this->db))->assign($ctx->supplierId, $ctx->periodIds(), $ctx->periodStart(),
+                $ctx->userOrNull(), 'pohoda_import', $ctx->protocol, PohodaReconciler::STEP,
+                'hlavní a hospodářskou činnost z POHODY neodvozuje (činnosti POHODY převádí do samostatné dimenze Činnost POHODY)',
+                $ctx->nonprofitLines);
         }
     }
 

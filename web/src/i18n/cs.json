@@ -2796,6 +2796,8 @@
     "reports_vat_by_dimension": "DPH podle dimenze"
   },
   "migration_nonprofit_notice": {
+    "title_504": "Převod účetnictví neziskové organizace",
+    "body_504": "Převod převezme agendu podle vyhlášky 504 do firmy se stejným účetním rámcem. Rozlišení hlavní a hospodářské činnosti se nepřebírá. Náklady a výnosy převod zařadí do hlavní činnosti a účetní hospodářskou činnost přeřadí podle skutečnosti. Fondy, dotace a členské příspěvky se převezmou jako účetní zápisy. Samostatná evidence se nezakládá. Zdanitelnost výnosů a uznatelnost nákladů nastaví účetní.",
     "title": "Převod pro neziskové organizace nebyl ověřen",
     "body": "Tato firma je nezisková organizace nebo jiná účetní jednotka podle vyhlášky 504/2002 Sb. (spolek, nadace, ústav, SVJ). Převod dat počítá s osnovou a výkazy podnikatele podle vyhlášky 500/2002 Sb. a nezná hlavní a hospodářskou činnost, fondy ani výkazy podle vyhlášky 504. Převod účetnictví do období vedeného podle vyhlášky 504 se odmítne. Před převodem proto kontaktujte podporu.",
     "body_native": "Tato firma je nezisková organizace nebo jiná účetní jednotka podle vyhlášky 504/2002 Sb. (spolek, nadace, ústav, SVJ). Export MyÚčto přenese osnovu a účetní deník jen do firmy se stejným účetním rámcem (vyhláška 500, nebo 504) a nepřenáší evidenci členů a příspěvků, dotací, kapitálu ani podklady daně z příjmů neziskové organizace. Převod pro neziskové organizace nebyl ověřen, před převodem proto kontaktujte podporu.",

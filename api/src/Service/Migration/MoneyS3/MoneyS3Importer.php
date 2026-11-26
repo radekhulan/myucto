@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AccountingFrameworkException;
 use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
+use MyInvoice\Service\Migration\Shared\NonprofitActivityDefault;
 use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingModeRepository;
@@ -463,7 +464,9 @@ final class MoneyS3Importer
         // roky a jejich kontrolu vypsal taxRecordsPreflight().
         $plan = $taxRecords ? [] : ($journalPreview['plan'] ?? $this->journal->plan($backup, $options, $calendar));
         if ($plan !== []) {
-            try { (new AccountingFrameworkImportGuard($this->db))->assertCz500Periods($supplierId, $plan); }
+            $nonprofit = $backup->hasNonprofitChart();
+            $frameworkPeriods = $nonprofit && $openingOnly !== null ? [...$plan, $openingOnly] : $plan;
+            try { (new AccountingFrameworkImportGuard($this->db, $nonprofit, 'Money S3'))->assertCz500Periods($supplierId, $frameworkPeriods); }
             catch (AccountingFrameworkException $e) { $add('error', $e->errorCode, $e->getMessage()); }
         }
         if (!$taxRecords && $plan === [] && $options->toYear !== null) {
@@ -799,7 +802,7 @@ final class MoneyS3Importer
         // jednotky se jí netýkají a převod je nemění.
         $automationManaged = !$ctx->taxRecords;
 
-        $frameworkGuard = new AccountingFrameworkImportGuard($this->db);
+        $frameworkGuard = new AccountingFrameworkImportGuard($this->db, $ctx->nonprofit(), 'Money S3');
         $frameworkPeriods = $this->journal->plan($backup, $options, $this->periods->fiscalCalendar($supplierId));
         if ($openingOnly !== null) {
             // Rok jen s počátečními stavy: převod do něj zapisuje otevírací zápis.
@@ -1065,7 +1068,15 @@ final class MoneyS3Importer
             CashBankImporter::STEP_CASH => fn () => $this->cashBank->importCash($ctx),
             CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
-            DimensionImporter::STEP => fn () => $this->dimensions->run($ctx),
+            DimensionImporter::STEP => function () use ($ctx, $seedDate): void {
+                $this->dimensions->run($ctx);
+                if ($ctx->nonprofit()) {
+                    $writable = array_filter($ctx->periods, fn (int $year): bool => $ctx->yearWritable($year), ARRAY_FILTER_USE_KEY);
+                    (new NonprofitActivityDefault($this->db))->assign($ctx->supplierId, array_column($writable, 'id'), $seedDate,
+                        $ctx->userId > 0 ? $ctx->userId : null, 'money_s3_import', $ctx->protocol, DimensionImporter::STEP,
+                        'činnost z Money S3 nepřebírá');
+                }
+            },
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
             PayrollLiabilityImporter::STEP => fn () => $this->payrollLiabilities->run($ctx),
             RecurringSeriesTakeover::STEP => fn () => $this->takeOverRecurring($ctx),

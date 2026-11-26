@@ -174,7 +174,7 @@ const actions = computed<ActionItem[]>(() => {
       <p class="mt-1 text-sm text-neutral-500">{{ t('money_s3.subtitle') }}</p>
     </div>
 
-    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" />
+    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" supports504 />
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
       <i18n-t keypath="money_s3.support_notice" tag="p">

@@ -506,7 +506,7 @@ const actions = computed<ActionItem[]>(() => {
       <p class="mt-1 text-sm text-neutral-500">{{ tt('subtitle') }}</p>
     </div>
 
-    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" />
+    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" :supports504="props.system === 'pohoda'" />
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="pohoda-support-notice">
       <i18n-t :keypath="te(ownKey('support_notice')) ? ownKey('support_notice') : 'pohoda.support_notice'" tag="p">

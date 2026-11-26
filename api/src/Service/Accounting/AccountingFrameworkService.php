@@ -91,6 +91,11 @@ final class AccountingFrameworkService
      */
     public function initializeCz500Baseline(int $supplierId, ?int $userId = null): bool
     {
+        return $this->initializeBaseline($supplierId, self::CZ_500, $userId);
+    }
+
+    public function initializeBaseline(int $supplierId, string $framework, ?int $userId = null): bool
+    {
         if (!$this->db->pdo()->inTransaction()) {
             throw new \LogicException('Inicializace účetního rámce vyžaduje transakci založení firmy.');
         }
@@ -98,7 +103,7 @@ final class AccountingFrameworkService
             return false;
         }
 
-        $this->recordFramework($supplierId, '1900-01-01', self::CZ_500, $userId);
+        $this->recordFramework($supplierId, '1900-01-01', $framework, $userId);
         return true;
     }
 

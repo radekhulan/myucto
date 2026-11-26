@@ -32,6 +32,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ClosingRepository;
+use MyInvoice\Service\Migration\MoneyS3\MoneyS3ClosingTakeover;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionRepository;
@@ -302,7 +303,7 @@ final class ClosingService
      *
      * @return array<string,mixed>
      */
-    public function state(int $supplierId, int $periodId): array
+    public function state(int $supplierId, int $periodId, bool $moneyS3History = false): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -380,7 +381,7 @@ final class ClosingService
                 && $steps['stock']['status'] === 'done',
             'opening_takeover' => $steps['open_next']['status'] === 'done'
                 ? null
-                : $this->openingTakeoverPreview($supplierId, $period, $steps, $next),
+                : $this->openingTakeoverPreview($supplierId, $period, $steps, $next, $moneyS3History),
         ];
     }
 
@@ -414,7 +415,7 @@ final class ClosingService
      * @param array<string,mixed>|null $next
      * @return array<string,mixed>
      */
-    private function openingTakeoverPreview(int $supplierId, array $period, array $steps, ?array $next): array
+    private function openingTakeoverPreview(int $supplierId, array $period, array $steps, ?array $next, bool $moneyS3History = false): array
     {
         $entries = $next === null ? [] : $this->closing->openingEntriesInPeriod($supplierId, (int) $next['id']);
         $base = [
@@ -426,16 +427,19 @@ final class ClosingService
         ];
         try {
             $openingDate = $next['starts_on'] ?? (new \DateTimeImmutable((string) $period['ends_on']))->modify('+1 day')->format('Y-m-d');
-            $this->assertOpeningFramework($supplierId, (string) $period['ends_on'], $openingDate);
+            $profile = $this->assertOpeningFramework($supplierId, (string) $period['ends_on'], $openingDate);
             if ($entries === []) {
                 return ['status' => 'to_create'] + $base;
             }
+            $moneyS3 = $moneyS3History && $profile->framework === AccountingFrameworkService::CZ_504
+                && (new MoneyS3ClosingTakeover($this->db))->isImportedOpening($supplierId, $entries);
             $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $entries);
             $cmp = $this->compareOpeningBalances(
                 $supplierId,
                 (int) $next['id'],
-                $this->expectedOpeningLines($supplierId, $period, $steps),
+                $this->expectedOpeningLines($supplierId, $period, $steps, $moneyS3),
                 $accountLevel !== null,
+                $moneyS3,
             );
         } catch (ClosingException $e) {
             // Nevyvážené zůstatky (rozbitý deník) hlásí precheck; stav průvodce kvůli
@@ -443,6 +447,7 @@ final class ClosingService
             return ['status' => 'unavailable', 'message' => $e->getMessage()] + $base;
         }
         return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']]
+            + ($moneyS3 ? ['compare_reason' => 'money_s3_history'] : [])
             + ($accountLevel !== null ? ['compare_level' => 'account', 'compare_reason' => $accountLevel] : []) + $base;
     }
 
@@ -499,7 +504,14 @@ final class ClosingService
         return $stmt->fetchColumn() === false ? 'opening_without_dimensions' : null;
     }
 
-    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines, bool $accountLevel = false): array
+    private function matchesImportedMoneyOpening(int $supplierId, array $period, array $steps): bool
+    {
+        $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
+        $comparison = $this->openingTakeoverPreview($supplierId, $period, $steps, $next, true);
+        return $comparison['status'] === 'match' && ($comparison['compare_reason'] ?? null) === 'money_s3_history';
+    }
+
+    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines, bool $accountLevel = false, bool $moneyS3 = false): array
     {
         if ($accountLevel) {
             return OpeningTakeoverComparison::compare(
@@ -521,6 +533,7 @@ final class ClosingService
             $this->closing->openingBalancesWithDimensionsInPeriod($supplierId, $nextPeriodId),
             $linkedTypes,
             $this->roleProfile($supplierId, (string) $this->periods->findById($supplierId, $nextPeriodId)['starts_on']),
+            $moneyS3,
         );
         if ($comparison['diff'] !== []) {
             $values = array_column($dimensions->listValues($supplierId), null, 'id');
@@ -592,7 +605,7 @@ final class ClosingService
      * @param array<string, array<string,mixed>> $steps
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    private function expectedOpeningLines(int $supplierId, array $period, array $steps): array
+    private function expectedOpeningLines(int $supplierId, array $period, array $steps, bool $preserveRetainedResult = false): array
     {
         $periodId = (int) $period['id'];
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
@@ -605,12 +618,12 @@ final class ClosingService
         if ($steps['close_books']['status'] === 'done') {
             $closingEntry = $this->findEntryWithLines($supplierId, 'closing', $periodId);
             $profit = round((float) ($steps['close_books']['payload']['profit'] ?? 0.0), 2);
-            return OpeningEntryExpectation::fromClosingLines($closingEntry['lines'] ?? [], $profit, $profile);
+            return OpeningEntryExpectation::fromClosingLines($closingEntry['lines'] ?? [], $profit, $profile, $preserveRetainedResult);
         }
         $pl = $this->plBalancesForProfile($supplierId, $period, $profile);
         $bs = $this->bsBalancesForProfile($supplierId, $period, $profile);
         $profit = round((float) $this->builder->closingLines($pl, $bs, $profile)['profit'], 2);
-        return $this->builder->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl));
+        return $this->builder->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl), preserveRetainedResult: $preserveRetainedResult);
     }
 
     /**
@@ -4947,9 +4960,9 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
      */
-    public function closeBooks(int $supplierId, int $periodId, int $rowVersion, array $meta = [], bool $overrideUnposted = false, ?string $overrideReason = null): array
+    public function closeBooks(int $supplierId, int $periodId, int $rowVersion, array $meta = [], bool $overrideUnposted = false, ?string $overrideReason = null, bool $moneyS3History = false): array
     {
-        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta, $overrideUnposted, $overrideReason): array {
+        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta, $overrideUnposted, $overrideReason, $moneyS3History): array {
             (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, ['closing']);
@@ -4960,11 +4973,15 @@ final class ClosingService
 
 
             $taxAssessment = $this->nonprofitTaxAssessment->closingCheck($supplierId, $periodId, true);
-            if (!$taxAssessment['complete']) {
+            $steps = $this->stepsMap($supplierId, $periodId);
+            $taxAssessmentTakenOver = !$taxAssessment['complete'] && $moneyS3History && $taxAssessment['assessment_id'] === null
+                && $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504
+                && (new MoneyS3ClosingTakeover($this->db))->hasOnlyImportedEntries($supplierId, $periodId)
+                && $this->matchesImportedMoneyOpening($supplierId, $period, $steps);
+            if (!$taxAssessment['complete'] && !$taxAssessmentTakenOver) {
                 throw new ClosingException('nonprofit_tax_assessment_required', 'Uzavření knih vyžaduje aktuální potvrzené daňové posouzení činností.', 422);
             }
 
-            $steps = $this->stepsMap($supplierId, $periodId);
             if (!$this->stepsComplete($steps, $this->preCloseStepKeys($supplierId, $period))) {
                 throw new ClosingException(
                     'closing_steps_incomplete',
@@ -4992,6 +5009,9 @@ final class ClosingService
                 );
             }
             $failing = $this->failingErrorChecks($supplierId, $period);
+            if ($taxAssessmentTakenOver) {
+                $failing = array_values(array_diff($failing, ['nonprofit_tax_assessment']));
+            }
             if ($failing !== []) {
                 throw new ClosingException(
                     'precheck_failed',
@@ -5149,6 +5169,9 @@ final class ClosingService
                 'category_frozen' => $categoryFrozen,
                 'notes_frozen' => $notesFrozen,
             ] + ($takenOverClosing !== [] ? ['closing_taken_over' => true, 'taken_over_entry_ids' => $takenOverClosing] : []);
+            if ($taxAssessmentTakenOver) {
+                $payload['nonprofit_tax_assessment_skipped'] = 'money_s3_history';
+            }
             if ($unpostedOverride !== null) {
                 // Výjimka do závěrkového balíčku (EP-10b) — auditovatelný záznam, že se
                 // knihy uzavřely přes nezaúčtované doklady, s důvodem a seznamem dokladů.
@@ -5175,7 +5198,7 @@ final class ClosingService
                 'profit' => $profit,
                 'document_no' => $docNo,
                 'category_frozen' => $categoryFrozen,
-            ], $meta);
+            ] + array_intersect_key($payload, ['nonprofit_tax_assessment_skipped' => true]), $meta);
             return $payload + ['status' => 'closed'];
         });
     }
@@ -5260,13 +5283,13 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
      */
-    public function openNext(int $supplierId, int $periodId, int $rowVersion, array $meta = [], ?string $replaceTakenOverReason = null): array
+    public function openNext(int $supplierId, int $periodId, int $rowVersion, array $meta = [], ?string $replaceTakenOverReason = null, bool $moneyS3History = false): array
     {
         $replaceTakenOverReason = $replaceTakenOverReason === null ? null : trim($replaceTakenOverReason);
         if ($replaceTakenOverReason === '') {
             $replaceTakenOverReason = null;
         }
-        return $this->tx(fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $rowVersion, $meta, $replaceTakenOverReason): array {
+        return $this->tx(fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $rowVersion, $meta, $replaceTakenOverReason, $moneyS3History): array {
             (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             // Past #37: open_next musí jít i nad 'approved' obdobím. Je to čistě technický
@@ -5316,7 +5339,11 @@ final class ClosingService
             $takenOverAccounts = 0;
             if ($takenOver !== []) {
                 $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $takenOver);
-                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines, $accountLevel !== null);
+                $moneyS3 = $moneyS3History && $replaceTakenOverReason === null
+                    && $openingProfile->framework === AccountingFrameworkService::CZ_504
+                    && (new MoneyS3ClosingTakeover($this->db))->isImportedOpening($supplierId, $takenOver);
+                $comparisonLines = $moneyS3 ? $this->expectedOpeningLines($supplierId, $period, $steps, true) : $lines;
+                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $comparisonLines, $accountLevel !== null, $moneyS3);
                 if ($replaceTakenOverReason !== null) {
                     $replacedDumps = [];
                     foreach ($takenOver as $entry) {

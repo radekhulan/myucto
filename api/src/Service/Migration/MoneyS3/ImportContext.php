@@ -169,6 +169,11 @@ final class ImportContext
         $this->calendar = $calendar ?? FiscalCalendar::calendar();
     }
 
+    public function nonprofit(): bool
+    {
+        return !$this->taxRecords && $this->backup->hasNonprofitChart();
+    }
+
     public function report(string $step, int $done, int $total): void
     {
         if ($this->progress !== null) {

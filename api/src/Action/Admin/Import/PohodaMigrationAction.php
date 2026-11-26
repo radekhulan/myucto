@@ -212,7 +212,7 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             'pohoda_converted' => $converted,
             'relink_preflight' => (object) $relinkPreflight,
             'stock_module' => $this->stockModule($supplierId),
-        ]), $payrollNotice));
+        ], supports504: $preflight !== []), $payrollNotice));
     }
 
     /**

@@ -11,8 +11,11 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 
 final class AccountingFrameworkImportGuard
 {
-    /** @param bool $allow504 převod umí i rámec 504 (zatím jen POHODA s osnovou pro neziskové organizace) */
-    public function __construct(private readonly Connection $db, private readonly bool $allow504 = false) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly bool $allow504 = false,
+        private readonly ?string $nonprofitSource = null,
+    ) {}
 
     public function assertCz500Periods(int $supplierId, array $periods, bool $currentRead = false): void
     {
@@ -27,6 +30,10 @@ final class AccountingFrameworkImportGuard
                 $period = $stmt->fetch(\PDO::FETCH_ASSOC) ?: $period;
             }
             foreach ($frameworks->forInterval($supplierId, $period['starts_on'], $period['ends_on'], $currentRead) as $framework) {
+                if ($this->allow504 && $this->nonprofitSource !== null && $framework === AccountingFrameworkService::CZ_500) {
+                    throw new AccountingFrameworkException('nonprofit_agenda_needs_504',
+                        "Agenda {$this->nonprofitSource} je vedená v osnově pro neziskové organizace, převáděná období v MyÚčtu ale zasahují do rámce vyhlášky 500. Nastavte převáděným obdobím účetní rámec vyhlášky 504 a spusťte převod znovu.", 409);
+                }
                 if ($framework !== AccountingFrameworkService::CZ_500
                     && !($this->allow504 && $framework === AccountingFrameworkService::CZ_504)) {
                     $this->unsupported();

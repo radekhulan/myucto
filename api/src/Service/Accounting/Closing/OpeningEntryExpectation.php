@@ -9,7 +9,7 @@ use MyInvoice\Service\Accounting\AccountingRoleProfile;
 
 final class OpeningEntryExpectation
 {
-    public static function fromClosingLines(array $lines, float $profit, ?AccountingRoleProfile $profile = null): array
+    public static function fromClosingLines(array $lines, float $profit, ?AccountingRoleProfile $profile = null, bool $preserveRetainedResult = false): array
     {
         $profile ??= new AccountingRoleProfile();
         $bs = [];
@@ -32,6 +32,6 @@ final class OpeningEntryExpectation
                 $bs[] = $balance;
             }
         }
-        return (new ClosingEntryBuilder())->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl));
+        return (new ClosingEntryBuilder())->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl), preserveRetainedResult: $preserveRetainedResult);
     }
 }
