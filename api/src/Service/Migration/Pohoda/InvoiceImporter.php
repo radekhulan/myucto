@@ -372,7 +372,7 @@ final class InvoiceImporter
         if (!$this->rateIssuedItems($ctx, $step, $doc, $amounts, $class, $clientId, $snapshot)) {
             return;
         }
-        $review = $class['reasons'] !== [];
+        $review = self::heldForReview($class['reasons'], $previous, $ctx->taxEvidence);
         $notes = $bucket === 'receivable' ? [self::OTHER_ITEM_IN_VAT_NOTE['receivable']] : [];
         if ($snapshot['dic'] !== '' && $ctx->vat->forcesA5($doc['vat_class']) && abs($amounts['total']) > self::KH_LIMIT) {
             // Pohoda doklad vykázala v KH A.5 (odběratel bez DIČ plátce) - MyÚčto rozhoduje
@@ -484,7 +484,7 @@ final class InvoiceImporter
         if ($amounts['advance_items'] > 0) {
             $p->count($step, 'advance_deductions_with_vat', $amounts['advance_items']);
         }
-        $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons']);
+        $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons'], $review);
     }
 
     /**
@@ -564,8 +564,8 @@ final class InvoiceImporter
             }
         }
         $type = $kind === 'invoice' && $amounts['gross_total'] < 0 ? 'credit_note' : $kind;
-        $review = $class['reasons'] !== [];
         $previous = $this->isPreviousPeriod($ctx, $doc);
+        $review = self::heldForReview($class['reasons'], $previous, $ctx->taxEvidence);
         $number = $this->freeNumber('purchase_invoices', $ctx->supplierId, $doc['number'], (int) substr($doc['issue'], 0, 4));
         if ($number === null) {
             $p->warn($step, 'number_taken', "Číslo dokladu {$doc['number']} už ve firmě má jiný doklad, nepřevzat.", ['document_no' => $doc['number']]);
@@ -718,7 +718,7 @@ final class InvoiceImporter
         if ($amounts['advance_items'] > 0) {
             $p->count($step, 'advance_deductions_with_vat', $amounts['advance_items']);
         }
-        $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons']);
+        $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons'], $review);
     }
 
     /**
@@ -1543,6 +1543,19 @@ final class InvoiceImporter
     }
 
     /**
+     * Koncept k ruční kontrole jen u dokladu, jehož DPH převod přebírá. Doklad minulého období
+     * v podvojném účetnictví má DPH podanou původním programem a zůstatek v počátečních stavech:
+     * koncept by na ní nic neopravil a jen by ho vyřadil ze saldokonta, otevírací zápis by
+     * pak nesl doklad, který sestava nevidí. Důvody zůstanou v poznámce dokladu a v protokolu.
+     *
+     * @param list<string> $reasons
+     */
+    private static function heldForReview(array $reasons, bool $previous, bool $taxEvidence): bool
+    {
+        return $reasons !== [] && !($previous && !$taxEvidence);
+    }
+
+    /**
      * Číslo dokladu, které ve firmě ještě není; obsazené dostane příponu roku.
      *
      * @return array{number:string,suffixed:bool}|null
@@ -1564,14 +1577,18 @@ final class InvoiceImporter
      * @param array{number:string,suffixed:bool} $number
      * @param list<string> $reasons
      */
-    private function reportNumberAndReview(PohodaContext $ctx, string $step, string $docNo, array $number, array $reasons): void
+    private function reportNumberAndReview(PohodaContext $ctx, string $step, string $docNo, array $number, array $reasons, bool $review): void
     {
         $p = $ctx->protocol;
         if ($number['suffixed']) {
             $p->count($step, 'suffixed');
             $p->info($step, 'number_suffixed', "Doklad {$docNo}: číslo už ve firmě je, převzat jako {$number['number']}.", ['document_no' => $docNo]);
         }
-        if ($reasons !== []) {
+        if ($reasons !== [] && !$review) {
+            $p->count($step, 'previous_period_vat_kept');
+            $p->info($step, 'previous_period_vat_kept', "Doklad {$docNo} minulého období převzat bez kontroly DPH, období podal původní program: "
+                . self::reasonList($reasons) . '.', ['document_no' => $docNo, 'reasons' => $reasons]);
+        } elseif ($reasons !== []) {
             $p->count($step, 'review');
             $p->warn($step, 'needs_review', "Doklad {$docNo} převzat jako koncept k ruční kontrole: " . self::reasonList($reasons)
                 . '. Do DPH ani do účtování nevstoupí, dokud ho neopravíte a nepotvrdíte.', ['document_no' => $docNo, 'reasons' => $reasons]);
@@ -1623,7 +1640,11 @@ final class InvoiceImporter
         foreach ($notes as $n) {
             $note .= '; ' . $n;
         }
-        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+        if ($reasons === []) {
+            return $note;
+        }
+        // Doklad minulého období se nekontroluje ({@see self::heldForReview()}), důvod je jen informace.
+        return $note . ($previous ? '. Členění DPH z POHODY, období už podané: ' : '. K ruční kontrole: ') . self::reasonList($reasons) . '.';
     }
 
     /**

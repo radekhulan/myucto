@@ -2051,7 +2051,11 @@ final class SyntheticPohodaExport
                 $journal .= self::entry('Dlouhodobý majetek', self::IMPROVED_ASSET, 'Odpis - Testovací linka', 5000, '551000', '082002', $date);
             }
         }
-        if ($withOss) {
+        // Doklad minulého období nemá zápis v deníku agendy, jeho zůstatek nese počáteční stav.
+        if ($withOss && $oss->date < self::YEAR . '-01-01') {
+            $journal .= self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 1230, '311001', '701000', self::YEAR . '-01-01')
+                . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 1230, '701000', '411000', self::YEAR . '-01-01');
+        } elseif ($withOss) {
             $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
                 . self::entry('Vydané faktury', '26FV0002', 'DPH OSS', 230, '311001', '343090', '2026-02-10');
         }
@@ -2141,7 +2145,8 @@ final class SyntheticPohodaExport
         if ($withOss) {
             $percent = $ossRateForm !== self::OSS_RATE_VALUE;
             $issued .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::OSS_DOCUMENT . '</typ:numberRequested></inv:number>'
-                . '<inv:symVar>260002</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
+                . '<inv:symVar>260002</inv:symVar><inv:date>' . $oss->date . '</inv:date><inv:dateTax>' . $oss->date . '</inv:dateTax><inv:dateAccounting>' . $oss->date . '</inv:dateAccounting>'
+                . '<inv:dateDue>' . date('Y-m-d', strtotime($oss->date . ' +14 days')) . '</inv:dateDue>'
                 . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Prodej zboží na dálku - SK</inv:text>'
                 . ($oss->moss !== null ? '<inv:MOSS><typ:ids>' . $oss->moss . '</typ:ids></inv:MOSS><inv:evidentiaryResourcesMOSS><typ:ids>G</typ:ids></inv:evidentiaryResourcesMOSS>' : '')
                 . '<inv:partnerIdentity><typ:address><typ:name>Jana</typ:name><typ:surname>Testovacia</typ:surname><typ:city>Bratislava</typ:city>'

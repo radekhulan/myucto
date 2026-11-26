@@ -15,7 +15,7 @@ use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use PDO;
 
 /**
- * Kontrola 5: saldokonto 311, 321, 324 a 325 proti hlavní knize po účtech a letech.
+ * Kontrola 5: saldokonto 311, 314, 315, 321, 324 a 325 proti hlavní knize po účtech a letech.
  *
  * Sestava Saldokonto ({@see SaldoService}) porovná otevřené položky dokladů se zůstatkem
  * účtu v hlavní knize. Kontrola ji spustí ke konci každého účetního období s deníkem (nebo
@@ -29,7 +29,7 @@ final class SubledgerLedgerCheck extends SourceScopedCheck
     public const KEY = 'subledger_vs_ledger';
 
     /** Saldokontní účty kontroly. */
-    public const ACCOUNTS = ['311', '321', '324', '325'];
+    public const ACCOUNTS = ['311', '314', '315', '321', '324', '325'];
 
     public function __construct(
         MigrationSources $sources,
@@ -46,7 +46,7 @@ final class SubledgerLedgerCheck extends SourceScopedCheck
 
     public function title(): string
     {
-        return 'Saldokonto 311, 321, 324 a 325 proti hlavní knize';
+        return 'Saldokonto 311, 314, 315, 321, 324 a 325 proti hlavní knize';
     }
 
     public function manual(): string

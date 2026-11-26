@@ -92,10 +92,11 @@ final class OtherItemImporter
                 if ($class !== null && $class['in_return']) {
                     continue; // faktura z kroku dokladů
                 }
-                $candidate = self::candidate($record, $agenda, $ctx->vat);
+                [$candidate, $rejection] = self::assess($record, $agenda, $ctx->vat);
                 if ($candidate === null) {
                     $p->count(self::STEP, 'requires_review');
-                    $p->warn(self::STEP, 'other_item_review', "Doklad {$number} (" . self::label($agenda) . ') má částky, měnu nebo zálohu, které převod do agendy nepřevezme; zůstává jen v deníku.', ['document_no' => $number]);
+                    $p->warn(self::STEP, 'other_item_review', "Doklad {$number} (" . self::label($agenda) . ") převod do agendy nepřevezme ({$rejection}); zůstává jen v deníku.",
+                        ['document_no' => $number, 'reason' => $rejection]);
                     continue;
                 }
                 $candidates = [];
@@ -338,46 +339,60 @@ final class OtherItemImporter
      */
     public static function candidate(array $record, string $agenda, PohodaVat $vat): ?array
     {
-        if (!in_array($agenda, ['receivable', 'commitment'], true)) return null;
+        return self::assess($record, $agenda, $vat)[0];
+    }
+
+    /**
+     * Totéž co {@see self::candidate()}, u odmítnutého dokladu s důvodem pro protokol:
+     * bez něj účetní nepozná, co v POHODĚ opravit, a stovky dokladů zůstanou jen v deníku.
+     *
+     * @return array{0:array{amount:float,remaining:float,due:string,title:string,symbol:?string}|null, 1:?string}
+     */
+    public static function assess(array $record, string $agenda, PohodaVat $vat): array
+    {
+        $no = static fn (string $reason): array => [null, $reason];
+        if (!in_array($agenda, ['receivable', 'commitment'], true)) return $no('jiná agenda');
         $header = PohodaXml::get($record, 'invoiceHeader');
         $summary = PohodaXml::get($record, 'invoiceSummary/homeCurrency');
         $code = PohodaXml::text($header, 'classificationVAT/ids');
-        if (PohodaXml::text($header, 'MOSS/ids') !== '') return null;
+        if (PohodaXml::text($header, 'MOSS/ids') !== '') return $no('doklad v režimu OSS');
         if ($code !== '') {
             $class = $agenda === 'receivable' ? $vat->sale($code, 0.0) : $vat->purchase($code);
-            if ($class === null || $class['in_return']) return null;
+            if ($class === null) return $no("členění DPH „{$code}“ převod nezařazuje");
+            if ($class['in_return']) return $no("členění DPH „{$code}“ je v přiznání");
         }
         // Bez členění rozhoduje nulová daň, kterou níž hlídají částky souhrnu i položek
         // ({@see self::outsideReturnWithoutVatClass()}).
-        if (PohodaXml::text($record, 'invoiceSummary/foreignCurrency/currency/ids') !== '') return null;
-        if (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') !== []) return null;
+        if (PohodaXml::text($record, 'invoiceSummary/foreignCurrency/currency/ids') !== '') return $no('doklad v cizí měně');
+        if (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') !== []) return $no('doklad odečítá zálohu');
         foreach (['priceLow', 'priceLowVAT', 'priceHigh', 'priceHighVAT', 'price3', 'price3VAT', 'round/priceRound'] as $field) {
-            if (abs(PohodaXml::num($summary, $field)) >= 0.005) return null;
+            if (abs(PohodaXml::num($summary, $field)) >= 0.005) return $no("souhrn má částku v poli {$field}, převod bere jen částky bez DPH (priceNone)");
         }
         $amount = round(PohodaXml::num($summary, 'priceNone'), 2);
         $summaryTotal = PohodaXml::text($summary, 'priceSum');
-        if ($summaryTotal !== '' && (!is_numeric($summaryTotal) || abs((float) $summaryTotal - $amount) >= 0.005)) return null;
+        if ($summaryTotal !== '' && (!is_numeric($summaryTotal) || abs((float) $summaryTotal - $amount) >= 0.005)) return $no('celková částka nesedí na částku bez DPH');
         $detailAmount = 0.0;
         $details = PohodaXml::all($record, 'invoiceDetail/invoiceItem');
         foreach ($details as $detail) {
-            if (abs(PohodaXml::num($detail, 'homeCurrency/priceVAT')) >= 0.005) return null;
+            if (abs(PohodaXml::num($detail, 'homeCurrency/priceVAT')) >= 0.005) return $no('položka nese DPH');
             $detailAmount += PohodaXml::num($detail, 'homeCurrency/price');
         }
-        if ($details !== [] && abs($detailAmount - $amount) >= 0.005) return null;
+        if ($details !== [] && abs($detailAmount - $amount) >= 0.005) return $no('součet položek nesedí na souhrn');
         $remaining = PohodaXml::text($header, 'liquidation/amountHome');
         $remaining = $remaining === '' ? 0.0 : (is_numeric($remaining) ? round((float) $remaining, 2) : null);
-        if ($amount <= 0 || $remaining === null || $remaining < -0.005 || $remaining - $amount >= 0.005) return null;
+        if ($amount <= 0) return $no('nulová nebo záporná částka');
+        if ($remaining === null || $remaining < -0.005 || $remaining - $amount >= 0.005) return $no('zbývá uhradit víc než částka dokladu, nebo záporně');
         $due = PohodaXml::date($header, 'dateDue') ?? PohodaXml::date($header, 'date');
-        if ($due === null) return null;
+        if ($due === null) return $no('chybí datum splatnosti i vystavení');
         $title = PohodaXml::text($header, 'text');
         $symbol = PohodaXml::text($header, 'symVar');
-        return [
+        return [[
             'amount' => $amount,
             'remaining' => max(0.0, $remaining),
             'due' => $due,
             'title' => $title !== '' ? $title : PohodaXml::text($header, 'number/numberRequested'),
             'symbol' => preg_match('/^[0-9]{1,20}$/', $symbol) === 1 ? $symbol : null,
-        ];
+        ], null];
     }
 
     private function posting(int $supplierId, int $entryId, string $agenda, float $amount): ?array

@@ -547,6 +547,21 @@ final class MigrationDataCheckTest extends TestCase
         self::assertSame(500.0, $items[0]['amount_czk']);
     }
 
+    /** Počáteční stav poskytnutých záloh a ostatních pohledávek bez dokladu je rozdíl saldokonta. */
+    public function testSubledgerDifferenceOnAdvancesAndOtherReceivablesIsReported(): void
+    {
+        $this->account('314', 'asset');
+        $this->account('315', 'asset');
+        $this->account('602', 'revenue');
+        $this->post('2025-01-01', '314', '602', 400.0);
+        $this->post('2025-01-01', '315', '602', 300.0);
+
+        $items = $this->service->detail($this->supplierId, SubledgerLedgerCheck::KEY)['items'];
+        $byAccount = array_column(array_map(static fn (array $i): array => [$i['details']['account'], $i['amount_czk']], $items), 1, 0);
+        self::assertSame(['314' => 400.0, '315' => 300.0], $byAccount);
+        self::assertStringContainsString('Zůstatek hlavní knihy 300,00', $items[1]['reason'] ?? '');
+    }
+
     /** Čtení kontroly kurz ČNB nestahuje: chybějící kurz je nález, kurzy se neukládají. */
     public function testForeignAccountWithMissingRateIsReportedWithoutFetching(): void
     {

@@ -46839,7 +46839,7 @@
       },
       "subledger_vs_ledger": {
         "title": "Subledger against the general ledger",
-        "hint": "Accounts 311, 321, 324 and 325 by year.",
+        "hint": "Accounts 311, 314, 315, 321, 324 and 325 by year.",
         "description": "Compares open items of the subledger with the account balance in the general ledger at the end of each year. A difference may be legitimate (overpayment without a document), so it is only reported with a link to the subledger."
       },
       "purchase_settled_uncovered": {

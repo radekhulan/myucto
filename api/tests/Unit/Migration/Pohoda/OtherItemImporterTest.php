@@ -58,6 +58,22 @@ final class OtherItemImporterTest extends TestCase
         self::assertNull(OtherItemImporter::candidate($record, 'receivable', $vat));
     }
 
+    /** Protokol u odmítnutého dokladu říká proč, jinak účetní neví, co v POHODĚ opravit. */
+    public function testRejectedDocumentCarriesConcreteReason(): void
+    {
+        $vat = $this->vat();
+        $record = $this->record();
+        self::assertSame([null], array_slice(OtherItemImporter::assess($record, 'receivable', $vat), 1));
+        $record['invoiceSummary']['homeCurrency']['priceHigh'] = '1200';
+        self::assertStringContainsString('priceHigh', (string) OtherItemImporter::assess($record, 'receivable', $vat)[1]);
+        $record = $this->record();
+        $record['invoiceHeader']['liquidation']['amountHome'] = '1300.00';
+        self::assertStringContainsString('zbývá uhradit', (string) OtherItemImporter::assess($record, 'receivable', $vat)[1]);
+        $record = $this->record();
+        $record['invoiceHeader']['classificationVAT']['ids'] = 'DOMESTIC';
+        self::assertStringContainsString('je v přiznání', (string) OtherItemImporter::assess($record, 'receivable', $vat)[1]);
+    }
+
     public function testPostingTakesOneBalanceAccountAgainstMergedCounterAccounts(): void
     {
         $receivable = [

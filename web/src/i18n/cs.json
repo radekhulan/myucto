@@ -46839,7 +46839,7 @@
       },
       "subledger_vs_ledger": {
         "title": "Saldokonto proti hlavní knize",
-        "hint": "Účty 311, 321, 324 a 325 po letech.",
+        "hint": "Účty 311, 314, 315, 321, 324 a 325 po letech.",
         "description": "Porovná otevřené položky saldokonta se zůstatkem účtu v hlavní knize ke konci každého roku. Rozdíl může být oprávněný (přeplatek bez dokladu), proto se jen hlásí s proklikem do saldokonta."
       },
       "purchase_settled_uncovered": {

@@ -16,10 +16,13 @@ final readonly class OssVariant
      *                                (doklad v POHODĚ není v režimu OSS)
      * @param string  $supplyType     typ plnění položky (`inv:typeServiceMOSS`), `''` = element chybí
      * @param ?string $partnerCountry země v adrese odběratele, `null` = adresa zemi neuvádí
+     * @param string  $date           datum vystavení, plnění i zaúčtování (splatnost o 14 dní později);
+     *                                datum před rokem agendy dělá z dokladu doklad minulého období
      */
     public function __construct(
         public ?string $moss = SyntheticPohodaExport::OSS_COUNTRY,
         public string $supplyType = '',
         public ?string $partnerCountry = SyntheticPohodaExport::OSS_COUNTRY,
+        public string $date = '2026-02-10',
     ) {}
 }

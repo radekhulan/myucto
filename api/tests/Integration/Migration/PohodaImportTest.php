@@ -18,6 +18,7 @@ use MyInvoice\Service\Migration\Pohoda\NonprofitActivityByCentre;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Service\Migration\Pohoda\PohodaPreviousPeriodDraftRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
@@ -2517,6 +2518,76 @@ final class PohodaImportTest extends TestCase
         self::assertNotNull($reason, $this->explain($protocol));
         self::assertStringContainsString('chybí stát MOSS', $reason);
         self::assertSame(0, self::stepCounts($protocol, 'issued_invoices')['oss_items'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Doklad minulého období (zaúčtovaný před rokem agendy, zůstatek je v počátečních stavech)
+     * s tímtéž členěním: DPH za jeho období už podala POHODA a převod ho nepřiznává. Koncept by
+     * ho vyřadil ze saldokonta (otevírací zápis ho nese, sestava koncepty nebere), proto se
+     * převezme jako vystavený a důvod zůstane jen v poznámce a v protokolu jako informace.
+     */
+    public function testPreviousPeriodUnDocumentWithoutMossIsNotDraft(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT,
+            oss: new OssVariant(moss: null, date: '2025-11-10')));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertNotSame('draft', $row['status'], $this->explain($protocol));
+        self::assertNull($this->reviewMessage($protocol), $this->explain($protocol));
+        self::assertContains('previous_period_vat_kept', $this->messageCodes($protocol), $this->explain($protocol));
+        $note = (string) $this->db->pdo()->query('SELECT note_below_items FROM invoices WHERE supplier_id = ' . $supplierId
+            . " AND varsymbol = '" . SyntheticPohodaExport::OSS_DOCUMENT . "'")->fetchColumn();
+        self::assertStringContainsString('chybí stát MOSS', $note);
+        self::assertStringNotContainsString('K ruční kontrole', $note);
+    }
+
+    /**
+     * Starší převod nechal doklad minulého období v konceptu: saldokonto ho nevidělo, přestože
+     * ho otevírací zápis nese. Oprava ho vrátí do stavu, jaký dává opravený převod, nanečisto
+     * nic nemění a opakovaný běh už doklad nenajde.
+     */
+    public function testPreviousPeriodDraftRepairRestoresDocumentToSaldo(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT,
+            oss: new OssVariant(moss: null, date: '2025-11-10')));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $pdo = $this->db->pdo();
+        $doc = $pdo->query("SELECT id, status, note_below_items FROM invoices WHERE supplier_id = {$supplierId} AND varsymbol = '"
+            . SyntheticPohodaExport::OSS_DOCUMENT . "'")->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(1, $this->rows('journal_entry_document_links', $supplierId, "doc_type = 'invoice' AND doc_id = {$doc['id']}"), $this->explain($protocol));
+        $fixed = $this->saldoOf($supplierId, '311');
+
+        // Stav po starším převodu: koncept s poznámkou o ruční kontrole.
+        $oldNote = str_replace('. Členění DPH z POHODY, období už podané: ', '. K ruční kontrole: ', (string) $doc['note_below_items']);
+        $pdo->prepare("UPDATE invoices SET status = 'draft', booked_at = NULL, note_below_items = ? WHERE id = ?")->execute([$oldNote, $doc['id']]);
+        $broken = $this->saldoOf($supplierId, '311');
+        self::assertGreaterThan(0.005, abs($broken['open'] - $fixed['open']), 'Koncept musí ze saldokonta vypadnout.');
+
+        $repair = Bootstrap::buildContainer()->get(PohodaPreviousPeriodDraftRepair::class);
+        $dry = $repair->run($supplierId, false);
+        self::assertSame([['invoice', (int) $doc['id'], 'would_repair', $doc['status']]],
+            array_map(static fn (array $r): array => [$r['doc_type'], $r['id'], $r['status'], $r['new_status']], $dry));
+        self::assertSame('draft', $pdo->query("SELECT status FROM invoices WHERE id = {$doc['id']}")->fetchColumn());
+
+        self::assertSame('repaired', $repair->run($supplierId, true, $this->userId)[0]['status']);
+        $row = $pdo->query("SELECT status, note_below_items, booked_at FROM invoices WHERE id = {$doc['id']}")->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($doc['status'], $row['status']);
+        self::assertSame($doc['note_below_items'], $row['note_below_items']);
+        self::assertNotNull($row['booked_at']);
+        self::assertSame($fixed, $this->saldoOf($supplierId, '311'));
+        self::assertSame(1, $this->rows('activity_log', $supplierId, "action = '" . PohodaPreviousPeriodDraftRepair::AUDIT_ACTION . "' AND entity_id = {$doc['id']}"));
+        self::assertSame([], $repair->run($supplierId, true, $this->userId));
     }
 
     /**

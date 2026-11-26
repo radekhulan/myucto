@@ -127,7 +127,7 @@ v deníku, takže v agendě Ostatní pohledávky a závazky chyběly a nešly p�
 ## 126.7 Saldokonto proti hlavní knize
 
 **Co kontrola hledá:** rozdíl mezi součtem otevřených položek saldokonta a zůstatkem účtu v hlavní knize
-na účtech 311, 321, 324 a 325, ke konci každého účetního roku s deníkem (nebo k poslednímu zápisu).
+na účtech 311, 314, 315, 321, 324 a 325, ke konci každého účetního roku s deníkem (nebo k poslednímu zápisu).
 Rozdíly do koruny jsou zaokrouhlení a kontrola je nehlásí.
 
 **Postup:** číslo účtu otevře saldokonto k danému dni. Rozdíl může být oprávněný (přeplatek bez dokladu,
