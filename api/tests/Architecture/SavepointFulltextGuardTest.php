@@ -94,6 +94,10 @@ final class SavepointFulltextGuardTest extends TestCase
             => 'Vkládá nové položky. Na existujících mění sazbu, částky, klasifikaci a daňové otisky, bez změny popisu.',
         'MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter::run'
             => 'Přílohy exekucí dostávají nové ID dokumentu. OCR zapisuje do právě vloženého řádku.',
+        'MyInvoice\Service\Migration\Pohoda\PohodaOtherLiabilityRepair::run'
+            => 'Fakturu (kaskáda na položky) maže až poslední krok dokladu, po kterém savepoint dokladu nic nevrací. Nanečisto vrací celou transakci; savepoint firmy jen v cizí transakci.',
+        'MyInvoice\Service\Migration\Pohoda\PohodaOtherLiabilityRepair::supplier'
+            => 'Fakturu (kaskáda na položky) maže až poslední krok dokladu, po kterém savepoint dokladu nic nevrací. Nanečisto vrací celou transakci; savepoint firmy jen v cizí transakci.',
         'MyInvoice\Service\Migration\Pohoda\PohodaImporter::run'
             => 'Vkládá nové položky. Označení drobného majetku na existujícím řádku mění jen expense_kind.',
         'MyInvoice\Service\Migration\Premier\PayrollImporter::import'

@@ -2086,6 +2086,81 @@ final class SyntheticPohodaExport
         self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>', $journal);
     }
 
+    /** Ostatní závazek v přiznání DPH přečíslovaný po zaúčtování ({@see withRenumberedCommitments()}). */
+    public const RENUMBERED_VAT_COMMITMENT = '26OZR0033';
+    /** Ostatní závazek mimo přiznání přečíslovaný po zaúčtování ({@see withRenumberedCommitments()}). */
+    public const RENUMBERED_COMMITMENT = '26OZR0040';
+    /** Přečíslovaný ostatní závazek s DPH zaúčtovaný dva dny po vystavení ({@see withRenumberedCommitments()}). */
+    public const RENUMBERED_BOOKED_LATER = '26OZR0050';
+
+    /**
+     * Doplní agendu z {@see withOtherItems()} o ostatní závazky, které POHODA zaúčtovala pod
+     * číslem z doby před prodloužením číselné řady (deník `26OZR033`, doklad `26OZR0033`):
+     *   - nákup s DPH (členění PD) 800 + 168 Kč, zápis 518/325 a 343/325,
+     *   - nájem mimo přiznání (PN) 500 Kč, zápis 518/325,
+     *   - nářadí s DPH 1 000 + 210 Kč vystavené 10. 3., zaúčtované (a v deníku) 12. 3.
+     */
+    public static function withRenumberedCommitments(string $dir): void
+    {
+        $doc = static fn (string $number, string $date, string $vat, float $none, float $base, float $tax, string $text, ?string $accounting = null): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:date>' . $date . '</inv:date><inv:dateTax>' . $date . '</inv:dateTax><inv:dateAccounting>' . ($accounting ?? $date) . '</inv:dateAccounting>'
+            . '<inv:dateDue>2026-04-01</inv:dateDue><inv:text>' . $text . '</inv:text>'
+            . '<inv:classificationVAT><typ:ids>' . $vat . '</typ:ids></inv:classificationVAT>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>' . ($none + $base + $tax) . '</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>' . $none . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+            . '<typ:priceHigh>' . $base . '</typ:priceHigh><typ:priceHighVAT rate="21">' . $tax . '</typ:priceHighVAT>'
+            . '<typ:priceHighSum>' . ($base + $tax) . '</typ:priceHighSum></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            $doc(self::RENUMBERED_VAT_COMMITMENT, '2026-03-05', 'PD', 0, 800, 168, 'Stavební materiál')
+            . $doc(self::RENUMBERED_COMMITMENT, '2026-03-06', 'PN', 500, 0, 0, 'Nájem garáže')
+            . $doc(self::RENUMBERED_BOOKED_LATER, '2026-03-10', 'PD', 0, 1000, 210, 'Nářadí', '2026-03-12'));
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Ostatní závazky', '26OZR033', 'Stavební materiál', 800, '518000', '325000', '2026-03-05')
+            . self::entry('Ostatní závazky', '26OZR033', 'DPH', 168, '343011', '325000', '2026-03-05')
+            . self::entry('Ostatní závazky', '26OZR040', 'Nájem garáže', 500, '518000', '325000', '2026-03-06')
+            . self::entry('Ostatní závazky', '26OZR050', 'Nářadí', 1000, '518000', '325000', '2026-03-12')
+            . self::entry('Ostatní závazky', '26OZR050', 'DPH', 210, '343011', '325000', '2026-03-12'));
+    }
+
+    /** Ostatní závazek s členěním do přiznání, ale bez daně ({@see withZeroVatClassifiedCommitment()}). */
+    public const ZERO_VAT_CLASSIFIED_COMMITMENT = '26OZK0001';
+
+    /**
+     * Ostatní závazek 700 Kč s členěním PD (tuzemský odpočet) bez daně a bez zápisu v deníku
+     * (předkontace „bez"): převod ho podle členění bere jako přijatou fakturu.
+     */
+    public static function withZeroVatClassifiedCommitment(string $dir): void
+    {
+        self::append($dir . '/26_faktury_commitment.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . self::ZERO_VAT_CLASSIFIED_COMMITMENT . '</typ:numberRequested></inv:number>'
+            . '<inv:date>2026-03-15</inv:date><inv:dateTax>2026-03-15</inv:dateTax><inv:dateAccounting>2026-03-15</inv:dateAccounting>'
+            . '<inv:dateDue>2026-04-15</inv:dateDue><inv:text>Pronájem vozidla</inv:text>'
+            . '<inv:classificationVAT><typ:ids>PD</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Pronajímatel Test s.r.o.</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>700</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>700</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>');
+    }
+
+    /**
+     * Počáteční stavy k {@see withPayrollItems()} a {@see withPurchasePaidEarlier()}: daň ze mzdy
+     * {@see PAYROLL_OPENING_TAX} 1 500 Kč na 342 a zbytek faktury {@see PURCHASE_PAID_EARLIER}
+     * 400 Kč na 321.
+     */
+    public static function withPayrollOpeningBalances(string $dir): void
+    {
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 1500, '701000', '342000', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 400, '701000', '321001', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 1900, '411000', '701000', '2026-01-01'));
+    }
+
     private static function append(string $file, string $closing, string $xml): void
     {
         $content = (string) file_get_contents($file);

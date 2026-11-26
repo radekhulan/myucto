@@ -358,6 +358,15 @@ final class OtherItemImporter
                 $candidates[] = ['year' => (int) $parts[0], 'date' => $parts[3], 'id' => (int) $entryId];
             }
         }
+        if ($candidates === []) {
+            // Doklad přečíslovaný po zaúčtování: zápis nese původní číslo ({@see PohodaJournal::renumberedEntries()}).
+            [$bySource, $numbers] = $this->renumberingIndex($ctx, $sources['journal'], $agenda, $source);
+            foreach (PohodaJournal::renumberedEntries($bySource, $number, array_values(array_filter([$issued, $accounting])), $numbers) as $entry) {
+                if ($entry['year'] >= $ctx->year() - 1 && $entry['year'] <= $ctx->year() && !$ctx->skipsDate($entry['date'])) {
+                    $candidates[] = $entry;
+                }
+            }
+        }
         // Stejné číslo dokladu v minulé agendě je jiný doklad ({@see DocumentLinker::agendaEntries()}).
         $entries = array_fill_keys(array_column(DocumentLinker::agendaEntries($candidates, $ctx->year(), $ctx->calendar->periodStart($ctx->year())), 'id'), true);
         $plan['entries'] = array_map('intval', array_keys($entries));
@@ -821,6 +830,37 @@ final class OtherItemImporter
             }
         }
         return $out;
+    }
+
+    /** @var array<string,array{0:array<string,list<array{year:int,date:string,id:int}>>,1:array<string,true>}> */
+    private array $renumbering = [];
+
+    /**
+     * Zápisy zdroje deníku podle čísla a čísla dokladů agendy v exportu, pro párování
+     * přečíslovaných dokladů ({@see PohodaJournal::renumberedEntries()}). Platí pro jeden běh
+     * převodu (klíč obsahuje kontext).
+     *
+     * @param array<string,int|string> $journal mapa převodu zápisů deníku
+     * @return array{0:array<string,list<array{year:int,date:string,id:int}>>,1:array<string,true>}
+     */
+    private function renumberingIndex(PohodaContext $ctx, array $journal, string $agenda, string $source): array
+    {
+        $cacheKey = spl_object_id($ctx) . '|' . $ctx->supplierId . '|' . $agenda . '|' . $source;
+        if (isset($this->renumbering[$cacheKey])) {
+            return $this->renumbering[$cacheKey];
+        }
+        $bySource = [];
+        foreach ($journal as $journalKey => $entryId) {
+            $parts = explode('|', (string) $journalKey, 4);
+            if (count($parts) === 4 && $parts[1] === $source) {
+                $bySource[$parts[2]][] = ['year' => (int) $parts[0], 'date' => $parts[3], 'id' => (int) $entryId];
+            }
+        }
+        $numbers = [];
+        foreach ($bySource === [] ? [] : $ctx->export->records($agenda, 'invoice') as $record) {
+            $numbers[PohodaXml::text(PohodaXml::get($record, 'invoiceHeader'), 'number/numberRequested')] = true;
+        }
+        return $this->renumbering[$cacheKey] = [$bySource, $numbers];
     }
 
     /**

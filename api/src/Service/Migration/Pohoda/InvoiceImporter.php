@@ -127,6 +127,16 @@ final class InvoiceImporter
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
 
+    /**
+     * Klíče mapy převodu (`agenda|číslo|datum`) ostatních pohledávek a závazků, které už jsou
+     * ostatní položkou nebo předpisem zálohy ({@see OtherItemImporter}, oprava
+     * {@see PohodaOtherLiabilityRepair}). Faktura se z nich znovu nezakládá, ani když
+     * členění POHODY doklad řadí do přiznání.
+     *
+     * @var array<string,true>
+     */
+    private array $otherItemKeys = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
@@ -145,6 +155,7 @@ final class InvoiceImporter
     public function importIssued(PohodaContext $ctx): void
     {
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_INVOICE);
+        $this->otherItemKeys = $this->otherItemKeys($ctx, 'receivable');
         foreach (self::ISSUED_AGENDAS as $agenda => $kind) {
             foreach ($ctx->export->records($agenda, 'invoice') as $r) {
                 $this->importIssuedDocument($ctx, self::STEP_ISSUED, $r, $agenda, $kind, 'invoice', $existing);
@@ -156,6 +167,7 @@ final class InvoiceImporter
     public function importPurchases(PohodaContext $ctx): void
     {
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE);
+        $this->otherItemKeys = $this->otherItemKeys($ctx, 'commitment');
         $selfAssessed = $this->selfAssessments($ctx);
         $used = [];
         foreach (self::PURCHASE_AGENDAS as $agenda => $kind) {
@@ -307,6 +319,16 @@ final class InvoiceImporter
         $this->stats->recomputeMany(array_values(array_unique($ctx->statsClients)));
     }
 
+    /** @return array<string,true> */
+    private function otherItemKeys(PohodaContext $ctx, string $agenda): array
+    {
+        $keys = [];
+        foreach ([PohodaImportRepository::KIND_OTHER_ITEM, PohodaImportRepository::KIND_TAX_ADVANCE] as $kind) {
+            $keys += array_fill_keys(array_keys($this->map->all($ctx->supplierId, $kind, $agenda . '|')), true);
+        }
+        return $keys;
+    }
+
     /** @param array<string,int> $existing */
     private function importIssuedDocument(PohodaContext $ctx, string $step, array $r, string $agenda, string $kind, string $prefix, array $existing): void
     {
@@ -322,6 +344,10 @@ final class InvoiceImporter
             return;
         }
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
+        if (!isset($existing[$key]) && isset($this->otherItemKeys[$key])) {
+            $p->count($step, 'existing');
+            return;
+        }
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'invoice', $existing[$key], $doc);
@@ -506,6 +532,10 @@ final class InvoiceImporter
             return;
         }
         $key = self::mapKey($agenda, $doc['number'], $doc['issue']);
+        if (!isset($existing[$key]) && isset($this->otherItemKeys[$key])) {
+            $p->count($step, 'existing');
+            return;
+        }
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'purchase_invoice', $existing[$key], $doc);

@@ -37597,6 +37597,7 @@
       "without_accounting": "dokladů bez zaúčtování (počáteční stav)",
       "opening_balances": "dokladů počátečního stavu účtu",
       "opening_cash": "pokladních dokladů navázaných na počáteční stavy",
+      "renumbered_entry": "dokladů přečíslovaných po zaúčtování, navázáno podle původního čísla",
       "cash_multi_invoice": "úhrad pokladním dokladem více faktur",
       "booked_without_document": "pohybů zaúčtovaných bez faktury",
       "relocated": "zápisů přesunuto do období podle data",

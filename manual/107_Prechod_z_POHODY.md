@@ -1157,6 +1157,28 @@ se opravou nemění, mění se jen DUZP v kontrolním hlášení a případně d
 převzaté z deníku POHODY zůstávají beze změny. Každý opravený doklad má záznam
 v auditní stopě a opakované spuštění už opravené doklady nemění.
 
+**Ostatní závazky převedené jako přijaté faktury.** Firma převedená verzí starší než
+6.72 má ostatní závazky bez členění DPH s nulovou daní (mzdy, odvody, nájem od neplátce,
+doplatek daně) mezi přijatými fakturami. Ty, které v POHODĚ vlastní zápis nemají (předpis
+nese interní doklad mezd nebo počáteční stav), jsou nezaúčtované a doklady minulého roku
+visí v saldokontu 321, ačkoli je deník vede na 325, 331 nebo 342. Správce instalace je
+převede příkazem `php api/bin/repair-pohoda-other-liabilities.php --all-pohoda` (nebo
+`--supplier=<id firmy>`, i opakovaně). Bez `--commit` jen vypíše, co by se změnilo,
+včetně rozdílu saldokonta 321 a 325 proti hlavní knize před opravou a po ní. Doklad se
+stane ostatním závazkem: zápis z deníku POHODY převezme, jinak se založí jako potvrzený
+bez zaúčtování. Úhrady z banky a pokladny se přesunou na ostatní závazek, nic se znovu
+neúčtuje. S `--include-posted` převede i zaúčtované přijaté faktury z ostatních závazků
+bez DPH, které pak převezmou svůj zápis. Ostatní závazek s DPH zůstává přijatou fakturou.
+Pokud ho POHODA zaúčtovala pod číslem z doby před prodloužením číselné řady
+(`26OZ033` proti `26OZ0033`), oprava ho na tento zápis naváže. Nový převod takové doklady
+páruje sám. Oprava vynechá a vypíše doklady v uzavřeném nebo zamčeném období, doklady
+v přiznání DPH, v cizí měně, s více možnými zápisy, s dalším zápisem v deníku (storno,
+přeúčtování), s připojeným souborem, se závazkem na účtech 341 a 343, s úhradou, která
+hradí i jiný doklad, a doklady, na které navazuje majetek, sklad, zápočet, dimenze nebo
+příkaz k úhradě. Chyba u jedné firmy vrátí jen její změny a výpis ji označí. Každý
+převedený doklad má záznam v auditní stopě a opakované spuštění nic nemění. Opakovaný
+převod z POHODY převedené doklady jako faktury znovu nezakládá.
+
 Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
 ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).
 

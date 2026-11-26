@@ -86,6 +86,10 @@ final class DocumentLinker
         $yearStart = $ctx->calendar->periodStart($year);
         $orphans = [];
         $openingAdvances = [];
+        $renumbered = [
+            PohodaJournal::COMMITMENT => ['table' => 'purchase_invoices'],
+            PohodaJournal::RECEIVABLE => ['table' => 'invoices'],
+        ];
         foreach ([
             [PohodaJournal::RECEIVED, 'purchase_invoice', 'purchase_invoice', $ctx->purchaseInvoices, null],
             [PohodaJournal::COMMITMENT, 'manual', 'purchase_invoice', $ctx->commitments, 'purchase_invoice'],
@@ -104,6 +108,15 @@ final class DocumentLinker
                 // zápisy jiné agendy jen tehdy, když jejich agenda žádný nemá (doklad minulého
                 // období převzatý do agendy, zaúčtovaný minulou agendou).
                 $all = $index[$source][$number] ?? [];
+                if ($all === [] && isset($renumbered[$source])) {
+                    // Ostatní pohledávka či závazek přečíslovaný po zaúčtování: zápis nese původní číslo.
+                    $renumbered[$source]['dates'] ??= $this->documentDates($ctx->supplierId, $renumbered[$source]['table'], array_values($docs));
+                    $all = $this->freeEntries($ctx->supplierId, PohodaJournal::renumberedEntries($index[$source] ?? [], (string) $number,
+                        $renumbered[$source]['dates'][(int) $docId] ?? [], $docs));
+                    if ($all !== []) {
+                        $p->count(self::STEP_LINK, 'renumbered_entry');
+                    }
+                }
                 $entries = self::agendaEntries($all, $year, $yearStart, $docType === 'bank');
                 if (count($entries) < count($all)) {
                     $this->dropForeignLinks($ctx->supplierId, $retype ?? $sourceType, $docType, (int) $docId,
@@ -1792,6 +1805,49 @@ final class DocumentLinker
             "DELETE dl FROM journal_entry_document_links dl JOIN journal_entries e ON e.id = dl.entry_id
               WHERE dl.supplier_id = ? AND e.source_type = 'opening' AND e.period_id = ? AND dl.doc_type = ? AND dl.doc_id = ?"
         )->execute([$ctx->supplierId, (int) $ctx->period['id'], $docType, $docId]);
+    }
+
+    /**
+     * Data dokladů, se kterými může zápis v deníku nést původní číslo: vystavení, DUZP
+     * a zaúčtování (u přijatých `booked_at`). Deník POHODY vede datum zaúčtování.
+     *
+     * @param 'purchase_invoices'|'invoices' $table
+     * @param list<int> $ids
+     * @return array<int,list<?string>> id dokladu => data
+     */
+    private function documentDates(int $supplierId, string $table, array $ids): array
+    {
+        $out = [];
+        $booked = $table === 'purchase_invoices' ? 'DATE(booked_at)' : 'NULL';
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $ids))), 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare("SELECT id, issue_date, tax_date, {$booked} AS booked FROM {$table}
+                WHERE supplier_id = ? AND id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')');
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['id']] = [$r['issue_date'], $r['tax_date'], $r['booked']];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Jen zápisy, které nikdo nevlastní: ruční bez zdroje a bez ostatní položky.
+     *
+     * @param list<array{date:string,id:int}> $entries
+     * @return list<array{date:string,id:int}>
+     */
+    private function freeEntries(int $supplierId, array $entries): array
+    {
+        if ($entries === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM journal_entries e WHERE e.id = ? AND e.supplier_id = ?
+            AND e.source_type = 'manual' AND e.source_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM other_items oi WHERE oi.supplier_id = e.supplier_id AND oi.journal_entry_id = e.id)");
+        return array_values(array_filter($entries, static function (array $e) use ($stmt, $supplierId): bool {
+            $stmt->execute([(int) $e['id'], $supplierId]);
+            return $stmt->fetchColumn() !== false;
+        }));
     }
 
     private function linkOpening(PohodaContext $ctx, string $docType, int $docId): bool

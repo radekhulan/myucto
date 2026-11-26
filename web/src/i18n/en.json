@@ -37597,6 +37597,7 @@
       "without_accounting": "documents without posting (opening balance)",
       "opening_balances": "account opening balance documents",
       "opening_cash": "cash documents linked to opening balances",
+      "renumbered_entry": "documents renumbered after posting, linked by their original number",
       "cash_multi_invoice": "cash payments of several invoices",
       "booked_without_document": "transactions posted without an invoice",
       "relocated": "entries moved to the period of their date",

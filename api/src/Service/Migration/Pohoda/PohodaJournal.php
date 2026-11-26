@@ -45,6 +45,52 @@ final class PohodaJournal
         return PohodaXml::text($item, 'number/numberRequested');
     }
 
+    /**
+     * Klíč čísla dokladu bez úvodních nul číselné části („26OZ033" = „26OZ0033"). Deník POHODY
+     * nese číslo, pod kterým se doklad zaúčtoval; po změně délky číselné řady agendy doklad
+     * nese nové číslo a jeho zápis staré. Doklad a zápis s různým číslem páruje jen
+     * {@see renumberedEntries()}.
+     */
+    public static function numberKey(string $number): string
+    {
+        $number = mb_strtoupper(trim($number));
+        return preg_replace_callback('/\d+$/', static fn (array $m): string => ltrim($m[0], '0') ?: '0', $number) ?? $number;
+    }
+
+    /**
+     * Zápis dokladu přečíslovaného po zaúčtování: ze zápisů zdroje (`číslo => zápisy`) jediný
+     * zápis s jiným číslem téhož klíče {@see numberKey()} a s datem dokladu. Deník nese datum
+     * zaúčtování, doklad v MyÚčtu datum vystavení i zaúčtování: platí kterékoli z `$dates`.
+     * Číslo, které má v agendě vlastní doklad (`$documentNumbers`), patří jemu. Víc
+     * kandidátů = žádný (párovat podle odhadu se nesmí).
+     *
+     * @param array<string,list<array{date:string,id:int}>> $bySource
+     * @param list<?string> $dates data dokladu (vystavení, zaúčtování)
+     * @param array<string,mixed> $documentNumbers čísla dokladů agendy jako klíče
+     * @return list<array{date:string,id:int}>
+     */
+    public static function renumberedEntries(array $bySource, string $number, array $dates, array $documentNumbers): array
+    {
+        $dates = array_fill_keys(array_filter(array_map(static fn (?string $d): string => substr((string) $d, 0, 10), $dates)), true);
+        if ($dates === []) {
+            return [];
+        }
+        $key = self::numberKey($number);
+        $found = [];
+        foreach ($bySource as $entryNumber => $entries) {
+            $entryNumber = (string) $entryNumber;
+            if ($entryNumber === $number || isset($documentNumbers[$entryNumber]) || self::numberKey($entryNumber) !== $key) {
+                continue;
+            }
+            foreach ($entries as $entry) {
+                if (isset($dates[$entry['date']])) {
+                    $found[] = $entry;
+                }
+            }
+        }
+        return count($found) === 1 ? $found : [];
+    }
+
     public static function isOpening(array $item): bool
     {
         return self::source($item) === self::OPENING;
