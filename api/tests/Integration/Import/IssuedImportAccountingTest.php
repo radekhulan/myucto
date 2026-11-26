@@ -76,8 +76,7 @@ final class IssuedImportAccountingTest extends StockTestCase
         $id = (int) $report['results'][0]['invoice_id'];
 
         self::assertNull($this->journal($supplierId, $id));
-        self::assertSame('paid', $this->invoice($id)['status']);
-        self::assertStringStartsWith('2023-12-31', $this->invoice($id)['paid_at']);
+        $this->assertUnpaidWithoutPayment($id);
     }
 
     public static function modesWithoutAccounting(): array
@@ -86,14 +85,39 @@ final class IssuedImportAccountingTest extends StockTestCase
     }
 
     #[DataProvider('modesWithoutAccounting')]
-    public function testImportWithoutActiveDoubleEntryKeepsAgeHeuristic(string $mode, bool $enabled): void
+    public function testImportWithoutActiveDoubleEntryDoesNotGuessPaymentFromDueDate(string $mode, bool $enabled): void
     {
         $supplierId = $this->company($mode, $enabled);
         $report = $this->import($supplierId, ['240003' => ['2024-04-10', '2024-04-10']]);
         $id = (int) $report['results'][0]['invoice_id'];
 
         self::assertNull($this->journal($supplierId, $id));
-        self::assertSame('paid', $this->invoice($id)['status']);
+        self::assertSame('sent', $report['results'][0]['imported_status']);
+        $this->assertUnpaidWithoutPayment($id);
+    }
+
+    /**
+     * Historický doklad z importu, označený jako zaplacený bez data: úhrada nesmí dostat
+     * dnešek (v daňové evidenci by to byl příjem letošního roku), ale pozdější z data
+     * vystavení a splatnosti.
+     */
+    public function testMarkPaidOfImportedInvoiceDefaultsToItsOwnDates(): void
+    {
+        $supplierId = $this->company('tax_evidence', true);
+        $report = $this->import($supplierId, ['240013' => ['2024-04-10', '2024-04-10']]);
+        $id = (int) $report['results'][0]['invoice_id'];
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('POST', '/api/invoices/' . $id . '/mark-paid')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withParsedBody([]);
+        $response = $this->container->get(\MyInvoice\Action\Invoice\MarkPaidAction::class)
+            ->__invoke($request, new \Slim\Psr7\Response(), ['id' => (string) $id]);
+        $response->getBody()->rewind();
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $paidOn = $this->db->pdo()->prepare('SELECT paid_on FROM invoice_payments WHERE invoice_id = ?');
+        $paidOn->execute([$id]);
+        self::assertSame('2024-04-10', $paidOn->fetchColumn());
     }
 
     public function testDisabledAutoPostingStillLeavesInvoiceUnpaid(): void
@@ -228,6 +252,17 @@ final class IssuedImportAccountingTest extends StockTestCase
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         self::assertIsArray($row);
         return $row;
+    }
+
+    private function assertUnpaidWithoutPayment(int $id): void
+    {
+        $invoice = $this->invoice($id);
+        self::assertSame('sent', $invoice['status']);
+        self::assertNull($invoice['paid_at']);
+        self::assertSame('0.00', $invoice['paid_total']);
+        $payments = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = ?');
+        $payments->execute([$id]);
+        self::assertSame(0, (int) $payments->fetchColumn());
     }
 
     private function journal(int $supplierId, int $id): ?array

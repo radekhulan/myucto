@@ -811,6 +811,18 @@ final class FakturoidImportService
         }
     }
 
+    /** @var array<int,true> přijaté doklady, které v tomto běhu převzaly stav uhrazeno ze zdroje */
+    private array $paidPurchaseIds = [];
+
+    /** Krytí úhrady převzaté ze zdroje, až po přepočtu částek ({@see ImportedPaidPurchase::cover()}). */
+    private function coverPaidPurchase(int $purchaseId, int $supplierId): void
+    {
+        if (isset($this->paidPurchaseIds[$purchaseId])) {
+            ImportedPaidPurchase::cover($this->db->pdo(), $purchaseId, $supplierId);
+            unset($this->paidPurchaseIds[$purchaseId]);
+        }
+    }
+
     /**
      * Aplikuje 'paid' na čerstvě importovanou přijatou fakturu (issue #121).
      * Guard na status='draft' — createExpense může přes dedup guard vrátit
@@ -819,10 +831,9 @@ final class FakturoidImportService
     private function applyPurchasePaymentState(int $purchaseId, int $supplierId, ?array $state, string $fallbackPaidAt): void
     {
         if ($state === null || $state['status'] !== 'paid') return;
-        $this->db->pdo()->prepare(
-            "UPDATE purchase_invoices SET status = 'paid', paid_at = ?
-              WHERE id = ? AND supplier_id = ? AND status = 'draft'"
-        )->execute([$state['paid_at'] ?? $fallbackPaidAt, $purchaseId, $supplierId]);
+        if (ImportedPaidPurchase::mark($this->db->pdo(), $purchaseId, $supplierId, $state['paid_at'] ?? $fallbackPaidAt)) {
+            $this->paidPurchaseIds[$purchaseId] = true;
+        }
     }
 
     private function importExpenses(int $jobId, int $supplierId, int $userId, bool $dryRun, ?string $bookmarkSince, bool $downloadAttachments = false): void
@@ -860,6 +871,7 @@ final class FakturoidImportService
                     // Doklad vrácený dedup guardem už v systému byl a mohl ho někdo
                     // upravit — zdrojové částky se na něj nepřenášejí.
                     $diffs = $this->lastExpenseExisted ? [] : $this->alignExpenseToSource($purchaseId, $supplierId, $exp, $computed);
+                    $this->coverPaidPurchase($purchaseId, $supplierId);
                     if ($downloadAttachments) {
                         $this->archiveExpensePdf($supplierId, $purchaseId, $exp);
                     }

@@ -588,6 +588,18 @@ final class IdokladImportService
         ]);
     }
 
+    /** @var array<int,true> přijaté doklady, které v tomto běhu převzaly stav uhrazeno ze zdroje */
+    private array $paidPurchaseIds = [];
+
+    /** Krytí úhrady převzaté ze zdroje, až po přepočtu částek ({@see ImportedPaidPurchase::cover()}). */
+    private function coverPaidPurchase(int $purchaseId, int $supplierId): void
+    {
+        if (isset($this->paidPurchaseIds[$purchaseId])) {
+            ImportedPaidPurchase::cover($this->db->pdo(), $purchaseId, $supplierId);
+            unset($this->paidPurchaseIds[$purchaseId]);
+        }
+    }
+
     /**
      * Aplikuje 'paid' na čerstvě importovanou přijatou fakturu (issue #121).
      * Guard na status='draft' — createReceivedFromIdoklad může přes dedup guard
@@ -596,10 +608,9 @@ final class IdokladImportService
     private function applyPurchasePaymentState(int $purchaseId, int $supplierId, ?array $state, string $fallbackPaidAt): void
     {
         if ($state === null || $state['status'] !== 'paid') return;
-        $this->db->pdo()->prepare(
-            "UPDATE purchase_invoices SET status = 'paid', paid_at = ?
-              WHERE id = ? AND supplier_id = ? AND status = 'draft'"
-        )->execute([$state['paid_at'] ?? $fallbackPaidAt, $purchaseId, $supplierId]);
+        if (ImportedPaidPurchase::mark($this->db->pdo(), $purchaseId, $supplierId, $state['paid_at'] ?? $fallbackPaidAt)) {
+            $this->paidPurchaseIds[$purchaseId] = true;
+        }
     }
 
     /**
@@ -639,6 +650,7 @@ final class IdokladImportService
                     'UPDATE purchase_invoices SET idoklad_id = ? WHERE id = ?'
                 )->execute([$idokladId, $purchaseId]);
                 $this->purCalc->recompute($purchaseId);
+                $this->coverPaidPurchase($purchaseId, $supplierId);
                 if ($downloadAttachments) {
                     $this->archiveReceivedPdf($supplierId, $purchaseId, $idokladId);
                 }
@@ -868,6 +880,7 @@ final class IdokladImportService
                     'UPDATE purchase_invoices SET idoklad_id = ? WHERE id = ?'
                 )->execute([$idokladId, $purchaseId]);
                 $this->purCalc->recompute($purchaseId);
+                $this->coverPaidPurchase($purchaseId, $supplierId);
                 if ($downloadAttachments) {
                     $this->archiveReceivedPdf($supplierId, $purchaseId, $idokladId, 'ReceivedReceipt');
                 }

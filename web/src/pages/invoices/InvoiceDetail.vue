@@ -524,6 +524,17 @@ const unrecordedBankTransactions = computed(() => {
   return bankTransactions.value.filter(tx => !recorded.has(tx.id))
 })
 
+// Doklad z importu souborů: výchozí datum úhrady je pozdější z vystavení a splatnosti (nejvýš
+// dnes), ne dnešek, jinak by historický doklad dostal úhradu, v daňové evidenci i příjem,
+// v letošním roce. Stejné pravidlo má server (InvoicePaidDateDefault).
+const markPaidDefaultDate = computed<string | undefined>(() => {
+  const inv = invoice.value
+  if (!inv?.import_batch_id) return undefined
+  const latest = [inv.issue_date, inv.due_date].filter((d): d is string => !!d).map(d => d.slice(0, 10)).sort().pop()
+  const today = appIsoDate()
+  return latest && latest < today ? latest : today
+})
+
 const remainingToPay = computed(() => {
   if (!invoice.value) return 0
   return Math.round(((invoice.value.amount_to_pay ?? 0) - (invoice.value.paid_total ?? 0)) * 100) / 100
@@ -2679,7 +2690,7 @@ useWindowRefresh(async () => {
       <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
       <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="invoice"
         :doc-id="invoice.id" :doc-number="invoice.varsymbol || `#${invoice.id}`"
-        :amount="remainingToPay" :partner-name="invoice.client_company_name"
+        :amount="remainingToPay" :partner-name="invoice.client_company_name" :default-date="markPaidDefaultDate"
         :thanks="{ enabled: thanksEnabled, hasRecipient: thanksHasRecipient, defaultChecked: sendThanks }"
         :busy="busy === 'paid'"
         @close="markPaidOpen = false" @done="onAltPayDone" @mark-paid="onPlainMarkPaid" />

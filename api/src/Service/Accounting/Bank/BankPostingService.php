@@ -5059,6 +5059,7 @@ final class BankPostingService
             if ($updated->rowCount() !== 1) {
                 return false;
             }
+            \MyInvoice\Service\Import\ImportedPaidPurchase::releaseForPayment($pdo, $supplierId, (int) $row['purchase_invoice_id']);
         }
         $pdo->prepare(
             "UPDATE purchase_invoices

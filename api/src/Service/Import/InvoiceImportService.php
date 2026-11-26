@@ -1380,15 +1380,17 @@ final class InvoiceImportService
         // Currency
         $currencyId = $this->currencyId($supplierId, (string) ($inv['currency'] ?? 'CZK'));
 
-        // Splatnost slouží k odhadu úhrady jen mimo účetnictví firmy. Importovaný
-        // doklad už klient dostal, takže výchozí stav je 'sent' k datu vystavení.
+        // Importovaný doklad už klient dostal, takže výchozí stav je 'sent' k datu vystavení.
+        // Uhrazený je jen tehdy, když úhradu nese evidence: platba, zápočet, nebo záloha,
+        // která pokryje celou částku. Stáří splatnosti o úhradě nic neříká, odhad podle ní
+        // vyřadil skutečně neuhrazené doklady z pohledávek, upomínek i zápočtů.
         //
         // Daňový doklad k přijaté platbě dokumentuje úplatu, která už přišla. Je proto
         // zaplacený bez ohledu na splatnost a paid_at = den přijetí úplaty (DUZP), stejně
-        // jako když ho aplikace vystaví k platbě zálohy. Podle splatnosti by čerstvý DDPP
-        // skončil jako `sent` a visel v pohledávkách a po splatnosti.
+        // jako když ho aplikace vystaví k platbě zálohy; k úhradě na něm nic nezbývá
+        // ({@see ImportedIssuedDocumentPolicy::settleTaxDocument()}).
         $inAccounting = $issuedPeriod($taxDate ?? $issueDate) !== null;
-        $isPaid = ImportedIssuedDocumentPolicy::isInitiallyPaid($invoiceType, $dueDate, $inAccounting);
+        $isPaid = ImportedIssuedDocumentPolicy::isPaidByNature($invoiceType);
         $status = $isPaid ? 'paid' : 'sent';
         $paidAt = $isPaid ? ($taxDate ?? $issueDate) : null;
         $sentAt = $issueDate . ' 12:00:00';

@@ -31,6 +31,8 @@ const props = defineProps<{
   /** Zbytek k úhradě (u přijaté faktury celková částka). */
   amount: number
   partnerName?: string | null
+  /** Výchozí datum úhrady (doklad z importu: pozdější z vystavení a splatnosti); jinak dnes. */
+  defaultDate?: string
   /** Jen u vydané faktury — děkovný e-mail za úhradu. */
   thanks?: { enabled: boolean; hasRecipient: boolean; defaultChecked: boolean }
   /** Rodič právě běží (mark-paid/transition) → zamknout tlačítko. */
@@ -60,7 +62,7 @@ const { t } = useI18n()
 const toast = useToast()
 
 const method = ref<Method>(props.settlementOnly ? 'settlement' : 'plain')
-const settledOn = ref(appIsoDate())
+const settledOn = ref(props.defaultDate || appIsoDate())
 const amount = ref(props.amount)
 const note = ref('')
 const sendThanks = ref(!!props.thanks?.enabled && !!props.thanks?.hasRecipient && !!props.thanks?.defaultChecked)

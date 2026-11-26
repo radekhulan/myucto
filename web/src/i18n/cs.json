@@ -33050,7 +33050,7 @@
     "supplier_required_title": "Dodavatel musí už existovat",
     "supplier_required_hint": "Doklad se naimportuje jen tehdy, když je na něm aktuálně zvolená firma ve správné roli - u vystavené faktury jako dodavatel, u přijaté jako odběratel. Doklad vystavený na jinou firmu se odmítne.",
     "status_rule_title": "Stav importované faktury",
-    "status_rule_hint": "U faktury v období podvojného účetnictví rozhoduje o stavu skutečná úhrada. Se zapnutým automatickým zaúčtováním se doklad při importu zaúčtuje. U dokladů před začátkem účetnictví a u firem bez podvojného účetnictví se při splatnosti starší než 30 dní předpokládá úhrada.",
+    "status_rule_hint": "O stavu faktury rozhoduje jen skutečná úhrada, ne stáří splatnosti: importovaná faktura je odeslaná, dokud ji nespárujete s platbou. Se zapnutým automatickým zaúčtováním se doklad v období podvojného účetnictví při importu zaúčtuje. Daňová evidence: při označení importované faktury jako zaplacené zadejte skutečné datum úhrady, rozhoduje o roce příjmu (výchozí je pozdější z data vystavení a splatnosti).",
     "imported_as_paid": "uloženo jako zaplacené",
     "imported_as_issued": "uloženo jako vystavené",
     "drop_or_click": "Přetáhněte soubory sem nebo klikněte pro výběr",

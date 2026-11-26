@@ -686,6 +686,32 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Přijatá faktura v cizí měně, kterou POHODA vede jako uhrazenou bez pohybu v bance:
+     * zbytek do částky k úhradě v měně dokladu nese `settled_outside_amount`, jinak by byla
+     * uhrazená bez krytí. Opakovaný převod částku nenásobí.
+     */
+    public function testForeignPurchasePaidOutsideIsCoveredInDocumentCurrency(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withForeignPurchasePaidOutside($dir);
+        $export = PohodaExport::open($dir);
+        $pdo = $this->db->pdo();
+        $id = null;
+        foreach ([1, 2] as $run) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $id ??= $this->documentId('purchase_invoices', $supplierId, SyntheticPohodaExport::PURCHASE_EUR_PAID_OUTSIDE);
+            $row = $pdo->query('SELECT pi.status, pi.amount_to_pay, pi.settled_outside_amount, ' . \MyInvoice\Support\Sql\PurchaseSettledExpr::settled('pi') . " AS settled
+                FROM purchase_invoices pi WHERE pi.id = {$id}")->fetch(\PDO::FETCH_ASSOC);
+            self::assertSame('paid', $row['status'], "běh {$run}");
+            self::assertSame('200.00', (string) $row['amount_to_pay'], "běh {$run}");
+            self::assertSame('200.00', (string) $row['settled_outside_amount'], "běh {$run}");
+            self::assertEqualsWithDelta(200.0, (float) $row['settled'], 0.001, "běh {$run}");
+        }
+    }
+
+    /**
      * Vydaná faktura minulého roku uhrazená zčásti před začátkem agendy: úhrada minulého roku
      * je evidovanou platbou k poslednímu dni před agendou, bez pohybu v bance a zápisu v deníku.
      * Saldokonto sedí na hlavní knihu, opakovaný převod platbu nezdvojí a nová platba ani její

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
-use MyInvoice\Service\Integration\InvoiceWebhookEvents;
-use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -18,11 +16,10 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eet\EetHistoryExistsException;
 use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\InvoiceUnmarkPaid;
 use MyInvoice\Service\Invoice\TakenOverFillerGuard;
 use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\IpMatcher;
-use MyInvoice\Service\Pdf\InvoicePdfRenderer;
-use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -45,12 +42,11 @@ final class UnmarkPaidAction
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
-        private readonly StatsRecomputer $stats,
-        private readonly InvoicePdfRenderer $pdf,
         private readonly InvoicePaymentService $payments,
         private readonly DocumentLockService $locks,
         private readonly EetHistoryGuard $eetHistory,
         private readonly TakenOverFillerGuard $fillerGuard,
+        private readonly InvoiceUnmarkPaid $unmark,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -145,8 +141,6 @@ final class UnmarkPaidAction
             return Json::error($response, EetHistoryGuard::ERROR_CODE, $eetConflict, 409);
         }
 
-        $previousPaidAt = (string) ($invoice['paid_at'] ?? '');
-
         // Smaže evidované platby + přepočítá paid_total; u dokladu s kladnou částkou
         // k úhradě tím service rovnou revertuje status (sent/issued) a vyčistí paid_at.
         try {
@@ -157,30 +151,13 @@ final class UnmarkPaidAction
             return Json::error($response, 'payment_locked', $e->getMessage(), 409);
         }
 
-        // Finální doklad krytý zálohou (amount_to_pay <= 0, žádné platby) service
-        // nerevertuje — bookkeeping flip vrátíme přímo (původní chování).
-        // Reminder stav (reminded) se nezachovává — uživatel může upomínku poslat znovu.
-        $reason = match (true) {
-            InvoiceAmountPolicy::shouldAutoMarkPaidOnIssue($invoice) => InvoiceWebhookEvents::ADVANCE,
-            (float) $invoice['amount_to_pay'] > 0 => InvoiceWebhookEvents::PAYMENT,
-            default => null,
-        };
-        $this->payments->setSettledStatus($id, (int) $invoice['supplier_id'], null, $reason);
-
-        // Cached PDF nese „UHRAZENO" stamp — bez invalidace by se po unmark vracel.
-        $this->pdf->invalidate($id, 'invalidate_unmark_paid');
-
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $this->logger->log('invoice.unmark_paid', $user['id'] ?? null, 'invoice', $id, [
-            'previous_paid_at' => $previousPaidAt ?: null,
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        $this->unmark->revert($invoice, isset($user['id']) ? (int) $user['id'] : null, [], $ip, $request->getHeaderLine('User-Agent'));
         foreach ($allowFiller ? $fillerRows : [] as $f) {
             $this->logger->log(DeletePaymentAction::FILLER_AUDIT_ACTION, $user['id'] ?? null, 'invoice', $id, [
                 'payment_id' => (int) $f['id'], 'amount' => $f['amount'], 'paid_on' => $f['paid_on'], 'note' => $f['note'], 'trigger' => 'unmark_paid',
             ], $ip, $request->getHeaderLine('User-Agent'));
         }
-
-        $this->stats->recomputeForInvoiceId($id);
 
         return Json::ok($response, $this->repo->find($id));
     }

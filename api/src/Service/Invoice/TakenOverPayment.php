@@ -10,13 +10,13 @@ use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 
 /**
  * Evidovaná platba vydaného dokladu, kterou založil převod z jiného systému (POHODA,
- * Money S3). Jediné místo pravidel, která z převzetí plynou: popisek „Převzato" v detailu
+ * Money S3, Helios). Jediné místo pravidel, která z převzetí plynou: popisek „Převzato" v detailu
  * dokladu, zákaz smazání a zákaz daňového dokladu k platbě.
  *
  * Smazat nejde platba, která nemá v MyÚčtu žádný protějšek (výplň Money S3 smí smazat
  * oprávněný uživatel v nezamčeném a nepodaném období, {@see TakenOverFillerGuard}): úhrada minulého roku
  * ({@see PohodaPriorYearPayments}), dorovnání uhrazené částky podle POHODY
- * ({@see DocumentLinker::REMAINDER_NOTE}) a úhrada, kterou Money S3 vede jen datem úhrady
+ * ({@see DocumentLinker::REMAINDER_NOTE}) a Heliosu ({@see HELIOS_REMAINDER_NOTE}) a úhrada, kterou Money S3 vede jen datem úhrady
  * bez dokladu úhrady v převedených datech ({@see MONEY_S3_WITHOUT_DOCUMENT_NOTE}). Nese
  * uhrazenou část bez bankovního pohybu, pokladního dokladu, zápočtu i zápisu v deníku.
  * Po smazání by přepočet z plateb snížil `paid_total`, doklad by se vrátil mezi neuhrazené
@@ -53,17 +53,26 @@ final class TakenOverPayment
 
     private const POHODA_PREFIX = 'Převzato z POHODY';
 
+    private const HELIOS_PREFIX = 'Převzato z Heliosu';
+
+    /**
+     * Dorovnání uhrazené částky dokladu převedeného z Heliosu: úhradu vede Helios a převod ji
+     * nesl jen v `paid_total` ({@see \MyInvoice\Service\Migration\Shared\IssuedRemainderRepair}).
+     */
+    public const HELIOS_REMAINDER_NOTE = self::HELIOS_PREFIX . ', dorovnání úhrady';
+
     /** Zdroje plateb, které zakládá převod z Money S3 ({@see IssuedPaymentRecorder}). */
     private const MONEY_S3_SOURCES = ['bank', 'cash', 'credit_note', 'settlement'];
 
     /** Poznámky plateb `settlement` bez protějšku v MyÚčtu. */
-    private const PROTECTED_NOTES = [PohodaPriorYearPayments::NOTE, DocumentLinker::REMAINDER_NOTE];
+    private const PROTECTED_NOTES = [PohodaPriorYearPayments::NOTE, DocumentLinker::REMAINDER_NOTE, self::HELIOS_REMAINDER_NOTE];
 
     /** @param array{source?:mixed,note?:mixed} $payment */
     public static function isTakenOver(array $payment): bool
     {
         $note = (string) ($payment['note'] ?? '');
-        return str_starts_with($note, self::POHODA_PREFIX) || str_starts_with($note, IssuedPaymentRecorder::NOTE_PREFIX);
+        return str_starts_with($note, self::POHODA_PREFIX) || str_starts_with($note, self::HELIOS_PREFIX)
+            || str_starts_with($note, IssuedPaymentRecorder::NOTE_PREFIX);
     }
 
     /** @param array{source?:mixed,note?:mixed} $payment */
@@ -206,7 +215,11 @@ final class TakenOverPayment
     /** Hláška k chráněné platbě podle zdroje (POHODA, Money S3). */
     public static function protectedMessage(array $payment): string
     {
-        return self::isMoneyS3Filler($payment) ? self::MONEY_S3_PROTECTED_MESSAGE : self::POHODA_PROTECTED_MESSAGE;
+        return match (true) {
+            self::isMoneyS3Filler($payment) => self::MONEY_S3_PROTECTED_MESSAGE,
+            ($payment['note'] ?? null) === self::HELIOS_REMAINDER_NOTE => self::PROTECTED_MESSAGE,
+            default => self::POHODA_PROTECTED_MESSAGE,
+        };
     }
 
     /**

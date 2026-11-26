@@ -1397,7 +1397,10 @@ final class DocumentLinker
      * úhrada v cizí měně přepočtená kurzem dokladu, zaokrouhlení v zápisu úhrady, nebo úhrada
      * bez dokladu banky či pokladny (tržby z pokladny účtované souhrnně). Zbytek
      * dostane evidovanou platbu se zdrojem `settlement` k datu úhrady, jinak by saldokonto drželo
-     * doklad otevřený, i když ho hlavní kniha má uzavřený. Doklad s ručním vyrovnáním v deníku
+     * doklad otevřený, i když ho hlavní kniha má uzavřený, a první změna plateb by uhrazenou
+     * část smazala. Platí pro faktury i zálohové listy, i částečně uhrazené, u dokladu bez data
+     * úhrady k DUZP
+     * ({@see PohodaIssuedRemainders}). Doklad s ručním vyrovnáním v deníku
      * (vazba nebo rozpad zápisu) ten zbytek už nese. Úhrady z doby před začátkem agendy
      * už nese platba {@see PohodaPriorYearPayments}, zbytek je jen to, co nepokryla.
      * Opakovaný převod nic nezdvojí.
@@ -1406,28 +1409,22 @@ final class DocumentLinker
     {
         $pdo = $this->db->pdo();
         $s = $ctx->supplierId;
+        $types = "'" . implode("','", PohodaIssuedRemainders::PAYABLE_TYPES) . "'";
         $rows = $pdo->query(
-            "SELECT i.id, cur.code AS currency, DATE(i.paid_at) AS paid_on,
+            "SELECT i.id, cur.code AS currency, " . PohodaIssuedRemainders::paidOnSql('i') . " AS paid_on,
                     ROUND(i.paid_total - COALESCE((SELECT SUM(ip.amount) FROM invoice_payments ip WHERE ip.invoice_id = i.id), 0), 2) AS rest
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.supplier_id = {$s} AND i.status = 'paid' AND i.invoice_type = 'invoice' AND i.paid_at IS NOT NULL
+              WHERE i.supplier_id = {$s} AND i.status NOT IN ('draft', 'cancelled') AND i.invoice_type IN ({$types})
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = i.supplier_id AND m.kind = 'invoice' AND m.target_id = i.id)
-                AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links jl
-                                  JOIN journal_entries je ON je.id = jl.entry_id AND je.supplier_id = jl.supplier_id AND je.source_type = 'manual'
-                                 WHERE jl.supplier_id = i.supplier_id AND jl.doc_type = 'invoice' AND jl.doc_id = i.id)
-                AND NOT EXISTS (SELECT 1 FROM journal_settlement_allocations ja WHERE ja.supplier_id = i.supplier_id AND ja.doc_type = 'invoice' AND ja.doc_id = i.id)
+                AND NOT " . PohodaIssuedRemainders::journalSettledSql('i') . "
              HAVING rest >= 0.01"
         )->fetchAll(PDO::FETCH_ASSOC);
-        $insert = $pdo->prepare(
-            "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, 'settlement', ?)"
-        );
         foreach ($rows as $r) {
             if ($ctx->skipsDate($r['paid_on'])) {
                 continue;
             }
-            $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], self::REMAINDER_NOTE, $ctx->userOrNull()]);
+            PohodaIssuedRemainders::record($pdo, $s, (int) $r['id'], (string) $r['paid_on'], (float) $r['rest'], (string) $r['currency'], $ctx->userOrNull());
             $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payment_remainder');
         }
     }
@@ -1656,8 +1653,14 @@ final class DocumentLinker
      * Úhrada přijaté faktury, kterou POHODA eviduje a převod ji nemá kam navázat (minulý rok,
      * nenavázaný zápočet), jde do `settled_outside_amount`. Nastavuje se absolutně. Rozhodují
      * úhrady POHODY, zůstatek dokladu je jen strop: POHODA ho u cizí měny přepočítává jiným
-     * kurzem, takže sám o úhradě nevypovídá. Doklady v cizí měně se nedoplňují, úhrady
-     * POHODY jsou v Kč a částku v měně dokladu spolehlivě nenese.
+     * kurzem, takže sám o úhradě nevypovídá.
+     *
+     * Úhrady POHODY jsou v Kč a částku v měně dokladu nenesou. Doklad v cizí měně proto
+     * doplní jen tehdy, když ho POHODA vede jako uhrazený (nulový zůstatek v Kč, stav `paid`):
+     * zbytek do částky k úhradě v měně dokladu, který nepokryly spárované úhrady, vyrovnala
+     * POHODA mimo převedené pohyby (kurzový rozdíl, zápočet, úhrada v minulém roce). Bez toho
+     * by uhrazený doklad zůstal bez krytí a párování banky i oprava stavu úhrad by ho brala
+     * jako neuhrazený. Částečně uhrazený doklad v cizí měně se nedoplňuje.
      */
     private function restorePurchaseSettlements(PohodaContext $ctx): void
     {
@@ -1672,14 +1675,20 @@ final class DocumentLinker
         $update = $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
         foreach (array_chunk(array_keys($paid), 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            $rows = $pdo->prepare("SELECT pi.id, pi.amount_to_pay, pi.settled_outside_amount AS outside, ({$settled}) - pi.settled_outside_amount AS settled
+            $rows = $pdo->prepare("SELECT pi.id, pi.amount_to_pay, pi.status, c.code AS currency, pi.settled_outside_amount AS outside,
+                       ({$settled}) - pi.settled_outside_amount AS settled
                   FROM purchase_invoices pi JOIN currencies c ON c.id = pi.currency_id AND c.supplier_id = pi.supplier_id
-                 WHERE pi.supplier_id = ? AND pi.id IN ({$in}) AND c.code = 'CZK' AND pi.amount_to_pay > 0");
+                 WHERE pi.supplier_id = ? AND pi.id IN ({$in}) AND pi.amount_to_pay > 0");
             $rows->execute([$ctx->supplierId, ...$chunk]);
             foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $id = (int) $row['id'];
                 $toPay = (float) $row['amount_to_pay'];
-                $sourcePaid = min($paid[$id], $toPay - max(0.0, $ctx->remaining['purchase_invoice|' . $id] ?? 0.0));
+                if ((string) $row['currency'] !== 'CZK' && (string) $row['status'] !== 'paid') {
+                    continue;
+                }
+                $sourcePaid = (string) $row['currency'] !== 'CZK'
+                    ? $toPay
+                    : min($paid[$id], $toPay - max(0.0, $ctx->remaining['purchase_invoice|' . $id] ?? 0.0));
                 $outside = round(max(0.0, $sourcePaid - (float) $row['settled']), 2);
                 if (abs($outside - (float) $row['outside']) >= 0.005) {
                     $update->execute([number_format($outside, 2, '.', ''), $id, $ctx->supplierId]);

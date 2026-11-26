@@ -16,6 +16,7 @@ use MyInvoice\Service\Eet\EetCommandException;
 use MyInvoice\Service\Eet\EetCreditNoteRefundGate;
 use MyInvoice\Service\Eet\EetInvoicePaymentGate;
 use MyInvoice\Service\Eet\IdempotencyConflictException;
+use MyInvoice\Service\Invoice\InvoicePaidDateDefault;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\IpMatcher;
@@ -56,7 +57,7 @@ final class MarkPaidAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $paidAt = (string) ($body['paid_at'] ?? date('Y-m-d'));
+        $paidAt = (string) ($body['paid_at'] ?? InvoicePaidDateDefault::forInvoice($invoice));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $paidAt)) {
             return Json::error($response, 'invalid_date', 'Neplatné datum.', 400);
         }

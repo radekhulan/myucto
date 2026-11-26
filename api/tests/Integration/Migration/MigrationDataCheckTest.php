@@ -381,20 +381,47 @@ final class MigrationDataCheckTest extends TestCase
     public function testPaidPurchaseWithoutCoverageGetsSettledOutside(): void
     {
         $covered = $this->purchase('DF-901', '2025-05-10', 1000.0, $this->czk);
-        $foreign = $this->purchase('DF-902', '2025-05-12', 100.0, $this->eur, 25.0);
+        $foreign = $this->purchase('DF-902', '2025-07-12', 100.0, $this->eur, 25.0);
         $late = $this->purchase('DF-903', '2025-09-15', 300.0, $this->czk);
         $this->lockUntil('2025-06-30');
 
         $detail = $this->service->detail($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
-        self::assertSame([$covered => 'locked', $foreign => 'review', $late => 'fixable'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertSame([$covered => 'locked', $foreign => 'fixable', $late => 'fixable'], array_column($detail['items'], 'state', 'entity_id'));
         self::assertSame(2500.0, array_column($detail['items'], 'amount_czk', 'entity_id')[$foreign]);
 
         $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
         $result = $this->service->fix($this->supplierId, PurchaseSettledUncoveredCheck::KEY, $this->userId, [], $preview['fingerprint']);
-        self::assertSame(1, $result['fixed_count']);
-        self::assertSame(['0.00', '0.00', '300.00'], array_map(fn (int $id): string => (string) $this->pdo->query("SELECT settled_outside_amount FROM purchase_invoices WHERE id = {$id}")->fetchColumn(), [$covered, $foreign, $late]));
+        self::assertSame(2, $result['fixed_count']);
+        self::assertSame(['0.00', '100.00', '300.00'], array_map(fn (int $id): string => (string) $this->pdo->query("SELECT settled_outside_amount FROM purchase_invoices WHERE id = {$id}")->fetchColumn(), [$covered, $foreign, $late]));
         self::assertSame(1, $this->rows('activity_log', "action = '" . PurchaseSettledUncoveredCheck::AUDIT_ACTION_POHODA . "' AND entity_id = {$late}"));
         $this->assertNothingToFix(PurchaseSettledUncoveredCheck::KEY);
+    }
+
+    public function testHeliosPaidPurchaseWithoutCoverageGetsSettledOutside(): void
+    {
+        $full = $this->heliosPurchase('HF-901', 1000.0, 1000.0);
+        $partial = $this->heliosPurchase('HF-902', 1000.0, 400.0);
+
+        $detail = $this->service->detail($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
+        self::assertSame([$full => 'fixable', $partial => 'review'], array_column($detail['items'], 'state', 'entity_id'));
+        $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
+        $result = $this->service->fix($this->supplierId, PurchaseSettledUncoveredCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(1, $result['fixed_count']);
+        self::assertSame(['1000.00', '0.00'], array_map(fn (int $id): string => (string) $this->pdo->query("SELECT settled_outside_amount FROM purchase_invoices WHERE id = {$id}")->fetchColumn(), [$full, $partial]));
+        self::assertSame(1, $this->rows('activity_log', "action = '" . PurchaseSettledUncoveredCheck::AUDIT_ACTION_HELIOS . "' AND entity_id = {$full}"));
+        $this->assertNothingToFix(PurchaseSettledUncoveredCheck::KEY);
+    }
+
+    private function heliosPurchase(string $number, float $total, float $sourcePaid): int
+    {
+        $this->pdo->prepare("INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
+                received_at, currency_id, exchange_rate, vendor_snapshot, total_without_vat, total_vat, total_with_vat, status, paid_at, paid_amount_invoice_ccy, created_by)
+            VALUES (?, ?, ?, 'invoice', '2025-08-10', '2025-08-10', '2025-08-10', '2025-08-10', ?, 1, '{}', ?, 0, ?, 'paid', '2025-08-20', ?, ?)")
+            ->execute([$this->supplierId, $this->clientId, $number, $this->czk, $total, $total, $sourcePaid, $this->userId]);
+        $id = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO helios_import_map (supplier_id, kind, source_key, target_id) VALUES (?, 'purchase_invoice', ?, ?)")
+            ->execute([$this->supplierId, $number, $id]);
+        return $id;
     }
 
     public function testStalePreviewIsRefused(): void

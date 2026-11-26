@@ -31,11 +31,14 @@ use PDO;
  *    a {@see MoneyS3SettledPayments::restorePurchaseSettlements()} (zápočet interním dokladem,
  *    zbytek mimo evidenci). Doplnění je jedno pro všechny doklady firmy, nález v chráněném
  *    období ho zastaví celé ({@see MigrationCheckLocks::allOrNothing()}).
+ *  - Helios: doklad z mapy převodu, který Helios vede jako uhrazený v plné výši v měně dokladu
+ *    (`paid_amount_invoice_ccy`), doplní se zbytek do částky k úhradě ({@see heliosItems()}).
  *  - POHODA: doklad z mapy převodu ve stavu uhrazený, s datem úhrady do konce posledního
  *    převedeného roku a v Kč. Úhrady POHODY už nejsou k dispozici; uhrazený stav POHODY ale
  *    znamená nulový zůstatek, takže chybějící krytí je celý zbytek do částky k úhradě, stejně
- *    jako u převodu (`Pohoda\DocumentLinker::restorePurchaseSettlements`). Doklady v cizí
- *    měně převod nedoplňuje (úhrady POHODY jsou v Kč), kontrola je jen ohlásí.
+ *    jako u převodu (`Pohoda\DocumentLinker::restorePurchaseSettlements`). U dokladu v cizí
+ *    měně se doplní zbytek v měně dokladu: úhrady POHODY jsou v Kč, uhrazený stav ale znamená
+ *    nulový zůstatek v Kč a rozdíl (kurzový rozdíl, zápočet) vyrovnala POHODA mimo evidenci.
  * Deník, DPH ani částka k úhradě se nemění, doplní se jen evidence úhrady. Uzavřené účetní
  * období proto opravu neblokuje, jen zámek účtování k datu a podané období DPH
  * ({@see MigrationCheckLocks::paymentRecordReason()}).
@@ -44,6 +47,7 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
 {
     public const KEY = 'purchase_settled_uncovered';
     public const AUDIT_ACTION_POHODA = 'purchase_invoice.pohoda_settled_outside_restored';
+    public const AUDIT_ACTION_HELIOS = 'purchase_invoice.helios_settled_outside_restored';
 
     public function __construct(
         MigrationSources $sources,
@@ -73,7 +77,7 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
 
     protected function sources(): array
     {
-        return [MigrationSources::POHODA, MigrationSources::MONEY_S3];
+        return [MigrationSources::POHODA, MigrationSources::MONEY_S3, MigrationSources::HELIOS];
     }
 
     public function options(): array
@@ -86,6 +90,9 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
         $items = [];
         if ($this->sources->has($supplierId, MigrationSources::POHODA)) {
             $items = array_merge($items, $this->pohodaItems($supplierId, false));
+        }
+        if ($this->sources->has($supplierId, MigrationSources::HELIOS)) {
+            $items = array_merge($items, $this->heliosItems($supplierId, false));
         }
         $money = $this->sources->has($supplierId, MigrationSources::MONEY_S3) ? $this->moneyItems($supplierId) : [];
         return new CheckResult(array_merge($items, MigrationCheckLocks::allOrNothing(new CheckResult($money))->items));
@@ -113,11 +120,12 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
         $notes = [];
         $update = $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = settled_outside_amount + ? WHERE id = ? AND supplier_id = ?');
         foreach ($plan['preview']->changes as $item) {
-            if (($item->details['source'] ?? '') !== MigrationSources::POHODA) {
+            $source = $item->details['source'] ?? '';
+            if (!in_array($source, [MigrationSources::POHODA, MigrationSources::HELIOS], true)) {
                 continue;
             }
             $update->execute([number_format((float) $item->amount, 2, '.', ''), $item->entityId, $supplierId]);
-            $this->activity->log(self::AUDIT_ACTION_POHODA, $userId, 'purchase_invoice', $item->entityId, [
+            $this->activity->log($source === MigrationSources::HELIOS ? self::AUDIT_ACTION_HELIOS : self::AUDIT_ACTION_POHODA, $userId, 'purchase_invoice', $item->entityId, [
                 'source' => 'migration_data_check',
                 'check' => self::KEY,
                 'document_no' => $item->label,
@@ -148,6 +156,9 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
     private function plan(int $supplierId, bool $forUpdate): array
     {
         $items = $this->sources->has($supplierId, MigrationSources::POHODA) ? $this->pohodaItems($supplierId, $forUpdate) : [];
+        if ($this->sources->has($supplierId, MigrationSources::HELIOS)) {
+            $items = array_merge($items, $this->heliosItems($supplierId, $forUpdate));
+        }
         $money = null;
         if ($this->sources->has($supplierId, MigrationSources::MONEY_S3)) {
             $moneyItems = $this->moneyPlan->purchases($supplierId, null, false)['items'];
@@ -186,15 +197,58 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
             $gap = round((float) $r['amount_to_pay'] - (float) $r['settled'], 2);
             $rate = (string) $r['currency'] === 'CZK' ? 1.0 : ((float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : 1.0);
             $paidAt = substr((string) $r['paid_at'], 0, 10);
-            if ((string) $r['currency'] !== 'CZK') {
-                [$state, $reason] = [CheckItem::REVIEW, 'Doklad v cizí měně: úhrady POHODY jsou v Kč, krytí doplňte ručně (Uhrazeno mimo evidenci v detailu dokladu).'];
-            } elseif (($lock = $this->locks->paymentRecordReason($supplierId, $paidAt)) !== null) {
+            if (($lock = $this->locks->paymentRecordReason($supplierId, $paidAt)) !== null) {
                 [$state, $reason] = [CheckItem::LOCKED, $lock];
+            } elseif ((string) $r['currency'] !== 'CZK') {
+                [$state, $reason] = [CheckItem::FIXABLE, 'Uhrazeno podle POHODY (nulový zůstatek v Kč). Zbytek v měně dokladu, který evidované úhrady nepokrývají (kurzový rozdíl, zápočet), se doplní jako úhrada mimo evidenci.'];
             } else {
                 [$state, $reason] = [CheckItem::FIXABLE, 'Uhrazeno podle POHODY, evidované úhrady doklad nepokrývají. Zbytek se doplní jako úhrada mimo evidenci.'];
             }
             $out[] = new CheckItem('purchase_invoice', (int) $r['id'], (string) $r['document_no'], $paidAt, round($gap * $rate, 2), $state, $reason,
                 $gap, (string) $r['currency'], ['source' => MigrationSources::POHODA, 'outside' => (float) $r['outside']]);
+        }
+        return $out;
+    }
+
+    /**
+     * Helios: doklad z mapy převodu ve stavu uhrazený, který Helios vede jako uhrazený v plné
+     * výši (`paid_amount_invoice_ccy` v měně dokladu kryje částku k úhradě). Převod úhradu nese
+     * jen touto částkou a stavem, evidence úhrad ji nepokrývá. Chybějící krytí je zbytek do
+     * částky k úhradě v měně dokladu. Doklad uhrazený podle Heliosu jen zčásti se jen ohlásí.
+     *
+     * @return list<CheckItem>
+     */
+    private function heliosItems(int $supplierId, bool $forUpdate): array
+    {
+        $settled = PurchaseSettledExpr::settled('pi', currentRead: $forUpdate);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM (
+                SELECT pi.id, COALESCE(NULLIF(pi.vendor_invoice_number, ''), NULLIF(pi.varsymbol, ''), CONCAT('#', pi.id)) AS document_no,
+                       cur.code AS currency, pi.exchange_rate, COALESCE(pi.paid_at, pi.tax_date, pi.issue_date) AS paid_at, pi.amount_to_pay,
+                       pi.settled_outside_amount AS outside, COALESCE(pi.paid_amount_invoice_ccy, 0) AS source_paid, ({$settled}) AS settled
+                  FROM purchase_invoices pi
+                  JOIN currencies cur ON cur.id = pi.currency_id
+                 WHERE pi.supplier_id = ? AND pi.status = 'paid' AND pi.amount_to_pay > 0
+                   AND EXISTS (SELECT 1 FROM helios_import_map m WHERE m.supplier_id = pi.supplier_id AND m.kind = 'purchase_invoice' AND m.target_id = pi.id)
+             ) d
+             WHERE d.amount_to_pay - d.settled >= 0.01
+             ORDER BY d.paid_at, d.id" . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $gap = round((float) $r['amount_to_pay'] - (float) $r['settled'], 2);
+            $rate = (string) $r['currency'] === 'CZK' ? 1.0 : ((float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : 1.0);
+            $paidAt = substr((string) $r['paid_at'], 0, 10);
+            if ((float) $r['source_paid'] < (float) $r['amount_to_pay'] - 0.01) {
+                [$state, $reason] = [CheckItem::REVIEW, 'Helios vede uhrazenou jen část dokladu, krytí doplňte ručně (Uhrazeno mimo evidenci v detailu dokladu).'];
+            } elseif (($lock = $this->locks->paymentRecordReason($supplierId, $paidAt)) !== null) {
+                [$state, $reason] = [CheckItem::LOCKED, $lock];
+            } else {
+                [$state, $reason] = [CheckItem::FIXABLE, 'Uhrazeno podle Heliosu v plné výši, evidované úhrady doklad nepokrývají. Zbytek se doplní jako úhrada mimo evidenci.'];
+            }
+            $out[] = new CheckItem('purchase_invoice', (int) $r['id'], (string) $r['document_no'], $paidAt, round($gap * $rate, 2), $state, $reason,
+                $gap, (string) $r['currency'], ['source' => MigrationSources::HELIOS, 'outside' => (float) $r['outside']]);
         }
         return $out;
     }

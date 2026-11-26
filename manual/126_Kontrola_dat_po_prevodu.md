@@ -59,7 +59,9 @@ zápočtem, a oprava zapíše přesně to, co ukázal náhled.
 **Jen ke kontrole:**
 
 - doklad vystavený v roce převedené agendy POHODY s uhrazenou částkou vyšší než platby: úhradou minulých
-  let to být nemůže, ověřte úhrady v detailu dokladu,
+  let to být nemůže. Chybějící dorovnání úhrady doplní správce instance skriptem
+  `api/bin/repair-issued-remainders.php --source=pohoda` (k datu úhrady podle POHODY, bez data úhrady k DUZP),
+  doklady vyrovnané ručním zápisem v deníku jen ohlásí,
 - doklad Money S3, jehož úhrada je spárovaná s pohybem převedené banky bez evidované platby: platbu
   doplní opakovaný převod z Money S3 ([§ 106.10.8](106_Prechod_z_Money_S3.md#106108-opakovany-prevod)).
 
@@ -145,8 +147,10 @@ by k němu nabídlo platbu se stejným symbolem znovu a úhradu by započetlo dv
 zápočet interním dokladem navázaným na doklad. Deník ani DPH se nemění, a proto opravu neblokuje uzavřené
 účetní období, jen zámek účtování k datu a podané období DPH.
 
-**Jen ke kontrole:** doklad z POHODY v cizí měně (úhrady POHODY jsou v Kč, krytí doplňte ručně v detailu
-dokladu) a doklad s úhradou za zámkem účtování k datu nebo v podaném období DPH.
+U dokladu z POHODY v cizí měně se doplní zbytek v měně dokladu: úhrady POHODY jsou v Kč, ale uhrazený
+stav znamená nulový zůstatek v Kč a rozdíl (kurzový rozdíl, zápočet) vyrovnala POHODA mimo převedené pohyby.
+
+**Jen ke kontrole:** doklad s úhradou za zámkem účtování k datu nebo v podaném období DPH.
 
 ## 126.9 DDKP bez vazby na zálohu
 

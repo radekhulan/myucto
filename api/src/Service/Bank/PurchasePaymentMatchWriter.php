@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank;
 
+use MyInvoice\Service\Import\ImportedPaidPurchase;
 use PDO;
 
 /**
@@ -17,6 +18,10 @@ use PDO;
  *
  * Unikátní index na dvojici záměrně nemáme (viz migrace 1090), takže tohle je
  * brána, přes kterou musí jít každý zápis.
+ *
+ * Úhrada dokladu, který import z Fakturoidu či iDokladu převzal jako uhrazený, sníží jeho
+ * krytí z importu ({@see ImportedPaidPurchase::releaseForPayment()}), jinak by byl doklad
+ * uhrazený dvakrát.
  *
  * Přednost: ruční párování přebíjí automatické. Auto zápis ruční řádek nemění,
  * ruční zápis auto řádek převezme (stane se ručním).
@@ -58,6 +63,7 @@ final class PurchasePaymentMatchWriter
                 $matchType === 'manual' ? null : $confidence,
                 $userId !== null && $userId > 0 ? $userId : null,
             ]);
+            ImportedPaidPurchase::releaseForPayment($pdo, $supplierId, $purchaseInvoiceId);
             return;
         }
 
@@ -67,6 +73,7 @@ final class PurchasePaymentMatchWriter
                     SET amount = ?, match_type = 'manual', match_confidence = NULL, matched_by_user_id = ?
                   WHERE id = ?"
             )->execute([$amount, $userId !== null && $userId > 0 ? $userId : null, (int) $row['id']]);
+            ImportedPaidPurchase::releaseForPayment($pdo, $supplierId, $purchaseInvoiceId);
             return;
         }
 
@@ -74,6 +81,7 @@ final class PurchasePaymentMatchWriter
             $pdo->prepare(
                 'UPDATE payment_matches SET amount = ?, match_confidence = ? WHERE id = ?'
             )->execute([$amount, $confidence, (int) $row['id']]);
+            ImportedPaidPurchase::releaseForPayment($pdo, $supplierId, $purchaseInvoiceId);
         }
     }
 }

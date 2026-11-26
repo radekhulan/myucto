@@ -658,6 +658,32 @@ final class SyntheticPohodaExport
             . '<typ:sourceDocument><typ:number>BAN9990001</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
+    /** Přijatá faktura v EUR uhrazená podle POHODY zápočtem ({@see withForeignPurchasePaidOutside()}). */
+    public const PURCHASE_EUR_PAID_OUTSIDE = '26PF0098';
+
+    /**
+     * Přijatá faktura 26PF0098 na 200 EUR (kurz 25, 5 000 Kč), kterou POHODA vede jako
+     * uhrazenou (zůstatek 0 Kč) zápočtem interním dokladem bez pohybu v bance. Úhrada POHODY je
+     * v Kč a částku v měně dokladu nenese.
+     */
+    public static function withForeignPurchasePaidOutside(string $dir): void
+    {
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_EUR_PAID_OUTSIDE . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2698</inv:symVar><inv:originalDocument>RE-2026-98</inv:originalDocument><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Pronájem stánku</inv:text>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Messe Test GmbH</typ:company><typ:city>Berlin</typ:city>'
+            . '<typ:country><typ:ids>DE</typ:ids></typ:country></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-20</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>5000</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency>'
+            . '<inv:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>25</typ:rate><typ:priceSum>200</typ:priceSum></inv:foreignCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('26PF0098liq')) . '</typ:id><typ:date>2026-02-20</typ:date><typ:sourceAgenda>internalDocuments</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>26ID9998</typ:number></typ:sourceDocument><typ:amount>5000</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+    }
+
     /** Vydaná faktura minulého roku uhrazená zčásti v minulém roce ({@see withIssuedPaidEarlier()}). */
     public const ISSUED_PAID_EARLIER = '25FV0098';
 

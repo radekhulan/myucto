@@ -309,8 +309,36 @@ final class PurchaseSettledExpr
     public static function remainingAmount(string $alias = 'pi', bool $currentRead = false): string
     {
         $a = $alias === '' ? '' : $alias . '.';
-        $nominal = "{$a}amount_to_pay - (" . self::paidAmount($alias, $currentRead) . ')';
+        return self::roundedRemainder($a, "{$a}amount_to_pay - (" . self::paidAmount($alias, $currentRead) . ')');
+    }
 
+    /**
+     * Zbývá uhradit podle evidovaných úhrad ({@see settled()}), se zaokrouhlením jako
+     * {@see remainingAmount()}. Na rozdíl od něj doklad ve stavu `paid` bez úhrad za uhrazený
+     * nebere: pro hledání dokladů uhrazených bez krytí.
+     */
+    public static function unsettledAmount(string $alias = 'pi', bool $currentRead = false): string
+    {
+        $a = $alias === '' ? '' : $alias . '.';
+        return self::roundedRemainder($a, "{$a}amount_to_pay - (" . self::settled($alias, currentRead: $currentRead) . ')');
+    }
+
+    /**
+     * Doklad `paid`, jehož úhradu evidované úhrady nekryjí: zbytek {@see unsettledAmount()}
+     * v Kč nad toleranci dorovnání, stejná hranice jako {@see paidShortfallCondition()}.
+     *
+     * @param string $currencyCode SQL výraz s kódem měny dokladu (typicky `cur.code`)
+     */
+    public static function unsettledShortfallCondition(string $alias, string $currencyCode, bool $currentRead = false): string
+    {
+        $a = $alias === '' ? '' : $alias . '.';
+        return "({$a}status = 'paid' AND (" . self::unsettledAmount($alias, $currentRead) . ")
+                 * (CASE WHEN UPPER({$currencyCode}) = 'CZK' THEN 1 ELSE COALESCE(NULLIF({$a}exchange_rate, 0), 1) END)
+                 > " . self::sqlNumber(FxPaymentSettlement::AMOUNT_TOLERANCE) . ')';
+    }
+
+    private static function roundedRemainder(string $a, string $nominal): string
+    {
         return "CASE WHEN COALESCE({$a}rounding, 0) = 0 OR ABS({$nominal}) < 0.005 THEN {$nominal}
                      ELSE {$nominal} + {$a}rounding END";
     }

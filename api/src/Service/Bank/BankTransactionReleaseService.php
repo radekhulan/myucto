@@ -257,6 +257,9 @@ final class BankTransactionReleaseService
         }
         // Konečná faktura krytá zálohou přestává být uhrazená spolu se zálohou.
         (new AdvanceCoveredPaidStatus($this->db))->afterPaymentsChanged($supplierId, $purchaseInvoiceIds);
+        // Doklad, který zůstal uhrazený jen podle zdroje importu (Fakturoid, iDoklad), dostane
+        // zpět krytí, které mu párování snížilo.
+        \MyInvoice\Service\Import\ImportedPaidPurchase::restoreAfterPaymentRemoved($pdo, $supplierId, $purchaseInvoiceIds);
         $this->restoreRefundDocuments($pdo, $supplierId, $refundInvoiceIds, $postedAt);
         // Konečná faktura zálohy už nesmí čerpat 314/324 za úhradu, která tu není.
         $this->bankPosting->syncAdvanceSettlements($supplierId, $advances, $userId);

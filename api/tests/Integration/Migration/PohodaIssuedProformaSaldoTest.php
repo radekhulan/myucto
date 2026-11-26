@@ -137,6 +137,25 @@ final class PohodaIssuedProformaSaldoTest extends TestCase
         self::assertSame(0, self::cents($this->account('311')['difference']));
     }
 
+    /**
+     * Uhrazenou částku každého převzatého vydaného dokladu nesou evidované platby (i zálohové
+     * listy): jinak ji první změna plateb přepočtem ze součtu plateb smaže.
+     */
+    public function testPaidTotalOfEveryIssuedDocumentIsBackedByPayments(): void
+    {
+        [$protocol] = $this->import();
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.varsymbol, i.invoice_type, i.paid_total,
+                    (SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p WHERE p.invoice_id = i.id) AS payments
+               FROM invoices i
+              WHERE i.supplier_id = ? AND i.invoice_type IN ('invoice', 'proforma') AND i.status NOT IN ('draft', 'cancelled')
+                AND NOT " . \MyInvoice\Service\Migration\Pohoda\PohodaIssuedRemainders::journalSettledSql('i') . "
+             HAVING ABS(i.paid_total - payments) >= 0.01"
+        );
+        $stmt->execute([$this->supplierId]);
+        self::assertSame([], $stmt->fetchAll(\PDO::FETCH_ASSOC), $this->explain($protocol));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array{0:ImportProtocol,1:string} */

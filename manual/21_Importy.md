@@ -338,15 +338,18 @@ Pro každou fakturu v souboru:
 | **Zakázka** | Má-li faktura číslo zakázky (ISDOC `OrderReference/ID`, Pohoda `numberOrder`), přiřadí se k zakázce s tím číslem (vytvoří se, pokud chybí). Nemá-li číslo zakázky, ale klient má v importovaném balíku **více různých e-mailů**, vytvoří se zakázka za každý e-mail s názvem `{Firma} - {e-mail}`. Jinak `bez zakázky`. |
 | **Faktura** | Uloží se se zachovaným původním variabilním symbolem. Položky, sazby DPH, kurz a měna se převezmou. Snapshoty klienta, dodavatele a banky se zafixují z aktuálních dat. |
 
-### 21.9.4 Stav vydaných faktur: pravidlo 30 dní
+### 21.9.4 Stav vydaných faktur
 
-- **V období podvojného účetnictví** se běžná faktura bez úhrady uloží jako
-  **Odeslaná** i po splatnosti. Úhradu spárujete například z bankovního výpisu
-  nebo pokladny.
-- **Před začátkem účetnictví a u firem bez podvojného účetnictví** se při
-  splatnosti starší než 30 dní předpokládá úhrada. Doklad se uloží jako
-  **Zaplacený** k DUZP nebo k datu vystavení. Při mladší nebo budoucí splatnosti
-  se uloží jako **Odeslaný**.
+- Běžná faktura se uloží jako **Odeslaná**, i když je po splatnosti, ve všech
+  režimech firmy (podvojné účetnictví, daňová evidence, jen fakturace). Soubor
+  úhradu nenese a stáří splatnosti o ní nic neříká. Úhradu spárujete
+  z bankovního výpisu nebo pokladny, případně ji zadáte na dokladu
+  (**Označit jako zaplacené** založí platbu; výchozí datum úhrady je u importovaného
+  dokladu pozdější z data vystavení a splatnosti, ne dnešek). Zaplacený je doklad jen
+  tehdy, když úhradu nese evidence. V daňové evidenci zadejte skutečné datum úhrady,
+  rozhoduje o roce příjmu.
+- **Faktura krytá odečtenou zálohou**, které k úhradě nic nezbývá, se uloží
+  jako **Zaplacená**.
 - **Daňový doklad k přijaté platbě** je vždy **Zaplacený** (ke dni přijetí
   platby) a nic se na něm nedoplácí. Dokumentuje platbu, která už přišla.
 - **Faktura, která odečítá zálohy**, nebo jejíž součet položek se od celkové
@@ -625,7 +628,7 @@ existujících). Import je čistě aditivní.
 #### 21.9.11.3 Platební stav
 
 API import přebírá **skutečný platební stav ze zdrojového systému**. Pro stav
-při souborovém importu platí [§ 21.9.4](#2194-stav-vydanych-faktur-pravidlo-30-dni).
+při souborovém importu platí [§ 21.9.4](#2194-stav-vydanych-faktur).
 
 - Doklad v iDokladu **Uhrazeno / Přeplaceno** se importuje jako **Zaplacená**
   (datum úhrady z iDokladu; nepošle se na ni upomínka).
@@ -634,6 +637,8 @@ při souborovém importu platí [§ 21.9.4](#2194-stav-vydanych-faktur-pravidlo-
   aby na reálně nezaplacené historické faktury nezačaly klientům odcházet
   upomínky.
 - Totéž platí pro **přijaté faktury** (uhrazeno je Zaplacená, jinak Koncept).
+  Úhradu ze zdroje nese u přijaté faktury **úhrada mimo evidenci** ve výši částky
+  k úhradě, takže ji párování banky nenabídne k zaplacení znovu.
 - **Přijaté účtenky a paragony** jsou hrazené na místě, importují se rovnou jako
   **Zaplacená** (datum úhrady = datum vystavení), pokud iDoklad nevrátí jiný stav.
 
@@ -701,7 +706,8 @@ kontrole a vazbu doplníte ručně. Čísla dokladů, variabilní symboly a úhr
 přebírají beze změny.
 
 **Platební stav.** Stejně jako u iDokladu se přebírá skutečný stav z Fakturoidu:
-doklad **Zaplaceno** se importuje jako Zaplacená (datum úhrady `paid_on`),
+doklad **Zaplaceno** se importuje jako Zaplacená (datum úhrady `paid_on`;
+vydaná faktura dostane platbu, přijatá úhradu mimo evidenci),
 **Stornováno** jako Stornovaná; vše ostatní (včetně částečných úhrad) zůstává
 Koncept k ručnímu vystavení.
 

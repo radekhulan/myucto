@@ -409,6 +409,8 @@ export interface Invoice {
   issue_date: string
   tax_date: string | null
   due_date: string
+  /** Dávka importu souborů, ze které doklad vznikl (jinak null). */
+  import_batch_id?: string | null
   currency_id: number
   currency: string
   reverse_charge: boolean
