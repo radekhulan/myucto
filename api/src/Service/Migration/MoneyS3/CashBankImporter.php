@@ -6,12 +6,14 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
+use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use PDO;
@@ -1034,6 +1036,9 @@ final class CashBankImporter
             // (stejně jako pokladna založená v aplikaci), další dostanou volnou analytiku.
             $account = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_REGISTER) === [] ? '211' : $this->freeCashAccount($ctx->supplierId);
         }
+        if ($account === null && !$ctx->options->relinkOnly) {
+            $account = $this->resolveCashAccount($ctx, $code, $name, $primaryAccount);
+        }
         if ($account !== null) {
             $stmt = $pdo->prepare('SELECT id FROM cash_registers WHERE supplier_id = ? AND account_code = ? LIMIT 1');
             $stmt->execute([$ctx->supplierId, $account]);
@@ -1058,6 +1063,25 @@ final class CashBankImporter
         $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_REGISTER, $code, $id, $ctx->runId);
         $ctx->protocol->count(self::STEP_CASH, 'registers');
         return ['id' => $id, 'currency' => $currency];
+    }
+
+    private function resolveCashAccount(ImportContext $ctx, string $code, string $name, string $primaryAccount): string
+    {
+        $account = AccountCode::fromMoney($primaryAccount);
+        $accounts = new ChartOfAccountsRepository($this->db);
+        $existing = $account !== null ? $accounts->findByCode($ctx->supplierId, $account) : null;
+        if ($existing !== null && (string) $existing['account_type'] === 'asset') {
+            $ctx->accountIds[$account] = (int) $existing['id'];
+            return $account;
+        }
+        $parent = $accounts->findByCode($ctx->supplierId, '211');
+        if ($existing !== null || $account === null || !str_starts_with($account, '211.')
+            || $parent === null || empty($parent['is_synthetic']) || $parent['account_type'] !== 'asset') {
+            throw new MoneyS3Exception('cash_register_account_missing',
+                "Pokladna {$code} nemá použitelný účet „{$primaryAccount}“. Opravte primární účet pokladny v Money S3 nebo doplňte účet v účetní osnově MyÚčta a převod spusťte znovu.");
+        }
+        $ctx->accountIds[$account] = (new ChartAccountCreator($accounts))->createAnalytic($ctx->supplierId, $account, $name, $parent);
+        return $account;
     }
 
     /**
