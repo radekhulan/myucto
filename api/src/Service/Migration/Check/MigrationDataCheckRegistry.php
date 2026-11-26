@@ -16,6 +16,7 @@ use MyInvoice\Service\Migration\Check\Checks\PurchaseSettledUncoveredCheck;
 use MyInvoice\Service\Migration\Check\Checks\SettledWithoutPaymentCheck;
 use MyInvoice\Service\Migration\Check\Checks\SubledgerLedgerCheck;
 use MyInvoice\Service\Migration\Check\Checks\TaxDocumentAdvanceLinkCheck;
+use MyInvoice\Service\Migration\Check\Checks\TaxEvidenceCashMissingCheck;
 
 /**
  * Seznam kontrol dat po převodu v pořadí, ve kterém je ukazuje přehled. Kontroly dodává
@@ -40,6 +41,7 @@ final class MigrationDataCheckRegistry
         ForeignIssuedInCzkCheck $foreignIssued,
         AssetAccountUndeterminedCheck $assetAccount,
         AssetActivationMissingCheck $assetActivation,
+        TaxEvidenceCashMissingCheck $taxEvidenceCash,
     ) {
         foreach (func_get_args() as $check) {
             $this->checks[$check->key()] = $check;

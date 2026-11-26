@@ -185,7 +185,7 @@ final class PohodaImporter
         if ($taxEvidence) {
             // Daňová evidence nemá účetní období ani rámec: kontroly deníku, období a osnovy
             // neziskovky se jí netýkají. Rok agendy je kalendářní rok exportu.
-            array_push($out, ...$this->taxEvidence->preflight($supplierId, $supplier, $export->year));
+            array_push($out, ...$this->taxEvidence->preflight($supplierId, $supplier, $export->year, $relinkOnly));
             if ($export->path('payroll') !== null) {
                 $add('info', 'payroll_separate', 'Export obsahuje mzdy z datového souboru POHODY (91_mzdy.xml). Převod daňové evidence je nepřevádí, zaměstnanci a mzdy se převádějí zvlášť.');
             }
@@ -330,8 +330,9 @@ final class PohodaImporter
      * @param bool $relinkOnly opravný převod vazeb už převedené firmy ({@see PohodaContext::$relinkOnly})
      * @param array<string,mixed>|null $payroll přehled mezd agendy z `meta.json` (`employees`, `months`, `first`, `last`);
      *        mzdy, které firma převzít nemůže, protokol zapíše jako upozornění ({@see PayrollMigrationNotice})
+     * @param bool $allowFiledVat daňová evidence převezme pokladní doklady s DPH i do podaného období DPH ({@see PohodaContext::$allowFiledVat})
      */
-    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false, ?array $stock = null, bool $relinkOnly = false, bool $keepOwnJournal = false, ?array $payroll = null, ?array $selectedYears = null): ImportProtocol
+    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false, ?array $stock = null, bool $relinkOnly = false, bool $keepOwnJournal = false, ?array $payroll = null, ?array $selectedYears = null, bool $allowFiledVat = false): ImportProtocol
     {
         // Dorovnání: deník nese i vlastní zápisy, rozdíl proti POHODĚ je očekávaný a hlásí se.
         $acceptDifferences = $acceptDifferences || $keepOwnJournal;
@@ -380,6 +381,7 @@ final class PohodaImporter
         $ctx->selectedYears = $selectedYears === null ? null : array_fill_keys($selectedYears, true);
         $ctx->stock = $stock;
         $ctx->relinkOnly = $relinkOnly;
+        $ctx->allowFiledVat = $allowFiledVat;
         $ctx->taxEvidence = self::isTaxEvidenceAgenda($export);
         // Daňová evidence se neúčtuje: automatika účtování, účetní období ani účetní rámec se
         // jí netýkají a převod je nemění.
@@ -420,6 +422,16 @@ final class PohodaImporter
             $automation = ['before' => $snapshot, 'during' => $dryRun || !$automationManaged ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
 
             $steps = $ctx->taxEvidence ? $this->taxEvidenceSteps($ctx) : $this->steps($ctx);
+            // Opravný převod daňové evidence zakládá pokladní doklady a navazuje z nich úhrady
+            // a mění krytí úhrad z dřívějšího převodu: celý běh je jedna transakce (savepoint
+            // uvnitř cizí), aby selhání nebo zrušení nenechalo pokladní doklady bez úhrad.
+            $atomic = $ctx->relinkOnly && $ctx->taxEvidence && !$dryRun;
+            $atomicOwn = $atomic && !$pdo->inTransaction();
+            if ($atomicOwn) {
+                $pdo->beginTransaction();
+            } elseif ($atomic) {
+                $pdo->exec('SAVEPOINT pohoda_relink');
+            }
             $total = count($steps);
             $index = 0;
             foreach ($steps as $key => $fn) {
@@ -461,6 +473,10 @@ final class PohodaImporter
                     break;
                 }
             }
+            if ($atomic) {
+                $this->finishAtomicRelink($pdo, $atomicOwn, $protocol);
+                $atomic = false;
+            }
             $ctx->report('done', $total, $total);
             if (!$dryRun) {
                 $this->invoices->recomputeClientStats($ctx);
@@ -476,6 +492,9 @@ final class PohodaImporter
             $protocol->error(self::STEP_PREFLIGHT, $e->errorCode, $e->getMessage());
             $protocol->fail(self::STEP_PREFLIGHT);
         } finally {
+            if (($atomic ?? false) && $pdo->inTransaction()) {
+                $atomicOwn ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_relink');
+            }
             if ($savepoint && $pdo->inTransaction()) {
                 $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_dry_run');
             } elseif ($dryRun && $pdo->inTransaction()) {
@@ -487,6 +506,20 @@ final class PohodaImporter
             }
         }
         return $protocol;
+    }
+
+    /** Konec opravného převodu daňové evidence: bez chyby se zapíše celý, jinak se celý vrátí. */
+    private function finishAtomicRelink(\PDO $pdo, bool $own, ImportProtocol $protocol): void
+    {
+        if (!$pdo->inTransaction()) {
+            return;
+        }
+        if (!$protocol->hasErrors()) {
+            $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT pohoda_relink');
+            return;
+        }
+        $own ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_relink');
+        $protocol->info(self::STEP_PREFLIGHT, 'relink_rolled_back', 'Opravný převod skončil chybou nebo byl zrušen, nic z něj se nezapsalo.');
     }
 
     private function convertPaidIssued(PohodaContext $ctx, string $step): void
@@ -661,9 +694,20 @@ final class PohodaImporter
      * vazby na pohyby ({@see PohodaTaxEvidenceImporter}). Dlouhodobý majetek převod v daňové
      * evidenci nepřevádí: karta bez účetních odpisů z deníku by byla neúplná.
      *
+     * Opravný převod ({@see PohodaContext::$relinkOnly}) vynechá stejné kroky jako u podvojného
+     * účetnictví a nové doklady, výpisy ani partnery nepřidá. Doplní jen pokladnu a pokladní
+     * doklady, které dřívější převod nepřevzal, a úhrady dokladů z nich.
+     *
      * @return array<string,callable():void>
      */
     private function taxEvidenceSteps(PohodaContext $ctx): array
+    {
+        $steps = $this->allTaxEvidenceSteps($ctx);
+        return $ctx->relinkOnly ? array_diff_key($steps, array_flip(self::RELINK_SKIPPED_STEPS)) : $steps;
+    }
+
+    /** @return array<string,callable():void> */
+    private function allTaxEvidenceSteps(PohodaContext $ctx): array
     {
         return [
             PartnerImporter::STEP_PARTNERS => fn () => $this->partners->importPartners($ctx),

@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
+use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
@@ -37,6 +38,7 @@ final class CashBankImporter
         private readonly SupplierBankAccountRepository $bankAccounts,
         private readonly MigratedCashNumber $cashNumbers,
         private readonly PohodaForeignBank $foreign,
+        private readonly MigrationCheckLocks $locks,
     ) {}
 
     public function importCash(PohodaContext $ctx): void
@@ -74,6 +76,7 @@ final class CashBankImporter
             $registers[$code] ??= ['name' => $code, 'account' => null];
         }
         $registerIds = [];
+        $ownRegisters = $ctx->taxEvidence ? $this->ownRegisters($ctx->supplierId) : [];
         foreach ($registers as $code => $reg) {
             if ($reg['account'] === null && isset($votes[$code])) {
                 arsort($votes[$code]);
@@ -82,7 +85,17 @@ final class CashBankImporter
             if (!isset($used[$code]) && !isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
                 continue; // pokladna bez dokladů v roce se nezakládá
             }
+            $isNew = $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null;
             $registerIds[$code] = $this->ensureRegister($ctx, $code, $reg['name'], $reg['account']);
+            if ($isNew && $ownRegisters !== []) {
+                // Daňová evidence: pokladnu POHODY převod založí vedle pokladny zadané v MyÚčtu,
+                // nesloučí je (pokladní kniha a zůstatky každé z nich by jinak nesouhlasily).
+                $p->warn(self::STEP_CASH, 'second_cash_register', sprintf(
+                    'Pokladna POHODY %s se založí jako další pokladna vedle pokladny zadané v MyÚčtu (%s). Zůstatky pokladen zkontrolujte, případný převod mezi nimi zadejte ručně.',
+                    $code !== '' ? $code : $reg['name'], implode(', ', $ownRegisters),
+                ), ['register' => $code, 'own_registers' => $ownRegisters]);
+                $p->addList('second_cash_register', [$code !== '' ? $code : $reg['name']]);
+            }
         }
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT);
@@ -99,6 +112,13 @@ final class CashBankImporter
         );
 
         $periodStart = $ctx->periodStart();
+        // Opravný převod daňové evidence doplňuje pokladní doklady, které dřívější převod
+        // nepřevzal (pokladna chyběla). Od prvního pokladního dokladu zadaného v MyÚčtu vede
+        // pokladnu už MyÚčto, doklady POHODY od toho dne se nepřevezmou.
+        $repairsCash = $ctx->relinkOnly && $ctx->taxEvidence;
+        $ownCashFrom = $repairsCash ? $this->firstOwnCashDate($ctx->supplierId, $periodStart, $ctx->year()) : null;
+        $ownCashKept = [];
+        $filedVat = [];
         foreach ($vouchers as $r) {
             $h = PohodaXml::get($r, 'voucherHeader');
             $number = PohodaXml::text($h, 'number/numberRequested');
@@ -124,7 +144,13 @@ final class CashBankImporter
                 $p->count(self::STEP_CASH, 'existing');
                 continue;
             }
-            if ($ctx->skipsNew(self::STEP_CASH)) {
+            if ($repairsCash) {
+                if ($ownCashFrom !== null && $issue >= $ownCashFrom) {
+                    $ownCashKept[] = $number;
+                    $p->count(self::STEP_CASH, 'own_cash_kept');
+                    continue;
+                }
+            } elseif ($ctx->skipsNew(self::STEP_CASH)) {
                 continue;
             }
             $registerId = $registerIds[PohodaXml::text($h, 'cashAccount/ids')] ?? null;
@@ -176,6 +202,16 @@ final class CashBankImporter
                 $p->count(self::STEP_CASH, 'kh_date_differs');
                 $p->info(self::STEP_CASH, 'kh_date_differs', "Pokladní doklad {$number}: DUZP z dokladu (datum KH DPH {$khDate}) se liší od data odpočtu {$taxDate}. Pokladní doklad nese jediné datum DPH, převzato datum odpočtu - v kontrolním hlášení bude {$taxDate}.", ['document_no' => $number]);
             }
+            // Daňová evidence: pokladní doklad s DPH do podaného období DPH by změnil podané
+            // přiznání a kontrolní hlášení. Bez výslovné volby se nepřevezme a vypíše.
+            if ($ctx->taxEvidence && $vatLines !== [] && !$ctx->allowFiledVat) {
+                $filed = $this->locks->filedPeriod($ctx->supplierId, $taxDate);
+                if ($filed !== null) {
+                    $filedVat[$filed][] = $number;
+                    $p->count(self::STEP_CASH, 'filed_vat_skipped');
+                    continue;
+                }
+            }
             $numberText = $this->cashNumbers->allocate($ctx->supplierId, [$number, $number . '/' . substr($issue, 0, 4)], $p, self::STEP_CASH, $number . ' z ' . $issue);
             $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
             $ruleKey = null;
@@ -223,7 +259,42 @@ final class CashBankImporter
             }
             $p->count(self::STEP_CASH, 'created');
         }
+        foreach ($filedVat as $period => $numbers) {
+            $p->warn(self::STEP_CASH, 'filed_vat_skipped', sprintf(
+                'Období DPH %s je v MyÚčtu podané: %d pokladních dokladů s DPH se nepřevzalo (%s). Převezme je opakovaný převod s volbou --allow-filed-vat, potom podejte dodatečné přiznání a následné kontrolní hlášení.',
+                $period, count($numbers), implode(', ', array_slice($numbers, 0, 20)) . (count($numbers) > 20 ? ' …' : ''),
+            ), ['period' => $period, 'documents' => $numbers]);
+            $p->addList('filed_vat_skipped', $numbers);
+        }
+        if ($ownCashKept !== []) {
+            $p->addList('own_cash_kept', $ownCashKept);
+            $p->warn(self::STEP_CASH, 'own_cash_kept', sprintf(
+                '%d pokladních dokladů POHODY od %s se nepřevzalo: od toho dne vede pokladnu MyÚčto (první pokladní doklad zadaný v MyÚčtu). Úhrady dokladů z nich zkontrolujte ručně.',
+                count($ownCashKept), date('j. n. Y', (int) strtotime((string) $ownCashFrom)),
+            ), ['from' => $ownCashFrom, 'documents' => count($ownCashKept)]);
+        }
         $p->finish(self::STEP_CASH);
+    }
+
+    /**
+     * Datum prvního zaúčtovaného pokladního dokladu roku agendy, který nevznikl převodem
+     * z POHODY a nese obchodní případ: tržba, nákup, úhrada dokladu, nebo doklad s účelem
+     * „ostatní" zařazený v peněžním deníku jako příjem či výdaj (tak účetní vede tržby bez
+     * faktury). Vklad, výběr nebo počáteční stav pokladny (ostatní bez zařazení, soukromé,
+     * převod) ani převod mezi pokladnami neříkají, že účetní začala vést hotovost v MyÚčtu:
+     * pokladna POHODY je samostatná a s nimi se nezdvojí.
+     */
+    private function firstOwnCashDate(int $supplierId, string $periodStart, int $year): ?string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT MIN(d.issue_date) FROM cash_documents d WHERE d.supplier_id = ?
+            AND d.issue_date >= ? AND d.issue_date < ? AND d.status = 'posted'
+            AND (d.purpose IN ('sale', 'purchase', 'invoice_payment', 'purchase_payment')
+                 OR (d.purpose = 'other' AND EXISTS (SELECT 1 FROM de_movement_classification c WHERE c.supplier_id = d.supplier_id AND c.cash_document_id = d.id
+                     AND c.tax_bucket IN ('income_taxable', 'income_exempt', 'income_nontax', 'expense_taxable', 'expense_nontax'))))
+            AND NOT EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = 'cash_document' AND m.target_id = d.id)");
+        $stmt->execute([$supplierId, substr($periodStart, 0, 10), sprintf('%04d-01-01', $year + 1)]);
+        $date = $stmt->fetchColumn();
+        return is_string($date) && $date !== '' ? substr($date, 0, 10) : null;
     }
 
     public function importBank(PohodaContext $ctx): void
@@ -742,6 +813,16 @@ final class CashBankImporter
             }
         }
         return $out;
+    }
+
+    /** @return list<string> názvy pokladen firmy, které nezaložil převod z POHODY */
+    private function ownRegisters(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT r.name FROM cash_registers r WHERE r.supplier_id = ?
+            AND NOT EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = r.supplier_id AND m.kind = 'cash_register' AND m.target_id = r.id)
+            ORDER BY r.id");
+        $stmt->execute([$supplierId]);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     private function ensureRegister(PohodaContext $ctx, string $code, string $name, ?string $account): int

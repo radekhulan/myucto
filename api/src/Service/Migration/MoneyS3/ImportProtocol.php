@@ -179,6 +179,26 @@ final class ImportProtocol
         return $this->sections[$section] ?? null;
     }
 
+    /**
+     * Úplný seznam položek nálezu (např. čísel dokladů) pod klíčem `$code` v oddílu `lists`
+     * ({@see toArray()}). Na rozdíl od zpráv kroku ho neomezuje {@see LIST_LIMIT}, takže
+     * souhrn na konci kroku nezmizí ani u velké firmy. Opakované volání seznam doplní.
+     *
+     * @param list<string|int> $items
+     */
+    public function addList(string $code, array $items): void
+    {
+        $lists = (array) ($this->sections['lists'] ?? []);
+        $lists[$code] = array_values(array_unique([...((array) ($lists[$code] ?? [])), ...array_map('strval', $items)]));
+        $this->sections['lists'] = $lists;
+    }
+
+    /** @return list<string> seznam z {@see addList()} */
+    public function listOf(string $code): array
+    {
+        return array_values((array) ($this->sections['lists'][$code] ?? []));
+    }
+
     public function hasErrors(): bool
     {
         if ($this->failure !== null) {

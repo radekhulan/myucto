@@ -777,6 +777,120 @@ final class SyntheticPohodaExport
         }
     }
 
+    public const ISSUED_PAID_BY_CASH = '26FV0070';
+    public const CASH_ISSUED_PAYMENT = '26PP0070';
+
+    /**
+     * Vydaná faktura 1 210 Kč (1 000 + DPH 21 %) uhrazená 5. 3. příjmovým pokladním dokladem
+     * 26PP0070 v pokladně `HP` ({@see withPurchasePaidByCash()} založí pokladní soubor).
+     * `$paid` nad 1 210 = odběratel zaplatil víc (přeplatek).
+     */
+    public static function withIssuedPaidByCash(string $dir, float $paid = 1210.0): void
+    {
+        $invoice = str_replace(
+            ['<typ:sourceAgenda>bank</typ:sourceAgenda>', '<typ:amount>1210</typ:amount>'],
+            ['<typ:date>2026-03-05</typ:date><typ:sourceAgenda>voucher</typ:sourceAgenda>', '<typ:amount>' . $paid . '</typ:amount>'],
+            self::invoice('issuedInvoice', self::ISSUED_PAID_BY_CASH, '2026070', '2026-03-02', 1000, 210, '', self::CASH_ISSUED_PAYMENT),
+        );
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $invoice);
+        $voucher = '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>receipt</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . self::CASH_ISSUED_PAYMENT . '</typ:numberRequested></vch:number>'
+            . '<vch:date>2026-03-05</vch:date><vch:datePayment>2026-03-05</vch:datePayment><vch:text>Úhrada faktury ' . self::ISSUED_PAID_BY_CASH . '</vch:text>'
+            . '<vch:classificationVAT><typ:ids>UN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>' . $paid . '</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $file = $dir . '/28_pokladna.xml';
+        if (is_file($file)) {
+            self::append($file, '</lst:listVoucher>', $voucher);
+        } else {
+            self::file($file, '<lst:listVoucher version="2.0" state="ok">' . $voucher . '</lst:listVoucher>');
+        }
+    }
+
+    public const PURCHASE_PARTLY_BY_CASH = '26PF0065';
+
+    /**
+     * Přijatá faktura 1 000 Kč mimo DPH uhrazená dvěma výdajovými pokladními doklady: 26VP0065
+     * na 600 Kč (v exportu je) a 26VP0066 na 400 Kč, který v exportu chybí.
+     */
+    public static function withPurchasePartlyPaidByCash(string $dir): void
+    {
+        $liq = static fn (string $voucher, float $amount): string => '<typ:liquidation><typ:id>' . abs(crc32('26PF0065' . $voucher)) . '</typ:id><typ:date>2026-02-16</typ:date>'
+            . '<typ:sourceAgenda>voucher</typ:sourceAgenda><typ:sourceDocument><typ:number>' . $voucher . '</typ:number></typ:sourceDocument><typ:amount>' . $amount . '</typ:amount></typ:liquidation>';
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_PARTLY_BY_CASH . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026065</inv:symVar><inv:originalDocument>RE-2026-65</inv:originalDocument><inv:date>2026-02-13</inv:date><inv:dateTax>2026-02-13</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-13</inv:dateAccounting><inv:dateDue>2026-02-27</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Materiál</inv:text>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-16</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>1000</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations>' . $liq('26VP0065', 600) . $liq('26VP0066', 400) . '</inv:liquidations></lst:invoice>');
+        $voucher = '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>expense</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>26VP0065</typ:numberRequested></vch:number>'
+            . '<vch:date>2026-02-16</vch:date><vch:datePayment>2026-02-16</vch:datePayment><vch:text>Úhrada materiálu</vch:text>'
+            . '<vch:classificationVAT><typ:ids>PN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>600</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $file = $dir . '/28_pokladna.xml';
+        if (is_file($file)) {
+            self::append($file, '</lst:listVoucher>', $voucher);
+        } else {
+            self::file($file, '<lst:listVoucher version="2.0" state="ok">' . $voucher . '</lst:listVoucher>');
+        }
+    }
+
+    /**
+     * `$count` přijatých faktur po 100 Kč mimo DPH (26PF1001 …), každá uhrazená pokladním
+     * dokladem, který v exportu není: úhrad z pokladny nenalezených víc než zpráv v protokolu kroku.
+     */
+    public static function withManyMissingCashPayments(string $dir, int $count): void
+    {
+        $xml = '';
+        for ($n = 1; $n <= $count; $n++) {
+            $number = sprintf('26PF%04d', 1000 + $n);
+            $xml .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+                . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+                . '<inv:symVar>' . (2026000 + $n) . '</inv:symVar><inv:originalDocument>RE-' . $number . '</inv:originalDocument><inv:date>2026-04-01</inv:date><inv:dateTax>2026-04-01</inv:dateTax>'
+                . '<inv:dateAccounting>2026-04-01</inv:dateAccounting><inv:dateDue>2026-04-15</inv:dateDue>'
+                . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Drobný nákup</inv:text>'
+                . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+                . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-04-02</typ:date></inv:liquidation></inv:invoiceHeader>'
+                . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>100</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+                . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+                . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32($number . 'liq')) . '</typ:id><typ:date>2026-04-02</typ:date><typ:sourceAgenda>voucher</typ:sourceAgenda>'
+                . '<typ:sourceDocument><typ:number>' . sprintf('26VP%04d', 1000 + $n) . '</typ:number></typ:sourceDocument><typ:amount>100</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>';
+        }
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>', $xml);
+    }
+
+    public const CASH_VAT_SALE = '26PP0080';
+
+    /** Tržba v hotovosti s DPH 21 % (1 000 + 210 Kč) 10. 3. v pokladně `HP`, bez faktury. */
+    public static function withVatCashSale(string $dir): void
+    {
+        $voucher = '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>receipt</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . self::CASH_VAT_SALE . '</typ:numberRequested></vch:number>'
+            . '<vch:date>2026-03-10</vch:date><vch:datePayment>2026-03-10</vch:datePayment><vch:dateTax>2026-03-10</vch:dateTax><vch:text>Tržba v hotovosti s DPH</vch:text>'
+            . '<vch:classificationVAT><typ:ids>UD</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>0</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>1000</typ:priceHigh><typ:priceHighVAT rate="21">210</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $file = $dir . '/28_pokladna.xml';
+        if (is_file($file)) {
+            self::append($file, '</lst:listVoucher>', $voucher);
+        } else {
+            self::file($file, '<lst:listVoucher version="2.0" state="ok">' . $voucher . '</lst:listVoucher>');
+        }
+    }
+
     /** Doklady, jejichž skupinu párovacího symbolu má POHODA vyrovnanou ({@see withClosedPairingGroups()}). */
     public const PAIRED_ISSUED = '26FV0090';
     public const PAIRED_PURCHASE = '26PF0090';

@@ -46867,6 +46867,11 @@
         "title": "Foreign-currency purchase invoices taken over in CZK",
         "hint": "Invoices from foreign suppliers with self-assessed VAT in CZK instead of the document currency.",
         "description": "The POHODA migration used to take over purchase invoices in EUR or another currency with self-assessed VAT in CZK. VAT, the control statement and the journal are correct; the currency, rate and foreign amount are missing, so a payment in the currency cannot be matched and no exchange difference is calculated. The repair reads the currency and rate from the original POHODA export and is run by the installation administrator, see the manual."
+      },
+      "tax_evidence_cash_missing": {
+        "title": "Tax records from POHODA without cash documents or payments",
+        "hint": "Cash documents and cash payments that an older tax records conversion did not take over.",
+        "description": "An older conversion of a POHODA agenda kept as tax records did not create the cash register, so it skipped the cash documents and left cash-paid documents paid without a movement or unpaid. The cash journal then differs from POHODA and the income tax base changes. The repair needs a new export of the agenda from POHODA and a repair conversion run by the installation administrator as described in the manual."
       }
     }
   }

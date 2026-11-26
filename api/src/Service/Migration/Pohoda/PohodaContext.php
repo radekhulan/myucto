@@ -211,6 +211,13 @@ final class PohodaContext
      */
     public bool $taxEvidence = false;
 
+    /**
+     * Daňová evidence: převzít i pokladní doklady s DPH do období DPH, které je v MyÚčtu
+     * podané ({@see CashBankImporter::importCash()}). Bez volby je převod přeskočí a vypíše;
+     * s ní je potřeba dodatečné přiznání a následné kontrolní hlášení.
+     */
+    public bool $allowFiledVat = false;
+
     /** @var (callable(string,int,int):void)|null */
     public $progress = null;
 

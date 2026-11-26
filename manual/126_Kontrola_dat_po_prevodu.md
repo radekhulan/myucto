@@ -322,7 +322,45 @@ V detailu nálezu otevřete kartu a ověřte, která část zůstatku na účtu 
 zařazená, použijte akci **Vrátit do konceptu**. Poté kartu zařaďte a vyberte **Zaúčtovat zařazení (02x / 04x)**.
 Kontrola zobrazuje nález a zůstatek účtu k ručnímu ověření.
 
-## 126.17 Související kapitoly
+## 126.17 Daňová evidence z POHODY bez pokladních dokladů nebo úhrad
+
+**Co kontrola hledá:** firmu v daňové evidenci převedenou z agendy POHODY, u které převod nepřevzal
+pokladní doklady (v historii převodů hláška „Pokladní doklad … nemá pokladnu, nepřevzat") nebo nenašel
+úhrady z pokladny („Úhrada … v převedené pokladně není"). Hlásí vydané doklady uhrazené jen doplatkem
+z převodu bez pohybu v bance nebo pokladně, přijaté doklady uhrazené v roce agendy úhradou mimo evidenci
+a doklady, které POHODA uhradila pokladnou a v MyÚčtu je evidované úhrady nepokrývají.
+
+**Proč na tom záleží:** peněžní deník počítá jen skutečné pohyby. Příjem uhrazený v hotovosti v něm bez
+pokladního dokladu chybí, výdaj uhrazený mimo evidenci v něm je bez dokladu úhrady a otevřený doklad do něj
+nevstoupí vůbec. Mění se tak základ daně z příjmů.
+
+**Oprava:** kontrola jen hlásí, oprava potřebuje nový export agendy z POHODY (stejný rok, úplný export
+včetně pokladny a pokladních dokladů). Správce instalace spustí opravný převod z příkazové řádky:
+
+```bash
+php api/bin/pohoda-relink.php --supplier=12 --zip=/cesta/export.zip --year=2026            # nanečisto
+php api/bin/pohoda-relink.php --supplier=12 --zip=/cesta/export.zip --year=2026 --commit   # zápis
+```
+
+Opravný převod založí pokladnu z POHODY, převezme chybějící pokladní doklady a naváže z nich úhrady dokladů.
+Krytí úhrady, které dřívější převod zapsal bez pohybu, sníží jen o část, kterou teď pokrývá navázaná nebo
+v MyÚčtu zadaná úhrada. Krytí úhrady, kterou se navázat nepodařilo, zůstane a protokol vypíše úplný seznam
+takových dokladů. U přijatého dokladu s navázanou částí úhrady a zbytkem krytí z dřívějšího převodu peněžní
+deník počítá výdaj jen ve výši navázaných úhrad, protokol takové doklady vypíše zvlášť. Úhradu dokladu
+uhrazeného mezitím úhradou zadanou v MyÚčtu nenaváže podruhé a vypíše ho. Úhrady POHODY jsou v Kč, k dokladům
+v cizí měně je převod nenaváže a vypíše je k ručnímu navázání.
+
+Doklady, výpisy a pokladní doklady zadané v MyÚčtu nechá beze změny. Má-li firma vlastní pokladnu, pokladna
+POHODY se založí vedle ní a protokol na to upozorní. Pokladní doklady POHODY ode dne prvního zaúčtovaného
+pokladního dokladu roku zadaného v MyÚčtu s tržbou, nákupem nebo úhradou dokladu nepřevezme a vypíše je.
+Vklad, výběr ani počáteční stav pokladny tuto hranici neurčují.
+
+Pokladní doklad s DPH do období DPH podaného v MyÚčtu převod nepřevezme a vypíše. Převezme ho až s volbou
+`--allow-filed-vat`, potom podejte dodatečné přiznání a následné kontrolní hlášení. Do roku s dokončenou
+roční uzávěrkou daňové evidence a za zámek dokladů převod nezapisuje. Opravný převod je jedna transakce:
+když skončí chybou, nezapíše se nic.
+
+## 126.18 Související kapitoly
 
 - [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)

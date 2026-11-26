@@ -46867,6 +46867,11 @@
         "title": "Přijaté doklady v cizí měně převzaté v Kč",
         "hint": "Faktury od zahraničních dodavatelů se samovyměřením DPH v Kč místo v měně dokladu.",
         "description": "Převod z POHODY dřív převzal přijaté doklady v EUR či jiné měně se samovyměřením DPH v Kč. DPH, KH i deník jsou správně, chybí měna, kurz a částka v měně, takže nejde spárovat platbu v měně ani spočítat kurzový rozdíl. Oprava čte měnu a kurz z původního exportu z POHODY a spouští ji správce instalace podle manuálu."
+      },
+      "tax_evidence_cash_missing": {
+        "title": "Daňová evidence z POHODY bez pokladních dokladů nebo úhrad",
+        "hint": "Pokladní doklady a úhrady z pokladny, které starší převod daňové evidence nepřevzal.",
+        "description": "Starší převod agendy POHODY vedené v daňové evidenci nezaložil pokladnu, takže pokladní doklady nepřevzal a doklady uhrazené v hotovosti vedl uhrazené bez pohybu nebo neuhrazené. Peněžní deník pak nesedí na POHODU a mění se základ daně z příjmů. Oprava potřebuje nový export agendy z POHODY a opravný převod, který spouští správce instalace podle manuálu."
       }
     }
   }

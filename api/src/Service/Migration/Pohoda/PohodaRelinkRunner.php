@@ -12,7 +12,9 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
  * Opravný převod vazeb z příkazové řádky (`api/bin/pohoda-relink.php`): nový export
  * z POHODY do už vedeného účetnictví firmy ({@see PohodaContext::$relinkOnly}). Zápisy
  * zadané v MyÚčtu zůstanou, nové doklady se nepřidají, doplní se vazby (daňové doklady
- * k zálohám a platbám, úhrady, zápočty). Mzdy ani sklad se nepřevádějí.
+ * k zálohám a platbám, úhrady, zápočty). Mzdy ani sklad se nepřevádějí. Agenda daňové
+ * evidence doplní i pokladní doklady, které dřívější převod nepřevzal
+ * ({@see CashBankImporter::importCash()}, {@see PohodaTaxEvidenceImporter::payments()}).
  *
  * Export se čte stejně jako v průvodci: ZIP rozbalí {@see PohodaExport::extractArchive()},
  * agendy firmy najde {@see PohodaExport::agendaDirs()} a každou otevře {@see PohodaExport::open()}.
@@ -33,9 +35,10 @@ final class PohodaRelinkRunner
     /**
      * @param string $source ZIP exportu, složka agendy (`IČO_rok`) nebo složka s agendami
      * @param (callable(string):void) $print výstup protokolu po řádcích
+     * @param bool $allowFiledVat daňová evidence: převzít pokladní doklady s DPH i do podaného období DPH
      * @return int kód návratu ({@see EXIT_OK}, {@see EXIT_FAILED}, {@see EXIT_INVALID})
      */
-    public function run(int $supplierId, string $source, bool $commit, ?int $year, ?int $userId, callable $print): int
+    public function run(int $supplierId, string $source, bool $commit, ?int $year, ?int $userId, callable $print, bool $allowFiledVat = false): int
     {
         $stmt = $this->db->pdo()->prepare('SELECT ic FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
@@ -88,7 +91,7 @@ final class PohodaRelinkRunner
                     'ico' => $export->ico, 'year' => $export->year, 'program' => $export->info['program'],
                 ], $userId);
                 try {
-                    $protocol = $this->importer->run($supplierId, $userId ?? 0, $export, !$commit, $runId, relinkOnly: true);
+                    $protocol = $this->importer->run($supplierId, $userId ?? 0, $export, !$commit, $runId, relinkOnly: true, allowFiledVat: $allowFiledVat);
                 } catch (\Throwable $e) {
                     $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $e->getMessage(), 'steps' => [], 'kind' => 'accounting']);
                     throw $e;
