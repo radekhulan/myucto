@@ -15,50 +15,57 @@ namespace MyInvoice\Service\Import;
  */
 final readonly class LlmProviderCapabilities
 {
-    /**
-     * Whitelisty modelů. Pořadí je VÝZNAMOVÉ — {@see strongerModel()} bere PRVNÍ
-     * vyhovující model odshora, takže nejnovější/nejsilnější patří nahoru. Starší
-     * generace se drží kvůli tenantům, kteří na nich mají zaparkovaný default.
-     * Ověřeno proti reálným katalogům providerů 2026-08-26
-     * (private/scripts/probe_llm_models.php + probe_llm_models_call.php).
-     */
     public const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-5-5';
+    public const ANTHROPIC_SONNET_MODEL = 'claude-sonnet-5-5';
     public const ANTHROPIC_MODELS = [
-        'claude-haiku-5-5',
-        'claude-haiku-4-5',
-        'claude-sonnet-5-5',
-        'claude-sonnet-5',
-        'claude-sonnet-4-6',
+        self::ANTHROPIC_DEFAULT_MODEL,
+        self::ANTHROPIC_SONNET_MODEL,
         'claude-opus-5-5',
+        'claude-fable-5-2',
+        'claude-fable-5-1',
+        'claude-fable-5',
         'claude-opus-5',
         'claude-opus-4-8',
         'claude-opus-4-7',
-        'claude-fable-5-1',
-        'claude-fable-5',
+        'claude-opus-4-6',
+        'claude-sonnet-5',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5-20251001',
     ];
 
-    public const OPENAI_DEFAULT_MODEL = 'gpt-5.4-mini';
+    public const OPENAI_DEFAULT_MODEL = 'gpt-6-luna';
+    private const OPENAI_ASSISTANT_DEFAULT_MODEL = 'gpt-6.2-sol';
     public const OPENAI_MODELS = [
-        'gpt-5.6-sol',
-        'gpt-5.6-terra',
-        'gpt-5.6-luna',
-        // Řada gpt-6 ověřena živě 2026-10-11; za 5.6, aby eskalace z mini zůstala
-        // na ceníkově známém gpt-5.6-sol, dokud se 6 nezměří na dokladech.
+        self::OPENAI_DEFAULT_MODEL,
+        self::OPENAI_ASSISTANT_DEFAULT_MODEL,
+        'gpt-6.2-astra',
+        'gpt-6.1-terra',
+        'gpt-5.4-mini',
         'gpt-6.1-sol',
         'gpt-6-sol',
         'gpt-6-astra',
-        'gpt-6-luna',
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
         'gpt-5.5',
         'gpt-5.4',
-        'gpt-5.1',
-        'gpt-5',
-        'gpt-4.1',
-        'gpt-4o',
-        'gpt-5.4-mini',
-        'gpt-5.4-nano',
-        'gpt-5-mini',
-        'gpt-4.1-mini',
-        'gpt-4o-mini',
+        'gpt-5.2',
+    ];
+
+    public const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+    private const GEMINI_ASSISTANT_DEFAULT_MODEL = 'gemini-3.8-flash';
+    public const GEMINI_MODELS = [
+        self::GEMINI_DEFAULT_MODEL,
+        self::GEMINI_ASSISTANT_DEFAULT_MODEL,
+        'gemini-3.6-flash',
+        'gemini-4-hydrogen',
+        'gemini-4-carbon',
+        'gemini-4-neon',
+        'gemini-4-argon',
+        'gemini-3.1-flash-lite',
+        'gemini-2.5-flash-lite',
+        'gemini-3.1-pro-preview',
+        'gemini-3-flash-preview',
     ];
 
     /**
@@ -70,37 +77,26 @@ final readonly class LlmProviderCapabilities
     public const EFFORT_ACCURATE = 'accurate';
     public const EFFORTS = [self::EFFORT_DEFAULT, self::EFFORT_FAST, self::EFFORT_ACCURATE];
 
-    /**
-     * Žebříčky eskalace — tier tokeny od NEJSLABŠÍHO po NEJSILNĚJŠÍ.
-     * {@see strongerModel()} z nich odvodí další stupeň, když extrakce neprojde.
-     * Anthropic jde haiku → sonnet → opus → fable: fable je NEJSILNĚJŠÍ stupeň,
-     * ne levný tier — z fable se už neeskaluje nikam.
-     * `null` = stupeň „model bez tier tokenu" (u OpenAI plný model proti mini/nano).
-     * Token se matchuje na podřetězec; když model sedí na víc tokenů
-     * (gemini-3.5-flash-lite), platí ten NEJSLABŠÍ — jinak by se lite tvářil jako flash.
-     *
-     * @var array<string, list<string|null>>
-     */
-    private const ESCALATION_LADDERS = [
-        'anthropic'    => ['haiku', 'sonnet', 'opus', 'fable'],
-        'openai'       => ['nano', 'mini', null],
-        'azure_openai' => ['nano', 'mini', null],
-        'gemini'       => ['lite', 'flash', 'pro'],
+    private const MODEL_RETIREMENT_DATES = [
+        'anthropic' => [
+            'claude-sonnet-4-5-20250929' => '2026-11-30',
+            'claude-opus-4-5-20251101' => '2027-01-22',
+        ],
+        'gemini' => ['gemini-3.1-flash-lite' => '2027-05-07'],
     ];
 
     /**
-     * gemini-2.5-flash vyřazen — provider ho novým účtům vrací 404 s odkazem na 3.6-flash.
-     * gemini-3.5-flash a 3.5-flash-lite z katalogu zmizely (2026-10-11); tenant s nimi
-     * uloženými dostane výchozí model (viz gemini()).
+     * Stupně eskalace od nejslabšího po nejsilnější. Při shodě více tokenů
+     * vyhrává první stupeň (např. flash-lite patří k lite). null je stupeň
+     * pro modely bez odpovídajícího tokenu.
+     *
+     * @var array<string, list<list<string>|null>>
      */
-    public const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash';
-    public const GEMINI_MODELS = [
-        'gemini-3.8-flash',
-        'gemini-3.7-flash',
-        'gemini-3.6-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-3.1-pro-preview',
-        'gemini-2.5-pro',
+    private const ESCALATION_LADDERS = [
+        'anthropic'    => [['haiku'], ['sonnet'], ['opus'], ['fable']],
+        'openai'       => [['nano'], ['mini', 'luna', 'terra'], null, ['astra']],
+        'azure_openai' => [['nano'], ['mini'], null],
+        'gemini'       => [['lite'], ['flash', 'hydrogen', 'argon'], ['pro', 'carbon', 'neon']],
     ];
 
     public function __construct(
@@ -116,19 +112,14 @@ final readonly class LlmProviderCapabilities
         public bool   $requiresStructuredOutputJsonMode,
     ) {}
 
-    /**
-     * Anthropic Claude descriptor. Whitelist modelů drží {@see ANTHROPIC_MODELS} —
-     * {@see \MyInvoice\Action\Admin\Import\AnthropicCredentialsAction} i
-     * {@see \MyInvoice\Action\Admin\Import\AiProviderCredentialsAction} z něj čtou,
-     * takže se allowlisty nemohou rozejít.
-     */
-    public static function anthropic(string $dataRegion = 'us'): self
+    public static function anthropic(string $dataRegion = 'us', ?string $defaultModel = null): self
     {
+        $model = self::resolveModel('anthropic', $defaultModel);
         return new self(
             id: 'anthropic',
             label: 'Anthropic Claude',
-            models: self::ANTHROPIC_MODELS,
-            defaultModel: self::ANTHROPIC_DEFAULT_MODEL,
+            models: self::withConfiguredModel(self::ANTHROPIC_MODELS, $model, self::isAnthropicPdfModel($model)),
+            defaultModel: $model,
             maxPdfBytes: 32 * 1024 * 1024,
             dataRegion: $dataRegion,
             residencyLabel: $dataRegion === 'eu' ? 'EU (Anthropic)' : 'US (Anthropic)',
@@ -169,15 +160,12 @@ final readonly class LlmProviderCapabilities
     public static function openai(?string $baseUrl, ?string $defaultModel): self
     {
         $region = self::openaiRegion($baseUrl);
-        $models = self::OPENAI_MODELS;
-        if ($defaultModel !== null && self::isOpenaiPdfModel($defaultModel) && !in_array($defaultModel, $models, true)) {
-            $models[] = $defaultModel;
-        }
+        $model = self::resolveModel('openai', $defaultModel);
         return new self(
             id: 'openai',
             label: 'OpenAI',
-            models: $models,
-            defaultModel: ($defaultModel !== null && $defaultModel !== '') ? $defaultModel : self::OPENAI_DEFAULT_MODEL,
+            models: self::withConfiguredModel(self::OPENAI_MODELS, $model, self::isOpenaiPdfModel($model)),
+            defaultModel: $model,
             maxPdfBytes: 20 * 1024 * 1024,
             dataRegion: $region,
             residencyLabel: $region === 'eu' ? 'EU (OpenAI)' : 'US (OpenAI)',
@@ -186,14 +174,96 @@ final readonly class LlmProviderCapabilities
         );
     }
 
-    /**
-     * /v1/models vrací ID bez údajů o modalitách. Vybíráme rodiny GPT pro chat s PDF
-     * a strukturovaným výstupem včetně datovaných verzí.
-     */
     public static function isOpenaiPdfModel(string $model): bool
     {
         return strlen($model) <= 128
             && preg_match('/\Agpt-(?:4(?:\.1|o)|(?:[5-9]|[1-9]\d+)(?:\.\d+)?)(?:-(?:astra|sol|terra|luna|mini|nano))?(?:-\d{4}-\d{2}-\d{2})?\z/', $model) === 1;
+    }
+
+    public static function isAnthropicPdfModel(string $model, ?string $today = null): bool
+    {
+        return strlen($model) <= 64
+            && preg_match('/\Aclaude-(?:haiku|sonnet|opus|fable)-(?:[4-9]|[1-9]\d+)(?:-\d{1,2})?(?:-\d{8})?\z/', $model) === 1
+            && !self::isRetiredModel('anthropic', $model, $today);
+    }
+
+    public static function isGeminiPdfModel(string $model, ?string $today = null): bool
+    {
+        return self::geminiPdfModelId($model) && !self::isRetiredModel('gemini', $model, $today);
+    }
+
+    private static function geminiPdfModelId(string $model): bool
+    {
+        return strlen($model) <= 128
+            && preg_match('/\Agemini-(?:(?:2\.5|3(?:\.\d+)?)-(?:flash(?:-lite)?|pro)|4-(?:carbon|neon|hydrogen|argon))(?:-preview(?:-\d{2}-\d{2})?)?\z/', $model) === 1;
+    }
+
+    public static function resolveModel(string $provider, ?string $model, ?string $today = null, bool $forAssistant = false): string
+    {
+        $defaultModel = match ($provider) {
+            'anthropic' => $forAssistant ? self::ANTHROPIC_SONNET_MODEL : self::ANTHROPIC_DEFAULT_MODEL,
+            'openai' => $forAssistant ? self::OPENAI_ASSISTANT_DEFAULT_MODEL : self::OPENAI_DEFAULT_MODEL,
+            'gemini' => $forAssistant ? self::GEMINI_ASSISTANT_DEFAULT_MODEL : self::GEMINI_DEFAULT_MODEL,
+            default => '',
+        };
+        if ($model === null || $model === '') {
+            return $defaultModel;
+        }
+        $today ??= gmdate('Y-m-d');
+        return self::isRetiredModel($provider, $model, $today)
+            ? self::retiredModelReplacement($provider, $model, $defaultModel, $today, $forAssistant)
+            : $model;
+    }
+
+    private static function isRetiredModel(string $provider, string $model, ?string $today): bool
+    {
+        $date = self::MODEL_RETIREMENT_DATES[$provider][$model] ?? null;
+        if ($date !== null && ($today ?? gmdate('Y-m-d')) >= $date) {
+            return true;
+        }
+        return match ($provider) {
+            'anthropic' => preg_match('/\Aclaude-(?:3(?:[-.]|$)|opus-4-1(?:-|$)|(?:opus|sonnet)-4-20250514\z)/', $model) === 1,
+            'openai' => preg_match('/\A(?:o1(?:-|$)|o[34]-mini(?:-|$)|gpt-(?:4|3\.5-turbo)(?:-|$))/', $model) === 1
+                || preg_match('/-(?:codex(?:-|$)|chat-latest\z)/', $model) === 1
+                || preg_match('/\Agpt-5\.[245]-pro(?:-\d{4}-\d{2}-\d{2})?\z/', $model) === 1,
+            'gemini' => preg_match('/\Agemini-(?:2\.0(?:-|$)|2\.5-(?:pro|flash)(?:\z|-preview(?:-|$))|3-(?:flash\z|pro-preview(?:-|$))|3\.1-flash-lite-preview(?:-|$)|3\.[57]-flash\z)/', $model) === 1,
+            default => false,
+        };
+    }
+
+    private static function retiredModelReplacement(string $provider, string $model, string $defaultModel, string $today, bool $forAssistant): string
+    {
+        if ($provider === 'gemini' && !$forAssistant) {
+            return $defaultModel;
+        }
+        $catalog = match ($provider) {
+            'anthropic' => self::ANTHROPIC_MODELS,
+            'openai' => self::OPENAI_MODELS,
+            'gemini' => self::GEMINI_MODELS,
+        };
+        $ladder = self::ESCALATION_LADDERS[$provider];
+        $tier = self::tierIndex($model, $ladder);
+        if ($tier === null || $ladder[$tier] === null) {
+            return $defaultModel;
+        }
+        foreach ($catalog as $candidate) {
+            if (self::tierIndex($candidate, $ladder) === $tier && !self::isRetiredModel($provider, $candidate, $today)) {
+                return $candidate;
+            }
+        }
+        return $defaultModel;
+    }
+
+    /**
+     * @param list<string> $catalog
+     * @return list<string>
+     */
+    private static function withConfiguredModel(array $catalog, string $model, bool $supported): array
+    {
+        if ($supported && !in_array($model, $catalog, true)) {
+            $catalog[] = $model;
+        }
+        return $catalog;
     }
 
     /**
@@ -202,14 +272,13 @@ final readonly class LlmProviderCapabilities
      */
     public static function gemini(?string $defaultModel): self
     {
-        $resolvedDefault = in_array($defaultModel, self::GEMINI_MODELS, true)
-            ? $defaultModel
-            : self::GEMINI_DEFAULT_MODEL;
+        $model = self::resolveModel('gemini', $defaultModel);
+        $catalog = array_values(array_filter(self::GEMINI_MODELS, self::isGeminiPdfModel(...)));
         return new self(
             id: 'gemini',
             label: 'Google Gemini',
-            models: self::GEMINI_MODELS,
-            defaultModel: $resolvedDefault,
+            models: self::withConfiguredModel($catalog, $model, self::isGeminiPdfModel($model)),
+            defaultModel: $model,
             maxPdfBytes: 20 * 1024 * 1024,
             dataRegion: 'us',
             residencyLabel: 'US (Gemini)',
@@ -244,7 +313,7 @@ final readonly class LlmProviderCapabilities
     /**
      * Další stupeň na žebříčku {@see ESCALATION_LADDERS} — co použít, když extrakce
      * na aktuálním modelu neprojde. Anthropic jde haiku → sonnet → opus → fable,
-     * OpenAI/Azure nano → mini → plný model, Gemini lite → flash → pro.
+     * OpenAI levné → běžné → Astra, Gemini Lite → Flash → Pro nebo Carbon.
      *
      * Přeskočí stupeň, který v tenantově whitelistu nemá žádný model, takže eskalace
      * nespadne jen proto, že prostřední tier chybí. Vrací null, když upgrade nedává
@@ -284,7 +353,7 @@ final readonly class LlmProviderCapabilities
      *                (ten hlásí „does not support the effort parameter").
      *   - openai     `reasoning_effort` — jen gpt-5 a novější plus řada o*; gpt-4.x
      *                hlásí „Unrecognized request argument".
-     *   - gemini     `thinkingConfig` — u gemini-3.x `thinkingLevel`, u gemini-2.5
+     *   - gemini     `thinkingConfig` — u Gemini 3 a 4 `thinkingLevel`, u gemini-2.5
      *                `thinkingBudget` (starší API tvar). POZOR: fragment patří dovnitř
      *                `generationConfig`, ne do kořene payloadu.
      *   - azure      nic — deployment může nést libovolný model a rozpoznat ho z názvu
@@ -306,14 +375,20 @@ final readonly class LlmProviderCapabilities
             'openai' => self::openaiSupportsReasoningEffort($model)
                 ? ['reasoning_effort' => $accurate ? 'high' : 'low']
                 : [],
-            'gemini' => match (true) {
-                str_starts_with($model, 'gemini-2.5-') => ['thinkingConfig' => ['thinkingBudget' => $accurate ? 8192 : 512]],
-                str_starts_with($model, 'gemini-')     => ['thinkingConfig' => ['thinkingLevel' => $accurate ? 'high' : 'low']],
-                default                                => [],
-            },
+            'gemini' => self::geminiThinkingPayload($model, $accurate ? 'high' : 'low', $accurate ? 8192 : 512),
             // `think` posílá OllamaClient jen modelu, který v /api/show hlásí capability
             // `thinking` — jinak Ollama vrací 400.
             'ollama' => ['think' => $accurate],
+            default => [],
+        };
+    }
+
+    /** @return array<string,array<string,string|int>> */
+    public static function geminiThinkingPayload(string $model, string $level = 'low', int $budget = 1024): array
+    {
+        return match (true) {
+            preg_match('/\Agemini-[34](?:[.-]|\z)/', $model) === 1 => ['thinkingConfig' => ['thinkingLevel' => $level]],
+            str_starts_with($model, 'gemini-2.5-') => ['thinkingConfig' => ['thinkingBudget' => $budget]],
             default => [],
         };
     }
@@ -394,23 +469,19 @@ final readonly class LlmProviderCapabilities
         return (int) $m[1] >= 5;
     }
 
-    /**
-     * Index stupně, na kterém model stojí. Při shodě na víc tokenů vyhrává NEJSLABŠÍ
-     * (gemini-3.5-flash-lite je lite, ne flash). `null` slot ve žebříčku chytá všechno,
-     * co nenese žádný token — tam patří třeba plný gpt-5.6-sol.
-     *
-     * @param list<string|null> $ladder
-     */
+    /** @param list<list<string>|null> $ladder */
     private static function tierIndex(string $model, array $ladder): ?int
     {
         $fallback = null;
-        foreach ($ladder as $i => $token) {
-            if ($token === null) {
+        foreach ($ladder as $i => $tier) {
+            if ($tier === null) {
                 $fallback = $i;
-                continue;
-            }
-            if (str_contains($model, $token)) {
-                return $i;
+            } else {
+                foreach ($tier as $token) {
+                    if (str_contains($model, $token)) {
+                        return $i;
+                    }
+                }
             }
         }
         return $fallback;
@@ -420,7 +491,7 @@ final readonly class LlmProviderCapabilities
      * První model whitelistu, který patří právě do daného stupně. Whitelist je seřazený
      * nejnovějším napřed, takže v rámci stupně padne volba na aktuální generaci.
      *
-     * @param list<string|null> $ladder
+     * @param list<list<string>|null> $ladder
      */
     private function firstModelInTier(array $ladder, int $tier): ?string
     {
@@ -435,13 +506,13 @@ final readonly class LlmProviderCapabilities
     /**
      * Validace API klíče (null = ok, jinak chybová hláška). Per-provider heuristika.
      */
-    public function validateKey(string $key): ?string
+    public function validateKey(#[\SensitiveParameter] string $key): ?string
     {
         return match ($this->id) {
-            'anthropic' => (!str_starts_with($key, 'sk-ant-') || strlen($key) > 256)
+            'anthropic' => (!str_starts_with($key, 'sk-ant-') || strlen($key) > 256 || preg_match('/\s/', $key) === 1)
                 ? 'api_key má neplatný formát (musí začínat "sk-ant-").'
                 : null,
-            'openai' => (!str_starts_with($key, 'sk-') || strlen($key) < 20 || strlen($key) > 256)
+            'openai' => (!str_starts_with($key, 'sk-') || strlen($key) < 20 || strlen($key) > 256 || preg_match('/\s/', $key) === 1)
                 ? 'api_key má neplatný formát (musí začínat "sk-").'
                 : null,
             'gemini' => (strlen($key) < 20 || strlen($key) > 512 || preg_match('/\s/', $key) === 1)

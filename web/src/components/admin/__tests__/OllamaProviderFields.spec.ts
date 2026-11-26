@@ -22,15 +22,18 @@ function deferred<T>() {
 const m = (name: string) => ({ name, size: 1, vision: true, thinking: null })
 
 describe('OllamaProviderFields', () => {
-  it('zahodí odpověď pro starou adresu a ponechá model při úvodním načtení', async () => {
+  it('ponechá uložený model bez dotazu a zahodí odpověď pro starou adresu', async () => {
     const first = deferred<{ models: ReturnType<typeof m>[] }>()
-    listMock.mockReturnValueOnce(first.promise)
+    listMock.mockReset().mockReturnValueOnce(first.promise)
     const w = mount(OllamaProviderFields, {
       props: { baseUrl: 'http://a:11434', model: 'saved', apiKey: '', hasApiKey: false,
         'onUpdate:baseUrl': (v: string) => w.setProps({ baseUrl: v }),
         'onUpdate:model': (v: string) => w.setProps({ model: v }) },
     })
     expect(w.props('model')).toBe('saved')
+    expect(listMock).not.toHaveBeenCalled()
+    expect(w.findAll('input').some(input => input.element.value === 'saved')).toBe(true)
+    await w.get('[data-test="ollama-load-models"]').trigger('click')
 
     await w.setProps({ baseUrl: 'http://b:11434' })
     expect(w.props('model')).toBe('')
@@ -45,4 +48,27 @@ describe('OllamaProviderFields', () => {
     expect(opts.some(o => o.includes('new'))).toBe(true)
     expect(opts.some(o => o.includes('stale-x'))).toBe(false)
   })
+
+  it('načte modely s novým klíčem a po označení smazání jej do požadavku nedá', async () => {
+    listMock.mockReset().mockResolvedValue({ models: [m('saved')] })
+    const w = mount(OllamaProviderFields, {
+      props: { baseUrl: 'http://a:11434', model: 'saved', apiKey: '', hasApiKey: true },
+    })
+    await w.get('[data-test="ollama-load-models"]').trigger('click')
+    await flushPromises()
+    expect(listMock).toHaveBeenLastCalledWith({ base_url: 'http://a:11434' })
+
+    await w.setProps({ apiKey: 'new-fixture-key' })
+    await w.get('[data-test="ollama-load-models"]').trigger('click')
+    await flushPromises()
+    expect(listMock).toHaveBeenLastCalledWith({ base_url: 'http://a:11434', api_key: 'new-fixture-key' })
+
+    await w.setProps({ clearApiKey: true })
+    await w.get('[data-test="ollama-load-models"]').trigger('click')
+    await flushPromises()
+    expect(listMock).toHaveBeenLastCalledWith({ base_url: 'http://a:11434', clear_api_key: true })
+    expect(w.props('model')).toBe('saved')
+    w.unmount()
+  })
+
 })

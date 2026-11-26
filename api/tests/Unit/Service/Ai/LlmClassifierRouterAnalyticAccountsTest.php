@@ -161,7 +161,12 @@ final class LlmClassifierRouterAnalyticAccountsTest extends TestCase
             'debit_account' => '518.100', 'credit_account' => '221.100',
             'operation_type' => 'subscription', 'confidence' => 0.9, 'reasoning' => 'mimo rozvrh',
         ];
-        $mock = new MockHandler([$this->anthropicResponse($bad), $this->anthropicResponse($bad)]);
+        $sonnet = new Response(200, [], json_encode([
+            'content' => [['type' => 'text', 'text' => json_encode($bad)]],
+            'model' => 'claude-sonnet-5-5',
+            'usage' => ['input_tokens' => 100, 'output_tokens' => 20],
+        ]));
+        $mock = new MockHandler([$this->anthropicResponse($bad), $sonnet]);
         $requests = [];
         $result = $this->router($mock, $requests)->classifyBankTransaction(1, ['direction' => 'out'], []);
 

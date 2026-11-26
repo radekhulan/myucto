@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { integrationsApi, type OllamaModel } from '@/api/integrations'
+import { integrationsApi, type OllamaModel, type AiCredentialsPayload } from '@/api/integrations'
 import { apiErrorMessage } from '@/api/errors'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
@@ -29,7 +29,11 @@ async function loadModels() {
   loading.value = true
   error.value = null
   try {
-    const res = await integrationsApi.listOllamaModels(url)
+    const key = apiKey.value.trim()
+    const payload: Pick<AiCredentialsPayload, 'api_key' | 'base_url' | 'clear_api_key'> = { base_url: url }
+    if (clearApiKey.value) payload.clear_api_key = true
+    else if (key) payload.api_key = key
+    const res = await integrationsApi.listOllamaModels(payload)
     if (seq !== requestSeq || url !== baseUrl.value.trim()) return
     models.value = res.models
   } catch (e) {
@@ -42,14 +46,13 @@ async function loadModels() {
 }
 
 // Změna adresy po úvodním načtení: seznam i vybraný model patřily staré adrese.
-watch(baseUrl, () => {
+watch([baseUrl, apiKey, clearApiKey], ([url], [previousUrl]) => {
   requestSeq++
   loading.value = false
   models.value = null
   error.value = null
-  model.value = ''
+  if (url !== previousUrl) model.value = ''
 })
-if (baseUrl.value) loadModels()
 </script>
 
 <template>
@@ -70,15 +73,17 @@ if (baseUrl.value) loadModels()
       <p v-if="error" class="text-xs text-danger-500 mt-1">{{ error }}</p>
     </div>
 
-    <div v-if="models !== null">
+    <div>
       <label :for="`${uid}-model`" class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.model') }} *</label>
-      <p v-if="models.length === 0" class="text-xs text-warning-600">{{ t('aiGateway.ollama_models_empty') }}</p>
-      <select v-else :id="`${uid}-model`" v-model="model" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm" data-test="ollama-model">
+      <select v-if="models?.length" :id="`${uid}-model`" v-model="model" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm" data-test="ollama-model">
         <option value="" disabled>{{ t('aiGateway.ollama_model_placeholder') }}</option>
         <option v-for="m in models" :key="m.name" :value="m.name">
           {{ m.name }}{{ m.vision ? ` · ${t('aiGateway.ollama_vision_badge')}` : '' }}
         </option>
       </select>
+      <input v-else :id="`${uid}-model`" v-model="model" type="text" maxlength="128" autocomplete="off"
+             class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+      <p v-if="models?.length === 0" class="text-xs text-warning-600">{{ t('aiGateway.ollama_models_empty') }}</p>
       <p v-if="savedModelMissing" class="text-xs text-danger-500 mt-1">{{ t('aiGateway.ollama_model_missing', { model }) }}</p>
       <p v-else-if="selected && selected.vision === false" class="text-xs text-warning-600 mt-1">{{ t('aiGateway.ollama_no_vision_warning') }}</p>
     </div>

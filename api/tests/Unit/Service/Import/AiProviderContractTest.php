@@ -12,6 +12,7 @@ use GuzzleHttp\Psr7\Response;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ai\OllamaEndpointGuard;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Import\AiModelCatalog;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
 use MyInvoice\Service\Import\GeminiClient;
@@ -208,7 +209,7 @@ final class AiProviderContractTest extends TestCase
             if (str_contains($sql, 'gemini_api_key_enc')) {
                 $stmt->method('fetch')->willReturn([
                     'gemini_api_key_enc' => 'ENC',
-                    'gemini_default_model' => 'gemini-3-flash',
+                    'gemini_default_model' => 'gemini-4-hydrogen',
                 ]);
             } elseif (str_contains($sql, 'company_name')) {
                 $stmt->method('fetch')->willReturn(false);
@@ -241,7 +242,7 @@ final class AiProviderContractTest extends TestCase
         self::assertSame(16384, $payload['generationConfig']['maxOutputTokens']);
         self::assertSame('low', $payload['generationConfig']['thinkingConfig']['thinkingLevel']);
         self::assertStringContainsString(
-            '/models/' . LlmProviderCapabilities::GEMINI_DEFAULT_MODEL . ':generateContent',
+            '/models/gemini-4-hydrogen:generateContent',
             (string) $history[0]['request']->getUri(),
         );
     }
@@ -278,10 +279,10 @@ final class AiProviderContractTest extends TestCase
         self::assertSame('claude-sonnet-5-5', $caps->strongerModel('claude-haiku-4-5'));
         self::assertSame('claude-opus-5-5', $caps->strongerModel('claude-sonnet-5'));
         self::assertSame('claude-opus-5-5', $caps->strongerModel('claude-sonnet-4-6'));
-        self::assertSame('claude-fable-5-1', $caps->strongerModel('claude-opus-5'));
-        self::assertSame('claude-fable-5-1', $caps->strongerModel('claude-opus-4-7'));
+        self::assertSame('claude-fable-5-2', $caps->strongerModel('claude-opus-5'));
+        self::assertSame('claude-fable-5-2', $caps->strongerModel('claude-opus-4-7'));
         // Vrchol žebříčku — dál už není kam.
-        self::assertNull($caps->strongerModel('claude-fable-5-1'));
+        self::assertNull($caps->strongerModel('claude-fable-5-2'));
         self::assertNull($caps->strongerModel(null));
 
         // Celý řetěz z defaultu doběhne na vrchol a nezacyklí se.
@@ -294,7 +295,7 @@ final class AiProviderContractTest extends TestCase
             $model  = $caps->strongerModel($model);
         }
         self::assertSame(
-            ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
+            ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-2'],
             $seen,
         );
     }
@@ -307,29 +308,28 @@ final class AiProviderContractTest extends TestCase
     public function testStrongerModel_escalationChainSurvivesWhitelistBumps(): void
     {
         $openai = LlmProviderCapabilities::openai(null, null);
-        // nano → mini → plný model.
-        self::assertSame('gpt-5.4-mini', $openai->strongerModel('gpt-5.4-nano'));
-        foreach (['gpt-5.4-mini', 'gpt-4o-mini'] as $weak) {
+        self::assertSame('gpt-6-luna', $openai->strongerModel('gpt-5.4-nano'));
+        foreach (['gpt-5.4-mini', 'gpt-6-luna', 'gpt-6.1-terra'] as $weak) {
             $up = $openai->strongerModel($weak);
             self::assertNotNull($up, "openai $weak neeskaluje");
             self::assertContains($up, $openai->models);
             self::assertStringNotContainsString('mini', $up);
             self::assertStringNotContainsString('nano', $up);
         }
-        self::assertNull($openai->strongerModel('gpt-5.6-sol'));
-        // Default OpenAI modelu musí být levný tier, aby escalace vůbec měla kam jít.
-        self::assertNotNull($openai->strongerModel(LlmProviderCapabilities::OPENAI_DEFAULT_MODEL));
+        self::assertSame('gpt-6.2-sol', $openai->strongerModel('gpt-6-luna'));
+        self::assertSame('gpt-6.2-astra', $openai->strongerModel('gpt-6.2-sol'));
+        self::assertNull($openai->strongerModel('gpt-6.2-astra'));
 
         $gemini = LlmProviderCapabilities::gemini(null);
         // flash-lite nesmí spadnout do tieru flash — jinak by eskaloval sám na sebe.
         self::assertSame('gemini-3.8-flash', $gemini->strongerModel('gemini-3.5-flash-lite'));
-        foreach (['gemini-3.7-flash', 'gemini-3.5-flash'] as $weak) {
+        foreach (['gemini-3.6-flash', 'gemini-4-hydrogen'] as $weak) {
             $up = $gemini->strongerModel($weak);
             self::assertNotNull($up, "gemini $weak neeskaluje");
             self::assertContains($up, $gemini->models);
-            self::assertStringContainsString('pro', $up);
+            self::assertSame('gemini-4-carbon', $up);
         }
-        self::assertNull($gemini->strongerModel('gemini-2.5-pro'));
+        self::assertNull($gemini->strongerModel('gemini-4-carbon'));
         self::assertNotNull($gemini->strongerModel(LlmProviderCapabilities::GEMINI_DEFAULT_MODEL));
 
         // Model mimo žebříček providera neeskaluje (fail-closed, žádný náhodný upgrade).
@@ -339,8 +339,10 @@ final class AiProviderContractTest extends TestCase
     public function testOpenAiModelDiscoveryReturnsOnlyPdfModelFamiliesFromProject(): void
     {
         $ids = ['gpt-4.1-mini', 'gpt-6.2-sol', 'gpt-6.2-sol', 'gpt-6.2-sol-2026-11-12',
-            'gpt-5-mini', 'gpt-5.4-codex', 'gpt-4o-realtime-preview', 'gpt-image-1',
-            'text-embedding-3-small', 'whisper-1'];
+            'gpt-6.2-astra', 'gpt-5.5-pro', 'gpt-5.4-pro', 'gpt-5.2-pro', 'gpt-5.4-pro-2026-03-05',
+            'gpt-5-mini', 'gpt-5.4-codex',
+            'gpt-4o-realtime-preview', 'gpt-image-1', 'gpt-audio', 'gpt-oss-120b', 'gpt-5.5-cyber',
+            'gpt-5.5-chat-latest', 'chat-latest', 'text-embedding-3-small', 'omni-moderation-latest', 'whisper-1'];
         $body = ['data' => array_map(static fn (string $id) => ['id' => $id], $ids)];
         $sent = [];
         $handler = HandlerStack::create(new MockHandler([new Response(200, [], (string) json_encode($body))]));
@@ -353,7 +355,10 @@ final class AiProviderContractTest extends TestCase
         );
 
         $models = $client->listModels('sk-test-fixture', 'https://eu.api.openai.com/');
-        self::assertEqualsCanonicalizing(['gpt-4.1-mini', 'gpt-5-mini', 'gpt-6.2-sol', 'gpt-6.2-sol-2026-11-12'], $models);
+        self::assertSame([
+            'models' => ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.2-sol-2026-11-12', 'gpt-5-mini', 'gpt-4.1-mini'],
+            'error' => null,
+        ], $models);
         self::assertCount(1, $sent);
         $request = $sent[0]['request'];
         self::assertSame('GET', $request->getMethod());
@@ -364,11 +369,78 @@ final class AiProviderContractTest extends TestCase
 
     public function testSavedOpenAiModelIsAvailableInExtractionWithoutDiscovery(): void
     {
-        $caps = LlmProviderCapabilities::openai(null, 'gpt-6.2-sol');
-        self::assertSame('gpt-6.2-sol', $caps->defaultModel);
-        self::assertContains('gpt-6.2-sol', $caps->models);
-        self::assertNotContains('gpt-6.2-sol', LlmProviderCapabilities::openai(null, null)->models);
-        self::assertSame('gpt-5.6-sol', $caps->strongerModel('gpt-5.4-mini'));
+        $snapshot = 'gpt-6.2-sol-2026-11-12';
+        $caps = LlmProviderCapabilities::openai(null, $snapshot);
+        self::assertSame($snapshot, $caps->defaultModel);
+        self::assertContains($snapshot, $caps->models);
+        self::assertNotContains($snapshot, LlmProviderCapabilities::openai(null, null)->models);
+        self::assertSame('gpt-6.2-sol', $caps->strongerModel('gpt-5.4-mini'));
+    }
+
+    public function testSavedOpenAiProModelFallsBackToAChatModel(): void
+    {
+        $caps = LlmProviderCapabilities::openai(null, 'gpt-5.5-pro');
+        self::assertSame(LlmProviderCapabilities::OPENAI_DEFAULT_MODEL, $caps->defaultModel);
+        self::assertNotContains('gpt-5.5-pro', $caps->models);
+        self::assertNotContains('gpt-5.4-pro', $caps->models);
+        self::assertNotContains('gpt-5.2-pro', $caps->models);
+    }
+
+    public function testEmptyModelUsesAnEconomicalPdfCapableDefault(): void
+    {
+        foreach ([null, ''] as $model) {
+            $openai = LlmProviderCapabilities::openai(null, $model);
+            self::assertSame('gpt-6-luna', $openai->defaultModel);
+            self::assertTrue(LlmProviderCapabilities::isOpenaiPdfModel($openai->defaultModel));
+            self::assertSame('claude-haiku-5-5', LlmProviderCapabilities::anthropic(defaultModel: $model)->defaultModel);
+            self::assertSame('gemini-3.5-flash-lite', LlmProviderCapabilities::gemini($model)->defaultModel);
+        }
+    }
+
+    public function testRetiredModelsAreReplacedWithoutMovingToAMoreExpensiveTier(): void
+    {
+        foreach ([
+            ['anthropic', 'claude-3-5-haiku-20241022', 'claude-haiku-5-5'],
+            ['anthropic', 'claude-sonnet-4-20250514', 'claude-sonnet-5-5'],
+            ['anthropic', 'claude-opus-4-1-20250805', 'claude-opus-5-5'],
+            ['openai', 'gpt-4-turbo-preview', 'gpt-6-luna'],
+            ['openai', 'o1-pro', 'gpt-6-luna'],
+            ['openai', 'o4-mini', 'gpt-6-luna'],
+            ['openai', 'gpt-5.3-codex', 'gpt-6-luna'],
+            ['openai', 'gpt-5.2-chat-latest', 'gpt-6-luna'],
+            ['gemini', 'gemini-3.1-flash-lite-preview', 'gemini-3.5-flash-lite'],
+            ['gemini', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'],
+            ['gemini', 'gemini-2.5-pro-preview-06-05', 'gemini-3.5-flash-lite'],
+            ['gemini', 'gemini-2.5-flash-preview-05-20', 'gemini-3.5-flash-lite'],
+        ] as [$provider, $model, $replacement]) {
+            self::assertSame($replacement, LlmProviderCapabilities::resolveModel($provider, $model, '2026-11-26'), $model);
+        }
+
+        self::assertSame('gpt-4o-mini', LlmProviderCapabilities::resolveModel('openai', 'gpt-4o-mini'));
+        self::assertSame('gemini-2.5-flash-lite', LlmProviderCapabilities::resolveModel('gemini', 'gemini-2.5-flash-lite'));
+        self::assertSame('gpt-4-turbo', LlmProviderCapabilities::resolveModel('azure_openai', 'gpt-4-turbo'));
+        self::assertSame('o4-mini', LlmProviderCapabilities::resolveModel('ollama', 'o4-mini'));
+    }
+
+    public function testUnknownSavedModelsArePreserved(): void
+    {
+        self::assertSame('gpt-test', LlmProviderCapabilities::openai(null, 'gpt-test')->defaultModel);
+        self::assertSame('gemini-unknown-legacy', LlmProviderCapabilities::gemini('gemini-unknown-legacy')->defaultModel);
+    }
+
+    public function testScheduledRetirementsApplyFromThePublishedUtcDate(): void
+    {
+        $claude = 'claude-sonnet-4-5-20250929';
+        self::assertTrue(LlmProviderCapabilities::isAnthropicPdfModel($claude, '2026-11-29'));
+        self::assertSame($claude, LlmProviderCapabilities::resolveModel('anthropic', $claude, '2026-11-29'));
+        self::assertFalse(LlmProviderCapabilities::isAnthropicPdfModel($claude, '2026-11-30'));
+        self::assertSame('claude-sonnet-5-5', LlmProviderCapabilities::resolveModel('anthropic', $claude, '2026-11-30'));
+
+        $gemini = 'gemini-3.1-flash-lite';
+        self::assertTrue(LlmProviderCapabilities::isGeminiPdfModel($gemini, '2027-05-06'));
+        self::assertSame($gemini, LlmProviderCapabilities::resolveModel('gemini', $gemini, '2027-05-06'));
+        self::assertFalse(LlmProviderCapabilities::isGeminiPdfModel($gemini, '2027-05-07'));
+        self::assertSame('gemini-3.5-flash-lite', LlmProviderCapabilities::resolveModel('gemini', $gemini, '2027-05-07'));
     }
 
     public function testOpenAiModelDiscoveryStopsAtRedirect(): void
@@ -385,9 +457,9 @@ final class AiProviderContractTest extends TestCase
             new Client(['handler' => $handler]),
         );
 
-        self::assertNull($client->listModels('sk-test-fixture', 'https://example.test'));
+        self::assertSame(AiModelCatalog::UNAVAILABLE, $client->listModels('sk-test-fixture', 'https://example.test')['error']);
         self::assertSame([], $sent);
-        self::assertNull($client->listModels('sk-test-fixture', ''));
+        self::assertSame(AiModelCatalog::UNAVAILABLE, $client->listModels('sk-test-fixture', '')['error']);
         self::assertCount(1, $sent);
         self::assertSame('https://api.openai.com/v1/models', (string) $sent[0]['request']->getUri());
     }
@@ -412,10 +484,12 @@ final class AiProviderContractTest extends TestCase
         );
 
         $openai = LlmProviderCapabilities::openai(null, null);
-        self::assertSame(
-            ['reasoning_effort' => 'high'],
-            $openai->effortPayload('gpt-5.6-sol', LlmProviderCapabilities::EFFORT_ACCURATE),
-        );
+        foreach (['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-sol'] as $model) {
+            self::assertSame(
+                ['reasoning_effort' => 'high'],
+                $openai->effortPayload($model, LlmProviderCapabilities::EFFORT_ACCURATE),
+            );
+        }
         self::assertSame(
             ['reasoning_effort' => 'low'],
             $openai->effortPayload('gpt-5.4-mini', LlmProviderCapabilities::EFFORT_FAST),
@@ -429,12 +503,12 @@ final class AiProviderContractTest extends TestCase
         $gemini = LlmProviderCapabilities::gemini(null);
         self::assertSame(
             ['thinkingConfig' => ['thinkingLevel' => 'high']],
-            $gemini->effortPayload('gemini-3.7-flash', LlmProviderCapabilities::EFFORT_ACCURATE),
+            $gemini->effortPayload('gemini-4-hydrogen', LlmProviderCapabilities::EFFORT_ACCURATE),
         );
         // gemini-2.5 zná jen starší thinkingBudget.
         self::assertSame(
             ['thinkingConfig' => ['thinkingBudget' => 8192]],
-            $gemini->effortPayload('gemini-2.5-pro', LlmProviderCapabilities::EFFORT_ACCURATE),
+            $gemini->effortPayload('gemini-2.5-flash-lite', LlmProviderCapabilities::EFFORT_ACCURATE),
         );
         // Azure deployment může nést cokoliv → fail-safe mlčíme.
         self::assertSame([], LlmProviderCapabilities::azureOpenai('https://x.openai.azure.com', 'gpt-5')

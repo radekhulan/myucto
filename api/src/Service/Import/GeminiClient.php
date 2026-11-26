@@ -40,7 +40,7 @@ final class GeminiClient implements LlmGatewayInterface
     }
 
     /**
-     * @return array{api_key:string, default_model:string}|null
+     * @return array{api_key:string, default_model:string, stored_model:string, replaced_model:?string}|null
      */
     public function getCredentials(int $supplierId): ?array
     {
@@ -58,15 +58,17 @@ final class GeminiClient implements LlmGatewayInterface
             $this->logger->error('Gemini API key decryption failed', ['supplier_id' => $supplierId]);
             return null;
         }
+        $storedModel = (string) ($row['gemini_default_model'] ?? '');
+        $model = LlmProviderCapabilities::resolveModel('gemini', $storedModel);
         return [
             'api_key'       => $key,
-            'default_model' => LlmProviderCapabilities::gemini(
-                isset($row['gemini_default_model']) ? (string) $row['gemini_default_model'] : null,
-            )->defaultModel,
+            'default_model' => $model,
+            'stored_model'  => $storedModel,
+            'replaced_model' => $storedModel !== '' && $storedModel !== $model ? $storedModel : null,
         ];
     }
 
-    public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null): void
+    public function setCredentials(int $supplierId, #[\SensitiveParameter] string $apiKey, ?string $defaultModel = null): void
     {
         $enc = $apiKey === '' ? null : $this->crypto->encrypt($apiKey);
         $this->db->pdo()->prepare(
@@ -96,6 +98,49 @@ final class GeminiClient implements LlmGatewayInterface
         return $this->capabilities($supplierId)->strongerModel($currentModel);
     }
 
+    /** @return array{models:list<string>, error:?string} */
+    public function listModels(#[\SensitiveParameter] string $apiKey): array
+    {
+        $query = ['pageSize' => 1000];
+        $seen = [];
+        $models = [];
+        $deadline = AiModelCatalog::deadline();
+        for ($i = 0; $i < AiModelCatalog::MAX_PAGES; $i++) {
+            $page = AiModelCatalog::fetchPage(
+                $this->http, self::BASE_URL . '/models', ['x-goog-api-key' => $apiKey], $query, $deadline,
+            );
+            $data = $page['body']['models'] ?? [];
+            if ($page['error'] !== null || !is_array($data) || !array_is_list($data)) {
+                if ($models !== [] && $page['error'] !== AiModelCatalog::INVALID_KEY) {
+                    break;
+                }
+                return ['models' => [], 'error' => $page['error'] ?? AiModelCatalog::UNAVAILABLE];
+            }
+            foreach ($data as $entry) {
+                $name = $entry['name'] ?? null;
+                $methods = $entry['supportedGenerationMethods'] ?? null;
+                if (!is_string($name) || !str_starts_with($name, 'models/')
+                    || !is_array($methods) || !in_array('generateContent', $methods, true)) {
+                    continue;
+                }
+                $id = substr($name, strlen('models/'));
+                if (LlmProviderCapabilities::isGeminiPdfModel($id)) {
+                    $models[] = $id;
+                }
+            }
+            $token = $page['body']['nextPageToken'] ?? '';
+            if ($token === '') {
+                return AiModelCatalog::result($models, LlmProviderCapabilities::GEMINI_MODELS);
+            }
+            if (!is_string($token) || isset($seen[$token])) {
+                break;
+            }
+            $seen[$token] = true;
+            $query['pageToken'] = $token;
+        }
+        return AiModelCatalog::result($models, LlmProviderCapabilities::GEMINI_MODELS, incomplete: true);
+    }
+
     public function testConnection(int $supplierId): array
     {
         $creds = $this->getCredentials($supplierId);
@@ -108,18 +153,16 @@ final class GeminiClient implements LlmGatewayInterface
                 'generationConfig' => ['maxOutputTokens' => 10],
             ]);
             if ($code !== 200) {
-                $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 $this->logger->warning('Gemini connection test failed', [
                     'supplier_id' => $supplierId,
                     'model'       => $creds['default_model'],
                     'http_status' => $code,
-                    'api_error'   => substr((string) $msg, 0, 500),
                 ]);
-                return ['ok' => false, 'error' => $msg];
+                return ['ok' => false, 'error' => 'Poskytovatel vrátil HTTP ' . $code . '.'];
             }
             return ['ok' => true, 'model' => $creds['default_model'], 'usage' => self::mapUsage($body['usageMetadata'] ?? null)];
-        } catch (\Throwable $e) {
-            return ['ok' => false, 'error' => $e->getMessage()];
+        } catch (\Throwable) {
+            return ['ok' => false, 'error' => 'Spojení s poskytovatelem se nepodařilo.'];
         }
     }
 
@@ -216,12 +259,8 @@ final class GeminiClient implements LlmGatewayInterface
         }
 
         $model = $modelOverride ?: $creds['default_model'];
-        $generationConfig = ['responseMimeType' => 'application/json', 'maxOutputTokens' => $maxTokens];
-        if (preg_match('/^gemini-3(?:[.-]|$)/', $model) === 1) {
-            $generationConfig['thinkingConfig'] = ['thinkingLevel' => 'low'];
-        } elseif (str_starts_with($model, 'gemini-2.5-')) {
-            $generationConfig['thinkingConfig'] = ['thinkingBudget' => 1024];
-        }
+        $generationConfig = ['responseMimeType' => 'application/json', 'maxOutputTokens' => $maxTokens]
+            + LlmProviderCapabilities::geminiThinkingPayload($model);
         // Volba tenanta rychle/přesně přebije výchozí thinkingConfig výše.
         $generationConfig = array_replace(
             $generationConfig,
@@ -302,7 +341,7 @@ final class GeminiClient implements LlmGatewayInterface
             : LlmProviderCapabilities::EFFORT_DEFAULT;
     }
 
-    private function post(string $model, string $apiKey, array $payload): array
+    private function post(string $model, #[\SensitiveParameter] string $apiKey, array $payload): array
     {
         $url = self::BASE_URL . '/models/' . rawurlencode($model) . ':generateContent';
         $resp = $this->http->post($url, [

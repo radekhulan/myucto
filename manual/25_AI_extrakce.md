@@ -39,7 +39,7 @@ přihlašovací údaje nastavíte podle [§ 25.3](#253-krok-za-krokem-nastavit-p
 
 ## 25.3 Krok za krokem: nastavit poskytovatele AI
 
-1. Otevřete `Firma → AI nastavení`. Pokud AI ještě není nastavená, je sekce **Nastavení AI extrakční brány** rozbalená.
+1. Otevřete **Administrace → Integrace → AI extrakce**. Pokud AI ještě není nastavená, je sekce **Nastavení AI extrakční brány** rozbalená.
 2. Vyberte poskytovatele v přepínači s pěti tlačítky: Anthropic, Azure OpenAI, OpenAI, Gemini nebo Ollama. Kliknutí jen přepne,
    jaké přihlašovací údaje se dole upravují, **neuloží** to ještě aktivní volbu.
 3. Ve formuláři **Přihlašovací údaje** vyplňte **API klíč** a volitelně **Model**. U Azure OpenAI vyplňte navíc
@@ -51,8 +51,16 @@ přihlašovací údaje nastavíte podle [§ 25.3](#253-krok-za-krokem-nastavit-p
 **Jak poznáte, že je hotovo:** u poskytovatele je štítek **aktivní** a nahoře zůstane zelená značka s jeho jménem
 (případně štítek **EU data residency**). Zvolený poskytovatel bez klíče má místo toho štítek **bez klíče** a extrakce zatím neběží.
 
-U již nastaveného **OpenAI** klikněte vedle pole **Model** na **Načíst modely z OpenAI**. Nabídka se načte pro projekt
-uloženého klíče. Zvolte model a klikněte na **Uložit a otestovat**. Zvolený model se použije jako výchozí při vytěžování.
+U **Anthropic Claude**, **OpenAI** a **Google Gemini** klikněte vedle pole **Model** na **Načíst modely**.
+Aplikace použije právě zadaný klíč. Pokud pole necháte prázdné, použije uložený klíč. Načtení ověří přístup ke katalogu
+a nabídne dostupné modely pro vytěžování dokladů. Když katalog neodpoví nebo neobsahuje vhodný model, zobrazí se záložní
+nabídka. Při částečném načtení se zobrazí získané modely a upozornění. Odmítnutý klíč má vlastní hlášku.
+Výběr potvrdíte tlačítkem **Uložit**. Při zadání nového klíče se tlačítko změní
+na **Uložit a otestovat**. Dostupnost modelu pro uložený klíč ověříte přes **Načíst modely** nebo **Test připojení**.
+
+Při vytěžování MyÚčto nahrazuje uložené modely, které byly vyřazeny nebo vypnuty.
+Náhradu vybírá u stejného poskytovatele ze stejné nebo levnější třídy.
+V nastavení integrace uvidíte původní i používaný model. Náhradu můžete uložit nebo vybrat jiný model.
 
 > [!TIP]
 > Nejste si jistí, kterého poskytovatele zvolit? Anthropic Claude je výchozí a nejodladěnější volba (nativní čtení PDF, nejlepší
@@ -80,7 +88,7 @@ Volitelné kroky:
 - **Ladění extrakce.** Pod formulářem nastavíte **Míru uvažování AI** a **Poznámky k extrakci**, uložíte tlačítkem
   **Uložit ladění** (viz [§ 25.9.16](#25916-ladeni-extrakce-poznamky-a-mira-uvazovani)).
 - **Model pro dotaz účetnímu asistentovi.** V `Účetnictví → AI asistent` ([kapitola 123](123_AI_asistent.md)) vyberete u vstupu dotazu **Model** aktivního
-  poskytovatele, například `gpt-5.5` místo `gpt-5.4-mini`. Volba platí pro další odesílané dotazy na této stránce a nemění
+  poskytovatele, například `gpt-6.2-astra` pro složitý dotaz. Volba platí pro další odesílané dotazy na této stránce a nemění
   výchozí model firmy. U každé odpovědi je uveden použitý model, také při otevření uložené konverzace.
   Navrhne-li asistent v odpovědi ostatní pohledávku nebo závazek, nabídne tlačítko **Založit v Ostatních pohledávkách
   a závazcích**. Po potvrzení vznikne pouze koncept, který po kontrole zaúčtujete sami. K založení potřebujete právo
@@ -211,7 +219,7 @@ Tento postup je pro správce. Místo cloudového poskytovatele může vytěžov�
 
 5. Klikněte na **Načíst modely** a vyberte model. Štítek *čte obrázky* označuje modely, které vytěží i skeny a fotky, model bez
    něj zpracuje jen PDF s textovou vrstvou.
-6. Uložte nastavení. Po uložení proběhne test spojení.
+6. Uložte nastavení. Spojení ověřte tlačítkem **Test připojení**. Pokud zadáváte nový klíč, použijte **Uložit a otestovat**.
 
 Název hostu s podtržítkem (`gpu_server.lan`) adresa nepřijme, zadejte IP adresu nebo název bez znaku `_`. API klíč vyplňte,
 jen pokud je Ollama za reverse proxy s autentizací. Při změně adresy se uložený klíč smaže.
@@ -406,19 +414,18 @@ Spojit lze PDF a fotky JPG, PNG a WebP. PDF chráněné heslem spojit nejde a sp
 AI extrakce neběží natvrdo nad jedním modelem, MyÚčto.cz nabízí **AI bránu** s pěti poskytovateli, mezi kterými si každá firma
 vybere podle toho, co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci dat:
 
-- **Anthropic Claude** - BYOK (vlastní klíč z `platform.claude.com`), výchozí model `claude-haiku-4-5`, dále `claude-sonnet-5`,
-  `claude-sonnet-4-6`, `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7` a `claude-fable-5`. Výchozí volba, na kterou je AI
-  extrakce primárně odladěná. Umí nativně číst PDF jako dokument (ne jen text či obrázek), takže má nejlepší přesnost na
-  vícesloupcových a naskenovaných fakturách.
-- **Azure OpenAI** - vlastní Azure resource (`endpoint`, `deployment`, `api_version`), hodí se, pokud firma už má Azure OpenAI
-  smlouvu nebo potřebuje EU rezidenci dat se smluvním zajištěním od Microsoftu.
-- **OpenAI** (přímé API) - vlastní klíč z platformy OpenAI, výchozí model `gpt-5.4-mini`. Tlačítko **Načíst modely z OpenAI**
-  nabídne modely pro vytěžování dostupné v projektu uloženého klíče. Použije uloženou adresu OpenAI včetně evropské, pokud
-  je nastavená. Klíč potřebuje oprávnění číst seznam modelů. Při chybě načítání zůstane k dispozici původní nabídka.
-- **Google Gemini** - BYOK klíč z Google AI Studio, výchozí model `gemini-3.7-flash`, dostupné jsou také `gemini-3.6-flash`,
-  `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview` a `gemini-2.5-pro`.
-- **Ollama (lokální)** - open-source model spuštěný na vlastním stroji, bez API klíče (komunikace přes lokální nebo privátní
-  síť). Data neopouštějí vaši infrastrukturu. Viz [§ 25.7](#257-krok-za-krokem-pouzit-lokalni-model-pres-ollamu).
+- **Anthropic Claude** - vlastní klíč z Claude Console. Pro běžné vytěžování je výchozí `claude-haiku-5-5`, pro náročnější
+  úlohy se používá `claude-sonnet-5-5`. Claude čte PDF přímo jako dokument. V nabídce jsou také `claude-opus-5-5` a
+  `claude-fable-5-2`.
+- **Azure OpenAI** - zadáte název vlastního nasazeného modelu a adresu Azure. Azure se hodí, pokud firma využívá vlastní
+  smlouvu s Microsoftem nebo potřebuje provoz v evropském regionu.
+- **OpenAI** (přímé API) - vlastní klíč z platformy OpenAI. Výchozí je `gpt-6-luna`, pro náročné doklady lze zvolit
+  `gpt-6.2-sol` nebo `gpt-6.2-astra`. Katalog se načítá ze zvolené adresy OpenAI.
+  Při změně adresy zadejte pro načtení katalogu klíč.
+- **Google Gemini** - vlastní klíč z Google AI Studio. Výchozí je `gemini-3.5-flash-lite`. Pro rychlé zpracování je v nabídce
+  také `gemini-4-hydrogen`, pro náročné úlohy `gemini-4-carbon`.
+- **Ollama (lokální)** - nabídka vychází z modelů nainstalovaných na zadané adrese. Pokud Ollamu chrání proxy s autentizací,
+  lze použít volitelný API klíč. Viz [§ 25.7](#257-krok-za-krokem-pouzit-lokalni-model-pres-ollamu).
 
 Nastavení je **na firmu** (celá firma sdílí jednoho aktivního poskytovatele a jeho přihlašovací údaje, ne po jednotlivých
 uživatelích).
@@ -431,14 +438,14 @@ Podrobnosti k formuláři:
   **OpenAI** má také nepovinné pole **Base URL** pro evropský endpoint. **Azure OpenAI** vyžaduje **Azure endpoint**,
   **Deployment** (název nasazeného modelu v Azure resource)
   a **API verze**. **Anthropic** má navíc nepovinné pole **ID workspace** (začíná `wrkspc_`), které vyplníte jen u klíče
-  nepřiřazeného k žádnému workspace; Anthropic takový klíč bez ID odmítne s hláškou, že požadavek musí obsahovat
-  `anthropic-workspace-id`.
+  nepřiřazeného k žádnému workspace.
 - **Test připojení** ověří klíč a endpoint reálným voláním a nahlásí, jaký model odpověděl (nebo chybu). Před uložením se
   kontroluje i základní formát klíče (Anthropic musí začínat `sk-ant-`, OpenAI `sk-`, Gemini přijímá podporované standardní
   i autorizační klíče z AI Studia), ušetří to zbytečný test s očividně špatně vloženým klíčem.
 - **Uložit nastavení do všech firem** uloží stejného poskytovatele, klíč, model, region dat, EU rezidenci a míru uvažování i do
   ostatních firem, ve kterých smíte měnit nastavení AI. Volba **Jen do firem s nenastavenou AI** (výchozí zapnutá) přeskočí
-  firmy, jejichž aktivní poskytovatel už má klíč, takže fungující nastavení jinde nepřepíšete. Klíč se otestuje jen jednou, na
+  firmy, jejichž aktivní poskytovatel už má klíč, takže fungující nastavení jinde nepřepíšete. Pro hromadné uložení zadejte
+  API klíč ve formuláři. Klíč se otestuje jen jednou, na
   aktuální firmě. Když test neprojde, do dalších firem se nic neuloží. Každá firma dostane vlastní šifrovanou kopii klíče.
   **Poznámky k extrakci** se nekopírují, každá firma si drží vlastní. Firma, která vyžaduje EU rezidenci dat, nastavení bez EU
   regionu nedostane a ve výsledku je uvedená jako přeskočená. Po uložení se pod formulářem vypíše, do kterých firem se
@@ -505,8 +512,8 @@ při přepnutí brány.
 | **Rychle a levně** | Zkrátí uvažování. Nižší cena a latence, u složitých faktur na úkor přesnosti. |
 | **Přesně (víc uvažování)** | Nechá model uvažovat déle. Vyšší přesnost na komplikovaných dokladech, ale pomalejší a dražší. |
 
-Ne každý model to umí. `claude-haiku-4-5` a modely řady `gpt-4` volbu nemají a prostě ji ignorují (extrakce běží dál, jen bez
-efektu). U Azure OpenAI se volba neuplatní vůbec, protože pod deploymentem může být libovolný model.
+Volba se uplatní u modelů, které míru uvažování podporují. Patří mezi ně řady GPT-5, GPT-6 a Gemini 3 a 4. U Azure OpenAI
+určuje chování nasazený model.
 
 **Poznámky k extrakci** jsou volný text (maximálně 2000 znaků), který se připojí k zadání pro AI. Patří sem to, co model nemá
 odkud vědět o *vašich* fakturách:

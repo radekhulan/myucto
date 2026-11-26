@@ -102,7 +102,7 @@ final class AccountingAssistantServiceTest extends TestCase
     private static function toolResponse(array $input): Response
     {
         return new Response(200, [], json_encode([
-            'model' => 'claude-sonnet-5',
+            'model' => 'claude-sonnet-5-5',
             'content' => [['type' => 'text', 'text' => json_encode($input)]],
             'stop_reason' => 'end_turn',
             'usage' => ['input_tokens' => 120, 'output_tokens' => 40],
@@ -174,7 +174,7 @@ final class AccountingAssistantServiceTest extends TestCase
         );
 
         $payload = $this->sentPayload();
-        self::assertSame('claude-sonnet-5', $payload['model'], 'haiku tenant → silnější model');
+        self::assertSame('claude-sonnet-5-5', $payload['model'], 'haiku tenant → silnější model');
         $content = $payload['messages'][0]['content'];
         self::assertSame('document', $content[0]['type']);
         self::assertSame(base64_encode("%PDF-1.4\nsyntetický zápis"), $content[0]['source']['data']);

@@ -53,6 +53,7 @@ final class OllamaClient implements LlmGatewayInterface
         'ollama_endpoint_blocked' => 'Adresa Ollamy není povolená (ollama_endpoint_blocked).',
         'ollama_unreachable'      => 'Ollama na zadané adrese neodpovídá (ollama_unreachable).',
         'ollama_timeout'          => 'Ollama nestihla odpovědět v časovém limitu. Pomůže GPU nebo vyšší MYINVOICE_OLLAMA_TIMEOUT (ollama_timeout).',
+        'ollama_auth_failed'      => 'Ollama nebo její proxy odmítla API klíč (ollama_auth_failed).',
         'ollama_not_ollama'       => 'Na zadané adrese neběží Ollama (ollama_not_ollama).',
         'ollama_model_missing'    => 'Vybraný model v Ollamě není nainstalovaný (ollama_model_missing).',
         'ollama_no_input'         => 'Z PDF se nepodařilo získat obrázky stránek ani text (ollama_no_input).',
@@ -134,11 +135,11 @@ final class OllamaClient implements LlmGatewayInterface
 
     /**
      * @param string|null $apiKey null = ponechat uložený klíč, '' = smazat
-     * @throws OllamaEndpointException ollama_endpoint_invalid
+     * @throws OllamaEndpointException
      */
-    public function setCredentials(int $supplierId, string $baseUrl, string $model, ?string $apiKey = null): void
+    public function setCredentials(int $supplierId, string $baseUrl, string $model, #[\SensitiveParameter] ?string $apiKey = null): void
     {
-        $base = $this->guard->normalize($baseUrl);
+        $base = $this->guard->normalizeForStorage($baseUrl);
         if ($apiKey === null) {
             $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ? WHERE id = ?')
                 ->execute([$base, $model, $supplierId]);
@@ -203,11 +204,14 @@ final class OllamaClient implements LlmGatewayInterface
      *
      * @return array{ok:true, models:list<array{name:string, size:int, vision:?bool, thinking:?bool}>}|array{ok:false, error:string, code:string}
      */
-    public function listModels(string $baseUrl, string $apiKey = ''): array
+    public function listModels(string $baseUrl, #[\SensitiveParameter] string $apiKey = ''): array
     {
         try {
             $ep = $this->endpoint($baseUrl);
             $tags = $this->request($ep, 'GET', '/api/tags', null, $apiKey, self::META_TIMEOUT);
+            if (in_array($tags['code'], [401, 403], true)) {
+                throw new OllamaEndpointException('ollama_auth_failed');
+            }
             if ($tags['code'] !== 200 || !is_array($tags['body']['models'] ?? null)) {
                 throw new OllamaEndpointException('ollama_not_ollama');
             }
@@ -441,7 +445,7 @@ final class OllamaClient implements LlmGatewayInterface
      * @return list<string>|null null = Ollama capabilities nehlásí
      * @throws OllamaEndpointException
      */
-    private function modelCapabilities(OllamaEndpoint $ep, string $model, string $apiKey, int $timeout = self::META_TIMEOUT): ?array
+    private function modelCapabilities(OllamaEndpoint $ep, string $model, #[\SensitiveParameter] string $apiKey, int $timeout = self::META_TIMEOUT): ?array
     {
         $r = $this->request($ep, 'POST', '/api/show', ['model' => $model], $apiKey, $timeout);
         if ($r['code'] === 404) {
@@ -459,7 +463,7 @@ final class OllamaClient implements LlmGatewayInterface
      * @return array{code:int, body:array<string,mixed>|null}
      * @throws OllamaEndpointException ollama_timeout | ollama_unreachable
      */
-    private function request(OllamaEndpoint $ep, string $method, string $path, ?array $json, string $apiKey, int $timeout): array
+    private function request(OllamaEndpoint $ep, string $method, string $path, ?array $json, #[\SensitiveParameter] string $apiKey, int $timeout): array
     {
         $options = [
             'timeout'         => $timeout,

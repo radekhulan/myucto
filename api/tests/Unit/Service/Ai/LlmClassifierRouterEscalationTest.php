@@ -33,7 +33,7 @@ use Psr\Log\NullLogger;
 
 /**
  * §12b — auto-escalace bank_tx kontace Haiku→Sonnet. Ověřuje, že při nepoužitelné
- * (nízkojisté) odpovědi Haiku se právě JEDNOU zopakuje dotaz na claude-sonnet-5 a
+ * (nízkojisté) odpovědi Haiku se právě JEDNOU zopakuje dotaz na claude-sonnet-5-5 a
  * použije se jeho odpověď; a naopak že při použitelné odpovědi Haiku se neescaluje.
  */
 #[AllowMockObjectsWithoutExpectations]
@@ -89,10 +89,10 @@ final class LlmClassifierRouterEscalationTest extends TestCase
     }
 
     /** @param array<string,mixed> $input */
-    private function anthropicResponse(string $model, array $input): Response
+    private function anthropicResponse(string $model, array $input, bool $structured = false): Response
     {
         return new Response(200, [], (string) json_encode([
-            'content' => [['type' => 'tool_use', 'input' => $input]],
+            'content' => [$structured ? ['type' => 'text', 'text' => json_encode($input)] : ['type' => 'tool_use', 'input' => $input]],
             'model' => $model,
             'usage' => ['input_tokens' => 100, 'output_tokens' => 20],
         ]));
@@ -113,10 +113,10 @@ final class LlmClassifierRouterEscalationTest extends TestCase
                 'debit_account' => '518000', 'credit_account' => '221000',
                 'operation_type' => 'fee', 'confidence' => 0.1, 'reasoning' => 'haiku guess',
             ]),
-            $this->anthropicResponse('claude-sonnet-5', [
+            $this->anthropicResponse('claude-sonnet-5-5', [
                 'debit_account' => '518000', 'credit_account' => '221000',
                 'operation_type' => 'fee', 'confidence' => 0.9, 'reasoning' => 'sonnet confident',
-            ]),
+            ], true),
         ]);
         $requests = [];
         $router = $this->router($mock, $requests);
@@ -125,10 +125,10 @@ final class LlmClassifierRouterEscalationTest extends TestCase
 
         self::assertCount(2, $requests, 'právě jedno zopakování (žádná smyčka)');
         self::assertSame('claude-haiku-4-5', $this->modelOf($requests[0]), 'první pokus na Haiku');
-        self::assertSame('claude-sonnet-5', $this->modelOf($requests[1]), 'escalace na Sonnet');
+        self::assertSame('claude-sonnet-5-5', $this->modelOf($requests[1]), 'escalace na Sonnet');
         self::assertTrue($result['ok']);
         self::assertTrue($result['escalated'] ?? false);
-        self::assertSame('claude-sonnet-5', $result['model']);
+        self::assertSame('claude-sonnet-5-5', $result['model']);
         self::assertSame(0.36, $result['confidence']);
     }
 

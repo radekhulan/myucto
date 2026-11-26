@@ -19,7 +19,7 @@ use Psr\Log\LoggerInterface;
 
 final class AiProviderHttpClient
 {
-    public const BANK_ESCALATION_MODEL = 'claude-sonnet-5';
+    public const BANK_ESCALATION_MODEL = LlmProviderCapabilities::ANTHROPIC_SONNET_MODEL;
 
     /** Strop výstupu pro dlouhé odpovědi (AI asistent, vytěžení dokumentu). */
     public const MAX_OUTPUT_TOKENS = 16000;
@@ -354,11 +354,9 @@ final class AiProviderHttpClient
                 'name' => $t['name'], 'description' => $t['description'], 'parameters' => $this->geminiSchema($t['parameters']),
             ], $c->tools)]],
             'toolConfig' => ['functionCallingConfig' => ['mode' => $final ? 'NONE' : 'AUTO']],
-            'generationConfig' => ['maxOutputTokens' => $c->maxOutputTokens],
+            'generationConfig' => ['maxOutputTokens' => $c->maxOutputTokens]
+                + LlmProviderCapabilities::geminiThinkingPayload($c->model),
         ];
-        if (preg_match('/^gemini-3(?:[.-]|$)/', $c->model) === 1) {
-            $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => 'low'];
-        }
         $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($c->model) . ':generateContent';
         $response = $this->http->post($url, [
             'headers' => ['x-goog-api-key' => $ctx['credentials']['api_key'], 'content-type' => 'application/json'], 'json' => $payload,
@@ -517,7 +515,7 @@ final class AiProviderHttpClient
 
     /**
      * Cílový silnější model pro jednorázovou auto-escalaci bank_tx kontace (§12b).
-     * Escaluje výhradně anthropic haiku → claude-sonnet-5; pro jiné providery nebo
+     * Escaluje výhradně anthropic haiku → claude-sonnet-5-5; pro jiné providery nebo
      * když tenant běží na jiném než haiku modelu vrací null (escalace není plošná).
      * Fail-closed: neznámý kontext / residency konflikt → null (žádná escalace).
      */
@@ -615,7 +613,9 @@ final class AiProviderHttpClient
         return [
             'provider' => $provider,
             'region' => $caps->dataRegion,
-            'model' => (string) ($credentials['default_model'] ?? $caps->defaultModel),
+            'model' => isset($credentials['stored_model'])
+                ? LlmProviderCapabilities::resolveModel($provider, $credentials['stored_model'], forAssistant: true)
+                : (string) ($credentials['default_model'] ?? $caps->defaultModel),
             'credentials' => $credentials,
             'supplier_id' => $supplierId,
         ];
@@ -755,11 +755,10 @@ final class AiProviderHttpClient
                     'responseMimeType' => 'application/json', 'responseSchema' => $this->geminiSchema($schema),
                 ],
             ];
-            // Gemini 3.x přemýšlí a myšlenky se počítají do maxOutputTokens: krátká
-            // klasifikace by skončila uprostřed JSON. Stejně jako v GeminiClient nízké
-            // přemýšlení a rezerva výstupu.
-            if (preg_match('/^gemini-3(?:[.-]|$)/', $ctx['model']) === 1) {
-                $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => 'low'];
+            // Myšlenky se počítají do maxOutputTokens. Krátká klasifikace potřebuje rezervu na JSON.
+            $thinking = LlmProviderCapabilities::geminiThinkingPayload($ctx['model']);
+            if ($thinking !== []) {
+                $payload['generationConfig'] += $thinking;
                 $payload['generationConfig']['maxOutputTokens'] = max($maxOutputTokens, 4000);
             }
             $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($ctx['model']) . ':generateContent';

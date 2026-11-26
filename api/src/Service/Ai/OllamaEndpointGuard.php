@@ -97,6 +97,16 @@ final class OllamaEndpointGuard
         return $scheme . '://' . $host . $port;
     }
 
+    public function normalizeForStorage(string $url): string
+    {
+        $base = $this->normalize($url);
+        $host = trim((string) parse_url($base, PHP_URL_HOST), '[]');
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            $this->resolve($base);
+        }
+        return $base;
+    }
+
     public function resolve(string $url): OllamaEndpoint
     {
         $base  = $this->normalize($url);

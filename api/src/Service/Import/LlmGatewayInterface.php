@@ -57,7 +57,7 @@ interface LlmGatewayInterface
 
     // ── credentials / admin ────────────────────────────────────────────────
 
-    /** @return array{api_key:string, default_model:string}|null */
+    /** @return array{api_key:string, default_model:string, stored_model?:string}|null */
     public function getCredentials(int $supplierId): ?array;
 
     /** @return array<string,mixed> */

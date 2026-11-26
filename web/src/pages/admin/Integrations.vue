@@ -5,7 +5,7 @@ import { integrationsApi,
   type IdokladCredentialsStatus, type FakturoidCredentialsStatus,
   type ImportJob,
   type AiProvider, type AiDataRegion, type AiCredentialsResponse, type AiCredentialsPayload,
-  type AiEffort, type AiBulkResult } from '@/api/integrations'
+  type AiEffort, type AiBulkResult, type CloudModelProvider } from '@/api/integrations'
 import { aiProviderBadge } from './aiProviderBadge'
 import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/settings'
 import { useSupplierStore } from '@/stores/supplier'
@@ -311,7 +311,7 @@ const aiSavingSelection = ref(false)
 let aiContextVersion = 0
 onBeforeUnmount(() => {
   aiContextVersion++
-  clearOpenAiModels()
+  clearModelCatalog()
 })
 const clientAiEnabled = ref(false)
 const clientAiMonthlyLimit = ref(100)
@@ -351,23 +351,38 @@ const bulkOnlyUnconfigured = ref(true)
 const bulkResult = ref<AiBulkResult | null>(null)
 
 const providerInfo = computed(() => aiCreds.value?.providers?.[aiProvider.value])
-const openAiModels = ref<string[] | null>(null)
-const openAiModelsLoading = ref(false)
-let openAiModelsRequest: AbortController | null = null
-const canLoadOpenAiModels = computed(() => aiProvider.value === 'openai' && !!providerInfo.value?.configured
-  && !credForm.api_key && credForm.base_url.trim() === (providerInfo.value.base_url ?? '').trim())
-const models = computed(() => openAiModels.value ?? providerInfo.value?.models ?? [])
+const catalogModels = ref<string[] | null>(null)
+const catalogLoading = ref(false)
+const catalogMessage = ref('')
+let catalogRequest: AbortController | null = null
+const catalogProvider = computed<CloudModelProvider | null>(() => {
+  const p = aiProvider.value
+  return p === 'anthropic' || p === 'openai' || p === 'gemini' ? p : null
+})
+const models = computed(() => catalogModels.value ?? providerInfo.value?.models ?? [])
 function euCapable(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.eu_capable ?? false }
 function providerConfigured(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.configured ?? false }
 function providerBadge(p: AiProvider) { return aiProviderBadge(p, aiCreds.value?.ai_provider, providerConfigured(p)) }
 // EU-required → provider musí být EU-capable (fail-closed vizuálně; server ho stejně odmítne)
 const providerBlockedByEu = computed(() => aiEuRequired.value && !euCapable(aiProvider.value))
 
+function normalizeOpenAiUrl(url: string) {
+  return url.trim().replace(/\/+$/, '') || 'https://api.openai.com'
+}
+
+const canLoadModelCatalog = computed(() => {
+  if (!catalogProvider.value || providerBlockedByEu.value) return false
+  if (credForm.api_key.trim()) return true
+  if (!providerInfo.value?.configured) return false
+  return catalogProvider.value !== 'openai'
+    || normalizeOpenAiUrl(credForm.base_url) === normalizeOpenAiUrl(providerInfo.value.base_url ?? '')
+})
+
 const aiConfigured = computed(() => !!providerInfo.value?.configured)
 const aiExtractCount = computed(() => providerInfo.value?.extractions_count ?? 0)
 
 function syncCredForm() {
-  clearOpenAiModels()
+  clearModelCatalog()
   const inf = providerInfo.value
   credForm.api_key = ''
   credForm.clear_api_key = false
@@ -380,30 +395,69 @@ function syncCredForm() {
   credTestMsg.value = null
 }
 
-function clearOpenAiModels() {
-  openAiModelsRequest?.abort()
-  openAiModelsRequest = null
-  openAiModelsLoading.value = false
-  openAiModels.value = null
+function clearModelCatalog() {
+  catalogRequest?.abort()
+  catalogRequest = null
+  catalogLoading.value = false
+  catalogModels.value = null
+  catalogMessage.value = ''
 }
 
-watch(canLoadOpenAiModels, (canLoad) => { if (!canLoad) clearOpenAiModels() })
+watch([() => credForm.api_key, () => credForm.base_url, () => credForm.workspace_id, providerBlockedByEu], clearModelCatalog, { flush: 'sync' })
 
-async function loadOpenAiModels() {
-  if (!canLoadOpenAiModels.value || openAiModelsLoading.value) return
+function aiModelErrorMessage(code: string): string | undefined {
+  switch (code) {
+    case 'model_catalog_unavailable':
+    case 'model_catalog_empty':
+    case 'model_catalog_incomplete':
+    case 'model_catalog_invalid_key':
+    case 'model_catalog_endpoint_key_required':
+    case 'model_invalid':
+    case 'model_unavailable':
+    case 'openai_base_url_invalid':
+    case 'workspace_id_invalid':
+    case 'residency_conflict':
+      return t(`aiGateway.${code}`)
+    case 'provider_not_configured':
+      return t('aiGateway.err_key_required')
+    case 'validation_failed':
+      return t('aiGateway.invalid_settings')
+    case 'forbidden':
+      return t('errors.forbidden')
+    default:
+      return undefined
+  }
+}
+
+async function loadModelCatalog() {
+  const provider = catalogProvider.value
+  if (!provider || !canLoadModelCatalog.value || catalogLoading.value) return
   const request = new AbortController()
-  openAiModelsRequest = request
-  openAiModelsLoading.value = true
+  catalogRequest = request
+  catalogLoading.value = true
+  catalogMessage.value = ''
+  const apiKey = credForm.api_key.trim()
+  const payload: Pick<AiCredentialsPayload, 'api_key' | 'base_url' | 'workspace_id'> = {}
+  if (apiKey) payload.api_key = apiKey
+  if (provider === 'openai') payload.base_url = credForm.base_url.trim()
+  if (provider === 'anthropic') payload.workspace_id = credForm.workspace_id.trim()
   try {
-    const result = await integrationsApi.listOpenAiModels(request.signal)
-    if (!request.signal.aborted) openAiModels.value = result.models
+    const result = await integrationsApi.listCloudModels(provider, payload, request.signal)
+    if (request.signal.aborted) return
+    catalogModels.value = result.models.length ? result.models : null
+    if (result.catalog_error) {
+      catalogMessage.value = t(`aiGateway.${result.catalog_error}`)
+    } else if (!result.models.length) {
+      catalogMessage.value = t('aiGateway.model_catalog_empty')
+    }
   } catch (e) {
-    if (!request.signal.aborted) toast.error(t(apiErrorCode(e) === 'residency_conflict'
-      ? 'aiGateway.residency_conflict' : 'aiGateway.openai_models_failed'))
+    if (request.signal.aborted) return
+    catalogModels.value = null
+    catalogMessage.value = aiModelErrorMessage(apiErrorCode(e)) ?? t('aiGateway.model_catalog_unavailable')
   } finally {
-    if (openAiModelsRequest === request) {
-      openAiModelsRequest = null
-      openAiModelsLoading.value = false
+    if (catalogRequest === request) {
+      catalogRequest = null
+      catalogLoading.value = false
     }
   }
 }
@@ -609,16 +663,21 @@ async function saveAiCredentials() {
     if (r.bulk) reportBulk(r.bulk)
     await loadAiCreds(true)
   } catch (e) {
-    credTestMsg.value = { ok: false, text: apiErrorMessage(e) }
+    const localized = catalogProvider.value ? aiModelErrorMessage(apiErrorCode(e)) : undefined
+    credTestMsg.value = { ok: false, text: localized ?? apiErrorMessage(e) }
   } finally {
     credSaving.value = false
   }
 }
 
+function bulkFailureMessage(result: AiBulkResult) {
+  return t(result.reason === 'key_required' ? 'aiGateway.bulk_key_required' : 'aiGateway.bulk_not_applied')
+}
+
 function reportBulk(b: AiBulkResult) {
   bulkResult.value = b
   if (!b.applied) {
-    toast.warning(t('aiGateway.bulk_not_applied'))
+    toast.warning(bulkFailureMessage(b))
     return
   }
   const n = b.updated?.length ?? 0
@@ -654,8 +713,8 @@ async function deleteAiCredentials() {
 
 watch(() => suppliers.currentSupplierId, () => {
   aiContextVersion++
-  clearOpenAiModels()
   aiCreds.value = null
+  syncCredForm()
   clientAiEnabled.value = false
   clientAiMonthlyLimit.value = 100
   clientAiSaving.value = false
@@ -1242,6 +1301,11 @@ onMounted(() => {
             <span v-if="providerInfo?.residency_label" class="ml-3 text-xs">· {{ providerInfo?.residency_label }}</span>
           </div>
 
+          <p v-if="providerInfo?.replaced_model" role="status"
+             class="rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-600 mb-4">
+            {{ t('aiGateway.model_replaced', { previous: providerInfo.replaced_model, current: providerInfo.default_model }) }}
+          </p>
+
           <div class="space-y-3">
             <!-- API key (write-only) — anthropic/openai/gemini -->
             <div v-if="aiProvider !== 'azure_openai' && aiProvider !== 'ollama'">
@@ -1315,22 +1379,22 @@ onMounted(() => {
                                   v-model:api-key="credForm.api_key" v-model:clear-api-key="credForm.clear_api_key"
                                   :has-api-key="!!providerInfo?.has_api_key" />
 
-            <div v-if="aiProvider !== 'ollama' && (models.length || openAiModels !== null)">
+            <div v-if="aiProvider !== 'ollama' && models.length">
               <label for="ai-extraction-default-model" class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.model') }}</label>
               <div class="flex flex-wrap items-center gap-2">
                 <select id="ai-extraction-default-model" v-model="credForm.default_model" class="min-w-0 flex-1 h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-                  <option v-if="aiProvider === 'openai' && !models.includes(credForm.default_model)" :value="credForm.default_model" disabled>
-                    {{ t('aiGateway.openai_model_not_listed', { model: credForm.default_model }) }}
+                  <option v-if="catalogProvider && credForm.default_model && !models.includes(credForm.default_model)" :value="credForm.default_model" disabled>
+                    {{ t('aiGateway.model_not_listed', { model: credForm.default_model }) }}
                   </option>
                   <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
                 </select>
-                <button v-if="canLoadOpenAiModels" type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']"
-                        :disabled="openAiModelsLoading || credSaving" @click="loadOpenAiModels">
+                <button v-if="canLoadModelCatalog" type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+                        :disabled="catalogLoading || credSaving" @click="loadModelCatalog">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" /></svg>
-                  {{ t(openAiModelsLoading ? 'aiGateway.openai_models_loading' : 'aiGateway.openai_models_load') }}
+                  {{ t(catalogLoading ? 'aiGateway.model_catalog_loading' : 'aiGateway.model_catalog_load') }}
                 </button>
               </div>
-              <p v-if="openAiModels?.length === 0" role="status" class="text-xs text-neutral-500 mt-1">{{ t('aiGateway.openai_models_empty') }}</p>
+              <p v-if="catalogMessage" role="status" class="text-xs text-warning-600 mt-1">{{ catalogMessage }}</p>
             </div>
           </div>
 
@@ -1389,7 +1453,7 @@ onMounted(() => {
 
           <div v-if="bulkResult" data-test="bulk-result" class="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700 space-y-1">
             <strong class="block">{{ t('aiGateway.bulk_result_title') }}</strong>
-            <p v-if="!bulkResult.applied" class="text-warning-700">{{ t('aiGateway.bulk_not_applied') }}</p>
+            <p v-if="!bulkResult.applied" class="text-warning-700">{{ bulkFailureMessage(bulkResult) }}</p>
             <template v-else>
               <p v-if="bulkResult.updated?.length" class="text-success-600">
                 {{ t('aiGateway.bulk_updated', { n: bulkResult.updated.length }) }}: {{ bulkResult.updated.map(c => c.name).join(', ') }}
@@ -1420,9 +1484,9 @@ onMounted(() => {
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
                 {{ credTesting ? t('common.loading') : t('aiGateway.test_connection') }}
               </button>
-              <button type="button" :class="btnFilled('primary')" :disabled="credSaving" @click="saveAiCredentials">
+              <button type="button" :class="btnFilled('primary')" :disabled="credSaving" data-test="save-ai-credentials" @click="saveAiCredentials">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-                {{ credSaving ? t('common.saving') : t('integrations.idoklad.save_and_test') }}
+                {{ t(credSaving ? 'common.saving' : credForm.api_key.trim() && !credForm.clear_api_key ? 'integrations.idoklad.save_and_test' : 'common.save') }}
               </button>
             </div>
           </div>

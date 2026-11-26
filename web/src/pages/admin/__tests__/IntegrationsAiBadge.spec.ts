@@ -5,7 +5,7 @@ import type { AiCredentialsResponse, AiProvider } from '@/api/integrations'
 
 const m = vi.hoisted(() => ({
   getAiCredentials: vi.fn(),
-  listOpenAiModels: vi.fn(),
+  listCloudModels: vi.fn(),
   setAiCredentials: vi.fn(),
   updateSupplier: vi.fn(),
   query: {} as Record<string, string>,
@@ -17,7 +17,7 @@ vi.mock('@/api/integrations', () => ({
     getIdokladCreds: vi.fn().mockResolvedValue(null),
     getFakturoidCreds: vi.fn().mockResolvedValue(null),
     getAiCredentials: m.getAiCredentials,
-    listOpenAiModels: m.listOpenAiModels,
+    listCloudModels: m.listCloudModels,
     setAiCredentials: m.setAiCredentials,
   },
 }))
@@ -98,7 +98,7 @@ describe('Externí integrace → AI extrakce', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     m.getAiCredentials.mockReset()
-    m.listOpenAiModels.mockReset()
+    m.listCloudModels.mockReset()
     m.setAiCredentials.mockReset()
     m.updateSupplier.mockReset().mockResolvedValue({})
     m.query = { tab: 'ai' }
@@ -159,22 +159,171 @@ describe('Externí integrace → AI extrakce', () => {
 
   it('načte modely projektu OpenAI a uloží zvolený model s existujícím klíčem', async () => {
     m.getAiCredentials.mockResolvedValue(creds('openai', { openai: true }))
-    m.listOpenAiModels.mockResolvedValue({ models: ['gpt-6.2-sol'] })
+    m.listCloudModels.mockResolvedValue({ models: ['gpt-6.2-sol-2026-11-12'] })
     m.setAiCredentials.mockResolvedValue({ saved: true, tested: false, test_ok: null })
     const w = await mountPage()
     const model = w.get('#ai-extraction-default-model')
-    expect(model.find('option[value="gpt-6.2-sol"]').exists()).toBe(false)
+    expect(model.find('option[value="gpt-6.2-sol-2026-11-12"]').exists()).toBe(false)
 
-    await w.findAll('button').find(b => b.text() === 'aiGateway.openai_models_load')!.trigger('click')
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
     await flushPromises()
-    expect(m.listOpenAiModels).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
-    await model.setValue('gpt-6.2-sol')
-    await w.findAll('button').find(b => b.text() === 'integrations.idoklad.save_and_test')!.trigger('click')
+    expect(m.listCloudModels).toHaveBeenCalledExactlyOnceWith('openai', { base_url: '' }, expect.any(AbortSignal))
+    await model.setValue('gpt-6.2-sol-2026-11-12')
+    const save = w.get('[data-test="save-ai-credentials"]')
+    expect(save.text()).toBe('common.save')
+    await save.trigger('click')
     await flushPromises()
 
     expect(m.setAiCredentials).toHaveBeenCalledExactlyOnceWith({
-      provider: 'openai', default_model: 'gpt-6.2-sol', base_url: '',
+      provider: 'openai', default_model: 'gpt-6.2-sol-2026-11-12', base_url: '',
     })
+    expect(m.listCloudModels).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
+
+  it('načte modely Claude s uloženým klíčem a ID workspace', async () => {
+    const status = creds('anthropic', { anthropic: true })
+    status.providers.anthropic.workspace_id = 'wrkspc_fixture'
+    m.getAiCredentials.mockResolvedValue(status)
+    m.listCloudModels.mockResolvedValue({ models: ['claude-haiku-5-5', 'claude-fable-5-2'] })
+    const w = await mountPage()
+
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    await flushPromises()
+    expect(m.listCloudModels).toHaveBeenCalledExactlyOnceWith('anthropic', { workspace_id: 'wrkspc_fixture' }, expect.any(AbortSignal))
+    expect(w.get('#ai-extraction-default-model').findAll('option:not(:disabled)').map(o => o.text())).toEqual([
+      'claude-haiku-5-5', 'claude-fable-5-2',
+    ])
+    w.unmount()
+  })
+
+  it('načte modely Gemini s právě zadaným klíčem a nic neuloží', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('gemini', {}))
+    m.listCloudModels.mockResolvedValue({ models: ['gemini-4-hydrogen'] })
+    const w = await mountPage()
+    const model = w.get('#ai-extraction-default-model')
+    expect(w.findAll('button').some(b => b.text() === 'aiGateway.model_catalog_load')).toBe(false)
+
+    await w.get('input[placeholder="AIza…"]').setValue('gemini-fixture-key')
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    await flushPromises()
+    expect(m.listCloudModels).toHaveBeenCalledExactlyOnceWith('gemini', { api_key: 'gemini-fixture-key' }, expect.any(AbortSignal))
+    expect(model.find('option[value="gemini-4-hydrogen"]').exists()).toBe(true)
+    expect(m.setAiCredentials).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('zobrazí záložní modely při výpadku a zvláštní hlášku při odmítnutí klíče', async () => {
+    const status = creds('gemini', { gemini: true })
+    status.providers.gemini.default_model = 'gemini-3.8-flash'
+    status.providers.gemini.models = ['gemini-3.8-flash']
+    m.getAiCredentials.mockResolvedValue(status)
+    m.listCloudModels
+      .mockResolvedValueOnce({ models: ['gemini-3.8-flash'], catalog_error: 'model_catalog_unavailable' })
+      .mockRejectedValueOnce({ response: { data: { error: { code: 'model_catalog_invalid_key' } } } })
+    const w = await mountPage()
+    const load = w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!
+
+    await load.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('aiGateway.model_catalog_unavailable')
+    expect(w.get('#ai-extraction-default-model').find('option[value="gemini-3.8-flash"]').exists()).toBe(true)
+
+    await load.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('aiGateway.model_catalog_invalid_key')
+    expect(w.text()).not.toContain('aiGateway.model_catalog_unavailable')
+    w.unmount()
+  })
+
+  it('zobrazí částečný katalog s načtenými modely', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('gemini', { gemini: true }))
+    m.listCloudModels.mockResolvedValue({ models: ['gemini-4-hydrogen'], catalog_error: 'model_catalog_incomplete' })
+    const w = await mountPage()
+
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    await flushPromises()
+
+    expect(w.get('[role="status"]').text()).toBe('aiGateway.model_catalog_incomplete')
+    expect(w.get('#ai-extraction-default-model').find('option[value="gemini-4-hydrogen"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it.each([
+    ['validation_failed', 'invalid_settings'],
+    ['openai_base_url_invalid', 'openai_base_url_invalid'],
+    ['model_catalog_endpoint_key_required', 'model_catalog_endpoint_key_required'],
+  ])('přeloží chybu načtení katalogu %s podle kódu', async (code, key) => {
+    m.getAiCredentials.mockResolvedValue(creds('openai', { openai: true }))
+    m.listCloudModels.mockRejectedValue({ response: { data: { error: { code, message: 'Česká hláška serveru' } } } })
+    const w = await mountPage()
+
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    await flushPromises()
+
+    expect(w.get('[role="status"]').text()).toBe(`aiGateway.${key}`)
+    w.unmount()
+  })
+
+  it.each(['model_invalid', 'model_unavailable', 'model_catalog_invalid_key', 'residency_conflict'])(
+    'přeloží chybu uložení %s podle kódu', async code => {
+      m.getAiCredentials.mockResolvedValue(creds('openai', { openai: true }))
+      m.setAiCredentials.mockRejectedValue({ response: { data: { error: { code, message: 'Česká hláška serveru' } } } })
+      const w = await mountPage()
+
+      await w.get('[data-test="save-ai-credentials"]').trigger('click')
+      await flushPromises()
+
+      expect(w.text()).toContain(`aiGateway.${code}`)
+      expect(w.text()).not.toContain('Česká hláška serveru')
+      w.unmount()
+    },
+  )
+
+  it('upozorní na náhradu uloženého modelu a předvybere používanou náhradu', async () => {
+    const status = creds('gemini', { gemini: true })
+    status.providers.gemini.default_model = 'gemini-4-carbon'
+    status.providers.gemini.models = ['gemini-3.8-flash', 'gemini-4-carbon']
+    status.providers.gemini.replaced_model = 'gemini-2.5-pro'
+    m.getAiCredentials.mockResolvedValue(status)
+    const w = await mountPage()
+
+    expect(w.get('[role="status"]').text()).toContain('aiGateway.model_replaced{"previous":"gemini-2.5-pro","current":"gemini-4-carbon"}')
+    expect(w.get<HTMLSelectElement>('#ai-extraction-default-model').element.value).toBe('gemini-4-carbon')
+    w.unmount()
+  })
+
+  it('zahodí rozpracovaný katalog, když se změní zadaný klíč', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('gemini', {}))
+    let resolve!: (value: { models: string[] }) => void
+    m.listCloudModels.mockReturnValue(new Promise(r => { resolve = r }))
+    const w = await mountPage()
+    const key = w.get('input[placeholder="AIza…"]')
+    await key.setValue('first-fixture-key')
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    await key.setValue('second-fixture-key')
+    expect(m.listCloudModels.mock.calls[0]?.[2].aborted).toBe(true)
+    resolve({ models: ['gemini-4-hydrogen'] })
+    await flushPromises()
+
+    expect(w.get('#ai-extraction-default-model').find('option[value="gemini-4-hydrogen"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('při přepnutí firmy zneplatní rozpracovaný katalog a vymaže zadaný klíč', async () => {
+    useSupplierStore().setAvailable([{ id: 1 }, { id: 2 }] as SupplierBrief[], 1)
+    m.getAiCredentials.mockResolvedValueOnce(creds('gemini', {})).mockReturnValueOnce(new Promise(() => {}))
+    m.listCloudModels.mockReturnValue(new Promise(() => {}))
+    const w = await mountPage()
+
+    await w.get('input[placeholder="AIza…"]').setValue('gemini-fixture-key')
+    await w.findAll('button').find(b => b.text() === 'aiGateway.model_catalog_load')!.trigger('click')
+    useSupplierStore().setSupplier(2)
+    await flushPromises()
+
+    expect(m.listCloudModels.mock.calls[0]?.[2].aborted).toBe(true)
+    expect(w.get<HTMLInputElement>('input[placeholder="AIza…"]').element.value).toBe('')
+    expect(w.findAll('button').some(b => b.text() === 'aiGateway.model_catalog_load')).toBe(false)
     w.unmount()
   })
 
@@ -226,6 +375,21 @@ describe('Externí integrace → AI extrakce', () => {
     expect(payload).not.toHaveProperty('apply_to_all_companies')
     expect(payload).not.toHaveProperty('only_unconfigured')
     expect(w.find('[data-test="bulk-result"]').exists()).toBe(false)
+  })
+
+  it('při hromadném uložení bez zadaného klíče ukáže výsledek pro aktuální firmu', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', { anthropic: true }))
+    m.setAiCredentials.mockResolvedValue({
+      saved: true, tested: false, test_ok: null, test_error: null,
+      bulk: { applied: false, reason: 'key_required' },
+    })
+    const w = await mountPage()
+    await w.get('[data-test="bulk-apply"]').setValue(true)
+    await w.get('[data-test="save-ai-credentials"]').trigger('click')
+    await flushPromises()
+
+    expect(w.get('[data-test="bulk-result"]').text()).toContain('aiGateway.bulk_key_required')
+    w.unmount()
   })
 })
 

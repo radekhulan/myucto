@@ -9,6 +9,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Import\AiModelCatalog;
+use MyInvoice\Service\Import\GeminiClient;
 use MyInvoice\Service\Import\LlmProviderCapabilities;
 use MyInvoice\Service\Import\OpenAiClient;
 use PHPUnit\Framework\Attributes\Group;
@@ -175,9 +177,9 @@ final class AiProviderCredentialsActionTest extends TestCase
         self::assertStringContainsString('Adresa Ollamy i model jsou povinné', (string) ($res['body']['error']['message'] ?? ''));
     }
 
-    public function testOllamaUnreachableIsReportedNotSaved(): void
+    public function testOllamaUnreachableWithNewKeyIsReportedNotSaved(): void
     {
-        $res = $this->call('update', 'PUT', 'admin', ['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b']);
+        $res = $this->call('update', 'PUT', 'admin', ['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b', 'api_key' => 'fixture-key']);
         self::assertSame(400, $res['status']);
         self::assertStringContainsString('ollama_unreachable', (string) ($res['body']['error']['message'] ?? ''));
         self::assertNull($this->ollamaRow()['ollama_base_url']);
@@ -245,7 +247,7 @@ final class AiProviderCredentialsActionTest extends TestCase
      *
      * @param array<int,array{request:\Psr\Http\Message\RequestInterface}> $history
      */
-    private function mockedAction(array &$history, ?OpenAiClient $openai = null): AiProviderCredentialsAction
+    private function mockedAction(array &$history, ?OpenAiClient $openai = null, ?GeminiClient $gemini = null): AiProviderCredentialsAction
     {
         $c = Bootstrap::buildContainer();
         $queue = [];
@@ -269,7 +271,7 @@ final class AiProviderCredentialsActionTest extends TestCase
             $c->get(\MyInvoice\Service\Import\AnthropicClient::class),
             $c->get(\MyInvoice\Service\Import\AzureOpenAiClient::class),
             $openai ?? $c->get(OpenAiClient::class),
-            $c->get(\MyInvoice\Service\Import\GeminiClient::class),
+            $gemini ?? $c->get(GeminiClient::class),
             $ollama,
             $c->get(Connection::class),
             $c->get(\MyInvoice\Service\ActivityLogger::class),
@@ -287,8 +289,8 @@ final class AiProviderCredentialsActionTest extends TestCase
         $saved = $stmt->fetch(\PDO::FETCH_NUM);
         $container = Bootstrap::buildContainer();
         $history = [];
-        $reply = new \GuzzleHttp\Psr7\Response(200, [], '{"data":[{"id":"gpt-6.2-sol"},{"id":"gpt-4o-realtime-preview"}]}');
-        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([$reply, clone $reply, clone $reply]));
+        $reply = new \GuzzleHttp\Psr7\Response(200, [], '{"data":[{"id":"gpt-6.2-sol-2026-11-12"},{"id":"gpt-4o-realtime-preview"}]}');
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([$reply, clone $reply]));
         $stack->push(\GuzzleHttp\Middleware::history($history));
         $client = new OpenAiClient(
             $this->db,
@@ -299,27 +301,156 @@ final class AiProviderCredentialsActionTest extends TestCase
         $ollamaHistory = [];
         $action = $this->mockedAction($ollamaHistory, $client);
 
+        $args = ['provider' => 'openai'];
         try {
-            $client->setCredentials($this->supplierId, 'sk-test-fixture', 'gpt-5.4-mini', 'https://eu.api.openai.com');
-            self::assertSame(403, $action->openaiModels($this->req('POST', 'accountant'), new Psr7Response())->getStatusCode());
+            $client->setCredentials($this->supplierId, 'sk-test-fixture-synthetic', 'gpt-5.4-mini', 'https://eu.api.openai.com');
+            self::assertSame(403, $action->cloudModels($this->req('POST', 'accountant'), new Psr7Response(), $args)->getStatusCode());
             self::assertSame([], $history);
 
-            $list = $action->openaiModels($this->req('POST', 'admin'), new Psr7Response());
+            $list = $action->cloudModels($this->req('POST', 'admin'), new Psr7Response(), $args);
             self::assertSame(200, $list->getStatusCode());
-            self::assertSame(['models' => ['gpt-6.2-sol']], json_decode((string) $list->getBody(), true));
+            self::assertSame(['models' => ['gpt-6.2-sol-2026-11-12']], json_decode((string) $list->getBody(), true));
 
             $update = $this->req('PUT', 'admin');
-            $unavailable = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6.2-terra']), new Psr7Response());
+            $unavailable = $action->update($update->withParsedBody([
+                'provider' => 'openai', 'default_model' => 'gpt-6.2-terra',
+                'api_key' => 'sk-test-fixture-new-synthetic', 'base_url' => 'https://eu.api.openai.com',
+            ]), new Psr7Response());
             self::assertSame(400, $unavailable->getStatusCode());
+            self::assertSame('model_unavailable', json_decode((string) $unavailable->getBody(), true)['error']['code']);
             self::assertSame('gpt-5.4-mini', $client->capabilities($this->supplierId)->defaultModel);
 
-            $accepted = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6.2-sol']), new Psr7Response());
+            $unsupported = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-5.5-pro']), new Psr7Response());
+            self::assertSame(400, $unsupported->getStatusCode());
+            self::assertSame('model_invalid', json_decode((string) $unsupported->getBody(), true)['error']['code']);
+
+            $accepted = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6.2-sol-2026-11-12']), new Psr7Response());
             self::assertSame(200, $accepted->getStatusCode());
-            self::assertSame('gpt-6.2-sol', $client->capabilities($this->supplierId)->defaultModel);
-            self::assertCount(3, $history);
+            self::assertFalse(json_decode((string) $accepted->getBody(), true)['tested']);
+            self::assertSame('gpt-6.2-sol-2026-11-12', $client->capabilities($this->supplierId)->defaultModel);
+            foreach (['', null] as $emptyModel) {
+                $client->setCredentials($this->supplierId, 'sk-test-fixture-synthetic', 'gpt-6.2-sol', 'https://eu.api.openai.com');
+                $cleared = $action->update($update->withParsedBody(['provider' => 'openai', 'default_model' => $emptyModel]), new Psr7Response());
+                self::assertSame(200, $cleared->getStatusCode());
+                self::assertSame('gpt-6-luna', $client->getCredentials($this->supplierId)['default_model']);
+            }
+            self::assertCount(2, $history);
         } finally {
             $pdo->prepare('UPDATE supplier SET openai_api_key_enc = ?, openai_default_model = ?, openai_base_url = ? WHERE id = ?')
                 ->execute([...$saved, $this->supplierId]);
+        }
+    }
+
+    public function testOpenAiConfigOnlyBaseUrlChangeCannotViolateRequiredEuResidency(): void
+    {
+        $pdo = $this->db->pdo();
+        $query = $pdo->prepare('SELECT openai_api_key_enc, openai_default_model, openai_base_url, ai_eu_residency_required FROM supplier WHERE id = ?');
+        $query->execute([$this->supplierId]);
+        $original = $query->fetch(\PDO::FETCH_NUM);
+        $client = Bootstrap::buildContainer()->get(OpenAiClient::class);
+
+        try {
+            $client->setCredentials($this->supplierId, 'sk-test-fixture-synthetic', 'gpt-5.4-mini', 'https://eu.api.openai.com');
+            $pdo->prepare('UPDATE supplier SET ai_eu_residency_required = 1 WHERE id = ?')->execute([$this->supplierId]);
+            $query->execute([$this->supplierId]);
+            $before = $query->fetch(\PDO::FETCH_NUM);
+
+            foreach (['https://api.openai.com', '', null] as $baseUrl) {
+                $request = $this->req('PUT', 'admin')->withParsedBody([
+                    'provider' => 'openai', 'base_url' => $baseUrl, 'default_model' => 'gpt-6-luna',
+                ]);
+                $response = $this->action->update($request, new Psr7Response());
+                self::assertSame(422, $response->getStatusCode());
+                self::assertSame('residency_conflict', json_decode((string) $response->getBody(), true)['error']['code']);
+                $query->execute([$this->supplierId]);
+                self::assertSame($before, $query->fetch(\PDO::FETCH_NUM));
+            }
+
+            $request = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'openai', 'default_model' => 'gpt-6-luna']);
+            self::assertSame(200, $this->action->update($request, new Psr7Response())->getStatusCode());
+            self::assertSame('https://eu.api.openai.com', $client->getCredentials($this->supplierId)['base_url']);
+            self::assertSame('gpt-6-luna', $client->getCredentials($this->supplierId)['default_model']);
+        } finally {
+            $pdo->prepare('UPDATE supplier SET openai_api_key_enc = ?, openai_default_model = ?, openai_base_url = ?, ai_eu_residency_required = ? WHERE id = ?')
+                ->execute([...$original, $this->supplierId]);
+        }
+    }
+
+    public function testGeminiListsWithUnsavedKeyAndReportsFallbackWithoutChangingCredentials(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $history = [];
+        $key = 'gemini-fixture-synthetic-key';
+        $catalog = new \GuzzleHttp\Psr7\Response(200, [], '{"models":[{"name":"models/gemini-3.9-flash","supportedGenerationMethods":["generateContent"]}]}');
+        $partial = new \GuzzleHttp\Psr7\Response(200, [], '{"models":[{"name":"models/gemini-3.9-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"next"}');
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([
+            $catalog, new \GuzzleHttp\Psr7\Response(503),
+            new \GuzzleHttp\Psr7\Response(403, [], $key),
+            $partial, new \GuzzleHttp\Psr7\Response(503),
+        ]));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $gemini = new GeminiClient(
+            $this->db,
+            $container->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+            $container->get(\Psr\Log\LoggerInterface::class),
+            new \GuzzleHttp\Client(['handler' => $stack]),
+        );
+        $ollamaHistory = [];
+        $action = $this->mockedAction($ollamaHistory, gemini: $gemini);
+        $args = ['provider' => 'gemini'];
+        $request = $this->req('POST', 'admin')->withParsedBody(['api_key' => $key]);
+
+        $list = $action->cloudModels($request, new Psr7Response(), $args);
+        self::assertSame(200, $list->getStatusCode());
+        self::assertSame(['models' => ['gemini-3.9-flash']], json_decode((string) $list->getBody(), true));
+        self::assertSame($key, $history[0]['request']->getHeaderLine('x-goog-api-key'));
+        self::assertNull($gemini->getCredentials($this->supplierId));
+
+        $fallback = $action->cloudModels($request, new Psr7Response(), $args);
+        self::assertSame(200, $fallback->getStatusCode());
+        self::assertSame(
+            ['models' => LlmProviderCapabilities::gemini(null)->models, 'catalog_error' => AiModelCatalog::UNAVAILABLE],
+            json_decode((string) $fallback->getBody(), true),
+        );
+
+        $invalid = $action->cloudModels($request, new Psr7Response(), $args);
+        self::assertSame(422, $invalid->getStatusCode());
+        self::assertSame(AiModelCatalog::INVALID_KEY, json_decode((string) $invalid->getBody(), true)['error']['code']);
+        self::assertStringNotContainsString($key, (string) $invalid->getBody());
+        self::assertNull($gemini->getCredentials($this->supplierId));
+
+        $incomplete = $action->cloudModels($request, new Psr7Response(), $args);
+        self::assertSame(200, $incomplete->getStatusCode());
+        self::assertSame(
+            ['models' => ['gemini-3.9-flash'], 'catalog_error' => AiModelCatalog::INCOMPLETE],
+            json_decode((string) $incomplete->getBody(), true),
+        );
+    }
+
+    public function testStatusReportsReplacementWithoutChangingStoredModel(): void
+    {
+        $pdo = $this->db->pdo();
+        $query = $pdo->prepare('SELECT gemini_default_model FROM supplier WHERE id = ?');
+        $query->execute([$this->supplierId]);
+        $default = $query->fetchColumn();
+        $key = 'gemini-fixture-retired-model';
+        $gemini = Bootstrap::buildContainer()->get(GeminiClient::class);
+
+        try {
+            $gemini->setCredentials($this->supplierId, $key, 'gemini-2.5-pro');
+            $res = $this->action->status($this->req('GET', 'admin'), new Psr7Response());
+            self::assertSame(200, $res->getStatusCode());
+            $body = (string) $res->getBody();
+            self::assertStringNotContainsString($key, $body);
+            $info = json_decode($body, true)['providers']['gemini'];
+            self::assertSame('gemini-2.5-pro', $info['replaced_model']);
+            self::assertSame('gemini-3.5-flash-lite', $info['default_model']);
+            self::assertContains('gemini-3.5-flash-lite', $info['models']);
+
+            $query->execute([$this->supplierId]);
+            self::assertSame('gemini-2.5-pro', $query->fetchColumn());
+        } finally {
+            $pdo->prepare('UPDATE supplier SET gemini_default_model = ? WHERE id = ?')->execute([$default, $this->supplierId]);
         }
     }
 
@@ -349,7 +480,7 @@ final class AiProviderCredentialsActionTest extends TestCase
         $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.2:9', 'default_model' => 'vision-model:7b']);
         $res = $action->update($req, new Psr7Response());
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
-        $this->assertNoAuthAndHost($history, '127.0.0.2');
+        self::assertSame([], $history);
         $row = $this->ollamaRow();
         self::assertSame('http://127.0.0.2:9', $row['ollama_base_url']);
         self::assertNull($row['ollama_api_key_enc'], 'klíč se při změně adresy musí smazat');
@@ -383,11 +514,10 @@ final class AiProviderCredentialsActionTest extends TestCase
         }
     }
 
-    /** Uložení ověří Ollamu jedním seznamem modelů; druhý průchod /api/tags + /api/show jen zdvojí čekání. */
-    public function testPutListsOllamaModelsOnlyOnce(): void
+    public function testPutWithNewKeyListsOllamaModelsOnlyOnce(): void
     {
         $history = [];
-        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b']);
+        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b', 'api_key' => 'fixture-key']);
         $res = $this->mockedAction($history)->update($req, new Psr7Response());
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         $body = json_decode((string) $res->getBody(), true);
@@ -395,6 +525,7 @@ final class AiProviderCredentialsActionTest extends TestCase
         self::assertSame('vision-model:7b', $body['model']);
         $tags = array_filter($history, static fn (array $h): bool => $h['request']->getUri()->getPath() === '/api/tags');
         self::assertCount(1, $tags);
+        self::assertSame('Bearer fixture-key', $history[0]['request']->getHeaderLine('Authorization'));
     }
 
     public function testPutWithSameBaseUrlKeepsStoredKey(): void
@@ -405,6 +536,7 @@ final class AiProviderCredentialsActionTest extends TestCase
         $res = $this->mockedAction($history)->update($req, new Psr7Response());
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         self::assertSame($enc, $this->ollamaRow()['ollama_api_key_enc']);
+        self::assertSame([], $history);
     }
 
     public function testPutWithNewUrlDropsUndecryptableOrphanKey(): void
@@ -436,8 +568,8 @@ final class AiProviderCredentialsActionTest extends TestCase
         };
         try {
             $crypto = Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\SecretEncryption::class);
-            $pdo->prepare('UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_workspace_id = NULL WHERE id = ?')
-                ->execute([$crypto->encrypt('sk-ant-' . str_repeat('a', 40)), $this->supplierId]);
+            $pdo->prepare('UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?, anthropic_workspace_id = NULL WHERE id = ?')
+                ->execute([$crypto->encrypt('sk-ant-' . str_repeat('a', 40)), 'claude-sonnet-5-5-20261111', $this->supplierId]);
 
             $ok = $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'workspace_id' => '  wrkspc_01AbC-9  ']);
             self::assertSame(200, $ok['status'], json_encode($ok['body']) ?: '');
@@ -448,7 +580,7 @@ final class AiProviderCredentialsActionTest extends TestCase
             foreach (["wrkspc_01\r\nX-Evil: 1", 'wrkspc 01', str_repeat('a', 129), ['pole']] as $bad) {
                 $res = $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'workspace_id' => $bad]);
                 self::assertSame(400, $res['status']);
-                self::assertSame('validation_failed', $res['body']['error']['code'] ?? null);
+                self::assertSame('workspace_id_invalid', $res['body']['error']['code'] ?? null);
                 self::assertSame('wrkspc_01AbC-9', $workspace(), 'neplatná hodnota nesmí nic zapsat');
             }
 

@@ -39,6 +39,9 @@ final class AnthropicClient implements LlmGatewayInterface
 
     private Client $http;
 
+    /** @var array<int,string> */
+    private array $storedModels = [];
+
     /** @var array{remaining_input:int, reset_at:int}|null */
     private ?array $rateLimitState = null;
 
@@ -62,7 +65,7 @@ final class AnthropicClient implements LlmGatewayInterface
      *
      * @return array<string,string>
      */
-    public static function requestHeaders(string $apiKey, ?string $workspaceId = null): array
+    public static function requestHeaders(#[\SensitiveParameter] string $apiKey, ?string $workspaceId = null): array
     {
         $headers = [
             'x-api-key'         => $apiKey,
@@ -90,7 +93,7 @@ final class AnthropicClient implements LlmGatewayInterface
     }
 
     /**
-     * @return array{api_key:string, default_model:string, workspace_id:?string}|null
+     * @return array{api_key:string, default_model:string, stored_model:string, replaced_model:?string, workspace_id:?string}|null
      */
     public function getCredentials(int $supplierId): ?array
     {
@@ -99,6 +102,7 @@ final class AnthropicClient implements LlmGatewayInterface
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $storedModel = $this->storedModels[$supplierId] = (string) ($row['anthropic_default_model'] ?? '');
         if (!$row || empty($row['anthropic_api_key_enc'])) return null;
         try {
             $key = $this->crypto->decrypt((string) $row['anthropic_api_key_enc']);
@@ -106,9 +110,12 @@ final class AnthropicClient implements LlmGatewayInterface
             $this->logger->error('Anthropic API key decryption failed', ['supplier_id' => $supplierId]);
             return null;
         }
+        $model = LlmProviderCapabilities::resolveModel('anthropic', $storedModel);
         return [
             'api_key'       => $key,
-            'default_model' => (string) ($row['anthropic_default_model'] ?? LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL),
+            'default_model' => $model,
+            'stored_model'  => $storedModel,
+            'replaced_model' => $storedModel !== '' && $storedModel !== $model ? $storedModel : null,
             'workspace_id'  => ($row['anthropic_workspace_id'] ?? '') !== '' ? (string) $row['anthropic_workspace_id'] : null,
         ];
     }
@@ -116,10 +123,11 @@ final class AnthropicClient implements LlmGatewayInterface
     /**
      * @param string|null $workspaceId null = ponechat uložené ID workspace, '' = smazat
      */
-    public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null, ?string $workspaceId = null): void
+    public function setCredentials(int $supplierId, #[\SensitiveParameter] string $apiKey, ?string $defaultModel = null, ?string $workspaceId = null): void
     {
         $enc = $apiKey === '' ? null : $this->crypto->encrypt($apiKey);
         $model = $defaultModel ?: LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
+        unset($this->storedModels[$supplierId]);
         if ($workspaceId === null) {
             $this->db->pdo()->prepare(
                 'UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?
@@ -146,6 +154,7 @@ final class AnthropicClient implements LlmGatewayInterface
         $this->db->pdo()->prepare(
             'UPDATE supplier SET anthropic_default_model = ? WHERE id = ?'
         )->execute([$defaultModel, $supplierId]);
+        unset($this->storedModels[$supplierId]);
     }
 
     /**
@@ -164,13 +173,50 @@ final class AnthropicClient implements LlmGatewayInterface
                 'messages' => [['role' => 'user', 'content' => 'Reply OK']],
             ], $creds);
             if ($code !== 200) {
-                $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
-                return ['ok' => false, 'error' => $msg];
+                return ['ok' => false, 'error' => 'Poskytovatel vrátil HTTP ' . $code . '.'];
             }
-            return ['ok' => true, 'model' => $body['model'] ?? null, 'usage' => $body['usage'] ?? null];
-        } catch (\Throwable $e) {
-            return ['ok' => false, 'error' => $e->getMessage()];
+            return ['ok' => true, 'model' => $creds['default_model'], 'usage' => $body['usage'] ?? null];
+        } catch (\Throwable) {
+            return ['ok' => false, 'error' => 'Spojení s poskytovatelem se nepodařilo.'];
         }
+    }
+
+    /** @return array{models:list<string>, error:?string} */
+    public function listModels(#[\SensitiveParameter] string $apiKey, ?string $workspaceId = null): array
+    {
+        $query = ['limit' => 1000];
+        $seen = [];
+        $models = [];
+        $deadline = AiModelCatalog::deadline();
+        for ($i = 0; $i < AiModelCatalog::MAX_PAGES; $i++) {
+            $page = AiModelCatalog::fetchPage(
+                $this->http, 'https://api.anthropic.com/v1/models',
+                self::requestHeaders($apiKey, $workspaceId), $query, $deadline,
+            );
+            $data = $page['body']['data'] ?? null;
+            if (!is_array($data) || !array_is_list($data)) {
+                if ($models !== [] && $page['error'] !== AiModelCatalog::INVALID_KEY) {
+                    break;
+                }
+                return ['models' => [], 'error' => $page['error'] ?? AiModelCatalog::UNAVAILABLE];
+            }
+            foreach ($data as $entry) {
+                $id = $entry['id'] ?? null;
+                if (is_string($id) && LlmProviderCapabilities::isAnthropicPdfModel($id)) {
+                    $models[] = $id;
+                }
+            }
+            if (!(bool) ($page['body']['has_more'] ?? false)) {
+                return AiModelCatalog::result($models, LlmProviderCapabilities::ANTHROPIC_MODELS);
+            }
+            $cursor = $page['body']['last_id'] ?? null;
+            if (!is_string($cursor) || $cursor === '' || isset($seen[$cursor])) {
+                break;
+            }
+            $seen[$cursor] = true;
+            $query['after_id'] = $cursor;
+        }
+        return AiModelCatalog::result($models, LlmProviderCapabilities::ANTHROPIC_MODELS, incomplete: true);
     }
 
     /**
@@ -189,7 +235,12 @@ final class AnthropicClient implements LlmGatewayInterface
      */
     public function capabilities(int $supplierId): LlmProviderCapabilities
     {
-        return LlmProviderCapabilities::anthropic('us');
+        if (!isset($this->storedModels[$supplierId])) {
+            $stmt = $this->db->pdo()->prepare('SELECT anthropic_default_model FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $this->storedModels[$supplierId] = (string) $stmt->fetchColumn();
+        }
+        return LlmProviderCapabilities::anthropic(defaultModel: $this->storedModels[$supplierId]);
     }
 
     /**
@@ -1102,7 +1153,7 @@ EOT;
     }
 
     /** @param array{api_key:string, workspace_id?:?string} $creds */
-    private function authHeaders(array $creds): array
+    private function authHeaders(#[\SensitiveParameter] array $creds): array
     {
         return self::requestHeaders($creds['api_key'], $creds['workspace_id'] ?? null);
     }
@@ -1118,7 +1169,7 @@ EOT;
      * @param array{api_key:string, workspace_id?:?string} $creds
      * @return array{code:int, body:array<string,mixed>|null}
      */
-    private function postWithRetry(array $payload, array $creds, ?int $supplierId = null): array
+    private function postWithRetry(array $payload, #[\SensitiveParameter] array $creds, ?int $supplierId = null): array
     {
         $model = (string) ($payload['model'] ?? '');
         if ($supplierId !== null) {

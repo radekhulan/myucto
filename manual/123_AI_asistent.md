@@ -110,6 +110,9 @@ pracuje ve více krocích.
 Data firmy a manuál asistent čte u poskytovatelů Anthropic, OpenAI, Azure OpenAI a Google Gemini. U lokální Ollamy
 odpovídá jedním voláním bez nástrojů, jen z kontextu a příloh.
 
+Asistent vychází z modelu uloženého u firmy. U Anthropic pro běžné dotazy asistentovi přepíná z Haiku na `claude-sonnet-5-5`.
+Vyřazený Gemini model řady Pro nahradí modelem stejné třídy, například `gemini-4-carbon`.
+
 ### 123.7.5 Auditní stopa
 
 Každý dotaz, při kterém asistent použil nástroje, se zapíše do protokolu činnosti jako `ai.assistant_tools`

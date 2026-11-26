@@ -92,6 +92,41 @@ final class AnthropicClientUnitTest extends TestCase
         $this->assertSame('', $this->invokeBuild($client, 1));
     }
 
+    public function testCapabilitiesReuseModelFromCredentialsAndCachePerSupplier(): void
+    {
+        $stmt = $this->createStub(PDOStatement::class);
+        $stmt->method('fetch')->willReturn(['anthropic_default_model' => 'claude-sonnet-5-5']);
+        $stmt->method('fetchColumn')->willReturn('claude-opus-5-5');
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(2))->method('prepare')->willReturn($stmt);
+        $conn = $this->createStub(Connection::class);
+        $conn->method('pdo')->willReturn($pdo);
+        $client = new AnthropicClient($conn, $this->createStub(SecretEncryption::class), new NullLogger());
+
+        self::assertNull($client->getCredentials(1));
+        self::assertSame('claude-sonnet-5-5', $client->capabilities(1)->defaultModel);
+        self::assertSame('claude-opus-5-5', $client->capabilities(2)->defaultModel);
+        self::assertSame('claude-opus-5-5', $client->capabilities(2)->defaultModel);
+        self::assertSame('claude-sonnet-5-5', $client->capabilities(1)->defaultModel);
+    }
+
+    public function testCapabilitiesReloadAfterChangingTheModelOrCredentials(): void
+    {
+        $stmt = $this->createStub(PDOStatement::class);
+        $stmt->method('fetchColumn')->willReturnOnConsecutiveCalls('claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5');
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::exactly(5))->method('prepare')->willReturn($stmt);
+        $conn = $this->createStub(Connection::class);
+        $conn->method('pdo')->willReturn($pdo);
+        $client = new AnthropicClient($conn, $this->createStub(SecretEncryption::class), new NullLogger());
+
+        self::assertSame('claude-haiku-5-5', $client->capabilities(1)->defaultModel);
+        $client->updateDefaultModel(1, 'claude-sonnet-5-5');
+        self::assertSame('claude-sonnet-5-5', $client->capabilities(1)->defaultModel);
+        $client->setCredentials(1, 'sk-ant-fixture', 'claude-opus-5-5');
+        self::assertSame('claude-opus-5-5', $client->capabilities(1)->defaultModel);
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     /**

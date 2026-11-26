@@ -134,6 +134,7 @@ export interface AnthropicCredentialsUpdateResult {
 
 // ── AI provider brána (Epic F7) — 4 provideři za LlmGateway ─────────────────
 export type AiProvider = 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
+export type CloudModelProvider = Extract<AiProvider, 'anthropic' | 'openai' | 'gemini'>
 export type AiDataRegion = 'eu' | 'us'
 
 /** Per-provider stav + capability descriptor (whitelist modelů, region). */
@@ -143,6 +144,7 @@ export interface AiProviderInfo {
   /** whitelist model/deployment id z LlmProviderCapabilities. */
   models: string[]
   default_model: string | null
+  replaced_model?: string | null
   data_region: AiDataRegion
   /** true = lze pro tohoto tenanta dosáhnout EU rezidence dat. */
   eu_capable: boolean
@@ -234,7 +236,7 @@ export interface AiBulkCompany {
 
 export interface AiBulkResult {
   applied: boolean
-  reason?: 'test_failed'
+  reason?: 'test_failed' | 'key_required'
   updated?: AiBulkCompany[]
   skipped_configured?: AiBulkCompany[]
   skipped_forbidden?: AiBulkCompany[]
@@ -343,10 +345,15 @@ export const integrationsApi = {
   testAiConnection: (provider: AiProvider) =>
     api.post<AiCredentialsUpdateResult>('/admin/imports/ai/credentials/test', { provider }).then(r => r.data),
   // POST kvůli CSRF ochraně — server se podle adresy připojuje ven.
-  listOpenAiModels: (signal: AbortSignal) =>
-    api.post<{ models: string[] }>('/admin/imports/ai/openai/models', {}, { signal }).then(r => r.data),
-  listOllamaModels: (baseUrl: string) =>
-    api.post<{ models: OllamaModel[] }>('/admin/imports/ai/ollama/models', { base_url: baseUrl }).then(r => r.data),
+  listCloudModels: (
+    provider: CloudModelProvider,
+    payload: Pick<AiCredentialsPayload, 'api_key' | 'base_url' | 'workspace_id'>,
+    signal: AbortSignal,
+  ) => api.post<{ models: string[]; catalog_error?: 'model_catalog_empty' | 'model_catalog_unavailable' | 'model_catalog_incomplete' }>(
+    `/admin/imports/ai/${provider}/models`, payload, { signal },
+  ).then(r => r.data),
+  listOllamaModels: (payload: Pick<AiCredentialsPayload, 'base_url' | 'api_key' | 'clear_api_key'>) =>
+    api.post<{ models: OllamaModel[] }>('/admin/imports/ai/ollama/models', payload).then(r => r.data),
   extractPdfAi: (file: File, model?: string, importBatchId?: string, withoutItems = false) => {
     const fd = new FormData()
     fd.append('pdf', file, file.name)

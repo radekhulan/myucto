@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\GuzzleException;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ai\AiRedirectPolicy;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -42,7 +41,7 @@ final class OpenAiClient implements LlmGatewayInterface
     }
 
     /**
-     * @return array{api_key:string, default_model:string, base_url:string}|null
+     * @return array{api_key:string, default_model:string, stored_model:string, replaced_model:?string, base_url:string}|null
      */
     public function getCredentials(int $supplierId): ?array
     {
@@ -60,15 +59,18 @@ final class OpenAiClient implements LlmGatewayInterface
             $this->logger->error('OpenAI API key decryption failed', ['supplier_id' => $supplierId]);
             return null;
         }
+        $storedModel = (string) ($row['openai_default_model'] ?? '');
+        $model = LlmProviderCapabilities::resolveModel('openai', $storedModel);
         return [
             'api_key'       => $key,
-            'default_model' => (string) ($row['openai_default_model'] ?? LlmProviderCapabilities::OPENAI_DEFAULT_MODEL)
-                ?: LlmProviderCapabilities::OPENAI_DEFAULT_MODEL,
+            'default_model' => $model,
+            'stored_model'  => $storedModel,
+            'replaced_model' => $storedModel !== '' && $storedModel !== $model ? $storedModel : null,
             'base_url'      => (string) ($row['openai_base_url'] ?? '') ?: self::DEFAULT_BASE_URL,
         ];
     }
 
-    public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null, ?string $baseUrl = null): void
+    public function setCredentials(int $supplierId, #[\SensitiveParameter] string $apiKey, ?string $defaultModel = null, ?string $baseUrl = null): void
     {
         $enc = $apiKey === '' ? null : $this->crypto->encrypt($apiKey);
         $this->db->pdo()->prepare(
@@ -99,42 +101,32 @@ final class OpenAiClient implements LlmGatewayInterface
         return $this->capabilities($supplierId)->strongerModel($currentModel);
     }
 
-    /** @return list<string>|null */
-    public function listModels(#[\SensitiveParameter] string $apiKey, string $baseUrl): ?array
+    /** @return array{models:list<string>, error:?string} */
+    public function listModels(#[\SensitiveParameter] string $apiKey, string $baseUrl): array
     {
         if (self::baseUrlError($baseUrl) !== null) {
-            return null;
+            return ['models' => [], 'error' => AiModelCatalog::UNAVAILABLE];
         }
-        $url = (rtrim(trim($baseUrl), '/') ?: self::DEFAULT_BASE_URL) . '/v1/models';
-        try {
-            $response = $this->http->get($url, [
-                'headers' => ['Authorization' => 'Bearer ' . $apiKey],
-                'timeout' => 5,
-                'connect_timeout' => 3,
-                'http_errors' => false,
-                'allow_redirects' => false,
-            ]);
-        } catch (GuzzleException | \InvalidArgumentException) {
-            return null;
-        }
-        if ($response->getStatusCode() !== 200) {
-            return null;
-        }
-        $data = json_decode((string) $response->getBody(), true)['data'] ?? null;
+        $url = self::normalizeBaseUrl($baseUrl) . '/v1/models';
+        $page = AiModelCatalog::fetchPage($this->http, $url, ['Authorization' => 'Bearer ' . $apiKey]);
+        $data = $page['body']['data'] ?? null;
         if (!is_array($data) || !array_is_list($data)) {
-            return null;
+            return ['models' => [], 'error' => $page['error'] ?? AiModelCatalog::UNAVAILABLE];
         }
 
         $models = [];
         foreach ($data as $entry) {
             $id = $entry['id'] ?? null;
             if (is_string($id) && LlmProviderCapabilities::isOpenaiPdfModel($id)) {
-                $models[$id] = true;
+                $models[] = $id;
             }
         }
-        $ids = array_keys($models);
-        rsort($ids, SORT_NATURAL);
-        return $ids;
+        return AiModelCatalog::result($models, LlmProviderCapabilities::OPENAI_MODELS);
+    }
+
+    public static function normalizeBaseUrl(string $baseUrl): string
+    {
+        return rtrim(trim($baseUrl), '/') ?: self::DEFAULT_BASE_URL;
     }
 
     /** Uložený klíč se smí posílat jen na HTTPS endpointy OpenAI. */
@@ -167,12 +159,11 @@ final class OpenAiClient implements LlmGatewayInterface
                 'max_completion_tokens' => 10,
             ]);
             if ($code !== 200) {
-                $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
-                return ['ok' => false, 'error' => $msg];
+                return ['ok' => false, 'error' => 'Poskytovatel vrátil HTTP ' . $code . '.'];
             }
-            return ['ok' => true, 'model' => $body['model'] ?? $creds['default_model'], 'usage' => self::mapUsage($body['usage'] ?? null)];
-        } catch (\Throwable $e) {
-            return ['ok' => false, 'error' => $e->getMessage()];
+            return ['ok' => true, 'model' => $creds['default_model'], 'usage' => self::mapUsage($body['usage'] ?? null)];
+        } catch (\Throwable) {
+            return ['ok' => false, 'error' => 'Spojení s poskytovatelem se nepodařilo.'];
         }
     }
 
@@ -315,7 +306,7 @@ final class OpenAiClient implements LlmGatewayInterface
      * @param array<string,mixed> $payload
      * @return array{code:int, body:array<string,mixed>|null}
      */
-    private function post(array $creds, array $payload): array
+    private function post(#[\SensitiveParameter] array $creds, array $payload): array
     {
         $url = rtrim($creds['base_url'], '/') . '/v1/chat/completions';
         $resp = $this->http->post($url, [

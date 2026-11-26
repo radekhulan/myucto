@@ -135,7 +135,7 @@ final class AiProviderHttpClientAttachmentsTest extends TestCase
         self::assertTrue(LlmProviderCapabilities::anthropicThinksByDefault('claude-sonnet-5'));
         self::assertFalse(LlmProviderCapabilities::anthropicThinksByDefault('claude-opus-4-8'));
         self::assertFalse(LlmProviderCapabilities::anthropicThinksByDefault('claude-haiku-4-5-20251001'));
-        foreach (['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'] as $m) {
+        foreach (['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-2'] as $m) {
             self::assertTrue(LlmProviderCapabilities::anthropicRejectsForcedToolChoice($m), $m);
         }
         foreach (['claude-haiku-5-5', 'claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5', 'claude-fable-5', 'claude-opus-4-8'] as $m) {
@@ -144,6 +144,27 @@ final class AiProviderHttpClientAttachmentsTest extends TestCase
         self::assertSame(['output_config' => ['effort' => 'low']], LlmProviderCapabilities::anthropic()->effortPayload('claude-haiku-5-5', 'fast'));
         self::assertSame([], LlmProviderCapabilities::anthropic()->effortPayload('claude-haiku-4-5', 'fast'));
         self::assertContains(LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL, LlmProviderCapabilities::ANTHROPIC_MODELS);
+    }
+
+    public function testGeminiUsesReplacementModelAndThinkingLevel(): void
+    {
+        $history = [];
+        $response = new Response(200, [], json_encode([
+            'candidates' => [['content' => ['parts' => [['text' => '{"answer":"ok"}']]]]],
+        ]));
+        $client = FakeAiProviderHttpClientFactory::create($this, 'gemini', [$response, $response, $response], $history, 'gemini-2.5-pro');
+
+        self::assertTrue($client->completeJson(1, 'SYS', 'DOTAZ', ['type' => 'object'])['ok']);
+        self::assertStringContainsString('/models/gemini-4-carbon:generateContent', (string) $history[0]['request']->getUri());
+        self::assertSame(['thinkingLevel' => 'low'], self::sentJson($history)['generationConfig']['thinkingConfig']);
+
+        $conversation = $client->startToolConversation(1, 'SYS', 'DOTAZ', [], ['type' => 'object'], 4000, modelOverride: 'gemini-4-hydrogen');
+        self::assertTrue($client->toolRound($conversation, true)['ok']);
+        self::assertStringContainsString('/models/gemini-4-hydrogen:generateContent', (string) $history[1]['request']->getUri());
+        self::assertSame(['thinkingLevel' => 'low'], self::sentJson($history, 1)['generationConfig']['thinkingConfig']);
+
+        self::assertTrue($client->completeJson(1, 'SYS', 'DOTAZ', ['type' => 'object'], 'gemini-2.5-flash-lite')['ok']);
+        self::assertSame(['thinkingBudget' => 1024], self::sentJson($history, 2)['generationConfig']['thinkingConfig']);
     }
 
     /** Stávající volající (bez příloh) posílají požadavek beze změny. */
@@ -227,5 +248,18 @@ final class AiProviderHttpClientAttachmentsTest extends TestCase
         self::assertFalse($noDpa['available']);
         self::assertSame('dpa_not_confirmed', $noDpa['reason']);
         self::assertSame('gpt-test', $noDpa['model']);
+    }
+
+    public function testToolConversationUsesAssistantDefaultWhenNoModelIsStored(): void
+    {
+        foreach ([
+            'anthropic' => 'claude-sonnet-5-5',
+            'openai' => 'gpt-6.2-sol',
+            'gemini' => 'gemini-3.8-flash',
+        ] as $provider => $model) {
+            $client = FakeAiProviderHttpClientFactory::create($this, $provider, [], model: '');
+            $conversation = $client->startToolConversation(1, 'SYS', 'DOTAZ', [], ['type' => 'object'], 4000);
+            self::assertSame($model, $conversation->model, $provider);
+        }
     }
 }

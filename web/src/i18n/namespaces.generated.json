@@ -1388,6 +1388,7 @@
     "admin-integrations": [
       "aiGateway",
       "automation",
+      "errors",
       "integrations"
     ],
     "crm-dashboard": [

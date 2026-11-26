@@ -3812,7 +3812,7 @@ final class Routes
         // Ollama: modely nainstalované na zadané adrese (admin-only, přes SSRF guard).
         // POST, ne GET: request jde ze serveru ven a podvržený odkaz nesmí projít bez CSRF tokenu.
         $app->post   ('/api/admin/imports/ai/ollama/models',     [AiProviderCredentialsAction::class, 'ollamaModels']);
-        $app->post   ('/api/admin/imports/ai/openai/models',     [AiProviderCredentialsAction::class, 'openaiModels']);
+        $app->post   ('/api/admin/imports/ai/{provider:anthropic|openai|gemini}/models', [AiProviderCredentialsAction::class, 'cloudModels']);
         // Ladění extrakce (poznámky do promptu + rychle/přesně). Žádné secrety.
         $app->put    ('/api/admin/imports/ai/tuning',             [AiProviderCredentialsAction::class, 'updateTuning']);
 

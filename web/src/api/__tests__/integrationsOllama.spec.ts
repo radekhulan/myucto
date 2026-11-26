@@ -13,7 +13,7 @@ describe('integrationsApi.listOllamaModels', () => {
 
   // Dotaz na adresu Ollamy jde ze serveru ven — GET by spustil i podvržený odkaz (SameSite=Lax bez CSRF).
   it('posílá adresu v těle POST requestu, ne v GET query', async () => {
-    await integrationsApi.listOllamaModels('http://192.168.1.50:11434')
+    await integrationsApi.listOllamaModels({ base_url: 'http://192.168.1.50:11434' })
 
     expect(get).not.toHaveBeenCalled()
     expect(post).toHaveBeenCalledWith('/admin/imports/ai/ollama/models', { base_url: 'http://192.168.1.50:11434' })
