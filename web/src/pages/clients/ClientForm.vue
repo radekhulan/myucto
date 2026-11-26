@@ -11,6 +11,9 @@ import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategor
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
+import { accountingApi, type ChartAccount } from '@/api/accounting'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
 import { eshopApi, type PriceLevel } from '@/api/eshop'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
@@ -45,6 +48,7 @@ const { t, locale } = useI18n()
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 const brandingProfiles = ref<BrandingProfile[]>([])
 
 /** Volby předvolené formy úhrady (migrace 1128); null = „nemá názor". */
@@ -198,6 +202,27 @@ const priceLevelId = ref<number | null>(null)
 const priceLevelName = ref<string | null>(null)
 const priceLevelOptions = computed(() => priceLevels.value.filter(l => l.is_active || l.id === priceLevelId.value))
 
+// Účty poskytnutých záloh dodavatele (314) — jen podvojné účetnictví a role s právem
+// zápisu do účetnictví. Drží se mimo `form`, aby se jinak vůbec neposlaly (server je
+// pak nemění). Prázdné pole = předkontace firmy.
+const advanceAccountsEnabled = computed(() => auth.hasCommercialFeatures
+  && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && auth.canWrite('accounting'))
+const advanceAccounts = ref({ advance_paid_account_code: '', advance_paid_vat_account_code: '' })
+const advanceAccountOptions = ref<ChartAccount[]>([])
+const advanceAccountsOpen = ref(false)
+
+async function loadAdvanceAccountOptions() {
+  if (!advanceAccountsEnabled.value) return
+  try {
+    advanceAccountOptions.value = (await accountingApi.listAccounts())
+      .filter(a => a.account_code === '314' || a.account_code.startsWith('314.'))
+  } catch {
+    // Bez osnovy zůstane pole prostým textem, kód ověří server.
+    advanceAccountOptions.value = []
+  }
+}
+
 async function loadPriceLevels() {
   if (!stockEnabled.value) return
   try {
@@ -275,6 +300,7 @@ const INLINE_ERROR_FIELDS = [
   'company_name', 'first_name', 'last_name', 'main_email', 'hourly_rate',
   'ic', 'street', 'zip', 'city', 'phone', 'price_level_id',
   'email_subject_format', 'email_attachment_name_format', 'email_attach_isdoc',
+  'advance_paid_account_code', 'advance_paid_vat_account_code',
 ]
 const unplacedErrors = computed(() =>
   Object.entries(errors.value)
@@ -325,6 +351,7 @@ async function loadVatPayerDetails() {
 
 onMounted(async () => {
   void loadPriceLevels()
+  void loadAdvanceAccountOptions()
   const [c, cur, ec, rc, bp] = await Promise.all([
     codebooksApi.countries(),
     codebooksApi.currencies(),
@@ -347,6 +374,11 @@ onMounted(async () => {
     emailFormatOpen.value = !!(c.email_subject_format || c.email_attachment_name_format) || c.email_attach_isdoc != null
     priceLevelId.value = c.price_level_id ?? null
     priceLevelName.value = c.price_level_name ?? null
+    advanceAccounts.value = {
+      advance_paid_account_code: c.advance_paid_account_code ?? '',
+      advance_paid_vat_account_code: c.advance_paid_vat_account_code ?? '',
+    }
+    advanceAccountsOpen.value = !!(c.advance_paid_account_code || c.advance_paid_vat_account_code)
     emailContacts.value = (c.email_contacts ?? []).map(ec => ({
       ...ec,
       usages: (ec.usages ?? []).map(u => ({ usage: u.usage, recipient: u.recipient ?? 'to' })),
@@ -541,6 +573,10 @@ async function submit() {
       })),
   }
   if (stockEnabled.value && priceLevelsLoaded.value) payload.price_level_id = priceLevelId.value
+  if (advanceAccountsEnabled.value && form.value.is_vendor) {
+    payload.advance_paid_account_code = advanceAccounts.value.advance_paid_account_code.trim() || null
+    payload.advance_paid_vat_account_code = advanceAccounts.value.advance_paid_vat_account_code.trim() || null
+  }
   try {
     if (isEdit.value && clientId.value) {
       const updated = await clientsApi.update(clientId.value, payload)
@@ -577,6 +613,9 @@ async function submit() {
       errors.value = data.fields
       if (data.fields.email_subject_format || data.fields.email_attachment_name_format || data.fields.email_attach_isdoc) {
         emailFormatOpen.value = true
+      }
+      if (data.fields.advance_paid_account_code || data.fields.advance_paid_vat_account_code) {
+        advanceAccountsOpen.value = true
       }
       // Uložit je na patě dlouhého formuláře, chybné pole bývá nahoře mimo
       // obraz — bez odskoku uživatel vidí jen „Validace selhala" (#120).
@@ -1065,6 +1104,32 @@ if (!props.embedded) {
           </select>
           <p class="text-xs text-neutral-500 mt-1">{{ t('client.default_expense_category_hint') }}</p>
         </div>
+
+        <!-- Účty poskytnutých záloh dodavatele (jen podvojné účetnictví) -->
+        <details v-if="form.is_vendor && advanceAccountsEnabled" class="pt-3 border-t border-neutral-100" :open="advanceAccountsOpen"
+          data-test="client-advance-accounts"
+          @toggle="advanceAccountsOpen = ($event.target as HTMLDetailsElement).open">
+          <summary class="cursor-pointer text-sm font-medium text-neutral-700">
+            {{ t('client.advance_accounts_section') }}
+          </summary>
+          <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('client.advance_accounts_hint') }}</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="client-advance-paid-account" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.advance_paid_account_code') }}</label>
+              <ChartAccountSelect v-model="advanceAccounts.advance_paid_account_code" input-id="client-advance-paid-account"
+                :accounts="advanceAccountOptions" placeholder="314" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('client.advance_paid_account_code_hint') }}</p>
+              <p data-field-error v-if="errors.advance_paid_account_code" class="text-xs text-danger-500 mt-1">{{ errors.advance_paid_account_code[0] }}</p>
+            </div>
+            <div>
+              <label for="client-advance-paid-vat-account" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.advance_paid_vat_account_code') }}</label>
+              <ChartAccountSelect v-model="advanceAccounts.advance_paid_vat_account_code" input-id="client-advance-paid-vat-account"
+                :accounts="advanceAccountOptions" placeholder="314" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('client.advance_paid_vat_account_code_hint') }}</p>
+              <p data-field-error v-if="errors.advance_paid_vat_account_code" class="text-xs text-danger-500 mt-1">{{ errors.advance_paid_vat_account_code[0] }}</p>
+            </div>
+          </div>
+        </details>
 
         <!-- Výchozí kategorie tržby (jen pro zákazníky) -->
         <div v-if="form.is_customer" class="pt-3 border-t border-neutral-100">

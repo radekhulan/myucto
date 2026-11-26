@@ -1211,6 +1211,17 @@ nevede na náklad, daň odpočtu vrací DPH uplatněnou z DDKP a zbytek zálohy 
 MD 321 / D 314. Odpočet musí s DDKP sedět s tolerancí 1 Kč a zbytek zálohy se základem odpočtu, jinak zaúčtování skončí
 hláškou s čísly. Uhrazenou zálohu v hlavičce faktura s odpočtovým řádkem neodečítá, aby se záloha neodečetla dvakrát.
 
+**Účty záloh podle dodavatele.** V podvojném účetnictví může mít karta dodavatele vlastní účty záloh (sekce **Účty
+poskytnutých záloh** v [úpravě klienta](18_Klienti.md#1872-pole-formulare)): **Účet zálohy** (například 314.610) a **Účet
+DPH ze zálohy** (například 314.611). Oba musí být účtovatelné analytiky účtu 314 v osnově firmy a měnit je smí jen role
+s právem zápisu do účetnictví. Úhrada zálohy bankou, pokladnou i zápočtem pak jde na účet zálohy (MD 314.610 / D 221),
+DDKP čerpá daň z účtu DPH ze zálohy (MD 343 / D 314.611) a konečná faktura zúčtuje zálohu z účtu, na který úhrada
+skutečně šla (MD 321 / D 314.610), a daň DDKP převede zpět (MD 314.611 / D 314.610). Po vyúčtování jsou oba účty na nule.
+Vyplnit lze i jen jeden z nich, prázdné pole znamená předkontaci firmy (**Poskytnutá záloha, úhrada** a **Daňový doklad
+k poskytnuté záloze**). Účet se z karty neodvozuje, analytiku DPH ze zálohy je potřeba vyplnit výslovně. Ručně zvolená předkontace
+dokladu s jiným účtem a firma, která zálohy účtuje rovnou na saldokonto 321, zůstávají beze změny. Změna účtů na kartě
+nepřeúčtuje už zaúčtované úhrady, zúčtování konečnou fakturou se vždy řídí účtem, na kterém úhrada leží.
+
 Finální faktura navázaná na zálohu s DDKP **bez** odpočtového řádku se nezaúčtuje: hláška spočítá, kolik DPH z faktury
 zbývá doúčtovat nad rámec toho, co DDKP uplatnil, a detail faktury nabídne **Doplnit odpočet zálohy z DDKP**. Takové
 doklady (i ze starších období) najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) jako konečné přijaté faktury bez odpočtu

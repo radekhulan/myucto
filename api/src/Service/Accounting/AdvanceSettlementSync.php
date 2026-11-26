@@ -224,9 +224,14 @@ final class AdvanceSettlementSync
         if ($debitCode === $creditCode) {
             return ['action' => 'none', 'reason' => 'settlement_on_same_account', 'entry_id' => $entryId];
         }
+        // Přijatá strana: zúčtování odúčtuje účet, na který šla úhrada zálohy, a převádí daň
+        // DDKP z účtu DPH zálohy ({@see AdvancePaidAccount}), takže k němu patří všechny
+        // řádky syntetiky zálohy (314). Konečná faktura jiné řádky 314 nemá.
+        $advanceSynthetic = $side === 'purchase' ? substr($creditCode, 0, 3) : null;
         $isSettlement = static fn (string $code, array $line): bool =>
             ($code === $debitCode && $line['side'] === 'debit')
             || ($code === $creditCode && $line['side'] === 'credit')
+            || ($advanceSynthetic !== null && SaldoAccountMatch::belongsTo($code, $advanceSynthetic))
             || ($line['line_text'] ?? null) === PostingService::ADVANCE_FX_LINE_TEXT;
 
         $expected = [];
@@ -260,8 +265,8 @@ final class AdvanceSettlementSync
             return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'final_saldo_changed', $userId);
         }
 
-        $before = self::pairAmount($current, $creditCode, $side === 'sale' ? $oldSaldoCode : null);
-        $after = self::pairAmount($expected, $creditCode);
+        $before = self::pairAmount($current, $creditCode, $side === 'sale' ? $oldSaldoCode : null, $advanceSynthetic);
+        $after = self::pairAmount($expected, $creditCode, null, $advanceSynthetic);
         if (self::signature($current) === self::signature($expected)) {
             return ['action' => 'in_sync', 'entry_id' => $entryId, 'before' => $before, 'after' => $after];
         }
@@ -407,13 +412,25 @@ final class AdvanceSettlementSync
         return $kind === false || $kind === null ? null : (string) $kind;
     }
 
-    /** @param list<array<string,mixed>> $lines */
-    private static function pairAmount(array $lines, string $creditCode, ?string $oldCreditCode = null): float
+    /**
+     * Částka zúčtování: D na účtu zálohy, u přijaté strany saldo D − MD celé syntetiky
+     * zálohy `$advanceSynthetic` (převod daně DDKP mezi analytikami 314 se vyruší).
+     *
+     * @param list<array<string,mixed>> $lines
+     */
+    private static function pairAmount(array $lines, string $creditCode, ?string $oldCreditCode = null, ?string $advanceSynthetic = null): float
     {
         $sum = 0;
         foreach ($lines as $l) {
+            $cents = (int) round((float) $l['amount'] * 100.0);
+            if ($advanceSynthetic !== null) {
+                if (SaldoAccountMatch::belongsTo((string) $l['account_code'], $advanceSynthetic)) {
+                    $sum += $l['side'] === 'credit' ? $cents : -$cents;
+                }
+                continue;
+            }
             if ($l['side'] === 'credit' && in_array($l['account_code'], [$creditCode, $oldCreditCode], true)) {
-                $sum += (int) round((float) $l['amount'] * 100.0);
+                $sum += $cents;
             }
         }
         return $sum / 100;

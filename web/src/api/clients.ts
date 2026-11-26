@@ -88,6 +88,10 @@ export interface Client {
   note?: string | null
   default_expense_category_id?: number | null
   default_revenue_category_id?: number | null
+  /** Účet poskytnutých záloh dodavatele (analytika 314); null = předkontace firmy. */
+  advance_paid_account_code?: string | null
+  /** Účet 314, ze kterého DDKP k záloze dodavatele čerpá daň; null = předkontace firmy. */
+  advance_paid_vat_account_code?: string | null
   // Vrací UpdateClientAction: počet faktur, do kterých byla doplněna nově nastavená
   // výchozí kategorie nákladu/tržby (pro toast po uložení klienta).
   expense_category_backfilled?: number
@@ -284,6 +288,9 @@ export interface ClientPayload {
   note?: string | null
   default_expense_category_id?: number | null
   default_revenue_category_id?: number | null
+  /** Posílá se JEN v podvojném účetnictví s právem zápisu do účetnictví; bez klíče se účet nemění. */
+  advance_paid_account_code?: string | null
+  advance_paid_vat_account_code?: string | null
   invoice_number_format?: string | null
   proforma_number_format?: string | null
   credit_note_number_format?: string | null

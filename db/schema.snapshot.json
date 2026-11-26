@@ -1252,7 +1252,8 @@
         "2346_nonprofit_funding_work.sql",
         "2347_entity_tags_recurring_templates.sql",
         "2348_invoice_tags.sql",
-        "2349_supplier_tags_enabled.sql"
+        "2349_supplier_tags_enabled.sql",
+        "2350_clients_advance_paid_accounts.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4635,6 +4636,8 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "advance_paid_account_code": "varchar(10) NULL DEFAULT NULL",
+                "advance_paid_vat_account_code": "varchar(10) NULL DEFAULT NULL",
                 "archived_at": "timestamp NULL DEFAULT NULL",
                 "auto_send_reminders": "tinyint(1) NOT NULL DEFAULT 1",
                 "city": "varchar(120) NOT NULL",

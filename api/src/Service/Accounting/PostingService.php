@@ -208,6 +208,8 @@ final class PostingService
 
     private ?BankDocumentNumber $bankDocumentNumber = null;
 
+    private ?AdvancePaidAccount $advancePaidAccount = null;
+
     /**
      * Varování pravidel dimenzí (vynucení `warning`) z posledního {@see postDocument()}.
      *
@@ -2131,12 +2133,13 @@ final class PostingService
      * Zálohová platba (money leg proti účtu záloh, NE proti saldokontu faktury — proforma
      * / zálohová PF není daňový doklad a nemá zaúčtovaný předpis, který by se párem uzavíral):
      *   received (vydaná strana): moneyAccount MD / 324 D  ('advance.received.collection')
-     *   paid     (přijatá strana): 314 MD / moneyAccount D ('advance.paid.payment')
+     *   paid     (přijatá strana): 314 MD / moneyAccount D ('advance.paid.payment', účet zálohy
+     *            podle karty dodavatele dokladu `purchase_invoice_id`, {@see AdvancePaidAccount::forPayment})
      * Částka = částka platby (může být i částečná úhrada zálohy — běžné). Bankovní i pokladní
      * úhrady jsou v1 CZK-only, takže money leg nenese cizoměnovou stopu.
      *
      * @param 'received'|'paid' $direction
-     * @param array{rule_key?:string, cost_center?:?string} $opts
+     * @param array{rule_key?:string, cost_center?:?string, purchase_invoice_id?:?int} $opts
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}>
      */
     public function buildFromAdvancePayment(int $supplierId, string $direction, string $moneyAccount, float $amount, array $opts = []): array
@@ -2155,7 +2158,9 @@ final class PostingService
             ];
         }
         if ($direction === 'paid') {
-            $adv = $this->ruleCode($supplierId, $opts['rule_key'] ?? 'advance.paid.payment', 'debit', '314');
+            $adv = isset($opts['rule_key'])
+                ? $this->ruleCode($supplierId, $opts['rule_key'], 'debit', '314')
+                : $this->advancePaid()->forPayment($supplierId, isset($opts['purchase_invoice_id']) ? (int) $opts['purchase_invoice_id'] : null);
             return [
                 $this->line($adv, 'debit', $amt, $cc),
                 $this->line($moneyAccount, 'credit', $amt, $cc),
@@ -2498,7 +2503,16 @@ final class PostingService
                     . '(neplátce / nulová sazba?) — DDKP bez daně se neúčtuje.',
             );
         }
+        // Účet DPH zálohy z karty dodavatele (např. 314.611), jinak D předkontace.
         $draw = $this->ruleCode($supplierId, $ruleKey, 'credit', '314');
+        $draw = $this->advancePaid()->forVatDocument(
+            $supplierId,
+            $purchaseInvoiceId,
+            $draw,
+            $ruleKey === AdvancePaidAccount::VAT_DOCUMENT_RULE
+                ? $draw
+                : $this->ruleCode($supplierId, AdvancePaidAccount::VAT_DOCUMENT_RULE, 'credit', '314'),
+        );
         $cc = $opts['cost_center'] ?? null;
         $lines = [];
         foreach ($amounts as $code => $amount) {
@@ -3735,7 +3749,7 @@ final class PostingService
             return;
         }
 
-        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->purchaseAdvanceSettlementAccounts($supplierId, $advId, $documentSaldo);
         if ($onSaldo) {
             // Zrcadlo vydané strany: záloha vedená přímo na závazku, pár se vyruší.
             return;
@@ -3783,7 +3797,9 @@ final class PostingService
         $foreign = min($deducted, $receipt['foreign']);
         $historical = round($foreign / $receipt['foreign'] * $receipt['czk'], 2);
         $nominal = round($foreign * $this->fxRate($final), 2);
-        ['debit' => $debit, 'credit' => $credit, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, $side, $documentSaldo);
+        ['debit' => $debit, 'credit' => $credit, 'on_saldo' => $onSaldo] = $side === 'purchase'
+            ? $this->purchaseAdvanceSettlementAccounts($supplierId, (int) $advance['id'], $documentSaldo)
+            : $this->advanceSettlementAccounts($supplierId, $side, $documentSaldo);
         if ($onSaldo) {
             if (self::cents($historical - $nominal) !== 0) {
                 throw new PostingException(
@@ -3814,7 +3830,9 @@ final class PostingService
      */
     private function tracedAdvance(int $supplierId, string $side, array $advance): array
     {
-        $accounts = $this->advanceSettlementAccounts($supplierId, $side);
+        $accounts = $side === 'purchase'
+            ? $this->purchaseAdvanceSettlementAccounts($supplierId, (int) $advance['id'])
+            : $this->advanceSettlementAccounts($supplierId, $side);
         $code = $accounts[$side === 'sale' ? 'debit' : 'credit'];
         return (new AdvanceSettlementEvidenceReader($this->db))->tracedBankAdvance(
             $supplierId, $side, (int) $advance['id'], (string) $advance['currency_code'],
@@ -3875,7 +3893,7 @@ final class PostingService
         if (self::cents($deduction['base']) <= 0) {
             return;
         }
-        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->purchaseAdvanceSettlementAccounts($supplierId, $advId, $documentSaldo);
         if ($onSaldo) {
             return;
         }
@@ -3907,7 +3925,6 @@ final class PostingService
         if ($advanceIds === []) {
             return;
         }
-        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
         foreach ($advanceIds as $advId) {
             $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
             if ($adv === null) {
@@ -3936,6 +3953,7 @@ final class PostingService
                 );
             }
             $paid = $this->postedAdvancePaid($supplierId, $adv);
+            ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->purchaseAdvanceSettlementAccounts($supplierId, $advId, $documentSaldo);
             if (self::cents($paid) <= 0 || $onSaldo) {
                 continue;
             }
@@ -4711,12 +4729,66 @@ final class PostingService
             );
         }
 
-        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        ['debit' => $draw, 'credit' => $advAcc, 'on_saldo' => $onSaldo] = $this->purchaseAdvanceSettlementAccounts($supplierId, $advId, $documentSaldo);
         if ($onSaldo) {
             return; // záloha vedená přímo na závazku, pár se vyruší
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $remaining, null), 'pair_group', 'advance');
         $lines[] = $this->pairHint($this->line($advAcc, 'credit', $remaining, null), 'pair_group', 'advance');
+        $this->appendAdvanceVatTransfer($supplierId, $advId, $advIsStandaloneDdkp, $advAcc, $lines);
+    }
+
+    /**
+     * Účty zúčtování poskytnuté zálohy `$advanceId`: MD saldokonto konečné faktury, D účet,
+     * na který šla úhrada zálohy ({@see AdvancePaidAccount::settlementCredit}). Záloha vedená
+     * přímo na saldokontu (stejné účty v předkontaci zúčtování) zůstává beze změny.
+     *
+     * @return array{debit:string, credit:string, on_saldo:bool}
+     */
+    private function purchaseAdvanceSettlementAccounts(int $supplierId, int $advanceId, ?string $documentSaldo = null): array
+    {
+        $accounts = $this->advanceSettlementAccounts($supplierId, 'purchase', $documentSaldo);
+        if (!$accounts['on_saldo']) {
+            $accounts['credit'] = $this->advancePaid()->settlementCredit(
+                $supplierId,
+                $advanceId,
+                $accounts['credit'],
+                fn (string $code): string => $this->redirectedAccountCode($supplierId, $code),
+            );
+        }
+        return $accounts;
+    }
+
+    /**
+     * Daň DDKP zálohy, kterou DDKP připsal na jiný účet 314 než úhrada zálohy (karta
+     * dodavatele: záloha 314.610, DPH zálohy 314.611), se při zúčtování převede na účet
+     * zálohy: 314.611 MD / 314.610 D. Úhrada, DDKP a zúčtování pak nechají obě analytiky
+     * na nule. Leží-li daň na účtu úhrady (výchozí stav, vše na 314), nepřidává se nic.
+     *
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
+     */
+    private function appendAdvanceVatTransfer(int $supplierId, int $advId, bool $advIsStandaloneDdkp, string $advAcc, array &$lines): void
+    {
+        $target = $this->redirectedAccountCode($supplierId, $advAcc);
+        $credits = $this->advancePaid()->postedVatDocumentCredits(
+            $supplierId,
+            $this->purchaseTaxDocumentIds($supplierId, $advId, $advIsStandaloneDdkp),
+            substr($advAcc, 0, 3),
+        );
+        foreach ($credits as $code => $amount) {
+            $code = (string) $code;
+            if ($code === $advAcc || $code === $target) {
+                continue;
+            }
+            $vatSide = $amount > 0 ? 'debit' : 'credit';
+            $lines[] = $this->pairHint($this->line($code, $vatSide, abs($amount), null), 'pair_group', 'advance_vat');
+            $lines[] = $this->pairHint($this->line($advAcc, $vatSide === 'debit' ? 'credit' : 'debit', abs($amount), null), 'pair_group', 'advance_vat');
+        }
+    }
+
+    private function advancePaid(): AdvancePaidAccount
+    {
+        return $this->advancePaidAccount ??= new AdvancePaidAccount($this->db, $this->rules);
     }
 
     /** Kód účtu z kontace (per-tenant override) se strany + fallback. */

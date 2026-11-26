@@ -25,8 +25,10 @@ final class BankAdvanceFxTest extends TestCase
                 amount_to_pay DECIMAL, paid_total DECIMAL, currency_id INT, parent_invoice_id INT, import_amount_to_pay_czk DECIMAL);
             INSERT INTO invoices VALUES (10, 1, 'proforma', 'paid', 24, 100, 100, 1, NULL, NULL);
             CREATE TABLE purchase_invoices (id INT, supplier_id INT, document_kind TEXT, status TEXT, exchange_rate DECIMAL,
-                amount_to_pay DECIMAL, parent_purchase_invoice_id INT, currency_id INT);
-            INSERT INTO purchase_invoices VALUES (10, 1, 'advance', 'paid', 24, 100, NULL, 1);
+                amount_to_pay DECIMAL, parent_purchase_invoice_id INT, currency_id INT, vendor_id INT);
+            INSERT INTO purchase_invoices VALUES (10, 1, 'advance', 'paid', 24, 100, NULL, 1, 5);
+            CREATE TABLE clients (id INT, supplier_id INT, advance_paid_account_code TEXT, advance_paid_vat_account_code TEXT);
+            INSERT INTO clients VALUES (5, 1, NULL, NULL);
             CREATE TABLE posting_rules (id INT, supplier_id INT, rule_key TEXT, description TEXT,
                 debit_account_code TEXT, credit_account_code TEXT, priority INT, is_active INT);
             INSERT INTO posting_rules VALUES

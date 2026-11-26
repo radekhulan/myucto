@@ -4898,8 +4898,10 @@ paths:
               schema: { $ref: '#/components/schemas/Client' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '403':
+          description: "Změna `advance_paid_account_code` / `advance_paid_vat_account_code` bez práva zápisu do účetnictví (`forbidden`)"
         '422':
-          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`); hladinu, kterou už klient má, lze poslat i neaktivní"
+          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`); hladinu, kterou už klient má, lze poslat i neaktivní. Účet záloh mimo osnovu firmy, mimo syntetiku 314 nebo syntetika s analytikami (`invalid_account`, `account_not_posting_level`)."
     delete:
       tags: [Clients]
       summary: Smazání klienta (pokud nemá vystavené doklady)
@@ -55085,6 +55087,8 @@ components:
         note: { type: [string, "null"] }
         default_expense_category_id: { type: [integer, "null"], description: "Default kategorie nákladu pro přijaté faktury dodavatele" }
         default_revenue_category_id: { type: [integer, "null"], description: "Default kategorie tržby pro vydané faktury odběratele" }
+        advance_paid_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet poskytnutých záloh dodavatele (analytika 314, např. 314.610). Na něj jde úhrada zálohy bankou, pokladnou i zápočtem a z něj ji konečná faktura zúčtuje. NULL = předkontace firmy `advance.paid.payment`." }
+        advance_paid_vat_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet 314, ze kterého daňový doklad k platbě (DDKP) k záloze dodavatele čerpá daň (např. 314.611). Konečná faktura daň z něj při zúčtování zálohy převede zpět, takže oba účty skončí na nule. NULL = předkontace firmy `advance.paid.vatdocument`." }
         invoice_number_format: { type: [string, "null"], description: "Per-klient override číselné řady faktur" }
         proforma_number_format: { type: [string, "null"] }
         credit_note_number_format: { type: [string, "null"] }
@@ -55253,6 +55257,8 @@ components:
         note: { type: [string, "null"] }
         default_expense_category_id: { type: [integer, "null"] }
         default_revenue_category_id: { type: [integer, "null"] }
+        advance_paid_account_code: { type: [string, "null"], maxLength: 10, description: "Účet poskytnutých záloh dodavatele. Musí být aktivní účet osnovy firmy pod syntetikou 314 a dát se na něj účtovat (syntetika s víc analytikami ne), jinak 422 `invalid_account` / `account_not_posting_level`. Změnu smí jen role s právem zápisu do účetnictví (jinak 403). `null` nebo `\"\"` = předkontace firmy, vynechání = beze změny." }
+        advance_paid_vat_account_code: { type: [string, "null"], maxLength: 10, description: "Účet 314, ze kterého DDKP k záloze dodavatele čerpá daň. Stejná pravidla jako `advance_paid_account_code`." }
         invoice_number_format: { type: [string, "null"], maxLength: 60 }
         proforma_number_format: { type: [string, "null"] }
         credit_note_number_format: { type: [string, "null"] }

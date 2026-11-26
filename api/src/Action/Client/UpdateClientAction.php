@@ -11,6 +11,10 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientEmailContactRepository;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -30,6 +34,7 @@ final class UpdateClientAction
         private readonly ClientBankAccountRepository $bankAccounts,
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
         private readonly StockPriceLevelService $priceLevels,
+        private readonly AdvancePaidAccount $advanceAccounts,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -63,6 +68,18 @@ final class UpdateClientAction
             }
         }
 
+        // Účty poskytnutých záloh dodavatele se zapisují jen když je tělo obsahuje.
+        try {
+            $advanceAccounts = $this->advanceAccounts->vendorSettingsFromBody((int) $existing['supplier_id'], $body, $existing);
+        } catch (PostingException $e) {
+            return self::accountError($response, $e);
+        }
+        if ($advanceAccounts !== [] && !RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403, [
+                'fields' => array_fill_keys(array_keys($advanceAccounts), ['Účty záloh na kartě dodavatele mění jen účetní.']),
+            ]);
+        }
+
         try {
             $backfilled = $this->repo->update($id, $body);
         } catch (\InvalidArgumentException $e) {
@@ -71,6 +88,7 @@ final class UpdateClientAction
         if ($writePriceLevel) {
             $this->repo->setPriceLevel($id, (int) $existing['supplier_id'], $priceLevelId);
         }
+        $this->repo->setAdvancePaidAccounts($id, (int) $existing['supplier_id'], $advanceAccounts);
 
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         // E-mailové kontakty dle účelu (#86) — replace-all, jen pokud klíč v payloadu je
@@ -119,5 +137,12 @@ final class UpdateClientAction
         }
 
         return Json::ok($response, $client);
+    }
+
+    public static function accountError(Response $response, PostingException $e): Response
+    {
+        $field = (string) ($e->context['field'] ?? '');
+        return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus,
+            $field !== '' ? ['fields' => [$field => [$e->getMessage()]]] : []);
     }
 }

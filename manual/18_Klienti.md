@@ -238,6 +238,7 @@ zakázky. Jinak by smazání skončilo chybou.
 | Hodinová sazba | Použije se v editoru faktury, pokud není vybraná zakázka. 0 = nepoužívat |
 | Posílat automatické upomínky | Vypnutím zastavíte automatické upomínky tomuto klientovi. Ruční odeslání (jednotlivé i hromadné) funguje vždy, viz [22. Upomínky](22_Upominky.md) |
 | Výchozí kategorie tržby | Předvyplní se na nových vydaných fakturách klienta a po uložení se doplní i do jeho stávajících faktur bez kategorie. Kategorie zakázky má přednost |
+| Účty poskytnutých záloh | Jen u dodavatele v podvojném účetnictví a pro roli s právem zápisu do účetnictví. **Účet zálohy** (např. 314.610) a **Účet DPH ze zálohy** (např. 314.611), analytiky účtu 314, na které se účtují úhrady záloh a daň z DDKP tohoto dodavatele. Prázdné = předkontace firmy, viz [§ 23.11.16](23_Prijate_faktury.md#231116-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni) |
 | Poznámka | Interní text, na faktuře se nezobrazí |
 | E-mail s fakturou | Volitelný předmět e-mailu, název přiloženého PDF a volba samostatného ISDOC pro klienta, viz [§ 18.4.1](#1841-predmet-e-mailu-a-nazev-prilozeneho-pdf) |
 

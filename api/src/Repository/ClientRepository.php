@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
 use MyInvoice\Service\Client\ClientFieldLimits;
 use MyInvoice\Service\Client\VendorDuplicateFinder;
 use MyInvoice\Service\Invoice\InvoiceNumberFormat;
@@ -896,6 +897,31 @@ final class ClientRepository
     }
 
     /** Cenová hladina odběratele (1833); platnost hladiny ověřuje StockPriceLevelService. */
+    /**
+     * Účty poskytnutých záloh z karty dodavatele ({@see AdvancePaidAccount}).
+     * `$codes` jsou už ověřené hodnoty, jen klíče, které se mění.
+     *
+     * @param array<string,?string> $codes
+     */
+    public function setAdvancePaidAccounts(int $id, int $supplierId, array $codes): void
+    {
+        $sets = [];
+        $params = [];
+        foreach (AdvancePaidAccount::FIELDS as $field) {
+            if (array_key_exists($field, $codes)) {
+                $sets[] = $field . ' = ?';
+                $params[] = $codes[$field];
+            }
+        }
+        if ($sets === []) {
+            return;
+        }
+        $params[] = $id;
+        $params[] = $supplierId;
+        $this->db->pdo()->prepare('UPDATE clients SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?')
+            ->execute($params);
+    }
+
     public function setPriceLevel(int $id, int $supplierId, ?int $priceLevelId): void
     {
         $this->db->pdo()->prepare('UPDATE clients SET price_level_id = ? WHERE id = ? AND supplier_id = ?')

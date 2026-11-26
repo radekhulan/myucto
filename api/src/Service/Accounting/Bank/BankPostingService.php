@@ -17,6 +17,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
 use MyInvoice\Service\Accounting\AdvanceSettlementSync;
 use MyInvoice\Service\Accounting\Dimension\BankRuleDimensions;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
@@ -1255,7 +1256,7 @@ final class BankPostingService
         if ((string) $pf['document_kind'] === 'advance'
             || (string) $pf['document_kind'] === 'tax_document'
         ) {
-            return $this->advancePaymentAccount($supplierId, false);
+            return $this->advancePaymentAccount($supplierId, false, $pfId);
         }
         return $this->predpisSaldo($supplierId, $this->predpis(
             $supplierId, 'purchase_invoice', $pfId, false,
@@ -1853,7 +1854,7 @@ final class BankPostingService
             throw new PostingException('cross_currency', 'Měna úhrady neodpovídá měně přijaté faktury #' . $pfId . '.');
         }
         if ((string) $pf['document_kind'] === 'advance') {
-            return [$this->advancePaymentAccount($supplierId, false), $paymentRate, true];
+            return [$this->advancePaymentAccount($supplierId, false, $pfId), $paymentRate, true];
         }
         $payable = $this->purchasePayable($supplierId, $pfId, $payable);
         $saldo = $this->predpisSaldo($supplierId, $this->predpis(
@@ -1863,12 +1864,17 @@ final class BankPostingService
         return [$payable, $this->predpisFxRate($supplierId, $saldo, $pf), false];
     }
 
-    private function advancePaymentAccount(int $supplierId, bool $incoming): string
+    /**
+     * Účet zálohy úhrady: přijatá záloha z předkontace, poskytnutá záloha přijatého dokladu
+     * `$purchaseInvoiceId` z karty dodavatele, jinak z předkontace ({@see AdvancePaidAccount::forPayment}).
+     */
+    private function advancePaymentAccount(int $supplierId, bool $incoming, ?int $purchaseInvoiceId = null): string
     {
-        $rule = $this->postingRules->resolve($supplierId, $incoming ? 'advance.received.collection' : 'advance.paid.payment');
-        return $incoming
-            ? (($rule['credit_account_code'] ?? null) ?: '324')
-            : (($rule['debit_account_code'] ?? null) ?: '314');
+        if (!$incoming) {
+            return (new AdvancePaidAccount($this->db, $this->postingRules))->forPayment($supplierId, $purchaseInvoiceId);
+        }
+        $rule = $this->postingRules->resolve($supplierId, 'advance.received.collection');
+        return ($rule['credit_account_code'] ?? null) ?: '324';
     }
 
     /** Přidělí haléř z přepočtu rozdělené platby záloze místo účtování kurzového rozdílu. */

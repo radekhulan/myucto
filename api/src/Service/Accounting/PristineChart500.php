@@ -49,6 +49,7 @@ final class PristineChart500
         'bank_posting_suggestions' => ['debit_account_code', 'credit_account_code'],
         'cash_documents' => ['counter_account_code'],
         'cash_registers' => ['account_code'],
+        'clients' => ['advance_paid_account_code', 'advance_paid_vat_account_code'],
         'expense_classification_rules' => ['target_account_code'],
         'revenue_classification_rules' => ['target_account_code'],
         'internal_document_lines' => ['account_code'],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Client;
 
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
 use MyInvoice\Service\Client\ClientFieldLimits;
 use MyInvoice\Service\Validation;
 use PHPUnit\Framework\TestCase;
@@ -31,6 +32,11 @@ final class ClientFieldLimitsTest extends TestCase
             if (in_array($column, ['invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
                 'email_subject_format', 'email_attachment_name_format'], true)) {
                 // Formáty mají vlastní validaci délky (InvoiceNumberFormat, ClientEmailFormat).
+                continue;
+            }
+            if (in_array($column, AdvancePaidAccount::FIELDS, true)) {
+                // Kód účtu záloh ověřuje AdvancePaidAccount proti osnově firmy (stejná šířka
+                // jako chart_of_accounts.account_code), zkracovat se nesmí.
                 continue;
             }
             self::assertArrayHasKey($column, ClientFieldLimits::MAX_LENGTHS, "clients.{$column} chybí v ClientFieldLimits");

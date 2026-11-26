@@ -427,7 +427,7 @@ final class InvoiceSettlementService
             $fallback = $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
         } else {
             if ($isAdvance) {
-                return $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314');
+                return (new AdvancePaidAccount($this->db, $this->rules))->forPayment($supplierId, $docId);
             }
             $fallback = $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321');
         }

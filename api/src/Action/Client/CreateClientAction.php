@@ -10,6 +10,10 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientEmailContactRepository;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -29,6 +33,7 @@ final class CreateClientAction
         private readonly ClientBankAccountRepository $bankAccounts,
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
         private readonly StockPriceLevelService $priceLevels,
+        private readonly AdvancePaidAccount $advanceAccounts,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -61,6 +66,19 @@ final class CreateClientAction
             }
         }
         try {
+            $advanceAccounts = array_filter(
+                $this->advanceAccounts->vendorSettingsFromBody($supplierId, $body),
+                static fn (?string $code): bool => $code !== null,
+            );
+        } catch (PostingException $e) {
+            return UpdateClientAction::accountError($response, $e);
+        }
+        if ($advanceAccounts !== [] && !RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403, [
+                'fields' => array_fill_keys(array_keys($advanceAccounts), ['Účty záloh na kartě dodavatele mění jen účetní.']),
+            ]);
+        }
+        try {
             $id = $this->repo->create($body, $supplierId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
@@ -68,6 +86,7 @@ final class CreateClientAction
         if ($priceLevelId !== null) {
             $this->repo->setPriceLevel($id, $supplierId, $priceLevelId);
         }
+        $this->repo->setAdvancePaidAccounts($id, $supplierId, $advanceAccounts);
 
         // E-mailové kontakty dle účelu (#86) — replace-all, validuje repo.
         if (isset($body['email_contacts']) && is_array($body['email_contacts'])) {

@@ -16,6 +16,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Accounting\AdvancePaidAccount;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\FxSettlementPosting;
@@ -1398,7 +1399,7 @@ final class CashDocumentService
 
     /**
      * Úhrada přijaté faktury hotově: běžná PF → 321/211, zálohová PF (document_kind=advance)
-     * → poskytnutá záloha 314/211 (B5). Závazek se bere z účtu, na kterém doklad vznikl
+     * → poskytnutá záloha 314/211 (B5), účet zálohy podle karty dodavatele ({@see AdvancePaidAccount}). Závazek se bere z účtu, na kterém doklad vznikl
      * ({@see PurchasePayableAccount::forPayment}), např. 325 u účtenky.
      *
      * @return list<array{account_code:string, side:string, amount:float}>
@@ -1427,7 +1428,10 @@ final class CashDocumentService
         // Samostatný DDKP (bez zálohové faktury) vlastní úhradu naopak MÁ — platí se jako
         // záloha na 314. Zrcadlo bankovní větve.
         if ($kind === 'advance' || $kind === 'tax_document_standalone') {
-            $advance = $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314');
+            $advance = (new AdvancePaidAccount($this->db, $this->rules))->forPayment(
+                $supplierId,
+                $doc['purchase_invoice_id'] !== null ? (int) $doc['purchase_invoice_id'] : null,
+            );
             return $refund
                 ? [
                     $this->line($cashAccount, 'debit', $total),
