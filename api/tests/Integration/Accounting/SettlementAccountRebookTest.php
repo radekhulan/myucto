@@ -123,6 +123,29 @@ final class SettlementAccountRebookTest extends BankPostingTestCase
         self::assertSame(0.0, $this->balance(self::RECEIVABLE, [$openEntry, $bankEntry]));
     }
 
+    /**
+     * Zápis zaostává za kartou partnera: doklad leží na 321, karta mezitím dostala 321.200.
+     * Přeúčtovat jde i účet, na kterém závazek v zápisu skutečně leží, a nový účet (321.100)
+     * vydrží další zaúčtování, i když karta říká jinak.
+     */
+    public function testBulkRebookRecognisesPostedPayableWhenCardChangedLater(): void
+    {
+        $vendor = $this->client('Dodavatel karta po zaúčtování');
+        $open = $this->postedPurchase('SYN-SAR-CARD', $vendor);
+        $this->db->pdo()->prepare('UPDATE clients SET payable_account_code = ? WHERE id = ?')->execute([self::PAYABLE, $vendor]);
+
+        $dryId = $this->dryRun('rebook_account', 'purchase_invoice', [$open],
+            ['from_account' => '321', 'to_account' => '321.100', 'side' => 'both', 'mode' => JournalRebookService::MODE_REWRITE]);
+        self::assertSame('would_change', $this->bySource($dryId)[$open]['status'], (string) json_encode($this->bySource($dryId)[$open], JSON_UNESCAPED_UNICODE));
+        $this->applyRun($dryId);
+        self::assertSame(121.0, $this->linesByAccountCode($this->documentEntry('purchase_invoice', $open))['321.100']['credit'] ?? null);
+
+        $this->container->get(DocumentJournalSync::class)->repostForceEdit($this->supplierId, 'purchase_invoice', $open, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $lines = $this->linesByAccountCode($this->documentEntry('purchase_invoice', $open));
+        self::assertSame(121.0, $lines['321.100']['credit'] ?? null, 'Přeúčtovaný závazek má přednost před kartou.');
+        self::assertArrayNotHasKey(self::PAYABLE, $lines);
+    }
+
     /** Cílový účet se ověřuje jako účet na kartě partnera: syntetika s analytikami ani DPH ne. */
     public function testBulkRebookRejectsInvalidTargetAccount(): void
     {

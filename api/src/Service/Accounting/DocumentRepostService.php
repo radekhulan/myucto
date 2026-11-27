@@ -614,7 +614,7 @@ final class DocumentRepostService
         $rebook = new SettlementAccountRebook($this->db, $this->posting);
         if ((new PartnerSettlementAccount($this->db))->hasPayment($supplierId, $sourceType, $docId)
             || $this->posting->documentCounterAccountBlocker($supplierId, $sourceType, $docId) !== null
-            || !$rebook->isSettlementAccount($supplierId, $sourceType, $docId, $from, true)
+            || !$rebook->wasSettlementAccount($supplierId, $sourceType, $before, $from)
         ) {
             return 0;
         }

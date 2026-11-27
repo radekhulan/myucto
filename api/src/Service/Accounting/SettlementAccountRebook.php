@@ -43,14 +43,37 @@ final class SettlementAccountRebook
     ) {}
 
     /**
-     * Je `$code` saldokontním účtem dokladu (účet, na který doklad zaúčtování z dokladu staví)?
+     * Je `$code` saldokontním účtem dokladu? Buď účtem, na kterém závazek či pohledávka leží
+     * v živém zápisu ({@see PartnerSettlementAccount::postedSettlementAccount}), nebo účtem,
+     * na který by doklad šel při novém zaúčtování z dokladu (zápis může zaostávat za kartou
+     * partnera, která se změnila po zaúčtování).
      *
      * @param 'invoice'|'purchase_invoice' $sourceType
      */
     public function isSettlementAccount(int $supplierId, string $sourceType, int $docId, string $code, bool $currentRead = false): bool
     {
-        $saldo = $this->posting->documentSettlementAccount($supplierId, $sourceType, $docId, $currentRead);
-        return $saldo !== null && $saldo === $this->posting->redirectedAccountCode($supplierId, $code, null, $currentRead);
+        $code = $this->posting->redirectedAccountCode($supplierId, $code, null, $currentRead);
+        $posted = $this->partners()->postedSettlementAccount($supplierId, $sourceType, $docId);
+        if ($posted !== null && $this->posting->redirectedAccountCode($supplierId, $posted, null, $currentRead) === $code) {
+            return true;
+        }
+        return $this->posting->documentSettlementAccount($supplierId, $sourceType, $docId, $currentRead) === $code;
+    }
+
+    /**
+     * Byl `$code` saldokontním účtem zápisu s řádky `$lines` (přeúčtování, které zápis už
+     * přepsalo, se ptá na původní řádky)?
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param list<array<string,mixed>> $lines
+     */
+    public function wasSettlementAccount(int $supplierId, string $sourceType, array $lines, string $code): bool
+    {
+        $codes = array_values(array_filter(array_map(
+            fn (array $line): string => $this->posting->redirectedAccountCode($supplierId, (string) ($line['account_code'] ?? ''), null, true),
+            $lines,
+        ), static fn (string $c): bool => $c !== ''));
+        return $this->partners()->settlementAccountOf($supplierId, $sourceType, $codes) === $code;
     }
 
     /**

@@ -359,6 +359,26 @@ final class PartnerSettlementAccount
     }
 
     /**
+     * Saldokontní účet mezi kódy účtů řádků zápisu dokladu (stejné pravidlo jako
+     * {@see postedSettlementAccount} nad živým zápisem): u přijatého jediný závazek třídy 3
+     * mimo DPH a zálohy ({@see PurchasePayableAccount::payableFromCodes}), u vydaného jediná
+     * pohledávka v syntetice předkontace úhrady pohledávek. Jinak null.
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param list<string> $codes
+     */
+    public function settlementAccountOf(int $supplierId, string $sourceType, array $codes): ?string
+    {
+        $codes = array_values(array_unique(array_map('strval', $codes)));
+        if ($sourceType === 'purchase_invoice') {
+            return PurchasePayableAccount::payableFromCodes($codes);
+        }
+        $synthetic = (new ItemPostingAccounts($this->db, $this->rules()))->receivableSynthetic($supplierId);
+        $receivables = array_values(array_filter($codes, static fn (string $code): bool => SaldoAccountMatch::belongsTo($code, $synthetic)));
+        return count($receivables) === 1 ? $receivables[0] : null;
+    }
+
+    /**
      * Má doklad evidovanou úhradu (přijatý {@see PurchasePayableAccount::hasPayment}, vydaný
      * {@see issuedHasPayment})?
      *
