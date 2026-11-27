@@ -180,8 +180,8 @@ final class LaterDatedEntrySpread
 
     /**
      * Zaúčtované nestornované zápisy období s řádkem na 381/384 nebo účtu odpisů, bez zápisů
-     * jiných větví a bez zápisů připojených k položkám agendy. Jeden průchod deníkem období
-     * po indexu (supplier_id, entry_date).
+     * jiných větví a bez zápisů připojených k položkám agendy. Zápisy se hledají jen
+     * po řádcích těchto účtů (index supplier_id, account_id, entry_id), ne průchodem deníku.
      *
      * @param array{prepaid_expense:string, deferred_revenue:string, depreciation:string} $prefix
      * @return array<int,array{date:string, document_no:string, lines:array<string,array{type:string, delta:float}>}>
@@ -189,6 +189,15 @@ final class LaterDatedEntrySpread
     private function candidateEntries(int $supplierId, string $from, string $to, array $prefix): array
     {
         $excluded = "'" . implode("', '", self::EXCLUDED_SOURCE_TYPES) . "'";
+        $like = static fn (string $p): string => addcslashes($p, '%_\\') . '%';
+        $accounts = $this->db->pdo()->prepare(
+            'SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND (account_code LIKE ? OR account_code LIKE ? OR account_code LIKE ?)'
+        );
+        $accounts->execute([$supplierId, $like($prefix['prepaid_expense']), $like($prefix['deferred_revenue']), $like($prefix['depreciation'])]);
+        $accountIds = array_map('intval', $accounts->fetchAll(\PDO::FETCH_COLUMN));
+        if ($accountIds === []) {
+            return [];
+        }
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.id, e.entry_date, COALESCE(e.document_no, '') AS document_no,
                     a.account_code, a.account_type,
@@ -201,16 +210,14 @@ final class LaterDatedEntrySpread
                 AND (e.source_type IS NULL OR e.source_type NOT IN ({$excluded}))
                 AND EXISTS (SELECT 1
                               FROM journal_entry_lines xl
-                              JOIN chart_of_accounts xa ON xa.id = xl.account_id
-                             WHERE xl.entry_id = e.id AND xl.supplier_id = e.supplier_id
-                               AND (xa.account_code LIKE ? OR xa.account_code LIKE ? OR xa.account_code LIKE ?))
+                             WHERE xl.supplier_id = e.supplier_id AND xl.entry_id = e.id
+                               AND xl.account_id IN (" . implode(',', $accountIds) . "))
                 AND NOT EXISTS (SELECT 1 FROM accrual_schedule s WHERE s.supplier_id = e.supplier_id AND s.journal_entry_id = e.id)
                 AND NOT EXISTS (SELECT 1 FROM accrual_entry_links al WHERE al.supplier_id = e.supplier_id AND al.journal_entry_id = e.id)
               GROUP BY e.id, e.entry_date, e.document_no, a.account_code, a.account_type
               ORDER BY e.entry_date, e.id"
         );
-        $like = static fn (string $p): string => addcslashes($p, '%_\\') . '%';
-        $stmt->execute([$supplierId, $from, $to, $like($prefix['prepaid_expense']), $like($prefix['deferred_revenue']), $like($prefix['depreciation'])]);
+        $stmt->execute([$supplierId, $from, $to]);
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             $id = (int) $r['id'];
