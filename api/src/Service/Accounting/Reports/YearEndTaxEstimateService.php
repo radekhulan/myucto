@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Tax\Return\DppoBooksFingerprint;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 
@@ -24,6 +25,10 @@ use MyInvoice\Service\Tax\Return\TaxReturnService;
  *   - nezaúčtované odpisy roku jsou položkou téže projekce uzávěrky (účetní snižují VH,
  *     rozdíl proti daňovým jde do ř. 50/150), takže je blok i náhled DPPO mají stejně.
  *
+ *   - můstek mezi VH k datu výkazu (tabulka výsledovky) a zaúčtovaným VH celého období:
+ *     {@see DppoBooksFingerprint::profitBeforeTaxBridge()}, stejné vymezení zápisů jako
+ *     ř. 10 náhledu, takže součet můstku je `vh_posted` na haléř.
+ *
  * Blok má smysl jen pro právnickou osobu v roce, který ještě nemá zaúčtovanou daň
  * z příjmů (591) a není uzavřený. Daň fyzické osoby není nákladem podniku, takže
  * „VH po zdanění" u ní nedává smysl a blok se nevrací.
@@ -39,11 +44,14 @@ final class YearEndTaxEstimateService
     /**
      * @return array<string,mixed>
      */
-    public function estimate(int $supplierId, int $periodId): array
+    public function estimate(int $supplierId, int $periodId, ?string $asOf = null): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
+        }
+        if ($asOf !== null && ($asOf < (string) $period['starts_on'] || $asOf > (string) $period['ends_on'])) {
+            throw new ReportException('validation_failed', 'as_of musí ležet uvnitř zvoleného období.', 422);
         }
         $fiscalYear = (int) $period['fiscal_year'];
         $out = [
@@ -85,6 +93,9 @@ final class YearEndTaxEstimateService
         $tax = round((float) ($isProjection ? $projection['projected_tax'] : ($result['tax'] ?? 0)), 2);
         $base = round((float) ($isProjection ? $projection['projected_base'] : ($summary['base'] ?? 0)), 2);
         $advances = round((float) ($result['advances_paid'] ?? 0), 2);
+        $bridge = ($preview['podklady']['accounting_decree'] ?? '500') === '504'
+            ? null
+            : $this->bridge($supplierId, $period, $asOf, $vhPosted);
 
         return [
             'applicable' => true,
@@ -92,6 +103,7 @@ final class YearEndTaxEstimateService
             'period' => $out['period'],
             'return_status' => $preview['status'],
             'vh_posted' => $vhPosted,
+            'bridge' => $bridge,
             'closing_items' => array_values((array) ($closing['items'] ?? [])),
             // Kroky uzávěrky, jejichž náhled selhal: projekce je bez nich neúplná.
             'projection_warnings' => array_values((array) ($closing['warnings'] ?? [])),
@@ -107,6 +119,46 @@ final class YearEndTaxEstimateService
             'advances_source' => $preview['advances_source'],
             'balance_due' => round($tax - $advances, 2),
             'vh_after_tax' => round($vhBeforeTax - $tax, 2),
+        ];
+    }
+
+    /**
+     * Můstek od VH k datu výkazu k `vh_posted`. Bez data výkazu, nebo když den výkazu je
+     * konec období, není co přemosťovat (null). Rámec 504 má VH z vlastního zdroje
+     * posouzení neziskové organizace, proto můstek nemá (volající vrací null).
+     *
+     * @param array<string,mixed> $period
+     * @return array{as_of:string, ends_on:string, vh_as_of:float, groups:list<array{key:string,amount:float}>, vh_posted:float}|null
+     */
+    private function bridge(int $supplierId, array $period, ?string $asOf, float $vhPosted): ?array
+    {
+        $endsOn = (string) $period['ends_on'];
+        if ($asOf === null || $asOf >= $endsOn) {
+            return null;
+        }
+        $raw = (new DppoBooksFingerprint($this->db))->profitBeforeTaxBridge($supplierId, (string) $period['starts_on'], $asOf, $endsOn);
+        $totalCents = (int) round($raw['as_of'] * 100);
+        $groups = [];
+        foreach ($raw['groups'] as $key => $amount) {
+            $cents = (int) round($amount * 100);
+            $totalCents += $cents;
+            if ($cents !== 0) {
+                $groups[] = ['key' => $key, 'amount' => $amount];
+            }
+        }
+        // Součet musí sedět na haléř. Nesedí jen při zaúčtování mezi dotazy: pak se můstek
+        // radši nevrací, než aby blok ukázal nesouhlasící řádky.
+        if ($totalCents !== (int) round($vhPosted * 100)) {
+            error_log(sprintf('Odhad do konce roku (firma %d): můstek %.2f nesouhlasí s VH %.2f, vynechán.', $supplierId, $totalCents / 100, $vhPosted));
+            return null;
+        }
+
+        return [
+            'as_of' => $asOf,
+            'ends_on' => $endsOn,
+            'vh_as_of' => $raw['as_of'],
+            'groups' => $groups,
+            'vh_posted' => $vhPosted,
         ];
     }
 

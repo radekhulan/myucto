@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Accounting\Reports;
 
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\ReportException;
@@ -18,7 +19,10 @@ use Psr\Log\LoggerInterface;
  * Odhad do konce roku k výsledovce po účtech (interní, načítá se zvlášť, protože
  * přepočítává náhled DPPO).
  *
- *   GET /api/accounting/reports/statement-accounts/tax-estimate?period_id=
+ *   GET /api/accounting/reports/statement-accounts/tax-estimate?period_id=&as_of=
+ *
+ * `as_of` = den výkazu tabulky výsledovky (stejný význam jako u statement-accounts);
+ * s ním odpověď nese můstek od VH k tomu dni k zaúčtovanému VH celého období.
  */
 final class YearEndTaxEstimateAction
 {
@@ -41,8 +45,13 @@ final class YearEndTaxEstimateAction
             return Json::error($response, 'validation_failed', 'period_id je povinný.', 422);
         }
 
+        $asOf = trim((string) ($request->getQueryParams()['as_of'] ?? ''));
+        if ($asOf !== '' && !IsoDate::isValid($asOf)) {
+            return Json::error($response, 'validation_failed', 'as_of musí být datum (YYYY-MM-DD).', 422);
+        }
+
         try {
-            $data = $this->estimates->estimate($supplierId, $periodId);
+            $data = $this->estimates->estimate($supplierId, $periodId, $asOf !== '' ? $asOf : null);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {

@@ -157,6 +157,67 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertTrue($body['applicable']);
     }
 
+    /**
+     * Můstek od VH k datu výkazu (tabulka výsledovky) k zaúčtovanému VH celého období:
+     * později datované zaúčtované zápisy po skupinách podle povahy, součet přesně vh_posted,
+     * uzávěrkový zápis vyloučený stejně jako ve VH tabulky i náhledu DPPO.
+     */
+    public function testBridgeFromStatementDateToPostedProfit(): void
+    {
+        $asOf = self::YEAR . '-11-27';
+        $this->post(self::YEAR . '-06-30', [['384', 'debit', 10000], ['602', 'credit', 10000]]);
+        $this->post(self::YEAR . '-11-30', [['384', 'debit', 120000.45], ['602', 'credit', 120000.45]]);
+        $this->post(self::YEAR . '-12-31', [['518', 'debit', 15000.10], ['381', 'credit', 15000.10]]);
+        $this->post(self::YEAR . '-12-31', [['518', 'debit', 7000], ['389', 'credit', 7000]]);
+        $this->post(self::YEAR . '-12-31', [['551', 'debit', 24000], ['082', 'credit', 24000]]);
+        $this->post(self::YEAR . '-12-15', [['518', 'debit', 5000], ['321', 'credit', 5000]]);
+        // Rudé storno rozpuštění: patří do stejné skupiny jako rušený zápis.
+        $this->post(self::YEAR . '-12-20', [['384', 'debit', 2000, true], ['602', 'credit', 2000, true]]);
+        $closingId = $this->post(self::YEAR . '-12-31', [['602', 'debit', 1000], ['710', 'credit', 1000]], 'closing');
+        $this->db->pdo()->prepare('UPDATE journal_entries SET source_id = ? WHERE id = ?')->execute([$this->periodId, $closingId]);
+
+        $e = $this->service->estimate($this->supplierId, $this->periodId, $asOf);
+
+        self::assertTrue($e['applicable']);
+        self::assertSame(round(650000 + 10000 + 120000.45 - 2000 - 15000.10 - 7000 - 24000 - 5000, 2), $e['vh_posted']);
+        $bridge = $e['bridge'];
+        self::assertIsArray($bridge);
+        self::assertSame($asOf, $bridge['as_of']);
+        self::assertSame(self::YEAR . '-12-31', $bridge['ends_on']);
+        self::assertSame(660000.0, $bridge['vh_as_of']);
+        $view = $this->statements->accountView($this->supplierId, $this->periodId, $asOf);
+        self::assertEqualsWithDelta($view['profit_loss']['profit_before_tax'], $bridge['vh_as_of'], 0.001, 'Začátek můstku = VH tabulky k datu výkazu.');
+        self::assertSame([
+            ['key' => 'deferred_revenue', 'amount' => 118000.45],
+            ['key' => 'prepaid_expenses', 'amount' => -15000.1],
+            ['key' => 'accruals', 'amount' => -7000.0],
+            ['key' => 'depreciation', 'amount' => -24000.0],
+            ['key' => 'other', 'amount' => -5000.0],
+        ], $bridge['groups']);
+        $cents = (int) round($bridge['vh_as_of'] * 100);
+        foreach ($bridge['groups'] as $g) {
+            $cents += (int) round($g['amount'] * 100);
+        }
+        self::assertSame((int) round($e['vh_posted'] * 100), $cents, 'Součet můstku = vh_posted na haléř.');
+        self::assertSame($e['vh_posted'], $bridge['vh_posted']);
+
+        self::assertNull($this->service->estimate($this->supplierId, $this->periodId)['bridge'], 'Bez data výkazu se můstek nevrací.');
+        self::assertNull($this->service->estimate($this->supplierId, $this->periodId, self::YEAR . '-12-31')['bridge'], 'Den výkazu = konec období: není co přemosťovat.');
+
+        [$req, $res] = $this->req('/api/accounting/reports/statement-accounts/tax-estimate', ['period_id' => (string) $this->periodId, 'as_of' => $asOf]);
+        $r = $this->action->get($req, $res);
+        self::assertSame(200, $r->getStatusCode());
+        $r->getBody()->rewind();
+        $body = json_decode((string) $r->getBody(), true);
+        self::assertEqualsWithDelta(660000.0, $body['bridge']['vh_as_of'], 0.001);
+        self::assertCount(5, $body['bridge']['groups']);
+
+        foreach (['2047-02-31', (self::YEAR + 1) . '-01-05'] as $bad) {
+            [$req, $res] = $this->req('/api/accounting/reports/statement-accounts/tax-estimate', ['period_id' => (string) $this->periodId, 'as_of' => $bad]);
+            self::assertSame(422, $this->action->get($req, $res)->getStatusCode(), 'Neplatné datum nebo mimo období: ' . $bad);
+        }
+    }
+
     public function testOptionalClosingSuggestionsAreShownButNotAdded(): void
     {
         // Pravidelná měsíční faktura leden–listopad, prosinec chybí → návrh dohadné položky.
@@ -296,7 +357,7 @@ final class YearEndTaxEstimateTest extends TestCase
     }
 
     /** @param list<array{0:string,1:string,2:float|int,3?:bool}> $lines */
-    private function post(string $date, array $lines, string $sourceType = 'manual'): void
+    private function post(string $date, array $lines, string $sourceType = 'manual'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -310,6 +371,8 @@ final class YearEndTaxEstimateTest extends TestCase
             $ids->execute([$this->supplierId, $code]);
             $ins->execute([$entryId, $this->supplierId, (int) $ids->fetchColumn(), $side, $amount, !empty($line[3]) ? 1 : 0]);
         }
+
+        return $entryId;
     }
 
     private function vendor(): int

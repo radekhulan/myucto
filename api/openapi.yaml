@@ -35449,6 +35449,13 @@ paths:
         schema:
           type: integer
         required: true
+      - in: query
+        name: as_of
+        description: Den výkazu výsledovky po účtech (YYYY-MM-DD, uvnitř období). S ním odpověď nese můstek `bridge` od VH k tomuto dni k zaúčtovanému VH celého období.
+        schema:
+          type: string
+          format: date
+        required: false
       responses:
         '200':
           description: OK
@@ -62195,6 +62202,11 @@ components:
           - final
         vh_posted:
           type: number
+        bridge:
+          description: Můstek od VH k dni výkazu (`as_of`) k `vh_posted`. Null bez `as_of`, když je den výkazu konec období, a u rámce 504.
+          anyOf:
+          - $ref: '#/components/schemas/YearEndProfitBridge'
+          - type: 'null'
         closing_items:
           type: array
           items:
@@ -62250,6 +62262,45 @@ components:
         balance_due:
           type: number
         vh_after_tax:
+          type: number
+    YearEndProfitBridge:
+      type: object
+      required:
+      - as_of
+      - ends_on
+      - vh_as_of
+      - groups
+      - vh_posted
+      properties:
+        as_of:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        vh_as_of:
+          type: number
+          description: VH před zdaněním ze zaúčtovaných zápisů do dne výkazu včetně.
+        groups:
+          type: array
+          description: Nenulové skupiny zaúčtovaných zápisů datovaných po dni výkazu do konce období. vh_as_of + Σ amount = vh_posted.
+          items:
+            type: object
+            required:
+            - key
+            - amount
+            properties:
+              key:
+                type: string
+                enum:
+                - deferred_revenue
+                - prepaid_expenses
+                - accruals
+                - depreciation
+                - other
+              amount:
+                type: number
+        vh_posted:
           type: number
     YearEndClosingItem:
       type: object

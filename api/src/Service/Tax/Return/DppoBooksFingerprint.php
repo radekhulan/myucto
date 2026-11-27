@@ -110,19 +110,91 @@ final class DppoBooksFingerprint
     public function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS vh
-               FROM journal_entry_lines l
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(" . self::PROFIT_SQL . "), 0) AS vh
+               " . self::profitScopeSql()
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /** Skupiny můstku {@see profitBeforeTaxBridge()} v pořadí zobrazení. */
+    public const BRIDGE_GROUPS = ['deferred_revenue', 'prepaid_expenses', 'accruals', 'depreciation', 'other'];
+
+    /**
+     * Můstek VH před zdaněním ({@see profitBeforeTax()}) mezi dnem výkazu a koncem období:
+     * VH ze zápisů do `$asOf` včetně a zápisy datované po něm do `$endsOn`, rozdělené podle
+     * povahy zápisu. Vymezení zápisů i účtů je to samé jako u profitBeforeTax(), takže
+     * `as_of` + Σ skupin = profitBeforeTax($startsOn, $endsOn) na haléř.
+     *
+     * Povaha se pozná podle účtů celého zápisu (storno nese tytéž účty jako rušený zápis):
+     * protiúčet 384 = rozpuštění výnosů příštích období, 381 = nákladů příštích období,
+     * 383/385/388/389 = výdaje a příjmy příštích období a dohadné položky, účet 551 = odpisy,
+     * jinak ostatní. Zápis s víc znaky spadne do první skupiny v tomto pořadí.
+     *
+     * @return array{as_of: float, groups: array<string,float>}
+     */
+    public function profitBeforeTaxBridge(int $supplierId, string $startsOn, string $asOf, string $endsOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ",
+             later_nature AS (
+                SELECT le.id AS entry_id,
+                       MAX(CASE WHEN la.account_code LIKE '384%' THEN 1 ELSE 0 END) AS has_384,
+                       MAX(CASE WHEN la.account_code LIKE '381%' THEN 1 ELSE 0 END) AS has_381,
+                       MAX(CASE WHEN la.account_code LIKE '383%' OR la.account_code LIKE '385%'
+                                  OR la.account_code LIKE '388%' OR la.account_code LIKE '389%' THEN 1 ELSE 0 END) AS has_accrual,
+                       MAX(CASE WHEN la.account_code LIKE '551%' THEN 1 ELSE 0 END) AS has_551
+                  FROM journal_entries le
+                  JOIN journal_entry_lines ll ON ll.supplier_id = le.supplier_id AND ll.entry_id = le.id
+                  JOIN chart_of_accounts la   ON la.id = ll.account_id
+                 WHERE le.supplier_id = ? AND le.posted_at IS NOT NULL
+                   AND le.entry_date > ? AND le.entry_date <= ?
+                 GROUP BY le.id
+             )
+             SELECT CASE WHEN e.entry_date <= ? THEN 'as_of'
+                         WHEN n.has_384 = 1 THEN 'deferred_revenue'
+                         WHEN n.has_381 = 1 THEN 'prepaid_expenses'
+                         WHEN n.has_accrual = 1 THEN 'accruals'
+                         WHEN n.has_551 = 1 THEN 'depreciation'
+                         ELSE 'other' END AS bucket,
+                    COALESCE(SUM(" . self::PROFIT_SQL . "), 0) AS vh
+               " . self::profitScopeSql('LEFT JOIN later_nature n ON n.entry_id = e.id') . "
+              GROUP BY bucket"
+        );
+        $stmt->execute([
+            $supplierId, $asOf, $endsOn,
+            $asOf,
+            $supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE,
+        ]);
+        $cents = array_fill_keys(['as_of', ...self::BRIDGE_GROUPS], 0);
+        foreach ($stmt->fetchAll(\PDO::FETCH_KEY_PAIR) as $bucket => $vh) {
+            $cents[(string) $bucket] = (int) round((float) $vh * 100);
+        }
+
+        return [
+            'as_of' => round($cents['as_of'] / 100, 2),
+            'groups' => array_map(static fn (int $c): float => round($c / 100, 2), array_intersect_key($cents, array_flip(self::BRIDGE_GROUPS))),
+        ];
+    }
+
+    private const PROFIT_SQL = "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END";
+
+    /**
+     * FROM a WHERE výsledku hospodaření před zdaněním (parametry firma, od, do, skladový
+     * slot). Jediné místo vymezení zápisů pro {@see profitBeforeTax()} i můstek.
+     */
+    private static function profitScopeSql(string $extraJoin = ''): string
+    {
+        return "FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
+               {$extraJoin}
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type IN ('revenue','expense')
-                AND a.account_code NOT LIKE '59%'"
-        );
-        $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
-        return round((float) $stmt->fetchColumn(), 2);
+                AND a.account_code NOT LIKE '59%'";
     }
 
     /**

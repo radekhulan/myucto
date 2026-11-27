@@ -82,7 +82,7 @@ export const AUDIT_TOOLS = [
     '/accounting/reports/document-completeness'),
   read('year_end_tax_estimate', 'Odhad daně do konce roku',
     'Čtecí živý odhad DPPO k výsledovce po účtech, bez uzavření či podání přiznání.',
-    { period_id: id('ID účetního období.') }, '/accounting/reports/statement-accounts/tax-estimate', ['period_id'], ['period_id']),
+    { period_id: id('ID účetního období.'), as_of: date('Den výkazu; s ním odpověď nese můstek k VH celého období.') }, '/accounting/reports/statement-accounts/tax-estimate', ['period_id', 'as_of'], ['period_id']),
   read('portfolio_overview', 'Přehled přístupných firem',
     'Přehled účetní kanceláře: termíny, nezaúčtované doklady, nespárované platby a stav období napříč přístupnými firmami.',
     {}, '/portfolio/overview'),
