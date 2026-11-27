@@ -218,6 +218,51 @@ final class YearEndTaxEstimateTest extends TestCase
         }
     }
 
+    /**
+     * Můstek s průběžným rozlišením: začíná VH tabulky k datu s volbou a skupiny později
+     * datovaných zápisů sníží o část, kterou volba už započetla (roční rozpuštění 381 poměrem
+     * dnů, odpis za deset měsíců). Součet je dál přesně vh_posted.
+     */
+    public function testBridgeWithAccrualSpreadStartsAtSpreadProfit(): void
+    {
+        $asOf = self::YEAR . '-11-27';
+        $this->post(self::YEAR . '-11-30', [['384', 'debit', 120000.45], ['602', 'credit', 120000.45]]);
+        $this->post(self::YEAR . '-12-31', [['518', 'debit', 15000.10], ['381', 'credit', 15000.10]]);
+        $this->post(self::YEAR . '-12-31', [['551', 'debit', 24000], ['082', 'credit', 24000]]);
+        $this->post(self::YEAR . '-12-15', [['518', 'debit', 5000], ['321', 'credit', 5000]]);
+
+        $plain = $this->service->estimate($this->supplierId, $this->periodId, $asOf);
+        $e = $this->service->estimate($this->supplierId, $this->periodId, $asOf, true);
+        self::assertSame($plain['vh_posted'], $e['vh_posted'], 'Zaúčtovaný VH období volba nemění.');
+
+        $prepaid = 13602.83; // 15 000,10 × 331/365
+        $view = $this->statements->accountView($this->supplierId, $this->periodId, $asOf, null, null, true);
+        $bridge = $e['bridge'];
+        self::assertEqualsWithDelta($view['profit_loss']['profit_before_tax'], $bridge['vh_as_of'], 0.001, 'Začátek můstku = VH tabulky s volbou.');
+        self::assertEqualsWithDelta(650000.0 - $prepaid - 20000.0, $bridge['vh_as_of'], 0.001);
+        self::assertSame(650000.0, $bridge['vh_as_of_posted']);
+        self::assertEqualsWithDelta(-$prepaid - 20000.0, $bridge['accrual_spread'], 0.001);
+        self::assertSame([
+            ['key' => 'deferred_revenue', 'amount' => 120000.45, 'spread' => 0.0],
+            ['key' => 'prepaid_expenses', 'amount' => round(-15000.10 + $prepaid, 2), 'spread' => -$prepaid],
+            ['key' => 'depreciation', 'amount' => -4000.0, 'spread' => -20000.0],
+            ['key' => 'other', 'amount' => -5000.0, 'spread' => 0.0],
+        ], $bridge['groups']);
+        $cents = (int) round($bridge['vh_as_of'] * 100);
+        foreach ($bridge['groups'] as $g) {
+            $cents += (int) round($g['amount'] * 100);
+        }
+        self::assertSame((int) round($e['vh_posted'] * 100), $cents, 'Součet můstku = vh_posted na haléř i s volbou.');
+
+        [$req, $res] = $this->req('/api/accounting/reports/statement-accounts/tax-estimate', ['period_id' => (string) $this->periodId, 'as_of' => $asOf, 'accrual_spread' => '1']);
+        $r = $this->action->get($req, $res);
+        self::assertSame(200, $r->getStatusCode());
+        $r->getBody()->rewind();
+        self::assertEqualsWithDelta($bridge['vh_as_of'], json_decode((string) $r->getBody(), true)['bridge']['vh_as_of'], 0.001);
+        [$req, $res] = $this->req('/api/accounting/reports/statement-accounts/tax-estimate', ['period_id' => (string) $this->periodId, 'as_of' => $asOf, 'accrual_spread' => 'x']);
+        self::assertSame(422, $this->action->get($req, $res)->getStatusCode());
+    }
+
     public function testOptionalClosingSuggestionsAreShownButNotAdded(): void
     {
         // Pravidelná měsíční faktura leden–listopad, prosinec chybí → návrh dohadné položky.

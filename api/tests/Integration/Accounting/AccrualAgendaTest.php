@@ -291,6 +291,23 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame(0.0, $projection['expense']);
     }
 
+    /**
+     * Roční rozpuštění zaúčtované předem k 31. 12.: výkaz k 15. 3. ho v deníku nemá, proto
+     * ho průběžný výkaz počítá jako nezaúčtované (poměr dnů); ke konci roku už nic.
+     */
+    public function testInterimCountsYearlyReleasePostedAfterReportDate(): void
+    {
+        $guard = new AccrualAgendaGuard($this->db);
+        $item = $this->revenueItem(36_500.00, '2091-01-01', '2092-12-31', ['method' => 'yearly']);
+        $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->rowOn($item, '2091-12-31')['id'], $this->meta());
+
+        $part = AccrualScheduleCalculator::recognizedBetween(36_500.00, '2091-01-01', '2092-12-31', '2090-12-31', '2091-03-15');
+        $interim = $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-03-15');
+        self::assertSame($part, $interim['total']);
+        self::assertSame($part, $interim['deltas']['384']);
+        self::assertSame(0.0, $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-12-31')['total'], 'Ke dni zápisu ho nese deník.');
+    }
+
     // ── krok uzávěrky a životní cyklus ───────────────────────────────────────
 
     public function testClosingStepPostsDueRowsIntoClosingPeriod(): void

@@ -142,19 +142,31 @@ final class FinancialStatementDepreciationSpreadTest extends TestCase
         self::assertEqualsWithDelta(round($year * 7 / 9, 2), $october['accrual_spread']['depreciation'], 0.001);
     }
 
-    /** Po zaúčtování odpisů roku je odpis v deníku a volba ho nepřidá podruhé. */
-    public function testBookedYearIsNotAddedAgain(): void
+    /**
+     * Odpis roku zaúčtovaný k poslednímu dni období: výkaz k tomu dni ho má v deníku a volba
+     * nic nepřidá. Výkaz k 31. 10. ho v deníku ještě nemá (zápis je datovaný po dni výkazu),
+     * proto volba ukáže uplynulé měsíce stejně jako u nezaúčtované karty.
+     */
+    public function testYearBookedAfterReportDateCountsElapsedMonths(): void
     {
         $this->createAssetInUse('M-PO-2', self::YEAR . '-03-10', 72000.00, 36);
         $result = $this->depreciation->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId, 'user_id' => $this->userId]);
         self::assertSame([], $result['errors']);
 
+        $yearEnd = $this->statements->incomeStatement($this->supplierId, $this->periodId, self::ENDS_ON, 'full', null, true);
+        self::assertSame(0.0, $yearEnd['accrual_spread']['depreciation'], 'Ke konci období nese odpis deník.');
+        self::assertSame(0, $yearEnd['accrual_spread']['depreciation_assets']);
+
         $plain = $this->statements->incomeStatement($this->supplierId, $this->periodId, self::YEAR . '-10-31', 'full');
         $spread = $this->statements->incomeStatement($this->supplierId, $this->periodId, self::YEAR . '-10-31', 'full', null, true);
 
-        self::assertSame(0.0, $spread['accrual_spread']['depreciation']);
-        self::assertSame(0, $spread['accrual_spread']['depreciation_assets']);
-        self::assertEqualsWithDelta($plain['checks']['profit_current'], $spread['checks']['profit_current'], 0.001);
+        self::assertSame(0.0, $this->accountAmount($plain['rows'], '551'), 'Zápis k 31. 12. ve výkazu k 31. 10. není.');
+        self::assertEqualsWithDelta(14000.00, $spread['accrual_spread']['depreciation'], 0.001);
+        self::assertSame(1, $spread['accrual_spread']['depreciation_assets']);
+        self::assertEqualsWithDelta($plain['checks']['profit_current'] - 14000.00, $spread['checks']['profit_current'], 0.001);
+
+        $bs = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::YEAR . '-10-31', 'full', null, true);
+        self::assertTrue($bs['checks']['balanced']);
     }
 
     private function createAssetInUse(string $inventoryNumber, string $useDate, float $price, int $lifeMonths, string $accMethod = 'straight_line'): int

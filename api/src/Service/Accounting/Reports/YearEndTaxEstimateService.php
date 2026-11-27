@@ -209,7 +209,7 @@ final class YearEndTaxEstimateService
      * zaúčtuje až uzávěrka) tak skupinu sníží pod nulu. Součet zůstává `vh_posted` na haléř.
      *
      * @param array<string,mixed> $period
-     * @return array{as_of:string, ends_on:string, vh_as_of:float, vh_as_of_posted:float, accrual_spread:?float, groups:list<array{key:string,amount:float,spread:float}>, vh_posted:float}|null
+     * @return array{as_of:string, ends_on:string, vh_as_of:float, vh_as_of_posted:float, accrual_spread:?float, groups:list<array{key:string,amount:float,spread?:float}>, vh_posted:float}|null
      */
     private function bridge(int $supplierId, array $period, ?string $asOf, float $vhPosted, bool $accrualSpread = false): ?array
     {
@@ -235,7 +235,7 @@ final class YearEndTaxEstimateService
             $cents = (int) round($amount * 100) - $spreadCents[$key];
             $totalCents += $cents;
             if ($cents !== 0 || $spreadCents[$key] !== 0) {
-                $groups[] = ['key' => $key, 'amount' => round($cents / 100, 2), 'spread' => round($spreadCents[$key] / 100, 2)];
+                $groups[] = ['key' => $key, 'amount' => round($cents / 100, 2)] + ($accrualSpread ? ['spread' => round($spreadCents[$key] / 100, 2)] : []);
             }
         }
         // Součet musí sedět na haléř (úpravy průběžného rozlišení se v něm odečtou). Nesedí jen při zaúčtování mezi dotazy: pak se můstek
