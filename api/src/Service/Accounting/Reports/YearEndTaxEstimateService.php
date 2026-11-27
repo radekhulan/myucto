@@ -96,6 +96,9 @@ final class YearEndTaxEstimateService
         $bridge = ($preview['podklady']['accounting_decree'] ?? '500') === '504'
             ? null
             : $this->bridge($supplierId, $period, $asOf, $vhPosted);
+        $closingItems = array_values((array) ($closing['items'] ?? []));
+        $vhAfterTax = round($vhBeforeTax - $tax, 2);
+        $balance = self::balanceEffects($closingItems, $tax, round($vhAfterTax - $vhPosted, 2));
 
         return [
             'applicable' => true,
@@ -104,7 +107,7 @@ final class YearEndTaxEstimateService
             'return_status' => $preview['status'],
             'vh_posted' => $vhPosted,
             'bridge' => $bridge,
-            'closing_items' => array_values((array) ($closing['items'] ?? [])),
+            'closing_items' => $closingItems,
             // Kroky uzávěrky, jejichž náhled selhal: projekce je bez nich neúplná.
             'projection_warnings' => array_values((array) ($closing['warnings'] ?? [])),
             // Rozdíl účetních a daňových odpisů: karty v konceptu, odpisy na 551 mimo karty apod.
@@ -118,8 +121,75 @@ final class YearEndTaxEstimateService
             'advances_paid' => $advances,
             'advances_source' => $preview['advances_source'],
             'balance_due' => round($tax - $advances, 2),
-            'vh_after_tax' => round($vhBeforeTax - $tax, 2),
+            'vh_after_tax' => $vhAfterTax,
+            'balance_effects' => $balance['items'],
+            'balance_check' => $balance['check'],
         ];
+    }
+
+    /**
+     * Rozvahový protiúčet kroků projekce uzávěrky ({@see \MyInvoice\Service\Tax\Return\ClosingProjectionCalculator}):
+     * každý krok je dvojice výsledkový účet ↔ jeden rozvahový účet, takže dopad na VH (znaménko
+     * × částka) je zároveň dopad na rozvahu. `asset` = mění aktiva o dopad na VH, `liability`
+     * = mění pasiva opačně, `net` = netto více rozvahových účtů (aktiva − pasiva), které
+     * projekce po účtech nerozkládá (kurzové rozdíly, rozpuštění 381/384).
+     */
+    private const BALANCE_EFFECTS = [
+        'small_asset_accrual' => ['381', 'asset'],
+        'prepaid_expense_accrual' => ['381', 'asset'],
+        'deferred_revenue_accrual' => ['384', 'liability'],
+        'prior_deferral_release' => ['381/384', 'net'],
+        'accrual_agenda_release' => ['381/384', 'net'],
+        'fx_revaluation' => ['21x/22x/31x/32x/46x', 'net'],
+        'stock_closing' => ['112/123/132', 'asset'],
+        'depreciation' => ['07x/08x', 'asset'],
+        'provision' => ['39x', 'asset'],
+        'estimate' => ['389', 'liability'],
+    ];
+
+    /**
+     * Odhadované změny rozvahy z návrhů uzávěrky a daně z příjmů (341). Návrhy k potvrzení
+     * (`optional`) se ukazují, ale nesčítají, stejně jako ve VH. Kontrola: Σ změn aktiv −
+     * Σ změn pasiv = odhad VH po zdanění − zaúčtovaný VH, takže rozvaha po odhadu zůstane
+     * vyrovnaná.
+     *
+     * @param list<array<string,mixed>> $closingItems
+     * @return array{items:list<array<string,mixed>>, check:array{assets:float,liabilities:float,difference:float,expected:float,matches:bool}}
+     */
+    private static function balanceEffects(array $closingItems, float $tax, float $expected): array
+    {
+        $items = [];
+        $assets = 0;
+        $liabilities = 0;
+        foreach ($closingItems as $item) {
+            $key = (string) $item['key'];
+            [$accounts, $side] = self::BALANCE_EFFECTS[$key] ?? [null, 'net'];
+            $vhCents = (int) round((float) $item['amount'] * 100) * ((int) $item['sign'] >= 0 ? 1 : -1);
+            $assetCents = $side === 'liability' ? 0 : $vhCents;
+            $liabilityCents = $side === 'liability' ? -$vhCents : 0;
+            $optional = (bool) ($item['optional'] ?? false);
+            if (!$optional) {
+                $assets += $assetCents;
+                $liabilities += $liabilityCents;
+            }
+            $items[] = ['key' => $key, 'label_key' => (string) ($item['label_key'] ?? ''), 'accounts' => $accounts, 'side' => $side,
+                'assets' => round($assetCents / 100, 2), 'liabilities' => round($liabilityCents / 100, 2), 'optional' => $optional];
+        }
+        $taxCents = (int) round($tax * 100);
+        if ($taxCents !== 0) {
+            $liabilities += $taxCents;
+            $items[] = ['key' => 'income_tax', 'label_key' => 'accounting.statement_accounts.estimate.balance_income_tax', 'accounts' => '341',
+                'side' => 'liability', 'assets' => 0.0, 'liabilities' => round($taxCents / 100, 2), 'optional' => false];
+        }
+        $expectedCents = (int) round($expected * 100);
+
+        return ['items' => $items, 'check' => [
+            'assets' => round($assets / 100, 2),
+            'liabilities' => round($liabilities / 100, 2),
+            'difference' => round(($assets - $liabilities) / 100, 2),
+            'expected' => round($expectedCents / 100, 2),
+            'matches' => $assets - $liabilities === $expectedCents,
+        ]];
     }
 
     /**

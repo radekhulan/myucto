@@ -29,6 +29,21 @@
     .total td { font-weight: bold; border-top: 0.4pt solid #999; }
     .result td { font-weight: bold; }
     .warn { color: #b91c1c; font-weight: bold; margin-top: 2mm; }
+    .estimate { margin-top: 4mm; border: 0.6pt dashed #b45309; padding: 2mm; page-break-inside: avoid; }
+    .estimate-head { font-size: 9pt; font-weight: bold; color: #92400e; margin-bottom: 1mm; }
+    .estimate-badge { font-size: 6.5pt; font-weight: bold; color: #92400e; background-color: #fef3c7; padding: 0.5mm 1.5mm; }
+    .estimate-note { font-size: 6.5pt; color: #555; margin-bottom: 2mm; }
+    .estimate-sub { font-size: 8pt; font-weight: bold; margin: 2mm 0 1mm; }
+    .estimate-warn { font-size: 6.5pt; color: #92400e; margin-bottom: 1mm; }
+    table.estimate-main { border-collapse: collapse; margin-bottom: 2mm; }
+    table.estimate-main td { font-size: 7pt; color: #555; padding: 1mm 4mm 1mm 0; }
+    table.estimate-main strong { font-size: 11pt; color: #15131D; }
+    table.estimate-rows { width: 60%; border-collapse: collapse; margin-bottom: 1mm; }
+    table.estimate-rows th { font-size: 6.5pt; font-weight: normal; color: #555; text-align: right; padding: 0.5mm 1mm; border-bottom: 0.3pt solid #ccc; }
+    table.estimate-rows th.thl { text-align: left; }
+    table.estimate-rows td { padding: 0.5mm 1mm; border-bottom: 0.2pt solid #eee; }
+    table.estimate-rows td.indent { padding-left: 4mm; }
+    table.estimate-rows tr.optional td { color: #999; }
 </style>
 </head>
 <body>
@@ -92,6 +107,8 @@
     {% endfor %}
     </tbody>
 </table>
+
+{% if estimate is defined and estimate and estimate.applicable %}{% include '_year_end_estimate.twig' %}{% endif %}
 
 {% if not checks.profit_matches %}
 <div class="warn">Výsledek hospodaření z rozvahových účtů ({{ m.amt(checks.profit_balance, unit) }}) se neshoduje s výsledkem z výsledkových účtů ({{ m.amt(checks.profit_loss, unit) }}).</div>

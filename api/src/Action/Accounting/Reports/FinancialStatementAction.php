@@ -13,6 +13,7 @@ use MyInvoice\Repository\StatementDefinitionRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
+use MyInvoice\Service\Accounting\Reports\YearEndTaxEstimateService;
 use MyInvoice\Service\Accounting\Reports\StatementMapResolver;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\ActivityLogger;
@@ -55,6 +56,7 @@ final class FinancialStatementAction
         private readonly StatementMapResolver $maps,
         private readonly DimensionService $dimensions,
         private readonly AccountViewPdfRenderer $accountViewPdf,
+        private readonly YearEndTaxEstimateService $estimates,
     ) {}
 
     public function balanceSheet(Request $request, Response $response): Response
@@ -279,7 +281,7 @@ final class FinancialStatementAction
             $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request));
             $out = $format === 'pdf'
                 ? [
-                    'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit]),
+                    'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit, 'estimate' => \MyInvoice\Security\RequestAuthorization::canReadYearEndTaxEstimate($request) ? $this->pdfEstimate($supplierId, $params['period_id'], $data) : null]),
                     'filename' => sprintf('%s-po-uctech-%s.pdf', $part === 'balance' ? 'rozvaha' : 'vysledovka', (string) $data['as_of']),
                     'mime'     => 'application/pdf',
                 ]
@@ -302,6 +304,31 @@ final class FinancialStatementAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
             ->withHeader('Content-Length', (string) strlen($out['bytes']))
             ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Odhad do konce roku pro PDF po účtech: stejný blok jako na obrazovce, jen u otevřeného
+     * období rámce 500 bez filtru dimenze a jen když odhad jde sestavit. Selhání odhadu
+     * export neshodí, PDF pak blok nemá.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>|null
+     */
+    private function pdfEstimate(int $supplierId, int $periodId, array $data): ?array
+    {
+        if (!isset($data['columns']) || !empty($data['closed']) || !empty($data['dimension'])) {
+            return null;
+        }
+        try {
+            $estimate = $this->estimates->estimate($supplierId, $periodId, (string) $data['as_of']);
+        } catch (\Throwable $e) {
+            if (\MyInvoice\Infrastructure\Database\TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+            $this->log->warning('Odhad do konce roku pro PDF po účtech se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
+            return null;
+        }
+        return ($estimate['applicable'] ?? false) === true ? $estimate : null;
     }
 
     /**

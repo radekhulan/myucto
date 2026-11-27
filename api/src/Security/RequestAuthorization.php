@@ -30,6 +30,15 @@ final class RequestAuthorization
         return self::allows($request, 'clients.create', AccessLevel::WRITE);
     }
 
+    /**
+     * Odhad do konce roku (čísla náhledu DPPO) přibalený k exportu výkazu po účtech: stejné
+     * právo jako samostatná route odhadu (`reports`), export sám chce jen `accounting`.
+     */
+    public static function canReadYearEndTaxEstimate(Request $request): bool
+    {
+        return self::allows($request, 'reports', AccessLevel::READ);
+    }
+
     /** MCP se uděluje samostatně; interní role zachovávají přístup přes správu tokenů. */
     public static function canUseMcp(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {

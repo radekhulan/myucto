@@ -62263,6 +62263,60 @@ components:
           type: number
         vh_after_tax:
           type: number
+        balance_effects:
+          type: array
+          description: Odhadované změny rozvahových účtů z návrhů uzávěrky (stejné kroky jako closing_items) a daň z příjmů na 341. Položky optional se nesčítají.
+          items:
+            type: object
+            required:
+            - key
+            - label_key
+            - accounts
+            - side
+            - assets
+            - liabilities
+            - optional
+            properties:
+              key:
+                type: string
+              label_key:
+                type: string
+              accounts:
+                anyOf:
+                - type: string
+                - type: 'null'
+              side:
+                type: string
+                enum:
+                - asset
+                - liability
+                - net
+              assets:
+                type: number
+              liabilities:
+                type: number
+              optional:
+                type: boolean
+        balance_check:
+          type: object
+          description: Σ změn aktiv − Σ změn pasiv musí dát vh_after_tax − vh_posted.
+          required:
+          - assets
+          - liabilities
+          - difference
+          - expected
+          - matches
+          properties:
+            assets:
+              type: number
+            liabilities:
+              type: number
+            difference:
+              type: number
+            expected:
+              type: number
+            matches:
+              type: boolean
     YearEndProfitBridge:
       type: object
       required:

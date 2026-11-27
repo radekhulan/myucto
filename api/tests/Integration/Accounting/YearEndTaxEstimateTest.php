@@ -234,6 +234,10 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame(10000.0, $items['estimate']['amount']);
         self::assertFalse($e['is_projection'], 'Samotný návrh k potvrzení projekci nezakládá.');
         self::assertSame($e['vh_posted'], $e['vh_before_tax'], 'Návrh k potvrzení se do VH nesčítá.');
+        $effects = array_column($e['balance_effects'], null, 'key');
+        self::assertSame(['389', 'liability', 10000.0, true], [$effects['estimate']['accounts'], $effects['estimate']['side'], $effects['estimate']['liabilities'], $effects['estimate']['optional']]);
+        self::assertSame(-$e['tax'], $e['balance_check']['difference'], 'Návrh k potvrzení se do změn rozvahy nesčítá.');
+        self::assertTrue($e['balance_check']['matches']);
         $gathered = $this->dppo->gather($this->supplierId, self::YEAR);
         self::assertSame($gathered['closing_projection']['vh_projected'], $e['vh_before_tax']);
         self::assertSame(540000.0, $e['vh_before_tax']);
@@ -297,6 +301,13 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame(round($before['vh_posted'] - $plan['pending_accounting'], 2), $before['vh_before_tax']);
         $previewBefore = $this->returns->previewReadOnly($this->supplierId, self::YEAR, 'po')['result'];
         self::assertSame((float) $previewBefore['projection']['projected_tax'], $before['tax'], 'Blok a náhled DPPO mají stejnou daň.');
+
+        // Rozvaha po odhadu: oprávky snižují aktiva, daň zvyšuje 341, rozdíl aktiv a pasiv = změna VH.
+        $effects = array_column($before['balance_effects'], null, 'key');
+        self::assertSame(['07x/08x', 'asset', -$plan['pending_accounting'], 0.0], [$effects['depreciation']['accounts'], $effects['depreciation']['side'], $effects['depreciation']['assets'], $effects['depreciation']['liabilities']]);
+        self::assertSame(['341', $before['tax']], [$effects['income_tax']['accounts'], $effects['income_tax']['liabilities']]);
+        self::assertTrue($before['balance_check']['matches']);
+        self::assertSame(round($before['vh_after_tax'] - $before['vh_posted'], 2), $before['balance_check']['difference']);
 
         $this->depreciation->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
         $after = $this->service->estimate($this->supplierId, $this->periodId);

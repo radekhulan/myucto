@@ -1,0 +1,83 @@
+{# Odhad do konce roku (nezaúčtováno) pod výsledovkou nebo rozvahou po účtech.
+   Data = YearEndTaxEstimateService::estimate() s applicable = true; pořadí řádků jako obrazovka. #}
+{% import 'account_view.twig' as av %}
+{% set closingLabels = {
+    'small_asset_accrual': 'Časové rozlišení drobného majetku (381)',
+    'prepaid_expense_accrual': 'Časové rozlišení nákladů příštích období (381)',
+    'deferred_revenue_accrual': 'Časové rozlišení výnosů příštích období (384)',
+    'fx_revaluation': 'Kurzové rozdíly k rozvahovému dni',
+    'prior_deferral_release': 'Rozpuštění časového rozlišení z minulého období',
+    'accrual_agenda_release': 'Nezaúčtované rozpuštění položek agendy Časové rozlišení',
+    'provision': 'Opravné položky k pohledávkám',
+    'estimate': 'Dohadné položky pasivní',
+    'stock_closing': 'Konečný stav zásob k rozvahovému dni (způsob B)',
+    'depreciation': 'Odpisy roku podle odpisového plánu (nezaúčtované)',
+    'income_tax': 'Daň z příjmů (591 / 341)',
+} %}
+{% set bridgeLabels = {
+    'deferred_revenue': 'Rozpuštění výnosů příštích období (384)',
+    'prepaid_expenses': 'Rozpuštění nákladů příštích období (381)',
+    'accruals': 'Výdaje a příjmy příštích období, dohadné položky (383, 385, 388, 389)',
+    'depreciation': 'Odpisy (551)',
+    'other': 'Ostatní zaúčtované zápisy',
+} %}
+{% set sideLabels = {'asset': 'aktiva', 'liability': 'pasiva', 'net': 'netto aktiva − pasiva'} %}
+{% macro signed(v, unit) %}{% import 'account_view.twig' as av %}{{ v < 0 ? '− ' : '+ ' }}{{ av.amt(v|abs, unit) }}{% endmacro %}
+{% import _self as e %}
+<div class="estimate">
+    <div class="estimate-head">Odhad do konce roku (nezaúčtováno) <span class="estimate-badge">ODHAD, NEZAÚČTOVÁNO</span></div>
+    <div class="estimate-note">Nic z tohoto bloku není v účetnictví. Čísla přebírá z náhledu přiznání k DPPO (včetně ručních úprav základu, ztráty, darů a slev), z uzávěrky, z karet majetku a z evidence záloh.</div>
+
+    <table class="estimate-main">
+        <tr>
+            <td>Odhad výsledku hospodaření před zdaněním<br><strong>{{ av.amt(estimate.vh_before_tax, unit) }}</strong></td>
+            {% if estimate.tax is not null %}<td>Odhad výsledku hospodaření po zdanění<br><strong>{{ av.amt(estimate.vh_after_tax, unit) }}</strong></td>{% endif %}
+        </tr>
+    </table>
+
+    {% if estimate.projection_warnings|default([]) is not empty %}
+    <div class="estimate-warn">Projekce uzávěrky je neúplná:{% for w in estimate.projection_warnings %} {{ closingLabels[w.source] ?? w.source }}: {{ w.reason }}{% if not loop.last %};{% endif %}{% endfor %}</div>
+    {% endif %}
+    {% for w in estimate.depreciation_warnings|default([]) %}<div class="estimate-warn">{{ w }}</div>{% endfor %}
+
+    <table class="estimate-rows">
+        <thead><tr><th class="thl">Položka</th><th>Částka</th><th class="thl">Zdroj</th></tr></thead>
+        <tbody>
+        {% if estimate.bridge %}
+            <tr><td>Zaúčtovaný výsledek k {{ estimate.bridge.as_of|cz_date }}</td><td class="num">{{ av.amt(estimate.bridge.vh_as_of, unit) }}</td><td>Výsledovka k datu výkazu</td></tr>
+            {% for g in estimate.bridge.groups %}
+            <tr><td class="indent">{{ bridgeLabels[g.key] ?? g.key }}, zaúčtováno po {{ estimate.bridge.as_of|cz_date }}</td><td class="num">{{ e.signed(g.amount, unit) }}</td><td>Účetní deník</td></tr>
+            {% endfor %}
+        {% endif %}
+            <tr class="strong"><td>Zaúčtovaný výsledek do {{ estimate.period.ends_on|cz_date }}</td><td class="num">{{ av.amt(estimate.vh_posted, unit) }}</td><td>Náhled DPPO</td></tr>
+        {% for item in estimate.closing_items %}
+            <tr{% if item.optional %} class="optional"{% endif %}><td class="indent">{{ closingLabels[item.key] ?? item.key }}{% if item.optional %} (návrh k potvrzení, nesčítá se){% endif %}</td><td class="num">{{ e.signed(item.sign * item.amount, unit) }}</td><td>{{ item.key == 'depreciation' ? 'Majetek' : (item.key == 'accrual_agenda_release' ? 'Časové rozlišení' : 'Uzávěrka') }}</td></tr>
+        {% else %}
+            <tr><td class="indent" colspan="3">Uzávěrka nemá žádné nezaúčtované operace, které by měnily výsledek.</td></tr>
+        {% endfor %}
+            <tr class="strong"><td>Odhad výsledku hospodaření před zdaněním</td><td class="num">{{ av.amt(estimate.vh_before_tax, unit) }}</td><td>Náhled DPPO</td></tr>
+            <tr><td class="indent">Připočitatelné položky (ř. 70)</td><td class="num">{{ e.signed(estimate.increases, unit) }}</td><td>Úpravy základu DPPO</td></tr>
+            <tr><td class="indent">Odčitatelné položky (ř. 170)</td><td class="num">{{ e.signed(-estimate.decreases, unit) }}</td><td>Úpravy základu DPPO</td></tr>
+            <tr><td class="indent">Základ daně (ř. 200)</td><td class="num">{{ av.amt(estimate.tax_base, unit) }}</td><td>Náhled DPPO</td></tr>
+            <tr><td>Odhad daně z příjmů (po odečtech a slevách)</td><td class="num">{{ e.signed(-estimate.tax, unit) }}</td><td>Náhled DPPO</td></tr>
+            <tr><td class="indent">Zaplacené zálohy na daň (§ 38a)</td><td class="num">{{ av.amt(estimate.advances_paid, unit) }}</td><td>Zálohy</td></tr>
+            <tr><td class="indent">{{ estimate.balance_due >= 0 ? 'Odhad doplatku daně' : 'Odhad přeplatku daně' }}</td><td class="num">{{ av.amt(estimate.balance_due|abs, unit) }}</td><td>Náhled DPPO</td></tr>
+            <tr class="total"><td>Odhad výsledku hospodaření po zdanění</td><td class="num">{{ av.amt(estimate.vh_after_tax, unit) }}</td><td>VH před zdaněním minus daň</td></tr>
+        </tbody>
+    </table>
+
+    {% if part != 'profit_loss' and estimate.balance_effects is defined %}
+    <div class="estimate-sub">Odhadované změny rozvahy z návrhů uzávěrky a daně z příjmů</div>
+    <table class="estimate-rows">
+        <thead><tr><th class="thl">Položka</th><th class="thl">Účet</th><th>Změna aktiv</th><th>Změna pasiv</th></tr></thead>
+        <tbody>
+        {% for b in estimate.balance_effects %}
+            <tr{% if b.optional %} class="optional"{% endif %}><td>{{ closingLabels[b.key] ?? b.key }}{% if b.optional %} (návrh k potvrzení, nesčítá se){% endif %}</td><td>{{ b.accounts ?? '' }} ({{ sideLabels[b.side] ?? b.side }})</td><td class="num">{{ b.side == 'liability' ? '' : e.signed(b.assets, unit) }}</td><td class="num">{{ b.side == 'liability' ? e.signed(b.liabilities, unit) : '' }}</td></tr>
+        {% endfor %}
+            <tr class="total"><td colspan="2">Celkem (aktiva − pasiva = {{ av.amt(estimate.balance_check.difference, unit) }}; změna výsledku po zdanění {{ av.amt(estimate.balance_check.expected, unit) }})</td><td class="num">{{ e.signed(estimate.balance_check.assets, unit) }}</td><td class="num">{{ e.signed(estimate.balance_check.liabilities, unit) }}</td></tr>
+            <tr><td colspan="2">Odhad daně k doplacení na účtu 341 (daň minus zálohy)</td><td></td><td class="num">{{ av.amt(estimate.balance_due, unit) }}</td></tr>
+        </tbody>
+    </table>
+    {% if not estimate.balance_check.matches %}<div class="estimate-warn">Změny rozvahy nesouhlasí se změnou výsledku hospodaření, rozvaha po odhadu by nebyla vyrovnaná.</div>{% endif %}
+    {% endif %}
+</div>
