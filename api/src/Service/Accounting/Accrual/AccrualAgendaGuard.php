@@ -126,9 +126,12 @@ final class AccrualAgendaGuard
      * metody: přidají se jen řádky plánu splatné do data výkazu, které ještě nejsou
      * zaúčtované; rozpracovaný měsíc ne. Účetní u měsíčních položek zaúčtuje každý měsíc
      * a výkaz má ukázat stav, jako by to udělal včas, ne jiný poměr, než jaký bude v knihách.
-     * Ruční metoda nemá plán a nepřidá nic. Řádek plánu zaúčtovaný zápisem s datem po dni
-     * výkazu k tomu dni v deníku není, proto se počítá jako nezaúčtovaný, i u položky, kterou
-     * tím zápisem agenda už dokončila.
+     * Ruční metoda nemá plán: nezaúčtované řádky nepřidají nic. Řádek plánu zaúčtovaný zápisem
+     * s datem po dni výkazu k tomu dni v deníku není, proto se počítá jako nezaúčtovaný, i
+     * u položky, kterou tím zápisem agenda už dokončila nebo ukončila (ukončení s datem po dni
+     * výkazu). U ruční metody se z takového řádku ukáže uplynulá část doby, kterou kryje
+     * ({@see AccrualScheduleCalculator::laterDatedShare()}, stejně jako zápis s pozdějším
+     * datem mimo agendu). Položka ukončená do dne výkazu se neupravuje.
      *
      * @return array{deltas: array<string,float>, items:int, total:float}
      */
@@ -180,28 +183,60 @@ final class AccrualAgendaGuard
     private function pendingByItem(int $supplierId, string $from, string $asOf, bool $proRataYearly): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT ai.id, ai.kind, ai.method, ai.basis_amount, ai.period_from, ai.period_to, ai.opening_as_of,
+            "SELECT ai.id, ai.kind, ai.method, ai.status, ai.basis_amount, ai.period_from, ai.period_to, ai.opening_as_of,
                     ai.accrual_account_code, ai.counter_account_code,
                     s.kind AS row_kind, s.due_on, s.from_on, s.to_on, s.amount_planned,
-                    CASE WHEN s.status IN ('posted', 'linked') AND (je.id IS NULL OR je.reversed_by IS NOT NULL OR (? = 1 AND je.entry_date > ?)) THEN 'planned' ELSE s.status END AS row_status
+                    CASE WHEN s.status IN ('posted', 'linked') AND (je.id IS NULL OR je.reversed_by IS NOT NULL OR (? = 1 AND je.entry_date > ?)) THEN 'planned' ELSE s.status END AS row_status,
+                    CASE WHEN s.status IN ('posted', 'linked') AND je.id IS NOT NULL AND je.reversed_by IS NULL THEN 1 ELSE 0 END AS live,
+                    CASE WHEN s.status IN ('posted', 'linked') AND je.id IS NOT NULL AND je.reversed_by IS NULL AND je.entry_date > ? THEN 1 ELSE 0 END AS later_dated
                FROM accrual_items ai
                JOIN accrual_schedule s ON s.accrual_item_id = ai.id AND s.supplier_id = ai.supplier_id
           LEFT JOIN journal_entries je ON je.id = s.journal_entry_id AND je.supplier_id = s.supplier_id
-              WHERE ai.supplier_id = ? AND ai.managed_by = 'agenda' AND (ai.status = 'active' OR (? = 1 AND ai.status = 'completed'))
-                AND ai.counter_account_code IS NOT NULL AND ai.method <> 'manual'
-                AND s.kind = 'release'
+          LEFT JOIN journal_entries te ON te.id = ai.termination_entry_id AND te.supplier_id = ai.supplier_id
+              WHERE ai.supplier_id = ? AND ai.managed_by = 'agenda'
+                AND (ai.status = 'active' OR (? = 1 AND (ai.status = 'completed'
+                     OR (ai.status = 'terminated' AND COALESCE(te.entry_date, ai.terminated_on) > ?))))
+                AND ai.counter_account_code IS NOT NULL AND (ai.method <> 'manual' OR ? = 1)
+                AND (s.kind = 'release' OR (ai.status = 'terminated' AND s.kind = 'termination'))
               ORDER BY ai.id, s.due_on"
         );
-        $stmt->execute([$proRataYearly ? 1 : 0, $asOf, $supplierId, $proRataYearly ? 1 : 0]);
+        $pro = $proRataYearly ? 1 : 0;
+        $stmt->execute([$pro, $asOf, $asOf, $supplierId, $pro, $asOf, $pro]);
         $byItem = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $byItem[(int) $r['id']][] = $r;
         }
         $out = [];
-        foreach ($byItem as $rows) {
-            $item = $rows[0];
+        foreach ($byItem as $all) {
+            $item = $all[0];
+            $rows = array_values(array_filter($all, static fn (array $r): bool => $r['row_kind'] === 'release'));
+            $termination = null;
+            foreach ($all as $r) {
+                if ($r['row_kind'] === 'termination' && (int) $r['live'] === 1) {
+                    $termination = $r;
+                }
+            }
             $amount = 0.0;
-            if ($proRataYearly && $item['method'] === 'yearly') {
+            if ($item['method'] === 'manual') {
+                // Bez plánu: jen řádky zaúčtované s datem po dni výkazu. Řádek kryje dny od
+                // svého začátku, jinak ode dne po předchozím řádku, jinak od převzetí či
+                // začátku položky (řádek z rekonstrukce převzatého deníku má začátek = datum).
+                $previousEnd = null;
+                foreach ($rows as $r) {
+                    $dueOn = (string) $r['due_on'];
+                    if ((int) $r['later_dated'] === 1 && $dueOn >= $from) {
+                        $start = $r['from_on'] !== null && (string) $r['from_on'] < $dueOn
+                            ? (string) $r['from_on']
+                            : ($previousEnd !== null ? AccrualPlanBuilder::dayAfter($previousEnd)
+                                : (string) ($item['opening_as_of'] ?? $item['period_from'] ?? $dueOn));
+                        $amount = round($amount + AccrualScheduleCalculator::laterDatedShare(
+                            (float) $r['amount_planned'], max($start, $from), $dueOn, $asOf), 2);
+                    }
+                    if ($r['row_status'] !== 'cancelled') {
+                        $previousEnd = (string) ($r['to_on'] ?? $dueOn);
+                    }
+                }
+            } elseif ($proRataYearly && $item['method'] === 'yearly') {
                 $schedule = array_map(static fn (array $r): array => ['kind' => $r['row_kind'], 'status' => $r['row_status'],
                     'to_on' => $r['to_on'], 'due_on' => $r['due_on']], $rows);
                 $covered = AccrualItemService::coveredThrough($item, array_values(array_filter($schedule,
@@ -225,6 +260,25 @@ final class AccrualAgendaGuard
                         $amount = round($amount + (float) $r['amount_planned'], 2);
                     }
                 }
+            }
+            if ($termination !== null && $item['method'] !== 'manual' && $item['period_from'] !== null && $item['period_to'] !== null) {
+                // Ukončení s datem po dni výkazu: jeho zápis nese i rozpuštění od posledního
+                // zaúčtovaného řádku do dne ukončení a zrušený plán ho už nenese. Výkaz z něj
+                // ukáže část do dne výkazu podle metody (měsíční jen celé měsíce). Co kryjí
+                // řádky plánu zaúčtované s pozdějším datem, započetl výpočet výše.
+                $covered = AccrualItemService::coveredThrough($item, array_map(static fn (array $r): array => ['kind' => 'release',
+                    'status' => (int) $r['live'] === 1 ? 'posted' : 'planned', 'to_on' => $r['to_on'], 'due_on' => $r['due_on']], $rows));
+                $through = $item['method'] === 'yearly' || date('Y-m-t', (int) strtotime($asOf)) === $asOf
+                    ? $asOf
+                    : AccrualPlanBuilder::dayBefore(substr($asOf, 0, 7) . '-01');
+                $through = min($through, (string) $termination['due_on'], (string) $item['period_to']);
+                $start = max($covered ?? AccrualPlanBuilder::dayBefore($from), AccrualPlanBuilder::dayBefore($from));
+                $release = AccrualPlanBuilder::releaseThrough((string) $item['method'], (float) $item['basis_amount'],
+                    (string) $item['period_from'], (string) $item['period_to'], $start, $through);
+                if (abs($release) > abs((float) $termination['amount_planned'])) {
+                    $release = (float) $termination['amount_planned'];
+                }
+                $amount = round($amount + $release, 2);
             }
             $out[] = [
                 'kind' => (string) $item['kind'],

@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -307,6 +308,74 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame($part, $interim['total']);
         self::assertSame($part, $interim['deltas']['384']);
         self::assertSame(0.0, $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-12-31')['total'], 'Ke dni zápisu ho nese deník.');
+    }
+
+    /** @return array<string,array{0:string}> */
+    public static function accrualKinds(): array
+    {
+        return ['náklady příštích období 381' => ['prepaid_expense'], 'výnosy příštích období 384' => ['deferred_revenue']];
+    }
+
+    /**
+     * Roční rozpuštění aktivní položky zaúčtované předem k 31. 12. (381 i 384): výkaz k 27. 11.
+     * ho v deníku nemá a ukáže poměr dnů; ke dni zápisu už nic.
+     */
+    #[DataProvider('accrualKinds')]
+    public function testInterimCountsActiveYearlyReleasePostedAfterReportDate(string $kind): void
+    {
+        $guard = new AccrualAgendaGuard($this->db);
+        $item = $this->agendaItem($kind, 36_500.00, '2091-01-01', '2092-12-31', ['method' => 'yearly']);
+        $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->rowOn($item, '2091-12-31')['id'], $this->meta());
+
+        $part = AccrualScheduleCalculator::recognizedBetween(36_500.00, '2091-01-01', '2092-12-31', '2090-12-31', '2091-11-27');
+        $this->assertInterim($guard->interimDeltas($this->supplierId, '2091-01-01', '2091-11-27'), $kind, $part);
+        self::assertSame(0.0, $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-12-31')['total'], 'Ke dni zápisu ho nese deník.');
+    }
+
+    /**
+     * Převzatá ruční položka (bez plánu, 381 i 384), dokončená rozpuštěním roku zaúčtovaným
+     * k 31. 12.: výkaz k 27. 11. ukáže poměr dnů od převzetí, stejně jako zápis s pozdějším
+     * datem mimo agendu. Ruční položka rozpouštěná po měsících rozpracovaný měsíc nepřidá.
+     */
+    #[DataProvider('accrualKinds')]
+    public function testInterimCountsManualItemReleasePostedAfterReportDate(string $kind): void
+    {
+        $guard = new AccrualAgendaGuard($this->db);
+        $yearly = $this->manualItem($kind, 3_650.00);
+        $this->linkedManualRow($kind, $yearly, '2091-12-31', '2091-12-31', 3_650.00, 'CR-SYN-Y');
+        $monthly = $this->manualItem($kind, 600.00);
+        $this->linkedManualRow($kind, $monthly, '2091-11-01', '2091-11-30', 300.00, 'CR-SYN-M');
+        $this->linkedManualRow($kind, $monthly, '2091-12-01', '2091-12-31', 300.00, 'CR-SYN-M');
+
+        $part = AccrualScheduleCalculator::cumRecognized(3_650.00, '2091-01-01', '2091-12-31', '2091-11-27');
+        self::assertSame(3_310.00, $part);
+        $this->assertInterim($guard->interimDeltas($this->supplierId, '2091-01-01', '2091-11-27'), $kind, $part);
+        self::assertSame(0.0, $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-12-31')['total'], 'Ke dni zápisu ho nese deník.');
+        $projection = $guard->projectionPending($this->supplierId, '2091-01-01', '2091-12-31');
+        self::assertSame([0.0, 0.0], [$projection['expense'], $projection['revenue']]);
+    }
+
+    /**
+     * Ukončení zaúčtované s datem po dni výkazu (381 i 384): zápis ukončení nese rozpuštění
+     * do dne ukončení, k datu výkazu v deníku není a výkaz ukáže poměrnou část. Položka
+     * ukončená před datem výkazu se neupravuje.
+     */
+    #[DataProvider('accrualKinds')]
+    public function testInterimCountsTerminationPostedAfterReportDate(string $kind): void
+    {
+        $guard = new AccrualAgendaGuard($this->db);
+        $this->accrualPosting->setToday('2091-12-20');
+        $extra = ['method' => 'yearly', 'termination_account_code' => $kind === 'prepaid_expense' ? '548' : '641'];
+        $late = $this->agendaItem($kind, 36_500.00, '2091-01-01', '2092-12-31', $extra);
+        $this->accrualPosting->terminate($this->supplierId, $late['id'], ['date' => '2091-12-15'], $this->meta());
+
+        $part = AccrualScheduleCalculator::recognizedBetween(36_500.00, '2091-01-01', '2092-12-31', '2090-12-31', '2091-11-27');
+        $this->assertInterim($guard->interimDeltas($this->supplierId, '2091-01-01', '2091-11-27'), $kind, $part);
+        self::assertSame(0.0, $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-12-15')['total'], 'Ke dni ukončení ho nese deník.');
+
+        $early = $this->agendaItem($kind, 36_500.00, '2091-01-01', '2092-12-31', $extra);
+        $this->accrualPosting->terminate($this->supplierId, $early['id'], ['date' => '2091-06-30'], $this->meta());
+        $this->assertInterim($guard->interimDeltas($this->supplierId, '2091-01-01', '2091-11-27'), $kind, $part);
     }
 
     // ── krok uzávěrky a životní cyklus ───────────────────────────────────────
@@ -621,6 +690,72 @@ final class AccrualAgendaTest extends TestCase
                        VALUES (?, ?, ?, ?, ?, ?, 'release', 'auto_document_no')")
             ->execute([$this->supplierId, $itemId, $entryId, $accountId, $rowId, $amount]);
         return $rowId;
+    }
+
+    /** Aktivní položka agendy 381 (protiúčet 548) nebo 384 (protiúčet 602) se zápisem vzniku. */
+    private function agendaItem(string $kind, float $basis, string $from, string $to, array $extra = []): array
+    {
+        if ($kind === 'deferred_revenue') {
+            return $this->revenueItem($basis, $from, $to, $extra);
+        }
+        $origin = $this->manualEntry($from, '381', '321', $basis, 'FP-SYN-' . random_int(1000, 9999));
+        return $this->items->create($this->supplierId, $this->input([
+            'kind' => 'prepaid_expense', 'accrual_account_code' => '381', 'counter_account_code' => '548',
+            'basis_amount' => $basis, 'period_from' => $from, 'period_to' => $to, 'origin_entry_id' => $origin, 'activate' => true,
+        ] + $extra), $this->userId);
+    }
+
+    /** Ruční položka 381/384 převzatá k 1. 1. (tvar položek z převodu deníku), dokončená. */
+    private function manualItem(string $kind, float $basis): int
+    {
+        [$accrual, $counter] = self::kindAccounts($kind);
+        $pdo = $this->db->pdo();
+        $kind === 'prepaid_expense'
+            ? $this->manualEntry(self::YEAR . '-01-01', '381', '321', $basis, 'PS-SYN-' . random_int(1000, 9999))
+            : $this->manualEntry(self::YEAR . '-01-01', '311', '384', $basis, 'PS-SYN-' . random_int(1000, 9999));
+        $pdo->prepare("INSERT INTO accrual_items (supplier_id, item_no, title, kind, accrual_account_code, counter_account_code,
+                           source_type, managed_by, basis_amount, opening_balance, opening_as_of, method, status)
+                       VALUES (?, ?, 'Syntetická převzatá položka', ?, ?, ?, 'migration', 'agenda', ?, ?, ?, 'manual', 'completed')")
+            ->execute([$this->supplierId, 'CR-SYN-' . random_int(1000, 9999), $kind, $accrual, $counter, $basis, $basis, self::YEAR . '-01-01']);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** Převzatý zápis rozpuštění navázaný na řádek ruční položky (začátek řádku = datum jako z rekonstrukce). */
+    private function linkedManualRow(string $kind, int $itemId, string $from, string $to, float $amount, string $docNo): void
+    {
+        [$accrual, $counter] = self::kindAccounts($kind);
+        $entryId = $kind === 'prepaid_expense'
+            ? $this->manualEntry($to, $counter, $accrual, $amount, $docNo)
+            : $this->manualEntry($to, $accrual, $counter, $amount, $docNo);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO accrual_schedule (supplier_id, accrual_item_id, kind, due_on, from_on, to_on, amount_planned, status, journal_entry_id)
+                       VALUES (?, ?, 'release', ?, ?, ?, ?, 'linked', ?)")
+            ->execute([$this->supplierId, $itemId, $to, $from, $to, $amount, $entryId]);
+        $rowId = (int) $pdo->lastInsertId();
+        $accountId = (int) $pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '{$accrual}'")->fetchColumn();
+        $pdo->prepare("INSERT INTO accrual_entry_links (supplier_id, accrual_item_id, journal_entry_id, account_id, schedule_id, amount, role, matched_by)
+                       VALUES (?, ?, ?, ?, ?, ?, 'release', 'auto_document_no')")
+            ->execute([$this->supplierId, $itemId, $entryId, $accountId, $rowId, $kind === 'prepaid_expense' ? -$amount : $amount]);
+    }
+
+    /** @return array{0:string, 1:string} účet rozlišení a protiúčet */
+    private static function kindAccounts(string $kind): array
+    {
+        return $kind === 'prepaid_expense' ? ['381', '548'] : ['384', '602'];
+    }
+
+    /**
+     * Průběžný výkaz přidal rozpuštění `$part`: 381 klesne proti nákladu, 384 klesne proti výnosu.
+     *
+     * @param array{deltas: array<string,float>, items:int, total:float} $interim
+     */
+    private function assertInterim(array $interim, string $kind, float $part): void
+    {
+        [$accrual, $counter] = self::kindAccounts($kind);
+        $sign = $kind === 'prepaid_expense' ? -1 : 1;
+        self::assertSame($part, $interim['total']);
+        self::assertSame(round($sign * $part, 2), $interim['deltas'][$accrual]);
+        self::assertSame(round(-$sign * $part, 2), $interim['deltas'][$counter]);
     }
 
     private function lockUntil(?string $date): void

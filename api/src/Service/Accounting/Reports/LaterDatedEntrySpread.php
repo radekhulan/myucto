@@ -23,7 +23,7 @@ use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
  * dokladu) v období do svého data. Bez předchozího zápisu kryje zápis ke konci období celé
  * období (roční rozpuštění), jinak měsíc svého data.
  *   - rozpuštění 381 (MD 5xx / D 381) a 384 (MD 384 / D 6xx): poměr dnů
- *     ({@see AccrualScheduleCalculator::cumRecognized()}, týž výpočet jako krok uzávěrky);
+ *     ({@see AccrualScheduleCalculator::laterDatedShare()}, týž výpočet jako krok uzávěrky);
  *     zápis za jediný měsíc se k datu uvnitř toho měsíce nepočítá, stejně jako měsíční
  *     položka agendy ({@see \MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard::interimDeltas()});
  *   - odpis (MD 551 / D 07x, 08x): uplynulé celé měsíce
@@ -114,9 +114,7 @@ final class LaterDatedEntrySpread
                 [$elapsed, $months] = DepreciationPostingService::elapsedMonthShare($from, $date, $asOf, $periodEndsOn);
                 $part = $months > 0 ? round($total * $elapsed / $months, 2) : 0.0;
             } else {
-                $part = substr($from, 0, 7) === substr($date, 0, 7)
-                    ? 0.0
-                    : AccrualScheduleCalculator::cumRecognized($total, $from, $date, $asOf);
+                $part = AccrualScheduleCalculator::laterDatedShare($total, $from, $date, $asOf);
             }
             if ((int) round($part * 100) === 0) {
                 continue;

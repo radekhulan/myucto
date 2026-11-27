@@ -70,6 +70,25 @@ final class AccrualScheduleCalculator
     }
 
     /**
+     * Uplynulá část rozpuštění zaúčtovaného s datem `$date` PO rozvahovém dni `$asOf`, které
+     * kryje dny [from..date]: k rozvahovému dni v deníku ještě není a výkaz k tomu dni z něj
+     * ukáže poměr dnů ({@see cumRecognized()}). Rozpuštění za jediný kalendářní měsíc se k datu
+     * uvnitř toho měsíce nepočítá (0), stejně jako řádek měsíčního plánu agendy splatný po dni
+     * výkazu. Volají ho zápisy s pozdějším datem v deníku
+     * ({@see \MyInvoice\Service\Accounting\Reports\LaterDatedEntrySpread}) i řádky plánu položek
+     * agendy zaúčtované s pozdějším datem ({@see AccrualAgendaGuard::interimDeltas()}).
+     */
+    public static function laterDatedShare(float $amount, string $from, string $date, string $asOf): float
+    {
+        $from = substr($from, 0, 10);
+        $date = substr($date, 0, 10);
+        if ($from > $asOf || $date <= $asOf || substr($from, 0, 7) === substr($date, 0, 7)) {
+            return 0.0;
+        }
+        return self::cumRecognized($amount, $from, $date, $asOf);
+    }
+
+    /**
      * Tranše uznaná za dny PO `$after` až do `$through` včetně: kumulativně uznáno k
      * `$through` − kumulativně uznáno k `$after`. Konec období rozlišení omezuje horní hranici
      * sám ({@see cumRecognized()}).
