@@ -126,7 +126,8 @@ final class AccrualAgendaGuard
      * metody: přidají se jen řádky plánu splatné do data výkazu, které ještě nejsou
      * zaúčtované; rozpracovaný měsíc ne. Účetní u měsíčních položek zaúčtuje každý měsíc
      * a výkaz má ukázat stav, jako by to udělal včas, ne jiný poměr, než jaký bude v knihách.
-     * Ruční metoda nemá plán a nepřidá nic.
+     * Ruční metoda nemá plán a nepřidá nic. Řádek plánu zaúčtovaný zápisem s datem po dni
+     * výkazu k tomu dni v deníku není, proto se počítá jako nezaúčtovaný.
      *
      * @return array{deltas: array<string,float>, items:int, total:float}
      */
@@ -181,7 +182,7 @@ final class AccrualAgendaGuard
             "SELECT ai.id, ai.kind, ai.method, ai.basis_amount, ai.period_from, ai.period_to, ai.opening_as_of,
                     ai.accrual_account_code, ai.counter_account_code,
                     s.kind AS row_kind, s.due_on, s.from_on, s.to_on, s.amount_planned,
-                    CASE WHEN s.status IN ('posted', 'linked') AND (je.id IS NULL OR je.reversed_by IS NOT NULL) THEN 'planned' ELSE s.status END AS row_status
+                    CASE WHEN s.status IN ('posted', 'linked') AND (je.id IS NULL OR je.reversed_by IS NOT NULL OR (? = 1 AND je.entry_date > ?)) THEN 'planned' ELSE s.status END AS row_status
                FROM accrual_items ai
                JOIN accrual_schedule s ON s.accrual_item_id = ai.id AND s.supplier_id = ai.supplier_id
           LEFT JOIN journal_entries je ON je.id = s.journal_entry_id AND je.supplier_id = s.supplier_id
@@ -190,7 +191,7 @@ final class AccrualAgendaGuard
                 AND s.kind = 'release'
               ORDER BY ai.id, s.due_on"
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute([$proRataYearly ? 1 : 0, $asOf, $supplierId]);
         $byItem = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $byItem[(int) $r['id']][] = $r;

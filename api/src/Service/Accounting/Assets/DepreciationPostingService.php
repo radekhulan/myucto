@@ -327,8 +327,11 @@ final class DepreciationPostingService
      * uvnitř roku s touto volbou ukáže odpis za uplynulé celé měsíce, jako by se účtoval
      * měsíčně. Výběr karet a roční řádek jsou stejné jako u bookYear; karta, jejíž odpis
      * roku už v evidenci leží (zaúčtovaný, převzatý z jiného programu nebo zaúčtovaný při
-     * vyřazení), se přeskočí, protože ho nese deník. Rok uzavřený původním systémem se
-     * neupravuje vůbec. Do deníku se nic nezapisuje.
+     * vyřazení), se přeskočí, protože ho nese deník. Výjimkou je odpis roku zaúčtovaný
+     * vlastním zápisem s datem po rozvahovém dni: k tomu dni v deníku ještě není, takže se
+     * karta počítá, jako by zaúčtovaná nebyla. Převzaté zápisy odpisů s pozdějším datem
+     * upravuje {@see \MyInvoice\Service\Accounting\Reports\LaterDatedEntrySpread}.
+     * Rok uzavřený původním systémem se neupravuje vůbec. Do deníku se nic nezapisuje.
      *
      * Měsíční rozpis bere z ročního řádku (rovnoměrné účetní odpisy a převzatý plán). Řádek
      * bez rozpisu (účetní odpisy podle daňových) se rozloží rovným dílem na měsíce, v nichž
@@ -355,19 +358,20 @@ final class DepreciationPostingService
 
         $firstMonth = self::monthIndex($periodStartsOn);
         $lastMonth = self::monthIndex($periodEnd);
-        // Započítávají se jen celé uplynulé měsíce: k 15. 10. odpis za září, k 31. 10. i za říjen.
-        $elapsedTo = $asOf >= $periodEnd
-            ? $lastMonth
-            : self::monthIndex($asOf) - ($asOf === date('Y-m-t', (int) strtotime($asOf)) ? 0 : 1);
+        $elapsedTo = self::elapsedMonthIndex($asOf, $periodEnd);
         if ($elapsedTo < $firstMonth) {
             return $out;
         }
         $expense = $this->accountingExpenseAccount($supplierId);
+        $bookedLater = $this->ownEntriesDatedAfter($supplierId, $asOf, $periodEnd);
 
         $lines = [];
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStartsOn, $periodEnd) as $asset) {
-            if ($asset['accumulated_account_code'] === null
-                || $this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear) !== null) {
+            if ($asset['accumulated_account_code'] === null) {
+                continue;
+            }
+            $existing = $this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear);
+            if ($existing !== null && !isset($bookedLater[(int) $existing['id']])) {
                 continue;
             }
             $row = $this->accountingRowToBook($asset, $this->buildContext($asset), $fiscalYear, false);
@@ -415,6 +419,58 @@ final class DepreciationPostingService
     private static function monthIndex(string $date): int
     {
         return ((int) substr($date, 0, 4)) * 12 + ((int) substr($date, 5, 2)) - 1;
+    }
+
+    /**
+     * Index posledního uplynulého celého měsíce k rozvahovému dni: k 15. 10. září, k 31. 10.
+     * i říjen, ke konci období jeho poslední měsíc.
+     */
+    private static function elapsedMonthIndex(string $asOf, string $periodEnd): int
+    {
+        return $asOf >= $periodEnd
+            ? self::monthIndex($periodEnd)
+            : self::monthIndex($asOf) - ($asOf === date('Y-m-t', (int) strtotime($asOf)) ? 0 : 1);
+    }
+
+    /**
+     * Podíl odpisu za měsíce `[$from..$to]`, který k rozvahovému dni připadá na uplynulé celé
+     * měsíce (stejné pravidlo jako {@see interimAccounting()}): [uplynulé měsíce, všechny měsíce].
+     *
+     * @return array{0:int, 1:int}
+     */
+    public static function elapsedMonthShare(string $from, string $to, string $asOf, string $periodEnd): array
+    {
+        $first = self::monthIndex($from);
+        $total = self::monthIndex($to) - $first + 1;
+        if ($total <= 0) {
+            return [0, 0];
+        }
+        return [max(0, min($total, self::elapsedMonthIndex($asOf, $periodEnd) - $first + 1)), $total];
+    }
+
+    /**
+     * Účetní řádky odpisu roku zaúčtované vlastním zápisem ('depreciation') s datem po
+     * rozvahovém dni do konce období: id řádku => true.
+     *
+     * @return array<int,true>
+     */
+    private function ownEntriesDatedAfter(int $supplierId, string $asOf, string $periodEnd): array
+    {
+        if ($asOf >= $periodEnd) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT source_id FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'depreciation'
+                AND entry_date > ? AND entry_date <= ?
+                AND posted_at IS NOT NULL AND reversed_by IS NULL"
+        );
+        $stmt->execute([$supplierId, $asOf, $periodEnd]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+            $out[(int) $id] = true;
+        }
+        return $out;
     }
 
     /**
