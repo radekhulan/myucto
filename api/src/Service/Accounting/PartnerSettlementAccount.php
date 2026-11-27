@@ -172,7 +172,7 @@ final class PartnerSettlementAccount
     }
 
     /**
-     * Syntetiky závazků, které vedou karty dodavatelů a firemní nastavení navíc proti
+     * Syntetiky saldokonta, které vedou karty partnerů a firemní nastavení navíc proti
      * `$known` (pro kontroly saldokonta, které jinak znají jen 311 a 321).
      *
      * @param list<string> $known
