@@ -14,7 +14,12 @@ const props = withDefaults(defineProps<{
   /** Rozvaha navíc ukazuje odhadované změny rozvahových účtů a daň k doplacení na 341. */
   part?: 'profit_loss' | 'balance'
   format: (value: number | null | undefined) => string
-}>(), { asOf: '', part: 'profit_loss' })
+  /** Tabulka je s průběžným rozlišením: odhad a můstek začnou VH k datu s ním. */
+  accrualSpread?: boolean
+}>(), { asOf: '', part: 'profit_loss', accrualSpread: false })
+
+/** Načtený odhad (null při načítání nebo chybě) pro souhrn nad tabulkou, bez druhého requestu. */
+const emit = defineEmits<{ loaded: [estimate: YearEndTaxEstimate | null] }>()
 
 const { t } = useI18n()
 
@@ -30,9 +35,13 @@ async function load() {
   loading.value = true
   failed.value = false
   estimate.value = null
+  emit('loaded', null)
   try {
-    const data = await accountingApi.getYearEndTaxEstimate(props.periodId, props.asOf || undefined)
-    if (seq === requestSeq) estimate.value = data
+    const data = await accountingApi.getYearEndTaxEstimate(props.periodId, props.asOf || undefined, props.accrualSpread)
+    if (seq === requestSeq) {
+      estimate.value = data
+      emit('loaded', data)
+    }
   } catch (e: any) {
     // Bez práva na přiznání (403) se blok prostě neukáže.
     if (seq === requestSeq) failed.value = e?.response?.status !== 403
@@ -41,12 +50,13 @@ async function load() {
   }
 }
 
-watch(() => [props.periodId, props.asOf], () => { void load() }, { immediate: true })
+watch(() => [props.periodId, props.asOf, props.accrualSpread], () => { void load() }, { immediate: true })
 
 const fiscalYear = computed(() => String(estimate.value?.period.fiscal_year ?? ''))
 const endsOn = computed(() => formatDate(estimate.value?.period.ends_on ?? ''))
 const hasTax = computed(() => estimate.value?.tax !== undefined && estimate.value?.tax !== null)
 const bridge = computed(() => estimate.value?.bridge ?? null)
+const bridgeWithSpread = computed(() => bridge.value?.accrual_spread !== undefined && bridge.value?.accrual_spread !== null)
 
 function dppoLink(tab: 'podklady' | 'upravy' | 'nahled' | 'zalohy'): RouteLocationRaw {
   return { name: 'reports-income-tax', query: { year: fiscalYear.value, tab } }
@@ -158,12 +168,17 @@ function signedValue(value: number): string {
           <tbody class="divide-y divide-neutral-100">
             <template v-if="bridge">
               <tr data-test="estimate-bridge-as-of">
-                <td class="px-3 py-1.5">{{ t('accounting.statement_accounts.estimate.vh_as_of', { date: formatDate(bridge.as_of) }) }}</td>
+                <td class="px-3 py-1.5">{{ t(bridgeWithSpread ? 'accounting.statement_accounts.estimate.vh_as_of_spread' : 'accounting.statement_accounts.estimate.vh_as_of', { date: formatDate(bridge.as_of) }) }}</td>
                 <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ format(bridge.vh_as_of) }}</td>
                 <td class="px-3 py-1.5 text-xs text-neutral-500">{{ t('accounting.statement_accounts.estimate.src_statement') }}</td>
               </tr>
               <tr v-for="g in bridge.groups" :key="g.key" :data-test="`estimate-bridge-${g.key}`">
-                <td class="px-3 py-1.5 pl-6">{{ t(`accounting.statement_accounts.estimate.bridge_${g.key}`, { date: formatDate(bridge.as_of) }) }}</td>
+                <td class="px-3 py-1.5 pl-6">
+                  {{ t(`accounting.statement_accounts.estimate.bridge_${g.key}`, { date: formatDate(bridge.as_of) }) }}
+                  <span v-if="g.spread" class="text-xs text-neutral-500" :data-test="`estimate-bridge-spread-${g.key}`">
+                    ({{ t('accounting.statement_accounts.estimate.bridge_spread', { amount: format(g.spread) }) }})
+                  </span>
+                </td>
                 <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ signedValue(g.amount) }}</td>
                 <td class="px-3 py-1.5 text-xs"><RouterLink v-if="laterJournalLink" :to="laterJournalLink" class="text-primary-600 hover:underline">{{ t('accounting.statement_accounts.estimate.src_journal') }}</RouterLink></td>
               </tr>

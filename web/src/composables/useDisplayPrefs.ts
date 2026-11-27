@@ -32,13 +32,14 @@ export const DISPLAY_DEFAULTS: ResolvedDisplayPrefs = {
   statement_analytics: true,
   statement_unit: 'czk',
   estimate_open: false,
+  statement_accrual_spread: false,
 }
 
 /** Uložené předvolby doplněné o výchozí hodnoty (neplatné hodnoty se ignorují). */
 export function resolveDisplayPrefs(stored: DisplayPrefs | null | undefined): ResolvedDisplayPrefs {
   const out: ResolvedDisplayPrefs = { ...DISPLAY_DEFAULTS }
   const src = stored ?? {}
-  for (const key of ['posting_open', 'dimensions_open', 'preview_open', 'statement_hide_zero', 'statement_analytics', 'estimate_open'] as const) {
+  for (const key of ['posting_open', 'dimensions_open', 'preview_open', 'statement_hide_zero', 'statement_analytics', 'estimate_open', 'statement_accrual_spread'] as const) {
     if (typeof src[key] === 'boolean') out[key] = src[key] as boolean
   }
   if (src.preview_placement === 'side' || src.preview_placement === 'below') out.preview_placement = src.preview_placement

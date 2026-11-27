@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
-import type { StatementAccountsReport, StatementColumnAccount, StatementColumnLine } from '@/api/accounting'
+import type { StatementAccountsReport, StatementColumnAccount, StatementColumnLine, YearEndProfitBridge } from '@/api/accounting'
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${JSON.stringify(params)}` : key }),
 }))
 
 vi.mock('@/composables/useFormat', () => ({
@@ -85,9 +85,9 @@ function report(profit: number): StatementAccountsReport {
   }
 }
 
-function mountTable(part: 'balance' | 'profit_loss', profit = -2000, patch: Partial<StatementAccountsReport> = {}) {
+function mountTable(part: 'balance' | 'profit_loss', profit = -2000, patch: Partial<StatementAccountsReport> = {}, bridge: YearEndProfitBridge | null = null) {
   return mount(StatementAccountsTable, {
-    props: { report: { ...report(profit), ...patch }, part, format: (v: number | null | undefined) => String(v), hideZero: true, showAnalytics: true },
+    props: { report: { ...report(profit), ...patch }, part, format: (v: number | null | undefined) => String(v), hideZero: true, showAnalytics: true, bridge },
     global: { stubs: { RouterLink: RouterLinkStub } },
   })
 }
@@ -181,5 +181,68 @@ describe('StatementAccountsTable', () => {
     const dim = mountTable('balance', -2000, { checks: mismatch, dimension: { type_id: 1, value_id: 1, value_ids: [1] } })
     expect(dim.find('[data-test="accounts-profit-mismatch"]').exists()).toBe(false)
     expect(dim.find('[data-test="accounts-profit-mismatch-dimension"]').exists()).toBe(true)
+  })
+
+  it('účty s úpravou průběžného rozlišení označí značkou, podbarví obraty a KS a vysvětlí pod tabulkou', () => {
+    const lines: StatementColumnLine[] = [
+      { kind: 'section', key: 'operating' },
+      {
+        kind: 'cells',
+        left: cell({ account_id: 50, account_code: '551', name: 'Odpisy', account_type: 'expense', month: 400, ytd: 2400, ks: 2400, spread: 2400 }),
+        right: cell({ account_id: 60, account_code: '602', name: 'Tržby', account_type: 'revenue', normal_side: 'credit', ks: 5000, ytd: 5000 }),
+      },
+      {
+        kind: 'cells',
+        left: null,
+        right: cell({ kind: 'analytic', account_id: 61, account_code: '602100', name: 'Předplatné', account_type: 'revenue', normal_side: 'credit', ks: -900, ytd: -900, spread: -900 }),
+      },
+      { kind: 'result', key: 'profit_row', amounts: amounts(1700) },
+    ]
+    const base = report(1700)
+    const w = mountTable('profit_loss', 1700, { columns: { ...base.columns!, profit_loss: { ...base.columns!.profit_loss, lines } } })
+
+    const mark = w.get('[data-test="spread-mark-551"]')
+    expect(mark.attributes('title')).toContain('accounting.statement_accounts.spread_mark')
+    expect(mark.attributes('title')).toContain('2400')
+    expect(w.find('[data-test="spread-mark-602100"]').exists()).toBe(true)
+    expect(w.find('[data-test="spread-mark-602"]').exists()).toBe(false)
+    for (const k of ['month', 'ytd', 'ks']) {
+      expect(w.get(`[data-test="amount-551-${k}"]`).classes()).toContain('bg-warning-50')
+      expect(w.get(`[data-test="amount-602100-${k}"]`).classes()).toContain('bg-warning-50')
+    }
+    expect(w.get('[data-test="amount-551-ps"]').classes()).not.toContain('bg-warning-50')
+    expect(w.get('[data-test="amount-602-ks"]').classes()).not.toContain('bg-warning-50')
+    expect(w.get('[data-test="accounts-spread-note"]').text()).toBe('accounting.statement_accounts.spread_note')
+  })
+
+  it('bez úprav průběžného rozlišení značky ani poznámku neukáže', () => {
+    const w = mountTable('balance')
+    expect(w.find('[data-test^="spread-mark-"]').exists()).toBe(false)
+    expect(w.find('[data-test="accounts-spread-note"]').exists()).toBe(false)
+  })
+
+  it('výsledek hospodaření popíše k datu výkazu a s můstkem doplní zápisy s pozdějším datem', () => {
+    const bridge: YearEndProfitBridge = { as_of: '2099-06-30', ends_on: '2099-12-31', vh_as_of: -2000, vh_posted: 1000.5, groups: [{ key: 'deferred_revenue', amount: 3000.5 }] }
+    for (const part of ['profit_loss', 'balance'] as const) {
+      const w = mountTable(part, -2000, {}, bridge)
+      const profit = w.get('[data-test="accounts-profit-row"]')
+      expect(profit.text()).toContain('accounting.statement_accounts.profit_row_as_of {"date":"2099-06-30"}')
+      const later = w.get('[data-test="accounts-profit-later"]')
+      expect(later.text()).toContain('accounting.statement_accounts.profit_later_posted {"date":"2099-06-30"}')
+      expect(later.findAll('td').at(-1)!.text()).toBe('3000.5')
+      const period = w.get('[data-test="accounts-profit-period"]')
+      expect(period.text()).toContain('accounting.statement_accounts.profit_period {"date":"2099-12-31"}')
+      expect(period.findAll('td').at(-1)!.text()).toBe(part === 'balance' ? '5500.5' : '1000.5')
+      expect(period.classes()).toContain('bg-success-50')
+    }
+  })
+
+  it('bez můstku nebo bez zápisů s pozdějším datem zůstane jen výsledek k datu výkazu', () => {
+    const none = mountTable('profit_loss')
+    expect(none.get('[data-test="accounts-profit-row"]').text()).toContain('profit_row_as_of')
+    expect(none.find('[data-test="accounts-profit-later"]').exists()).toBe(false)
+    const same = mountTable('profit_loss', -2000, {}, { as_of: '2099-06-30', ends_on: '2099-12-31', vh_as_of: -2000, vh_posted: -2000, groups: [] })
+    expect(same.find('[data-test="accounts-profit-later"]').exists()).toBe(false)
+    expect(same.find('[data-test="accounts-profit-period"]').exists()).toBe(false)
   })
 })

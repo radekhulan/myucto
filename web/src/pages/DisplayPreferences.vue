@@ -17,7 +17,7 @@ const { t } = useI18n()
 const prefs = useDisplayPrefs()
 const ready = ref(false)
 
-type BoolKey = 'posting_open' | 'dimensions_open' | 'preview_open' | 'statement_hide_zero' | 'statement_analytics' | 'estimate_open'
+type BoolKey = 'posting_open' | 'dimensions_open' | 'preview_open' | 'statement_hide_zero' | 'statement_analytics' | 'estimate_open' | 'statement_accrual_spread'
 
 interface ToggleRow { key: BoolKey; label: string; hint: string }
 interface ChoiceRow<K extends 'preview_placement' | 'statement_unit'> {
@@ -59,6 +59,7 @@ const sections = computed(() => [
     toggles: [
       { key: 'statement_hide_zero', label: t('display_prefs.statement_hide_zero'), hint: t('display_prefs.statement_hide_zero_hint') },
       { key: 'statement_analytics', label: t('display_prefs.statement_analytics'), hint: t('display_prefs.statement_analytics_hint') },
+      { key: 'statement_accrual_spread', label: t('display_prefs.statement_accrual_spread'), hint: t('display_prefs.statement_accrual_spread_hint') },
       { key: 'estimate_open', label: t('display_prefs.estimate_open'), hint: t('display_prefs.estimate_open_hint') },
     ] as ToggleRow[],
     choices: [{

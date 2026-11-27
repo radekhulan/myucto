@@ -1687,11 +1687,11 @@ export interface StatementParams {
   columns?: 0 | 1
   hide_zero?: 0 | 1
   analytics?: 0 | 1
-  /** Průběžné časové rozlišení (381/384) a odpisy k rozvahovému dni mimo deník, jen pohled výkazu. */
+  /** Průběžné časové rozlišení (381/384) a odpisy k rozvahovému dni mimo deník (výkaz i pohled po účtech, včetně exportu). */
   accrual_spread?: 0 | 1
 }
 
-/** Souhrn průběžného časového rozlišení; ve výkazu jen při `accrual_spread=1`. */
+/** Souhrn průběžného časového rozlišení; ve výkazu i pohledu po účtech jen při `accrual_spread=1`. */
 export interface StatementAccrualSpread {
   /** false = volba se neuplatnila (výkaz za hodnotu dimenze). */
   applied: boolean
@@ -1703,6 +1703,12 @@ export interface StatementAccrualSpread {
   depreciation: number
   depreciation_assets: number
   prev: { prepaid_expense: number; deferred_revenue: number; documents: number; depreciation: number; depreciation_assets: number } | null
+  /** Úpravy z agendy časového rozlišení (karty rozlišení). */
+  accrual_agenda?: number
+  /** O kolik úpravy mění výsledek hospodaření. */
+  vh_effect?: number
+  /** Uplynulá část zápisů rozpuštění 384/381 a odpisů zaúčtovaných s datem po dni výkazu. */
+  later_dated?: { deferred_revenue: number; prepaid_expense: number; depreciation: number; entries: number }
 }
 
 export interface StatementRowAccount {
@@ -2033,6 +2039,8 @@ export interface StatementColumnAccount extends StatementColumnAmounts {
   ps_unusual: boolean
   ks_unusual: boolean
   is_zero: boolean
+  /** Úprava průběžného rozlišení a odpisů obsažená v obratech a KS (mimo deník); chybí bez úpravy. */
+  spread?: number
 }
 
 export interface StatementColumnClass extends StatementColumnAmounts {
@@ -2101,6 +2109,8 @@ export interface StatementAccountsReport {
     unassigned_count: number
   }
   columns?: StatementAccountColumns
+  /** Jen při `accrual_spread=1`: úpravy jsou přímo v obratech a KS účtů. */
+  accrual_spread?: StatementAccrualSpread
 }
 
 /** Nezaúčtovaná uzávěrková operace z projekce náhledu DPPO (ClosingProjectionCalculator). */
@@ -2146,8 +2156,14 @@ export type YearEndBridgeGroupKey = 'deferred_revenue' | 'prepaid_expenses' | 'a
 export interface YearEndProfitBridge {
   as_of: string
   ends_on: string
+  /** VH k datu; s průběžným rozlišením včetně úprav. */
   vh_as_of: number
-  groups: { key: YearEndBridgeGroupKey; amount: number }[]
+  /** VH k datu jen ze zaúčtovaných zápisů (bez úprav). */
+  vh_as_of_posted?: number
+  /** Dopad úprav průběžného rozlišení na VH; null bez volby. */
+  accrual_spread?: number | null
+  /** `amount` je bez části, kterou už započetlo průběžné rozlišení (`spread`). */
+  groups: { key: YearEndBridgeGroupKey; amount: number; spread?: number }[]
   vh_posted: number
 }
 
@@ -3077,8 +3093,9 @@ export const accountingApi = {
   getStatementAccounts: (params: Omit<StatementParams, 'scope'>) =>
     api.get<StatementAccountsReport | Statement504Report>('/accounting/reports/statement-accounts', { params }).then(r => r.data),
   /** Odhad do konce otevřeného roku (náhled DPPO, uzávěrka, odpisy, zálohy) — samostatný request. */
-  getYearEndTaxEstimate: (periodId: number, asOf?: string) =>
-    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate', { params: { period_id: periodId, as_of: asOf || undefined } }).then(r => r.data),
+  getYearEndTaxEstimate: (periodId: number, asOf?: string, accrualSpread = false) =>
+    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate',
+      { params: { period_id: periodId, as_of: asOf || undefined, ...(accrualSpread ? { accrual_spread: 1 } : {}) } }).then(r => r.data),
   /**
    * VZZ v ÚČELOVÉM členění. Bez úplné mapy funkcí backend výkaz NESESTAVÍ a vrátí
    * `function_map_incomplete` s výčtem nepřiřazených účtů — nepřiřazený náklad by z výkazu

@@ -7,7 +7,7 @@ import { setLoadedDisplayPrefs } from '@/composables/useDisplayPrefs'
 const getYearEndTaxEstimate = vi.fn()
 
 vi.mock('@/api/accounting', () => ({
-  accountingApi: { getYearEndTaxEstimate: (id: number, asOf?: string) => getYearEndTaxEstimate(id, asOf) },
+  accountingApi: { getYearEndTaxEstimate: (id: number, asOf?: string, spread?: boolean) => spread ? getYearEndTaxEstimate(id, asOf, spread) : getYearEndTaxEstimate(id, asOf) },
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -50,7 +50,7 @@ function estimate(patch: Partial<Estimate> = {}): Estimate {
   }
 }
 
-function mountBlock(props: { asOf?: string; part?: 'profit_loss' | 'balance' } = {}) {
+function mountBlock(props: { asOf?: string; part?: 'profit_loss' | 'balance'; accrualSpread?: boolean } = {}) {
   return mount(YearEndTaxEstimate, {
     props: { periodId: 7, format: (v: number | null | undefined) => String(v), ...props },
     global: { stubs: { RouterLink: RouterLinkStub } },
@@ -236,5 +236,39 @@ describe('YearEndTaxEstimate', () => {
     await flushPromises()
     expect(w.find('[data-test="year-end-estimate"]').exists()).toBe(false)
     expect(w.find('[data-test="estimate-error"]').exists()).toBe(false)
+  })
+
+  it('s průběžným rozlišením začne můstek VH k datu s úpravami a u skupin ukáže započtenou část', async () => {
+    getYearEndTaxEstimate.mockResolvedValue(estimate({
+      vh_posted: 164099.61,
+      bridge: { as_of: '2099-11-27', ends_on: '2099-12-31', vh_as_of: -1000000, vh_as_of_posted: -2291099.41, accrual_spread: 1291099.41, vh_posted: 164099.61, groups: [
+        { key: 'deferred_revenue', amount: 1827144.25, spread: 1291099.41 },
+        { key: 'prepaid_expenses', amount: -38944.85, spread: 0 },
+        { key: 'depreciation', amount: -624099.79, spread: 0 },
+      ] },
+    }))
+    const w = mountBlock({ asOf: '2099-11-27', accrualSpread: true })
+    await flushPromises()
+    expect(getYearEndTaxEstimate).toHaveBeenCalledWith(7, '2099-11-27', true)
+    expect(w.emitted('loaded')?.at(-1)?.[0]).toMatchObject({ vh_posted: 164099.61 })
+    await expand(w)
+    const first = w.get('[data-test="estimate-bridge-as-of"]')
+    expect(first.text()).toContain('accounting.statement_accounts.estimate.vh_as_of_spread')
+    expect(first.text()).toContain('-1000000')
+    const deferred = w.get('[data-test="estimate-bridge-spread-deferred_revenue"]')
+    expect(deferred.text()).toContain('accounting.statement_accounts.estimate.bridge_spread')
+    expect(deferred.text()).toContain('1291099.41')
+    expect(w.find('[data-test="estimate-bridge-spread-prepaid_expenses"]').exists()).toBe(false)
+    expect(w.get('[data-test="estimate-bridge-deferred_revenue"]').text()).toContain('+ 1827144.25')
+    const sum = Math.round((-1000000 + 1827144.25 - 38944.85 - 624099.79) * 100) / 100
+    expect(sum).toBe(164099.61)
+  })
+
+  it('bez volby se ptá bez průběžného rozlišení a při chybě předá prázdný odhad', async () => {
+    getYearEndTaxEstimate.mockRejectedValueOnce({ response: { status: 500 } })
+    const w = mountBlock({ asOf: '2099-11-27' })
+    await flushPromises()
+    expect(getYearEndTaxEstimate).toHaveBeenCalledWith(7, '2099-11-27')
+    expect(w.emitted('loaded')).toEqual([[null]])
   })
 })

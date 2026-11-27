@@ -52,6 +52,8 @@ export interface DisplayPrefs {
   statement_unit?: 'czk' | 'thousands'
   /** Odhad do konce roku: rozpad rozbalený. */
   estimate_open?: boolean
+  /** Výkazy: průběžné časové rozlišení a odpisy zapnuté, dokud ho uživatel na výkazu sám nepřepne. */
+  statement_accrual_spread?: boolean
 }
 
 export const preferencesApi = {

@@ -21391,7 +21391,9 @@
       "toggle_hint": "Counts expenses and revenues of documents with a from–to period only pro rata by days up to the reporting date and shows the rest as prepaid expenses (381) and deferred revenue (384). Also includes accounting depreciation of assets for elapsed full months not yet posted (551 / accumulated depreciation). Nothing is posted to the journal.",
       "note_title": "Interim accruals and depreciation outside the journal.",
       "note": "Expenses and revenues of documents with a from–to period are spread pro rata by days up to the reporting date. Prepaid expenses (381): {prepaid}, deferred revenue (384): {deferred}, documents adjusted: {documents}. Accounting depreciation of assets for elapsed full months not yet posted: {depreciation} (assets: {assets}). The adjustment is not posted to the journal; the Accruals and Asset depreciation steps of the year-end closing post it.",
-      "skipped_dimension": "A statement filtered by a dimension value does not apply interim accruals and depreciation and shows the journal balances."
+      "skipped_dimension": "A statement filtered by a dimension value does not apply interim accruals and depreciation and shows the journal balances.",
+      "note_later_dated": "Of which elapsed parts of entries posted with a date after the reporting date (entries: {entries}): release of deferred revenue {deferred}, release of prepaid expenses {prepaid}, depreciation {depreciation}.",
+      "note_vh_effect": "This changes the profit or loss by {amount}."
     },
     "balance_sheet": {
       "title": "Balance sheet",
@@ -21518,7 +21520,9 @@
         "side_net": "net assets − liabilities",
         "balance_check": "Total: assets − liabilities = {difference}, change in profit after tax {expected}",
         "balance_check_ok": "The balance sheet stays balanced after the estimate",
-        "balance_check_mismatch": "Balance sheet changes do not match the change in profit"
+        "balance_check_mismatch": "Balance sheet changes do not match the change in profit",
+        "vh_as_of_spread": "Result as of {date} with interim accruals",
+        "bridge_spread": "excluding the part already counted by interim accruals: {amount}"
       },
       "hide_zero": "Hide zero accounts",
       "col_ps": "Opening balance",
@@ -21537,7 +21541,20 @@
       "total_expenses_all": "Total expenses, all activities",
       "total_revenues_all": "Total revenues, all activities",
       "open_inventory": "Open account inventory",
-      "sign_hint": "Sign by account type: assets and expenses debit − credit, liabilities and revenues credit − debit. For every account, opening balance + turnover from the start of the period = closing balance. An unusual side is in red; accumulated depreciation is negative in assets and is not unusual."
+      "sign_hint": "Sign by account type: assets and expenses debit − credit, liabilities and revenues credit − debit. For every account, opening balance + turnover from the start of the period = closing balance. An unusual side is in red; accumulated depreciation is negative in assets and is not unusual.",
+      "spread_mark": "Includes an interim accruals and depreciation adjustment: {amount} (not in the journal)",
+      "spread_note": "Marked accounts include an interim accruals and depreciation adjustment. It is not posted to the journal; turnovers and closing balances show it as if it were posted as of the reporting date.",
+      "profit_row_as_of": "Profit or loss as of {date}",
+      "profit_later_posted": "Posted with a date after {date}",
+      "profit_period": "Profit or loss up to {date}",
+      "summary": {
+        "vh_as_of": "Profit or loss as of {date}",
+        "with_spread": "with interim accruals",
+        "vh_posted": "Posted profit or loss up to {date}",
+        "before_tax": "Estimate before tax",
+        "after_tax": "Estimate after tax",
+        "note": "The difference between the profit or loss as of {date} and the posted result up to {end} consists of entries dated after {date}; see the breakdown in the Year-end estimate block below."
+      }
     },
     "income_statement": {
       "title": "Income statement",
@@ -47056,6 +47073,8 @@
     "statement_analytics": "Show analytical accounts",
     "statement_analytics_hint": "Default state of the toggle in the By accounts view.",
     "estimate_open": "Expand the year-end estimate breakdown",
-    "estimate_open_hint": "The Year-end estimate block in statements shows the detailed breakdown right away."
+    "estimate_open_hint": "The Year-end estimate block in statements shows the detailed breakdown right away.",
+    "statement_accrual_spread": "Interim accruals and depreciation",
+    "statement_accrual_spread_hint": "Default state of the toggle in the statement and the By accounts view until you switch it on the statement yourself."
   }
 }

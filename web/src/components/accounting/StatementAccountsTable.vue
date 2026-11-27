@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import type { StatementAccountsReport, StatementColumnAccount, StatementColumnAmounts } from '@/api/accounting'
+import type { StatementAccountsReport, StatementColumnAccount, StatementColumnAmounts, YearEndProfitBridge } from '@/api/accounting'
 import { formatDate } from '@/composables/useFormat'
 
 const props = defineProps<{
@@ -11,6 +11,8 @@ const props = defineProps<{
   format: (value: number | null | undefined) => string
   hideZero: boolean
   showAnalytics: boolean
+  /** Můstek z odhadu do konce roku: pod VH k datu výkazu doplní zápisy s pozdějším datem. */
+  bridge?: YearEndProfitBridge | null
 }>()
 
 const emit = defineEmits<{
@@ -56,8 +58,31 @@ function accountLink(cell: StatementColumnAccount) {
 }
 
 function amountClass(cell: StatementColumnAccount, key: keyof StatementColumnAmounts): string {
-  return (key === 'ps' && cell.ps_unusual) || (key === 'ks' && cell.ks_unusual) ? 'text-danger-600 font-semibold' : ''
+  const unusual = (key === 'ps' && cell.ps_unusual) || (key === 'ks' && cell.ks_unusual) ? 'text-danger-600 font-semibold' : ''
+  return [unusual, hasSpread(cell) && key !== 'ps' ? 'bg-warning-50' : ''].filter(Boolean).join(' ')
 }
+
+/** Účet nese úpravu průběžného rozlišení a odpisů (mimo deník, jako by byla zaúčtovaná k datu výkazu). */
+function hasSpread(cell: StatementColumnAccount): boolean {
+  return !!cell.spread
+}
+
+function spreadTitle(cell: StatementColumnAccount): string {
+  return t('accounting.statement_accounts.spread_mark', { amount: props.format(cell.spread ?? 0) })
+}
+
+const anySpread = computed(() => lines.value.some(line => line.kind === 'cells'
+  && ([line.left, line.right] as const).some(c => !!c && c.kind !== 'class' && hasSpread(c))))
+
+const asOfLabel = computed(() => formatDate(props.report.as_of))
+
+/** Rozdíl VH do konce období proti VH k datu výkazu = zápisy s datem po dni výkazu. */
+const laterPosted = computed(() => {
+  const b = props.bridge
+  if (!b) return null
+  const cents = Math.round(b.vh_posted * 100) - Math.round(b.vh_as_of * 100)
+  return cents === 0 ? null : cents / 100
+})
 
 const closedAtYearEnd = computed(() => props.report.closed && props.report.as_of === props.report.period.ends_on)
 </script>
@@ -145,6 +170,9 @@ const closedAtYearEnd = computed(() => props.report.closed && props.report.as_of
                         class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
                         {{ line[side].account_code }}
                       </RouterLink>
+                      <span v-if="hasSpread(line[side])" class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-warning-500 align-middle"
+                        role="img" :title="spreadTitle(line[side])" :aria-label="spreadTitle(line[side])"
+                        :data-test="`spread-mark-${line[side].account_code}`"></span>
                     </td>
                     <td class="px-2" :class="line[side].kind === 'analytic' ? 'py-1 text-xs text-neutral-600' : 'py-1.5'">{{ line[side].name }}</td>
                     <td v-for="k in amountKeys" :key="k" class="px-2 text-right font-mono whitespace-nowrap"
@@ -171,18 +199,43 @@ const closedAtYearEnd = computed(() => props.report.closed && props.report.as_of
                 :data-test="line.key === 'profit_row' ? 'accounts-profit-row' : undefined">
                 <td colspan="6"></td>
                 <td colspan="2" class="px-2 py-1.5 border-l border-neutral-300">
-                  {{ t(`accounting.statement_accounts.${line.key}`) }}
                   <template v-if="line.key === 'profit_row'">
+                    {{ t('accounting.statement_accounts.profit_row_as_of', { date: asOfLabel }) }}
                     ({{ line.amounts.ks >= 0 ? t('accounting.statement_accounts.profit') : t('accounting.statement_accounts.loss') }})
                   </template>
+                  <template v-else>{{ t(`accounting.statement_accounts.${line.key}`) }}</template>
                 </td>
                 <td v-for="k in amountKeys" :key="k" class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ format(line.amounts[k]) }}</td>
               </tr>
+              <template v-if="line.kind === 'result' && line.key === 'profit_row' && laterPosted !== null && bridge">
+                <tr class="text-neutral-600" data-test="accounts-profit-later">
+                  <td colspan="6"></td>
+                  <td colspan="2" class="px-2 py-1.5 border-l border-neutral-300">
+                    {{ t('accounting.statement_accounts.profit_later_posted', { date: asOfLabel }) }}
+                  </td>
+                  <td colspan="3"></td>
+                  <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ format(laterPosted) }}</td>
+                </tr>
+                <tr class="font-semibold border-t border-neutral-300"
+                  :class="line.amounts.ks + laterPosted >= 0 ? 'bg-success-50 text-success-800' : 'bg-danger-50 text-danger-700'"
+                  data-test="accounts-profit-period">
+                  <td colspan="6"></td>
+                  <td colspan="2" class="px-2 py-1.5 border-l border-neutral-300">
+                    {{ t('accounting.statement_accounts.profit_period', { date: formatDate(bridge.ends_on) }) }}
+                  </td>
+                  <td colspan="3"></td>
+                  <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ format(Math.round((line.amounts.ks + laterPosted) * 100) / 100) }}</td>
+                </tr>
+              </template>
             </template>
           </tbody>
         </table>
       </div>
     </div>
+    <p v-if="anySpread" class="flex items-start gap-1.5 text-xs text-warning-800 mb-2" data-test="accounts-spread-note">
+      <span class="mt-1 inline-block w-1.5 h-1.5 shrink-0 rounded-full bg-warning-500" aria-hidden="true"></span>
+      <span>{{ t('accounting.statement_accounts.spread_note') }}</span>
+    </p>
     <p class="text-xs text-neutral-500 mb-4">{{ t('accounting.statement_accounts.sign_hint') }}</p>
   </div>
 </template>

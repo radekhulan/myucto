@@ -21391,7 +21391,9 @@
       "toggle_hint": "Náklady a výnosy dokladů s obdobím od–do započte k rozvahovému dni jen poměrně podle dnů, zbytek ukáže jako náklady (381) a výnosy (384) příštích období. Započte i účetní odpisy majetku za uplynulé celé měsíce, které ještě nejsou zaúčtované (551 / oprávky). Do deníku se nic nezapisuje.",
       "note_title": "Průběžné časové rozlišení a odpisy mimo deník.",
       "note": "Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne. Na náklady příštích období (381) jde {prepaid}, na výnosy příštích období (384) {deferred}, upravených dokladů: {documents}. Účetní odpisy majetku za uplynulé celé měsíce, které ještě nejsou zaúčtované: {depreciation} (karet: {assets}). Úprava není zaúčtovaná v deníku; v účetnictví ji zaúčtují až kroky uzávěrky Časové rozlišení a Odpisy majetku.",
-      "skipped_dimension": "Výkaz za hodnotu dimenze průběžné časové rozlišení a odpisy neuplatní a ukazuje stav deníku."
+      "skipped_dimension": "Výkaz za hodnotu dimenze průběžné časové rozlišení a odpisy neuplatní a ukazuje stav deníku.",
+      "note_later_dated": "Z toho uplynulé části zápisů zaúčtovaných s datem po dni výkazu (zápisů: {entries}): rozpuštění výnosů příštích období {deferred}, rozpuštění nákladů příštích období {prepaid}, odpisy {depreciation}.",
+      "note_vh_effect": "Výsledek hospodaření se tím mění o {amount}."
     },
     "balance_sheet": {
       "title": "Rozvaha",
@@ -21518,7 +21520,9 @@
         "side_net": "netto aktiva − pasiva",
         "balance_check": "Celkem: aktiva − pasiva = {difference}, změna výsledku po zdanění {expected}",
         "balance_check_ok": "Rozvaha po odhadu zůstane vyrovnaná",
-        "balance_check_mismatch": "Změny rozvahy nesouhlasí se změnou výsledku"
+        "balance_check_mismatch": "Změny rozvahy nesouhlasí se změnou výsledku",
+        "vh_as_of_spread": "Výsledek k {date} s průběžným rozlišením",
+        "bridge_spread": "bez části započtené průběžným rozlišením: {amount}"
       },
       "hide_zero": "Skrýt nulové účty",
       "col_ps": "Počáteční stav",
@@ -21537,7 +21541,20 @@
       "total_expenses_all": "Náklady celkem za všechny činnosti",
       "total_revenues_all": "Výnosy celkem za všechny činnosti",
       "open_inventory": "Otevřít inventuru účtu",
-      "sign_hint": "Znaménko podle typu účtu: aktiva a náklady MD − Dal, pasiva a výnosy Dal − MD. U každého účtu platí počáteční stav + obrat od začátku období = konečný stav. Neobvyklá strana je červeně; oprávky jsou v aktivech záporně a neobvyklé nejsou."
+      "sign_hint": "Znaménko podle typu účtu: aktiva a náklady MD − Dal, pasiva a výnosy Dal − MD. U každého účtu platí počáteční stav + obrat od začátku období = konečný stav. Neobvyklá strana je červeně; oprávky jsou v aktivech záporně a neobvyklé nejsou.",
+      "spread_mark": "Obsahuje úpravu průběžného časového rozlišení a odpisů: {amount} (není v deníku)",
+      "spread_note": "Označené účty obsahují úpravu průběžného časového rozlišení a odpisů. Úprava není zaúčtovaná v deníku; v obratech a konečném stavu je, jako by byla zaúčtovaná k datu výkazu.",
+      "profit_row_as_of": "Výsledek hospodaření k {date}",
+      "profit_later_posted": "Zaúčtováno s datem po {date}",
+      "profit_period": "Výsledek hospodaření do {date}",
+      "summary": {
+        "vh_as_of": "Výsledek hospodaření k {date}",
+        "with_spread": "s průběžným rozlišením",
+        "vh_posted": "Zaúčtovaný výsledek hospodaření do {date}",
+        "before_tax": "Odhad před zdaněním",
+        "after_tax": "Odhad po zdanění",
+        "note": "Rozdíl mezi výsledkem hospodaření k {date} a zaúčtovaným výsledkem do {end} tvoří zápisy s datem po {date}; rozpad je v bloku Odhad do konce roku níže."
+      }
     },
     "income_statement": {
       "title": "Výkaz zisku a ztráty",
@@ -47056,6 +47073,8 @@
     "statement_analytics": "Zobrazit analytiky",
     "statement_analytics_hint": "Výchozí stav přepínače v pohledu Po účtech.",
     "estimate_open": "Rozbalovat rozpad odhadu do konce roku",
-    "estimate_open_hint": "Blok Odhad do konce roku ve výkazech ukáže rovnou i podrobný rozpad."
+    "estimate_open_hint": "Blok Odhad do konce roku ve výkazech ukáže rovnou i podrobný rozpad.",
+    "statement_accrual_spread": "Průběžné časové rozlišení a odpisy",
+    "statement_accrual_spread_hint": "Výchozí stav přepínače ve výkazu i pohledu Po účtech, dokud ho na výkazu sami nepřepnete."
   }
 }

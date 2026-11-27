@@ -13,10 +13,12 @@ import {
   type StatementRowAccount,
   type StatementAccountsReport,
   type StatementParams,
+  type YearEndTaxEstimate as YearEndEstimate,
 } from '@/api/accounting'
 import Statement504Table from '@/components/accounting/Statement504Table.vue'
 import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
 import YearEndTaxEstimate from '@/components/accounting/YearEndTaxEstimate.vue'
+import StatementAccountsSummary from '@/components/accounting/StatementAccountsSummary.vue'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -65,6 +67,8 @@ const report504 = ref<Statement504Report | null>(null)
 const accounts504 = ref<Statement504Report | null>(null)
 const view = ref<'statement' | 'accounts'>('statement')
 const accountsReport = ref<StatementAccountsReport | null>(null)
+// Odhad do konce roku načítá blok pod tabulkou; souhrn nad tabulkou a konec tabulky ho sdílí (jeden request).
+const yearEstimate = ref<YearEndEstimate | null>(null)
 const hasData = computed(() => view.value === 'accounts' ? !!(accountsReport.value || accounts504.value) : !!(report.value || report504.value))
 const category = ref<EntityCategory | null>(null)
 const loading = ref(false)
@@ -103,6 +107,7 @@ function accountsParams(): Omit<StatementParams, 'scope'> {
   return {
     period_id, as_of, dimension_value_id, dimension_descendants,
     columns: 1, hide_zero: hideZero.value ? 1 : 0, analytics: showAnalytics.value ? 1 : 0,
+    ...accrualSpread.param(),
   }
 }
 
@@ -136,6 +141,7 @@ async function load() {
   if (!filters.period_id) return
   loading.value = true
   expandedRowCode.value = null
+  yearEstimate.value = null
   try {
     if (view.value === 'accounts') {
       const result = await accountingApi.getStatementAccounts(accountsParams())
@@ -332,7 +338,7 @@ onMounted(async () => {
             {{ t(`accounting.balance_sheet.category_${category.category}`) }}
           </span>
         </div>
-        <div v-if="view === 'statement' && !report504" class="flex items-end pb-2">
+        <div v-if="view === 'statement' ? !report504 : !accounts504" class="flex items-end pb-2">
           <AccrualSpreadToggle :model-value="accrualSpreadOn" @update:model-value="onAccrualSpread" />
         </div>
       </div>
@@ -347,6 +353,7 @@ onMounted(async () => {
       {{ t('dimensions.balance_filter_note') }}
     </p>
     <AccrualSpreadNote v-if="view === 'statement' && report?.accrual_spread" :spread="report.accrual_spread" :format="fm" />
+    <AccrualSpreadNote v-else-if="view === 'accounts' && accountsReport?.accrual_spread" :spread="accountsReport.accrual_spread" :format="fm" />
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
@@ -360,11 +367,14 @@ onMounted(async () => {
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ accountsReport.entity.prepared_at }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
+      <StatementAccountsSummary v-if="yearEstimate && !accountsReport.closed && !accountsReport.dimension" :estimate="yearEstimate"
+        :as-of="accountsReport.as_of" :accrual-applied="!!accountsReport.accrual_spread?.applied" :format="fm" />
       <StatementAccountsTable :report="accountsReport" part="balance" :format="fm"
-        :hide-zero="hideZero" :show-analytics="showAnalytics"
+        :hide-zero="hideZero" :show-analytics="showAnalytics" :bridge="yearEstimate?.bridge ?? null"
         @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
       <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id"
-        :as-of="accountsReport.as_of" part="balance" :format="fm" />
+        :as-of="accountsReport.as_of" part="balance" :format="fm"
+        :accrual-spread="!!accountsReport.accrual_spread?.applied" @loaded="yearEstimate = $event" />
     </template>
 
     <template v-else-if="report">
