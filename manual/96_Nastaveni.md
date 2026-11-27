@@ -435,6 +435,13 @@ firmy (typicky **325** Ostatní závazky), zaúčtují se přijaté doklady druh
 závazku z předkontace (321). Ručně zvolená předkontace s jiným závazkem má přednost. Prázdné pole znamená závazek
 z předkontace. Aplikace odmítne účet, který v osnově není nebo není závazkový (například 311 nebo 518).
 
+Vedle něj je pole **Účet závazku pro zahraniční dodavatele**. Zadáte-li závazkový účet třídy 3
+(například analytiku **321.300**), zaúčtují se přijaté doklady dodavatelů z jiné země, než je země
+firmy, na tento účet. Přednost má účet závazku na kartě dodavatele, protiúčet na řádku dokladu
+a ručně zvolená předkontace (viz [§ 23.11.6](23_Prijate_faktury.md#23116-polozky-a-druh-vydaje)).
+Syntetický účet s více analytikami zadat nejde, vyberte analytiku. Prázdné pole znamená závazek
+z předkontace.
+
 Úhrady přijatých dokladů z pokladny, banky, platby kartou i zápočty vždy vyrovnávají účet, na kterém závazek dokladu
 skutečně vznikl. Účtenka zaúčtovaná na 325 se tedy uhradí 325/211 nebo 325/221 a saldo zůstane na jednom účtu.
 Úhrada dokladu, který ještě není zaúčtovaný, jde na závazek z kontace úhrady (321), proto účtenku zaúčtujte dřív,
@@ -443,7 +450,7 @@ než ji uhradíte. Nastavení platí pro nově zaúčtované doklady, už zaúč
 **Postup:**
 
 1. Otevřete `Firma → Nastavení`, záložku **Daně a účetnictví**, sekci **Daňové nastavení (EPO výkazy DPH/KH)**.
-2. Zapněte požadované přepínače, případně vyplňte účet závazku pro účtenky.
+2. Zapněte požadované přepínače, případně vyplňte účet závazku pro účtenky a pro zahraniční dodavatele.
 3. V boxu **Automatika účtování** zvolte preset (**Vypnuto**, **Jen návrhy**, **Asistovaná**, **Plná automatika**).
 4. Případně upravte jednotlivé typy operací na vypnuto / návrh / automaticky, nastavte **Denní limit automatiky (Kč)** a zapněte **Ranní přehled e-mailem**.
 5. Uložte nastavení.

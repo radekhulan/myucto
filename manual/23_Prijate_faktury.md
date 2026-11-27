@@ -723,6 +723,23 @@ pole, takže řádek nese celou dvojici účtů:
   jeden závazek dokladu. U finální faktury navázané na zálohu a u daňového dokladu k platbě se
   protiúčet z řádku použít nedá.
 
+Závazek dokladu bez protiúčtu na řádku určuje aplikace v tomto pořadí:
+
+1. **Účet Dal na řádku** (nebo závazek z předkontace řádku).
+2. **Ručně zvolená předkontace** dokladu při zaúčtování.
+3. **Účet závazku na kartě dodavatele** (např. 321.200 pro tuzemské faktury), viz
+   [Klienti](18_Klienti.md).
+4. **Účet závazku pro zahraniční dodavatele** z nastavení firmy (např. 321.300), pokud je země
+   dodavatele jiná než země firmy, viz [Nastavení](96_Nastaveni.md).
+5. Závazek z předkontace dokladu, u účtenky případně účet závazku pro účtenky z nastavení firmy.
+
+Úhrady bankou, pokladnou, kartou i zápočtem vyrovnají účet, na kterém závazek dokladu vznikl.
+Zúčtování zaplacené zálohy konečnou fakturou jde proti stejnému závazku jako faktura. Dobropis
+k zaúčtované faktuře jde na účet, na kterém leží faktura, i když se mezitím změnila karta
+dodavatele. Výjimkou je doklad, který zúčtovává zálohu vedenou přímo na závazku (předkontace
+zúčtování zálohy se stejnými účty): ten zůstává na závazku z předkontace, protože tam leží úhrada
+zálohy. Změna karty nebo nastavení platí pro nově zaúčtované doklady, už zaúčtované se nepřeúčtují.
+
 Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
 [Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.
 

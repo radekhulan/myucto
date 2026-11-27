@@ -815,6 +815,13 @@ doklad k platbě, penále), a jen pro účetní.
 Protiúčet z řádku nelze použít u vyúčtování zálohy, daňového dokladu k platbě a penále: tyto
 doklady účtují pohledávku podle vlastní předkontace a zaúčtování to ohlásí chybou.
 
+Bez protiúčtu na řádku a bez ručně zvolené předkontace jde pohledávka na **Účet pohledávky**
+z karty odběratele (např. 311.200 pachtovné, viz [Klienti](18_Klienti.md)), jinak na pohledávku
+z předkontace dokladu. Celý doklad má pohledávku na jednom účtu včetně DPH, takže ji úhrada
+uzavře. Dobropis k zaúčtované faktuře jde na účet, na kterém faktura leží. Vyúčtování zálohy
+vedené přímo na pohledávce (předkontace zúčtování zálohy se stejnými účty) a penále zůstávají
+na pohledávce z předkontace.
+
 **Členění DPH položky** zvolíte pod šipkou na konci řádku, kde je i účet položky. Výchozí
 **Automaticky podle sazby** kód odvodí ze sazby, jednotky a odběratele. Zvolený kód se při dalším
 uložení zachová, dokud nezměníte sazbu, jednotku, kartu majetku, odběratele, přenesenou daňovou
