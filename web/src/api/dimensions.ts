@@ -331,6 +331,27 @@ export interface DimensionProfitRow {
   semantic_key?: string | null
   responsible_user_id?: number | null
   responsible_user_name?: string | null
+  /** Odhad do konce roku (jen s `estimate=1` a použitelným odhadem). */
+  estimate?: { own: DimensionProfitEstimateAmounts; total: DimensionProfitEstimateAmounts }
+}
+
+/** Odhad do konce roku pro hodnotu nebo součet; `result` = VH + ostatní sloupce. */
+export interface DimensionProfitEstimateAmounts {
+  posted_later: number
+  accruals: number
+  depreciation: number
+  other: number
+  result: number
+}
+
+export interface DimensionProfitEstimate {
+  applicable: boolean
+  reason: string | null
+  period?: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
+  /** Od kterého dne jsou zaúčtované zápisy ve sloupci posted_later (null = sestava do konce období). */
+  posted_later_from?: string | null
+  has_other?: boolean
+  check?: { vh_before_tax: number; income_tax_posted: number; total: number; matches: boolean }
 }
 
 /** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
@@ -358,6 +379,9 @@ export interface DimensionProfitReport {
   totals: DimensionProfitAmounts
   companies?: (DimensionProfitAmounts & { id: number; name: string })[]
   matrix?: DimensionProfitMatrix
+  estimate?: DimensionProfitEstimate
+  unassigned_estimate?: DimensionProfitEstimateAmounts
+  totals_estimate?: DimensionProfitEstimateAmounts
 }
 
 export interface DimensionProfitParams {
@@ -369,6 +393,7 @@ export interface DimensionProfitParams {
   responsible_user_id?: number
   accounts?: 1
   companies?: 1
+  estimate?: 1
 }
 
 export interface DimensionAnalyticsAmounts extends DimensionProfitAmounts {

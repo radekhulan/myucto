@@ -11,6 +11,12 @@ const m = vi.hoisted(() => ({
   replace: vi.fn(),
   routeQuery: {} as Record<string, string>,
   accountingMode: 'double_entry',
+  canReports: true,
+  periodStatus: 'open',
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canRead: (permission: string) => permission !== 'reports' || m.canReports }),
 }))
 
 vi.mock('@/stores/supplier', () => ({
@@ -41,7 +47,7 @@ vi.mock('@/api/dimensions', () => ({
 }))
 vi.mock('@/api/accounting', () => ({
   accountingApi: {
-    listPeriods: async () => [{ id: 2, fiscal_year: 2094, starts_on: '2094-01-01', ends_on: '2094-12-31', status: 'open' }],
+    listPeriods: async () => [{ id: 2, fiscal_year: 2094, starts_on: '2094-01-01', ends_on: '2094-12-31', status: m.periodStatus }],
     getTrialBalance: m.getTrialBalance,
   },
 }))
@@ -57,7 +63,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 const economicKey = 'dimensions.system_values.activity.economic'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => (key === economicKey ? 'Economic activity' : key), te: (key: string) => key === economicKey, locale: { value: 'cs' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v) }))
+vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v), formatDate: (v: string) => v }))
 
 import DimensionProfit from '../DimensionProfit.vue'
 import DimensionProfitMatrix from '@/components/dimensions/DimensionProfitMatrix.vue'
@@ -85,6 +91,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.routeQuery = {}
   m.accountingMode = 'double_entry'
+  m.canReports = true
+  m.periodStatus = 'open'
   m.profit.mockResolvedValue(profitReport)
   m.cashFlow.mockResolvedValue({
     from: '2094-01-01', to: '2094-12-31', supplier_ids: [1, 3], hidden_companies: 0, dimension: null, profit: 0,
@@ -227,6 +235,87 @@ describe('Výkazy po dimenzi', () => {
     expect(w.get('[data-test="profit-companies"]').text()).toContain('První firma')
     expect(w.get('[data-test="profit-companies"]').text()).not.toContain('Druhá firma')
     expect(m.replace).toHaveBeenLastCalledWith({ query: expect.objectContaining({ companies: '1' }) })
+  })
+})
+
+describe('Odhad do konce roku ve výsledovce po dimenzi', () => {
+  const zero = { posted_later: 0, accruals: 0, depreciation: 0, other: 0 }
+  const estimateReport = {
+    ...profitReport,
+    to: '2094-11-27',
+    rows: [
+      { ...profitReport.rows[0], estimate: { own: { ...zero, accruals: 18200, result: 18190 }, total: { ...zero, accruals: 18200, result: 18190 } } },
+      { value_id: 6, parent_id: null, code: 'S2', name: 'Stroje', is_active: true, depth: 0, has_children: false,
+        own: { revenue: 0, cost: 0, result: 0 }, total: { revenue: 0, cost: 0, result: 0 },
+        estimate: { own: { ...zero, posted_later: 5000, depreciation: -21600, result: -16600 }, total: { ...zero, posted_later: 5000, depreciation: -21600, result: -16600 } } },
+    ],
+    estimate: { applicable: true, reason: null, period: { id: 2, fiscal_year: 2094, starts_on: '2094-01-01', ends_on: '2094-12-31' },
+      posted_later_from: '2094-11-28', has_other: false, check: { vh_before_tax: 1590, income_tax_posted: 0, total: 1590, matches: true } },
+    unassigned_estimate: { ...zero, result: 0 },
+    totals_estimate: { posted_later: 5000, accruals: 18200, depreciation: -21600, other: 0, result: 1590 },
+  }
+
+  it('přepínač pošle estimate=1 a doplní sloupce odhadu u hodnot, souhrnu i hodnoty jen s odhadem', async () => {
+    m.routeQuery = { type_id: '1', from: '2094-01-01', to: '2094-11-27' }
+    m.profit.mockResolvedValue(estimateReport)
+    const w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(m.profit).toHaveBeenLastCalledWith({ type_id: 1, from: '2094-01-01', to: '2094-11-27' })
+
+    await w.get('[data-test="profit-estimate"]').setValue(true)
+    await flushPromises()
+    expect(m.profit).toHaveBeenLastCalledWith({ type_id: 1, from: '2094-01-01', to: '2094-11-27', estimate: 1 })
+    expect(m.replace).toHaveBeenLastCalledWith({ query: expect.objectContaining({ estimate: '1' }) })
+    expect(w.findAll('[data-test^="profit-estimate-col-"]').map(c => c.attributes('data-test'))).toEqual([
+      'profit-estimate-col-posted_later', 'profit-estimate-col-accruals', 'profit-estimate-col-depreciation', 'profit-estimate-col-result',
+    ])
+    expect(w.get('[data-test="profit-estimate-col-posted_later"]').attributes('title')).toBe('dimensions.profit_estimate_posted_later_hint')
+    expect(w.get('[data-test="profit-estimate-5-accruals"]').text()).toBe('18200')
+    expect(w.get('[data-test="profit-estimate-6-depreciation"]').text()).toBe('-21600')
+    expect(w.get('[data-test="profit-estimate-6-posted_later"]').text()).toBe('5000')
+    expect(w.get('[data-test="profit-estimate-total-result"]').text()).toBe('1590')
+    expect(w.find('[data-test="profit-estimate-note"]').text()).toContain('dimensions.profit_estimate_badge')
+    expect(w.find('[data-test="profit-estimate-unassigned-result"]').exists()).toBe(false)
+  })
+
+  it('bez otevřeného období od jeho začátku, se skupinou, rozpadem po účtech nebo bez práva přepínač nenabídne', async () => {
+    m.routeQuery = { type_id: '1', from: '2094-02-01', to: '2094-11-27', estimate: '1' }
+    let w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(w.find('[data-test="profit-estimate"]').exists()).toBe(false)
+    expect(m.profit).toHaveBeenLastCalledWith(expect.not.objectContaining({ estimate: 1 }))
+
+    m.routeQuery = { type_id: '1', from: '2094-01-01', to: '2094-11-27', accounts: '1' }
+    w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(w.find('[data-test="profit-estimate"]').exists()).toBe(false)
+
+    m.routeQuery = { type_id: '2', from: '2094-01-01', to: '2094-11-27', scope: 'group' }
+    w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(w.find('[data-test="profit-estimate"]').exists()).toBe(false)
+
+    m.routeQuery = { type_id: '1', from: '2094-01-01', to: '2094-11-27' }
+    m.periodStatus = 'closed'
+    w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(w.find('[data-test="profit-estimate"]').exists()).toBe(false)
+
+    m.periodStatus = 'open'
+    m.canReports = false
+    w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(w.find('[data-test="profit-estimate"]').exists()).toBe(false)
+  })
+
+  it('nepoužitelný odhad vysvětlí důvodem a sloupce nepřidá', async () => {
+    m.routeQuery = { type_id: '1', from: '2094-01-01', to: '2094-11-27', estimate: '1' }
+    m.profit.mockResolvedValue({ ...profitReport, estimate: { applicable: false, reason: 'income_tax_posted' } })
+    const w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    expect(m.profit).toHaveBeenLastCalledWith(expect.objectContaining({ estimate: 1 }))
+    expect(w.get('[data-test="profit-estimate-unavailable"]').text()).toBe('dimensions.profit_estimate_unavailable')
+    expect(w.findAll('[data-test^="profit-estimate-col-"]')).toHaveLength(0)
   })
 })
 

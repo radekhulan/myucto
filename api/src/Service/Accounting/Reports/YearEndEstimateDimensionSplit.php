@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
@@ -63,12 +64,21 @@ final class YearEndEstimateDimensionSplit
                 continue;
             }
             $column = $key === 'depreciation' ? 'depreciation' : (in_array($key, self::ACCRUAL_KEYS, true) ? 'accruals' : 'other');
-            $parts = match ($key) {
-                'prepaid_expense_accrual' => $this->accrualParts($typeId, $this->closing->prepaidExpenseAccrualLines($supplierId, (int) $period['id'])['lines'], 1),
-                'deferred_revenue_accrual' => $this->accrualParts($typeId, $this->closing->deferredRevenueAccrualLines($supplierId, (int) $period['id'])['lines'], -1),
-                'depreciation' => $this->depreciationParts($supplierId, $typeId, $period),
-                default => ['' => $cents],
-            };
+            try {
+                $parts = match ($key) {
+                    'prepaid_expense_accrual' => $this->accrualParts($typeId, $this->closing->prepaidExpenseAccrualLines($supplierId, (int) $period['id'])['lines'], 1),
+                    'deferred_revenue_accrual' => $this->accrualParts($typeId, $this->closing->deferredRevenueAccrualLines($supplierId, (int) $period['id'])['lines'], -1),
+                    'depreciation' => $this->depreciationParts($supplierId, $typeId, $period),
+                    default => ['' => $cents],
+                };
+            } catch (\Throwable $e) {
+                if (TransactionFailure::aborted($e)) {
+                    throw $e;
+                }
+                // Odhad položku má (náhled v odhadu prošel), jen rozpad selhal: částka zůstane v součtu.
+                error_log(sprintf('Odhad po dimenzích (firma %d): rozpad %s selhal: %s: %s', $supplierId, $key, $e::class, $e->getMessage()));
+                $parts = ['' => $cents];
+            }
             if (array_sum($parts) !== $cents) {
                 error_log(sprintf('Odhad po dimenzích (firma %d): rozpad %s %.2f nesouhlasí s odhadem %.2f, celý do řádku bez hodnoty.',
                     $supplierId, $key, array_sum($parts) / 100, $cents / 100));

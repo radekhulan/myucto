@@ -882,6 +882,9 @@
       "reports",
       "taxReturn"
     ],
+    "accounting-income-statement-by-function": [
+      "taxReturn"
+    ],
     "accounting-dimension-profit": [
       "dimensions"
     ],

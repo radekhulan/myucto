@@ -9,6 +9,9 @@
  *
  * Stránka je proto postavená tak, aby chybějící přiřazení nebyla slepá ulička: backend
  * vrátí seznam účtů s obratem, kterým přiřazení chybí, a ty jdou přiřadit rovnou tady.
+ *
+ * Pod výkazem je tentýž blok odhadu do konce roku jako u výsledovky po účtech (můstek od
+ * data výkazu); u uzavřeného období nebo bez práva k odhadu se blok neukáže.
  */
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -28,6 +31,7 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
 import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
+import YearEndTaxEstimate from '@/components/accounting/YearEndTaxEstimate.vue'
 import { useAccrualSpread } from '@/composables/useAccrualSpread'
 
 const { t } = useI18n()
@@ -58,6 +62,10 @@ const unassigned = computed<UnassignedExpenseAccount[]>(() => functionMap.value?
 const hasUnassigned = computed(() => unassigned.value.length > 0)
 
 const FUNCTIONS: StatementFunctionCode[] = ['cost_of_sales', 'distribution', 'administration']
+
+function fmt(value: number | null | undefined): string {
+  return formatMoney(value)
+}
 
 async function loadMap() {
   if (!filters.period_id) return
@@ -288,5 +296,6 @@ onMounted(async () => {
         </table>
       </div>
     </div>
+    <YearEndTaxEstimate v-if="!loading && report && !report.dimension" class="mt-4" :period-id="report.period.id" :as-of="report.as_of" :format="fmt" />
   </div>
 </template>

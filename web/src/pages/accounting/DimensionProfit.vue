@@ -8,14 +8,17 @@ import {
   type DimensionCashFlowParams,
   type DimensionCashFlowReport,
   type DimensionProfitParams,
+  type DimensionProfitEstimateAmounts,
   type DimensionProfitReport,
   type DimensionProfitRow,
 } from '@/api/dimensions'
+import { accountingApi, type AccountingPeriod } from '@/api/accounting'
+import { useAuthStore } from '@/stores/auth'
 import { useDimensions } from '@/composables/useDimensions'
 import { dimensionValueLabel, dimensionValueName } from '@/utils/dimensionValueLabel'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DimensionPicker from '@/components/dimensions/DimensionPicker.vue'
@@ -27,6 +30,7 @@ import DimensionCashFlowPanel from '@/components/dimensions/DimensionCashFlowPan
  * Výkazy po dimenzi (Účetnictví):
  *   • Výsledovka — hodnoty jednoho typu (strom) × výnosy, náklady, výsledek; volitelně
  *     jen větev hodnoty nebo hodnoty odpovědné osoby a rozpad po účtech.
+ *     Volitelně s odhadem do konce roku (zaúčtováno později, časové rozlišení, odpisy).
  *   • Peněžní tok — nepřímou metodou za celou firmu nebo za hodnotu dimenze.
  * Globální typ jde sečíst za všechny firmy skupiny, ke kterým má uživatel přístup.
  * Rozvaha, předvaha a hlavní kniha po dimenzi jsou filtrem přímo u těch výkazů.
@@ -39,6 +43,7 @@ const dims = useDimensions()
 // Daňová evidence: výsledovka z peněžního deníku (příjmy a výdaje), peněžní tok
 // po dimenzi a výkazy z deníku tu nejsou.
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 function revenueLabel() { return isTaxEvidence.value ? t('dimensions.profit_income') : t('dimensions.profit_revenue') }
 function costLabel() { return isTaxEvidence.value ? t('dimensions.profit_expense') : t('dimensions.profit_cost') }
@@ -57,6 +62,7 @@ const profitForm = reactive({
   responsibleId: (Number(route.query.responsible_user_id) || null) as number | null,
   accounts: route.query.accounts === '1',
   companies: route.query.companies === '1',
+  estimate: route.query.estimate === '1',
 })
 const cashFlowForm = reactive({
   valueId: (Number(route.query.dimension_value_id) || null) as number | null,
@@ -72,6 +78,7 @@ const ready = ref(false)
 let requestId = 0
 const collapsed = ref<Set<number>>(new Set())
 const responsibleCandidates = ref<{ id: number; name: string }[]>([])
+const periods = ref<AccountingPeriod[]>([])
 
 const types = computed(() => dims.types.value.filter(ty => ty.is_active))
 const selectedType = computed(() => types.value.find(ty => ty.id === profitForm.typeId) ?? null)
@@ -82,12 +89,25 @@ const cashFlowType = computed(() => {
 const groupAvailable = computed(() => (tab.value === 'profit' ? selectedType.value : cashFlowType.value)?.level === 'global')
 const hasAmount = (value: number) => Math.round(Math.abs(value) * 100) !== 0
 const hasActivity = (amounts: { revenue: number; cost: number }) => hasAmount(amounts.revenue) || hasAmount(amounts.cost)
+const hasEstimate = (e?: DimensionProfitEstimateAmounts | null) => !!e
+  && (hasAmount(e.posted_later) || hasAmount(e.accruals) || hasAmount(e.depreciation) || hasAmount(e.other))
+/**
+ * Odhad do konce roku: jen jedna firma v podvojném účetnictví, s právem k přehledům,
+ * sestava od prvního dne otevřeného období do dne uvnitř něj a bez rozpadu po účtech
+ * (sloupce odhadu jsou v tabulce hodnot). Zbytek podmínek (rámec, daň) hlásí server.
+ */
+const estimatePeriodAvailable = computed(() => periods.value.some(p =>
+  p.status !== 'closed' && p.starts_on === from.value && to.value >= p.starts_on && to.value <= p.ends_on))
+const estimateAvailable = computed(() => !isTaxEvidence.value && auth.canRead('reports')
+  && !(groupScope.value && groupAvailable.value) && !profitForm.accounts && estimatePeriodAvailable.value)
+const estimateOn = computed(() => profitForm.estimate && estimateAvailable.value)
+const estimate = computed(() => profitReport.value?.estimate?.applicable ? profitReport.value.estimate : null)
 const activeRowIds = computed(() => {
   const rows = profitReport.value?.rows ?? []
   const byId = new Map(rows.map(row => [row.value_id, row]))
   const ids = new Set<number>()
   for (const row of rows) {
-    if (!hasActivity(row.own) && !hasActivity(row.total)) continue
+    if (!hasActivity(row.own) && !hasActivity(row.total) && !hasEstimate(row.estimate?.total)) continue
     let current: typeof row | undefined = row
     while (current && !ids.has(current.value_id)) {
       ids.add(current.value_id)
@@ -128,6 +148,7 @@ function profitParams(): DimensionProfitParams | null {
     ...(profitForm.responsibleId ? { responsible_user_id: profitForm.responsibleId } : {}),
     ...(profitForm.accounts ? { accounts: 1 as const } : {}),
     ...(groupScope.value && groupAvailable.value && profitForm.companies ? { companies: 1 as const } : {}),
+    ...(estimateOn.value ? { estimate: 1 as const } : {}),
   }
 }
 
@@ -151,6 +172,7 @@ function syncQuery() {
     if (profitForm.responsibleId) query.responsible_user_id = String(profitForm.responsibleId)
     if (profitForm.accounts) query.accounts = '1'
     if (groupScope.value && groupAvailable.value && profitForm.companies) query.companies = '1'
+    if (profitForm.estimate) query.estimate = '1'
   } else if (cashFlowForm.valueId) {
     query.dimension_value_id = String(cashFlowForm.valueId)
     if (!cashFlowForm.descendants) query.dimension_descendants = '0'
@@ -231,6 +253,9 @@ onMounted(async () => {
   await dims.load()
   if (!profitForm.typeId) profitForm.typeId = types.value[0]?.id ?? null
   try { responsibleCandidates.value = await dimensionsApi.responsibleCandidates() } catch { responsibleCandidates.value = [] }
+  if (!isTaxEvidence.value) {
+    try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  }
   ready.value = true
   await load()
 })
@@ -253,7 +278,7 @@ const visibleRows = computed(() => {
 })
 
 watch(() => [from.value, to.value, groupScope.value, profitForm.typeId, profitForm.valueId,
-  profitForm.responsibleId, profitForm.accounts, profitForm.companies, cashFlowForm.valueId, cashFlowForm.descendants], () => {
+  profitForm.responsibleId, profitForm.accounts, profitForm.companies, estimateOn.value, cashFlowForm.valueId, cashFlowForm.descendants], () => {
   if (ready.value) void load()
 }, { flush: 'post' })
 const showResponsible = computed(() => visibleRows.value.some(row => !!row.responsible_user_name))
@@ -269,6 +294,35 @@ const report = computed(() => (tab.value === 'profit' ? profitReport.value : cas
 
 function money(v: number) {
   return formatMoney(v, 'CZK')
+}
+
+function resultClass(v: number) {
+  return v < 0 ? 'text-danger-600' : v > 0 ? 'text-success-700' : ''
+}
+
+/** Sloupce odhadu v pořadí tabulky; zaúčtováno později jen u sestavy končící před koncem období. */
+const estimateColumns = computed<(keyof DimensionProfitEstimateAmounts)[]>(() => {
+  if (!estimate.value) return []
+  return [
+    ...(estimate.value.posted_later_from ? ['posted_later' as const] : []),
+    'accruals' as const,
+    'depreciation' as const,
+    ...(estimate.value.has_other ? ['other' as const] : []),
+    'result' as const,
+  ]
+})
+const estimateReason = computed(() => {
+  const e = profitReport.value?.estimate
+  if (!e || e.applicable) return ''
+  const key = `dimensions.profit_estimate_reason.${e.reason ?? 'not_applicable'}`
+  return t('dimensions.profit_estimate_unavailable', { reason: te(key) ? t(key) : t('dimensions.profit_estimate_reason.not_applicable') })
+})
+function estimateHeader(column: keyof DimensionProfitEstimateAmounts): string {
+  return column === 'posted_later' ? t('dimensions.profit_estimate_posted_later') : t(`dimensions.profit_estimate_${column}`)
+}
+function estimateHeaderTitle(column: keyof DimensionProfitEstimateAmounts): string | undefined {
+  if (column !== 'posted_later' || !estimate.value?.posted_later_from || !estimate.value.period) return undefined
+  return t('dimensions.profit_estimate_posted_later_hint', { from: formatDate(estimate.value.posted_later_from), to: formatDate(estimate.value.period.ends_on) })
 }
 
 function rowLabel(row: DimensionProfitRow): string {
@@ -351,6 +405,11 @@ function rowLabel(row: DimensionProfitRow): string {
           <input v-model="profitForm.accounts" type="checkbox" class="rounded border-neutral-300" data-test="profit-accounts" />
           {{ t('dimensions.profit_by_accounts') }}
         </label>
+        <label v-if="tab === 'profit' && estimateAvailable" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap"
+               :title="t('dimensions.profit_estimate_toggle_hint')">
+          <input v-model="profitForm.estimate" type="checkbox" class="rounded border-neutral-300" data-test="profit-estimate" />
+          {{ t('dimensions.profit_estimate_toggle') }}
+        </label>
         <label v-if="groupAvailable" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
           <input v-model="groupScope" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.profit_group_scope') }}
@@ -376,6 +435,15 @@ function rowLabel(row: DimensionProfitRow): string {
         <p v-if="profitReport.restricted" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="profit-restricted">
           {{ t('dimensions.profit_restricted_note') }}
         </p>
+
+        <p v-if="estimateReason" class="mb-3 rounded-md border border-warning-100 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="profit-estimate-unavailable">
+          {{ estimateReason }}
+        </p>
+        <div v-if="estimate" class="mb-3 rounded-md border border-dashed border-warning-500 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="profit-estimate-note">
+          <span class="text-[11px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded bg-warning-100 whitespace-nowrap mr-1">{{ t('dimensions.profit_estimate_badge') }}</span>
+          {{ t('dimensions.profit_estimate_note') }}
+          <span v-if="estimate.check" class="block mt-1">{{ t('dimensions.profit_estimate_check', { amount: money(estimate.check.vh_before_tax) }) }}</span>
+        </div>
 
         <div v-if="hasActivity(profitReport.totals)" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4" data-test="profit-summary">
           <div v-for="metric in (['revenue', 'cost', 'result'] as const)" :key="metric" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
@@ -403,7 +471,7 @@ function rowLabel(row: DimensionProfitRow): string {
 
         <DimensionProfitMatrix v-if="profitReport.matrix" :matrix="profitReport.matrix" :cash-journal="profitReport.basis === 'cash_journal'" :system-key="profitReport.type.system_key" />
 
-        <div v-if="!profitReport.matrix && visibleRows.length === 0 && !hasActivity(profitReport.unassigned)" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6 text-sm text-neutral-500" data-test="profit-no-activity">{{ t('dimensions.profit_no_activity') }}</div>
+        <div v-if="!profitReport.matrix && visibleRows.length === 0 && !hasActivity(profitReport.unassigned) && !hasEstimate(profitReport.unassigned_estimate)" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6 text-sm text-neutral-500" data-test="profit-no-activity">{{ t('dimensions.profit_no_activity') }}</div>
         <div v-else-if="!profitReport.matrix" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
           <table class="w-full text-sm" data-test="profit-table">
             <thead class="bg-neutral-50 text-neutral-600">
@@ -414,6 +482,9 @@ function rowLabel(row: DimensionProfitRow): string {
                 <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ revenueLabel() }}</th>
                 <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ costLabel() }}</th>
                 <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ t('dimensions.profit_result') }}</th>
+                <th v-for="column in estimateColumns" :key="column" :title="estimateHeaderTitle(column)"
+                    class="px-4 py-3 text-right font-medium whitespace-nowrap bg-warning-50 text-warning-700 border-l border-dashed border-warning-500/40"
+                    :data-test="`profit-estimate-col-${column}`">{{ estimateHeader(column) }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -441,14 +512,22 @@ function rowLabel(row: DimensionProfitRow): string {
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap" :title="row.has_children ? t('dimensions.profit_own', { amount: money(row.own.revenue) }) : undefined">{{ hasAmount(row.total.revenue) ? money(row.total.revenue) : '–' }}</td>
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap" :title="row.has_children ? t('dimensions.profit_own', { amount: money(row.own.cost) }) : undefined">{{ hasAmount(row.total.cost) ? money(row.total.cost) : '–' }}</td>
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap" :class="row.total.result < 0 ? 'text-danger-600' : row.total.result > 0 ? 'text-success-700' : ''">{{ hasAmount(row.total.result) ? money(row.total.result) : '–' }}</td>
+                <td v-for="column in estimateColumns" :key="column" class="px-4 py-2 text-right tabular-nums whitespace-nowrap bg-warning-50/40"
+                    :class="column === 'result' ? ['font-medium', resultClass(row.estimate?.total.result ?? 0)] : ''"
+                    :data-test="`profit-estimate-${row.value_id}-${column}`">
+                  {{ hasAmount(row.estimate?.total[column] ?? 0) ? money(row.estimate?.total[column] ?? 0) : '–' }}
+                </td>
               </tr>
-              <tr v-if="!profitReport.restricted && hasActivity(profitReport.unassigned)" class="text-neutral-500 italic">
+              <tr v-if="!profitReport.restricted && (hasActivity(profitReport.unassigned) || hasEstimate(profitReport.unassigned_estimate))" class="text-neutral-500 italic">
                 <td class="px-4 py-2">{{ t('dimensions.profit_unassigned') }}</td>
                 <td v-if="otherReports.length" class="px-4 py-2" />
                 <td v-if="showResponsible" class="px-4 py-2" />
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.unassigned.revenue) }}</td>
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.unassigned.cost) }}</td>
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap" :class="profitReport.unassigned.result < 0 ? 'text-danger-600' : profitReport.unassigned.result > 0 ? 'text-success-700' : ''">{{ money(profitReport.unassigned.result) }}</td>
+                <td v-for="column in estimateColumns" :key="column" class="px-4 py-2 text-right tabular-nums whitespace-nowrap bg-warning-50/40"
+                    :class="column === 'result' ? resultClass(profitReport.unassigned_estimate?.result ?? 0) : ''"
+                    :data-test="`profit-estimate-unassigned-${column}`">{{ money(profitReport.unassigned_estimate?.[column] ?? 0) }}</td>
               </tr>
             </tbody>
             <tfoot class="bg-neutral-50 font-semibold">
@@ -459,6 +538,9 @@ function rowLabel(row: DimensionProfitRow): string {
                 <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.totals.revenue) }}</td>
                 <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.totals.cost) }}</td>
                 <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap" :class="profitReport.totals.result < 0 ? 'text-danger-600' : profitReport.totals.result > 0 ? 'text-success-700' : ''">{{ money(profitReport.totals.result) }}</td>
+                <td v-for="column in estimateColumns" :key="column" class="px-4 py-3 text-right tabular-nums whitespace-nowrap bg-warning-50"
+                    :class="column === 'result' ? resultClass(profitReport.totals_estimate?.result ?? 0) : ''"
+                    :data-test="`profit-estimate-total-${column}`">{{ money(profitReport.totals_estimate?.[column] ?? 0) }}</td>
               </tr>
             </tfoot>
           </table>
