@@ -19623,6 +19623,10 @@ paths:
 
         s VH z výsledkových účtů.
 
+         S `accrual_spread=1` jsou úpravy průběžného časového rozlišení a odpisů přímo v obratech
+        a konečných stavech dotčených účtů (jako by byly zaúčtované k `as_of`), buňka sloupcového
+        pohledu je nese v `spread` a souhrn je v `accrual_spread`; VH i kontrola rozvahy je obsahují.
+
          Pro historický rámec 504 obsahuje balances počáteční/konečné debetní zůstatky, profit_loss řádky hlavní/hospodářské činnosti/celkem a checks diagnostiku účtu 931 a odsouhlasení. Jde o pracovní přehled. Implicitní datum rámce 504 se omezuje na hranice období, tedy nejdříve na jeho první den.'
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -19659,6 +19663,7 @@ paths:
           type: integer
           enum: [0, 1]
           default: 1
+      - $ref: '#/components/parameters/AccrualSpread'
       responses:
         '200':
           description: OK
@@ -19677,7 +19682,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Export rozvahy nebo výsledovky po účtech (PDF / XLSX)
-      description: XLSX i PDF (na šířku) mají tvar obrazovky, tedy sloupce `columns.*.lines`.
+      description: XLSX i PDF (na šířku) mají tvar obrazovky, tedy sloupce `columns.*.lines`. Účty s úpravou průběžného rozlišení (`accrual_spread=1`) jsou označené. PDF otevřeného období nese nahoře souhrn (VH k datu, zaúčtovaný VH do konce období, odhad před a po zdanění) a pod tabulkou odhad do konce roku.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - $ref: '#/components/parameters/DimensionValueId'
@@ -19689,6 +19694,7 @@ paths:
         - { in: query, name: unit, schema: { type: string, enum: [czk, thousands], default: czk } }
         - { in: query, name: hide_zero, description: "0 = ukázat i nulové účty", schema: { type: integer, enum: [0, 1], default: 1 } }
         - { in: query, name: analytics, description: "0 = jen syntetiky", schema: { type: integer, enum: [0, 1], default: 1 } }
+        - $ref: '#/components/parameters/AccrualSpread'
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -35470,6 +35476,11 @@ paths:
           type: string
           format: date
         required: false
+      - in: query
+        name: accrual_spread
+        description: '`1` = tabulka k datu je s průběžným časovým rozlišením a odpisy; můstek pak začíná VH k datu s úpravami a skupiny jsou bez části, kterou úpravy započetly.'
+        schema: { type: integer, enum: [0, 1], default: 0 }
+        required: false
       responses:
         '200':
           description: OK
@@ -40974,7 +40985,12 @@ components:
         odklad už zaúčtovala uzávěrka, se neupravují. Výkaz za hodnotu dimenze a výkazy
         podle vyhlášky 504 volbu neuplatní. Volba zároveň započte průběžné účetní odpisy: u karet,
         jejichž odpis roku ještě není zaúčtovaný, odpis za uplynulé celé měsíce do rozvahového dne
-        (MD 551 / D oprávky). Výchozí `0` = výkaz z deníku beze změny.
+        (MD 551 / D oprávky). Zápisy rozpuštění 381/384 a odpisů zaúčtované s datem PO rozvahovém
+        dni (typicky deník převzatý z jiného programu s ročním rozpuštěním k 31. 12.) k tomu dni
+        v deníku nejsou, proto se z nich započte uplynulá část: rozpuštění poměrem dnů (zápis za
+        jediný měsíc až po jeho uplynutí), odpis za uplynulé celé měsíce. Stejně položka agendy
+        Časové rozlišení a karta majetku, jejichž rozpuštění či odpis roku nese zápis s pozdějším
+        datem. Výchozí `0` = výkaz z deníku beze změny.
       schema: { type: integer, enum: [0, 1], default: 0 }
 
     PropertyAsOf:
@@ -54976,6 +54992,9 @@ components:
         d:
           type: number
           description: Zůstatek na straně D.
+        spread:
+          type: number
+          description: Jen s `accrual_spread=1` u účtu s úpravou průběžného rozlišení (MD − D), už obsažená v MD a D.
         analytics:
           type: array
           description: Analytické účty pod syntetikou; prázdné, když syntetika analytiky nemá.
@@ -55021,6 +55040,9 @@ components:
       - type: object
         required: [kind]
         properties:
+          spread:
+            type: number
+            description: Jen u účtu s úpravou průběžného časového rozlišení a odpisů (`accrual_spread=1`). Úprava obratu se znaménkem podle typu účtu, obraty i konečný stav ji už obsahují.
           kind:
             type: string
             enum: [class, synthetic, analytic]
@@ -55130,6 +55152,8 @@ components:
         closed:
           type: boolean
           description: Období je uzavřené; zůstatky jsou i tak před uzávěrkovým zápisem.
+        accrual_spread:
+          $ref: '#/components/schemas/StatementAccrualSpread'
         columns:
           $ref: '#/components/schemas/StatementAccountColumns'
         dimension:
@@ -62407,10 +62431,16 @@ components:
           format: date
         vh_as_of:
           type: number
-          description: VH před zdaněním ze zaúčtovaných zápisů do dne výkazu včetně.
+          description: VH před zdaněním ze zaúčtovaných zápisů do dne výkazu včetně; s `accrual_spread=1` včetně úprav průběžného rozlišení.
+        vh_as_of_posted:
+          type: number
+          description: VH před zdaněním ze zaúčtovaných zápisů do dne výkazu včetně, bez úprav.
+        accrual_spread:
+          type: [number, 'null']
+          description: Dopad úprav průběžného rozlišení na VH k datu; null bez volby.
         groups:
           type: array
-          description: Nenulové skupiny zaúčtovaných zápisů datovaných po dni výkazu do konce období. vh_as_of + Σ amount = vh_posted.
+          description: Nenulové skupiny zaúčtovaných zápisů datovaných po dni výkazu do konce období, s volbou bez části započtené průběžným rozlišením (`spread`). vh_as_of + Σ amount = vh_posted.
           items:
             type: object
             required:
@@ -62427,6 +62457,9 @@ components:
                 - other
               amount:
                 type: number
+              spread:
+                type: number
+                description: Jen s `accrual_spread=1`. Část skupiny, kterou už započetlo průběžné rozlišení (dopad na VH).
         vh_posted:
           type: number
     YearEndClosingItem:
@@ -70323,6 +70356,17 @@ components:
         documents: { type: integer, description: Počet upravených dokladů }
         depreciation: { type: number, description: Průběžný účetní odpis za uplynulé celé měsíce (MD 551 / D oprávky) u karet, jejichž odpis roku ještě není zaúčtovaný }
         depreciation_assets: { type: integer, description: Počet karet s průběžným odpisem }
+        accrual_agenda: { type: number, description: Nezaúčtované rozpuštění položek agendy Časové rozlišení k rozvahovému dni }
+        vh_effect: { type: number, description: O kolik úpravy mění výsledek hospodaření (výnosy − náklady úprav) }
+        later_dated:
+          type: object
+          description: Uplynulá část zápisů rozpuštění a odpisů zaúčtovaných s datem po rozvahovém dni (už obsažená v úpravách).
+          required: [deferred_revenue, prepaid_expense, depreciation, entries]
+          properties:
+            deferred_revenue: { type: number, description: Rozpuštění výnosů příštích období (384) }
+            prepaid_expense: { type: number, description: Rozpuštění nákladů příštích období (381) }
+            depreciation: { type: number, description: Odpisy (551) }
+            entries: { type: integer, description: Počet upravených zápisů }
         prev:
           description: Táž úprava sloupce minulého období (null = bez minulého období)
           anyOf:
