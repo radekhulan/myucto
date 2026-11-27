@@ -16,6 +16,9 @@ td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top;
 .total td { font-weight: bold; border-top: 0.5pt solid #333; }
 .positive { color: #16703f; }
 .negative { color: #b42318; }
+.estimate th:nth-child(3) { text-align: right; }
+.estimate td { color: #444; }
+.badge { font-size: 7pt; font-weight: bold; color: #92400e; background-color: #fef3c7; padding: 0.5mm 1.5mm; }
 </style>
 </head>
 <body>
@@ -38,6 +41,31 @@ td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top;
 <tr class="total"><td></td><td>Celkem</td><td></td><td class="num">{{ totals.revenue|cz_money }}</td><td class="num">{{ totals.cost|cz_money }}</td><td class="num {{ totals.result > 0 ? 'positive' : (totals.result < 0 ? 'negative' : '') }}">{{ totals.result|cz_money }}</td></tr>
 </tbody>
 </table>
+{% if estimate is defined and estimate.applicable|default(false) %}
+{% set laterFrom = estimate.posted_later_from|default(null) %}
+{% set hasOther = estimate.has_other|default(false) %}
+<h2>Odhad do konce roku <span class="badge">ODHAD, NEZAÚČTOVÁNO</span></h2>
+<div class="meta">Nic z odhadu není v účetnictví. Časové rozlišení přebírá náhled uzávěrky podle dimenzí zdrojových dokladů, odpisy plán odpisů podle dimenzí karty majetku. Daň z příjmů se po hodnotách nerozpočítává.</div>
+<table class="estimate">
+<thead><tr><th>Kód</th><th>{{ type.name }}</th><th>Zisk / ztráta</th>{% if laterFrom %}<th>Zaúčtováno od {{ laterFrom|cz_date }}</th>{% endif %}<th>Časové rozlišení</th><th>Odpisy</th>{% if hasOther %}<th>Ostatní uzávěrka</th>{% endif %}<th>Odhad VH</th></tr></thead>
+<tbody>
+{% for row in rows %}
+<tr>
+<td>{{ row.code }}</td>
+<td style="padding-left:{{ 1.5 + row.depth * 3 }}mm">{{ row.name }}</td>
+<td class="num">{{ row.total.result|cz_money }}</td>
+{% if laterFrom %}<td class="num">{{ row.estimate.total.posted_later|cz_money }}</td>{% endif %}
+<td class="num">{{ row.estimate.total.accruals|cz_money }}</td>
+<td class="num">{{ row.estimate.total.depreciation|cz_money }}</td>
+{% if hasOther %}<td class="num">{{ row.estimate.total.other|cz_money }}</td>{% endif %}
+<td class="num {{ row.estimate.total.result > 0 ? 'positive' : (row.estimate.total.result < 0 ? 'negative' : '') }}">{{ row.estimate.total.result|cz_money }}</td>
+</tr>
+{% endfor %}
+{% if not restricted %}<tr><td></td><td>Bez hodnoty</td><td class="num">{{ unassigned.result|cz_money }}</td>{% if laterFrom %}<td class="num">{{ unassigned_estimate.posted_later|cz_money }}</td>{% endif %}<td class="num">{{ unassigned_estimate.accruals|cz_money }}</td><td class="num">{{ unassigned_estimate.depreciation|cz_money }}</td>{% if hasOther %}<td class="num">{{ unassigned_estimate.other|cz_money }}</td>{% endif %}<td class="num">{{ unassigned_estimate.result|cz_money }}</td></tr>{% endif %}
+<tr class="total"><td></td><td>Celkem</td><td class="num">{{ totals.result|cz_money }}</td>{% if laterFrom %}<td class="num">{{ totals_estimate.posted_later|cz_money }}</td>{% endif %}<td class="num">{{ totals_estimate.accruals|cz_money }}</td><td class="num">{{ totals_estimate.depreciation|cz_money }}</td>{% if hasOther %}<td class="num">{{ totals_estimate.other|cz_money }}</td>{% endif %}<td class="num {{ totals_estimate.result > 0 ? 'positive' : (totals_estimate.result < 0 ? 'negative' : '') }}">{{ totals_estimate.result|cz_money }}</td></tr>
+</tbody>
+</table>
+{% endif %}
 {% if companies is defined and companies %}
 <h2>Rozpad po firmách</h2>
 <table class="companies">

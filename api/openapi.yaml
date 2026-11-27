@@ -19741,6 +19741,14 @@ paths:
         - { in: query, name: responsible_user_id, schema: { type: integer } }
         - { in: query, name: accounts, schema: { type: integer, enum: [1] }, description: 'Přidá rozpad po účtech.' }
         - { in: query, name: companies, schema: { type: integer, enum: [1] }, description: 'Přidá rozpad součtu po přístupných firmách.' }
+        - in: query
+          name: estimate
+          schema: { type: integer, enum: [1] }
+          description: |
+            Přidá odhad do konce roku po hodnotách (`estimate`, `rows[].estimate`, `unassigned_estimate`,
+            `totals_estimate`). Jen jedna firma v podvojném účetnictví rámce 500, otevřené období a sestava
+            od začátku období do dne uvnitř něj; jinak `estimate.applicable = false` s důvodem. Vyžaduje
+            právo k přehledům (`reports`) jako odhad do konce roku u výsledovky po účtech.
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DimensionProfitReport' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -19783,6 +19791,7 @@ paths:
         - { in: query, name: value_id, schema: { type: integer } }
         - { in: query, name: responsible_user_id, schema: { type: integer } }
         - { in: query, name: companies, schema: { type: integer, enum: [1] }, description: 'Přidá list Po firmách do XLSX a tabulku do PDF.' }
+        - { in: query, name: estimate, schema: { type: integer, enum: [1] }, description: 'Přidá sloupce odhadu do konce roku (označené jako odhad, nezaúčtováno).' }
         - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: xlsx } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
@@ -54825,6 +54834,46 @@ components:
         cost: { type: number }
         result: { type: number }
 
+    DimensionProfitEstimateAmounts:
+      type: object
+      required: [posted_later, accruals, depreciation, other, result]
+      description: 'Odhad do konce roku (nezaúčtováno) pro hodnotu, větev nebo součet. `result` = VH + ostatní sloupce.'
+      properties:
+        posted_later: { type: number, description: 'Zaúčtované zápisy datované po dni sestavy do konce období.' }
+        accruals: { type: number, description: 'Nezaúčtované časové rozlišení z náhledů uzávěrky.' }
+        depreciation: { type: number, description: 'Nezaúčtované účetní odpisy podle plánu (dimenze karty majetku).' }
+        other: { type: number, description: 'Ostatní nezaúčtované kroky uzávěrky bez rozpadu po dimenzích (kurzové rozdíly, zásoby).' }
+        result: { type: number, description: 'Odhad VH (daň z příjmů se po hodnotách nerozpočítává).' }
+
+    DimensionProfitEstimate:
+      type: object
+      required: [applicable, reason]
+      properties:
+        applicable: { type: boolean }
+        reason:
+          type: [string, 'null']
+          description: 'Proč odhad chybí: multiple_companies, cash_journal, no_period, period_closed, range_not_period, framework, forbidden, sum_mismatch nebo důvod odhadu do konce roku (taxpayer_fo, income_tax_posted, tax_unavailable).'
+        period:
+          type: object
+          properties:
+            id: { type: integer }
+            fiscal_year: { type: integer }
+            starts_on: { type: string, format: date }
+            ends_on: { type: string, format: date }
+        posted_later_from:
+          type: [string, 'null']
+          format: date
+          description: 'Od kterého dne jsou zápisy ve sloupci posted_later (null = sestava končí koncem období).'
+        has_other: { type: boolean }
+        check:
+          type: object
+          description: 'Kontrola: Σ odhadu VH + zaúčtovaná daň 59x = odhad VH před zdaněním firmy.'
+          properties:
+            vh_before_tax: { type: number }
+            income_tax_posted: { type: number }
+            total: { type: number }
+            matches: { type: boolean }
+
     DimensionProfitCompany:
       type: object
       required: [id, name, revenue, cost, result]
@@ -54889,6 +54938,12 @@ components:
           items:
             $ref: '#/components/schemas/DimensionProfitCompany'
           description: Součty po přístupných firmách při companies=1.
+        estimate:
+          $ref: '#/components/schemas/DimensionProfitEstimate'
+        unassigned_estimate:
+          $ref: '#/components/schemas/DimensionProfitEstimateAmounts'
+        totals_estimate:
+          $ref: '#/components/schemas/DimensionProfitEstimateAmounts'
 
     StatementAccountLine:
       type: object
@@ -60847,6 +60902,12 @@ components:
           $ref: '#/components/schemas/DimensionProfitAmounts'
         total:
           $ref: '#/components/schemas/DimensionProfitAmounts'
+        estimate:
+          type: object
+          description: Odhad do konce roku při estimate=1 (vlastní částky a souhrn větve).
+          properties:
+            own: { $ref: '#/components/schemas/DimensionProfitEstimateAmounts' }
+            total: { $ref: '#/components/schemas/DimensionProfitEstimateAmounts' }
         semantic_key:
           type:
           - string

@@ -349,6 +349,44 @@ final class IncomeStatementByFunctionTest extends TestCase
     }
 
     /**
+     * PDF účelového výkazu nese pod výkazem blok odhadu do konce roku (stejný jako výkaz
+     * po účtech, označený jako nezaúčtovaný), jen s právem k odhadu a u otevřeného období.
+     */
+    public function testPurposeStatementPdfCarriesYearEndEstimate(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $pdo = $this->db->pdo();
+        $constants = \MyInvoice\Service\Tax\TaxConstants::forYear(2026);
+        $constants['year'] = self::YEAR;
+        $pdo->prepare('INSERT INTO tax_constants (year, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)')
+            ->execute([self::YEAR, json_encode($constants, JSON_UNESCAPED_UNICODE)]);
+        $pdo->prepare("UPDATE supplier SET taxpayer_type = 'po', accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+        $this->revenue('602', 1_000_000.00);
+        $this->expense('501', 400_000.00);
+        $this->assign(['501' => 'cost_of_sales']);
+
+        $action = $container->get(\MyInvoice\Action\Accounting\Reports\FinancialStatementAction::class);
+        $text = function (string $role) use ($action): string {
+            $req = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('GET', '/api/accounting/reports/income-statement-by-function/export')
+                ->withQueryParams(['period_id' => (string) $this->periodId, 'as_of' => self::YEAR . '-06-30', 'scope' => 'full', 'format' => 'pdf'])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+            $res = $action->exportIncomeStatementByFunction($req, new \Slim\Psr7\Response());
+            self::assertSame(200, $res->getStatusCode());
+            $res->getBody()->rewind();
+            return (new \Smalot\PdfParser\Parser())->parseContent((string) $res->getBody())->getText();
+        };
+
+        $pdf = $text('accountant');
+        self::assertStringContainsString('ODHAD, NEZAÚČTOVÁNO', $pdf);
+        self::assertStringContainsString('Odhad výsledku hospodaření před zdaněním', $pdf);
+
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        self::assertStringNotContainsString('ODHAD, NEZAÚČTOVÁNO', $text('accountant'), 'Uzavřené období odhad nemá.');
+    }
+
+    /**
      * Hlavička výstupu musí říct, které členění to je.
      *
      * Šablonu i XLSX sdílí obě varianty a popisek byl natvrdo „druhové", takže účelový

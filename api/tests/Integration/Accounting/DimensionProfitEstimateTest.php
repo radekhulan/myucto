@@ -208,6 +208,41 @@ final class DimensionProfitEstimateTest extends TestCase
         self::assertTrue($after['estimate']['check']['matches']);
     }
 
+    public function testExportsCarryEstimateColumns(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $report = $this->profit->build($this->supplierId, $this->typeId, self::YEAR . '-01-01', self::TO, [$this->supplierId], ['estimate' => true, 'accounts' => true]);
+        $report['entity'] = ['name' => 'Odhad po dimenzích s.r.o.', 'ico' => '12345678', 'address' => 'Zkušební 1'];
+
+        $xlsx = $container->get(\MyInvoice\Service\Accounting\Reports\ReportXlsxExporter::class)->dimensionProfit($report);
+        $file = tempnam(sys_get_temp_dir(), 'odhad-dim');
+        file_put_contents($file, $xlsx['bytes']);
+        try {
+            $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file)->getSheet(0);
+        } finally {
+            unlink($file);
+        }
+        $header = $sheet->rangeToArray('A6:J6')[0];
+        self::assertSame(['Výsledek', 'Zaúčtováno od 28.11.2047', 'Odhad časového rozlišení (nezaúčtováno)', 'Odhad odpisů (nezaúčtováno)', 'Odhad VH do konce roku (odhad, nezaúčtováno)'],
+            array_slice(array_values(array_filter($header, static fn ($v): bool => $v !== null)), 5));
+        $last = $sheet->getHighestDataRow();
+        self::assertSame('Celkem', $sheet->getCell('B' . $last)->getValue());
+        self::assertEqualsWithDelta($report['totals_estimate']['result'], (float) $sheet->getCell('J' . $last)->getValue(), 0.001);
+
+        $plain = $this->profit->build($this->supplierId, $this->typeId, self::YEAR . '-01-01', self::TO, [$this->supplierId], ['accounts' => true]);
+        $plain['entity'] = $report['entity'];
+        $file = tempnam(sys_get_temp_dir(), 'odhad-dim');
+        file_put_contents($file, $container->get(\MyInvoice\Service\Accounting\Reports\ReportXlsxExporter::class)->dimensionProfit($plain)['bytes']);
+        try {
+            self::assertSame('F', \PhpOffice\PhpSpreadsheet\IOFactory::load($file)->getSheet(0)->getHighestDataColumn(), 'Bez přepínače XLSX beze sloupců odhadu.');
+        } finally {
+            unlink($file);
+        }
+
+        $pdf = $container->get(\MyInvoice\Service\Pdf\DimensionPdfRenderer::class)->render($report);
+        self::assertStringStartsWith('%PDF', $pdf);
+    }
+
     public function testEstimateNeedsRangeFromPeriodStartAndSingleCompany(): void
     {
         $report = $this->profit->build($this->supplierId, $this->typeId, self::YEAR . '-02-01', self::TO, [$this->supplierId], ['estimate' => true]);

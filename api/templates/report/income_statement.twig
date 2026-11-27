@@ -38,6 +38,7 @@
     .col-num { width: 28mm; }
     .checks-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
     .check-line { font-size: 8pt; margin-top: 0.5mm; }
+{% include '_year_end_estimate_style.twig' %}
 </style>
 </head>
 <body>
@@ -101,6 +102,7 @@
     Hodnoty jsou v celých tisících Kč, zaokrouhleny po řádcích (§4 odst. 3 vyhl. č. 500/2002 Sb.);
     součtové řádky se počítají z hodnot v Kč — proti součtu zaokrouhlených položek může vzniknout rozdíl ±1 tis. Kč.
 </div>
+{% if estimate is defined and estimate and estimate.applicable %}{% set part = 'profit_loss' %}{% include '_year_end_estimate.twig' %}{% endif %}
 
 </body>
 </html>

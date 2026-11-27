@@ -1804,7 +1804,29 @@ final class ReportXlsxExporter
         }
 
         $head = 6;
-        $this->headerRow($sheet, $head, ['Kód', $typeName !== '' ? $typeName : 'Hodnota', 'Odpovědná osoba', 'Výnosy', 'Náklady', 'Výsledek']);
+        // Odhad do konce roku: sloupce za výsledkem, v hlavičce označené jako nezaúčtované.
+        $estimate = ($data['estimate']['applicable'] ?? false) === true;
+        $estimateColumns = [];
+        if ($estimate) {
+            if (($data['estimate']['posted_later_from'] ?? null) !== null) {
+                $estimateColumns['posted_later'] = 'Zaúčtováno od ' . $this->czDate((string) $data['estimate']['posted_later_from']);
+            }
+            $estimateColumns['accruals'] = 'Odhad časového rozlišení (nezaúčtováno)';
+            $estimateColumns['depreciation'] = 'Odhad odpisů (nezaúčtováno)';
+            if (!empty($data['estimate']['has_other'])) {
+                $estimateColumns['other'] = 'Odhad ostatní uzávěrky (nezaúčtováno)';
+            }
+            $estimateColumns['result'] = 'Odhad VH do konce roku (odhad, nezaúčtováno)';
+            $sheet->setCellValue('A5', 'Sloupce odhadu nejsou v účetnictví: přebírají náhled uzávěrky a plán odpisů, daň z příjmů se po hodnotách nerozpočítává.');
+        }
+        $cols = 6 + count($estimateColumns);
+        $this->headerRow($sheet, $head, ['Kód', $typeName !== '' ? $typeName : 'Hodnota', 'Odpovědná osoba', 'Výnosy', 'Náklady', 'Výsledek', ...array_values($estimateColumns)]);
+        $writeEstimate = function (int $r, ?array $values) use ($sheet, $estimateColumns): void {
+            $c = 7;
+            foreach (array_keys($estimateColumns) as $key) {
+                $sheet->setCellValue([$c++, $r], (float) ($values[$key] ?? 0));
+            }
+        };
         $r = $head + 1;
         foreach ($data['rows'] ?? [] as $row) {
             $sheet->setCellValueExplicit([1, $r], (string) $row['code'], DataType::TYPE_STRING);
@@ -1813,8 +1835,11 @@ final class ReportXlsxExporter
             $sheet->setCellValue([4, $r], (float) $row['total']['revenue']);
             $sheet->setCellValue([5, $r], (float) $row['total']['cost']);
             $sheet->setCellValue([6, $r], (float) $row['total']['result']);
+            if ($estimate) {
+                $writeEstimate($r, $row['estimate']['total'] ?? null);
+            }
             if (!empty($row['has_children'])) {
-                $this->boldRow($sheet, $r, 6);
+                $this->boldRow($sheet, $r, $cols);
             }
             $r++;
         }
@@ -1823,14 +1848,20 @@ final class ReportXlsxExporter
             $sheet->setCellValue([4, $r], (float) ($data['unassigned']['revenue'] ?? 0));
             $sheet->setCellValue([5, $r], (float) ($data['unassigned']['cost'] ?? 0));
             $sheet->setCellValue([6, $r], (float) ($data['unassigned']['result'] ?? 0));
+            if ($estimate) {
+                $writeEstimate($r, $data['unassigned_estimate'] ?? null);
+            }
             $r++;
         }
         $sheet->setCellValue([2, $r], 'Celkem');
         $sheet->setCellValue([4, $r], (float) ($data['totals']['revenue'] ?? 0));
         $sheet->setCellValue([5, $r], (float) ($data['totals']['cost'] ?? 0));
         $sheet->setCellValue([6, $r], (float) ($data['totals']['result'] ?? 0));
-        $this->boldRow($sheet, $r, 6);
-        $this->finishTable($sheet, $head, $r, 6, 4);
+        if ($estimate) {
+            $writeEstimate($r, $data['totals_estimate'] ?? null);
+        }
+        $this->boldRow($sheet, $r, $cols);
+        $this->finishTable($sheet, $head, $r, $cols, 4);
 
         $matrix = $data['matrix'] ?? null;
         if (is_array($matrix)) {

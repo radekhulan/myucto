@@ -281,7 +281,7 @@ final class FinancialStatementAction
             $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request));
             $out = $format === 'pdf'
                 ? [
-                    'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit, 'estimate' => \MyInvoice\Security\RequestAuthorization::canReadYearEndTaxEstimate($request) ? $this->pdfEstimate($supplierId, $params['period_id'], $data) : null]),
+                    'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit, 'estimate' => isset($data['columns']) && \MyInvoice\Security\RequestAuthorization::canReadYearEndTaxEstimate($request) ? $this->pdfEstimate($supplierId, $params['period_id'], $data) : null]),
                     'filename' => sprintf('%s-po-uctech-%s.pdf', $part === 'balance' ? 'rozvaha' : 'vysledovka', (string) $data['as_of']),
                     'mime'     => 'application/pdf',
                 ]
@@ -307,16 +307,17 @@ final class FinancialStatementAction
     }
 
     /**
-     * Odhad do konce roku pro PDF po účtech: stejný blok jako na obrazovce, jen u otevřeného
-     * období rámce 500 bez filtru dimenze a jen když odhad jde sestavit. Selhání odhadu
-     * export neshodí, PDF pak blok nemá.
+     * Odhad do konce roku pro PDF po účtech a VZZ v účelovém členění: stejný blok jako na
+     * obrazovce, jen u otevřeného období rámce 500 bez filtru dimenze a jen když odhad jde
+     * sestavit (uzavřené období, fyzická osoba a zaúčtovaná daň vrací `applicable = false`).
+     * Selhání odhadu export neshodí, PDF pak blok nemá.
      *
      * @param array<string,mixed> $data
      * @return array<string,mixed>|null
      */
     private function pdfEstimate(int $supplierId, int $periodId, array $data): ?array
     {
-        if (!isset($data['columns']) || !empty($data['closed']) || !empty($data['dimension'])) {
+        if (!empty($data['closed']) || !empty($data['dimension'])) {
             return null;
         }
         try {
@@ -397,6 +398,9 @@ final class FinancialStatementAction
                     FinancialStatementService::TYPE_PURPOSE => 'vysledovka-ucelova',
                     default => 'vysledovka',
                 };
+                if ($type === FinancialStatementService::TYPE_PURPOSE && \MyInvoice\Security\RequestAuthorization::canReadYearEndTaxEstimate($request)) {
+                    $data['estimate'] = $this->pdfEstimate($supplierId, $params['period_id'], $data);
+                }
                 $out = [
                     'bytes'    => $renderer->render($data),
                     'filename' => sprintf('%s-%s.pdf', $basename, (string) ($data['as_of'] ?? '')),
