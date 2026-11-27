@@ -328,7 +328,8 @@ knih neblokuje, rozhoduje účetní. Firma bez položek agendy kontrolu nemá.
 ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)) přidá to, co agenda ještě
 nezaúčtovala: u měsíčních metod řádky plánu splatné do data výkazu (rozpracovaný měsíc ne), u roční metody
 poměrnou část podle dnů od posledního rozpuštění. Ruční metoda nepřidá nic. Zaúčtované rozpuštění je
-v deníku a výkaz ho čte odtud.
+v deníku a výkaz ho čte odtud. Rozpuštění nebo ukončení zaúčtované s datem po dni výkazu v deníku k tomu
+dni není: výkaz z něj ukáže část do data výkazu, u ruční metody poměr dnů doby, kterou zápis kryje.
 
 **Projekce DPPO.** Panel projekce závěrkových operací v přiznání k DPPO
 ([§ 43.11.7](43_Dan_z_prijmu.md#43117-jak-se-pocita-dppo)) zahrne nezaúčtované rozpuštění položek agendy do

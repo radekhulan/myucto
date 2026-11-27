@@ -332,7 +332,11 @@ k 31. 12. a odpisy k posledním dnům měsíců i po dni výkazu:
   měsíční odpis za listopad k 27. 11. ještě ne,
 - **položka agendy Časové rozlišení** a **karta majetku**, jejichž rozpuštění nebo
   odpis roku je zaúčtovaný zápisem s pozdějším datem, se počítají jako nezaúčtované
-  podle svého plánu,
+  podle svého plánu. Platí to i pro položku, kterou tento zápis dokončil, a pro položku
+  ukončenou zápisem s pozdějším datem (do výkazu jde rozpuštění do **Sestaveno k**).
+  Položka s ruční metodou (typicky převzatá z jiného programu) plán nemá: z jejího
+  zápisu s pozdějším datem se započte poměrná část doby, kterou kryje, stejně jako
+  u zápisu mimo agendu. Položka ukončená do data výkazu se neupravuje,
 - zápis s jinými účty (DPH, závazek, smíšený zápis) se neupravuje.
 
 Úpravy se přičtou k týmž účtům jako zápis (včetně analytik), protiúčet 381, 384 či
