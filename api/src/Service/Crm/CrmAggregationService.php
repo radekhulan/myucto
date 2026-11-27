@@ -3074,6 +3074,23 @@ final class CrmAggregationService
     }
 
     /**
+     * Typy karet, které smí uživatel skrýt.
+     *
+     * ⚠️ Musí obsahovat KAŽDÝ typ, který feed vydá bez `'dismissible' => false`.
+     * Widget nabídne nabídku skrytí právě takovým kartám, takže typ, který tu
+     * chybí, se v UI skrýt nabídne a volání skončí chybou „Invalid item_type".
+     * Dynamické typy s ID (`bank_sync_error_<id>`, `bank_statement_processing_<id>`)
+     * se skrývat nedají a jsou proto označené `dismissible => false`.
+     */
+    public const DISMISSIBLE_ITEM_TYPES = [
+        'overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
+        'purchase_drafts', 'unbooked_documents', 'journal_integrity', 'tax_deadline', 'kh_deadline',
+        'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due',
+        'purchase_approvals_pending', 'purchase_approvals_rejected', 'bank_notice_unprocessed', 'pwa_install',
+        'license', 'proforma_awaiting_document', 'accounting_period_missing', 'jmhz_unsent', 'vat_payment',
+    ];
+
+    /**
      * Uloží dismissal pro user + item_type.
      * Mode 'historical' → snapshotuje aktuální set ID daného typu.
      * Mode 'day' / 'week' → spočítá dismissed_until.
@@ -3081,12 +3098,8 @@ final class CrmAggregationService
      */
     public function dismissActionItem(int $supplierId, int $userId, string $itemType, string $mode): void
     {
-        $validTypes = ['overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
-            'purchase_drafts', 'unbooked_documents', 'journal_integrity', 'tax_deadline', 'kh_deadline',
-            'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due',
-            'purchase_approvals_pending', 'purchase_approvals_rejected', 'bank_notice_unprocessed', 'pwa_install'];
         $validModes = ['day', 'week', 'forever', 'historical'];
-        if (!in_array($itemType, $validTypes, true)) {
+        if (!in_array($itemType, self::DISMISSIBLE_ITEM_TYPES, true)) {
             throw new \InvalidArgumentException("Invalid item_type: {$itemType}");
         }
         if (!in_array($mode, $validModes, true)) {
