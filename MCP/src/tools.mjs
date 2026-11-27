@@ -1414,7 +1414,7 @@ export const TOOLS = [
       + 'neexistuje — pokud ano, nic se nevytvoří a vrátí se odkaz na stávající '
       + 'kartu. Vědomý duplicitní zápis povolíš přes `allow_duplicate`.',
     inputSchema: schema({
-      ic: str('IČO (8 číslic). Když je vyplněné, zbytek se dotáhne z ARES.'),
+      ic: str('IČO (8 číslic). Když je vyplněné, zbytek se dotáhne z ARES. U zahraničního partnera (`country_iso2` jiné než CZ) identifikátor jeho země, bez ARES.'),
       company_name: str('Firma nebo jméno. Povinné, pokud se nedotáhne z ARES.'),
       street: str('Ulice a číslo popisné.'),
       city: str('Město.'),
@@ -1433,15 +1433,19 @@ export const TOOLS = [
     }),
     write: true,
     run: async (c, a, tool) => {
-      const ic = String(a.ic ?? '').replace(/\D/g, '');
-      if (a.ic && ic.length !== 8) {
+      // IČO o 8 číslicích a ARES jen u tuzemského partnera (stejně jako Validation::icError
+      // v API); zahraniční partner nese identifikátor své země a ten ověří API.
+      const country = String(a.country_iso2 ?? '').trim().toUpperCase();
+      const domestic = country === '' || country === 'CZ';
+      const ic = domestic ? String(a.ic ?? '').replace(/\D/g, '') : String(a.ic ?? '').trim();
+      if (domestic && a.ic && ic.length !== 8) {
         throw new Error(`IČO musí mít 8 číslic, dostal jsem „${a.ic}".`);
       }
 
       // ── ARES ────────────────────────────────────────────────────────────
       let ares = null;
-      let aresNote = 'nepoužit (IČO nezadáno)';
-      if (ic !== '') {
+      let aresNote = domestic ? 'nepoužit (IČO nezadáno)' : 'nepoužit (zahraniční partner)';
+      if (ic !== '' && domestic) {
         try {
           const res = await c.post('/clients/lookup-ares', { ic }, tool);
           if (res?.found === false || !res?.data) {
@@ -1540,7 +1544,7 @@ export const TOOLS = [
       city: str('Město.'),
       zip: str('PSČ.'),
       country_iso2: str('Kód země, dvě písmena.', { minLength: 2, maxLength: 2 }),
-      ic: str('IČO (8 číslic).'),
+      ic: str('IČO (8 číslic), u zahraničního partnera identifikátor jeho země.'),
       dic: str('DIČ.'),
       is_vat_payer: bool('Plátce DPH. Bez zadání se stávající hodnota na kartě nemění.'),
       main_email: str('Hlavní e-mail pro zasílání dokladů.'),

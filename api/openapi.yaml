@@ -55355,7 +55355,7 @@ components:
         company_name: { type: string }
         first_name: { type: [string, "null"] }
         last_name: { type: [string, "null"] }
-        ic: { type: [string, "null"], description: IČO (8 číslic) }
+        ic: { type: [string, "null"], description: "IČO (8 číslic) u tuzemského partnera, u zahraničního identifikátor jeho země" }
         dic: { type: [string, "null"], description: "DIČ / VAT ID s country prefixem (u SK klienta = IČ DPH)" }
         tax_number: { type: [string, "null"], description: "Národní daňové číslo bez prefixu (SK DIČ, DE/AT Steuernummer, PL NIP, HU Adószám) — issue #120" }
         street: { type: string }
@@ -55532,7 +55532,7 @@ components:
         company_name: { type: string, maxLength: 190, description: "Delší textová pole než uvedené maxLength = 400 `validation_failed`." }
         first_name: { type: [string, "null"], maxLength: 60 }
         last_name: { type: [string, "null"], maxLength: 60 }
-        ic: { type: [string, "null"], description: "IČO — 8 číslic" }
+        ic: { type: [string, "null"], maxLength: 20, description: "Identifikační číslo. U tuzemského partnera (`country_iso2` CZ nebo neuvedená) IČO o 8 číslicích, u zahraničního identifikátor jeho země (písmena, číslice, mezery, tečky, lomítka, pomlčky). Jinak 400 `validation_failed`." }
         dic: { type: [string, "null"], maxLength: 20, description: "DIČ / VAT ID s country prefixem (u SK = IČ DPH)" }
         tax_number: { type: [string, "null"], maxLength: 30, description: "Národní daňové číslo bez prefixu (SK DIČ, DE/AT Steuernummer, PL NIP, HU Adószám)" }
         street: { type: string, maxLength: 190 }

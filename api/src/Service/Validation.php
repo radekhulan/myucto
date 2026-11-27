@@ -55,8 +55,9 @@ final class Validation
         if ($mainEmail !== '' && !filter_var($mainEmail, FILTER_VALIDATE_EMAIL)) {
             $err['main_email'][] = 'Hlavní email musí být platný';
         }
-        if (!empty($data['ic']) && !preg_match('/^\d{8}$/', (string) $data['ic'])) {
-            $err['ic'][] = 'IČO musí mít 8 číslic';
+        $icError = self::icError($data['ic'] ?? null, $data['country_iso2'] ?? null);
+        if ($icError !== null) {
+            $err['ic'][] = $icError;
         }
         $lang = $data['language'] ?? 'cs';
         if (!in_array($lang, ['cs', 'en'], true)) {
@@ -82,6 +83,39 @@ final class Validation
     }
 
     /**
+     * Chyba identifikačního čísla partnera (IČ), null = v pořádku nebo prázdné. Jediné
+     * pravidlo pro kartu partnera z formuláře, veřejného API i MCP (založení i úprava).
+     *
+     * Tuzemský partner (země CZ; karta bez země je CZ, stejně jako ji tak zakládá
+     * {@see \MyInvoice\Repository\ClientRepository}) má IČO o 8 číslicích. Zahraniční
+     * partner nese identifikátor své země (polský NIP nebo REGON, slovenské IČO, německé
+     * HRB…), proto se u něj hlídají jen znaky. Délku hlídá {@see ClientFieldLimits}.
+     */
+    public static function icError(mixed $ic, mixed $countryIso2): ?string
+    {
+        if ($ic === null || is_array($ic)) {
+            return null;
+        }
+        $value = (string) $ic;
+        if ($value === '') {
+            return null;
+        }
+        if (self::isDomesticPartner($countryIso2)) {
+            return preg_match('/^\d{8}$/D', $value) === 1 ? null : 'IČO musí mít 8 číslic';
+        }
+        return preg_match('/^[\p{L}\p{N}](?:[\p{L}\p{N} .\/-]*[\p{L}\p{N}])?$/uD', $value) === 1
+            ? null
+            : 'Identifikační číslo smí obsahovat jen písmena, číslice, mezery, tečky, lomítka a pomlčky';
+    }
+
+    /** Tuzemský partner: země CZ, nebo karta bez země (výchozí CZ). */
+    public static function isDomesticPartner(mixed $countryIso2): bool
+    {
+        $iso = is_string($countryIso2) ? strtoupper(trim($countryIso2)) : '';
+        return $iso === '' || $iso === 'CZ';
+    }
+
+    /**
      * Non-blocking varování pro klienta/dodavatele (audit 2026-07, nález "IČO bez
      * kontroly mod 11, DIČ se nevaliduje vůbec"). Na rozdíl od client() NIKDY
      * neblokuje uložení — cizí subjekty (zahraniční VAT ID, subjekty bez IČO)
@@ -96,8 +130,10 @@ final class Validation
 
         // IČO má formát ověřený už v client() (přesně 8 číslic); mod 11 kontrolujeme
         // jen když regex prošel — jinak by šlo o duplicitní hlášku ke stejné chybě.
+        // Zahraniční partner nese identifikátor své země, kontrolní součet IČO pro něj neplatí.
         $ic = isset($data['ic']) ? trim((string) $data['ic']) : '';
-        if ($ic !== '' && preg_match('/^\d{8}$/', $ic) === 1 && !self::icChecksumValid($ic)) {
+        if ($ic !== '' && self::isDomesticPartner($data['country_iso2'] ?? null)
+            && preg_match('/^\d{8}$/', $ic) === 1 && !self::icChecksumValid($ic)) {
             $warn[] = 'ic_checksum_invalid';
         }
 

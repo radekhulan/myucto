@@ -293,6 +293,8 @@ function setContactRecipient(c: ClientEmailContact, r: EmailContactRecipient) {
 // přejmenuje na „IČ DPH" (DIČ s prefixem SK = IČ DPH, samostatné DIČ je bez prefixu).
 const taxNumberLabel = computed(() => TAX_NUMBER_LABELS[form.value.country_iso2] ?? null)
 const isSkClient = computed(() => form.value.country_iso2 === 'SK')
+/** Tuzemský partner má IČO o 8 číslicích, zahraniční identifikátor své země (Validation::icError). */
+const isDomesticClient = computed(() => !form.value.country_iso2 || form.value.country_iso2 === 'CZ')
 
 const countries = ref<Country[]>([])
 const currencies = ref<Currency[]>([])
@@ -684,7 +686,7 @@ if (!props.embedded) {
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('client.ic') }}</label>
               <div class="flex gap-2">
-                <input autocomplete="off" v-model="form.ic" maxlength="8" placeholder="12345678"
+                <input autocomplete="off" v-model="form.ic" :maxlength="isDomesticClient ? 8 : 20" :placeholder="isDomesticClient ? '12345678' : ''"
                   @blur="checkDuplicateIc"
                   class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="loadFromAres" :disabled="!form.ic || aresLoading"

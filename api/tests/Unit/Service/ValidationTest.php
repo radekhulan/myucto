@@ -43,6 +43,30 @@ final class ValidationTest extends TestCase
         self::assertArrayHasKey('ic', $err);
     }
 
+    /** BEZ OPRAVY PADÁ: zahraniční partner (PL) s 10místným identifikátorem se uloží. */
+    public function testForeignPartnerIcAllowsOwnCountryIdentifier(): void
+    {
+        foreach (['1234567890', 'HRB 12345', '12-345-67-890', 'ABC/123.45'] as $ic) {
+            $data = ['country_iso2' => 'PL', 'ic' => $ic] + $this->validBase();
+            self::assertSame([], Validation::client($data), $ic);
+        }
+        self::assertSame([], Validation::clientWarnings(['country_iso2' => 'PL', 'ic' => '12345678']), 'Kontrolní součet IČO u zahraničního partnera neplatí.');
+        $bad = Validation::client(['country_iso2' => 'DE', 'ic' => '12345;DROP'] + $this->validBase());
+        self::assertArrayHasKey('ic', $bad, 'Zahraniční identifikátor smí jen písmena, číslice a oddělovače.');
+        self::assertArrayHasKey('ic', Validation::client(['country_iso2' => 'PL', 'ic' => str_repeat('1', 21)] + $this->validBase()), 'Délka podle sloupce.');
+    }
+
+    /** Tuzemský partner (CZ nebo bez země) dál potřebuje IČO o 8 číslicích. */
+    public function testDomesticPartnerIcStillRequiresEightDigits(): void
+    {
+        foreach (['CZ', 'cz', null, ''] as $country) {
+            $data = ['ic' => '123456789'] + $this->validBase() + ($country === null ? [] : ['country_iso2' => $country]);
+            self::assertSame(['IČO musí mít 8 číslic'], Validation::client($data)['ic'] ?? null, var_export($country, true));
+        }
+        self::assertSame([], Validation::client(['country_iso2' => 'CZ', 'ic' => '12345679'] + $this->validBase()));
+        self::assertContains('ic_checksum_invalid', Validation::clientWarnings(['country_iso2' => 'CZ', 'ic' => '12345678']));
+    }
+
     public function testIcValidChecksumNoWarning(): void
     {
         $warn = Validation::clientWarnings(['ic' => '12345679']);

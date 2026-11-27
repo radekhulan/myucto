@@ -222,7 +222,7 @@ zakázky. Jinak by smazání skončilo chybou.
 |---|---|
 | Firma / jméno | Název na faktuře |
 | Křestní jméno + Příjmení | Jen pro fyzické osoby (volitelné) |
-| IČO | České IČO (8 číslic); slovenské funguje s ARES SK |
+| IČO | U partnera se zemí Česko (nebo bez země) IČO o 8 číslicích, slovenské funguje s ARES SK. U zahraničního partnera identifikační číslo jeho země (například polský REGON nebo NIP) až do 20 znaků: písmena, číslice, mezery, tečky, lomítka a pomlčky. Kontrolní součet se ověřuje jen u českého IČO. |
 | DIČ | Daňové ID s prefixem země: ČR „CZ12345678“, SK „SK1234567890“, EU různě. U slovenského klienta se pole jmenuje **IČ DPH** (viz [§ 18.7.3](#1873-slovensky-klient-a-narodni-danova-cisla)) |
 | Národní daňové číslo | Zobrazí se jen u zemí, kde existuje vedle VAT ID: SK **DIČ**, DE/AT **Steuernummer**, PL **NIP**, HU **Adószám**. Tiskne se na fakturu mezi IČO a DIČ/IČ DPH |
 | Drobný zákazník (jen pro zjednodušené doklady) | Karta bez adresy jen se jménem a e-mailem nebo telefonem. Plátce jí vystaví jen zjednodušený daňový doklad do 10 000 Kč včetně DPH a k němu zjednodušený dobropis (§ 45 odst. 2 ZDPH), viz [§ 18.3.1](#1831-drobny-zakaznik-bez-adresy) |

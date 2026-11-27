@@ -258,3 +258,17 @@ test('drobný zákazník se založí bez adresy, ale s kontaktem', async () => {
   await assert.rejects(tool.run(c, { company_name: 'Pepa Novák', simplified_only: true }, tool), /e-mail nebo telefon/);
   await assert.rejects(tool.run(c, { company_name: 'Pepa Novák', main_email: 'pepa@example.test' }, tool), /street, city, zip/);
 });
+
+test('zahraniční partner se založí s identifikátorem své země bez ARES, tuzemský jen s 8 číslicemi', async () => {
+  const tool = TOOLS_BY_NAME.get('create_client');
+  const posted = [];
+  const c = { post: async (path, body) => { posted.push([path, body]); return { id: 2, ...body }; }, get: async () => ({ data: [] }) };
+
+  const result = await tool.run(c, {
+    company_name: 'Dostawca Sp. z o.o.', street: 'Ulica 1', city: 'Kraków', zip: '30-001', country_iso2: 'PL', ic: '1234567890',
+  }, tool);
+  assert.equal(result.client.ic, '1234567890');
+  assert.deepEqual(posted.map(([path]) => path), ['/clients'], 'Zahraniční IČ se v ARES nehledá.');
+
+  await assert.rejects(tool.run(c, { company_name: 'Tuzemec', street: 'Ulice 1', city: 'Praha', zip: '11000', ic: '123456789' }, tool), /8 číslic/);
+});

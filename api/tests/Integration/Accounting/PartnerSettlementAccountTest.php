@@ -365,6 +365,29 @@ final class PartnerSettlementAccountTest extends BankPostingTestCase
         self::assertNull($this->container->get(ClientRepository::class)->find($client)['payable_account_code']);
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: kartu zahraničního dodavatele s identifikátorem své země (10 číslic)
+     * jde uložit i s účtem závazku; tuzemská karta s 9 číslicemi se dál odmítne.
+     */
+    public function testForeignVendorCardWithOwnCountryIdSavesPayableAccount(): void
+    {
+        $action = $this->container->get(UpdateClientAction::class);
+        $foreign = $this->vendor('Dodavatel zahraniční karta', null, $this->deId);
+        $ok = $this->callAction($action, '__invoke', 'PUT', 'admin', [
+            'ic' => '1234567890', 'payable_account_code' => self::FOREIGN,
+        ], ['id' => (string) $foreign]);
+        self::assertSame(200, $ok['status'], json_encode($ok['body'], JSON_UNESCAPED_UNICODE) ?: '');
+        $card = $this->container->get(ClientRepository::class)->find($foreign);
+        self::assertSame('1234567890', $card['ic']);
+        self::assertSame(self::FOREIGN, $card['payable_account_code']);
+
+        $domestic = $this->vendor('Dodavatel tuzemská karta', null);
+        $bad = $this->callAction($action, '__invoke', 'PUT', 'admin', ['ic' => '123456789'], ['id' => (string) $domestic]);
+        self::assertSame(400, $bad['status']);
+        self::assertSame('validation_failed', $bad['body']['error']['code'] ?? null);
+        self::assertArrayHasKey('ic', $bad['body']['error']['fields'] ?? []);
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
 
     private function analytic(string $parentCode, string $code, string $name): void
