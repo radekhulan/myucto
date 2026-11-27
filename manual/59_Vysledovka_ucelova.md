@@ -42,8 +42,9 @@ a hospodářskou činností.
 2. Vpravo nahoře vyberte fiskální rok a klikněte na **Načíst**. Výkaz se sestaví k dřívějšímu z posledního dne období a dneška, rozsah se zvolí automaticky podle kategorie účetní jednotky.
 3. Zkontrolujte sloupce **Běžné období** a **Minulé období**.
 4. Pro průběžný výkaz klientovi můžete vedle výběru roku zaškrtnout **Průběžné časové rozlišení a odpisy**; pravidla jsou stejná jako u druhové výsledovky ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)).
-5. Klikněte na **Export PDF** nebo **Export XLSX**. Export jde jen u sestaveného, úplně namapovaného výkazu.
-6. Chcete-li výsledek ověřit, porovnejte ho s [druhovou výsledovkou](58_Vysledovka_druhova.md). Celkový výsledek hospodaření musí být shodný, liší se jen členění provozních nákladů.
+5. V otevřeném roce je pod výkazem blok **Odhad do konce roku (nezaúčtováno)** s odhadem výsledku hospodaření a daně z příjmů ([§ 59.6.5](#5965-odhad-do-konce-roku-nezauctovano)).
+6. Klikněte na **Export PDF** nebo **Export XLSX**. Export jde jen u sestaveného, úplně namapovaného výkazu.
+7. Chcete-li výsledek ověřit, porovnejte ho s [druhovou výsledovkou](58_Vysledovka_druhova.md). Celkový výsledek hospodaření musí být shodný, liší se jen členění provozních nákladů.
 
 **Jak poznáte, že je hotovo:** Výkaz je sestavený, PDF a XLSX se stáhly a výsledek za období odpovídá druhové výsledovce.
 
@@ -156,6 +157,22 @@ backendové datum a automatický rozsah jako zobrazení.
 > Při změně účtového rozvrhu nebo zavedení nové nákladové analytiky znovu
 > zkontrolujte seznam nepřiřazených účtů. Mapa je rozhodnutí účetní jednotky,
 > nikoli automatický odhad systému.
+
+### 59.6.5 Odhad do konce roku (nezaúčtováno)
+
+Pod sestaveným výkazem je stejný blok **Odhad do konce roku (nezaúčtováno)**
+jako u druhové výsledovky po účtech, se štítkem **Odhad, nezaúčtováno**. Nic
+z něj není v účetnictví: skládá zaúčtovaný výsledek k datu výkazu, zápisy
+zaúčtované po něm do konce období, nezaúčtované operace uzávěrky a odpisy
+podle plánu, odhad daně z příjmů a výsledek po zdanění. Řádky, zdroje
+a pravidla popisuje [§ 58.7.6.1](58_Vysledovka_druhova.md#58761-odhad-do-konce-roku-nezauctovano).
+Účelové členění na odhadu nic nemění, výsledek hospodaření je stejný jako
+u druhové výsledovky.
+
+Blok se ukáže jen u právnické osoby v roce, který není uzavřený a nemá
+zaúčtovanou daň z příjmů (591), a uživateli s právem na přiznání k dani
+z příjmů. **Export PDF** ho v takovém roce přidá pod výkaz se stejným
+označením (částky v celých tisících Kč jako výkaz); XLSX ho nemá.
 
 ## 59.7 Související kapitoly
 

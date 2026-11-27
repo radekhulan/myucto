@@ -185,7 +185,8 @@ Podrobnosti v [§ 114.11.10](#1141110-pravidla-dimenzi-podle-uctu).
 
 1. Otevřete `Účetnictví → Výkazy po dimenzi`.
 2. Vyberte typ dimenze a období, přepněte záložku (**Výsledovka**, **Peněžní tok**).
-3. Tlačítkem **Export XLSX** stáhnete aktivní záložku, výsledovku také jako PDF.
+3. Ve výsledovce od prvního dne otevřeného účetního období můžete zaškrtnout **Zahrnout odhad do konce roku**, viz [Odhad do konce roku po dimenzi](#odhad-do-konce-roku-po-dimenzi).
+4. Tlačítkem **Export XLSX** stáhnete aktivní záložku, výsledovku také jako PDF.
 
 **Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených). Tlačítkem **Přidat dimenzi** zkombinujete víc dimenzí, například projekt a středisko.
 
@@ -1007,6 +1008,37 @@ U globálního typu lze zapnout **Sečíst všechny firmy skupiny** a potom voli
 **Rozpad po firmách**. Tabulka ukáže výnosy, náklady a výsledek každé přístupné
 firmy pro stejný výběr hodnot a období, nulové firmy vynechá a skončí součtem.
 Při zapnutí rozpadu se tabulka přidá také do PDF a jako samostatný list do XLSX.
+
+#### Odhad do konce roku po dimenzi
+
+Volba **Zahrnout odhad do konce roku** přidá k výsledovce za hodnotami stejný
+odhad, jaký je pod [výsledovkou po účtech](58_Vysledovka_druhova.md#58761-odhad-do-konce-roku-nezauctovano),
+rozdělený po hodnotách dimenze. Sloupce jsou podbarvené a nad tabulkou je
+štítek **Odhad, nezaúčtováno**: nic z nich není v účetnictví.
+
+<!-- cols: 30 70 -->
+| Sloupec | Obsah |
+|---|---|
+| Zaúčtováno s pozdějším datem | zaúčtované zápisy datované po dni **Do** až do konce období, se stejným výběrem zápisů a hodnot jako výsledek sestavy; jen když **Do** leží před koncem období |
+| Odhad časového rozlišení | nezaúčtované časové rozlišení z náhledu uzávěrky ([kap. 72](72_Uzaverka.md)); náklady a výnosy příštích období leží na hodnotách řádků dokladů, ze kterých se odkládají, stejně jako je zaúčtuje krok uzávěrky (rozpad mezi víc hodnot po haléřích); rozlišení drobného majetku, rozpuštění z minulého roku a agenda Časové rozlišení jsou v řádku **Bez hodnoty** |
+| Odhad odpisů | nezaúčtované účetní odpisy roku podle plánu na hodnotách karty majetku ([§ 114.11.8](#114118-majetek)), stejně jako je dostane zaúčtovaný odpis |
+| Odhad ostatní uzávěrky | jen když je nenulový: kurzové rozdíly a konečný stav zásob, vždy v řádku **Bez hodnoty** |
+| Odhad VH | výsledek sestavy plus předchozí sloupce |
+
+Nadřízená hodnota sčítá celou větev jako ostatní sloupce. Řádek **Celkem**
+sloupce Odhad VH je odhad výsledku hospodaření před zdaněním firmy z bloku
+odhadu; pod tabulkou je tato kontrola uvedená. Kdyby součet po hodnotách
+nesouhlasil (účetnictví se mezi výpočty změnilo), sloupce se nezobrazí
+a sestava vyzve k novému načtení. Daň z příjmů se po hodnotách nerozpočítává.
+Návrhy k potvrzení (opravné a dohadné položky) se nezapočítávají, stejně
+jako v bloku odhadu.
+
+Volba je k dispozici jen pro jednu firmu v podvojném účetnictví, u sestavy
+od prvního dne otevřeného účetního období do dne uvnitř něj, bez rozpadu po
+účtech a uživateli s právem na přiznání k dani z příjmů. Odhad má jen
+právnická osoba v rámci 500 bez zaúčtované daně z příjmů za rok; jinak
+sestava uvede důvod. XLSX má sloupce odhadu za sloupcem Výsledek, PDF je
+přidá jako samostatnou tabulku s označením **Odhad, nezaúčtováno**.
 
 **Peněžní tok** počítá tok nepřímou metodou za celou firmu nebo za vybranou
 hodnotu:
