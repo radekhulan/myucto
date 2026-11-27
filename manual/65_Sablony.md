@@ -165,8 +165,9 @@ analytiky, je potřeba kontace posunout na ně.
 1. Otevřete `Nástroje → Účetní nastavení` a záložku **Předkontace** (viz [Nástroje](73_Ucetni_nastroje.md)).
 2. Klikněte na **Doplnit podle osnovy**. Otevře se náhled, který každou stranu pravidla porovná s osnovou firmy.
 3. Volbou **Zobrazit jen řádky k řešení** skryjete položky v pořádku.
-4. U řádků se stavem **K rozhodnutí** vyberte analytiku, nebo zvolte **Ponechat beze změny**.
-5. Klikněte na **Zapsat vybrané změny**.
+4. U řádků se stavem **K rozhodnutí** zkontrolujte navrženou analytiku, případně vyberte jinou, nebo zvolte **Ponechat beze změny**.
+5. Zaškrtněte řádky, které chcete změnit. Nic není předvybrané. Tlačítkem **Vybrat vše** zaškrtnete všechny zobrazené řádky K rozhodnutí, tlačítkem **Zrušit výběr** výběr zrušíte.
+6. Klikněte na **Zapsat vybrané změny**.
 
 <!-- cols: 26 74 -->
 | Stav | Význam |
@@ -179,7 +180,8 @@ analytiky, je potřeba kontace posunout na ně.
 
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Doplněno pravidel** s počtem a u řádků zůstane stav V pořádku.
 
-Náhled nic nemění. Zapíší se jen zaškrtnuté řádky se stavem K rozhodnutí, a to jako firemní předkontace.
+Náhled nic nemění. Zapíší se jen řádky se stavem K rozhodnutí, které jste zaškrtli, a to jako firemní předkontace.
+Předkontace, které nezaškrtnete, zůstanou beze změny, i když u nich náhled analytiku navrhuje.
 Nabízené účty jsou pouze daňové analytiky původního účtu. Nedaňová analytika (například 518.990) mezi nimi není,
 protože ji vybírá daňový příznak dokladu, nikoli předkontace. U firmy, která už účtuje, je předvybraná ta
 analytika, kterou má nejčastěji v deníku.

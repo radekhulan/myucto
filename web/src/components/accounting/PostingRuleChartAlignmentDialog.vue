@@ -22,7 +22,7 @@ import {
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [v: boolean]; applied: [] }>()
@@ -54,10 +54,10 @@ async function load() {
         debit: rule.debit.suggested_code ?? '',
         credit: rule.credit.suggested_code ?? '',
       }
-      // Předvybráno je jen to, co má co zapsat — ať „Zapsat" nikdy neznamená
-      // víc, než kolik řádků uživatel opravdu vidí vyplněných.
-      nextPicked[rule.rule_key] = rule.status === 'suggest'
-        && (rule.debit.suggested_code !== null || rule.credit.suggested_code !== null)
+      // Nic není předvybrané: firma s desítkami řádků „K rozhodnutí" by jinak jedním
+      // kliknutím přepsala i předkontace, které měnit nechtěla. Návrh analytiky zůstává
+      // ve výběru účtu, řádek ale účetní zaškrtne sama (nebo „Vybrat vše").
+      nextPicked[rule.rule_key] = false
     }
     choice.value = nextChoice
     picked.value = nextPicked
@@ -89,6 +89,18 @@ const changes = computed<ChartAlignmentApplyItem[]>(() => {
   }
   return out
 })
+
+/** Zobrazené řádky, které jde zaškrtnout (stav K rozhodnutí). */
+const selectable = computed<ChartAlignmentRule[]>(() => rows.value.filter(r => r.status === 'suggest'))
+
+const allPicked = computed(() => selectable.value.length > 0 && selectable.value.every(r => picked.value[r.rule_key]))
+
+function toggleAll() {
+  const value = !allPicked.value
+  const next = { ...picked.value }
+  for (const rule of selectable.value) next[rule.rule_key] = value
+  picked.value = next
+}
 
 function isSelectable(side: ChartAlignmentSide): boolean {
   return side.status === 'suggest' && side.candidates.length > 0
@@ -159,10 +171,23 @@ const STATUS_ORDER: ChartAlignmentStatus[] = ['suggest', 'missing', 'auto', 'con
             {{ t('accounting.posting_rules.alignment.redirect_off') }}
           </p>
 
-          <label class="flex items-center gap-2 text-sm text-neutral-600">
-            <input v-model="onlyTodo" type="checkbox" class="rounded border-neutral-300" />
-            {{ t('accounting.posting_rules.alignment.only_todo') }}
-          </label>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label class="flex items-center gap-2 text-sm text-neutral-600">
+              <input v-model="onlyTodo" type="checkbox" class="rounded border-neutral-300" />
+              {{ t('accounting.posting_rules.alignment.only_todo') }}
+            </label>
+            <button
+              v-if="selectable.length > 0"
+              type="button"
+              data-test="alignment-select-all"
+              :class="btnOutlineSm('neutral')"
+              class="whitespace-nowrap"
+              @click="toggleAll"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ allPicked ? t('accounting.posting_rules.alignment.select_none') : t('accounting.posting_rules.alignment.select_all') }}
+            </button>
+          </div>
 
           <div v-if="rows.length === 0" class="text-sm text-neutral-500 py-6 text-center">
             {{ t('accounting.posting_rules.alignment.nothing_todo') }}

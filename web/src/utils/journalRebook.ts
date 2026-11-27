@@ -32,7 +32,7 @@ export const REBOOK_SOURCE_TYPES: JournalRebookSourceType[] = ['invoice', 'purch
 /** Důvody vynechání, které umí stránka přeložit; ostatní (a `repost_failed`) ukazují zprávu serveru. */
 export const REBOOK_REASON_CODES = [
   'period_not_open', 'date_locked', 'entry_reversed', 'posting_group', 'needs_reverse',
-  'not_item_account', 'changed_after_dry_run', 'changed_after_apply', 'excluded_by_user',
+  'not_item_account', 'paid_document', 'changed_after_dry_run', 'changed_after_apply', 'excluded_by_user',
   'bank_invariant', 'taken_over', 'cash_account', 'entry_not_found',
 ] as const
 

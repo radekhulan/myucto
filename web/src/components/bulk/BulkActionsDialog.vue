@@ -392,6 +392,7 @@ onUnmounted(stopPolling)
                 <option value="rewrite_or_reverse">{{ t('bulk_actions.mode_rewrite_or_reverse') }}</option>
               </select>
             </div>
+            <p class="sm:col-span-2 text-xs text-neutral-500" data-test="bulk-rule-hint">{{ t('bulk_actions.rule_hint') }}</p>
           </div>
 
           <!-- Poznámka faktur -->

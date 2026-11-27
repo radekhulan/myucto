@@ -153,7 +153,7 @@ Přeúčtování změní jen kontaci. DPH se jím nemění, daňový režim se o
 
 **Jak poznáte, že je hotovo:** Zápis má novou kontaci. V otevřeném období se přepsal na místě, v uzavřeném nebo zamčeném vznikl storno a nový zápis. Oba zůstanou v deníku kvůli auditu.
 
-U faktury se změněný účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet vedly, takže ho další úprava faktury nevrátí. Platí to pro výměnu jednoho účtu za jiný se stejnou částkou. Protiúčet (311, 321), DPH a zaokrouhlení se na položky nepřenášejí. Stejný účet na mnoha dokladech najednou změníte hromadně, viz [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
+U faktury se změněný účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet vedly, takže ho další úprava faktury nevrátí. Změněný závazek nebo pohledávku neuhrazeného dokladu (například 321 na 321.200) zapíše do protiúčtu položek. Platí to pro výměnu jednoho účtu za jiný se stejnou částkou. Uhrazený doklad si při dalším zaúčtování ponechá závazek nebo pohledávku svého zápisu, na kterém leží úhrada. DPH a zaokrouhlení se na položky nepřenášejí. Stejný účet na mnoha dokladech najednou změníte hromadně, viz [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
 
 Doklad převzatý z jiného programu má skupinu jednoho nebo více vlastních účetních zápisů, například zvlášť základ a DPH. Tato skupina je oddělená od informativních vazeb **Souvisí**. Opakované automatické zaúčtování převzatou skupinu nepřepisuje. Při **Přeúčtování** dialog vypíše všechny její členy a předvyplní řádky, které jsou právě v deníku. Po potvrzení vzniknou protizápisy ke všem původním členům a jeden nový předpis. Úhrady a pouze související zápisy zůstanou zachované. Změní-li se některý člen během otevřeného dialogu, obnovte náhled. Storno nebo smazání zdrojového dokladu rovněž zruší celou skupinu zaúčtování.
 
@@ -191,6 +191,7 @@ Použijte, když je stejný účet chybně na desítkách až stovkách dokladů
 Spolu se zápisem se změní i zdrojový doklad, aby změnu nevrátila jeho další úprava:
 
 - U vydané a přijaté faktury se nový účet zapíše na položky dokladu, které vedly na původní účet.
+- Přeúčtujete-li závazek přijaté faktury nebo účtenky (například 321 na 321.200) nebo pohledávku vydané faktury (311 na 311.200), zapíše se nový účet do protiúčtu položek dokladu. Ostatní řádky zápisu zůstanou beze změny a úhrada pak odúčtuje nový účet. Přeúčtovat jde jen neuhrazený doklad: uhrazený i částečně uhrazený doklad zůstává na účtu, na kterém leží jeho úhrada, a vynechá se s důvodem. Nový účet musí být závazek, resp. pohledávka, na kterou jde účtovat, stejně jako účet na kartě partnera.
 - U interního dokladu se nový účet zapíše do jeho řádků na téže straně.
 - U pokladního dokladu se změní jeho protiúčet.
 - U bankovního pohybu zůstává bankovní účet pohybu (221) beze změny.
@@ -205,7 +206,9 @@ Spolu se zápisem se změní i zdrojový doklad, aby změnu nevrátila jeho dal�
 | **Zápis už je stornovaný** | Zápis někdo stornoval, nebo interní doklad už není zaúčtovaný. |
 | **Doklad má více zápisů, jde jen stornem** | Doklad převzatý z jiného programu má skupinu zápisů (například zvlášť základ a DPH). Zvolte storno a nový zápis. Ruční zápis, který do takové skupiny patří, se hromadně nepřeúčtuje. |
 | **Opravit na místě nejde, zvolte storno** | Zápis nejde přepsat na místě a vybrali jste jen opravu. |
-| **Účet není na položkách ani v protiúčtu dokladu, změna by vydržela jen do další úpravy dokladu** | U faktury jde měnit jen účet z položek (výnos, náklad, majetek), ne 311/321, DPH ani zaokrouhlení. U pokladního dokladu jen jeho protiúčet, a to jen u dokladu, který neuhrazuje fakturu. |
+| **Účet není na položkách ani v protiúčtu dokladu, změna by vydržela jen do další úpravy dokladu** | U faktury jde měnit účet z položek (výnos, náklad, majetek) a závazek nebo pohledávku dokladu, ne DPH ani zaokrouhlení. U pokladního dokladu jen jeho protiúčet, a to jen u dokladu, který neuhrazuje fakturu. |
+| **Doklad je uhrazený, úhrada leží na původním účtu** | Závazek nebo pohledávku uhrazeného (i částečně) dokladu nejde přeúčtovat, saldo by se rozdělilo na dva účty. Zrušte nejdřív úhradu, nebo přeúčtujte i úhradu ručně. |
+| Zpráva o neplatném účtu nebo o záloze | Nový účet není závazek, resp. pohledávka, na kterou jde účtovat (například syntetika s analytikami), nebo doklad nemá saldokonto (daňový doklad k platbě, penále) či zúčtovává zálohu. |
 | **Bankovní účet pohybu se měnit nedá** | Účet z nebo na je 221, nebo jde o avízo či ignorovaný pohyb. |
 | **Pokladní účet 211 se nemění** | Pokladní účet se hromadně nepřeúčtovává. |
 | **Zápis se po běhu nanečisto změnil** | Mezi během nanečisto a ostrým během doklad někdo upravil. Spusťte nový běh nanečisto. |
@@ -227,7 +230,7 @@ Použijte, když chcete změnit mnoho záznamů, které máte před sebou v sezn
 4. Zvolte **Operaci**. Nedostupná operace ukáže důvod (například chybí právo nebo firma nemá zapnuté dimenze).
    - **Přeúčtovat účet**: **Z účtu**, **Na účet**, **Strana** a **Způsob změny** jako na stránce Přeúčtovat doklady ([§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu)), jen nad vybranými záznamy.
    - **Nastavit dimenze**: u každého typu dimenze (Středisko, Zakázka, Činnost a další typy firmy) zvolte **Beze změny**, **Přepsat**, **Jen kde je prázdné** nebo **Vymazat** a u prvních dvou hodnotu. Najednou jde změnit víc typů. U faktur zvolte, **Kam dimenze zapsat**: **Hlavička dokladu** (platí pro všechny řádky zápisu), nebo **Jen položky** (v deníku jen nákladové a výnosové řádky). V deníku můžete změnu omezit polem **Jen řádky na účtech začínajících**, například `5, 6`.
-   - **Změnit předkontaci**: zvolte **Novou předkontaci** a **Způsob změny**. Jen u vydaných a přijatých faktur.
+   - **Změnit předkontaci**: zvolte **Novou předkontaci** a **Způsob změny**. Jen u vydaných a přijatých faktur. Předkontace určí účty položek: vlastní účet nákladu nebo výnosu a protiúčet položky se nahradí účty předkontace, pokud je předkontace uvádí (například položka s vlastním účtem 582.000 nebo 511.200 dostane účet nákladu předkontace 518.000). Uhrazený doklad zůstává na závazku nebo pohledávce svého zápisu, kde leží úhrada.
    - **Smazat**: v deníku zvolte, co se stane se zápisem, který smazat nejde: **Přeskočit**, nebo **Stornovat**.
    - **Změnit poznámku**: zvolte **Poznámka nad položkami** nebo **Poznámka pod položkami**, způsob **Přepsat**, **Připojit na konec** nebo **Vymazat** a text. Doklady, které už nejsou koncept, změní jen zaškrtnutá volba **Upravit i vystavené doklady**. Jen u vydaných a přijatých faktur.
    - **Opravit variabilní symbol**: zadejte **Stálou hodnotu**, nebo zvolte **Podle vzoru** a zadejte **Vzor** se značkami, které se doplní z pohybu ([§ 52.14.18](#521418-hromadne-akce-v-seznamech)). Jen u bankovních pohybů.
@@ -2541,9 +2544,12 @@ se od běhu nanečisto změnilo, se vynechá.
 Pravidla:
 
 - Najednou jde přeúčtovat nejvýš 500 dokladů. Větší výběr rozdělte podle období.
-- U vydaných a přijatých faktur jde měnit jen účet, na který vedou položky dokladu
-  (výnos, náklad, majetek). Nový účet se zapíše i na položky, takže ho další úprava
-  faktury nevrátí. Protiúčet 311/321, DPH a zaokrouhlení se mění úpravou dokladu
+- U vydaných a přijatých faktur jde měnit účet, na který vedou položky dokladu
+  (výnos, náklad, majetek), a závazek nebo pohledávku dokladu (321, 325, 311 a jejich
+  analytiky). Nový účet se zapíše i na položky, resp. do protiúčtu položek, takže ho další
+  úprava faktury nevrátí. Závazek nebo pohledávku jde přeúčtovat jen u neuhrazeného
+  dokladu a jen na účet, který by šel nastavit na kartě partnera. Uhrazený doklad se
+  vynechá, úhrada leží na původním účtu. DPH a zaokrouhlení se mění úpravou dokladu
   nebo předkontace.
 - U bankovního pohybu se nemění bankovní účet pohybu (221).
 - Ruční zápisy, interní doklady a pokladní doklady se přeúčtují **jen opravou zápisu**,
@@ -2594,7 +2600,8 @@ Pravidla společná všem operacím:
 
 **Změnit předkontaci:**
 
-- Nastaví předkontaci všem běžným položkám vydaných a přijatých faktur. Účet položky a protiúčet, které předkontace určuje, se z položky odeberou, aby předkontace platila. Stranu, kterou předkontace neurčuje, položka ponechá.
+- Nastaví předkontaci všem běžným položkám vydaných a přijatých faktur. Účet položky a protiúčet, které předkontace určuje, se z položky odeberou, aby předkontace platila. Položka s vlastním účtem nákladu (například 582.000 nebo 511.200) tak dostane účet nákladu předkontace (například 518.000). Stranu, kterou předkontace neurčuje, položka ponechá.
+- Uhrazený i částečně uhrazený doklad zůstává na závazku nebo pohledávce svého zápisu, i když nová předkontace uvádí jiný: úhrada leží na původním účtu a přesun by saldo rozdělil na dva účty. Totéž platí při každém dalším zaúčtování uhrazeného dokladu, například po změně karty partnera.
 - Zaúčtovaný doklad se zaúčtuje znovu z dokladu, stejně jako **Přeúčtovat** na detailu ([§ 52.14.9.2](#521492-preuctovani-z-dokladu-sekce-zauctovani)): v otevřeném období oprava na místě, v uzavřeném nebo zamčeném podle **Způsobu změny** vynechání, nebo storno a nový zápis. Nezaúčtovaný doklad dostane jen novou předkontaci.
 - Stornovaný doklad a nezaúčtovaný doklad v uzavřeném období se vynechají. Vystavenou fakturu mění jen role s právem upravit vystavenou fakturu, znovu zaúčtovat jen role s právem zaúčtovat.
 - DPH se nemění. V období, za které je podané přiznání k DPH nebo kontrolní hlášení (u přijaté faktury období odpočtu), se zápis přepíše na místě jen jako přesun mezi účty bez daňového dopadu, stejně jako při přeúčtování v zamčeném datu. Jinak se doklad vynechá s důvodem **Podané období DPH**, i když zámek k datu někdo posunul zpět.

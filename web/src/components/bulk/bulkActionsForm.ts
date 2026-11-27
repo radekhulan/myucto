@@ -179,7 +179,7 @@ export function buildApplyRequest(
 
 /** Důvody, které UI umí přeložit; ostatní ukážou zprávu serveru. */
 export const BULK_REASON_CODES = [
-  'period_not_open', 'date_locked', 'entry_reversed', 'needs_reverse', 'not_item_account',
+  'period_not_open', 'date_locked', 'entry_reversed', 'needs_reverse', 'not_item_account', 'paid_document',
   'bank_invariant', 'posting_group', 'changed_after_dry_run', 'changed_after_apply', 'excluded_by_user',
   'entry_not_found', 'tax_neutral_rewrite', 'cash_account', 'taken_over',
   'dimensions_frozen', 'dimension_required', 'split_in_locked_period', 'account_change_in_locked_period',

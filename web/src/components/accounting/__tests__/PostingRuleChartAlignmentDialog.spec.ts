@@ -67,9 +67,25 @@ describe('PostingRuleChartAlignmentDialog', () => {
     expect(wrapper.text()).toContain('cash.revenue')
   })
 
+  it('nic nepředvybere, takže bez zaškrtnutí se nic nezapíše', async () => {
+    const wrapper = await openDialog()
+
+    // Druhý checkbox je řádek pravidla (první přepíná filtr).
+    const row = wrapper.findAll('input[type="checkbox"]')[1]
+    expect((row.element as HTMLInputElement).checked).toBe(false)
+    // Návrh analytiky v řádku zůstává, jen se nezapíše bez zaškrtnutí.
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('518.200')
+    expect(wrapper.findAll('button').at(-1)!.attributes('disabled')).toBeDefined()
+
+    await wrapper.findAll('button').at(-1)!.trigger('click')
+    await flushPromises()
+    expect(m.applyPostingRuleChartAlignment).not.toHaveBeenCalled()
+  })
+
   it('odešle jen zaškrtnuté řádky se změnou a druhou stranu nechá být', async () => {
     const wrapper = await openDialog()
 
+    await wrapper.findAll('input[type="checkbox"]')[1].setValue(true)
     await wrapper.findAll('button').at(-1)!.trigger('click')
     await flushPromises()
 
@@ -78,15 +94,15 @@ describe('PostingRuleChartAlignmentDialog', () => {
     ])
   })
 
-  it('nezapíše nic, když uživatel volbu odškrtne', async () => {
+  it('Vybrat vše zaškrtne řádky k rozhodnutí a podruhé výběr zruší', async () => {
     const wrapper = await openDialog()
 
-    // Druhý checkbox je řádek pravidla (první přepíná filtr).
-    await wrapper.findAll('input[type="checkbox"]')[1].setValue(false)
-    await wrapper.findAll('button').at(-1)!.trigger('click')
-    await flushPromises()
+    await wrapper.find('[data-test="alignment-select-all"]').trigger('click')
+    expect((wrapper.findAll('input[type="checkbox"]')[1].element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('[data-test="alignment-select-all"]').text()).toContain('select_none')
 
-    expect(m.applyPostingRuleChartAlignment).not.toHaveBeenCalled()
+    await wrapper.find('[data-test="alignment-select-all"]').trigger('click')
+    expect((wrapper.findAll('input[type="checkbox"]')[1].element as HTMLInputElement).checked).toBe(false)
   })
 
   it('řádek, který dořeší engine, se zapsat nedá ani po zobrazení všech', async () => {
