@@ -16,6 +16,8 @@ use PDO;
  * na účet z nastavení firmy `supplier.receipt_payable_account_code` (typicky 325), pokud
  * je vyplněný a předkontace dokladu nese výchozí závazek. Ručně zvolená předkontace
  * s jiným závazkem zůstává, jak ji účetní vybrala. Prázdné nastavení = beze změny.
+ * Účet závazku z karty dodavatele a firemní účet pro zahraniční dodavatele mají přednost
+ * a určuje je {@see PartnerSettlementAccount}, tahle třída je jeho poslední krok.
  *
  * Úhrada ({@see forPayment}): odúčtuje se účet, na kterém závazek dokladu SKUTEČNĚ
  * vznikl (živý zápis předpisu v deníku), ne pevný účet z kontace úhrady. Bez toho by

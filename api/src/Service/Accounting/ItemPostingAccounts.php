@@ -141,15 +141,7 @@ final class ItemPostingAccounts
             );
         }
 
-        // Úhrada vydané faktury v pokladně, zápočtem a vyrovnáním odúčtuje pohledávku podle
-        // předkontace úhrady, ne podle zápisu dokladu (na rozdíl od přijaté strany, která má
-        // {@see PurchasePayableAccount::forPayment}). Protiúčet proto smí jen na tutéž
-        // syntetiku (typicky analytika 311), jinak by saldo zůstalo otevřené.
-        $receivable = null;
-        if ($direction === 'sale') {
-            $payment = $this->rules->resolve($supplierId, 'payment.receivable.settlement');
-            $receivable = substr(self::text($payment['credit_account_code'] ?? null) ?? '311', 0, 3);
-        }
+        $receivable = $direction === 'sale' ? $this->receivableSynthetic($supplierId) : null;
         $expectedType = $direction === 'purchase' ? 'liability' : 'asset';
         if ((string) $row['account_type'] !== $expectedType
             || !str_starts_with($code, '3')
@@ -173,6 +165,22 @@ final class ItemPostingAccounts
         }
 
         return (string) $row['account_code'];
+    }
+
+    /**
+     * Syntetika, na kterou smí pohledávka vydaného dokladu mimo předkontaci (protiúčet
+     * řádku, účet pohledávky z karty odběratele, {@see PartnerSettlementAccount}).
+     *
+     * Úhrada vydané faktury bankou, v pokladně, zápočtem a vyrovnáním odúčtuje pohledávku
+     * podle předkontace úhrady a v zápisu dokladu dohledá jen její analytiku
+     * ({@see FxSettlementPosting::predpisSaldo}), ne jiný účet (na rozdíl od přijaté strany,
+     * která má {@see PurchasePayableAccount::forPayment}). Pohledávka proto smí jen na
+     * tutéž syntetiku (typicky analytika 311), jinak by saldo zůstalo otevřené.
+     */
+    public function receivableSynthetic(int $supplierId): string
+    {
+        $payment = $this->rules->resolve($supplierId, 'payment.receivable.settlement');
+        return substr(self::text($payment['credit_account_code'] ?? null) ?? '311', 0, 3);
     }
 
     /** @return array<string,mixed>|null */

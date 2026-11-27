@@ -4786,9 +4786,12 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '403':
-          $ref: '#/components/responses/InsufficientScope'
+          description: "Token nemá scope `read_write`, nebo tělo nastavuje účty záloh (`advance_paid_account_code`, `advance_paid_vat_account_code`) či účet závazku a pohledávky (`payable_account_code`, `receivable_account_code`) bez práva zápisu do účetnictví (`forbidden`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`)"
+          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`). Účet záloh, závazku nebo pohledávky mimo osnovu firmy, nevhodného druhu nebo syntetika s analytikami (`invalid_account`, `account_not_posting_level`)."
 
   /api/v1/clients/duplicates:
     get:
@@ -4899,9 +4902,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '403':
-          description: "Změna `advance_paid_account_code` / `advance_paid_vat_account_code` bez práva zápisu do účetnictví (`forbidden`)"
+          description: "Změna `advance_paid_account_code` / `advance_paid_vat_account_code` nebo `payable_account_code` / `receivable_account_code` bez práva zápisu do účetnictví (`forbidden`)"
         '422':
-          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`); hladinu, kterou už klient má, lze poslat i neaktivní. Účet záloh mimo osnovu firmy, mimo syntetiku 314 nebo syntetika s analytikami (`invalid_account`, `account_not_posting_level`)."
+          description: "Cenová hladina nepatří firmě nebo není aktivní (`invalid_price_level`); hladinu, kterou už klient má, lze poslat i neaktivní. Účet záloh mimo osnovu firmy, mimo syntetiku 314 nebo syntetika s analytikami (`invalid_account`, `account_not_posting_level`). Účet závazku, který není pasivní účet třídy 3 (mimo 343 a 314), nebo účet pohledávky, který není aktivní účet pod syntetikou předkontace úhrady pohledávek (typicky 311), stejné kódy."
     delete:
       tags: [Clients]
       summary: Smazání klienta (pokud nemá vystavené doklady)
@@ -10168,7 +10171,9 @@ paths:
         `person_title` je nepovinný titul fyzické osoby (nejvýše 10 znaků po
         oříznutí okolních mezer); prázdný řetězec nebo `null` titul vymaže.
         `receipt_payable_account_code` musí být aktivní závazkový účet třídy 3
-        z účtové osnovy firmy, jinak 422 `invalid_account`.
+        z účtové osnovy firmy, jinak 422 `invalid_account`. Totéž platí pro
+        `foreign_payable_account_code`, který navíc nesmí být syntetika s víc
+        analytikami (`account_not_posting_level`).
       requestBody:
         required: true
         content:
@@ -10193,7 +10198,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: Účet závazku pro účtenky (`receipt_payable_account_code`) není závazkový účet z osnovy firmy
+          description: Účet závazku pro účtenky (`receipt_payable_account_code`) nebo pro zahraniční dodavatele (`foreign_payable_account_code`) není závazkový účet z osnovy firmy, na který lze účtovat
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -55333,6 +55338,8 @@ components:
         default_revenue_category_id: { type: [integer, "null"], description: "Default kategorie tržby pro vydané faktury odběratele" }
         advance_paid_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet poskytnutých záloh dodavatele (analytika 314, např. 314.610). Na něj jde úhrada zálohy bankou, pokladnou i zápočtem a z něj ji konečná faktura zúčtuje. NULL = předkontace firmy `advance.paid.payment`." }
         advance_paid_vat_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet 314, ze kterého daňový doklad k platbě (DDKP) k záloze dodavatele čerpá daň (např. 314.611). Konečná faktura daň z něj při zúčtování zálohy převede zpět, takže oba účty skončí na nule. NULL = předkontace firmy `advance.paid.vatdocument`." }
+        payable_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet závazku přijatých dokladů dodavatele (např. 321.200). Má přednost před firemním účtem pro zahraniční dodavatele a předkontací dokladu, ne před protiúčtem na řádcích dokladu a ručně zvolenou předkontací. Dobropis k zaúčtované faktuře jde na účet faktury. Úhrady odúčtují účet, na kterém závazek dokladu vznikl. NULL = předkontace dokladu." }
+        receivable_account_code: { type: [string, "null"], maxLength: 10, description: "Podvojné účetnictví: účet pohledávky vydaných dokladů odběratele (např. 311.200). Nese celý předpis včetně DPH. Má přednost před předkontací dokladu, ne před protiúčtem na řádcích dokladu a ručně zvolenou předkontací. Dobropis k zaúčtované faktuře jde na účet faktury. NULL = předkontace dokladu." }
         invoice_number_format: { type: [string, "null"], description: "Per-klient override číselné řady faktur" }
         proforma_number_format: { type: [string, "null"] }
         credit_note_number_format: { type: [string, "null"] }
@@ -55503,6 +55510,8 @@ components:
         default_revenue_category_id: { type: [integer, "null"] }
         advance_paid_account_code: { type: [string, "null"], maxLength: 10, description: "Účet poskytnutých záloh dodavatele. Musí být aktivní účet osnovy firmy pod syntetikou 314 a dát se na něj účtovat (syntetika s víc analytikami ne), jinak 422 `invalid_account` / `account_not_posting_level`. Změnu smí jen role s právem zápisu do účetnictví (jinak 403). `null` nebo `\"\"` = předkontace firmy, vynechání = beze změny." }
         advance_paid_vat_account_code: { type: [string, "null"], maxLength: 10, description: "Účet 314, ze kterého DDKP k záloze dodavatele čerpá daň. Stejná pravidla jako `advance_paid_account_code`." }
+        payable_account_code: { type: [string, "null"], maxLength: 10, description: "Účet závazku přijatých dokladů dodavatele. Musí být aktivní pasivní účet třídy 3 z osnovy firmy mimo 343 a 314 a dát se na něj účtovat (syntetika s víc analytikami ne), jinak 422 `invalid_account` / `account_not_posting_level`. Změnu smí jen role s právem zápisu do účetnictví (jinak 403). `null` nebo `\"\"` = předkontace dokladu, vynechání = beze změny." }
+        receivable_account_code: { type: [string, "null"], maxLength: 10, description: "Účet pohledávky vydaných dokladů odběratele. Musí být aktivní účet aktiv z osnovy firmy pod syntetikou předkontace úhrady pohledávek (typicky analytika 311), jinak by doklad úhrada neuzavřela. Ostatní pravidla jako `payable_account_code`." }
         invoice_number_format: { type: [string, "null"], maxLength: 60 }
         proforma_number_format: { type: [string, "null"] }
         credit_note_number_format: { type: [string, "null"] }
@@ -57662,6 +57671,7 @@ components:
         oss_enabled: { type: boolean }
         dimensions_enabled: { type: boolean, description: "Zapnutí dimenzí vyžaduje platnou licenci účetnictví nebo zkušební dobu. Vypnutí a uložení již zapnuté hodnoty ji nevyžaduje." }
         receipt_payable_account_code: { type: [string, "null"], maxLength: 10, description: "Účet závazku pro účtenky a paragony (document_kind=receipt), např. 325. Musí být aktivní závazkový účet třídy 3 z osnovy firmy; prázdná hodnota nebo null = závazek z předkontace (321)." }
+        foreign_payable_account_code: { type: [string, "null"], maxLength: 10, description: "Účet závazku pro dodavatele z jiné země, než je země firmy, např. 321.300. Platí, když karta dodavatele nenese vlastní účet závazku (`payable_account_code`). Musí být aktivní závazkový účet třídy 3 z osnovy firmy, na který lze účtovat; prázdná hodnota nebo null = závazek z předkontace." }
         oss_valid_from: { type: [string, "null"], format: date }
         oss_valid_to: { type: [string, "null"], format: date }
         oss_identification_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
@@ -57842,6 +57852,7 @@ components:
         dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
         auto_match_other_items: { type: boolean, default: false, description: "Automatické párování bankovních pohybů s ostatními pohledávkami a závazky. Pohyb, který nespárovala žádná faktura, se přiřadí položce jen při jisté shodě (VS s účtem protistrany, příští splátkou nebo celým zbytkem; nebo účet protistrany s příští splátkou v okně splatnosti). V daňové evidenci se úhrada jen přiřadí, v podvojném účetnictví se nezaúčtovaný pohyb zaúčtuje na účet položky." }
         receipt_payable_account_code: { type: [string, "null"], description: "Účet závazku pro účtenky a paragony (document_kind=receipt); null = závazek z předkontace (321). Úhrady odúčtují účet, na kterém závazek dokladu vznikl." }
+        foreign_payable_account_code: { type: [string, "null"], description: "Účet závazku pro dodavatele z jiné země než firma, pokud jejich karta nenese vlastní účet závazku; null = závazek z předkontace." }
         vat_status_history:
           type: array
           readOnly: true

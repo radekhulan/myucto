@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AdvancePaidAccount;
+use MyInvoice\Service\Accounting\PartnerSettlementAccount;
 use MyInvoice\Service\Client\ClientFieldLimits;
 use MyInvoice\Service\Client\VendorDuplicateFinder;
 use MyInvoice\Service\Invoice\InvoiceNumberFormat;
@@ -905,9 +906,29 @@ final class ClientRepository
      */
     public function setAdvancePaidAccounts(int $id, int $supplierId, array $codes): void
     {
+        $this->setAccountCodes($id, $supplierId, AdvancePaidAccount::FIELDS, $codes);
+    }
+
+    /**
+     * Účet závazku a pohledávky z karty partnera ({@see PartnerSettlementAccount}).
+     * `$codes` jsou už ověřené hodnoty, jen klíče, které se mění.
+     *
+     * @param array<string,?string> $codes
+     */
+    public function setPartnerSettlementAccounts(int $id, int $supplierId, array $codes): void
+    {
+        $this->setAccountCodes($id, $supplierId, PartnerSettlementAccount::FIELDS, $codes);
+    }
+
+    /**
+     * @param list<string> $fields povolené sloupce
+     * @param array<string,?string> $codes
+     */
+    private function setAccountCodes(int $id, int $supplierId, array $fields, array $codes): void
+    {
         $sets = [];
         $params = [];
-        foreach (AdvancePaidAccount::FIELDS as $field) {
+        foreach ($fields as $field) {
             if (array_key_exists($field, $codes)) {
                 $sets[] = $field . ' = ?';
                 $params[] = $codes[$field];

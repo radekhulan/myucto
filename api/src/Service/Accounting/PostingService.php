@@ -193,6 +193,7 @@ final class PostingService
     private ?ProductPostingDefaults $productDefaults = null;
     private ?RevenueRuleMatcher $revenueRules = null;
     private ?ItemPostingAccounts $itemPosting = null;
+    private ?PartnerSettlementAccount $partnerSettlementAccount = null;
 
     private ?EntryFormService $entryForms = null;
 
@@ -2009,18 +2010,26 @@ final class PostingService
         $revenue    = $rule['credit_account_code'] ?? '602';
         $cc = $opts['cost_center'] ?? null;
         // Protiúčet zadaný na řádcích (zaúčtování při zadání faktury) nahradí pohledávku
-        // předkontace. Bez něj zůstává zápis beze změny.
+        // předkontace, bez něj pohledávka z karty odběratele ({@see PartnerSettlementAccount}).
+        // Bez obojího zůstává zápis beze změny.
         $itemCounter = $this->itemCounterAccount($supplierId, 'sale', $invoiceId, $inv, $opts, $entryDate, $currentRead);
-        if ($itemCounter !== null) {
-            if ($deduction['active']) {
-                throw new PostingException(
-                    'counter_account_with_advance',
-                    'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
-                    422,
-                );
-            }
-            $receivable = $itemCounter;
+        if ($itemCounter !== null && $deduction['active']) {
+            throw new PostingException(
+                'counter_account_with_advance',
+                'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
+                422,
+            );
         }
+        $receivable = $this->partnerSettlement()->saleReceivable(
+            $supplierId,
+            $inv,
+            $itemCounter,
+            fn (): bool => isset($opts['rule_key'])
+                || ($this->issuedSettlesProforma($supplierId, (int) ($inv['parent_invoice_id'] ?? 0))
+                    && $this->advanceSettlementAccounts($supplierId, 'sale')['on_saldo']),
+            (string) $receivable,
+            fn (): string => $this->ruleCode($supplierId, self::DEFAULT_ISSUED_RULE_KEY, 'debit', '311'),
+        );
 
         // Rozpad výnosu po POLOŽKÁCH (1177) — zrcadlo nákladové strany z §DM. Faktura běžně
         // míchá prodej majetku se službami a jedna noha by celý základ poslala na jeden účet.
@@ -2371,7 +2380,13 @@ final class PostingService
                 422,
             );
         }
-        $payable = $itemCounter ?? $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
+        $payable = $this->partnerSettlement()->purchasePayable(
+            $supplierId,
+            $pi,
+            $itemCounter,
+            fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, $defaultKey),
+        );
         $cc = $opts['cost_center'] ?? null;
 
         $pct = max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0;
@@ -3394,8 +3409,13 @@ final class PostingService
         }
 
         $rule = $this->rules->resolve($supplierId, self::DEFAULT_RECEIVED_RULE_KEY);
-        $payable = $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead)
-            ?? $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
+        $payable = $this->partnerSettlement()->purchasePayable(
+            $supplierId,
+            $pi,
+            $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead),
+            fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY),
+        );
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
         $documentSaldo = $payable;
@@ -3425,6 +3445,25 @@ final class PostingService
             $rulePayable,
             (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
         );
+    }
+
+    private function partnerSettlement(): PartnerSettlementAccount
+    {
+        return $this->partnerSettlementAccount ??= new PartnerSettlementAccount($this->db, $this->rules);
+    }
+
+    /**
+     * Zúčtovává přijatý doklad zálohu, kterou firma vede přímo na saldokontu (předkontace
+     * zúčtování se stejnými účty)? Úhrada takové zálohy leží na závazku z předkontace,
+     * doklad proto zůstává na něm, ne na účtu podle partnera.
+     *
+     * @param array<string,mixed> $pi
+     */
+    private function purchaseAdvanceOnSaldo(int $supplierId, array $pi): bool
+    {
+        $advance = (int) ($pi['advance_purchase_invoice_id'] ?? 0) > 0
+            || (new PurchaseAdvanceLinks($this->db))->isMulti($supplierId, (int) $pi['id']);
+        return $advance && $this->advanceSettlementAccounts($supplierId, 'purchase')['on_saldo'];
     }
 
     private function itemPosting(): ItemPostingAccounts

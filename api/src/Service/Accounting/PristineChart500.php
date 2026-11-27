@@ -49,7 +49,7 @@ final class PristineChart500
         'bank_posting_suggestions' => ['debit_account_code', 'credit_account_code'],
         'cash_documents' => ['counter_account_code'],
         'cash_registers' => ['account_code'],
-        'clients' => ['advance_paid_account_code', 'advance_paid_vat_account_code'],
+        'clients' => ['advance_paid_account_code', 'advance_paid_vat_account_code', 'payable_account_code', 'receivable_account_code'],
         'expense_classification_rules' => ['target_account_code'],
         'revenue_classification_rules' => ['target_account_code'],
         'internal_document_lines' => ['account_code'],
@@ -73,7 +73,7 @@ final class PristineChart500
      * Kódy účtů ve firemním nastavení (tabulka supplier, klíčem je id firmy).
      * Vyplněný účet je použití osnovy, takže osnova už nedotčená není.
      */
-    public const SUPPLIER_CODE_REFERENCES = ['receipt_payable_account_code'];
+    public const SUPPLIER_CODE_REFERENCES = ['receipt_payable_account_code', 'foreign_payable_account_code'];
 
     /** Kódy účtů v řádcích dokladů bez supplier_id: tabulka => [sloupce, rodič, FK na rodiče]. */
     public const CHILD_CODE_REFERENCES = [

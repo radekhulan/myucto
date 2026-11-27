@@ -748,6 +748,8 @@ final class SettingsAction
             'auto_match_other_items',
             // Účet závazku pro účtenky / paragony (migrace 2204), viz PurchasePayableAccount.
             'receipt_payable_account_code',
+            // Účet závazku pro zahraniční dodavatele (migrace 2353), viz PartnerSettlementAccount.
+            'foreign_payable_account_code',
             // F7 — AI provider selection (NON-secret; secrety `*_enc` jdou VÝHRADNĚ přes
             // AiProviderCredentialsAction, NIKDY tady — mustFix #11).
             'ai_provider', 'ai_data_region', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'client_ai_extraction_monthly_limit',
@@ -812,6 +814,14 @@ final class SettingsAction
             try {
                 $body['receipt_payable_account_code'] = (new \MyInvoice\Service\Accounting\PurchasePayableAccount($this->db))
                     ->validateReceiptSetting($id, $body['receipt_payable_account_code']);
+            } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), 422, $e->context);
+            }
+        }
+        if (array_key_exists('foreign_payable_account_code', $body)) {
+            try {
+                $body['foreign_payable_account_code'] = (new \MyInvoice\Service\Accounting\PartnerSettlementAccount($this->db))
+                    ->validatePayable($id, $body['foreign_payable_account_code'], 'foreign_payable_account_code');
             } catch (\MyInvoice\Service\Accounting\PostingException $e) {
                 return Json::error($response, $e->errorCode, $e->getMessage(), 422, $e->context);
             }

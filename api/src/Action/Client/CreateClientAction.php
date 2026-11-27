@@ -13,6 +13,7 @@ use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\AdvancePaidAccount;
+use MyInvoice\Service\Accounting\PartnerSettlementAccount;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
@@ -34,6 +35,7 @@ final class CreateClientAction
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
         private readonly StockPriceLevelService $priceLevels,
         private readonly AdvancePaidAccount $advanceAccounts,
+        private readonly PartnerSettlementAccount $settlementAccounts,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -79,6 +81,19 @@ final class CreateClientAction
             ]);
         }
         try {
+            $settlementAccounts = array_filter(
+                $this->settlementAccounts->partnerSettingsFromBody($supplierId, $body),
+                static fn (?string $code): bool => $code !== null,
+            );
+        } catch (PostingException $e) {
+            return UpdateClientAction::accountError($response, $e);
+        }
+        if ($settlementAccounts !== [] && !RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403, [
+                'fields' => array_fill_keys(array_keys($settlementAccounts), [UpdateClientAction::SETTLEMENT_FORBIDDEN]),
+            ]);
+        }
+        try {
             $id = $this->repo->create($body, $supplierId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
@@ -87,6 +102,7 @@ final class CreateClientAction
             $this->repo->setPriceLevel($id, $supplierId, $priceLevelId);
         }
         $this->repo->setAdvancePaidAccounts($id, $supplierId, $advanceAccounts);
+        $this->repo->setPartnerSettlementAccounts($id, $supplierId, $settlementAccounts);
 
         // E-mailové kontakty dle účelu (#86) — replace-all, validuje repo.
         if (isset($body['email_contacts']) && is_array($body['email_contacts'])) {

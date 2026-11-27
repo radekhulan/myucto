@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
+use MyInvoice\Service\Accounting\PartnerSettlementAccount;
 use MyInvoice\Service\Accounting\PurchasePayableAccount;
 use MyInvoice\Service\Crm\CrmAggregationService;
 use PDO;
@@ -203,13 +204,15 @@ final class DocumentCompletenessService
         $items = [];
         $totalCzk = 0.0;
         $truncated = false;
-        // Účtenky mohou mít závazek na účtu z nastavení firmy (typicky 325) — jejich
-        // neuhrazené položky patří do kontroly stejně jako 321. Bez nastavení beze změny.
+        // Účtenky mohou mít závazek na účtu z nastavení firmy (typicky 325), doklady partnerů
+        // na účtu z karty nebo z účtu pro zahraniční dodavatele ({@see PartnerSettlementAccount})
+        // — jejich neuhrazené položky patří do kontroly stejně jako 321. Bez nastavení beze změny.
         $codes = ['311', '321'];
         $receiptPayable = (new PurchasePayableAccount($this->db))->receiptSetting($supplierId);
         if ($receiptPayable !== null && !in_array(substr($receiptPayable, 0, 3), $codes, true)) {
             $codes[] = substr($receiptPayable, 0, 3);
         }
+        array_push($codes, ...(new PartnerSettlementAccount($this->db))->extraSynthetics($supplierId, $codes));
         foreach ($codes as $code) {
             $acc = $this->saldo->resolveAccount($supplierId, $code, $today);
             if ($acc === null) {

@@ -14,6 +14,7 @@ use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\AdvancePaidAccount;
+use MyInvoice\Service\Accounting\PartnerSettlementAccount;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
@@ -35,7 +36,10 @@ final class UpdateClientAction
         private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
         private readonly StockPriceLevelService $priceLevels,
         private readonly AdvancePaidAccount $advanceAccounts,
+        private readonly PartnerSettlementAccount $settlementAccounts,
     ) {}
+
+    public const SETTLEMENT_FORBIDDEN = 'Účet závazku a pohledávky na kartě partnera mění jen účetní.';
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
@@ -79,6 +83,17 @@ final class UpdateClientAction
                 'fields' => array_fill_keys(array_keys($advanceAccounts), ['Účty záloh na kartě dodavatele mění jen účetní.']),
             ]);
         }
+        // Účet závazku a pohledávky partnera stejně: jen když je tělo obsahuje a liší se.
+        try {
+            $settlementAccounts = $this->settlementAccounts->partnerSettingsFromBody((int) $existing['supplier_id'], $body, $existing);
+        } catch (PostingException $e) {
+            return self::accountError($response, $e);
+        }
+        if ($settlementAccounts !== [] && !RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403, [
+                'fields' => array_fill_keys(array_keys($settlementAccounts), [self::SETTLEMENT_FORBIDDEN]),
+            ]);
+        }
 
         try {
             $backfilled = $this->repo->update($id, $body);
@@ -89,6 +104,7 @@ final class UpdateClientAction
             $this->repo->setPriceLevel($id, (int) $existing['supplier_id'], $priceLevelId);
         }
         $this->repo->setAdvancePaidAccounts($id, (int) $existing['supplier_id'], $advanceAccounts);
+        $this->repo->setPartnerSettlementAccounts($id, (int) $existing['supplier_id'], $settlementAccounts);
 
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         // E-mailové kontakty dle účelu (#86) — replace-all, jen pokud klíč v payloadu je
