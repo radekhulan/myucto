@@ -127,7 +127,8 @@ final class AccrualAgendaGuard
      * zaúčtované; rozpracovaný měsíc ne. Účetní u měsíčních položek zaúčtuje každý měsíc
      * a výkaz má ukázat stav, jako by to udělal včas, ne jiný poměr, než jaký bude v knihách.
      * Ruční metoda nemá plán a nepřidá nic. Řádek plánu zaúčtovaný zápisem s datem po dni
-     * výkazu k tomu dni v deníku není, proto se počítá jako nezaúčtovaný.
+     * výkazu k tomu dni v deníku není, proto se počítá jako nezaúčtovaný, i u položky, kterou
+     * tím zápisem agenda už dokončila.
      *
      * @return array{deltas: array<string,float>, items:int, total:float}
      */
@@ -186,12 +187,12 @@ final class AccrualAgendaGuard
                FROM accrual_items ai
                JOIN accrual_schedule s ON s.accrual_item_id = ai.id AND s.supplier_id = ai.supplier_id
           LEFT JOIN journal_entries je ON je.id = s.journal_entry_id AND je.supplier_id = s.supplier_id
-              WHERE ai.supplier_id = ? AND ai.managed_by = 'agenda' AND ai.status = 'active'
+              WHERE ai.supplier_id = ? AND ai.managed_by = 'agenda' AND (ai.status = 'active' OR (? = 1 AND ai.status = 'completed'))
                 AND ai.counter_account_code IS NOT NULL AND ai.method <> 'manual'
                 AND s.kind = 'release'
               ORDER BY ai.id, s.due_on"
         );
-        $stmt->execute([$proRataYearly ? 1 : 0, $asOf, $supplierId]);
+        $stmt->execute([$proRataYearly ? 1 : 0, $asOf, $supplierId, $proRataYearly ? 1 : 0]);
         $byItem = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $byItem[(int) $r['id']][] = $r;

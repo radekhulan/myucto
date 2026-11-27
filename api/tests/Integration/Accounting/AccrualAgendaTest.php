@@ -298,10 +298,11 @@ final class AccrualAgendaTest extends TestCase
     public function testInterimCountsYearlyReleasePostedAfterReportDate(): void
     {
         $guard = new AccrualAgendaGuard($this->db);
-        $item = $this->revenueItem(36_500.00, '2091-01-01', '2092-12-31', ['method' => 'yearly']);
+        // Poslední (jediný) řádek plánu: nezaúčtovaný plán po něm už nic nenese.
+        $item = $this->revenueItem(36_500.00, '2091-01-01', '2091-12-31', ['method' => 'yearly']);
         $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->rowOn($item, '2091-12-31')['id'], $this->meta());
 
-        $part = AccrualScheduleCalculator::recognizedBetween(36_500.00, '2091-01-01', '2092-12-31', '2090-12-31', '2091-03-15');
+        $part = AccrualScheduleCalculator::recognizedBetween(36_500.00, '2091-01-01', '2091-12-31', '2090-12-31', '2091-03-15');
         $interim = $guard->interimDeltas($this->supplierId, '2091-01-01', '2091-03-15');
         self::assertSame($part, $interim['total']);
         self::assertSame($part, $interim['deltas']['384']);
