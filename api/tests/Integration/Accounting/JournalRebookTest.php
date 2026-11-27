@@ -168,7 +168,10 @@ final class JournalRebookTest extends BankPostingTestCase
             'date_from' => self::YEAR . '-06-10', 'date_to' => self::YEAR . '-06-10']));
         $skipped = $this->items($dryId)['skipped'] ?? [];
         self::assertSame($open, $skipped[0]['source_id'] ?? null);
-        self::assertSame('not_item_account', $skipped[0]['reason_code']);
+        // Pohledávka 311 je saldokontní účet dokladu, 315 ale pohledávkou faktury být nemůže
+        // (úhrada by ji neuzavřela), proto se doklad vynechá s důvodem cílového účtu.
+        self::assertSame('invalid_settlement_account', $skipped[0]['reason_code']);
+        self::assertStringContainsString('315', (string) $skipped[0]['message']);
     }
 
     public function testBankPostingWithoutDocumentIsRebooked(): void

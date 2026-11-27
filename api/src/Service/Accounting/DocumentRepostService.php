@@ -428,9 +428,13 @@ final class DocumentRepostService
         (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
             ->copyToEntry((int) $plan['entry_id'], $entryId, $supplierId);
 
-        $itemsSynced = $sourceType === 'invoice' || $sourceType === 'purchase_invoice'
-            ? $this->syncItemAccounts($supplierId, $sourceType, $docId, $targetDate, $plan['lines'], $lines)
-            : 0;
+        $itemsSynced = 0;
+        if ($sourceType === 'invoice' || $sourceType === 'purchase_invoice') {
+            $itemsSynced = $this->syncItemAccounts($supplierId, $sourceType, $docId, $targetDate, $plan['lines'], $lines);
+            if ($itemsSynced === 0) {
+                $itemsSynced = $this->syncSettlementAccount($supplierId, $sourceType, $docId, $plan['lines'], $lines);
+            }
+        }
 
         $this->activity->log(
             'accounting.reposted',
@@ -527,30 +531,11 @@ final class DocumentRepostService
      */
     private function syncItemAccounts(int $supplierId, string $sourceType, int $docId, string $entryDate, array $before, array $after): int
     {
-        $volume = [];
-        foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
-            foreach ($lines as $line) {
-                if (($line['account_code'] ?? null) === null) {
-                    continue;
-                }
-                $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code']);
-                $volume[$code] = ($volume[$code] ?? 0) + $sign * JournalLineAmount::cents($line['amount'] ?? 0);
-            }
-        }
-        $removed = array_keys(array_filter($volume, static fn (int $c): bool => $c < 0));
-        $added = array_keys(array_filter($volume, static fn (int $c): bool => $c > 0));
-        if (count($removed) !== 1 || count($added) !== 1) {
+        $moved = $this->movedAccount($supplierId, $before, $after);
+        if ($moved === null) {
             return 0;
         }
-        [$from, $to] = [(string) $removed[0], (string) $added[0]];
-        if ($volume[$from] + $volume[$to] !== 0) {
-            return 0;
-        }
-        foreach ($after as $line) {
-            if ($this->posting->redirectedAccountCode($supplierId, (string) ($line['account_code'] ?? '')) === $from) {
-                return 0;
-            }
-        }
+        [$from, $to] = $moved;
 
         $resolve = fn (): array => array_map(
             fn (string $code): string => $this->posting->redirectedAccountCode($supplierId, $code, $entryDate, true),
@@ -605,6 +590,72 @@ final class DocumentRepostService
             $restore->execute([...array_map(static fn (string $c): mixed => $row[$c], [$column, ...$extra]), (int) $row['id'], $docId]);
         }
         return 0;
+    }
+
+    /**
+     * Přenese přeúčtovaný saldokontní účet (závazek přijaté, pohledávka vydané faktury)
+     * do protiúčtu řádků dokladu ({@see SettlementAccountRebook::persist}), aby ho další
+     * úprava nebo znovuzaúčtování dokladu nevrátily. Stejný jednoznačný případ jako
+     * {@see syncItemAccounts()}: zmizel právě jeden účet, a to saldokontní účet dokladu.
+     * Uhrazený doklad, doklad bez saldokonta a doklad se zálohou se nemění: uhrazený si
+     * účet svého zápisu drží sám ({@see PartnerSettlementAccount::keptForPaidDocument}).
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param list<array{account_code:?string, side:string, amount:float}> $before
+     * @param list<array{account_code:string, side:string, amount:float}> $after
+     */
+    private function syncSettlementAccount(int $supplierId, string $sourceType, int $docId, array $before, array $after): int
+    {
+        $moved = $this->movedAccount($supplierId, $before, $after);
+        if ($moved === null) {
+            return 0;
+        }
+        [$from, $to] = $moved;
+        $rebook = new SettlementAccountRebook($this->db, $this->posting);
+        if ((new PartnerSettlementAccount($this->db))->hasPayment($supplierId, $sourceType, $docId)
+            || $this->posting->documentCounterAccountBlocker($supplierId, $sourceType, $docId) !== null
+            || !$rebook->isSettlementAccount($supplierId, $sourceType, $docId, $from, true)
+        ) {
+            return 0;
+        }
+        return $rebook->persist($supplierId, $sourceType, $docId, $to);
+    }
+
+    /**
+     * Jednoznačná výměna účtu mezi řádky před a po: z deníku zmizel právě jeden účet a stejná
+     * částka přibyla na právě jednom jiném (kódy po přesměrování syntetiky). Jinak null.
+     *
+     * @param list<array<string,mixed>> $before
+     * @param list<array<string,mixed>> $after
+     * @return array{0:string, 1:string}|null [z, na]
+     */
+    private function movedAccount(int $supplierId, array $before, array $after): ?array
+    {
+        $volume = [];
+        foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
+            foreach ($lines as $line) {
+                if (($line['account_code'] ?? null) === null) {
+                    continue;
+                }
+                $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code']);
+                $volume[$code] = ($volume[$code] ?? 0) + $sign * JournalLineAmount::cents($line['amount'] ?? 0);
+            }
+        }
+        $removed = array_keys(array_filter($volume, static fn (int $c): bool => $c < 0));
+        $added = array_keys(array_filter($volume, static fn (int $c): bool => $c > 0));
+        if (count($removed) !== 1 || count($added) !== 1) {
+            return null;
+        }
+        [$from, $to] = [(string) $removed[0], (string) $added[0]];
+        if ($volume[$from] + $volume[$to] !== 0) {
+            return null;
+        }
+        foreach ($after as $line) {
+            if ($this->posting->redirectedAccountCode($supplierId, (string) ($line['account_code'] ?? '')) === $from) {
+                return null;
+            }
+        }
+        return [$from, $to];
     }
 
     /** Zámek účetnictví k datu (§35 soft-close) — zamčené je datum <= locked_until. */

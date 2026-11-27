@@ -2398,7 +2398,7 @@ final class PostingService
             $pi,
             $itemCounter,
             fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
-            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, $defaultKey, self::postedSaldoOpt($opts)),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, $defaultKey),
             self::postedSaldoOpt($opts),
         );
         $cc = $opts['cost_center'] ?? null;
@@ -3428,7 +3428,7 @@ final class PostingService
             $pi,
             $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead),
             fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
-            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY, self::postedSaldoOpt($opts)),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY),
             self::postedSaldoOpt($opts),
         );
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
@@ -3447,7 +3447,7 @@ final class PostingService
      * @param array<string,mixed> $pi
      * @param array<string,mixed>|null $rule
      */
-    private function purchasePayable(int $supplierId, array $pi, ?array $rule, string $defaultKey, ?string $postedSaldo = null): string
+    private function purchasePayable(int $supplierId, array $pi, ?array $rule, string $defaultKey): string
     {
         $rulePayable = (string) ($rule['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE);
         if ((string) ($pi['document_kind'] ?? '') !== 'receipt') {
@@ -3459,7 +3459,6 @@ final class PostingService
             $pi,
             $rulePayable,
             (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
-            $postedSaldo,
         );
     }
 
@@ -3534,9 +3533,28 @@ final class PostingService
         if ($counter === null) {
             return null;
         }
+        $blocker = $this->counterAccountBlocker($supplierId, $direction, $docId, $doc);
+        if ($blocker !== null) {
+            throw $blocker;
+        }
+
+        return $counter;
+    }
+
+    /**
+     * Proč doklad nemůže nést protiúčet na řádcích (null = může): doklad bez saldokonta
+     * (DDKP, penále), nebo doklad, který zúčtovává zálohu. Jediné pravidlo pro zaúčtování
+     * ({@see itemCounterAccount}) i pro přeúčtování saldokontního účtu
+     * ({@see SettlementAccountRebook}), které nový účet ukládá právě do protiúčtu řádků.
+     *
+     * @param 'purchase'|'sale' $direction
+     * @param array<string,mixed> $doc hlavička z {@see fetchDocHeader}
+     */
+    private function counterAccountBlocker(int $supplierId, string $direction, int $docId, array $doc): ?PostingException
+    {
         $kind = $direction === 'purchase' ? (string) ($doc['document_kind'] ?? 'invoice') : (string) ($doc['invoice_type'] ?? 'invoice');
         if (in_array($kind, ['tax_document', 'penalty'], true)) {
-            throw new PostingException(
+            return new PostingException(
                 'counter_account_not_applicable',
                 'Doklad tohoto druhu nemá ' . ($direction === 'purchase' ? 'závazek' : 'pohledávku') . ', protiúčet na řádku u něj nelze použít.',
                 422,
@@ -3547,14 +3565,50 @@ final class PostingService
                 || (new PurchaseAdvanceLinks($this->db))->isMulti($supplierId, $docId)
             : $this->issuedSettlesProforma($supplierId, (int) ($doc['parent_invoice_id'] ?? 0));
         if ($advance) {
-            throw new PostingException(
+            return new PostingException(
                 'counter_account_with_advance',
                 'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
                 422,
             );
         }
+        return null;
+    }
 
-        return $counter;
+    /**
+     * Veřejná podoba {@see counterAccountBlocker} pro doklad podle id.
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     */
+    public function documentCounterAccountBlocker(int $supplierId, string $sourceType, int $docId): ?PostingException
+    {
+        $doc = $this->fetchDocHeader($sourceType === 'invoice' ? 'invoices' : 'purchase_invoices', $supplierId, $docId);
+        if ($doc === null) {
+            return new PostingException('entry_not_found', 'Doklad #' . $docId . ' neexistuje.', 404);
+        }
+        return $this->counterAccountBlocker($supplierId, $sourceType === 'invoice' ? 'sale' : 'purchase', $docId, $doc);
+    }
+
+    /**
+     * Saldokontní účet dokladu (závazek přijatého, pohledávka vydaného), na který by doklad
+     * šel, kdyby se teď zaúčtoval znovu z dokladu: týž výpočet jako zaúčtování
+     * (`$documentSaldo` z {@see buildFromInvoice} / {@see buildFromPurchaseInvoice}).
+     * NULL = doklad saldokonto nemá (penále, DDKP) nebo se z dokladu sestavit nedá.
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     */
+    public function documentSettlementAccount(int $supplierId, string $sourceType, int $docId, bool $currentRead = false): ?string
+    {
+        $saldo = null;
+        try {
+            if ($sourceType === 'invoice') {
+                $this->buildFromInvoice($supplierId, $docId, ['current_read' => $currentRead], $saldo);
+            } else {
+                $this->buildFromPurchaseInvoice($supplierId, $docId, ['current_read' => $currentRead], $saldo);
+            }
+        } catch (PostingException) {
+            return null;
+        }
+        return $saldo === null ? null : $this->redirectedAccountCode($supplierId, $saldo, null, $currentRead);
     }
 
     /** Vydaná faktura navázaná na proformu (vyúčtování zálohy). Dobropis na fakturu sem nepatří. */

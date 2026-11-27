@@ -107,24 +107,21 @@ final class PurchasePayableAccount
      * @param string $rulePayable závazek z použité předkontace dokladu
      * @param string $defaultPayable závazek výchozí předkontace přijatých dokladů
      */
-    public function forPosting(int $supplierId, array $pi, string $rulePayable, string $defaultPayable, ?string $postedSaldo = null): string
+    public function forPosting(int $supplierId, array $pi, string $rulePayable, string $defaultPayable): string
     {
         if ((string) ($pi['document_kind'] ?? '') !== 'receipt' || $rulePayable !== $defaultPayable) {
             return $rulePayable;
         }
-        $setting = $this->receiptSetting($supplierId);
-        if ($setting === null) {
-            return $rulePayable;
-        }
-        return $this->keptForPaidDocument($supplierId, (int) ($pi['id'] ?? 0), $postedSaldo) ?? $setting;
+        return $this->receiptSetting($supplierId) ?? $rulePayable;
     }
 
     /**
      * Uhrazený (i částečně) a zaúčtovaný doklad zůstává při opětovném zaúčtování na závazku,
-     * na kterém v deníku leží, i když se mezitím změnilo nastavení (karta dodavatele, účet pro
-     * zahraniční dodavatele, účet pro účtenky): úhrady už ten účet vyrovnaly a přesun by saldo
-     * rozdělil na dva účty. Neuhrazený doklad přejde na nové nastavení. Volá se jen tam, kde
-     * by se nastavení uplatnilo, bez nastavení je zápis beze změny.
+     * na kterém v deníku leží, ať by nový účet přišel odkudkoli (předkontace dokladu nebo
+     * řádků, protiúčet řádků, karta dodavatele, účet pro zahraniční dodavatele, účet pro
+     * účtenky): úhrady už ten účet vyrovnaly a přesun by saldo rozdělil na dva účty.
+     * Neuhrazený doklad a doklad bez živého zápisu jde podle nastavení. Přijatá strana
+     * pravidla, které platí pro obě strany ({@see PartnerSettlementAccount::keptForPaidDocument}).
      *
      * @param string|null $postedSaldo závazek zápisu, který volající právě stornuje; null = živý zápis
      */

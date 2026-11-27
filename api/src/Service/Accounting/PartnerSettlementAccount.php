@@ -20,6 +20,8 @@ use PDO;
  * z jiné země, než je země firmy, pokud jeho karta účet závazku nenese.
  *
  * Pořadí priorit (závazek přijatého dokladu, {@see purchasePayable}):
+ *   0. uhrazený doklad se živým zápisem zůstává na účtu svého zápisu, ať by nový účet
+ *      přišel odkudkoli ({@see keptForPaidDocument}),
  *   1. protiúčet zadaný na řádcích dokladu ({@see ItemPostingAccounts}),
  *   2. explicitní předkontace od volajícího (ruční zaúčtování s vybranou `rule_key`),
  *   3. účet závazku z karty dodavatele,
@@ -82,19 +84,19 @@ final class PartnerSettlementAccount
         \Closure $legacy,
         ?string $postedSaldo = null,
     ): string {
+        $id = (int) ($pi['id'] ?? 0);
+        $kept = $this->keptForPaidDocument($supplierId, 'purchase_invoice', $id, $postedSaldo);
+        if ($kept !== null) {
+            return $kept;
+        }
         if ($itemCounter !== null) {
             return $itemCounter;
         }
-        $id = (int) ($pi['id'] ?? 0);
         $partner = $this->purchasePartnerAccount($supplierId, $id);
         if ($partner === null || $keepRule()) {
             return $legacy();
         }
         $payables = new PurchasePayableAccount($this->db);
-        $kept = $payables->keptForPaidDocument($supplierId, $id, $postedSaldo);
-        if ($kept !== null) {
-            return $kept;
-        }
         $parentId = (int) ($pi['parent_purchase_invoice_id'] ?? 0);
         if ((string) ($pi['document_kind'] ?? '') === 'credit_note' && $parentId > 0) {
             return $payables->postedPayable($supplierId, $parentId) ?? $partner;
@@ -121,22 +123,20 @@ final class PartnerSettlementAccount
         \Closure $defaultReceivable,
         ?string $postedSaldo = null,
     ): string {
+        $id = (int) ($inv['id'] ?? 0);
+        $kept = $this->keptForPaidDocument($supplierId, 'invoice', $id, $postedSaldo);
+        if ($kept !== null) {
+            return $kept;
+        }
         if ($itemCounter !== null) {
             return $itemCounter;
         }
-        $id = (int) ($inv['id'] ?? 0);
         $partner = $this->customerAccount($supplierId, $id);
         // Hlavičková předkontace s jinou pohledávkou (např. prodej majetku na 315) zůstává.
         if ($partner === null || $keepRule() || $ruleReceivable !== $defaultReceivable()) {
             return $ruleReceivable;
         }
         $synthetic = substr($partner, 0, 3);
-        if (self::issuedHasPayment($this->db->pdo(), $supplierId, $id)) {
-            $posted = $postedSaldo ?? $this->postedReceivable($supplierId, $id, $synthetic);
-            if ($posted !== null) {
-                return $posted;
-            }
-        }
         $parentId = (int) ($inv['parent_invoice_id'] ?? 0);
         if ((string) ($inv['invoice_type'] ?? '') === 'credit_note' && $parentId > 0) {
             return $this->postedReceivable($supplierId, $parentId, $synthetic) ?? $partner;
@@ -326,6 +326,49 @@ final class PartnerSettlementAccount
                 $documentId,
                 (new ItemPostingAccounts($this->db, $this->rules()))->receivableSynthetic($supplierId),
             );
+    }
+
+    /**
+     * Uhrazený (i částečně) doklad se živým zápisem si při opětovném zaúčtování ponechá
+     * saldokontní účet svého zápisu, ať by nový účet přišel odkudkoli: předkontace dokladu
+     * nebo řádků (i hromadná Změnit předkontaci), protiúčet řádků, karta partnera, firemní
+     * účet pro zahraniční dodavatele, účet pro účtenky. Úhrady už ten účet vyrovnaly
+     * a přesun by saldo rozdělil na dva účty. Jediné pravidlo pro obě strany: zaúčtování
+     * přijatého ({@see purchasePayable}) i vydaného dokladu ({@see saleReceivable}) se ho
+     * ptá jako první. Hromadné přeúčtování saldokontního účtu uhrazený doklad vynechá
+     * ({@see SettlementAccountRebook}).
+     *
+     * Neuhrazený doklad a doklad bez živého zápisu: null (jde podle nastavení). Pohledávka
+     * se hledá v syntetice předkontace úhrady pohledávek ({@see postedSettlementAccount}).
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param string|null $postedSaldo účet zápisu, který volající právě stornuje; null = živý zápis
+     */
+    public function keptForPaidDocument(int $supplierId, string $sourceType, int $documentId, ?string $postedSaldo = null): ?string
+    {
+        if ($documentId <= 0) {
+            return null;
+        }
+        if ($sourceType === 'purchase_invoice') {
+            return (new PurchasePayableAccount($this->db))->keptForPaidDocument($supplierId, $documentId, $postedSaldo);
+        }
+        if (!self::issuedHasPayment($this->db->pdo(), $supplierId, $documentId)) {
+            return null;
+        }
+        return $postedSaldo ?? $this->postedSettlementAccount($supplierId, 'invoice', $documentId);
+    }
+
+    /**
+     * Má doklad evidovanou úhradu (přijatý {@see PurchasePayableAccount::hasPayment}, vydaný
+     * {@see issuedHasPayment})?
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     */
+    public function hasPayment(int $supplierId, string $sourceType, int $documentId): bool
+    {
+        return $sourceType === 'purchase_invoice'
+            ? (new PurchasePayableAccount($this->db))->hasPayment($supplierId, $documentId)
+            : self::issuedHasPayment($this->db->pdo(), $supplierId, $documentId);
     }
 
     /**

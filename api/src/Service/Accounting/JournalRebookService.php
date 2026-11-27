@@ -453,8 +453,9 @@ final class JournalRebookService implements BulkOperation, BulkCandidateSource
             if ($sourceType === 'bank' && (str_starts_with($filter['from_account'], '221') || str_starts_with($filter['to_account'], '221'))) {
                 return ['status' => 'skipped', 'reason_code' => 'bank_invariant'] + $item;
             }
-            if ($sourceType !== 'bank' && !$this->isItemAccount($supplierId, $sourceType, $sourceId, $filter['from_account'], (string) $plan['entry_date'])) {
-                return ['status' => 'skipped', 'reason_code' => 'not_item_account'] + $item;
+            $blocked = $this->documentAccountBlocker($supplierId, $sourceType, $sourceId, $filter, (string) $plan['entry_date']);
+            if ($blocked !== null) {
+                return ['status' => 'skipped', 'reason_code' => $blocked[0]] + ($blocked[1] === null ? [] : ['message' => $blocked[1]]) + $item;
             }
             $preview = $this->repost->previewPlan($supplierId, $sourceType, $sourceId, $after);
             $item['strategy'] = (string) $preview['strategy'];
@@ -491,6 +492,12 @@ final class JournalRebookService implements BulkOperation, BulkCandidateSource
             [$after] = self::transform(self::normalizeLines($plan['lines']), $filter['from_account'], $filter['to_account'], $filter['side']);
             if ($this->fingerprint($supplierId, $plan) !== $dry['fingerprint'] || self::linesHash($after) !== self::linesHash($dry['after'])) {
                 return ['status' => 'skipped', 'reason_code' => 'changed_after_dry_run'] + $item;
+            }
+            // Úhrada mezi během nanečisto a ostrým otisk zápisu nezmění, saldokontní účet
+            // uhrazeného dokladu se ale přeúčtovat nesmí: podmínky se ověří znovu.
+            $blocked = $this->documentAccountBlocker($supplierId, $sourceType, $sourceId, $filter, (string) $plan['entry_date']);
+            if ($blocked !== null) {
+                return ['status' => 'skipped', 'reason_code' => $blocked[0]] + ($blocked[1] === null ? [] : ['message' => $blocked[1]]) + $item;
             }
             $result = $this->repost->repost(
                 $supplierId,
@@ -856,8 +863,9 @@ final class JournalRebookService implements BulkOperation, BulkCandidateSource
 
     /**
      * Je účet `$code` účtem, na který podle dokladu míří některá jeho položka? Jen takovou
-     * změnu {@see DocumentRepostService} přenese i na položky. Jinak (protiúčet 311/321,
-     * DPH, zaokrouhlení) by přeúčtování vydrželo jen do příští úpravy faktury.
+     * změnu {@see DocumentRepostService} přenese i na položky. Saldokontní účet (závazek,
+     * pohledávka) přenese do protiúčtu řádků ({@see settlement()}). Jinak (DPH, zaokrouhlení)
+     * by přeúčtování vydrželo jen do příští úpravy faktury.
      */
     private function isItemAccount(int $supplierId, string $sourceType, int $docId, string $code, string $entryDate): bool
     {
@@ -871,6 +879,35 @@ final class JournalRebookService implements BulkOperation, BulkCandidateSource
             }
         }
         return false;
+    }
+
+    /**
+     * Proč účet dokladu nejde přeúčtovat (null = jde): banka se řídí vlastními invarianty,
+     * u faktury musí jít o účet položek, nebo o saldokontní účet neuhrazeného dokladu
+     * s platným cílovým účtem.
+     *
+     * @param array<string,mixed> $filter
+     * @return array{0:string, 1:?string}|null
+     */
+    private function documentAccountBlocker(int $supplierId, string $sourceType, int $sourceId, array $filter, string $entryDate): ?array
+    {
+        if ($sourceType === 'bank' || $this->isItemAccount($supplierId, $sourceType, $sourceId, $filter['from_account'], $entryDate)) {
+            return null;
+        }
+        $settlement = $this->settlement();
+        if (!$settlement->isSettlementAccount($supplierId, $sourceType, $sourceId, $filter['from_account'])) {
+            return ['not_item_account', null];
+        }
+        return $settlement->blocker($supplierId, $sourceType, $sourceId, $filter['to_account']);
+    }
+
+    /**
+     * Saldokontní účet dokladu (závazek, pohledávka): přeúčtovat jde jen neuhrazený doklad
+     * na platný účet; nový účet {@see DocumentRepostService} uloží do protiúčtu řádků.
+     */
+    private function settlement(): SettlementAccountRebook
+    {
+        return new SettlementAccountRebook($this->db, $this->posting);
     }
 
     /**
