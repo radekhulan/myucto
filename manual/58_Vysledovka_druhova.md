@@ -45,10 +45,11 @@ nevýdělečné organizaci, včetně hlavní a hospodářské činnosti.
 
 1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
 2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
-3. Zkontrolujte mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
+3. Pod finanční činností zkontrolujte řádek **Náklady celkem za všechny činnosti** a **Výnosy celkem za všechny činnosti**, potom mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
 4. Klikněte na účet. Otevře se inventura účtu, odtud vede jeho opis.
 5. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
-6. Klikněte na **Export PDF** nebo **Export XLSX**.
+6. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**. Nahoře je odhad výsledku před zdaněním a po zdanění, tlačítko **Zobrazit rozpad odhadu** ukáže, jak se k němu od výsledku v tabulce došlo.
+7. Klikněte na **Export PDF** nebo **Export XLSX**.
 
 **Jak poznáte, že je hotovo:** Zvýrazněný řádek **Výsledek hospodaření** se shoduje s výkazem a s výsledkem v rozvaze po účtech.
 
@@ -199,7 +200,9 @@ Náklady jsou vlevo a výnosy vpravo na jednom řádku. Každá strana má sloup
 **Počáteční stav**, **Obrat** měsíce, **Obrat od** začátku období a **Konečný stav**,
 se znaménkem podle typu účtu: náklady `MD − Dal`, výnosy `Dal − MD`. Výnos s převahou
 MD a náklad s převahou Dal jsou proto záporné a červené. Každá skupina končí součtem
-nákladů a výnosů. Přepínač **Skrýt nulové účty** funguje jako
+nákladů a výnosů. Pod poslední činností (provozní, finanční a nezařazené účty) je řádek
+**Náklady celkem za všechny činnosti** a **Výnosy celkem za všechny činnosti** ve stejných
+sloupcích; daň z příjmů a převod podílu do něj nepatří. Přepínač **Skrýt nulové účty** funguje jako
 u [rozvahy po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech).
 
 Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
@@ -223,14 +226,21 @@ na šířku stránky.
 
 U právnické osoby v roce, který ještě není uzavřený a nemá zaúčtovanou daň
 z příjmů (účet 591), je pod tabulkou blok **Odhad do konce roku
-(nezaúčtováno)**. Nic z něj není v účetnictví a po zaúčtování daně z příjmů
+(nezaúčtováno)** se štítkem **Odhad, nezaúčtováno**. Nic z něj není v účetnictví a po zaúčtování daně z příjmů
 zmizí. Načítá se samostatně až po tabulce, protože přepočítává náhled
 přiznání k DPPO. Aplikace v něm nic nového nepočítá, jen skládá čísla, která
-už ukazují jiné stránky:
+už ukazují jiné stránky.
+
+Nahoře je zvýrazněný **Odhad výsledku hospodaření před zdaněním** a, když je
+daň známá, **Odhad výsledku hospodaření po zdanění**. Rozpad pod nimi je
+sbalený, otevře ho **Zobrazit rozpad odhadu**. Řádky jdou v tomto pořadí
+a každá částka se přičte právě jednou:
 
 | Řádek | Odkud je |
 |---|---|
-| Výsledek hospodaření průběžně (zaúčtováno) | ř. 10 náhledu DPPO; shoduje se s řádkem Výsledek hospodaření před zdaněním výše (k poslednímu dni období) |
+| Zaúčtovaný výsledek k datu výkazu | výsledek hospodaření před zdaněním ze zaúčtovaných zápisů do data **Sestaveno k** včetně; shoduje se s řádkem Výsledek hospodaření před zdaněním v tabulce |
+| Zápisy zaúčtované po datu výkazu: rozpuštění výnosů příštích období (384), rozpuštění nákladů příštích období (381), výdaje a příjmy příštích období a dohadné položky (383, 385, 388, 389), odpisy (551), ostatní | zaúčtované zápisy deníku s datem po dni výkazu do konce období, seskupené podle účtů zápisu; ukazují se jen nenulové skupiny a odkaz vede do deníku na tyto dny |
+| Zaúčtovaný výsledek do konce období | ř. 10 náhledu DPPO, tedy všechny zaúčtované zápisy období; součet předchozích řádků na haléř |
 | Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku, konečný stav zásob způsobem B) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
 | Odpisy roku podle odpisového plánu (nezaúčtované) | tatáž projekce z karet majetku ([kap. 28](28_Majetek.md)); účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150 |
 | Opravné položky a dohadné položky | tatáž projekce; jde o návrhy, které účetní teprve potvrdí, proto jsou šedě a do odhadu se nesčítají |
@@ -244,9 +254,23 @@ takže se nic nezapočte dvakrát. Selže-li náhled některého kroku uzávěrk
 ukáže varování o neúplné projekci s krokem a důvodem; odhad je pak bez něj. Mzdy ani jiné budoucí provozní náklady do
 zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
 
+Rozpad k datu výkazu (první dva typy řádků) se ukáže, jen když je **Sestaveno k**
+dřív než poslední den období. K poslednímu dni začíná rozpad rovnou zaúčtovaným
+výsledkem do konce období. Výsledek hospodaření před zdaněním v tabulce i
+zaúčtovaný výsledek v bloku se počítají stejně: bez zápisu uzavření knih, se
+skladovými zápisy uzávěrky, storno se přičte ke skupině rušeného zápisu a daň
+z příjmů (59x) se nezapočítává.
+
 U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
 nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani
-uživateli bez práva na přiznání k dani z příjmů.
+uživateli bez práva na přiznání k dani z příjmů. V rámci 504 (**Průběžný
+účetní přehled**) blok není.
+
+**Export PDF** z této záložky přidá v otevřeném roce stejný blok pod tabulku,
+s označením **Odhad, nezaúčtováno**, ve stejném pořadí řádků včetně upozornění.
+Uzavřený rok, filtr dimenze nebo chybějící právo na přiznání ho z PDF vynechá stejně
+jako z obrazovky; XLSX blok nemá. Stejný blok je i pod
+[rozvahou po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech).
 
 ### 58.7.7 Průběžné časové rozlišení a odpisy
 

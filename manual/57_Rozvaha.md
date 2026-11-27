@@ -77,7 +77,8 @@ a používá členění tohoto rámce.
 3. Projděte aktiva vlevo a pasiva vpravo. Přepínač **Zobrazit analytiky** analytiky skryje, **Skrýt nulové účty** schová účty bez zůstatku a pohybu.
 4. Klikněte na účet. Otevře se inventura účtu, odtud vede opis i otevřené položky.
 5. Zkontrolujte zvýrazněný řádek **Výsledek hospodaření** pod součtem rozvahových účtů.
-6. Klikněte na **Export PDF** nebo **Export XLSX**.
+6. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**: odhad výsledku před zdaněním a po zdanění a **Odhad daně k doplacení (341)**. **Zobrazit rozpad odhadu** ukáže cestu od výsledku k rozvahovému dni a odhadované změny rozvahových účtů.
+7. Klikněte na **Export PDF** nebo **Export XLSX**.
 
 **Jak poznáte, že je hotovo:** Výsledek hospodaření z rozvahových účtů se neliší od výsledku z výsledkových účtů. Rozdíl stránka ohlásí nad tabulkou.
 
@@ -352,6 +353,41 @@ platí výsledovka.
 
 Export XLSX i PDF z této záložky má stejný tvar jako obrazovka včetně přepínačů, jednotky
 **Kč / tis. Kč** a červeně označené neobvyklé strany. PDF se tiskne na šířku stránky.
+
+#### 57.7.8.1 Odhad do konce roku (nezaúčtováno)
+
+V otevřeném roce rámce 500 je pod tabulkou tentýž blok **Odhad do konce roku
+(nezaúčtováno)** se štítkem **Odhad, nezaúčtováno** jako pod výsledovkou po účtech
+([§ 58.7.6.1](58_Vysledovka_druhova.md#58761-odhad-do-konce-roku-nezauctovano)),
+se stejnými čísly, podmínkami zobrazení i rozpadem. Datem výkazu pro rozpad je
+rozvahový den: rozpad začíná výsledkem hospodaření k rozvahovému dni, tedy řádkem
+**Výsledek hospodaření** v tabulce. Rámec 504 (**Průběžný účetní přehled**) blok nemá.
+
+Nahoře je navíc **Odhad daně k doplacení (341)**: odhad daně z příjmů minus zaplacené
+zálohy, tedy zůstatek, který po zaúčtování daně přibude v pasivech. Přeplatek je záporný.
+
+V rozpadu je tabulka **Odhadované změny rozvahy z návrhů uzávěrky a daně z příjmů**.
+Každý nezaúčtovaný krok uzávěrky, který mění výsledek, má jeden rozvahový protiúčet,
+takže změna výsledku je zároveň změnou rozvahy:
+
+| Položka | Účet | Strana |
+|---|---|---|
+| Časové rozlišení drobného majetku a nákladů příštích období | 381 | aktiva |
+| Časové rozlišení výnosů příštích období | 384 | pasiva |
+| Rozpuštění časového rozlišení z minulého období, rozpuštění položek agendy Časové rozlišení | 381/384 | netto aktiva − pasiva |
+| Kurzové rozdíly k rozvahovému dni | pohledávky, závazky a účty v cizí měně | netto aktiva − pasiva |
+| Konečný stav zásob (způsob B) | 112/123/132 | aktiva |
+| Odpisy roku podle odpisového plánu | oprávky 07x/08x | aktiva (snížení) |
+| Daň z příjmů | 341 | pasiva |
+| Opravné položky k pohledávkám, dohadné položky pasivní | 39x, 389 | šedě jako návrh k potvrzení, nesčítají se |
+
+Řádek **Celkem** kontroluje, že změny aktiv minus změny pasiv dají rozdíl mezi
+odhadem výsledku po zdanění a zaúčtovaným výsledkem do konce období. Rozvaha po odhadu
+tak zůstane vyrovnaná. Částky i strany přebírá blok z projekce uzávěrky v náhledu
+DPPO, sám nic nepočítá; netto položky projekce po jednotlivých účtech nerozkládá.
+
+**Export PDF** z této záložky přidá v otevřeném roce blok pod tabulku s označením
+**Odhad, nezaúčtováno**, včetně změn rozvahy a odhadu daně k doplacení. XLSX blok nemá.
 
 ## 57.8 Související kapitoly
 

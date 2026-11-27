@@ -873,7 +873,8 @@
     "accounting-balance-sheet": [
       "activation",
       "dimensions",
-      "reports"
+      "reports",
+      "taxReturn"
     ],
     "accounting-income-statement": [
       "activation",
