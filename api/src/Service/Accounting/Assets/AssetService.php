@@ -1008,7 +1008,7 @@ final class AssetService
                 );
             }
         } else {
-            $candidates = $this->residuals->journalEntriesFor($supplierId, $date, $account);
+            $candidates = $this->residuals->journalEntriesFor($supplierId, $date, $account, (string) ($asset['inventory_number'] ?? ''));
             if (count($candidates) === 1) {
                 $entryId = $candidates[0];
             } else {

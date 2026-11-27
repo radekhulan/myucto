@@ -1002,7 +1002,7 @@ final class AssetImporter
      */
     private function markDisposed(ImportContext $ctx, int $assetId, string $disposal, array $card): void
     {
-        $asset = $this->db->pdo()->prepare('SELECT asset_account_code, accumulated_account_code FROM assets WHERE id = ? AND supplier_id = ?');
+        $asset = $this->db->pdo()->prepare('SELECT inventory_number, asset_account_code, accumulated_account_code FROM assets WHERE id = ? AND supplier_id = ?');
         $asset->execute([$assetId, $ctx->supplierId]);
         $accounts = $asset->fetch(\PDO::FETCH_ASSOC) ?: ['asset_account_code' => '', 'accumulated_account_code' => null];
         $type = $this->disposals->type($ctx->supplierId, $disposal, self::disposalType((string) ($card['ZpVyrazeni'] ?? '')));

@@ -31,8 +31,10 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  * Vyřazení převzaté karty v deníku: zápis s jejím číslem dokladu, který připisuje na její
  * majetkový účet (01x/02x) v okolí data vyřazení, je zápisem vyřazení. Zůstatková cena
  * v něm je připsaná pořizovací cena minus odepsané oprávky (MD 07x/08x) a z obratu 551
- * zápisu se odečte (řeší ji můstek ZC, {@see DisposalResiduals}). Když ji tak z řádků
- * zápisu určit nejde, celý obrat 551 zápisu zůstane mimo karty a podklady na to upozorní.
+ * zápisu se odečte (řeší ji můstek ZC, {@see DisposalResiduals}). Vede-li zápis ZC na 54x
+ * (MD 541 / D 08x), je 551 téhož zápisu proti oprávkám odpis roku vyřazení a zůstává
+ * u karty. Když ZC z řádků zápisu určit nejde, celý obrat 551 zápisu zůstane mimo karty
+ * a podklady na to upozorní.
  *
  * Karta s daňovým odpisem rovným účetnímu (`tax_method = 'by_accounting'`, nehmotný
  * majetek § 32a) má daňový plán až od konce počátečního stavu: daňový odpis převzatých
@@ -48,6 +50,9 @@ final class BookedAccountingDepreciation
 {
     /** Syntetický účet účetních odpisů (vyhláška 500/2002 i 504/2002). */
     public const EXPENSE_ACCOUNT = '551';
+
+    /** Účtová skupina, na kterou převzaté vyřazení vede zůstatkovou cenu (541, 543, 549). */
+    private const RESIDUAL_EXPENSE_PREFIX = '54';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -429,7 +434,9 @@ final class BookedAccountingDepreciation
      *
      * Zůstatková cena na 551 = nejmenší z obratu 551 zápisu, připsané pořizovací ceny minus
      * oprávek odepsaných na MD 07x/08x a části 551 bez protějšku v dalu 07x/08x (řádek 551
-     * spárovaný s oprávkami je odpis, ne zůstatková cena). Nerozdělitelný je jen zápis bez
+     * spárovaný s oprávkami je odpis, ne zůstatková cena). Zápis, který ZC vede na 54x proti
+     * oprávkám a jehož 551 pokrývá zbytek připsaných oprávek, má na 551 jen odpis: ZC na 551
+     * ani nerozdělitelný obrat nemá ({@see DisposalResiduals} bere ZC z 54x). Nerozdělitelný je jen zápis bez
      * zůstatkové ceny v rozdílu ceny a oprávek, jehož 551 jde celé proti oprávkám, u karty,
      * která podle evidence plně odepsaná není: odpis od zůstatkové ceny odvedené přes
      * oprávky (MD 551 / D 08x, MD 08x / D 02x) z řádků rozlišit nejde.
@@ -482,11 +489,14 @@ final class BookedAccountingDepreciation
             $accumulatedDebit = 0.0;
             $accumulatedCredit = 0.0;
             $expense = 0.0;
+            $residualExpense = 0.0;
             foreach ($lines[$root] ?? [] as $line) {
                 $code = (string) $line['account_code'];
                 $value = (float) $line['total'];
                 if (str_starts_with($code, self::EXPENSE_ACCOUNT)) {
                     $expense += $line['side'] === 'debit' ? $value : -$value;
+                } elseif (str_starts_with($code, self::RESIDUAL_EXPENSE_PREFIX)) {
+                    $residualExpense += $line['side'] === 'debit' ? $value : -$value;
                 } elseif ($line['side'] === 'credit' && $matches($code, $assetAccount, ['01', '02'])) {
                     $assetCredit += $value;
                 } elseif ($matches($code, $accumulated, ['07', '08'])) {
@@ -498,6 +508,9 @@ final class BookedAccountingDepreciation
                 }
             }
             if ($assetCredit < 0.005 || $expense <= 0.0) {
+                continue;
+            }
+            if ($residualExpense >= 0.005 && $expense <= $accumulatedCredit - $residualExpense + 0.005) {
                 continue;
             }
             $priceLessAccumulated = max(0.0, $assetCredit - $accumulatedDebit);

@@ -24,7 +24,7 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         $this->pdo = new PDO('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT)');
-        $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
+        $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER, document_no TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER NOT NULL DEFAULT 0, signed_amount REAL GENERATED ALWAYS AS (CASE WHEN is_red_storno = 1 THEN -amount ELSE amount END) VIRTUAL)');
         $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, disposal_date TEXT,
             disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
@@ -117,10 +117,44 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         self::assertFalse($this->residuals->isJournalDisposalEntry(2, 10, '082'), 'Zápis jiné firmy.');
     }
 
-    /** @param list<array{0:string,1:string,2:float|int,3?:bool}> $lines */
-    private function entry(int $id, array $lines): void
+    public function testJournalEntriesForPicksEntryWithCardDocumentNumberAmongSameDayCandidates(): void
     {
-        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,'2025-06-30','manual',NULL,'2025-06-30',NULL)")->execute([$id]);
+        $this->entry(10, [['541', 'debit', 1000], ['082', 'credit', 1000]], 'DHM-1');
+        $this->entry(11, [['541', 'debit', 500], ['082', 'credit', 500]], 'dhm-2 ');
+
+        self::assertSame([10, 11], $this->residuals->journalEntriesFor(1, '2025-06-30', '082'));
+        self::assertSame([11], $this->residuals->journalEntriesFor(1, '2025-06-30', '082', 'DHM-2'));
+        self::assertSame([10, 11], $this->residuals->journalEntriesFor(1, '2025-06-30', '082', 'DHM-3'), 'Bez shody zůstane nejednoznačné.');
+    }
+
+    public function testUnlinkedCardsTakeResidualFromEntryWithTheirDocumentNumber(): void
+    {
+        $this->entry(10, [['541', 'debit', 1000], ['082', 'credit', 1000], ['551', 'debit', 200], ['082', 'credit', 200]], 'A');
+        $this->entry(11, [['541', 'debit', 500], ['082', 'credit', 500]], 'B');
+        $this->card(1, 'A', 100000, 99500, null);
+        $this->card(2, 'B', 50000, 49000, null);
+
+        $result = $this->residuals->forPeriod(1, '2025-01-01', '2025-12-31');
+        $byNumber = array_column($result['rows'], null, 'inventory_number');
+        self::assertSame([1000.0, 'linked_entry', 1000.0], [$byNumber['A']['book_residual_value'], $byNumber['A']['book_residual_source'], $byNumber['A']['journal_residual_value']]);
+        self::assertSame([500.0, 'linked_entry', 500.0], [$byNumber['B']['book_residual_value'], $byNumber['B']['book_residual_source'], $byNumber['B']['journal_residual_value']]);
+        self::assertCount(2, $result['warnings'], 'ZC karty (500 a 1 000) se liší od zápisu, karta k ověření.');
+    }
+
+    public function testDocumentNumberSharedByTwoCardsKeepsCardResidual(): void
+    {
+        $this->entry(10, [['541', 'debit', 1000], ['082', 'credit', 1000]], 'A');
+        $this->card(1, 'A', 100000, 99000, null);
+        $this->card(2, 'A', 100000, 99000, null);
+
+        $rows = $this->residuals->forPeriod(1, '2025-01-01', '2025-12-31')['rows'];
+        self::assertSame(['card', 'card'], array_column($rows, 'book_residual_source'));
+    }
+
+    /** @param list<array{0:string,1:string,2:float|int,3?:bool}> $lines */
+    private function entry(int $id, array $lines, ?string $documentNo = null): void
+    {
+        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,'2025-06-30','manual',NULL,'2025-06-30',NULL,?)")->execute([$id, $documentNo]);
         foreach ($lines as $line) {
             [$code, $side, $amount] = $line;
             $red = $line[3] ?? false;

@@ -20,6 +20,8 @@ use MyInvoice\Infrastructure\Database\Connection;
  *     (`assets.disposal_entry_id`, {@see AssetService::disposeFromJournal()}): debetní
  *     nákladové řádky toho zápisu. Nese-li zápis vyřazení více karet, rozdělit ho nejde:
  *     ZC je z karet a zápis je kontrolou jejich součtu;
+ *   - karta vyřazená mimo modul bez odkazu, jejíž zápis vyřazení jde určit jednoznačně podle
+ *     čísla dokladu ({@see self::documentEntries()}): MD 54x toho zápisu, stejně jako s odkazem;
  *   - karta vyřazená mimo modul bez odkazu (převod z jiného systému, kde vyřazení zaúčtoval
  *     převzatý deník, nebo ruční zápis 54x): z karty, stejným výpočtem jako při vyřazení
  *     v modulu (zvýšená vstupní cena − oprávky). Kontrolou je deník: MD 54x v dokladech ke
@@ -169,10 +171,16 @@ final class DisposalResiduals
         );
         $stmt->execute([$supplierId, $startsOn, $endsOn]);
 
+        $cards = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $byDocument = $this->documentEntries($supplierId, array_values(array_filter(
+            $cards,
+            static fn (array $r): bool => $r['disposal_entry_id'] === null && $r['linked_entry_id'] === null,
+        )));
+
         $rows = [];
         $warnings = [];
         $groups = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+        foreach ($cards as $r) {
             $number = (string) $r['inventory_number'];
             $depreciable = $r['accumulated_account_code'] !== null && (string) $r['accumulated_account_code'] !== '';
             $increased = round((float) $r['input_price'] + (float) $r['improvements_total'], 2);
@@ -190,7 +198,21 @@ final class DisposalResiduals
                 );
                 $bookSource = self::BOOK_SOURCE_CARD;
                 $expenseAccount = null;
-                if ($r['linked_entry_id'] !== null && (int) $r['linked_share'] === 1) {
+                if ($r['linked_entry_id'] === null && isset($byDocument[(int) $r['id']])) {
+                    // Zápis vyřazení bez odkazu, ale jednoznačně podle čísla dokladu: ZC je
+                    // MD 54x zápisu, nejvýš to, co zápis připsal na účet karty.
+                    $entry = $byDocument[(int) $r['id']];
+                    $journal = $entry['residual'];
+                    if (abs($journal - $book) >= 0.01) {
+                        $warnings[] = 'Účetní ZC vyřazeného majetku ' . $number . ' ke dni ' . (string) $r['disposal_date']
+                            . ': v zápisu vyřazení (deník, zápis č. ' . $entry['entry'] . ' s číslem dokladu karty) '
+                            . self::money($journal) . ', podle karty ' . self::money($book)
+                            . '. Přiznání počítá se ZC ze zápisu; kartu ověřte.';
+                    }
+                    $book = $journal;
+                    $bookSource = self::BOOK_SOURCE_LINKED_ENTRY;
+                    $expenseAccount = $entry['expense_account'];
+                } elseif ($r['linked_entry_id'] !== null && (int) $r['linked_share'] === 1) {
                     // Doklad vyřazení může nést i jiné řádky (Money: roční interní doklad s odpisy
                     // dalších karet): ZC karty je MD 54x zápisu, nejvýš to, co zápis připsal na
                     // oprávky (majetkový účet) karty.
@@ -245,7 +267,9 @@ final class DisposalResiduals
         }
 
         foreach ($groups as $g) {
-            $journal = isset($g['entry']) ? $g['journal'] : $this->journalResidual($supplierId, $g['date'], $g['account']);
+            $journal = isset($g['entry'])
+                ? $g['journal']
+                : $this->journalResidual($supplierId, $g['date'], $g['account'], array_column($byDocument, 'entry'));
             foreach ($g['rows'] as $i) {
                 $rows[$i]['journal_residual_value'] = count($g['rows']) === 1 ? $journal : null;
             }
@@ -290,16 +314,117 @@ final class DisposalResiduals
      * a připsání na účet karty (oprávky, u neodpisovaného majetku majetkový účet) včetně
      * jeho analytik. Podle nich se karta vyřazená bez zaúčtování naváže na zápis
      * ({@see AssetService::disposeFromJournal()}); jediný kandidát = jednoznačná vazba.
+     * Vyřadil-li deník ten den víc karet proti stejnému účtu (POHODA: jeden zápis na kartu,
+     * číslo dokladu = inventární číslo), rozhodne číslo dokladu: zůstane-li jediný zápis
+     * s číslem dokladu rovným inventárnímu číslu karty, je to ten její.
      *
      * @return list<int>
      */
-    public function journalEntriesFor(int $supplierId, string $date, string $account): array
+    public function journalEntriesFor(int $supplierId, string $date, string $account, ?string $inventoryNumber = null): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT DISTINCT je.id' . self::journalDisposalFrom('je.entry_date = ?') . ' ORDER BY je.id'
+            'SELECT DISTINCT je.id, je.document_no' . self::journalDisposalFrom('je.entry_date = ?') . ' ORDER BY je.id'
         );
         $stmt->execute([$supplierId, $date, self::JOURNAL_EXPENSE_PREFIX . '%', $account, $account . '.%']);
-        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        $candidates = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $number = self::documentKey($inventoryNumber);
+        if (count($candidates) > 1 && $number !== '') {
+            $own = array_values(array_filter(
+                $candidates,
+                static fn (array $c): bool => self::documentKey($c['document_no']) === $number,
+            ));
+            if (count($own) === 1) {
+                return [(int) $own[0]['id']];
+            }
+        }
+        return array_map(static fn (array $c): int => (int) $c['id'], $candidates);
+    }
+
+    /**
+     * Zápisy vyřazení karet bez odkazu, které jdou určit podle čísla dokladu: zaúčtovaný
+     * a nestornovaný zápis ke dni vyřazení s číslem dokladu rovným inventárnímu číslu karty,
+     * MD 54x a připsáním na účet karty ({@see residualCreditAccount()}), na který není
+     * navázaná jiná karta. Karta, které vyjde víc zápisů, a zápis, který by připadl víc
+     * kartám, zůstanou bez vazby (ZC z karty a kontrola deníkem).
+     *
+     * @param list<array<string,mixed>> $cards vyřazené karty bez odkazu na zápis
+     * @return array<int,array{entry:int, residual:float, expense_account:?string}> podle id karty
+     */
+    private function documentEntries(int $supplierId, array $cards): array
+    {
+        $numbers = [];
+        $dates = [];
+        foreach ($cards as $card) {
+            if (self::documentKey($card['inventory_number']) !== '') {
+                $numbers[(string) $card['inventory_number']] = true;
+                $dates[(string) $card['disposal_date']] = true;
+            }
+        }
+        if ($numbers === []) {
+            return [];
+        }
+        $numbers = array_keys($numbers);
+        $dates = array_keys($dates);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT je.id, je.entry_date, je.document_no, l.side, ca.account_code, SUM(l.signed_amount) AS total
+               FROM journal_entries je
+               JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+               JOIN chart_of_accounts ca ON ca.id = l.account_id
+              WHERE je.supplier_id = ?
+                AND je.entry_date IN (' . implode(',', array_fill(0, count($dates), '?')) . ')
+                AND je.document_no IN (' . implode(',', array_fill(0, count($numbers), '?')) . ')
+                AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                AND je.source_type NOT IN (\'asset_disposal\', \'closing\')
+                AND NOT EXISTS (
+                    SELECT 1 FROM assets la WHERE la.supplier_id = je.supplier_id AND la.disposal_entry_id = je.id
+                )
+              GROUP BY je.id, je.entry_date, je.document_no, l.side, ca.account_code'
+        );
+        $stmt->execute([$supplierId, ...$dates, ...$numbers]);
+        $entries = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $id = (int) $row['id'];
+            $entries[$id]['date'] = substr((string) $row['entry_date'], 0, 10);
+            $entries[$id]['doc'] = self::documentKey($row['document_no']);
+            $entries[$id]['lines'][] = [(string) $row['side'], (string) $row['account_code'], (float) $row['total']];
+        }
+
+        $found = [];
+        $claims = [];
+        foreach ($cards as $card) {
+            $number = self::documentKey($card['inventory_number']);
+            $account = self::residualCreditAccount($card);
+            $matches = [];
+            foreach ($entries as $id => $entry) {
+                if ($number === '' || $entry['doc'] !== $number || $entry['date'] !== (string) $card['disposal_date']) {
+                    continue;
+                }
+                $expense = 0.0;
+                $expenseAccount = null;
+                $credit = 0.0;
+                foreach ($entry['lines'] as [$side, $code, $total]) {
+                    if ($side === 'debit' && str_starts_with($code, self::JOURNAL_EXPENSE_PREFIX)) {
+                        $expense += $total;
+                        $expenseAccount = $expenseAccount === null || strcmp($code, $expenseAccount) < 0 ? $code : $expenseAccount;
+                    } elseif ($side === 'credit' && ($code === $account || str_starts_with($code, $account . '.'))) {
+                        $credit += $total;
+                    }
+                }
+                if ($expense >= 0.005 && $credit >= 0.005) {
+                    $matches[] = ['entry' => $id, 'residual' => round(min($expense, $credit), 2), 'expense_account' => $expenseAccount];
+                }
+            }
+            if (count($matches) === 1) {
+                $found[(int) $card['id']] = $matches[0];
+                $claims[$matches[0]['entry']] = ($claims[$matches[0]['entry']] ?? 0) + 1;
+            }
+        }
+        return array_filter($found, static fn (array $m): bool => $claims[$m['entry']] === 1);
+    }
+
+    private static function documentKey(mixed $value): string
+    {
+        return mb_strtoupper(trim((string) $value));
     }
 
     /**
@@ -316,17 +441,19 @@ final class DisposalResiduals
     /**
      * MD 54x v dokladech ke dni vyřazení, které připisují na daný účet (oprávky, u
      * neodpisovaného majetku majetkový účet) včetně jeho analytik. Zápisy, na které je
-     * navázaná vyřazená karta, patří jí a nepočítají se.
+     * navázaná vyřazená karta nebo které jí patří podle čísla dokladu ($own), se nepočítají.
+     *
+     * @param list<int> $own
      */
-    private function journalResidual(int $supplierId, string $date, string $account): float
+    private function journalResidual(int $supplierId, string $date, string $account, array $own = []): float
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT COALESCE(SUM(dl.signed_amount), 0)' . self::journalDisposalFrom('je.entry_date = ?') . '
                 AND NOT EXISTS (
                     SELECT 1 FROM assets la WHERE la.supplier_id = je.supplier_id AND la.disposal_entry_id = je.id
-                )'
+                )' . ($own !== [] ? ' AND je.id NOT IN (' . implode(',', array_fill(0, count($own), '?')) . ')' : '')
         );
-        $stmt->execute([$supplierId, $date, self::JOURNAL_EXPENSE_PREFIX . '%', $account, $account . '.%']);
+        $stmt->execute([$supplierId, $date, self::JOURNAL_EXPENSE_PREFIX . '%', $account, $account . '.%', ...$own]);
         return round((float) $stmt->fetchColumn(), 2);
     }
 

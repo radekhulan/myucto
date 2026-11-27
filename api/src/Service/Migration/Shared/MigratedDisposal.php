@@ -84,13 +84,19 @@ final class MigratedDisposal
 
     /**
      * Zápis deníku, který vyřazení karty zaúčtoval: jediný zápis ke dni vyřazení s MD 54x
-     * proti účtu karty. Víc kandidátů ani žádný = bez vazby (přiznání vezme ZC z karty).
+     * proti účtu karty, u více takových ten s číslem dokladu rovným inventárnímu číslu karty.
+     * Víc kandidátů ani žádný = bez vazby (přiznání vezme ZC z karty).
      *
      * @param array<string,mixed> $asset karta (účty)
      */
     public function entry(int $supplierId, array $asset, string $date): ?int
     {
-        $candidates = $this->residuals->journalEntriesFor($supplierId, $date, DisposalResiduals::residualCreditAccount($asset));
+        $candidates = $this->residuals->journalEntriesFor(
+            $supplierId,
+            $date,
+            DisposalResiduals::residualCreditAccount($asset),
+            (string) ($asset['inventory_number'] ?? ''),
+        );
         return count($candidates) === 1 ? $candidates[0] : null;
     }
 

@@ -457,6 +457,67 @@ final class DppoTakenOverDepreciationTest extends TestCase
         self::assertSame([], $booked['disposals_unsplit']['assets']);
     }
 
+    /**
+     * Převod z POHODY: dvě karty vyřazené týž den, každá vlastním zápisem s číslem dokladu
+     * rovným inventárnímu číslu (MD 082 / D 022 cena, MD 541 / D 082 ZC, MD 551 / D 082 odpis
+     * měsíce vyřazení). Karty nejsou na zápisy navázané (dva kandidáti ke dni proti 082).
+     * Účetní ZC je MD 541 zápisu, ne výpočet z počátečního stavu karty, a 551 zápisu je odpis.
+     */
+    public function testSameDayTakenOverDisposalsWithResidualOn541AgainstAccumulated(): void
+    {
+        foreach (['VYR-11', 'VYR-12'] as $number) {
+            $this->disposedCard($number);
+            $this->monthly(self::YEAR, 1, 5, [$number => 2000]);
+            $this->post('2026-06-30', [['082', 'debit', 120000], ['022', 'credit', 120000], ['541', 'debit', 30000], ['082', 'credit', 30000],
+                ['551', 'debit', 2000], ['082', 'credit', 2000]], $number);
+        }
+
+        $booked = $this->booked(self::YEAR . '-01-01', self::YEAR . '-12-31');
+        self::assertSame([24000.0, 24000.0, 0.0, 0.0], [$booked['total'], $booked['taken_over'], $booked['residuals'], $booked['outside_cards']]);
+        self::assertSame(['assets' => [], 'amount' => 0.0], $booked['disposals_unsplit']);
+
+        $data = $this->provider->gather($this->supplierId, self::YEAR);
+        $rows = array_column($data['disposals'], null, 'inventory_number');
+        foreach (['VYR-11', 'VYR-12'] as $number) {
+            self::assertSame(
+                [30000.0, 'linked_entry', 30000.0, 30000.0],
+                [$rows[$number]['book_residual_value'], $rows[$number]['book_residual_source'], $rows[$number]['journal_residual_value'], $rows[$number]['tax_residual_value']],
+            );
+        }
+        self::assertSame([0.0, 0.0], [$data['disposal_tax_decrease'], $data['disposal_tax_increase']]);
+        $warnings = implode("\n", $data['depreciation_warnings']);
+        self::assertStringNotContainsString('nejde rozdělit', $warnings);
+        $lines = $this->lines($data);
+        self::assertSame([0.0, 0.0], [$lines[150] ?? 0.0, $lines[160] ?? 0.0]);
+    }
+
+    /** Bez zápisu s číslem dokladu karty zůstane vyřazení bez vazby a ZC z karty, deník ji jen kontroluje. */
+    public function testSameDayDisposalWithoutOwnDocumentKeepsCardResidual(): void
+    {
+        foreach (['VYR-13' => 'INT-13', 'VYR-14' => 'INT-14'] as $number => $document) {
+            $this->disposedCard($number);
+            $this->post('2026-06-30', [['082', 'debit', 120000], ['022', 'credit', 120000], ['541', 'debit', 30000], ['082', 'credit', 30000]], $document);
+        }
+
+        $rows = array_column($this->provider->gather($this->supplierId, self::YEAR)['disposals'], null, 'inventory_number');
+        self::assertSame([14000.0, 'card'], [$rows['VYR-13']['book_residual_value'], $rows['VYR-13']['book_residual_source']]);
+    }
+
+    /** Vyřazení bez zaúčtování se ze dvou zápisů téhož dne naváže na ten s číslem dokladu karty. */
+    public function testJournalDisposalLinksEntryWithCardDocumentNumber(): void
+    {
+        $ids = [];
+        $entries = [];
+        foreach (['VYR-15', 'VYR-16'] as $number) {
+            $ids[$number] = $this->card($number, 120000, '2022-01-15', 'straight_line', 4, 90000, 53, 106000, 60);
+            $entries[$number] = $this->post('2026-06-30', [['082', 'debit', 120000], ['022', 'credit', 120000], ['541', 'debit', 30000], ['082', 'credit', 30000]], $number);
+        }
+
+        $result = $this->assets->disposeFromJournal($this->supplierId, $ids['VYR-16'], ['date' => '2026-06-30', 'type' => 'liquidated'], ['user_id' => $this->userId]);
+        self::assertSame($entries['VYR-16'], (int) $result['asset']['disposal_entry_id']);
+        self::assertSame([], array_values(array_filter(array_column($result['warnings'], 'code'), static fn (string $c): bool => str_starts_with($c, 'disposal_entry'))));
+    }
+
     /** Plně odepsaná karta s odpisem posledního měsíce v zápisu vyřazení není nerozdělitelná. */
     public function testFullyDepreciatedCardLastMonthInDisposalEntryIsDepreciation(): void
     {
