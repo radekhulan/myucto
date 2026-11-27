@@ -40,6 +40,7 @@ function sideTitle(side: 'left' | 'right'): string {
 }
 
 function totalLabel(key: string, side: 'left' | 'right'): string {
+  if (key === 'activities') return side === 'left' ? t('accounting.statement_accounts.total_expenses_all') : t('accounting.statement_accounts.total_revenues_all')
   if (key === 'section') return side === 'left' ? t('accounting.statement_accounts.total_expenses') : t('accounting.statement_accounts.total_revenues')
   if (side === 'left') return t('accounting.statement_accounts.total_assets')
   return key === 'balance_with_result' ? t('accounting.statement_accounts.total_liabilities_result') : t('accounting.statement_accounts.total_liabilities')
@@ -156,7 +157,9 @@ const closedAtYearEnd = computed(() => props.report.closed && props.report.as_of
                 </template>
               </tr>
 
-              <tr v-else-if="line.kind === 'total'" class="font-semibold bg-neutral-50 border-t border-neutral-300" data-test="accounts-total">
+              <tr v-else-if="line.kind === 'total'" class="font-semibold border-t border-neutral-300"
+                :class="line.key === 'activities' ? 'bg-primary-50/40 border-t-2' : 'bg-neutral-50'"
+                :data-test="line.key === 'activities' ? 'accounts-total-activities' : 'accounts-total'">
                 <template v-for="side in sides" :key="side">
                   <td colspan="2" class="px-2 py-1.5" :class="side === 'right' ? 'border-l border-neutral-300' : ''">{{ totalLabel(line.key, side) }}</td>
                   <td v-for="k in amountKeys" :key="k" class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ format(line[side][k]) }}</td>

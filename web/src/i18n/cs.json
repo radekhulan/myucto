@@ -21511,6 +21511,8 @@
       "total_liabilities_result": "Pasiva s výsledkem hospodaření",
       "total_expenses": "Náklady celkem",
       "total_revenues": "Výnosy celkem",
+      "total_expenses_all": "Náklady celkem za všechny činnosti",
+      "total_revenues_all": "Výnosy celkem za všechny činnosti",
       "open_inventory": "Otevřít inventuru účtu",
       "sign_hint": "Znaménko podle typu účtu: aktiva a náklady MD − Dal, pasiva a výnosy Dal − MD. U každého účtu platí počáteční stav + obrat od začátku období = konečný stav. Neobvyklá strana je červeně; oprávky jsou v aktivech záporně a neobvyklé nejsou."
     },

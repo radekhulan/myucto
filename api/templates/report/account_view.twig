@@ -83,8 +83,8 @@
         {% elseif line.kind == 'section' %}
             <tr class="section"><td colspan="13">{{ sectionLabels[line.key] ?? line.key }}</td></tr>
         {% elseif line.kind == 'total' %}
-            {% set leftLabel = line.key == 'section' ? 'Náklady celkem' : 'Aktiva celkem' %}
-            {% set rightLabel = line.key == 'section' ? 'Výnosy celkem' : (line.key == 'balance_with_result' ? 'Pasiva s výsledkem hospodaření' : 'Pasiva celkem') %}
+            {% set leftLabel = line.key == 'activities' ? 'Náklady celkem za všechny činnosti' : (line.key == 'section' ? 'Náklady celkem' : 'Aktiva celkem') %}
+            {% set rightLabel = line.key == 'activities' ? 'Výnosy celkem za všechny činnosti' : (line.key == 'section' ? 'Výnosy celkem' : (line.key == 'balance_with_result' ? 'Pasiva s výsledkem hospodaření' : 'Pasiva celkem')) %}
             <tr class="total"><td colspan="2">{{ leftLabel }}</td>{{ m.amounts(line.left, unit, '') }}<td class="gap"></td><td colspan="2">{{ rightLabel }}</td>{{ m.amounts(line.right, unit, '') }}</tr>
         {% elseif line.kind == 'result' %}
             <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">{{ resultLabels[line.key] ?? line.key }}</td>{{ m.amounts(line.amounts, unit, '') }}</tr>

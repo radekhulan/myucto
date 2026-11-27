@@ -210,21 +210,35 @@ final class StatementAccountColumns
      * @param array{hide_zero:bool, analytics:bool} $options
      * @return list<array<string,mixed>>
      */
+    private const ACTIVITY_SECTIONS = ['operating', 'financial', 'unassigned'];
+
     private static function sectionLines(array $sections, array $options): array
     {
         $lines = [];
+        $activities = ['left' => self::sum([]), 'right' => self::sum([])];
+        $hasActivities = false;
         foreach ($sections as $key => $section) {
             $cells = self::cellLines($section, false, $options);
-            if ($cells === []) {
-                continue;
+            if (in_array($key, self::ACTIVITY_SECTIONS, true)) {
+                $activities['left'] = self::add($activities['left'], $section['left_total']);
+                $activities['right'] = self::add($activities['right'], $section['right_total']);
+                $hasActivities = $hasActivities || $cells !== [];
             }
-            $lines = [
-                ...$lines,
-                ['kind' => 'section', 'key' => $key],
-                ...$cells,
-                ['kind' => 'total', 'key' => 'section', 'section' => $key,
-                    'left' => self::money($section['left_total']), 'right' => self::money($section['right_total'])],
-            ];
+            if ($cells !== []) {
+                $lines = [
+                    ...$lines,
+                    ['kind' => 'section', 'key' => $key],
+                    ...$cells,
+                    ['kind' => 'total', 'key' => 'section', 'section' => $key,
+                        'left' => self::money($section['left_total']), 'right' => self::money($section['right_total'])],
+                ];
+            }
+            // Náklady a výnosy celkem za všechny činnosti (provozní, finanční a nezařazené
+            // účty), tedy to, z čeho vzniká VH před zdaněním; daň a převod podílu stojí pod tím.
+            if ($key === self::ACTIVITY_SECTIONS[array_key_last(self::ACTIVITY_SECTIONS)] && $hasActivities) {
+                $lines[] = ['kind' => 'total', 'key' => 'activities',
+                    'left' => self::money($activities['left']), 'right' => self::money($activities['right'])];
+            }
         }
         return $lines;
     }

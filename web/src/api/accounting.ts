@@ -2045,7 +2045,7 @@ export type StatementColumnCell = StatementColumnAccount | StatementColumnClass
 export type StatementColumnLine =
   | { kind: 'cells'; left: StatementColumnCell | null; right: StatementColumnCell | null }
   | { kind: 'section'; key: StatementAccountSectionKey }
-  | { kind: 'total'; key: 'balance' | 'balance_with_result' | 'section'; section?: StatementAccountSectionKey; left: StatementColumnAmounts; right: StatementColumnAmounts }
+  | { kind: 'total'; key: 'balance' | 'balance_with_result' | 'section' | 'activities'; section?: StatementAccountSectionKey; left: StatementColumnAmounts; right: StatementColumnAmounts }
   | { kind: 'result'; key: string; amounts: StatementColumnAmounts }
 
 export interface StatementColumnPart {

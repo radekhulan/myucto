@@ -21511,6 +21511,8 @@
       "total_liabilities_result": "Liabilities including profit or loss",
       "total_expenses": "Total expenses",
       "total_revenues": "Total revenues",
+      "total_expenses_all": "Total expenses, all activities",
+      "total_revenues_all": "Total revenues, all activities",
       "open_inventory": "Open account inventory",
       "sign_hint": "Sign by account type: assets and expenses debit − credit, liabilities and revenues credit − debit. For every account, opening balance + turnover from the start of the period = closing balance. An unusual side is in red; accumulated depreciation is negative in assets and is not unusual."
     },

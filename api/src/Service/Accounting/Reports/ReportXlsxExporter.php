@@ -925,6 +925,7 @@ final class ReportXlsxExporter
         return match ($line['key']) {
             'balance' => $side === 'left' ? 'Aktiva celkem' : 'Pasiva celkem',
             'balance_with_result' => $side === 'left' ? 'Aktiva celkem' : 'Pasiva s výsledkem hospodaření',
+            'activities' => $side === 'left' ? 'Náklady celkem za všechny činnosti' : 'Výnosy celkem za všechny činnosti',
             default => $side === 'left' ? 'Náklady celkem' : 'Výnosy celkem',
         };
     }
