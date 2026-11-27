@@ -22,12 +22,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Výsledovka po dimenzi.
  *
  *   GET /api/accounting/reports/dimension-profit?type_id=&from=&to=
- *       [&scope=group][&value_id=][&responsible_user_id=][&accounts=1][&companies=1]
+ *       [&scope=group][&value_id=][&responsible_user_id=][&accounts=1][&companies=1][&estimate=1]
  *   GET /api/accounting/reports/dimension-profit/export — totéž jako XLSX (vždy s rozpadem po účtech)
  *
  * `scope=group` u globálního typu sečte firmy skupiny ({@see DimensionGroupScope}),
  * `value_id` omezí sestavu na větev hodnoty, `responsible_user_id` na hodnoty odpovědné
  * osoby, `accounts=1` přidá rozpad po syntetických účtech a `companies=1` součty po firmách.
+ * `estimate=1` přidá odhad do konce roku po hodnotách ({@see DimensionProfitService::build()});
+ * čísla jsou z náhledu DPPO, proto chce stejné právo jako blok odhadu (`reports`).
  */
 final class DimensionProfitAction
 {
@@ -192,6 +194,8 @@ final class DimensionProfitAction
             'accounts' => $forceAccounts || (string) ($q['accounts'] ?? '') === '1',
             'companies' => (string) ($q['companies'] ?? '') === '1',
         ];
+        $estimate = (string) ($q['estimate'] ?? '') === '1';
+        $options['estimate'] = $estimate && RequestAuthorization::canReadYearEndTaxEstimate($request);
         if ($options['value_id'] !== null) {
             $value = $this->dimensions->findValue($supplierId, $options['value_id']);
             if ($value === null || (int) $value['type_id'] !== $typeId) {
@@ -204,6 +208,9 @@ final class DimensionProfitAction
         } catch (ReportException $e) {
             $err = Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
             return null;
+        }
+        if ($estimate && !$options['estimate']) {
+            $data['estimate'] = ['applicable' => false, 'reason' => 'forbidden'];
         }
         $data['hidden_companies'] = $hidden;
         return $data;

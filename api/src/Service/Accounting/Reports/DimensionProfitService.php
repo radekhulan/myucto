@@ -6,7 +6,10 @@ namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\TaxEvidence\CashJournalDimensionService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionSplitAllocation;
@@ -37,6 +40,12 @@ use PDO;
  *
  * Globální typ lze sečíst za víc firem skupiny najednou (projekt vedený přes
  * mateřskou firmu i SPV); které firmy smí do součtu, určuje volající.
+ *
+ * `estimate` přidá odhad do konce roku po hodnotách ({@see yearEndEstimate()}): zaúčtované
+ * zápisy po `to` do konce období (stejný filtr jako sestava), nezaúčtované časové rozlišení
+ * a odpisy z odhadu do konce roku ({@see YearEndTaxEstimateService}, rozpad
+ * {@see YearEndEstimateDimensionSplit}) a odhad VH. Součet sestavy sedí na odhad VH před
+ * zdaněním firmy; bez `estimate` je výstup beze změny.
  */
 final class DimensionProfitService
 {
@@ -45,11 +54,15 @@ final class DimensionProfitService
         private readonly DimensionRepository $dimensions,
         private readonly AccountingModeRepository $modes,
         private readonly CashJournalDimensionService $cashJournal,
+        private readonly AccountingPeriodRepository $periods,
+        private readonly AccountingFrameworkService $frameworks,
+        private readonly YearEndTaxEstimateService $estimates,
+        private readonly YearEndEstimateDimensionSplit $estimateSplit,
     ) {}
 
     /**
      * @param list<int> $supplierIds firmy do součtu (první je aktuální firma)
-     * @param array{value_id?:?int, responsible_user_id?:?int, accounts?:bool, companies?:bool} $options
+     * @param array{value_id?:?int, responsible_user_id?:?int, accounts?:bool, companies?:bool, estimate?:bool} $options
      * @return array<string,mixed>
      */
     public function build(int $supplierId, int $typeId, string $from, string $to, array $supplierIds, array $options = []): array
@@ -63,6 +76,7 @@ final class DimensionProfitService
         $responsible = (int) ($options['responsible_user_id'] ?? 0);
         $withAccounts = (bool) ($options['accounts'] ?? false);
         $withCompanies = (bool) ($options['companies'] ?? false);
+        $withEstimate = (bool) ($options['estimate'] ?? false);
 
         $known = [];
         foreach ($values as $v) {
@@ -73,8 +87,10 @@ final class DimensionProfitService
         $direct = [];
         $companyDirect = [];
         $accounts = [];
+        $incomeTaxCents = 0;
         foreach ($supplierIds as $sid) {
             foreach ($this->sums($sid, $typeId, $from, $to) as $row) {
+                $incomeTaxCents += (int) ($row['income_tax_cost'] ?? 0);
                 $key = $row['value_key'];
                 $code = $row['code'];
                 $direct[$key][$code]['revenue'] = ($direct[$key][$code]['revenue'] ?? 0) + $row['revenue'];
@@ -169,6 +185,10 @@ final class DimensionProfitService
         ];
         if ($withAccounts) {
             $out['matrix'] = self::matrix($accounts, $roots, $rootTotals, $restricted ? null : $unassigned, $all);
+        }
+        if ($withEstimate) {
+            $out += $this->yearEndEstimate($supplierId, $typeId, $from, $to, $supplierIds, $known, $direct, $incomeTaxCents, $rows, $restricted);
+            $out['rows'] = $rows;
         }
         if ($withCompanies) {
             $out['companies'] = [];
@@ -279,6 +299,171 @@ final class DimensionProfitService
                 'name' => $company['name'],
             ] + self::analyticsMoney($company), array_values($companyTotals)),
             'company_value_totals' => (object) $companyValues,
+        ];
+    }
+
+    /**
+     * Odhad do konce roku po hodnotách: `estimate` (stav a kontrola součtu), u řádků
+     * `estimate` (own/total), `unassigned_estimate` a `totals_estimate`. Sloupce:
+     *   posted_later  = zaúčtované zápisy po `to` do konce období, stejný filtr jako sestava,
+     *   accruals      = nezaúčtované časové rozlišení z náhledů uzávěrky,
+     *   depreciation  = nezaúčtované účetní odpisy podle plánu,
+     *   other         = ostatní nezaúčtované kroky uzávěrky (kurzové rozdíly, zásoby),
+     *   result        = VH + součet sloupců.
+     * Jen jedna firma, podvojné účetnictví rámce 500, otevřené období, sestava od začátku
+     * období do dne uvnitř něj. Daň se po hodnotách nerozpočítává: zaúčtovaná 59x zůstává
+     * ve VH řádku, Σ result + 59x = `vh_before_tax` odhadu. Při nesouladu se sloupce
+     * nevracejí (zaloguje se).
+     *
+     * @param list<int> $supplierIds
+     * @param array<int,array<string,mixed>> $known
+     * @param array<string,array<string,array{revenue:int,cost:int}>> $direct
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>
+     */
+    private function yearEndEstimate(int $supplierId, int $typeId, string $from, string $to, array $supplierIds, array $known, array $direct, int $incomeTaxCents, array &$rows, bool $restricted): array
+    {
+        $meta = static fn (?string $reason, array $extra = []): array => ['estimate' => ['applicable' => $reason === null, 'reason' => $reason] + $extra];
+        if (count($supplierIds) !== 1 || $supplierIds[0] !== $supplierId) {
+            return $meta('multiple_companies');
+        }
+        if ($this->basis($supplierId, (int) substr($to, 0, 4)) !== 'journal') {
+            return $meta('cash_journal');
+        }
+        $period = $this->periods->findForDate($supplierId, $to);
+        if ($period === null) {
+            return $meta('no_period');
+        }
+        $p = ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'starts_on' => (string) $period['starts_on'], 'ends_on' => (string) $period['ends_on']];
+        if (AccountingPeriodStatus::isClosed((string) $period['status'])) {
+            return $meta('period_closed', ['period' => $p]);
+        }
+        if ($from !== $p['starts_on']) {
+            return $meta('range_not_period', ['period' => $p]);
+        }
+        if ($this->frameworks->forDate($supplierId, $p['ends_on']) !== AccountingFrameworkService::CZ_500) {
+            return $meta('framework', ['period' => $p]);
+        }
+        $estimate = $this->estimates->estimate($supplierId, $p['id']);
+        if (($estimate['applicable'] ?? false) !== true) {
+            return $meta((string) ($estimate['reason'] ?? 'not_applicable'), ['period' => $p]);
+        }
+
+        $normalize = static fn (string $key): string => $key !== '' && !isset($known[(int) $key]) ? '' : $key;
+        // hodnota => sloupec => haléře
+        $extra = [];
+        $laterFrom = null;
+        if ($to < $p['ends_on']) {
+            $laterFrom = (new \DateTimeImmutable($to))->modify('+1 day')->format('Y-m-d');
+            foreach ($this->sums($supplierId, $typeId, $laterFrom, $p['ends_on']) as $row) {
+                $incomeTaxCents += (int) $row['income_tax_cost'];
+                $key = $normalize($row['value_key']);
+                $extra[$key]['posted_later'] = ($extra[$key]['posted_later'] ?? 0) + $row['revenue'] - $row['cost'];
+            }
+        }
+        foreach ($this->estimateSplit->split($supplierId, $typeId, $p, (array) $estimate['closing_items']) as $column => $byValue) {
+            foreach ($byValue as $key => $cents) {
+                $key = $normalize((string) $key);
+                $extra[$key][$column] = ($extra[$key][$column] ?? 0) + $cents;
+            }
+        }
+
+        $vh = [];
+        foreach ($direct as $key => $byAccount) {
+            $sum = self::collapse($byAccount);
+            $vh[(string) $key] = $sum['revenue'] - $sum['cost'];
+        }
+        $all = $incomeTaxCents;
+        foreach (array_unique([...array_map('strval', array_keys($vh)), ...array_map('strval', array_keys($extra))]) as $key) {
+            $all += ($vh[$key] ?? 0) + array_sum($extra[$key] ?? []);
+        }
+        $expected = (int) round((float) $estimate['vh_before_tax'] * 100);
+        $check = ['vh_before_tax' => $expected / 100, 'income_tax_posted' => $incomeTaxCents / 100, 'total' => $all / 100, 'matches' => $all === $expected];
+        if ($all !== $expected) {
+            error_log(sprintf('Výsledovka po dimenzi s odhadem (firma %d, typ %d): součet %.2f nesouhlasí s odhadem VH %.2f, sloupce vynechány.',
+                $supplierId, $typeId, $all / 100, $expected / 100));
+            return $meta('sum_mismatch', ['period' => $p, 'check' => $check]);
+        }
+
+        $index = [];
+        foreach ($rows as $i => $row) {
+            $index[(int) $row['value_id']] = $i;
+        }
+        $totals = [];
+        for ($i = count($rows) - 1; $i >= 0; $i--) {
+            $id = (int) $rows[$i]['value_id'];
+            $own = self::estimateCents($vh[(string) $id] ?? 0, $extra[(string) $id] ?? []);
+            $total = self::addEstimate($own, $totals[$id] ?? null);
+            $totals[$id] = $total;
+            $parent = $rows[$i]['parent_id'];
+            if ($parent !== null && isset($index[(int) $parent]) && $rows[$index[(int) $parent]]['depth'] === $rows[$i]['depth'] - 1) {
+                $totals[(int) $parent] = self::addEstimate($total, $totals[(int) $parent] ?? null);
+            }
+            $rows[$i]['estimate'] = ['own' => self::estimateMoney($own), 'total' => self::estimateMoney($total)];
+        }
+        $unassigned = self::estimateCents($restricted ? 0 : ($vh[''] ?? 0), $restricted ? [] : ($extra[''] ?? []));
+        $sum = $unassigned;
+        foreach ($rows as $row) {
+            if ($row['depth'] === 0) {
+                $sum = self::addEstimate($sum, $totals[(int) $row['value_id']]);
+            }
+        }
+        $hasOther = false;
+        foreach ($extra as $columns) {
+            $hasOther = $hasOther || ($columns['other'] ?? 0) !== 0;
+        }
+
+        return $meta(null, [
+            'period' => $p,
+            'posted_later_from' => $laterFrom,
+            'has_other' => $hasOther,
+            'check' => $check,
+        ]) + [
+            'unassigned_estimate' => self::estimateMoney($unassigned),
+            'totals_estimate' => self::estimateMoney($sum),
+        ];
+    }
+
+    private const ESTIMATE_COLUMNS = ['vh', 'posted_later', 'accruals', 'depreciation', 'other'];
+
+    /**
+     * @param array<string,int> $extra
+     * @return array<string,int>
+     */
+    private static function estimateCents(int $vh, array $extra): array
+    {
+        $out = ['vh' => $vh];
+        foreach (self::ESTIMATE_COLUMNS as $c) {
+            $out[$c] ??= (int) ($extra[$c] ?? 0);
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,int> $a
+     * @param array<string,int>|null $b
+     * @return array<string,int>
+     */
+    private static function addEstimate(array $a, ?array $b): array
+    {
+        foreach (self::ESTIMATE_COLUMNS as $c) {
+            $a[$c] = ($a[$c] ?? 0) + ($b[$c] ?? 0);
+        }
+        return $a;
+    }
+
+    /**
+     * @param array<string,int> $cents
+     * @return array{posted_later:float, accruals:float, depreciation:float, other:float, result:float}
+     */
+    private static function estimateMoney(array $cents): array
+    {
+        return [
+            'posted_later' => $cents['posted_later'] / 100,
+            'accruals' => $cents['accruals'] / 100,
+            'depreciation' => $cents['depreciation'] / 100,
+            'other' => $cents['other'] / 100,
+            'result' => array_sum($cents) / 100,
         ];
     }
 

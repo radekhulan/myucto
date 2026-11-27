@@ -2414,6 +2414,32 @@ final class ClosingService
     }
 
     /**
+     * Řádky zápisu odkladu výnosů příštích období po účtech a dimenzích, ze kterých krok
+     * uzávěrky účtuje (`amount` se znaménkem, kladná = výnos se odloží). Read-only, pro
+     * rozpad odhadu do konce roku po dimenzích.
+     *
+     * @return array{total:float, lines:list<array<string,mixed>>}
+     */
+    public function deferredRevenueAccrualLines(int $supplierId, int $periodId): array
+    {
+        $data = $this->deferredRevenueAccrualData($supplierId, $periodId);
+        return ['total' => (float) $data['total'], 'lines' => $data['lines']];
+    }
+
+    /**
+     * Řádky zápisu odkladu nákladů příštích období po účtech a dimenzích, ze kterých krok
+     * uzávěrky účtuje (`amount` se znaménkem, kladná = náklad se odloží). Read-only, pro
+     * rozpad odhadu do konce roku po dimenzích.
+     *
+     * @return array{total:float, lines:list<array<string,mixed>>}
+     */
+    public function prepaidExpenseAccrualLines(int $supplierId, int $periodId): array
+    {
+        $data = $this->prepaidExpenseAccrualData($supplierId, $periodId);
+        return ['total' => (float) $data['total'], 'lines' => $data['lines']];
+    }
+
+    /**
      * Náhled {@see deferredRevenueAccrualPreview()} a navíc řádky zápisu odkladu po účtech
      * a dimenzích (`lines`), ze kterých zápis účtuje krok uzávěrky, a rozpad odkladu řádků
      * vydaných faktur a ostatních pohledávek pro záznam kroku (`snapshot`, {@see AccrualDeferralService::snapshotItem()}).

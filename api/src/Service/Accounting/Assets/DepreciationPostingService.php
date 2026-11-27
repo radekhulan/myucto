@@ -259,10 +259,12 @@ final class DepreciationPostingService
      * `findings` = karty, jejichž zaúčtovaný účetní řádek roku nemá v deníku svůj zápis
      * (bookYear je neúčtuje, ohlásí je); `accounting_skipped` = 'closing_taken_over', když
      * rok uzavřel původní systém a účetní odpisy se v něm neúčtují.
+     * `pending_accounting_by_asset` = nenulový `pending_accounting` po kartách (id karty =>
+     * částka), součet na haléř = `pending_accounting`; rozpad odhadu po dimenzích karty.
      *
      * @return array{assets:int, planned_accounting:float, posted_accounting:float, pending_accounting:float,
      *     planned_tax:float, confirmed_tax:float, pending_tax:float, accounting_skipped:?string,
-     *     findings: list<array{asset_id:int, code:string}>}
+     *     findings: list<array{asset_id:int, code:string}>, pending_accounting_by_asset: array<int,float>}
      */
     public function previewYear(int $supplierId, int $fiscalYear): array
     {
@@ -276,6 +278,7 @@ final class DepreciationPostingService
             'planned_tax' => 0.0, 'confirmed_tax' => 0.0, 'pending_tax' => 0.0,
             'accounting_skipped' => $takenOver ? 'closing_taken_over' : null,
             'findings' => [],
+            'pending_accounting_by_asset' => [],
         ];
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
             $assetId = (int) $asset['id'];
@@ -299,6 +302,9 @@ final class DepreciationPostingService
                 continue;
             }
             $out['assets']++;
+            if ((int) round(($plannedAcc - $postedAcc) * 100) !== 0) {
+                $out['pending_accounting_by_asset'][$assetId] = round($plannedAcc - $postedAcc, 2);
+            }
             $out['planned_accounting'] += $plannedAcc;
             $out['posted_accounting'] += $postedAcc;
             $out['planned_tax'] += $plannedTax;
@@ -356,7 +362,7 @@ final class DepreciationPostingService
         if ($elapsedTo < $firstMonth) {
             return $out;
         }
-        $expense = (string) ($this->rules->resolve($supplierId, 'depreciation.booking')['debit_account_code'] ?? '551');
+        $expense = $this->accountingExpenseAccount($supplierId);
 
         $lines = [];
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStartsOn, $periodEnd) as $asset) {
@@ -398,6 +404,12 @@ final class DepreciationPostingService
         }
 
         return $out;
+    }
+
+    /** Nákladový účet účetního odpisu (MD pravidla `depreciation.booking`, výchozí 551). */
+    public function accountingExpenseAccount(int $supplierId): string
+    {
+        return (string) ($this->rules->resolve($supplierId, 'depreciation.booking')['debit_account_code'] ?? '551');
     }
 
     private static function monthIndex(string $date): int
@@ -565,8 +577,7 @@ final class DepreciationPostingService
             'status' => 'posted',
         ]);
 
-        $rule = $this->rules->resolve($supplierId, 'depreciation.booking');
-        $expense = $rule['debit_account_code'] ?? '551';
+        $expense = $this->accountingExpenseAccount($supplierId);
 
         $this->posting->postDocument($supplierId, 'depreciation', $entryId, [
             ['account_code' => $expense, 'side' => 'debit', 'amount' => $amount],
