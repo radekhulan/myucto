@@ -55,6 +55,14 @@ const profitLines = (profit: number): StatementColumnLine[] => [
     right: cell({ account_id: 60, account_code: '602', name: 'Tržby', account_type: 'revenue', normal_side: 'credit', ks: 0, ytd: 0 }),
   },
   { kind: 'total', key: 'section', section: 'operating', left: amounts(2000), right: amounts(0) },
+  { kind: 'section', key: 'financial' },
+  {
+    kind: 'cells',
+    left: cell({ account_id: 70, account_code: '562', name: 'Úroky', account_type: 'expense', ks: 300, ytd: 300 }),
+    right: cell({ account_id: 80, account_code: '662', name: 'Úroky', account_type: 'revenue', normal_side: 'credit', ks: 100, ytd: 100 }),
+  },
+  { kind: 'total', key: 'section', section: 'financial', left: amounts(300), right: amounts(100) },
+  { kind: 'total', key: 'activities', left: amounts(2300), right: amounts(100) },
   { kind: 'result', key: 'operating_profit', amounts: amounts(-2000) },
   { kind: 'result', key: 'profit_row', amounts: amounts(profit) },
 ]
@@ -103,6 +111,21 @@ describe('StatementAccountsTable', () => {
     const line = wrapper.get('[data-test="accounts-line"]')
     expect(line.text()).toContain('518')
     expect(line.text()).toContain('602')
+  })
+
+  it('pod finanční činností sečte náklady a výnosy všech činností', () => {
+    const wrapper = mountTable('profit_loss')
+    const rows = wrapper.findAll('tbody tr').map(r => r.attributes('data-test'))
+    const financialTotal = rows.lastIndexOf('accounts-total')
+    expect(rows[financialTotal + 1]).toBe('accounts-total-activities')
+    const total = wrapper.get('[data-test="accounts-total-activities"]')
+    expect(total.text()).toContain('accounting.statement_accounts.total_expenses_all')
+    expect(total.text()).toContain('accounting.statement_accounts.total_revenues_all')
+    expect(total.text()).toContain('2300')
+    expect(total.findAll('td').map(td => td.text())).toEqual([
+      'accounting.statement_accounts.total_expenses_all', '0', '0', '2300', '2300',
+      'accounting.statement_accounts.total_revenues_all', '0', '0', '100', '100',
+    ])
   })
 
   it('má sloupce počáteční stav, obrat měsíce, obrat od začátku období a konečný stav', () => {

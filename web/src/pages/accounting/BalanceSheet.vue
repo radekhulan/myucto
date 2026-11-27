@@ -16,6 +16,7 @@ import {
 } from '@/api/accounting'
 import Statement504Table from '@/components/accounting/Statement504Table.vue'
 import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
+import YearEndTaxEstimate from '@/components/accounting/YearEndTaxEstimate.vue'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -355,6 +356,8 @@ onMounted(async () => {
       <StatementAccountsTable :report="accountsReport" part="balance" :format="fm"
         :hide-zero="hideZero" :show-analytics="showAnalytics"
         @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
+      <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id"
+        :as-of="accountsReport.as_of" part="balance" :format="fm" />
     </template>
 
     <template v-else-if="report">

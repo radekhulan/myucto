@@ -2134,6 +2134,31 @@ export interface YearEndTaxEstimate {
   advances_source?: 'return' | 'schedules' | 'none'
   balance_due?: number
   vh_after_tax?: number
+  /** Můstek od VH k datu výkazu k zaúčtovanému VH období; null bez as_of nebo k poslednímu dni. */
+  bridge?: YearEndProfitBridge | null
+  /** Odhadované změny rozvahy z návrhů uzávěrky a daň na 341. */
+  balance_effects?: YearEndBalanceEffect[]
+  balance_check?: { assets: number; liabilities: number; difference: number; expected: number; matches: boolean }
+}
+
+export type YearEndBridgeGroupKey = 'deferred_revenue' | 'prepaid_expenses' | 'accruals' | 'depreciation' | 'other'
+
+export interface YearEndProfitBridge {
+  as_of: string
+  ends_on: string
+  vh_as_of: number
+  groups: { key: YearEndBridgeGroupKey; amount: number }[]
+  vh_posted: number
+}
+
+export interface YearEndBalanceEffect {
+  key: string
+  label_key: string
+  accounts: string | null
+  side: 'asset' | 'liability' | 'net'
+  assets: number
+  liabilities: number
+  optional: boolean
 }
 
 // ── Saldokonto (audit 2026-07, D6/1)───────────────────────────────────────
@@ -3052,8 +3077,8 @@ export const accountingApi = {
   getStatementAccounts: (params: Omit<StatementParams, 'scope'>) =>
     api.get<StatementAccountsReport | Statement504Report>('/accounting/reports/statement-accounts', { params }).then(r => r.data),
   /** Odhad do konce otevřeného roku (náhled DPPO, uzávěrka, odpisy, zálohy) — samostatný request. */
-  getYearEndTaxEstimate: (periodId: number) =>
-    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate', { params: { period_id: periodId } }).then(r => r.data),
+  getYearEndTaxEstimate: (periodId: number, asOf?: string) =>
+    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate', { params: { period_id: periodId, as_of: asOf || undefined } }).then(r => r.data),
   /**
    * VZZ v ÚČELOVÉM členění. Bez úplné mapy funkcí backend výkaz NESESTAVÍ a vrátí
    * `function_map_incomplete` s výčtem nepřiřazených účtů — nepřiřazený náklad by z výkazu

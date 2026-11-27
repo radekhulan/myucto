@@ -75,6 +75,19 @@ final class AccountViewPdfRendererTest extends TestCase
         self::assertStringStartsWith('%PDF', $renderer->render($this->data() + ['part' => 'balance', 'unit' => 'thousands', 'estimate' => $this->estimate()]));
     }
 
+    /** Pod činnostmi (před daní) jsou náklady a výnosy celkem za všechny činnosti, i v PDF. */
+    public function testProfitLossHasTotalsForAllActivities(): void
+    {
+        $lines = $this->data()['columns']['profit_loss']['lines'];
+        $keys = array_map(static fn (array $l): string => $l['kind'] . ':' . ($l['key'] ?? ''), $lines);
+        self::assertSame(['section:operating', 'cells:', 'total:section', 'total:activities', 'result:operating_profit'], array_slice($keys, 0, 5));
+        $activities = $lines[3];
+        self::assertSame([200.0, 700.0], [$activities['left']['ks'], $activities['right']['ks']]);
+
+        $text = self::text((new AccountViewPdfRenderer())->html($this->data() + ['part' => 'profit_loss', 'unit' => 'czk']));
+        self::assertStringContainsString('Náklady celkem za všechny činnosti 0,00 0,00 200,00 200,00 Výnosy celkem za všechny činnosti 0,00 0,00 700,00 700,00', $text);
+    }
+
     public function testRequiresColumnView(): void
     {
         $data = $this->data();

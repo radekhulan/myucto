@@ -326,7 +326,7 @@ onMounted(async () => {
       <StatementAccountsTable :report="accountsReport" part="profit_loss" :format="fm"
         :hide-zero="hideZero" :show-analytics="showAnalytics"
         @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
-      <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id" :format="fm" />
+      <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id" :as-of="accountsReport.as_of" :format="fm" />
     </template>
 
     <template v-else-if="report">
