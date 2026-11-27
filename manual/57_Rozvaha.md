@@ -73,12 +73,13 @@ V rámci 504 se odpovídající záložka jmenuje **Průběžný účetní přeh
 a používá členění tohoto rámce.
 
 1. Otevřete `Účetnictví → Rozvaha` a zvolte záložku **Účet 702 (po účtech)**.
-2. Nastavte **Rozvahový den**. Rozsah výkazu se tu nepoužívá.
-3. Projděte aktiva vlevo a pasiva vpravo. Přepínač **Zobrazit analytiky** analytiky skryje, **Skrýt nulové účty** schová účty bez zůstatku a pohybu.
-4. Klikněte na účet. Otevře se inventura účtu, odtud vede opis i otevřené položky.
-5. Zkontrolujte zvýrazněný řádek **Výsledek hospodaření** pod součtem rozvahových účtů.
-6. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**: odhad výsledku před zdaněním a po zdanění a **Odhad daně k doplacení (341)**. **Zobrazit rozpad odhadu** ukáže cestu od výsledku k rozvahovému dni a odhadované změny rozvahových účtů.
-7. Klikněte na **Export PDF** nebo **Export XLSX**.
+2. Nastavte **Rozvahový den**. Rozsah výkazu se tu nepoužívá. Pro stav jako po uzávěrce k rozvahovému dni zaškrtněte **Průběžné časové rozlišení a odpisy** ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)).
+3. V otevřeném roce si nahoře přečtěte souhrn: výsledek k rozvahovému dni, zvýrazněný zaúčtovaný výsledek do konce období a odhad před a po zdanění.
+4. Projděte aktiva vlevo a pasiva vpravo. Přepínač **Zobrazit analytiky** analytiky skryje, **Skrýt nulové účty** schová účty bez zůstatku a pohybu.
+5. Klikněte na účet. Otevře se inventura účtu, odtud vede opis i otevřené položky.
+6. Zkontrolujte zvýrazněný řádek **Výsledek hospodaření k** rozvahovému dni pod součtem rozvahových účtů.
+7. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**: odhad výsledku před zdaněním a po zdanění a **Odhad daně k doplacení (341)**. **Zobrazit rozpad odhadu** ukáže cestu od výsledku k rozvahovému dni a odhadované změny rozvahových účtů.
+8. Klikněte na **Export PDF** nebo **Export XLSX**.
 
 **Jak poznáte, že je hotovo:** Výsledek hospodaření z rozvahových účtů se neliší od výsledku z výsledkových účtů. Rozdíl stránka ohlásí nad tabulkou.
 
@@ -108,8 +109,9 @@ a používá členění tohoto rámce.
   v korunách.
 - **Průběžné časové rozlišení a odpisy** přičte k zůstatkům deníku odklad dokladů s obdobím
   od–do na 381 a 384 a dosud nezaúčtované účetní odpisy majetku za uplynulé měsíce k rozvahovému dni mimo deník; pravidla popisuje
-  [§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy). Výchozí je
-  vypnuté a volba platí společně s výsledovkou.
+  [§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy), včetně rozpuštění
+  a odpisů zaúčtovaných s datem po rozvahovém dni. Výchozí je vypnuté (lze změnit
+  v Předvolbách zobrazení) a volba platí společně s výsledovkou i se záložkou **Účet 702 (po účtech)**.
 
 Systém vybere verzi definice výkazu platnou k rozvahovému dni. Její kód se
 zobrazuje v záhlaví. Minulé období se sestaví z předchozího fiskálního období
@@ -334,9 +336,15 @@ Přepínač **Skrýt nulové účty** schová účty, které mají ve všech čt
 nulu, takže žádný součet nezmění. Účet s počátečním stavem a konečným stavem 0 se
 ukáže, protože v něm je pohyb. Účty bez jediného zápisu sestava neobsahuje.
 
-Pod součty stran je zvýrazněný řádek **Výsledek hospodaření** (zisk zeleně, ztráta
-červeně) jako `aktiva celkem − pasiva celkem` a pod ním **Pasiva s výsledkem
-hospodaření**, která se rovnají aktivům. Bez uzávěrky je výsledek k dispozici
+Pod součty stran je zvýrazněný řádek **Výsledek hospodaření k** rozvahovému dni (zisk
+zeleně, ztráta červeně) jako `aktiva celkem − pasiva celkem` a pod ním **Pasiva s výsledkem
+hospodaření**, která se rovnají aktivům. V otevřeném roce je nad tabulkou stejný souhrn
+a na konci tabulky stejné řádky **Zaúčtováno s datem po** a **Výsledek hospodaření do**
+konce období jako u výsledovky po účtech
+([§ 58.7.6](58_Vysledovka_druhova.md#5876-vysledovka-po-uctech)). S volbou **Průběžné časové
+rozlišení a odpisy** jsou úpravy přímo v obratech a konečných stavech 381, 384,
+oprávek i dotčených výsledkových účtů, upravené účty jsou označené a výsledek
+hospodaření je stejný jako v rozvaze a výsledovce s volbou. Bez uzávěrky je výsledek k dispozici
 kdykoli během roku. Zůstatky jsou vždy před uzavřením účetních
 knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled k poslednímu
 dni období ukazuje přesně to, co uzávěrka převedla na konečný účet rozvažný 702.

@@ -44,14 +44,16 @@ V rámci 504 zvolte **Průběžný účetní přehled**; jeho členění odpoví
 nevýdělečné organizaci, včetně hlavní a hospodářské činnosti.
 
 1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
-2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
-3. Pod finanční činností zkontrolujte řádek **Náklady celkem za všechny činnosti** a **Výnosy celkem za všechny činnosti**, potom mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
-4. Klikněte na účet. Otevře se inventura účtu, odtud vede jeho opis.
-5. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
-6. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**. Nahoře je odhad výsledku před zdaněním a po zdanění, tlačítko **Zobrazit rozpad odhadu** ukáže, jak se k němu od výsledku v tabulce došlo.
-7. Klikněte na **Export PDF** nebo **Export XLSX**.
+2. V otevřeném roce si nahoře přečtěte souhrn: **Výsledek hospodaření k** datu výkazu, zvýrazněný **Zaúčtovaný VH do** konce období a odhad před zdaněním a po zdanění. Klientce posílejte zaúčtovaný výsledek do konce období nebo výsledek s volbou **Průběžné časové rozlišení a odpisy**, ne holý výsledek k datu ([§ 58.7.6](#5876-vysledovka-po-uctech)).
+3. Pro stav jako po uzávěrce k datu výkazu zaškrtněte **Průběžné časové rozlišení a odpisy**. Upravené účty jsou označené a vysvětlené pod tabulkou ([§ 58.7.7](#5877-prubezne-casove-rozliseni-a-odpisy)).
+4. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
+5. Pod finanční činností zkontrolujte řádek **Náklady celkem za všechny činnosti** a **Výnosy celkem za všechny činnosti**, potom mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
+6. Klikněte na účet. Otevře se inventura účtu, odtud vede jeho opis.
+7. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
+8. V otevřeném roce si pod tabulkou přečtěte **Odhad do konce roku (nezaúčtováno)**. Nahoře je odhad výsledku před zdaněním a po zdanění, tlačítko **Zobrazit rozpad odhadu** ukáže, jak se k němu od výsledku v tabulce došlo.
+9. Klikněte na **Export PDF** nebo **Export XLSX**.
 
-**Jak poznáte, že je hotovo:** Zvýrazněný řádek **Výsledek hospodaření** se shoduje s výkazem a s výsledkem v rozvaze po účtech.
+**Jak poznáte, že je hotovo:** Zvýrazněný řádek **Výsledek hospodaření k** datu výkazu se shoduje s výkazem (se stejnou volbou průběžného rozlišení) a s výsledkem v rozvaze po účtech.
 
 ## 58.5 Krok za krokem: výběr řádků pro čistý obrat
 
@@ -207,10 +209,27 @@ u [rozvahy po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech).
 
 Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
 **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
-**po zdanění** a zvýrazněný řádek **Výsledek hospodaření** za účetní období.
+**po zdanění** a zvýrazněný řádek **Výsledek hospodaření k** datu výkazu.
 Hodnoty se shodují s řádky výkazu a s výsledkem v rozvaze po účtech
 ([Rozvaha po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech)). Uzávěrkový zápis se nezapočítává, po uzavření roku
 tak pohled ukazuje obsah konečného účtu 710.
+
+Výsledek k datu výkazu obsahuje jen zápisy s datem do tohoto dne. Nese-li deník
+zápisy s pozdějším datem (převzatý deník s rozpuštěním časového rozlišení k 31. 12.,
+odpisy k posledním dnům měsíců), může být výsledek k datu hluboká ztráta, ačkoli
+zaúčtovaný výsledek celého období je zisk. V otevřeném roce rámce 500 bez filtru
+dimenze proto stránka ukazuje:
+
+- **nad tabulkou souhrn**: **Výsledek hospodaření k** datu výkazu (se štítkem
+  průběžného rozlišení, je-li volba zapnutá), zvýrazněný **Zaúčtovaný VH do** konce
+  období, **Odhad před zdaněním** a **Odhad po zdanění** a pod nimi větu, že rozdíl
+  tvoří zápisy s datem po dni výkazu. Čísla jsou z bloku odhadu
+  ([§ 58.7.6.1](#58761-odhad-do-konce-roku-nezauctovano)), nic se nepočítá znovu;
+- **na konci tabulky** pod řádkem **Výsledek hospodaření k** datu výkazu ještě řádky
+  **Zaúčtováno s datem po** dni výkazu a **Výsledek hospodaření do** konce období,
+  když se liší.
+
+Souhrn je i nahoře v PDF. Uzavřené období a rámec 504 souhrn ani tyto řádky nemají.
 
 Výsledkový účet, který mapa výkazu nezná, je ve skupině **Účty nezařazené ve
 výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
@@ -219,8 +238,8 @@ tabulkou upozorní a účet je třeba zařadit výjimkou mapování
 
 Kliknutím na účet se otevře záložka **Inventura účtu**. Výsledkové účty se
 neinventarizují, stránka to řekne a vede do opisu. Export XLSX i PDF z této záložky má
-stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč**. PDF se tiskne
-na šířku stránky.
+stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč** i s volbou
+**Průběžné časové rozlišení a odpisy**. PDF se tiskne na šířku stránky.
 
 #### 58.7.6.1 Odhad do konce roku (nezaúčtováno)
 
@@ -238,8 +257,8 @@ a každá částka se přičte právě jednou:
 
 | Řádek | Odkud je |
 |---|---|
-| Zaúčtovaný výsledek k datu výkazu | výsledek hospodaření před zdaněním ze zaúčtovaných zápisů do data **Sestaveno k** včetně; shoduje se s řádkem Výsledek hospodaření před zdaněním v tabulce |
-| Zápisy zaúčtované po datu výkazu: rozpuštění výnosů příštích období (384), rozpuštění nákladů příštích období (381), výdaje a příjmy příštích období a dohadné položky (383, 385, 388, 389), odpisy (551), ostatní | zaúčtované zápisy deníku s datem po dni výkazu do konce období, seskupené podle účtů zápisu; ukazují se jen nenulové skupiny a odkaz vede do deníku na tyto dny |
+| Zaúčtovaný výsledek k datu výkazu | výsledek hospodaření před zdaněním ze zaúčtovaných zápisů do data **Sestaveno k** včetně; shoduje se s řádkem Výsledek hospodaření před zdaněním v tabulce. S volbou **Průběžné časové rozlišení a odpisy** je to výsledek k datu s průběžným rozlišením, stejně jako v tabulce |
+| Zápisy zaúčtované po datu výkazu: rozpuštění výnosů příštích období (384), rozpuštění nákladů příštích období (381), výdaje a příjmy příštích období a dohadné položky (383, 385, 388, 389), odpisy (551), ostatní | zaúčtované zápisy deníku s datem po dni výkazu do konce období, seskupené podle účtů zápisu; ukazují se jen nenulové skupiny a odkaz vede do deníku na tyto dny. S volbou průběžného rozlišení je skupina snížená o část, kterou už průběžné rozlišení započetlo do výsledku k datu (úprava se přiřadí skupině podle rozvahového účtu, 384, 381, oprávky); odklad dokladu, který zaúčtuje až uzávěrka, tak skupinu sníží i pod nulu |
 | Zaúčtovaný výsledek do konce období | ř. 10 náhledu DPPO, tedy všechny zaúčtované zápisy období; součet předchozích řádků na haléř |
 | Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku, konečný stav zásob způsobem B) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
 | Odpisy roku podle odpisového plánu (nezaúčtované) | tatáž projekce z karet majetku ([kap. 28](28_Majetek.md)); účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150 |
@@ -293,7 +312,32 @@ jako by uzávěrka proběhla k tomu dni:
 Upravují se jen doklady zaúčtované od začátku období do data **Sestaveno k**.
 Doklad, jehož odklad už je v deníku (zaúčtovaný krok uzávěrky k tomuto dni,
 rozpuštění z minulého roku, faktura rozúčtovaná rovnou na 381/384 nebo ruční
-interní doklad k faktuře), se znovu neupravuje. Účet nákladu či výnosu je ten,
+interní doklad k faktuře), se znovu neupravuje.
+
+Hotové je ale jen to, co deník nese s datem nejpozději k **Sestaveno k**. Zápis
+zaúčtovaný s pozdějším datem v deníku k tomuto dni není, a výkaz s volbou ho proto
+bere jako nezaúčtovaný a započte z něj uplynulou část. Typicky jde o deník převzatý
+z jiného programu (POHODA), který rozpuštění časového rozlišení za celý rok nese
+k 31. 12. a odpisy k posledním dnům měsíců i po dni výkazu:
+
+- **zápis rozpuštění 381 nebo 384** (MD 5xx / D 381, MD 384 / D 6xx) kryje dobu od dne
+  po předchozím zápisu téže řady (stejné číslo dokladu) do svého data. Bez předchozího
+  zápisu kryje zápis k poslednímu dni období celé období, jiný zápis měsíc svého data.
+  Do výkazu jde poměrná část podle dnů do **Sestaveno k** včetně, stejně jako v kroku
+  uzávěrky. Zápis za jediný měsíc se započte až po uplynutí měsíce, stejně jako měsíční
+  položka agendy Časové rozlišení. Příklad: rozpuštění 36 500 Kč k 31. 12. se k 27. 11.
+  započte z 331/365, tedy 33 100 Kč,
+- **zápis odpisu** (MD 551 / D oprávky) se započte za uplynulé celé měsíce kryté doby,
+  stejně jako průběžný odpis karty: roční odpis k 31. 12. k 27. 11. za deset měsíců,
+  měsíční odpis za listopad k 27. 11. ještě ne,
+- **položka agendy Časové rozlišení** a **karta majetku**, jejichž rozpuštění nebo
+  odpis roku je zaúčtovaný zápisem s pozdějším datem, se počítají jako nezaúčtované
+  podle svého plánu,
+- zápis s jinými účty (DPH, závazek, smíšený zápis) se neupravuje.
+
+Úpravy se přičtou k týmž účtům jako zápis (včetně analytik), protiúčet 381, 384 či
+oprávky se upraví o totéž a rozvaha dál bilancuje. Výkaz k poslednímu dni období
+a výkaz bez volby jsou beze změny. Účet nákladu či výnosu je ten,
 na který doklad zaúčtoval řádek, včetně analytik účtotvorné dimenze. Stejné
 pravidlo platí pro sloupec **Minulé období** k jeho konci.
 
@@ -310,17 +354,29 @@ celé měsíce (k 15. 10. za období do září, k 31. 10. i za říjen):
   v rozvaze sníží majetek přes oprávky karty a výsledek běžného období se upraví
   o totéž,
 - karta, jejíž odpis roku už v evidenci je (zaúčtovaný krok, odpis při vyřazení,
-  odpis převzatý z jiného programu), se znovu neupravuje. Rok uzavřený původním
-  programem se neupravuje vůbec.
+  odpis převzatý z jiného programu), se znovu neupravuje, pokud ho deník nese
+  s datem nejpozději k **Sestaveno k**; s pozdějším datem viz výše. Rok uzavřený
+  původním programem se neupravuje vůbec.
 
 U neziskové organizace se při průběžném odpisu nepromítá rozpuštění investičního
 zdroje (901), které zaúčtování odpisu v uzávěrce doprovází.
 
 Do deníku se nic nezapisuje a uzávěrka zůstává stejná. Nad výkazem je poznámka
-s částkami na 381 a 384, počtem upravených dokladů a průběžnými odpisy, totéž je
-v záhlaví PDF a XLSX.
-Volba je výchozí vypnutá, aplikace si ji pamatuje pro každého uživatele a platí
-společně pro výsledovku v obou členěních i pro rozvahu. Výkaz za hodnotu dimenze
+s částkami na 381 a 384, počtem upravených dokladů, průběžnými odpisy, uplynulou
+částí zápisů s pozdějším datem a změnou výsledku hospodaření, totéž je v záhlaví PDF
+a XLSX.
+
+Volba je i na záložkách **Účet 710 (po účtech)** a **Účet 702 (po účtech)**. Tabulka
+po účtech pak vypadá, jako by úpravy byly zaúčtované k datu výkazu: jsou přímo
+v obratu měsíce, obratu od začátku období a konečném stavu dotčených účtů (náklady
+a výnosy, 551, 381, 384, oprávky) včetně analytik a součty, mezisoučty i výsledek
+hospodaření je obsahují. Upravený účet je označený barvou a značkou, poznámka pod
+tabulkou vysvětluje, že úprava v deníku není. Výsledek je stejný jako ve výkazu
+s volbou, rozvaha po účtech bilancuje. Stejně vypadá export PDF a XLSX po účtech.
+
+Volba je výchozí vypnutá; výchozí stav lze nastavit v Předvolbách zobrazení
+(`Profil → Předvolby zobrazení`). Aplikace si ji pak pamatuje pro každého uživatele a platí
+společně pro výsledovku v obou členěních, rozvahu i pohledy po účtech. Výkaz za hodnotu dimenze
 a výkazy podle vyhlášky 504 ji neuplatní. Podání účetní závěrky, přiznání
 k dani z příjmů, uzávěrka ani kontroly ji nepoužívají nikdy.
 
