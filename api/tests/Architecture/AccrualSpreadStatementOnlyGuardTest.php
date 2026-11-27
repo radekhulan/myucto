@@ -12,21 +12,21 @@ use PHPUnit\Framework\TestCase;
  * a manažerského Měsíčního přehledu. Podání (EPO/XML závěrky, DPPO), uzávěrka, balíček
  * závěrky, příloha, kontroly ani převody ho používat nesmí: počítají s deníkem tak, jak je.
  *
- * Brána hledá v `api/src` volání `->balanceSheet()`, `->incomeStatement()`
- * a `->incomeStatementByFunction()` s víc než pěti argumenty (šestý je volba
- * `accrualSpread`) nebo s pojmenovaným argumentem `accrualSpread:`. Výjimku mají jen
+ * Brána hledá v `api/src` volání `->balanceSheet()`, `->incomeStatement()`,
+ * `->incomeStatementByFunction()` a `->accountView()` (pohled po účtech) s víc než pěti
+ * argumenty (šestý je volba `accrualSpread`) nebo s pojmenovaným argumentem `accrualSpread:`. Výjimku mají jen
  * metody uvedené v ALLOWED. Skenují se tokeny, ne text.
  */
 final class AccrualSpreadStatementOnlyGuardTest extends TestCase
 {
-    private const METHODS = ['balanceSheet', 'incomeStatement', 'incomeStatementByFunction'];
+    private const METHODS = ['balanceSheet', 'incomeStatement', 'incomeStatementByFunction', 'accountView'];
 
-    /** soubor (pod api/src) => metoda, která volbu smí předat, s důvodem. */
+    /** soubor (pod api/src) => metody, které volbu smí předat, s důvodem. */
     private const ALLOWED = [
-        // Převádí parametr `accrual_spread` z dotazu výkazu (obrazovka, PDF, XLSX).
-        'Action/Accounting/Reports/FinancialStatementAction.php' => 'buildStatement',
+        // Převádí parametr `accrual_spread` z dotazu výkazu a pohledu po účtech (obrazovka, PDF, XLSX).
+        'Action/Accounting/Reports/FinancialStatementAction.php' => ['buildStatement', 'accountView', 'exportAccountView'],
         // Manažerský přehled klientovi, volbu dostává z dotazu nebo těla MonthlyReportAction.
-        'Service/Report/MonthlyReportService.php' => 'build',
+        'Service/Report/MonthlyReportService.php' => ['build'],
     ];
 
     public function testOnlyStatementActionPassesAccrualSpread(): void
@@ -35,7 +35,7 @@ final class AccrualSpreadStatementOnlyGuardTest extends TestCase
         $violations = [];
         foreach (SourceCorpus::sources($root) as $relative => $source) {
             foreach (self::violations($source) as [$method, $line]) {
-                if ((self::ALLOWED[$relative] ?? null) === $method) {
+                if (in_array($method, self::ALLOWED[$relative] ?? [], true)) {
                     continue;
                 }
                 $violations[] = $relative . ':' . $line . ' (' . $method . ')';

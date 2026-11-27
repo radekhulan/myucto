@@ -833,9 +833,11 @@ final class ReportXlsxExporter
             . ' ke dni ' . $this->czDate($asOf) . ($thousands ? ' (v celých tisících Kč)' : ' (v Kč)'));
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $this->entityHeader($sheet, $data);
-        $sheet->setCellValue('A5', 'Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu), se znaménkem podle typu účtu. Červeně = neobvyklá strana.');
+        $sheet->setCellValue('A5', 'Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu), se znaménkem podle typu účtu. Červeně = neobvyklá strana.'
+            . (!empty($data['accrual_spread']['applied']) ? ' Žlutě a hvězdičkou = účet obsahuje úpravu průběžného časového rozlišení a odpisů, která není v deníku.' : ''));
         $sheet->getStyle('A5')->getFont()->setSize(9)->setItalic(true);
         $this->dimensionLine($sheet, 'A6', $data);
+        $this->accrualSpreadLine($sheet, 'A6', $data);
 
         $head = 8;
         $sheet->setCellValue([1, $head - 1], $isBalance ? 'AKTIVA' : 'NÁKLADY');
@@ -860,8 +862,12 @@ final class ReportXlsxExporter
                 $class = (string) $cell['class'];
                 $sheet->setCellValueExplicit([$firstCol, $r], 'Třída ' . $class . ' · ' . (self::ACCOUNT_CLASS_LABELS[$class] ?? ''), DataType::TYPE_STRING);
             } else {
-                $sheet->setCellValueExplicit([$firstCol, $r], ($cell['kind'] === 'analytic' ? '    ' : '') . (string) $cell['account_code'], DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([$firstCol, $r], ($cell['kind'] === 'analytic' ? '    ' : '') . (string) $cell['account_code']
+                    . (isset($cell['spread']) ? ' *' : ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([$firstCol + 1, $r], (string) $cell['name'], DataType::TYPE_STRING);
+            }
+            if (isset($cell['spread']) && $cell['kind'] !== 'class') {
+                $sheet->getStyle([$firstCol + 3, $r, $firstCol + 5, $r])->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
             }
             $writeAmounts($cell, $firstCol + 2);
             if ($cell['kind'] !== 'analytic') {
@@ -896,7 +902,9 @@ final class ReportXlsxExporter
                     $this->boldRow($sheet, $r, 12);
                     break;
                 case 'result':
-                    $sheet->setCellValue([7, $r], self::ACCOUNT_RESULT_LABELS[(string) $line['key']] ?? (string) $line['key']);
+                    $sheet->setCellValue([7, $r], $line['key'] === 'profit_row'
+                        ? 'Výsledek hospodaření k ' . $this->czDate($asOf)
+                        : (self::ACCOUNT_RESULT_LABELS[(string) $line['key']] ?? (string) $line['key']));
                     $writeAmounts($line['amounts'], 9);
                     $this->boldRow($sheet, $r, 12);
                     break;
@@ -2018,12 +2026,19 @@ final class ReportXlsxExporter
         }
         $money = static fn (mixed $v): string => number_format((float) $v, 2, ',', ' ') . ' Kč';
         $depreciation = (float) ($spread['depreciation'] ?? 0);
+        $later = is_array($spread['later_dated'] ?? null) ? $spread['later_dated'] : null;
         $sheet->setCellValueExplicit($cell, 'Průběžné časové rozlišení a odpisy mimo deník: náklady a výnosy dokladů s obdobím od–do'
             . ' rozložené poměrně podle dnů do rozvahového dne, zbytek jako náklady příštích období ('
             . $money($spread['prepaid_expense'] ?? 0) . ') a výnosy příštích období (' . $money($spread['deferred_revenue'] ?? 0)
             . ').' . ((int) round($depreciation * 100) !== 0
                 ? ' Účetní odpisy majetku za uplynulé měsíce, které ještě nejsou zaúčtované: ' . $money($depreciation) . '.'
                 : '')
+            . ($later !== null && (int) ($later['entries'] ?? 0) > 0
+                ? ' Rozpuštění a odpisy zaúčtované s datem po rozvahovém dni jsou započtené za uplynulou dobu: výnosy příštích období '
+                    . $money($later['deferred_revenue'] ?? 0) . ', náklady příštích období ' . $money($later['prepaid_expense'] ?? 0)
+                    . ', odpisy ' . $money($later['depreciation'] ?? 0) . '.'
+                : '')
+            . (isset($spread['vh_effect']) ? ' Výsledek hospodaření se úpravou mění o ' . $money($spread['vh_effect']) . '.' : '')
             . ' Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.', DataType::TYPE_STRING);
         $sheet->getStyle($cell)->getFont()->setBold(true);
     }

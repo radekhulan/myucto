@@ -75,6 +75,57 @@ final class AccountViewPdfRendererTest extends TestCase
         self::assertStringStartsWith('%PDF', $renderer->render($this->data() + ['part' => 'balance', 'unit' => 'thousands', 'estimate' => $this->estimate()]));
     }
 
+    /**
+     * Souhrn nad tabulkou (VH k datu, zaúčtovaný VH do konce období zvýrazněný, odhady) a konec
+     * tabulky s VH k datu, zápisy s pozdějším datem a VH do konce období; s průběžným
+     * rozlišením označené účty, poznámka a můstek od VH k datu s úpravami.
+     */
+    public function testSummaryOnTopAndProfitRowsAtEnd(): void
+    {
+        $renderer = new AccountViewPdfRenderer();
+        $text = self::text($renderer->html($this->data() + ['part' => 'profit_loss', 'unit' => 'czk', 'estimate' => $this->estimate()]));
+        $order = [
+            'Výsledek hospodaření k 30.06.2099 -2 291 099,41',
+            'Zaúčtovaný výsledek do 31.12.2099 164 099,61',
+            'Odhad před zdaněním 54 238,97',
+            'Odhad po zdanění 43 931,97',
+            'tvoří zápisy zaúčtované s datem po 30.06.2099',
+            'NÁKLADY',
+            'Výsledek hospodaření k 30.06.2099 0,00 0,00 500,00 500,00',
+            'Zaúčtováno s datem po 30.06.2099 2 455 199,02',
+            'Výsledek hospodaření do 31.12.2099 2 455 699,02',
+            'Odhad do konce roku (nezaúčtováno)',
+        ];
+        $pos = 0;
+        foreach ($order as $needle) {
+            $found = mb_strpos($text, $needle, $pos);
+            self::assertNotFalse($found, 'Chybí nebo je mimo pořadí: ' . $needle);
+            $pos = $found + 1;
+        }
+        self::assertStringNotContainsString('S PRŮBĚŽNÝM ROZLIŠENÍM', $text);
+        self::assertStringNotContainsString('Zaúčtováno s datem po', self::text($renderer->html($this->data() + ['part' => 'profit_loss', 'unit' => 'czk'])),
+            'Bez odhadu (uzavřené období) řádky konce období nejsou.');
+
+        $estimate = $this->estimate();
+        $estimate['bridge'] = ['as_of' => '2099-06-30', 'ends_on' => '2099-12-31', 'vh_as_of' => 500.0, 'vh_as_of_posted' => 600.0,
+            'accrual_spread' => -100.0, 'vh_posted' => 164099.61, 'groups' => [
+                ['key' => 'deferred_revenue', 'amount' => 163599.61, 'spread' => 0.0],
+                ['key' => 'prepaid_expenses', 'amount' => 0.0, 'spread' => -100.0],
+            ]];
+        $spread = ['applied' => true, 'skipped_reason' => null, 'prepaid_expense' => 0.0, 'deferred_revenue' => 0.0, 'documents' => 0,
+            'depreciation' => 0.0, 'depreciation_assets' => 0, 'accrual_agenda' => 0.0, 'vh_effect' => -100.0,
+            'later_dated' => ['deferred_revenue' => 0.0, 'prepaid_expense' => 100.0, 'depreciation' => 0.0, 'entries' => 1], 'prev' => null];
+        $html = $renderer->html($this->data(['518' => 100.0]) + ['part' => 'profit_loss', 'unit' => 'czk', 'estimate' => $estimate, 'accrual_spread' => $spread]);
+        $text = self::text($html);
+        self::assertStringContainsString('Výsledek hospodaření k 30.06.2099 S PRŮBĚŽNÝM ROZLIŠENÍM 500,00', $text);
+        self::assertStringContainsString('518 * Ostatní služby', $text, 'Upravený účet je označený.');
+        self::assertStringContainsString('class="num strong spread"', $html);
+        self::assertStringContainsString('Žlutě označený účet obsahuje úpravu průběžného časového rozlišení a odpisů', $text);
+        self::assertStringContainsString('Rozpuštění a odpisy zaúčtované s datem po rozvahovém dni jsou započtené za uplynulou dobu', $text);
+        self::assertStringContainsString('Výsledek k 30.06.2099 s průběžným rozlišením 500,00', $text);
+        self::assertStringContainsString('(bez části započtené průběžným rozlišením − 100,00) + 0,00', $text);
+    }
+
     /** Pod činnostmi (před daní) jsou náklady a výnosy celkem za všechny činnosti, i v PDF. */
     public function testProfitLossHasTotalsForAllActivities(): void
     {
@@ -133,8 +184,11 @@ final class AccountViewPdfRendererTest extends TestCase
         ];
     }
 
-    /** @return array<string,mixed> */
-    private function data(): array
+    /**
+     * @param array<string,float> $spread účet => úprava průběžného rozlišení (MD − D), už v obratu
+     * @return array<string,mixed>
+     */
+    private function data(array $spread = []): array
     {
         $row = static fn (int $id, string $code, string $name, string $type, string $side, float $psMd, float $psD, float $toMd, float $toD): array => [
             'id' => $id, 'account_code' => $code, 'name' => $name, 'account_type' => $type, 'normal_side' => $side,
@@ -147,6 +201,12 @@ final class AccountViewPdfRendererTest extends TestCase
             $row(3, '518', 'Ostatní služby', 'expense', 'debit', 0.0, 0.0, 200.0, 0.0),
             $row(4, '602', 'Tržby z prodeje služeb', 'revenue', 'credit', 0.0, 0.0, 0.0, 700.0),
         ];
+        foreach ($raw as &$r) {
+            if (isset($spread[$r['account_code']])) {
+                $r['spread'] = $spread[$r['account_code']];
+            }
+        }
+        unset($r);
         $columns = StatementAccountColumns::build($raw, [['account_id' => 1, 'month' => '2099-06', 'md' => 500.0, 'd' => 0.0]],
             static fn (string $code): string => 'operating', ['operating', 'financial', 'unassigned', 'tax', 'transfer'],
             ['hide_zero' => true, 'analytics' => true, 'from' => '2099-01-01', 'month_from' => '2099-06-01', 'as_of' => '2099-06-30']);

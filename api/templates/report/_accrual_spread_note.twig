@@ -4,5 +4,7 @@
 Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne, zbytek je vykázán jako
 náklady příštích období ({{ accrual_spread.prepaid_expense|cz_money }} Kč) a výnosy příštích období ({{ accrual_spread.deferred_revenue|cz_money }} Kč).
 {% if accrual_spread.depreciation|default(0) != 0 %}Účetní odpisy majetku za uplynulé měsíce, které ještě nejsou zaúčtované: {{ accrual_spread.depreciation|cz_money }} Kč.
+{% endif %}{% set later = accrual_spread.later_dated|default(null) %}{% if later and later.entries > 0 %}Rozpuštění a odpisy zaúčtované s datem po rozvahovém dni jsou započtené za uplynulou dobu: výnosy příštích období {{ later.deferred_revenue|cz_money }} Kč, náklady příštích období {{ later.prepaid_expense|cz_money }} Kč, odpisy {{ later.depreciation|cz_money }} Kč.
+{% endif %}{% if accrual_spread.vh_effect is defined %}Výsledek hospodaření se úpravou mění o {{ accrual_spread.vh_effect|cz_money }} Kč.
 {% endif %}Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.</div>
 {% endif %}

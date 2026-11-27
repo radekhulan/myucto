@@ -44,9 +44,13 @@
         <thead><tr><th class="thl">Položka</th><th>Částka</th><th class="thl">Zdroj</th></tr></thead>
         <tbody>
         {% if estimate.bridge %}
+            {% if estimate.bridge.accrual_spread is defined and estimate.bridge.accrual_spread is not null %}
+            <tr><td>Výsledek k {{ estimate.bridge.as_of|cz_date }} s průběžným rozlišením</td><td class="num">{{ av.amt(estimate.bridge.vh_as_of, unit) }}</td><td>Výsledovka k datu výkazu (zaúčtováno {{ av.amt(estimate.bridge.vh_as_of_posted, unit) }}, průběžné rozlišení {{ e.signed(estimate.bridge.accrual_spread, unit) }})</td></tr>
+            {% else %}
             <tr><td>Zaúčtovaný výsledek k {{ estimate.bridge.as_of|cz_date }}</td><td class="num">{{ av.amt(estimate.bridge.vh_as_of, unit) }}</td><td>Výsledovka k datu výkazu</td></tr>
+            {% endif %}
             {% for g in estimate.bridge.groups %}
-            <tr><td class="indent">{{ bridgeLabels[g.key] ?? g.key }}, zaúčtováno po {{ estimate.bridge.as_of|cz_date }}</td><td class="num">{{ e.signed(g.amount, unit) }}</td><td>Účetní deník</td></tr>
+            <tr><td class="indent">{{ bridgeLabels[g.key] ?? g.key }}, zaúčtováno po {{ estimate.bridge.as_of|cz_date }}{% if g.spread is defined and g.spread != 0 %} (bez části započtené průběžným rozlišením {{ e.signed(g.spread, unit) }}){% endif %}</td><td class="num">{{ e.signed(g.amount, unit) }}</td><td>Účetní deník</td></tr>
             {% endfor %}
         {% endif %}
             <tr class="strong"><td>Zaúčtovaný výsledek do {{ estimate.period.ends_on|cz_date }}</td><td class="num">{{ av.amt(estimate.vh_posted, unit) }}</td><td>Náhled DPPO</td></tr>

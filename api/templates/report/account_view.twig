@@ -29,21 +29,29 @@
     .total td { font-weight: bold; border-top: 0.4pt solid #999; }
     .result td { font-weight: bold; }
     .warn { color: #b91c1c; font-weight: bold; margin-top: 2mm; }
+    .spread { background-color: #fef3c7; }
+    .header-scope { font-size: 7pt; color: #92400e; margin-bottom: 2mm; }
+    table.summary { border-collapse: collapse; margin-bottom: 1mm; }
+    table.summary td { font-size: 7pt; color: #555; padding: 1mm 5mm 1mm 0; vertical-align: top; }
+    table.summary strong { font-size: 11pt; color: #15131D; }
+    table.summary td.main { background-color: #ecfdf5; padding-left: 2mm; }
+    .summary-badge { font-size: 6pt; font-weight: bold; color: #92400e; background-color: #fef3c7; padding: 0.3mm 1mm; }
+    .summary-note { font-size: 6.5pt; color: #555; margin-bottom: 2mm; }
 {% include '_year_end_estimate_style.twig' %}
 </style>
 </head>
 <body>
 {% macro amt(v, unit) %}{% if unit == 'thousands' %}{{ (v / 1000)|round|number_format(0, ',', ' ') }}{% else %}{{ v|number_format(2, ',', ' ') }}{% endif %}{% endmacro %}
-{% macro amounts(a, unit, cls) %}{% import _self as m %}
+{% macro amounts(a, unit, cls) %}{% import _self as m %}{% set sp = a.spread is defined ? ' spread' : '' %}
 <td class="num {{ cls }}{% if a.ps_unusual|default(false) %} unusual{% endif %}">{{ m.amt(a.ps, unit) }}</td>
-<td class="num {{ cls }}">{{ m.amt(a.month, unit) }}</td>
-<td class="num {{ cls }}">{{ m.amt(a.ytd, unit) }}</td>
-<td class="num {{ cls }}{% if a.ks_unusual|default(false) %} unusual{% endif %}">{{ m.amt(a.ks, unit) }}</td>
+<td class="num {{ cls }}{{ sp }}">{{ m.amt(a.month, unit) }}</td>
+<td class="num {{ cls }}{{ sp }}">{{ m.amt(a.ytd, unit) }}</td>
+<td class="num {{ cls }}{{ sp }}{% if a.ks_unusual|default(false) %} unusual{% endif %}">{{ m.amt(a.ks, unit) }}</td>
 {% endmacro %}
 {% macro side(c, unit, classLabels) %}{% import _self as m %}
 {% if c is null %}<td colspan="6"></td>
 {% elseif c.kind == 'class' %}<td class="class" colspan="2">Třída {{ c.class }} · {{ classLabels[c.class] ?? '' }}</td>{{ m.amounts(c, unit, 'class') }}
-{% else %}{% set cls = c.kind == 'analytic' ? 'analytic' : 'strong' %}<td class="{{ cls }}">{% if c.kind == 'analytic' %}&nbsp;&nbsp;{% endif %}{{ c.account_code }}</td><td class="{{ cls }}">{{ c.name|slice(0, 34) }}</td>{{ m.amounts(c, unit, cls) }}
+{% else %}{% set cls = c.kind == 'analytic' ? 'analytic' : 'strong' %}<td class="{{ cls }}">{% if c.kind == 'analytic' %}&nbsp;&nbsp;{% endif %}{{ c.account_code }}{% if c.spread is defined %}&nbsp;*{% endif %}</td><td class="{{ cls }}">{{ c.name|slice(0, 34) }}</td>{{ m.amounts(c, unit, cls) }}
 {% endif %}
 {% endmacro %}
 {% import _self as m %}
@@ -66,6 +74,21 @@
     </tr>
 </table>
 <div class="note">Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu), se znaménkem podle typu účtu. Červeně = neobvyklá strana.{% if not columns.hide_zero %} Včetně nulových účtů.{% endif %}{% if not columns.analytics %} Bez analytických účtů.{% endif %}{% if dimension is defined and dimension and dimension.label %} Dimenze: {{ dimension.label }}.{% endif %}</div>
+{% include '_accrual_spread_note.twig' %}
+{% set spreadOn = accrual_spread is defined and accrual_spread and accrual_spread.applied %}
+{% set hasEstimate = estimate is defined and estimate and estimate.applicable %}
+{% set bridge = hasEstimate ? estimate.bridge|default(null) : null %}
+{% if hasEstimate %}
+<table class="summary">
+    <tr>
+        <td>Výsledek hospodaření k {{ as_of|cz_date }}{% if spreadOn %} <span class="summary-badge">S PRŮBĚŽNÝM ROZLIŠENÍM</span>{% endif %}<br><strong>{{ m.amt(bridge ? bridge.vh_as_of : estimate.vh_posted, unit) }}</strong></td>
+        <td class="main">Zaúčtovaný výsledek do {{ estimate.period.ends_on|cz_date }}<br><strong>{{ m.amt(estimate.vh_posted, unit) }}</strong></td>
+        <td>Odhad před zdaněním<br><strong>{{ m.amt(estimate.vh_before_tax, unit) }}</strong></td>
+        {% if estimate.tax is not null %}<td>Odhad po zdanění<br><strong>{{ m.amt(estimate.vh_after_tax, unit) }}</strong></td>{% endif %}
+    </tr>
+</table>
+{% if bridge and bridge.vh_as_of != bridge.vh_posted %}<div class="summary-note">Rozdíl mezi výsledkem k {{ as_of|cz_date }} a zaúčtovaným výsledkem do {{ estimate.period.ends_on|cz_date }} tvoří zápisy zaúčtované s datem po {{ as_of|cz_date }}{% if spreadOn %} bez části, kterou už započetlo průběžné rozlišení{% endif %} (rozpad v bloku odhadu pod tabulkou).</div>{% endif %}
+{% endif %}
 
 <table class="book">
     <thead>
@@ -88,13 +111,20 @@
             {% set rightLabel = line.key == 'activities' ? 'Výnosy celkem za všechny činnosti' : (line.key == 'section' ? 'Výnosy celkem' : (line.key == 'balance_with_result' ? 'Pasiva s výsledkem hospodaření' : 'Pasiva celkem')) %}
             <tr class="total"><td colspan="2">{{ leftLabel }}</td>{{ m.amounts(line.left, unit, '') }}<td class="gap"></td><td colspan="2">{{ rightLabel }}</td>{{ m.amounts(line.right, unit, '') }}</tr>
         {% elseif line.kind == 'result' %}
-            <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">{{ resultLabels[line.key] ?? line.key }}</td>{{ m.amounts(line.amounts, unit, '') }}</tr>
+            <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">{{ line.key == 'profit_row' ? 'Výsledek hospodaření k ' ~ as_of|cz_date : (resultLabels[line.key] ?? line.key) }}</td>{{ m.amounts(line.amounts, unit, '') }}</tr>
+            {% if line.key == 'profit_row' and bridge and bridge.vh_as_of != bridge.vh_posted %}
+            {% set later = bridge.vh_posted - bridge.vh_as_of %}
+            <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">Zaúčtováno s datem po {{ as_of|cz_date }}</td><td colspan="3"></td><td class="num">{{ m.amt(later, unit) }}</td></tr>
+            <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">Výsledek hospodaření do {{ bridge.ends_on|cz_date }}</td><td colspan="3"></td><td class="num">{{ m.amt(line.amounts.ks + later, unit) }}</td></tr>
+            {% endif %}
         {% endif %}
     {% endfor %}
     </tbody>
 </table>
 
-{% if estimate is defined and estimate and estimate.applicable %}{% include '_year_end_estimate.twig' %}{% endif %}
+{% if spreadOn %}<div class="note">* Žlutě označený účet obsahuje úpravu průběžného časového rozlišení a odpisů k {{ as_of|cz_date }}, jako by byla zaúčtovaná k tomu dni. V deníku není.</div>{% endif %}
+
+{% if hasEstimate %}{% include '_year_end_estimate.twig' %}{% endif %}
 
 {% if not checks.profit_matches %}
 <div class="warn">Výsledek hospodaření z rozvahových účtů ({{ m.amt(checks.profit_balance, unit) }}) se neshoduje s výsledkem z výsledkových účtů ({{ m.amt(checks.profit_loss, unit) }}).</div>

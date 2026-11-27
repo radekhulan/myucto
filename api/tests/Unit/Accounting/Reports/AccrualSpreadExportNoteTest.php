@@ -68,6 +68,56 @@ final class AccrualSpreadExportNoteTest extends TestCase
         }
     }
 
+    /**
+     * Rozvaha a výsledovka po účtech s volbou: poznámka s pozdějšími zápisy a dopadem na VH,
+     * upravený účet označený hvězdičkou a výplní, poslední řádek „Výsledek hospodaření k datu".
+     */
+    public function testXlsxAccountViewMarksAdjustedAccounts(): void
+    {
+        $raw = [
+            ['id' => 1, 'account_code' => '384', 'name' => 'Výnosy příštích období', 'account_type' => 'liability', 'normal_side' => 'credit',
+                'parent_id' => null, 'parent_code' => null, 'parent_name' => null, 'parent_normal_side' => null,
+                'ps_md' => 0.0, 'ps_d' => 1000.0, 'to_md' => 300.0, 'to_d' => 0.0, 'spread' => 300.0],
+            ['id' => 2, 'account_code' => '602', 'name' => 'Tržby z prodeje služeb', 'account_type' => 'revenue', 'normal_side' => 'credit',
+                'parent_id' => null, 'parent_code' => null, 'parent_name' => null, 'parent_normal_side' => null,
+                'ps_md' => 0.0, 'ps_d' => 0.0, 'to_md' => 0.0, 'to_d' => 300.0, 'spread' => -300.0],
+            ['id' => 3, 'account_code' => '221', 'name' => 'Bankovní účty', 'account_type' => 'asset', 'normal_side' => 'debit',
+                'parent_id' => null, 'parent_code' => null, 'parent_name' => null, 'parent_normal_side' => null,
+                'ps_md' => 1000.0, 'ps_d' => 0.0, 'to_md' => 0.0, 'to_d' => 0.0],
+        ];
+        $columns = \MyInvoice\Service\Accounting\Reports\StatementAccountColumns::build($raw, [],
+            static fn (string $code): string => 'operating', ['operating', 'financial', 'unassigned', 'tax', 'transfer'],
+            ['hide_zero' => true, 'analytics' => true, 'from' => '2094-01-01', 'month_from' => '2094-10-01', 'as_of' => '2094-10-31']);
+        $spread = self::SPREAD + ['vh_effect' => 300.0, 'later_dated' => ['deferred_revenue' => 300.0, 'prepaid_expense' => 0.0, 'depreciation' => 0.0, 'entries' => 1]];
+        $data = ['entity' => self::ENTITY, 'as_of' => '2094-10-31', 'period' => ['fiscal_year' => 2094], 'dimension' => null,
+            'checks' => ['profit_matches' => true], 'columns' => $columns, 'accrual_spread' => $spread];
+
+        $sheet = $this->load((new ReportXlsxExporter())->accountView($data, 'balance'))->getSheet(0);
+        $note = (string) $sheet->getCell('A6')->getValue();
+        self::assertStringContainsString('zaúčtované s datem po rozvahovém dni', $note);
+        self::assertStringContainsString('mění o 300,00 Kč', $note);
+        $marked = [];
+        $profitRow = null;
+        foreach ($sheet->getRowIterator(9) as $row) {
+            $r = $row->getRowIndex();
+            foreach (['A', 'G'] as $col) {
+                if (str_ends_with((string) $sheet->getCell($col . $r)->getValue(), ' *')) {
+                    $marked[] = trim((string) $sheet->getCell($col . $r)->getValue());
+                    self::assertSame('FEF3C7', $sheet->getStyle(chr(ord($col) + 5) . $r)->getFill()->getStartColor()->getRGB());
+                }
+            }
+            if ((string) $sheet->getCell('G' . $r)->getValue() === 'Výsledek hospodaření k 31.10.2094') {
+                $profitRow = $r;
+            }
+        }
+        self::assertSame(['384 *'], $marked);
+        self::assertNotNull($profitRow);
+
+        $plain = $data;
+        unset($plain['accrual_spread']);
+        self::assertStringNotContainsString('Průběžné', (string) $this->load((new ReportXlsxExporter())->accountView($plain, 'balance'))->getSheet(0)->getCell('A6')->getValue());
+    }
+
     /** @param array{bytes:string} $out */
     private function load(array $out): Spreadsheet
     {
