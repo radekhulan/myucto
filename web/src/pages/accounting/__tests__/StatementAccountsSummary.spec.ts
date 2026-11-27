@@ -136,6 +136,16 @@ describe.each(pages)('%s po účtech', (_name, page, part) => {
     expect(w.find('[data-test="accounts-summary-spread-badge"]').exists()).toBe(false)
   })
 
+  it('ke konci období bez můstku ukáže VH k datu z tabulky i s průběžným rozlišením', async () => {
+    m.accounts.mockResolvedValue(accountsReport({ as_of: '2099-12-31' }))
+    m.estimate.mockResolvedValue(estimate({ bridge: null }))
+    const w = mount(page, { global: { stubs } })
+    await flushPromises()
+    expect(w.get('[data-test="accounts-summary-as-of"]').text()).toContain('-1000000')
+    expect(w.get('[data-test="accounts-summary-posted"]').text()).toContain('164099.61')
+    expect(w.find('[data-test="accounts-summary-note"]').exists()).toBe(false)
+  })
+
   it('uzavřené období, filtr dimenze ani nepoužitelný odhad souhrn nemají', async () => {
     m.accounts.mockResolvedValue(accountsReport({ closed: true }))
     let w = mount(page, { global: { stubs } })

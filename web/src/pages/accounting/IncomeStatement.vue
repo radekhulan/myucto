@@ -338,7 +338,8 @@ onMounted(async () => {
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
       <StatementAccountsSummary v-if="yearEstimate && !accountsReport.closed && !accountsReport.dimension" :estimate="yearEstimate"
-        :as-of="accountsReport.as_of" :accrual-applied="!!accountsReport.accrual_spread?.applied" :format="fm" />
+        :as-of="accountsReport.as_of" :vh-table="accountsReport.profit_loss.profit_before_tax"
+        :accrual-applied="!!accountsReport.accrual_spread?.applied" :format="fm" />
       <StatementAccountsTable :report="accountsReport" part="profit_loss" :format="fm"
         :hide-zero="hideZero" :show-analytics="showAnalytics" :bridge="yearEstimate?.bridge ?? null"
         @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />

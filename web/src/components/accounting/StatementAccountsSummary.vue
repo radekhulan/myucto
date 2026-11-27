@@ -11,8 +11,13 @@ import { formatDate } from '@/composables/useFormat'
  */
 const props = defineProps<{
   estimate: YearEndTaxEstimate
-  /** Den výkazu; bez můstku (výkaz ke konci období) se VH k datu rovná zaúčtovanému VH. */
+  /** Den výkazu. */
   asOf: string
+  /**
+   * VH před zdaněním z tabulky. Bez můstku (výkaz ke konci období) je to VH k datu: s průběžným
+   * rozlišením se od zaúčtovaného VH liší o úpravy, které deník nenese.
+   */
+  vhTable?: number | null
   /** Tabulka je s průběžným časovým rozlišením a odpisy. */
   accrualApplied: boolean
   format: (value: number | null | undefined) => string
@@ -23,7 +28,7 @@ const { t } = useI18n()
 const bridge = computed(() => props.estimate.bridge ?? null)
 const asOfDate = computed(() => formatDate(bridge.value?.as_of ?? props.asOf))
 const endsOn = computed(() => formatDate(props.estimate.period.ends_on))
-const vhAsOf = computed(() => bridge.value ? bridge.value.vh_as_of : (props.estimate.vh_posted ?? null))
+const vhAsOf = computed(() => bridge.value ? bridge.value.vh_as_of : (props.vhTable ?? props.estimate.vh_posted ?? null))
 const hasTax = computed(() => props.estimate.tax !== undefined && props.estimate.tax !== null)
 
 function tone(value: number | null | undefined): string {
