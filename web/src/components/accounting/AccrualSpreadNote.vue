@@ -18,7 +18,7 @@ const { t } = useI18n()
       assets: spread.depreciation_assets ?? 0,
     }) }}
     <template v-if="(spread.later_dated?.entries ?? 0) > 0">
-      <span data-test="accrual-spread-later-dated">{{ t('accounting.accrual_spread.note_later_dated', {
+      <span data-test="accrual-spread-later-dated">{{ ' ' + t('accounting.accrual_spread.note_later_dated', {
         entries: spread.later_dated!.entries,
         deferred: format(spread.later_dated!.deferred_revenue),
         prepaid: format(spread.later_dated!.prepaid_expense),
@@ -26,7 +26,7 @@ const { t } = useI18n()
       }) }}</span>
     </template>
     <span v-if="spread.vh_effect !== undefined" data-test="accrual-spread-vh-effect">
-      {{ t('accounting.accrual_spread.note_vh_effect', { amount: format(spread.vh_effect) }) }}
+      {{ ' ' + t('accounting.accrual_spread.note_vh_effect', { amount: format(spread.vh_effect) }) }}
     </span>
   </p>
   <p v-else class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
