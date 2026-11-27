@@ -10,6 +10,8 @@ import type { DimensionSplits } from '@/api/dimensions'
 const props = defineProps<{
   dimensions: Record<number, number | null> | null | undefined
   splits?: DimensionSplits | null
+  /** Štítky nepřetékají šířku rodiče: dlouhý text se zkrátí, celý je v `title`. */
+  truncate?: boolean
 }>()
 
 const dims = useDimensions()
@@ -46,15 +48,22 @@ const chips = computed(() => [
       }
     }),
 ])
+
+function chipTitle(chip: { type: string; label: string; path: string }): string {
+  const value = chip.path ? `${chip.path} › ${chip.label}` : chip.label
+  // Zkrácený štítek musí v `title` nést i typ, jinak by z něj nešlo poznat, k čemu patří.
+  return props.truncate && chip.type ? `${chip.type}: ${value}` : value
+}
 </script>
 
 <template>
-  <span v-if="dims.enabled.value && chips.length > 0" class="inline-flex flex-wrap gap-1" data-test="dimension-chips">
+  <span v-if="dims.enabled.value && chips.length > 0" class="inline-flex flex-wrap gap-1"
+        :class="{ 'max-w-full min-w-0': truncate }" data-test="dimension-chips">
     <span v-for="chip in chips" :key="chip.key"
-          :title="chip.path ? `${chip.path} › ${chip.label}` : chip.label"
+          :title="chipTitle(chip)"
           class="inline-flex items-center gap-1 rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700 whitespace-nowrap"
-          :class="{ 'opacity-60': chip.closed }">
-      <span v-if="chip.type" class="text-primary-500">{{ chip.type }}:</span>{{ chip.label }}
+          :class="{ 'opacity-60': chip.closed, 'max-w-full min-w-0': truncate }">
+      <span v-if="chip.type" class="text-primary-500" :class="{ 'shrink-0': truncate }">{{ chip.type }}:</span><span :class="{ 'truncate min-w-0': truncate }">{{ chip.label }}</span>
     </span>
   </span>
 </template>

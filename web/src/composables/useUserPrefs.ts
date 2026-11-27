@@ -1,5 +1,6 @@
 import { ref, computed, watch, type ComputedRef } from 'vue'
-import { preferencesApi, type SavedFilter, type TablePrefs, type NavOrderPrefs } from '@/api/preferences'
+import { preferencesApi, type SavedFilter, type TablePrefs, type NavOrderPrefs, type DisplayPrefs } from '@/api/preferences'
+import { DISPLAY_PREFS_KEY, setLoadedDisplayPrefs, storedDisplayPrefs } from '@/composables/useDisplayPrefs'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { i18n } from '@/i18n'
@@ -23,6 +24,7 @@ let supplierWatchBound = false
 
 const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 let navSaveTimer: ReturnType<typeof setTimeout> | null = null
+let displaySaveTimer: ReturnType<typeof setTimeout> | null = null
 
 function stripTablePrefix(key: string): string {
   return key.startsWith('table.') ? key.slice('table.'.length) : key
@@ -34,6 +36,7 @@ function loadPrefs(): Promise<void> {
       const out: Record<string, TablePrefs> = {}
       for (const [k, v] of Object.entries(map ?? {})) {
         if (k === NAV_ORDER_KEY) { navOrder.value = (v as unknown as NavOrderPrefs) ?? {}; continue }
+        if (k === DISPLAY_PREFS_KEY) { setLoadedDisplayPrefs((v as unknown as DisplayPrefs) ?? {}); continue }
         if (k.startsWith('table.')) out[stripTablePrefix(k)] = v
       }
       prefsByPage.value = out
@@ -168,5 +171,30 @@ export async function resetNavOrder(): Promise<void> {
   if (navSaveTimer) { clearTimeout(navSaveTimer); navSaveTimer = null }
   try {
     await preferencesApi.deletePreferenceKey(NAV_ORDER_KEY)
+  } catch { /* 404 = už výchozí, ignoruj */ }
+}
+
+// ── Předvolby zobrazení (display.defaults, stav v useDisplayPrefs) ────────────
+
+/** Optimistic zápis + debounced PUT 800 ms (R14), stejný vzor jako patchPagePrefs. */
+export function patchDisplayPrefs(patch: DisplayPrefs): void {
+  storedDisplayPrefs.value = { ...storedDisplayPrefs.value, ...patch }
+  if (displaySaveTimer) clearTimeout(displaySaveTimer)
+  displaySaveTimer = setTimeout(() => { void flushDisplayPrefs() }, PREF_DEBOUNCE_MS)
+}
+
+function flushDisplayPrefs(): Promise<void> {
+  displaySaveTimer = null
+  return preferencesApi.putPreferenceKey(DISPLAY_PREFS_KEY, storedDisplayPrefs.value)
+    .then(() => undefined)
+    .catch(() => { useToast().warning(i18n.global.t('common.save_failed')) })
+}
+
+/** Návrat všech předvoleb zobrazení k výchozím = DELETE klíče. */
+export async function resetDisplayPrefs(): Promise<void> {
+  storedDisplayPrefs.value = {}
+  if (displaySaveTimer) { clearTimeout(displaySaveTimer); displaySaveTimer = null }
+  try {
+    await preferencesApi.deletePreferenceKey(DISPLAY_PREFS_KEY)
   } catch { /* 404 = už výchozí, ignoruj */ }
 }

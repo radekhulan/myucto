@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { formatMoney } from '@/composables/useFormat'
@@ -8,6 +8,8 @@ import { calendarYearRange } from '@/utils/accountingPeriod'
 import { journalAmount, journalForeignAmount } from '@/utils/journalAmount'
 import { canPair, pairLines } from '@/utils/journalPairs'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { useDimensions } from '@/composables/useDimensions'
+import { useNarrowContainer } from '@/composables/useNarrowContainer'
 
 /**
  * Rozpad účetního zápisu na účty (MD/DAL) jako samostatná karta.
@@ -34,9 +36,19 @@ const props = withDefaults(defineProps<{
   dateFrom?: string
   dateTo?: string
   contextDate?: string | null
-}>(), { dense: false })
+  /**
+   * Šířka karty v px, pod kterou se místo tabulky ukáže řádkový tvar (blok na
+   * souvztažnost, částka celá vpravo). Pro kartu ve sloupci formuláře vedle náhledu
+   * PDF, kde kontejner stránky pořád hlásí širokou plochu. `null` = jen podle kontejneru.
+   */
+  compactBelow?: number | null
+}>(), { dense: false, compactBelow: null })
 
 const { t } = useI18n()
+const dims = useDimensions()
+
+const root = ref<HTMLElement | null>(null)
+const narrow = useNarrowContainer(root, () => props.compactBelow)
 
 const paired = computed(() => canPair(props.lines))
 const pairs = computed(() => (paired.value ? pairLines(props.lines) : []))
@@ -119,6 +131,35 @@ const showsCostCenter = computed(() => props.lines.some(l => !!l.cost_center))
 
 const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
 
+type Leg = { side: 'debit' | 'credit'; line: JournalLine }
+function legsOf(p: { debit: JournalLine | null; credit: JournalLine | null }): Leg[] {
+  const legs: Leg[] = []
+  if (p.debit) legs.push({ side: 'debit', line: p.debit })
+  if (p.credit) legs.push({ side: 'credit', line: p.credit })
+  return legs
+}
+
+/** Celý název účtu do `title` — v řádkovém tvaru se název zkracuje. */
+function accountTitle(line: JournalLine): string {
+  const name = line.account_name ? `${line.account_code} ${line.account_name}` : String(line.account_code ?? '')
+  return `${name} · ${t('accounting.accounts.detail.statement')}`
+}
+
+/**
+ * Nese některá z nohou dimenzi druhu Středisko? Pak řádek „Středisko: …" jen opakuje
+ * štítek nad ním a v řádkovém tvaru se vynechá.
+ */
+function hasCostCenterChip(...lines: (JournalLine | null)[]): boolean {
+  return lines.some(line => {
+    if (!line) return false
+    const typeIds = [
+      ...Object.entries(line.dimensions ?? {}).filter(([, valueId]) => !!valueId).map(([typeId]) => Number(typeId)),
+      ...Object.entries(line.dimension_splits ?? {}).filter(([, shares]) => (shares?.length ?? 0) > 0).map(([typeId]) => Number(typeId)),
+    ]
+    return typeIds.some(id => dims.typeById.value.get(id)?.kind === 'cost_center')
+  })
+}
+
 function movementLink(line: JournalLine) {
   const fallback = calendarYearRange(props.contextDate)
   const from = props.dateFrom || fallback.from
@@ -135,8 +176,83 @@ function movementLink(line: JournalLine) {
 </script>
 
 <template>
-  <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+  <div ref="root" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
     <p v-if="lines.some(line => line.is_red_storno)" class="px-3 py-2 text-xs text-danger-600">{{ t('accounting.journal.red_storno') }}</p>
+    <!-- ── Úzká karta (sloupec formuláře vedle náhledu PDF) ──
+         Souvztažnost = blok: účty MD/DAL pod sebou se zkráceným názvem a štítky
+         dimenzí, částka vždy celá vpravo. Tabulka by tu sloupce mačkala a částky
+         ořízla. -->
+    <div v-if="narrow" class="divide-y divide-neutral-100" :class="dense ? 'text-xs' : 'text-sm'" data-test="journal-lines-compact">
+      <template v-if="paired">
+        <div v-for="p in pairs" :key="`c-${p.key}`" class="px-3 py-2 flex items-start gap-3" data-test="journal-compact-row">
+          <div class="min-w-0 flex-1 space-y-1">
+            <div v-for="leg in legsOf(p)" :key="leg.side" class="min-w-0">
+              <RouterLink :to="movementLink(leg.line)"
+                class="flex items-baseline gap-2 min-w-0 text-primary-600 hover:text-primary-700 hover:underline"
+                :title="accountTitle(leg.line)">
+                <span class="text-[10px] uppercase tracking-wide font-medium text-neutral-400 w-7 shrink-0">
+                  {{ leg.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}
+                </span>
+                <span class="font-mono font-medium shrink-0">{{ leg.line.account_code }}</span>
+                <span class="truncate min-w-0 text-neutral-600" data-test="journal-compact-account-name">{{ leg.line.account_name }}</span>
+              </RouterLink>
+              <div class="pl-9 min-w-0">
+                <DimensionChips class="mt-0.5 flex" truncate :dimensions="leg.line.dimensions" :splits="leg.line.dimension_splits" />
+              </div>
+            </div>
+            <div v-if="p.costCenter && !hasCostCenterChip(p.debit, p.credit)" class="pl-9 text-xs text-neutral-500 truncate"
+              :title="p.costCenter" data-test="journal-compact-cost-center">
+              {{ t('accounting.journal.cost_center') }}: {{ p.costCenter }}
+            </div>
+          </div>
+          <div class="shrink-0 text-right whitespace-nowrap font-mono font-medium text-neutral-900" data-test="journal-compact-amount">
+            {{ formatMoney(p.amount) }}
+            <div v-if="p.amountForeign != null && p.currencyCode" class="text-xs font-normal text-neutral-400">
+              {{ formatMoney(p.amountForeign, p.currencyCode) }}
+            </div>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div v-for="l in lines" :key="`c-${l.id}`" class="px-3 py-2 flex items-start gap-3" data-test="journal-compact-row">
+          <div class="min-w-0 flex-1">
+            <RouterLink :to="movementLink(l)"
+              class="flex items-baseline gap-2 min-w-0 text-primary-600 hover:text-primary-700 hover:underline"
+              :title="accountTitle(l)">
+              <span class="text-[10px] uppercase tracking-wide font-medium text-neutral-400 w-7 shrink-0">
+                {{ l.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}
+              </span>
+              <span class="font-mono font-medium shrink-0">{{ l.account_code }}</span>
+              <span class="truncate min-w-0 text-neutral-600" data-test="journal-compact-account-name">{{ l.account_name }}</span>
+            </RouterLink>
+            <div class="pl-9 min-w-0">
+              <DimensionChips class="mt-0.5 flex" truncate :dimensions="l.dimensions" :splits="l.dimension_splits" />
+            </div>
+            <div v-if="l.cost_center && !hasCostCenterChip(l)" class="pl-9 text-xs text-neutral-500 truncate"
+              :title="l.cost_center" data-test="journal-compact-cost-center">
+              {{ t('accounting.journal.cost_center') }}: {{ l.cost_center }}
+            </div>
+          </div>
+          <div class="shrink-0 text-right whitespace-nowrap font-mono font-medium text-neutral-900" data-test="journal-compact-amount">
+            {{ formatMoney(journalAmount(l)) }}
+            <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs font-normal text-neutral-400">
+              {{ formatMoney(journalForeignAmount(l) ?? 0, l.currency_code) }}
+            </div>
+          </div>
+        </div>
+      </template>
+      <div v-if="showsTotal" class="px-3 py-2 bg-neutral-50 space-y-1" data-test="journal-compact-total">
+        <div class="flex justify-between gap-3 font-semibold">
+          <span class="min-w-0">{{ t('accounting.journal.total') }}</span>
+          <span class="font-mono whitespace-nowrap shrink-0">{{ formatMoney(total) }}</span>
+        </div>
+        <div v-for="a in twoSidedAccounts" :key="`c-net-${a.code}`" class="flex justify-between gap-3 text-xs text-neutral-500">
+          <span class="min-w-0">{{ t('accounting.journal.net_on_account', { account: a.code }) }}</span>
+          <span class="font-mono whitespace-nowrap shrink-0">{{ formatMoney(Math.abs(a.net)) }}</span>
+        </div>
+      </div>
+    </div>
+    <template v-else>
     <!-- ── Desktop, souvztažnosti: MD účet | DAL účet | částka ──
          Na mobilu se tři sloupce s názvy účtů do šířky nevejdou, tam je z každé
          dvojice karta. -->
@@ -327,5 +443,6 @@ function movementLink(line: JournalLine) {
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>

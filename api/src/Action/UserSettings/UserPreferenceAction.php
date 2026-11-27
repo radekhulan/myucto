@@ -18,8 +18,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/user/preferences/{key}                                — upsert, vrací uložený payload
  *   DELETE /api/user/preferences/{key}                               — reset klíče, {"deleted": true}
  *
- * Povolené jsou `table.*`, `nav.order`, `keyboard.shortcuts` a klíče průvodců
- * (`onboarding.guide`, `payroll.guide`). Payload je opaque, omezený velikostí
+ * Povolené jsou `table.*`, `nav.order`, `keyboard.shortcuts`, `display.defaults`
+ * a klíče průvodců (`onboarding.guide`, `payroll.guide`). Payload je opaque, omezený velikostí
  * a hloubkou; vlastnictví vždy určuje přihlášený uživatel.
  */
 final class UserPreferenceAction
@@ -45,6 +45,12 @@ final class UserPreferenceAction
      */
     private const PAYROLL_GUIDE_KEY = 'payroll.guide';
 
+    /**
+     * Předvolby zobrazení — výchozí podoba sekcí a přepínačů napříč stránkami
+     * (rozbalené Zaúčtování/Dimenze v detailu dokladu, náhled PDF, výkazy po účtech).
+     */
+    private const DISPLAY_DEFAULTS_KEY = 'display.defaults';
+
     /** Nav order a klávesové zkratky jsou o úroveň hlubší než ploché table.* prefy. */
     private const MAX_DEPTH = 4;
 
@@ -64,6 +70,7 @@ final class UserPreferenceAction
             $valid[] = self::KEYBOARD_SHORTCUTS_KEY;
             $valid[] = self::ONBOARDING_KEY;
             $valid[] = self::PAYROLL_GUIDE_KEY;
+            $valid[] = self::DISPLAY_DEFAULTS_KEY;
             $keys = array_values(array_unique(array_intersect($keys, $valid)));
             if ($keys === []) {
                 return Json::ok($response, (object) []);
@@ -139,6 +146,7 @@ final class UserPreferenceAction
             || $key === self::KEYBOARD_SHORTCUTS_KEY
             || $key === self::ONBOARDING_KEY
             || $key === self::PAYROLL_GUIDE_KEY
+            || $key === self::DISPLAY_DEFAULTS_KEY
         ) {
             return true;
         }

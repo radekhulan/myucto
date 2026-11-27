@@ -1195,8 +1195,10 @@ useWindowRefresh(async () => {
       <ExtractionReviewModal v-if="reviewOpen" :invoice-ids="[invoice.id]" :only-flagged="false" @updated="onReviewUpdated" @close="onReviewClose" />
 
       <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
-      <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
-        <h1 class="text-2xl font-semibold flex items-center gap-3 flex-wrap min-w-0">
+      <!-- Hlavička se zalamuje podle místa, ne podle breakpointu: ve sloupci vedle náhledu PDF
+           by štítky vedle akcí dostaly tak úzký pruh, že by šel každý na vlastní řádek. -->
+      <div class="flex flex-wrap items-start justify-between gap-3 md:gap-4" data-test="detail-header">
+        <h1 class="text-2xl font-semibold flex items-center gap-x-3 gap-y-2 flex-wrap min-w-0 flex-[1_1_28rem] *:whitespace-nowrap *:max-w-full">
           <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
           <span v-else class="text-neutral-400 font-mono">#{{ invoice.id }}</span>
           <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(invoice.status)">
@@ -1229,7 +1231,7 @@ useWindowRefresh(async () => {
             :class="stockFullyReceived ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">
             {{ t('stock.receipt.received_badge', { received: stockReceivedTotal, total: stockRequestedTotal }) }}
           </span>
-          <span v-if="stockProposal?.pf_changed_after_receipt" class="text-xs px-2 py-0.5 rounded font-normal bg-warning-50 text-warning-600"
+          <span v-if="stockProposal?.pf_changed_after_receipt" class="text-xs px-2 py-0.5 rounded font-normal bg-warning-50 text-warning-600 truncate"
             :title="t('stock.receipt.pf_changed_warning')">
             ⚠ {{ t('stock.receipt.pf_changed_warning') }}
           </span>
@@ -1600,24 +1602,24 @@ useWindowRefresh(async () => {
       </div>
 
       <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
-      <div v-show="!isPhone || phoneDetailsOpen" data-test="detail-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-show="!isPhone || phoneDetailsOpen" data-test="detail-cards" class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4">
         <!-- Datumy -->
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.issue_date') }} / {{ t('purchase_invoice.fields.tax_date') }} / {{ t('purchase_invoice.fields.due_date') }}</h3>
           <dl class="space-y-2 text-sm">
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd></div>
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.tax_date') }}</dt><dd class="font-mono">{{ invoice.tax_date ? formatDate(invoice.tax_date) : '—' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.due_date) }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.tax_date') }}</dt><dd class="font-mono">{{ invoice.tax_date ? formatDate(invoice.tax_date) : '—' }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.due_date) }}</dd></div>
             <!-- Zdroj data přijetí rozhoduje o období odpočtu podle § 73 odst. 1 písm. a):
                  otisk dne importu není totéž co datum, které účetní vědomě zadala. -->
-            <div class="flex justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('purchase_invoice.fields.received_at') }}</dt>
               <dd class="text-right">
                 <span class="font-mono">{{ formatDate(invoice.received_at) }}</span>
                 <span v-if="invoice.received_at_source === 'import'" class="ml-1 text-xs text-warning-600">{{ t('purchase_invoice.fields.received_at_source_import') }}</span>
               </dd>
             </div>
-            <div v-if="invoice.paid_at" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.status.paid') }}</dt><dd class="font-mono text-success-600">{{ formatDate(invoice.paid_at) }}</dd></div>
+            <div v-if="invoice.paid_at" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.status.paid') }}</dt><dd class="font-mono text-success-600">{{ formatDate(invoice.paid_at) }}</dd></div>
           </dl>
         </div>
 
@@ -1626,23 +1628,23 @@ useWindowRefresh(async () => {
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.currency_payment_section') }}</h3>
           <dl class="space-y-2 text-sm">
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
-            <div v-if="invoice.exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }}</dt><dd class="font-mono">{{ invoice.exchange_rate }}</dd></div>
-            <div v-if="invoice.exchange_rate_date" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ t(`purchase_invoice.exchange_rate_source.${invoice.exchange_rate_source}`) }}</dd></div>
-            <div class="flex justify-between">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
+            <div v-if="invoice.exchange_rate" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }}</dt><dd class="font-mono">{{ invoice.exchange_rate }}</dd></div>
+            <div v-if="invoice.exchange_rate_date" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ t(`purchase_invoice.exchange_rate_source.${invoice.exchange_rate_source}`) }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('purchase_invoice.fields.prices_include_vat') }}</dt>
               <dd class="font-medium">{{ invoice.prices_include_vat ? t('common.yes') : t('common.no') }}</dd>
             </div>
             <template v-if="hasStoredAccount">
-              <div v-if="invoice.payment_iban" class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_iban }}</dd></div>
-              <div v-else class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
-              <div v-if="invoice.payment_bic" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
-              <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
-              <div v-if="invoice.payment_account_source" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
+              <div v-if="invoice.payment_iban" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_iban }}</dd></div>
+              <div v-else class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
+              <div v-if="invoice.payment_bic" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
+              <div v-if="invoice.payment_variable_symbol" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
+              <div v-if="invoice.payment_account_source" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
             </template>
             <!-- Způsob úhrady. U jiného než převodu zvýrazněný — je to důvod, proč se
                  faktura neobjeví v platebních příkazech, a to musí být na první pohled vidět. -->
-            <div class="flex justify-between gap-2 pt-2 border-t border-neutral-100">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right pt-2 border-t border-neutral-100">
               <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
               <dd>
                 <span v-if="isNonTransferPayment"
@@ -1665,19 +1667,19 @@ useWindowRefresh(async () => {
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.classification.section') }}</h3>
           <dl class="space-y-2 text-sm">
-            <div class="flex justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('purchase_invoice.fields.reverse_charge') }}</dt>
               <dd class="font-medium text-right" :class="invoice.reverse_charge ? 'text-warning-600' : 'text-neutral-700'">
                 {{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}
               </dd>
             </div>
-            <div class="flex justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('purchase_invoice.fields.vendor_is_vat_payer') }}</dt>
               <dd class="font-medium text-right" :class="invoice.vendor_is_vat_payer === false ? 'text-warning-600' : 'text-neutral-700'">
                 {{ invoice.vendor_is_vat_payer === false ? t('common.no') : t('common.yes') }}
               </dd>
             </div>
-            <div class="flex justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>
               <dd class="font-medium text-right" :class="deductionClass(effectiveDeduction)" data-test="effective-vat-deduction">
                 <template v-if="effectiveDeduction === 'mixed'">{{ t('purchase_invoice.vat_treatment.mixed') }}</template>
@@ -1688,7 +1690,7 @@ useWindowRefresh(async () => {
               </dd>
             </div>
             <ul v-if="effectiveDeduction === 'mixed'" class="space-y-1 text-xs text-neutral-600" data-test="vat-treatment-parts">
-              <li v-for="(p, i) in vatTreatment?.parts ?? []" :key="i" class="flex justify-between gap-3">
+              <li v-for="(p, i) in vatTreatment?.parts ?? []" :key="i" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
                 <span>{{ deductionLabel(p.vat_deduction, p.vat_deduction_percent) }}</span>
                 <span class="font-mono whitespace-nowrap">{{ t('purchase_invoice.vat_treatment.part_amounts', { base: formatMoney(p.base_amount, invoice.currency), vat: formatMoney(p.vat_amount, invoice.currency) }) }}</span>
               </li>
@@ -1703,10 +1705,10 @@ useWindowRefresh(async () => {
         <div v-if="invoice.payment_currency_id" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.payment_currency.toggle') }}</h3>
           <dl class="space-y-2 text-sm">
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.currency') }}</dt><dd class="font-mono">{{ invoice.payment_currency || '—' }}</dd></div>
-            <div v-if="invoice.payment_exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.rate') }}</dt><dd class="font-mono">{{ invoice.payment_exchange_rate }}</dd></div>
-            <div v-if="invoice.paid_amount_payment_ccy" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.paid_payment_ccy') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount_payment_ccy, invoice.payment_currency || '') }}</dd></div>
-            <div v-if="invoice.exchange_diff_base !== null" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.exchange_diff') }}</dt><dd class="font-mono" :class="(invoice.exchange_diff_base ?? 0) < 0 ? 'text-danger-500' : 'text-success-600'">{{ formatMoney(invoice.exchange_diff_base, 'CZK') }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.currency') }}</dt><dd class="font-mono">{{ invoice.payment_currency || '—' }}</dd></div>
+            <div v-if="invoice.payment_exchange_rate" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.rate') }}</dt><dd class="font-mono">{{ invoice.payment_exchange_rate }}</dd></div>
+            <div v-if="invoice.paid_amount_payment_ccy" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.paid_payment_ccy') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount_payment_ccy, invoice.payment_currency || '') }}</dd></div>
+            <div v-if="invoice.exchange_diff_base !== null" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.exchange_diff') }}</dt><dd class="font-mono" :class="(invoice.exchange_diff_base ?? 0) < 0 ? 'text-danger-500' : 'text-success-600'">{{ formatMoney(invoice.exchange_diff_base, 'CZK') }}</dd></div>
           </dl>
         </div>
       </div>

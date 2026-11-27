@@ -14,6 +14,7 @@ import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { journalEntryLink } from '@/utils/journalSourceLink'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
+import { useDisplayDefault } from '@/composables/useDisplayPrefs'
 
 /**
  * Sbalená sekce „Zaúčtování" na detailu faktury — kontace dokladu tak, jak ji
@@ -24,7 +25,7 @@ import { useWindowRefresh } from '@/composables/useWindowRefresh'
  * se muselo opustit doklad. Sekce se načítá na pozadí a zobrazí se jen tehdy,
  * když zaúčtování existuje — nezaúčtovaný doklad ani firma v daňové evidenci
  * o prázdnou lištu nezakopne. Default je sbalený stav: hlavní obsah detailu
- * jsou pořád položky.
+ * jsou pořád položky. Rozbalení napoprvé řídí Předvolby zobrazení uživatele.
  */
 const props = withDefaults(defineProps<{
   source: JournalSectionSource
@@ -51,8 +52,15 @@ const emit = defineEmits<{ reposted: []; repost: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 
+/**
+ * Pod touto šířkou karty kontace (px) se rozpad na účty ukáže v řádkovém tvaru.
+ * Tabulka MD | DAL | Středisko | Částka potřebuje kolem 900 px; ve sloupci formuláře
+ * vedle náhledu PDF by se jinak středisko lámalo po slovech a částky ořízly.
+ */
+const POSTING_COMPACT_BELOW = 880
+
 const entries = ref<JournalEntryWithLines[]>([])
-const open = ref(false)
+const open = useDisplayDefault('posting_open')
 const failed = ref(false)
 const repostOpen = ref(false)
 const originRef = ref<InstanceType<typeof PostingOriginRow> | null>(null)
@@ -163,7 +171,7 @@ defineExpose({ reload: () => load(props.docId, true) })
 
 <template>
   <div v-if="visible" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-    <button type="button" @click="open = !open"
+    <button type="button" @click="open = !open" :aria-expanded="open" data-test="document-posting-toggle"
       class="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-neutral-50 cursor-pointer"
       :class="open ? 'border-b border-neutral-200' : ''">
       <span class="flex items-center gap-2">
@@ -174,7 +182,7 @@ defineExpose({ reload: () => load(props.docId, true) })
         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
       </svg>
     </button>
-    <div v-show="open" class="px-5 py-4 space-y-5">
+    <div v-show="open" class="px-5 py-4 space-y-5" data-test="document-posting-body">
       <p v-if="advance" class="text-sm text-neutral-600">
         {{ advancePaid ? t('accounting.journal.document_posting.advance_posted') : t('accounting.journal.document_posting.advance_unpaid') }}
       </p>
@@ -183,9 +191,9 @@ defineExpose({ reload: () => load(props.docId, true) })
       </p>
       <div v-for="entry in entries" :key="entry.id">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <span class="flex items-center gap-2 text-xs text-neutral-500">
-            <span class="font-medium text-neutral-700">{{ entry.document_no || `#${entry.id}` }}</span>
-            <span>{{ formatDate(entry.entry_date) }}</span>
+          <span class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700 whitespace-nowrap">{{ entry.document_no || `#${entry.id}` }}</span>
+            <span class="whitespace-nowrap">{{ formatDate(entry.entry_date) }}</span>
             <span v-if="isReversal(entry)" class="px-1.5 py-0.5 rounded bg-danger-50 text-danger-500 font-medium">
               {{ t('accounting.journal.document_posting.reversal') }}
             </span>
@@ -197,7 +205,7 @@ defineExpose({ reload: () => load(props.docId, true) })
                 ? t('accounting.journal.document_posting.relation_advance_payment')
                 : t('accounting.journal.document_posting.relation_advance_final') }}
             </span>
-            <span v-if="entry.description" class="text-neutral-400 truncate max-w-[24rem]">{{ entry.description }}</span>
+            <span v-if="entry.description" class="text-neutral-400 truncate min-w-0 max-w-full sm:max-w-[24rem]" :title="entry.description">{{ entry.description }}</span>
           </span>
           <span class="flex flex-wrap items-center gap-2">
             <!-- Administrativní zásah do už zaúčtovaného dokladu → warning, ne primary. -->
@@ -218,7 +226,7 @@ defineExpose({ reload: () => load(props.docId, true) })
             </RouterLink>
           </span>
         </div>
-        <JournalLinesTable :lines="entry.lines" :context-date="entry.entry_date" />
+        <JournalLinesTable :lines="entry.lines" :context-date="entry.entry_date" :compact-below="POSTING_COMPACT_BELOW" />
         <!-- Souvisí: protějšky v grafu doklad ↔ úhrada. Panel si data tahá sám
              podle entry-id a když nic nenajde, nevykreslí se. -->
         <JournalRelatedPanel class="mt-3 block" :entry-id="entry.id"

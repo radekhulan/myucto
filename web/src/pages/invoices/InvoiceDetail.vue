@@ -2555,8 +2555,10 @@ useWindowRefresh(async () => {
           :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
         <RouterLink :to="listNav.listPath.value ?? '/invoices'" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('invoice.back_to_list') }}</RouterLink>
       </div>
-      <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
-        <h1 class="text-2xl font-semibold flex items-center gap-3 flex-wrap min-w-0">
+      <!-- Hlavička se zalamuje podle místa, ne podle breakpointu: ve sloupci vedle náhledu PDF
+           by štítky vedle akcí dostaly tak úzký pruh, že by šel každý na vlastní řádek. -->
+      <div class="flex flex-wrap items-start justify-between gap-3 md:gap-4" data-test="detail-header">
+        <h1 class="text-2xl font-semibold flex items-center gap-x-3 gap-y-2 flex-wrap min-w-0 flex-[1_1_28rem] *:whitespace-nowrap *:max-w-full">
           <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
           <span v-else class="text-neutral-400 font-mono">{{ t('invoice.draft_id', { id: invoice.id }) }}</span>
           <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(displayStatus(invoice.status, invoice.payment_status))">
@@ -3294,7 +3296,7 @@ useWindowRefresh(async () => {
         {{ phoneDetailsOpen ? t('invoice.phone.details_hide') : t('invoice.phone.details_show') }}
         <svg class="h-4 w-4 transition-transform" :class="phoneDetailsOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.chevron" /></svg>
       </button>
-      <div v-show="!isPhone || phoneDetailsOpen" class="grid grid-cols-1 md:grid-cols-3 gap-4" data-test="invoice-detail-cards">
+      <div v-show="!isPhone || phoneDetailsOpen" class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4" data-test="invoice-detail-cards">
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">
             {{ t('invoice.issue_date') }}
@@ -3302,44 +3304,44 @@ useWindowRefresh(async () => {
             / {{ t('invoice.due_date') }}
           </h3>
           <dl class="space-y-1.5 text-sm">
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.issue_date') }}</dt><dd>{{ formatDate(invoice.issue_date) }}</dd></div>
-            <div v-if="invoice.tax_date && !isProforma" class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.tax_date') }}</dt><dd>{{ formatDate(invoice.tax_date) }}</dd></div>
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.due_date') }}</dt><dd>{{ formatDate(invoice.due_date) }}</dd></div>
-            <div v-if="invoice.calendar_contract_ref" class="flex justify-between gap-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('invoice.issue_date') }}</dt><dd>{{ formatDate(invoice.issue_date) }}</dd></div>
+            <div v-if="invoice.tax_date && !isProforma" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('invoice.tax_date') }}</dt><dd>{{ formatDate(invoice.tax_date) }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('invoice.due_date') }}</dt><dd>{{ formatDate(invoice.due_date) }}</dd></div>
+            <div v-if="invoice.calendar_contract_ref" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('invoice.calendar_contract_ref') }}</dt>
               <dd class="text-right">{{ invoice.calendar_contract_ref }}</dd>
             </div>
-            <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-3">
+            <div v-if="invoice.payment_variable_symbol" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('invoice.payment_variable_symbol') }}</dt>
               <dd class="font-mono text-right">{{ invoice.payment_variable_symbol }}</dd>
             </div>
-            <div v-if="invoice.supplier_order_number" class="flex justify-between gap-3">
+            <div v-if="invoice.supplier_order_number" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('invoice.supplier_order_number') }}</dt>
               <dd class="font-mono text-right">{{ invoice.supplier_order_number }}</dd>
             </div>
-            <div v-if="invoiceIssuedBy(invoice)" class="flex justify-between gap-3" data-test="invoice-issued-by">
+            <div v-if="invoiceIssuedBy(invoice)" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right" data-test="invoice-issued-by">
               <dt class="text-neutral-500">{{ t('invoice.issued_by') }}</dt>
               <dd class="text-right">{{ invoiceIssuedBy(invoice) }}</dd>
             </div>
-            <div v-if="invoice.paid_at" class="flex justify-between"><dt class="text-neutral-500">{{ t('status.paid') }}</dt><dd>{{ formatDate(invoice.paid_at) }}</dd></div>
+            <div v-if="invoice.paid_at" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('status.paid') }}</dt><dd>{{ formatDate(invoice.paid_at) }}</dd></div>
           </dl>
         </div>
 
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('common.currency') }} &amp; {{ t('invoice.totals.vat') }}</h3>
           <dl class="space-y-1.5 text-sm">
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
-            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.language') }}</dt><dd>{{ invoice.language.toUpperCase() }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right"><dt class="text-neutral-500">{{ t('invoice.language') }}</dt><dd>{{ invoice.language.toUpperCase() }}</dd></div>
             <!-- Reverse charge se ukazuje v kartě „Daňové zařazení" níž (jeden domov
                  pro daňová pole), tady zůstává jen měna, jazyk, OSS doložka a úhrada. -->
             <!-- OSS řádek se ukazuje jen na dokladu, který OSS plnění opravdu má — jinak by
                  u drtivé většiny faktur jen přibyl prázdný řádek. Doklad v tomhle režimu nese
                  v PDF i ve veřejném náhledu doložku o odvodu daně ve státě spotřeby. -->
-            <div v-if="ossConsumerCountries !== null" class="flex justify-between gap-3" :title="t('invoice.oss.clause_hint')">
+            <div v-if="ossConsumerCountries !== null" class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right" :title="t('invoice.oss.clause_hint')">
               <dt class="text-neutral-500">{{ t('invoice.oss.clause_row') }}</dt>
               <dd class="text-right">{{ ossConsumerCountries || t('invoice.oss.clause_countries_unknown') }}</dd>
             </div>
-            <div class="flex justify-between">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 [&>dd]:ml-auto [&>dd]:text-right">
               <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
               <dd>{{ t('payment_method.' + (invoice.payment_method ?? 'bank_transfer')) }}</dd>
             </div>

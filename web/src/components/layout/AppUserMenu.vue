@@ -97,6 +97,10 @@ defineExpose({ button })
           <svg class="w-4 h-4 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6.75A1.75 1.75 0 0 1 4.75 5h14.5A1.75 1.75 0 0 1 21 6.75v10.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V6.75zM6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 13h.01M10 13h.01M13 13h.01M16 13h.01M8 16h8"/></svg>
           {{ t('keyboard_shortcuts.title') }}
         </component>
+        <component :is="link" v-if="!auth.isInstanceAdmin" to="/profile/display" :class="USER_MENU_ITEM" role="menuitem" data-test="user-menu-display" @click="open = false">
+          <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>
+          {{ t('display_prefs.title') }}
+        </component>
         <button
           v-if="canLockSession"
           type="button"

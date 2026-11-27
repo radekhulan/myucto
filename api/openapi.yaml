@@ -22554,7 +22554,7 @@ paths:
     get:
       tags: [User]
       summary: Uživatelské preference UI (globální per user)
-      description: 'Mapa pref_key → payload. Podporuje table.*, nav.order a keyboard.shortcuts; keys volitelný — výčtem omezí výsledek.'
+      description: 'Mapa pref_key → payload. Podporuje table.*, nav.order, keyboard.shortcuts a display.defaults (předvolby zobrazení); keys volitelný — výčtem omezí výsledek.'
       parameters:
         - { in: query, name: keys, required: false, schema: { type: string }, description: 'CSV výčet pref_key (např. table.invoices,nav.order,keyboard.shortcuts)' }
       responses:
@@ -22572,7 +22572,7 @@ paths:
     put:
       tags: [User]
       summary: Upsert uživatelské preference
-      description: 'Klíč je table.<page_key>, nav.order nebo keyboard.shortcuts. Body je přímo payload dané preference.'
+      description: 'Klíč je table.<page_key>, nav.order, keyboard.shortcuts nebo display.defaults. Body je přímo payload dané preference.'
       parameters:
         - { in: path, name: key, required: true, schema: { type: string, pattern: '^[a-z0-9_.]+$' } }
       requestBody:

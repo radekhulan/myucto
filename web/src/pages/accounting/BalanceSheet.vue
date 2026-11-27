@@ -30,6 +30,7 @@ import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.v
 import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
 import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
 import { useAccrualSpread } from '@/composables/useAccrualSpread'
+import { useDisplayDefault } from '@/composables/useDisplayPrefs'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -44,7 +45,9 @@ function onAccrualSpread(value: boolean) {
 }
 
 // Klientský přepínač Kč / tis. Kč (F4 R17) — jen formátování při renderu, data beze změny.
-const unit = ref<'czk' | 'thousands'>('czk')
+// Výchozí jednotky a přepínače výkazu po účtech z Předvoleb zobrazení; přepnutí
+// na stránce platí jen pro tuto stránku.
+const unit = useDisplayDefault('statement_unit')
 function fm(value: number | null | undefined): string {
   if (unit.value === 'czk') return formatMoney(value)
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
@@ -88,8 +91,12 @@ function queryParams() {
   }
 }
 
-const hideZero = ref(true)
-const showAnalytics = ref(true)
+// Předvolby načtené až po prvním načtení výkazu ho přenačtou (pohled Po účtech podle nich filtruje).
+function reloadAccountsView() {
+  if (view.value === 'accounts' && filters.period_id) void load()
+}
+const hideZero = useDisplayDefault('statement_hide_zero', reloadAccountsView)
+const showAnalytics = useDisplayDefault('statement_analytics', reloadAccountsView)
 
 function accountsParams(): Omit<StatementParams, 'scope'> {
   const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams

@@ -11,6 +11,7 @@ import {
 import { useDimensions } from '@/composables/useDimensions'
 import { applyPrefill } from '@/composables/useDocumentDimensions'
 import { useToast } from '@/composables/useToast'
+import { useDisplayDefault } from '@/composables/useDisplayPrefs'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 /**
@@ -76,10 +77,21 @@ const hasAutoFilled = computed(() =>
   Object.entries(autoFilled.value).some(([typeId, valueId]) => header.value[Number(typeId)] === valueId))
 
 /*
- * Sbalitelná karta je výchozím stavem zavřená. Neuložený návrh (předvyplnění)
- * ani výzva k přeúčtování se ale schovat nesmí, proto ji otevřou.
+ * Sbalitelná karta je výchozím stavem zavřená, pokud si uživatel v Předvolbách
+ * zobrazení nenastavil opak. Neuložený návrh (předvyplnění) ani výzva
+ * k přeúčtování se ale schovat nesmí, proto ji otevřou.
  */
-const open = ref(!props.collapsible || props.initiallyOpen)
+const defaultOpen = useDisplayDefault('dimensions_open')
+const open = ref(!props.collapsible || props.initiallyOpen || defaultOpen.value)
+let toggled = false
+// Předvolby se můžou načíst až po vykreslení; ruční rozbalení/sbalení má přednost.
+watch(defaultOpen, (value) => {
+  if (!toggled && props.collapsible && !props.initiallyOpen && !dirty.value && !needsRepost.value) open.value = value
+})
+function toggle() {
+  toggled = true
+  open.value = !open.value
+}
 watch([dirty, needsRepost], ([isDirty, repost]) => {
   if (isDirty || repost) open.value = true
 })
@@ -154,7 +166,7 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
            data-test="document-dimensions">
     <div class="flex items-center justify-between gap-2" :class="[open ? 'border-b border-neutral-200' : '', editable && dirty ? 'pr-5' : '']">
       <button type="button" class="flex-1 min-w-0 px-5 py-3 flex items-center justify-between gap-2 text-left hover:bg-neutral-50 cursor-pointer"
-        :aria-expanded="open" data-test="document-dimensions-toggle" @click="open = !open">
+        :aria-expanded="open" data-test="document-dimensions-toggle" @click="toggle">
         <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('dimensions.panel_title') }}</h3>
         <svg class="w-4 h-4 text-neutral-400 transition-transform shrink-0" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -169,8 +181,8 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
       <template v-else>
         <DimensionFields v-model="header" :types="singleTypes" :disabled="!editable" />
-        <div class="mt-2 flex flex-wrap items-center gap-2">
-          <DimensionChips :dimensions="{}" :splits="headerSplits" class="flex" data-test="document-splits" />
+        <div class="mt-2 flex flex-wrap items-center gap-2 min-w-0">
+          <DimensionChips :dimensions="{}" :splits="headerSplits" truncate class="flex" data-test="document-splits" />
           <button v-if="editable" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="document-split" @click="splitOpen = true">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
             {{ t('dimensions.split.open') }}
@@ -204,8 +216,8 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
     <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
     <template v-else>
       <DimensionFields v-model="header" :types="singleTypes" :disabled="!editable" />
-      <div class="mt-2 flex flex-wrap items-center gap-2">
-        <DimensionChips :dimensions="{}" :splits="headerSplits" class="flex" data-test="document-splits" />
+      <div class="mt-2 flex flex-wrap items-center gap-2 min-w-0">
+        <DimensionChips :dimensions="{}" :splits="headerSplits" truncate class="flex" data-test="document-splits" />
         <button v-if="editable" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="document-split" @click="splitOpen = true">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
           {{ t('dimensions.split.open') }}

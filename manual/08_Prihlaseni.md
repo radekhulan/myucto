@@ -189,6 +189,31 @@ Jazyk rozhraní přepnete tlačítkem s vlajkou v horní liště. **Jméno** (zo
 se v rozhraní a v logu činnosti) a **Jazyk** účtu (`cs` nebo `en`, používá se
 i pro e-mailové šablony) mění správce v `Systém → Uživatelé`.
 
+### 8.6.1 Předvolby zobrazení
+
+Výchozí podobu sekcí a přepínačů na stránkách si nastavíte jednou a platí pro váš
+účet na všech zařízeních.
+
+1. Klikněte na své jméno vpravo nahoře a zvolte **Předvolby zobrazení**.
+2. Zapněte nebo vypněte požadované volby. Změny se ukládají automaticky.
+
+| Volba | Co ovlivní |
+|---|---|
+| Rozbalovat sekci Zaúčtování v detailu dokladů | Kontace se na detailu vydané a přijaté faktury a ostatní položky ukáže hned, bez rozkliknutí. Výchozí stav je sbalená sekce. |
+| Rozbalovat sekci Dimenze v detailu dokladů | Dimenze hlavičky dokladu jsou na detailu faktury hned vidět. Chybí-li povinná dimenze, sekce se rozbalí vždy. |
+| Otevírat náhled automaticky | Náhled originálu (PDF) se v detailu a editoru přijaté a vydané faktury a pokladního dokladu otevře sám. |
+| Umístění náhledu | **Vedle formuláře**, nebo **Pod formulářem**. Když se náhled vedle formuláře nevejde, ukáže se pod ním. |
+| Jednotky výkazu | V jakých jednotkách (**Kč**, nebo **tis. Kč**) se otevře rozvaha a výsledovka. |
+| Skrýt nulové účty, Zobrazit analytiky | Výchozí stav přepínačů v pohledu **Po účtech** rozvahy a výsledovky. |
+| Rozbalovat rozpad odhadu do konce roku | Blok **Odhad do konce roku** ve výkazech ukáže rovnou podrobný rozpad. |
+
+Předvolba určuje jen to, jak se stránka otevře. Když sekci na detailu rozbalíte
+nebo sbalíte ručně, případně přepnete jednotky či přepínač na výkazu, předvolba
+se nezmění. Náhled originálu si detail a editor pamatují zvlášť pro každou
+agendu; změna předvolby náhledu tento zapamatovaný stav přepíše, takže nová
+předvolba začne platit všude. Tlačítkem **Obnovit výchozí** vrátíte všechny
+volby do původního stavu.
+
 ## 8.7 Krok za krokem: zamknutí a odemknutí aplikace
 
 ### 8.7.1 Zamknutí hned

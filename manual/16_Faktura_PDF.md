@@ -355,8 +355,12 @@ s konkrétní hláškou u každého selhaného čísla dokladu. Dávka je omezen
 **Automatické zaúčtování při vystavení** nastavuje admin, viz
 [§ 96.11](96_Nastaveni.md#969-krok-za-krokem-automaticke-uctovani).
 
-**Sekce Zaúčtování na detailu.** U zaúčtované faktury se pod položkami rozbalí
-sekce **Zaúčtování** s kontací tak, jak je v deníku. Kromě odkazu **Otevřít v deníku** má:
+**Sekce Zaúčtování na detailu.** U zaúčtované faktury je pod položkami sekce
+**Zaúčtování** s kontací tak, jak je v deníku. Sekce je sbalená, rozbalenou ji
+můžete mít v [Předvolbách zobrazení](08_Prihlaseni.md#861-predvolby-zobrazeni).
+V úzkém sloupci (například vedle náhledu PDF) se rozpad na účty ukáže po řádcích:
+účty MD a Dal pod sebou se štítky dimenzí a částka celá vpravo. Kromě odkazu
+**Otevřít v deníku** má:
 
 - **Podle čeho se účtovalo** - [předkontaci](73_Ucetni_nastroje.md#735-krok-za-krokem-predkontace),
   ze které kontace vznikla (u vydané faktury podle klíče výnosu na hlavičce),

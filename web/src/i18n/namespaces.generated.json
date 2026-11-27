@@ -8,6 +8,7 @@
     "common",
     "crm",
     "demo",
+    "display_prefs",
     "eet",
     "favorites",
     "hosting",
@@ -1562,6 +1563,9 @@
       "domain_login",
       "mfa_setup",
       "recovery_codes"
+    ],
+    "profile-display": [
+      "reports"
     ],
     "profile-api-tokens": [
       "api_tokens"

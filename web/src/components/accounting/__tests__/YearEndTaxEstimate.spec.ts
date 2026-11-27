@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import YearEndTaxEstimate from '@/components/accounting/YearEndTaxEstimate.vue'
 import type { YearEndTaxEstimate as Estimate } from '@/api/accounting'
+import { setLoadedDisplayPrefs } from '@/composables/useDisplayPrefs'
 
 const getYearEndTaxEstimate = vi.fn()
 
@@ -61,7 +62,21 @@ async function expand(w: ReturnType<typeof mountBlock>) {
 }
 
 describe('YearEndTaxEstimate', () => {
-  beforeEach(() => getYearEndTaxEstimate.mockReset())
+  beforeEach(() => {
+    getYearEndTaxEstimate.mockReset()
+    setLoadedDisplayPrefs({})
+  })
+
+  it('s Předvolbou zobrazení ukáže rozpad rovnou, ruční sbalení ji nemění', async () => {
+    setLoadedDisplayPrefs({ estimate_open: true })
+    getYearEndTaxEstimate.mockResolvedValue(estimate())
+    const w = mountBlock({ asOf: '2099-11-27' })
+    await flushPromises()
+    expect(w.find('[data-test="estimate-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(w.find('[data-test="estimate-detail"]').exists()).toBe(true)
+    await expand(w)
+    expect(w.find('[data-test="estimate-detail"]').exists()).toBe(false)
+  })
 
   it('loads the estimate lazily and shows every figure with its source', async () => {
     getYearEndTaxEstimate.mockResolvedValue(estimate())

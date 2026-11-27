@@ -43,8 +43,8 @@ function update(typeId: number, valueId: number | null) {
   <div v-if="dims.enabled.value && shownTypes.length > 0"
        :class="compact ? 'flex flex-wrap gap-2' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'"
        data-test="dimension-fields">
-    <div v-for="type in shownTypes" :key="type.id" :class="compact ? 'min-w-[10rem] flex-1' : ''">
-      <label v-if="!compact" class="block text-sm font-medium text-neutral-700 mb-1">
+    <div v-for="type in shownTypes" :key="type.id" :class="compact ? 'min-w-[10rem] flex-1' : 'min-w-0'">
+      <label v-if="!compact" class="block text-sm font-medium text-neutral-700 mb-1 truncate" :title="type.name">
         {{ type.name }}
         <span v-if="type.level === 'global'" class="ml-1 text-xs font-normal text-neutral-400">{{ t('dimensions.level_global_short') }}</span>
       </label>

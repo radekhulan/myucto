@@ -33,6 +33,27 @@ export interface NavOrderPrefs {
   hidden?: string[]                       // položky skryté uživatelem
 }
 
+/**
+ * Předvolby zobrazení (`display.defaults`) — výchozí podoba sekcí a přepínačů napříč
+ * stránkami. Ruční změna na stránce je dál věcí té stránky; tohle je jen výchozí stav.
+ */
+export interface DisplayPrefs {
+  /** Sekce Zaúčtování v detailu dokladů rozbalená. */
+  posting_open?: boolean
+  /** Sekce Dimenze v detailu dokladů rozbalená. */
+  dimensions_open?: boolean
+  /** Náhled originálu (PDF) v detailu a editoru dokladu otevírat automaticky. */
+  preview_open?: boolean
+  preview_placement?: 'side' | 'below'
+  /** Výkazy po účtech: skrýt nulové účty / zobrazit analytiky. */
+  statement_hide_zero?: boolean
+  statement_analytics?: boolean
+  /** Jednotky rozvahy a výsledovky. */
+  statement_unit?: 'czk' | 'thousands'
+  /** Odhad do konce roku: rozpad rozbalený. */
+  estimate_open?: boolean
+}
+
 export const preferencesApi = {
   // filtry: jeden request na session — bez page_key vrací vše pro usera + aktuální firmu
   listFilters:  () => api.get<SavedFilter[]>('/user/filters').then(r => r.data),

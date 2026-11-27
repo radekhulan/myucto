@@ -5,6 +5,7 @@ import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { accountingApi, type YearEndTaxEstimate, type YearEndClosingItem, type YearEndBalanceEffect } from '@/api/accounting'
 import { closingProjectionLabelKey, closingProjectionSource, closingProjectionWarningLabelKey, type ClosingProjectionWarning } from '@/utils/closingProjection'
 import { formatDate } from '@/composables/useFormat'
+import { useDisplayDefault } from '@/composables/useDisplayPrefs'
 
 const props = withDefaults(defineProps<{
   periodId: number
@@ -20,7 +21,8 @@ const { t } = useI18n()
 const estimate = ref<YearEndTaxEstimate | null>(null)
 const loading = ref(false)
 const failed = ref(false)
-const expanded = ref(false)
+// Rozpad rozbalený napoprvé podle Předvoleb zobrazení; ruční přepnutí platí jen tady.
+const expanded = useDisplayDefault('estimate_open')
 
 let requestSeq = 0
 async function load() {

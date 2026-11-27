@@ -21,7 +21,7 @@ function signIn(type: string) {
 describe('AppUserMenu', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('běžné roli nabídne stejné položky jako dřív, se zkratkami a odkazy na /profile/password', () => {
+  it('běžné roli nabídne stejné položky jako dřív, se zkratkami, odkazy na /profile/password a Předvolbami zobrazení', () => {
     signIn('staff')
     useSessionSecurityStore().state = { session_state: 'active', unlock_methods: ['passkey'] } as never
     const wrapper = mount(AppUserMenu, { props: { link, open: true } })
@@ -31,6 +31,7 @@ describe('AppUserMenu', () => {
       '/profile/password?tab=passkeys',
       '/profile/password?tab=session-lock',
       '/profile/password?tab=shortcuts',
+      '/profile/display',
     ])
     expect(wrapper.text()).toContain('session_lock.lock_now')
     expect(wrapper.text()).toContain('nav.logout')
@@ -53,6 +54,7 @@ describe('AppUserMenu', () => {
       '/profile/password?tab=sso',
       '/profile/password?tab=session-lock',
       '/profile/password?tab=shortcuts',
+      '/profile/display',
     ])
   })
 
@@ -66,7 +68,16 @@ describe('AppUserMenu', () => {
       '/profile/password?tab=sso',
       '/profile/password?tab=session-lock',
       '/profile/password?tab=shortcuts',
+      '/profile/display',
     ])
+  })
+
+  it('technickému účtu Předvolby zobrazení nenabízí, stejně jako klávesové zkratky', () => {
+    signIn('instance_admin')
+    const wrapper = mount(AppUserMenu, { props: { link, open: true } })
+    const hrefs = wrapper.findAll('a').map(item => item.attributes('href'))
+    expect(hrefs).not.toContain('/profile/display')
+    expect(hrefs).not.toContain('/profile/password?tab=shortcuts')
   })
 
   it('kompaktní tlačítko ukáže iniciály a popisek pro čtečky', () => {

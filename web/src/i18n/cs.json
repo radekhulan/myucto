@@ -47025,5 +47025,32 @@
         "description": "Starší převod agendy POHODY vedené v daňové evidenci nezaložil pokladnu, takže pokladní doklady nepřevzal a doklady uhrazené v hotovosti vedl uhrazené bez pohybu nebo neuhrazené. Peněžní deník pak nesedí na POHODU a mění se základ daně z příjmů. Oprava potřebuje nový export agendy z POHODY a opravný převod, který spouští správce instalace podle manuálu."
       }
     }
+  },
+  "display_prefs": {
+    "title": "Předvolby zobrazení",
+    "subtitle": "Výchozí podoba sekcí a přepínačů na stránkách aplikace. Platí pro váš účet na všech zařízeních.",
+    "hint": "Předvolba určuje jen to, jak se stránka otevře. Když sekci nebo přepínač na stránce změníte ručně, předvolba zůstane, jak je. Změny se ukládají automaticky.",
+    "reset": "Obnovit výchozí",
+    "section_documents": "Detail dokladů",
+    "posting_open": "Rozbalovat sekci Zaúčtování v detailu dokladů",
+    "posting_open_hint": "Kontace dokladu (účty MD a Dal, částky, dimenze) se na detailu faktury i ostatní položky ukáže rovnou, bez rozkliknutí.",
+    "dimensions_open": "Rozbalovat sekci Dimenze v detailu dokladů",
+    "dimensions_open_hint": "Dimenze hlavičky dokladu (středisko, zakázka…) budou na detailu faktury rovnou vidět. Chybí-li povinná dimenze, sekce se rozbalí vždy.",
+    "section_preview": "Náhled originálu dokladu",
+    "preview_open": "Otevírat náhled automaticky",
+    "preview_open_hint": "Náhled originálu (PDF) se v detailu a editoru přijaté a vydané faktury a pokladního dokladu otevře sám. Změna předvolby přepíše stav, který si jednotlivé agendy zapamatovaly.",
+    "preview_placement": "Umístění náhledu",
+    "preview_placement_hint": "Kde se náhled ukáže, když je na obrazovce dost místa.",
+    "preview_placement_side": "Vedle formuláře",
+    "preview_placement_below": "Pod formulářem",
+    "section_statements": "Rozvaha a výsledovka",
+    "statement_unit": "Jednotky výkazu",
+    "statement_unit_hint": "V jakých jednotkách se rozvaha a výsledovka otevřou.",
+    "statement_hide_zero": "Skrýt nulové účty",
+    "statement_hide_zero_hint": "Výchozí stav přepínače v pohledu Po účtech.",
+    "statement_analytics": "Zobrazit analytiky",
+    "statement_analytics_hint": "Výchozí stav přepínače v pohledu Po účtech.",
+    "estimate_open": "Rozbalovat rozpad odhadu do konce roku",
+    "estimate_open_hint": "Blok Odhad do konce roku ve výkazech ukáže rovnou i podrobný rozpad."
   }
 }

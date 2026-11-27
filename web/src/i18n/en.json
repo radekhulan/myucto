@@ -47025,5 +47025,32 @@
         "description": "An older conversion of a POHODA agenda kept as tax records did not create the cash register, so it skipped the cash documents and left cash-paid documents paid without a movement or unpaid. The cash journal then differs from POHODA and the income tax base changes. The repair needs a new export of the agenda from POHODA and a repair conversion run by the installation administrator as described in the manual."
       }
     }
+  },
+  "display_prefs": {
+    "title": "Display preferences",
+    "subtitle": "Default look of sections and toggles across the application. Applies to your account on all devices.",
+    "hint": "A preference only sets how a page opens. Expanding a section or switching a toggle on the page by hand leaves the preference unchanged. Changes are saved automatically.",
+    "reset": "Restore defaults",
+    "section_documents": "Document detail",
+    "posting_open": "Expand the Posting section in document detail",
+    "posting_open_hint": "The posting of the document (debit and credit accounts, amounts, dimensions) is shown right away on invoice and other item detail, without a click.",
+    "dimensions_open": "Expand the Dimensions section in document detail",
+    "dimensions_open_hint": "Document header dimensions (cost centre, job…) are visible right away on invoice detail. When a required dimension is missing, the section always expands.",
+    "section_preview": "Original document preview",
+    "preview_open": "Open the preview automatically",
+    "preview_open_hint": "The original (PDF) preview opens by itself in the detail and editor of received and issued invoices and cash documents. Changing this preference overrides the state each agenda remembered.",
+    "preview_placement": "Preview placement",
+    "preview_placement_hint": "Where the preview appears when there is enough room on the screen.",
+    "preview_placement_side": "Next to the form",
+    "preview_placement_below": "Below the form",
+    "section_statements": "Balance sheet and income statement",
+    "statement_unit": "Statement units",
+    "statement_unit_hint": "Units in which the balance sheet and income statement open.",
+    "statement_hide_zero": "Hide zero accounts",
+    "statement_hide_zero_hint": "Default state of the toggle in the By accounts view.",
+    "statement_analytics": "Show analytical accounts",
+    "statement_analytics_hint": "Default state of the toggle in the By accounts view.",
+    "estimate_open": "Expand the year-end estimate breakdown",
+    "estimate_open_hint": "The Year-end estimate block in statements shows the detailed breakdown right away."
   }
 }

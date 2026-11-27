@@ -607,6 +607,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'profile/totp',           name: 'profile-totp',          redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'totp' } }) },
       { path: 'profile/password',       name: 'profile-password',      component: () => import('@/pages/PasswordChange.vue'), meta: {  } },
       { path: 'profile/shortcuts',      name: 'profile-shortcuts',     redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'shortcuts' } }) },
+      { path: 'profile/display',        name: 'profile-display',       component: () => import('@/pages/DisplayPreferences.vue') },
       { path: 'profile/api-tokens',     name: 'profile-api-tokens',    component: () => import('@/pages/ApiTokens.vue') },
       { path: 'profile/mcp-server',     name: 'profile-mcp-server',    component: () => import('@/pages/McpServer.vue') },
       { path: 'profile/passkeys',       name: 'profile-passkeys',      redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'passkeys' } }) },

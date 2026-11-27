@@ -269,6 +269,29 @@ final class UserPreferenceActionTest extends TestCase
         self::assertSame('invalid_pref_key', $bad['body']['error']['code']);
     }
 
+    public function testDisplayDefaultsKeyAcceptedFilteredAndDeleted(): void
+    {
+        // Předvolby zobrazení — výchozí rozbalení sekcí detailu dokladu a přepínače výkazů.
+        $payload = ['posting_open' => true, 'dimensions_open' => false, 'statement_unit' => 'thousands'];
+
+        $put = $this->call('put', 'PUT', ['args' => ['key' => 'display.defaults'], 'body' => $payload]);
+        self::assertSame(200, $put['status']);
+        self::assertSame($payload, $put['body']);
+
+        $filtered = $this->call('list', 'GET', ['query' => ['keys' => 'display.defaults']]);
+        self::assertSame($payload, $filtered['body']['display.defaults']);
+        self::assertCount(1, $filtered['body']);
+
+        $del = $this->call('delete', 'DELETE', ['args' => ['key' => 'display.defaults']]);
+        self::assertSame(200, $del['status']);
+        self::assertTrue($del['body']['deleted']);
+
+        // Sousední klíč v namespace display.* whitelistovaný není.
+        $bad = $this->call('put', 'PUT', ['args' => ['key' => 'display.other'], 'body' => ['a' => 'b']]);
+        self::assertSame(422, $bad['status']);
+        self::assertSame('invalid_pref_key', $bad['body']['error']['code']);
+    }
+
     public function testReadonlyRoleCanWriteOwnPreferences(): void
     {
         $put = $this->call('put', 'PUT', ['args' => ['key' => 'table.invoices'], 'body' => ['density' => 'compact'], 'role' => 'readonly']);
