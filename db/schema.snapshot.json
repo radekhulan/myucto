@@ -1255,7 +1255,8 @@
         "2349_supplier_tags_enabled.sql",
         "2350_clients_advance_paid_accounts.sql",
         "2351_other_item_offset_settlement.sql",
-        "2352_statement_504_group_accounts.sql"
+        "2352_statement_504_group_accounts.sql",
+        "2353_partner_settlement_accounts.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4675,11 +4676,13 @@
                 "note": "text NULL DEFAULT NULL",
                 "oss_default_supply_type": "enum('goods','services') NULL DEFAULT NULL",
                 "oss_mode": "enum('auto','never') NOT NULL DEFAULT 'auto'",
+                "payable_account_code": "varchar(10) NULL DEFAULT NULL",
                 "payment_due_default": "int(10) unsigned NULL DEFAULT NULL",
                 "payment_due_unit": "enum('days','month') NULL DEFAULT NULL",
                 "phone": "varchar(40) NULL DEFAULT NULL",
                 "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "proforma_number_format": "varchar(60) NULL DEFAULT NULL",
+                "receivable_account_code": "varchar(10) NULL DEFAULT NULL",
                 "related_party": "tinyint(1) NOT NULL DEFAULT 0",
                 "related_party_note": "varchar(255) NULL DEFAULT NULL",
                 "related_party_type": "enum('capital','otherwise','employment','close_person') NULL DEFAULT NULL",
@@ -28351,6 +28354,7 @@
                 "financial_office_code": "varchar(8) NULL DEFAULT NULL",
                 "fiscal_year_start_month": "tinyint(3) unsigned NOT NULL DEFAULT 1",
                 "flat_tax_band": "enum('none','band1','band2','band3') NOT NULL DEFAULT 'none'",
+                "foreign_payable_account_code": "varchar(10) NULL DEFAULT NULL",
                 "gemini_api_key_enc": "varbinary(512) NULL DEFAULT NULL",
                 "gemini_default_model": "varchar(128) NULL DEFAULT NULL",
                 "gemini_extractions_count": "int(10) unsigned NOT NULL DEFAULT 0",
