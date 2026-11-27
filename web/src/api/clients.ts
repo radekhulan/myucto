@@ -96,6 +96,8 @@ export interface Client {
   payable_account_code?: string | null
   /** Účet pohledávky vydaných dokladů odběratele (např. 311.200); null = předkontace dokladu. */
   receivable_account_code?: string | null
+  /** Závazek, který se u dokladů dodavatele použije: karta, jinak účet firmy pro zahraniční dodavatele. */
+  effective_payable_account_code?: string | null
   // Vrací UpdateClientAction: počet faktur, do kterých byla doplněna nově nastavená
   // výchozí kategorie nákladu/tržby (pro toast po uložení klienta).
   expense_category_backfilled?: number

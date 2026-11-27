@@ -72,7 +72,7 @@ import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
 import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
-import { useEditorPosting } from '@/composables/useEditorPosting'
+import { partnerCounterAccount, useEditorPosting } from '@/composables/useEditorPosting'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import { accountingApi, type PostingRule } from '@/api/accounting'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
@@ -1090,8 +1090,14 @@ const POSTABLE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty']
 const editorPostable = computed(() => editorPosting.enabled.value && POSTABLE_TYPES.includes(form.value.invoice_type))
 const canSaveAndPost = computed(() => editorPostable.value && editorPosting.canPost.value
   && (editedStatus.value !== 'draft' || auth.canWrite('invoices.issue')))
-/** Pohledávka, která platí bez volby na řádku — nápověda v poli protiúčtu. */
-const defaultCounterAccount = computed(() => editorPosting.ruleAccount('invoice.services.issued', 'debit') ?? '311')
+/**
+ * Pohledávka, která platí bez volby na řádku — nápověda v poli protiúčtu: účet pohledávky
+ * z karty odběratele (je v cache klientů editoru), jinak pohledávka z předkontace.
+ */
+const clientCounterAccount = computed(() => partnerCounterAccount('sale', selectedClient.value))
+const defaultCounterSource = computed(() => (clientCounterAccount.value ? 'partner' : 'rule') as 'partner' | 'rule')
+const defaultCounterAccount = computed(() => clientCounterAccount.value
+  || editorPosting.ruleAccount('invoice.services.issued', 'debit') || '311')
 /** Předkontace řádku doplní výnosový účet, který řádek ještě nemá (server pak totéž). */
 function applyItemRule(item: InvoiceItem, rule: PostingRule) {
   if (!item.revenue_account_code && rule.credit_account_code) item.revenue_account_code = rule.credit_account_code
@@ -3938,7 +3944,7 @@ useWindowTitle(
                   <ItemPostingFields v-if="editorPostable && itemAccountEditable(item)" direction="sale"
                     v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
                     :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
-                    :default-counter="defaultCounterAccount"
+                    :default-counter="defaultCounterAccount" :default-counter-source="defaultCounterSource"
                     @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
                   <label v-if="itemVatEditable(item)" :title="t('invoice.item_details.vat_classification_hint')"
                     class="flex items-center gap-2">
@@ -4152,7 +4158,7 @@ useWindowTitle(
                 class="mt-1.5" direction="sale" stacked
                 v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
                 :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
-                :default-counter="defaultCounterAccount"
+                :default-counter="defaultCounterAccount" :default-counter-source="defaultCounterSource"
                 @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
               <label v-if="itemVatEditable(item) && itemDetailsOpen.has(item)" class="mt-1.5 block text-xs font-medium text-neutral-600">
                 <span class="mb-1 block">{{ t('invoice.item_details.vat_classification') }}</span>

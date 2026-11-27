@@ -48,6 +48,16 @@ describe('ItemPostingFields', () => {
 
     expect(wrapper.emitted('update:counterAccount')).toBeUndefined()
   })
+
+  it('nápověda protiúčtu řekne, jestli účet je z karty partnera, nebo z předkontace', () => {
+    const placeholder = (source: 'rule' | 'partner') => mount(ItemPostingFields, {
+      props: { direction: 'purchase', ruleKey: null, counterAccount: null, rules: [], accounts: [], defaultCounter: '321.200', defaultCounterSource: source } as any,
+      global: { stubs: { ChartAccountSelect } },
+    }).findComponent(ChartAccountSelect).props('placeholder')
+
+    expect(placeholder('partner')).toBe('accounting.editor_posting.counter_default_partner')
+    expect(placeholder('rule')).toBe('accounting.editor_posting.counter_default')
+  })
 })
 
 describe('ItemPostingFields: předkontace podle typu dokladu', () => {

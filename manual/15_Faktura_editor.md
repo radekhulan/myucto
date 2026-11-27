@@ -817,10 +817,13 @@ doklady účtují pohledávku podle vlastní předkontace a zaúčtování to oh
 
 Bez protiúčtu na řádku a bez ručně zvolené předkontace jde pohledávka na **Účet pohledávky**
 z karty odběratele (např. 311.200 pachtovné, viz [Klienti](18_Klienti.md)), jinak na pohledávku
-z předkontace dokladu. Celý doklad má pohledávku na jednom účtu včetně DPH, takže ji úhrada
-uzavře. Dobropis k zaúčtované faktuře jde na účet, na kterém faktura leží. Vyúčtování zálohy
-vedené přímo na pohledávce (předkontace zúčtování zálohy se stejnými účty) a penále zůstávají
-na pohledávce z předkontace.
+z předkontace dokladu. Platí to i pro penále. Prázdné pole protiúčtu ukazuje účet, který se
+použije („z karty partnera“ nebo „z předkontace“), a po změně odběratele se přepočítá. Celý
+doklad má pohledávku na jednom účtu včetně DPH, takže ji úhrada uzavře. Dobropis k zaúčtované
+faktuře jde na účet, na kterém faktura leží. Vyúčtování zálohy vedené přímo na pohledávce
+(předkontace zúčtování zálohy se stejnými účty) zůstává na pohledávce z předkontace. Při
+přeúčtování přejde na nový účet z karty jen faktura bez úhrady, uhrazená celá nebo zčásti
+zůstane na účtu, na kterém je zaúčtovaná.
 
 **Členění DPH položky** zvolíte pod šipkou na konci řádku, kde je i účet položky. Výchozí
 **Automaticky podle sazby** kód odvodí ze sazby, jednotky a odběratele. Zvolený kód se při dalším

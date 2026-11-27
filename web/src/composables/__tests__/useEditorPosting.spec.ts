@@ -15,7 +15,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'double_entry' } }) }))
 
-import { useEditorPosting } from '../useEditorPosting'
+import { partnerCounterAccount, useEditorPosting } from '../useEditorPosting'
 
 describe('useEditorPosting: kdo vidí zaúčtování v editoru faktury', () => {
   it('jen čtení účetnictví nestačí', () => {
@@ -35,5 +35,22 @@ describe('useEditorPosting: kdo vidí zaúčtování v editoru faktury', () => {
     expect(useEditorPosting().canPost.value).toBe(false)
     m.auth.saveAndPostEnabled = true
     expect(useEditorPosting().canPost.value).toBe(true)
+  })
+})
+
+describe('partnerCounterAccount: nápověda protiúčtu z karty partnera', () => {
+  it('přijatý doklad bere závazek dodavatele včetně účtu pro zahraniční dodavatele', () => {
+    expect(partnerCounterAccount('purchase', { effective_payable_account_code: '321.300', receivable_account_code: '311.200' })).toBe('321.300')
+    expect(partnerCounterAccount('purchase', { effective_payable_account_code: null, receivable_account_code: '311.200' })).toBeNull()
+  })
+
+  it('vydaný doklad bere pohledávku odběratele', () => {
+    expect(partnerCounterAccount('sale', { effective_payable_account_code: '321.200', receivable_account_code: ' 311.200 ' })).toBe('311.200')
+    expect(partnerCounterAccount('sale', { effective_payable_account_code: '321.200', receivable_account_code: '' })).toBeNull()
+  })
+
+  it('bez partnera nic, platí předkontace', () => {
+    expect(partnerCounterAccount('sale', null)).toBeNull()
+    expect(partnerCounterAccount('purchase', undefined)).toBeNull()
   })
 })

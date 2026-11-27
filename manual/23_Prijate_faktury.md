@@ -717,8 +717,10 @@ pole, takže řádek nese celou dvojici účtů:
 
 - **Předkontace** vybere předkontaci řádku. Doplní nákladový účet (MD) a závazek (Dal), pokud je
   řádek ještě nemá. Vyplněný účet má vždy přednost.
-- **Účet Dal (závazek)** je protiúčet řádku, například 325 u účtenky. Prázdné pole použije závazek
-  z předkontace dokladu (obvykle 321). Zadat lze aktivní závazkový účet třídy 3 mimo DPH a zálohy.
+- **Účet Dal (závazek)** je protiúčet řádku, například 325 u účtenky. Prázdné pole použije účet
+  závazku z karty dodavatele, u zahraničního dodavatele účet firmy pro zahraniční dodavatele,
+  jinak závazek z předkontace dokladu (obvykle 321). Účet, který se použije, ukazuje prázdné pole
+  jako nápovědu („z karty partnera“ nebo „z předkontace“) a po změně dodavatele se přepočítá. Zadat lze aktivní závazkový účet třídy 3 mimo DPH a zálohy.
   Všechny řádky dokladu musí mít stejný protiúčet, protože úhrada z banky nebo pokladny uzavírá
   jeden závazek dokladu. U finální faktury navázané na zálohu a u daňového dokladu k platbě se
   protiúčet z řádku použít nedá.
@@ -738,7 +740,11 @@ Zúčtování zaplacené zálohy konečnou fakturou jde proti stejnému závazku
 k zaúčtované faktuře jde na účet, na kterém leží faktura, i když se mezitím změnila karta
 dodavatele. Výjimkou je doklad, který zúčtovává zálohu vedenou přímo na závazku (předkontace
 zúčtování zálohy se stejnými účty): ten zůstává na závazku z předkontace, protože tam leží úhrada
-zálohy. Změna karty nebo nastavení platí pro nově zaúčtované doklady, už zaúčtované se nepřeúčtují.
+zálohy. Změna karty nebo nastavení platí pro nově zaúčtované doklady, už zaúčtované se samy
+nepřeúčtují. Při přeúčtování (oprava dokladu, hromadné přeúčtování) přejde na nový účet jen doklad,
+který ještě nemá žádnou úhradu. Doklad uhrazený celý nebo zčásti (banka, karta, pokladna,
+zápočet) zůstane na účtu, na kterém je zaúčtovaný a který úhrada vyrovnala. Stejně se chová
+účet závazku pro účtenky z nastavení firmy.
 
 Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
 [Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.

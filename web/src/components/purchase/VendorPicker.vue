@@ -15,6 +15,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [v: number | null]
   'selected': [vendor: Client | null]
+  /** Karta vybraného dodavatele po výběru i po dotažení podle id (edit), bez dotazu navíc. */
+  'resolved': [vendor: Client | null]
 }>()
 
 const { t } = useI18n()
@@ -49,15 +51,17 @@ async function onSearch(q: string) {
 
 // Edit / externí nastavení modelValue: dotáhni dodavatele podle id kvůli zobrazení labelu.
 async function ensureLoaded(id: number | null) {
-  if (id === null) { selectedOption.value = null; return }
+  if (id === null) { selectedOption.value = null; emit('resolved', null); return }
   const existing = cache.value.find(c => c.id === id)
-  if (existing) { selectedOption.value = toOpt(existing); return }
+  if (existing) { selectedOption.value = toOpt(existing); emit('resolved', existing); return }
   try {
     const full = await clientsApi.get(id)
     merge([full])
     selectedOption.value = toOpt(full)
+    emit('resolved', full)
   } catch {
     selectedOption.value = { value: id, label: `#${id}` }
+    emit('resolved', null)
   }
 }
 
@@ -67,6 +71,7 @@ function onChange(id: number | string | null) {
   const vendor = numId === null ? null : (cache.value.find(c => c.id === numId) ?? null)
   selectedOption.value = vendor ? toOpt(vendor) : null
   emit('selected', vendor)
+  emit('resolved', vendor)
 }
 
 onMounted(() => { ensureLoaded(props.modelValue) })
@@ -79,7 +84,10 @@ async function reload() { await ensureLoaded(props.modelValue) }
 // Parent upravil kartu (např. z ARES/VIES) — obnov cache a popisek vybraného dodavatele.
 function upsert(c: Client) {
   merge([c])
-  if (props.modelValue === c.id) selectedOption.value = toOpt(c)
+  if (props.modelValue === c.id) {
+    selectedOption.value = toOpt(c)
+    emit('resolved', c)
+  }
   options.value = options.value.map(o => o.value === c.id ? toOpt(c) : o)
 }
 defineExpose({ reload, upsert })

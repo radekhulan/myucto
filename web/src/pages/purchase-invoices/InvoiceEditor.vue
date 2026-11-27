@@ -57,7 +57,7 @@ import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggesti
 import AccrualSuggestionHint from '@/components/accounting/AccrualSuggestionHint.vue'
 import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
 import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
-import { useEditorPosting } from '@/composables/useEditorPosting'
+import { partnerCounterAccount, useEditorPosting } from '@/composables/useEditorPosting'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import type { PostingRule } from '@/api/accounting'
 import { detectAccrualPeriod, type AccrualPeriod } from '@/utils/accrualPeriod'
@@ -1201,9 +1201,18 @@ function itemDetailsFilled(it: PurchaseInvoiceItem): boolean {
 const editorPosting = useEditorPosting()
 const postingErrorToast = useAccountingPeriodToast()
 onMounted(() => { void editorPosting.load() })
-/** Závazek, který platí bez volby na řádku — nápověda v poli protiúčtu. */
-const defaultCounterAccount = computed(() =>
-  editorPosting.ruleAccount(derivedIsFixedAsset.value ? 'invoice.dhm.received' : 'invoice.services.received', 'credit') ?? '321')
+/** Karta vybraného dodavatele (z VendorPickeru, bez dotazu navíc). */
+const vendorCard = ref<Client | null>(null)
+/**
+ * Závazek, který platí bez volby na řádku — nápověda v poli protiúčtu: účet z karty
+ * dodavatele, jinak účet firmy pro zahraniční dodavatele (server ho dává jako
+ * `effective_payable_account_code`), jinak závazek z předkontace dokladu.
+ */
+const vendorCounterAccount = computed(() =>
+  partnerCounterAccount('purchase', vendorCard.value?.id === form.value.vendor_id ? vendorCard.value : null))
+const defaultCounterSource = computed(() => (vendorCounterAccount.value ? 'partner' : 'rule') as 'partner' | 'rule')
+const defaultCounterAccount = computed(() => vendorCounterAccount.value
+  || editorPosting.ruleAccount(derivedIsFixedAsset.value ? 'invoice.dhm.received' : 'invoice.services.received', 'credit') || '321')
 /** Předkontace řádku doplní účet nákladu, který řádek ještě nemá (server pak totéž). */
 function applyItemRule(it: PurchaseInvoiceItem, rule: PostingRule) {
   if (!it.expense_account_code && rule.debit_account_code) it.expense_account_code = rule.debit_account_code
@@ -2296,6 +2305,7 @@ useWindowTitle(
                   ref="vendorPickerRef"
                   v-model="form.vendor_id"
                   @selected="onVendorSelected"
+                  @resolved="(v: Client | null) => { vendorCard = v }"
                 />
               </div>
               <ClientRegistryCheck :client-id="form.vendor_id" button-class="mt-[26px]" @updated="onVendorRegistryUpdated" />
@@ -2713,7 +2723,7 @@ useWindowTitle(
                   <ItemPostingFields v-if="editorPosting.enabled.value" direction="purchase"
                     v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
                     :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
-                    :default-counter="defaultCounterAccount"
+                    :default-counter="defaultCounterAccount" :default-counter-source="defaultCounterSource"
                     @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                   <label class="flex items-center gap-2 text-xs text-neutral-500">
                     <span class="shrink-0">{{ t('purchase_invoice.items.vat_classification') }}</span>
@@ -2883,7 +2893,7 @@ useWindowTitle(
                 <ItemPostingFields v-if="editorPosting.enabled.value" class="mt-2" direction="purchase" stacked
                   v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
                   :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
-                  :default-counter="defaultCounterAccount"
+                  :default-counter="defaultCounterAccount" :default-counter-source="defaultCounterSource"
                   @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                 <label class="mt-2 block text-xs text-neutral-600">
                   {{ t('purchase_invoice.items.vat_classification') }}

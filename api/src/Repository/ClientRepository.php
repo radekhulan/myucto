@@ -30,7 +30,8 @@ final class ClientRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT c.*, co.iso2 AS country_iso2, co.is_eu AS country_is_eu,
-                    cur.code AS currency_default, pl.name AS price_level_name
+                    cur.code AS currency_default, pl.name AS price_level_name,
+                    ' . self::effectivePayableSql() . '
                FROM clients c
                JOIN countries co ON co.id = c.country_id
                JOIN currencies cur ON cur.id = c.currency_default_id
@@ -214,6 +215,7 @@ final class ClientRepository
                        c.payment_due_default, c.payment_due_unit, c.default_payment_method, c.hourly_rate,
                        c.default_expense_category_id, c.default_revenue_category_id,
                        c.price_level_id, pl.name AS price_level_name,
+                       c.payable_account_code, c.receivable_account_code, " . self::effectivePayableSql() . ",
                        c.archived_at, co.iso2 AS country_iso2, co.is_eu AS country_is_eu,
                        (SELECT COUNT(*) FROM projects p WHERE p.client_id = c.id AND p.status = 'active' AND p.archived_at IS NULL) AS active_projects_count,
                        COALESCE(crc.revenue, 0) AS revenue,
@@ -941,6 +943,17 @@ final class ClientRepository
         $params[] = $supplierId;
         $this->db->pdo()->prepare('UPDATE clients SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?')
             ->execute($params);
+    }
+
+    /**
+     * Závazek, který se u dokladů dodavatele použije bez protiúčtu řádku: karta, jinak účet
+     * firmy pro zahraniční dodavatele ({@see PartnerSettlementAccount::partnerPayableSql}).
+     * Editor přijatého dokladu ho ukazuje jako nápovědu bez dalšího dotazu.
+     */
+    private static function effectivePayableSql(): string
+    {
+        return '(SELECT ' . PartnerSettlementAccount::partnerPayableSql('c', 'eps')
+            . ' FROM supplier eps WHERE eps.id = c.supplier_id) AS effective_payable_account_code';
     }
 
     public function setPriceLevel(int $id, int $supplierId, ?int $priceLevelId): void

@@ -151,27 +151,28 @@ final class PartnerSettlementAccount
     public function purchasePartnerAccount(int $supplierId, int $purchaseInvoiceId): ?string
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.payable_account_code, c.country_id AS vendor_country_id,
-                    s.country_id AS supplier_country_id, s.foreign_payable_account_code
+            'SELECT ' . self::partnerPayableSql('c', 's') . '
                FROM purchase_invoices pi
                JOIN supplier s ON s.id = pi.supplier_id
                LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
               WHERE pi.supplier_id = ? AND pi.id = ?'
         );
         $stmt->execute([$supplierId, $purchaseInvoiceId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return null;
-        }
-        $card = self::code($row['payable_account_code'] ?? null);
-        if ($card !== null) {
-            return $card;
-        }
-        $foreign = self::code($row['foreign_payable_account_code'] ?? null);
-        if ($foreign === null || !self::isForeign($row['vendor_country_id'] ?? null, $row['supplier_country_id'] ?? null)) {
-            return null;
-        }
-        return $foreign;
+        return self::code($stmt->fetchColumn());
+    }
+
+    /**
+     * SQL výraz účtu závazku podle partnera: karta dodavatele `$client`, jinak firemní účet
+     * pro zahraniční dodavatele z `$supplier`, liší-li se země dodavatele od země firmy.
+     * NULL = partner nic nenese. Sdílí ho zaúčtování ({@see purchasePartnerAccount}) i karta
+     * klienta, ze které editor dokladu ukazuje závazek, který se použije.
+     */
+    public static function partnerPayableSql(string $client, string $supplier): string
+    {
+        return "COALESCE(NULLIF(TRIM({$client}.payable_account_code), ''),
+                CASE WHEN {$client}.country_id IS NOT NULL AND {$supplier}.country_id IS NOT NULL
+                          AND {$client}.country_id <> {$supplier}.country_id
+                     THEN NULLIF(TRIM({$supplier}.foreign_payable_account_code), '') END)";
     }
 
     /** Účet pohledávky z karty odběratele vydaného dokladu, null = nic. */
@@ -410,13 +411,6 @@ final class PartnerSettlementAccount
                 ['field' => $field],
             );
         }
-    }
-
-    private static function isForeign(mixed $partnerCountry, mixed $supplierCountry): bool
-    {
-        $partner = (int) ($partnerCountry ?? 0);
-        $own = (int) ($supplierCountry ?? 0);
-        return $partner > 0 && $own > 0 && $partner !== $own;
     }
 
     private function rules(): PostingRuleRepository

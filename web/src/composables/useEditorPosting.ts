@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { accountingApi, type ChartAccount, type PostingRule } from '@/api/accounting'
+import type { Client } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -43,4 +44,18 @@ export function useEditorPosting() {
   }
 
   return { enabled, canPost, rules, accounts, load, ruleAccount }
+}
+
+/**
+ * Saldokontní účet z karty partnera, který zaúčtování použije bez protiúčtu na řádku
+ * (PartnerSettlementAccount): u přijatého dokladu závazek dodavatele včetně účtu firmy
+ * pro zahraniční dodavatele (`effective_payable_account_code` z API klienta), u vydaného
+ * pohledávka odběratele. Null = platí předkontace dokladu.
+ */
+export function partnerCounterAccount(
+  direction: 'purchase' | 'sale',
+  partner: Pick<Client, 'effective_payable_account_code' | 'receivable_account_code'> | null | undefined,
+): string | null {
+  const code = direction === 'purchase' ? partner?.effective_payable_account_code : partner?.receivable_account_code
+  return code && code.trim() !== '' ? code.trim() : null
 }

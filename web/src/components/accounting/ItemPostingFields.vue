@@ -18,12 +18,14 @@ const props = withDefaults(defineProps<{
   counterAccount: string | null | undefined
   rules: PostingRule[]
   accounts: ChartAccount[]
-  /** Protiúčet, který platí bez volby na řádku (z předkontace dokladu). */
+  /** Protiúčet, který platí bez volby na řádku (z karty partnera nebo z předkontace dokladu). */
   defaultCounter?: string | null
+  /** Odkud výchozí protiúčet pochází, podle toho se popíše v poli. */
+  defaultCounterSource?: 'rule' | 'partner'
   /** Pole pod sebou (mobilní karta). */
   stacked?: boolean
   disabled?: boolean
-}>(), { defaultCounter: null, stacked: false, disabled: false })
+}>(), { defaultCounter: null, defaultCounterSource: 'rule', stacked: false, disabled: false })
 
 const emit = defineEmits<{
   'update:ruleKey': [string | null]
@@ -91,7 +93,9 @@ const counterLabel = computed(() => t(props.direction === 'purchase'
       <span class="shrink-0" :class="stacked ? 'block mb-1' : ''">{{ counterLabel }}</span>
       <ChartAccountSelect :model-value="counterAccount ?? ''" :accounts="counterAccounts" :disabled="disabled"
         :compact="!stacked" :aria-label="counterLabel" :class="stacked ? 'w-full' : 'w-44 max-w-full'"
-        :placeholder="defaultCounter ? t('accounting.editor_posting.counter_default', { code: defaultCounter }) : undefined"
+        :placeholder="defaultCounter ? t(defaultCounterSource === 'partner'
+          ? 'accounting.editor_posting.counter_default_partner'
+          : 'accounting.editor_posting.counter_default', { code: defaultCounter }) : undefined"
         @update:model-value="onCounter" />
     </label>
   </div>

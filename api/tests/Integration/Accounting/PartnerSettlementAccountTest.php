@@ -100,7 +100,12 @@ final class PartnerSettlementAccountTest extends BankPostingTestCase
         self::assertSame(121.0, $lines[self::DOMESTIC]['credit'] ?? null, 'Karta dodavatele má přednost před zahraničním nastavením.');
         self::assertArrayNotHasKey(self::FOREIGN, $lines);
 
+        $clients = $this->container->get(ClientRepository::class);
+        self::assertSame(self::FOREIGN, $clients->find($foreign)['effective_payable_account_code'] ?? null, 'Karta klienta nese závazek pro nápovědu v editoru.');
+        self::assertSame(self::DOMESTIC, $clients->find($foreignWithCard)['effective_payable_account_code'] ?? null);
+
         $domestic = $this->vendor('Dodavatel CZ bez karty', null);
+        self::assertNull($clients->find($domestic)['effective_payable_account_code'] ?? null);
         $lines = $this->linesByAccountCode($this->documentEntry('purchase_invoice', $this->postedPurchase('SYN-PSA-CZ', $domestic, 'invoice')));
         self::assertSame(121.0, $lines['321']['credit'] ?? null, 'Tuzemský dodavatel bez karty zůstává na předkontaci.');
     }
