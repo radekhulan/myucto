@@ -682,7 +682,11 @@ async function saveSupplier() {
       auto_match_other_items: supplier.value.auto_match_other_items ?? false,
       // Účet závazku pro účtenky (2204) — jen v podvojném účetnictví, kde ho pole ukazuje.
       ...(supplier.value.accounting_mode === 'double_entry'
-        ? { receipt_payable_account_code: (supplier.value.receipt_payable_account_code ?? '').trim() || null }
+        ? {
+            receipt_payable_account_code: (supplier.value.receipt_payable_account_code ?? '').trim() || null,
+            // Účet závazku pro zahraniční dodavatele (2353), vedle účtu pro účtenky.
+            foreign_payable_account_code: (supplier.value.foreign_payable_account_code ?? '').trim() || null,
+          }
         : {}),
       taxpayer_type: (supplier.value as any).taxpayer_type ?? null,
       vat_period: (supplier.value as any).vat_period ?? null,
@@ -1775,6 +1779,12 @@ async function confirmTaxRepDelete() {
                 <input id="receipt-payable-account" v-model="supplier.receipt_payable_account_code" type="text" maxlength="10" inputmode="numeric" placeholder="321"
                   class="w-40 h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                 <p class="text-xs text-neutral-500 mt-1">{{ t('settings.receipt_payable_account_hint') }}</p>
+              </div>
+              <div class="max-w-md pt-2" data-test="settings-foreign-payable">
+                <label for="foreign-payable-account" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.foreign_payable_account') }}</label>
+                <input id="foreign-payable-account" v-model="supplier.foreign_payable_account_code" type="text" maxlength="10" inputmode="numeric" placeholder="321"
+                  class="w-40 h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                <p class="text-xs text-neutral-500 mt-1">{{ t('settings.foreign_payable_account_hint') }}</p>
               </div>
             </div>
             <label class="md:col-span-2 flex items-start gap-2 cursor-pointer" data-test="settings-auto-match-other-items">

@@ -372,6 +372,8 @@ export interface Supplier {
   auto_match_other_items?: boolean
   /** Účet závazku pro účtenky / paragony (migrace 2204); null = závazek z předkontace (321). */
   receipt_payable_account_code?: string | null
+  /** Účet závazku pro dodavatele z jiné země než firma (migrace 2353); null = předkontace. */
+  foreign_payable_account_code?: string | null
   // Tax settings pro EPO výkazy DPH/KH (migrace 0038, fáze 6)
   taxpayer_type?: 'fo' | 'po' | null
   vat_period?: 'monthly' | 'quarterly' | null

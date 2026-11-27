@@ -209,17 +209,27 @@ const advanceAccountsEnabled = computed(() => auth.hasCommercialFeatures
   && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   && auth.canWrite('accounting'))
 const advanceAccounts = ref({ advance_paid_account_code: '', advance_paid_vat_account_code: '' })
-const advanceAccountOptions = ref<ChartAccount[]>([])
+const chartAccounts = ref<ChartAccount[]>([])
+const advanceAccountOptions = computed(() => chartAccounts.value
+  .filter(a => a.account_code === '314' || a.account_code.startsWith('314.')))
 const advanceAccountsOpen = ref(false)
+
+// Účet závazku (dodavatel) a pohledávky (odběratel) partnera — stejná pravidla jako
+// účty záloh. Prázdné pole = předkontace dokladu, server ověří druh účtu.
+const settlementAccounts = ref({ payable_account_code: '', receivable_account_code: '' })
+const settlementAccountsOpen = ref(false)
+const payableAccountOptions = computed(() => chartAccounts.value.filter(a => a.account_type === 'liability'
+  && a.account_code.startsWith('3') && !a.account_code.startsWith('343') && !a.account_code.startsWith('314')))
+const receivableAccountOptions = computed(() => chartAccounts.value
+  .filter(a => a.account_code === '311' || a.account_code.startsWith('311.')))
 
 async function loadAdvanceAccountOptions() {
   if (!advanceAccountsEnabled.value) return
   try {
-    advanceAccountOptions.value = (await accountingApi.listAccounts())
-      .filter(a => a.account_code === '314' || a.account_code.startsWith('314.'))
+    chartAccounts.value = (await accountingApi.listAccounts()).filter(a => a.is_active)
   } catch {
     // Bez osnovy zůstane pole prostým textem, kód ověří server.
-    advanceAccountOptions.value = []
+    chartAccounts.value = []
   }
 }
 
@@ -301,6 +311,7 @@ const INLINE_ERROR_FIELDS = [
   'ic', 'street', 'zip', 'city', 'phone', 'price_level_id',
   'email_subject_format', 'email_attachment_name_format', 'email_attach_isdoc',
   'advance_paid_account_code', 'advance_paid_vat_account_code',
+  'payable_account_code', 'receivable_account_code',
 ]
 const unplacedErrors = computed(() =>
   Object.entries(errors.value)
@@ -379,6 +390,11 @@ onMounted(async () => {
       advance_paid_vat_account_code: c.advance_paid_vat_account_code ?? '',
     }
     advanceAccountsOpen.value = !!(c.advance_paid_account_code || c.advance_paid_vat_account_code)
+    settlementAccounts.value = {
+      payable_account_code: c.payable_account_code ?? '',
+      receivable_account_code: c.receivable_account_code ?? '',
+    }
+    settlementAccountsOpen.value = !!(c.payable_account_code || c.receivable_account_code)
     emailContacts.value = (c.email_contacts ?? []).map(ec => ({
       ...ec,
       usages: (ec.usages ?? []).map(u => ({ usage: u.usage, recipient: u.recipient ?? 'to' })),
@@ -577,6 +593,12 @@ async function submit() {
     payload.advance_paid_account_code = advanceAccounts.value.advance_paid_account_code.trim() || null
     payload.advance_paid_vat_account_code = advanceAccounts.value.advance_paid_vat_account_code.trim() || null
   }
+  if (advanceAccountsEnabled.value && form.value.is_vendor) {
+    payload.payable_account_code = settlementAccounts.value.payable_account_code.trim() || null
+  }
+  if (advanceAccountsEnabled.value && form.value.is_customer) {
+    payload.receivable_account_code = settlementAccounts.value.receivable_account_code.trim() || null
+  }
   try {
     if (isEdit.value && clientId.value) {
       const updated = await clientsApi.update(clientId.value, payload)
@@ -616,6 +638,9 @@ async function submit() {
       }
       if (data.fields.advance_paid_account_code || data.fields.advance_paid_vat_account_code) {
         advanceAccountsOpen.value = true
+      }
+      if (data.fields.payable_account_code || data.fields.receivable_account_code) {
+        settlementAccountsOpen.value = true
       }
       // Uložit je na patě dlouhého formuláře, chybné pole bývá nahoře mimo
       // obraz — bez odskoku uživatel vidí jen „Validace selhala" (#120).
@@ -1127,6 +1152,32 @@ if (!props.embedded) {
                 :accounts="advanceAccountOptions" placeholder="314" />
               <p class="text-xs text-neutral-500 mt-1">{{ t('client.advance_paid_vat_account_code_hint') }}</p>
               <p data-field-error v-if="errors.advance_paid_vat_account_code" class="text-xs text-danger-500 mt-1">{{ errors.advance_paid_vat_account_code[0] }}</p>
+            </div>
+          </div>
+        </details>
+
+        <!-- Účet závazku a pohledávky partnera (jen podvojné účetnictví) -->
+        <details v-if="(form.is_vendor || form.is_customer) && advanceAccountsEnabled" class="pt-3 border-t border-neutral-100"
+          :open="settlementAccountsOpen" data-test="client-settlement-accounts"
+          @toggle="settlementAccountsOpen = ($event.target as HTMLDetailsElement).open">
+          <summary class="cursor-pointer text-sm font-medium text-neutral-700">
+            {{ t('client.settlement_accounts_section') }}
+          </summary>
+          <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('client.settlement_accounts_hint') }}</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div v-if="form.is_vendor">
+              <label for="client-payable-account" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.payable_account_code') }}</label>
+              <ChartAccountSelect v-model="settlementAccounts.payable_account_code" input-id="client-payable-account"
+                :accounts="payableAccountOptions" placeholder="321" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('client.payable_account_code_hint') }}</p>
+              <p data-field-error v-if="errors.payable_account_code" class="text-xs text-danger-500 mt-1">{{ errors.payable_account_code[0] }}</p>
+            </div>
+            <div v-if="form.is_customer">
+              <label for="client-receivable-account" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.receivable_account_code') }}</label>
+              <ChartAccountSelect v-model="settlementAccounts.receivable_account_code" input-id="client-receivable-account"
+                :accounts="receivableAccountOptions" placeholder="311" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('client.receivable_account_code_hint') }}</p>
+              <p data-field-error v-if="errors.receivable_account_code" class="text-xs text-danger-500 mt-1">{{ errors.receivable_account_code[0] }}</p>
             </div>
           </div>
         </details>
