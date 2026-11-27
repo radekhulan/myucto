@@ -8,6 +8,7 @@ use MyInvoice\Action\Client\UpdateClientAction;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\PartnerSettlementAccount;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
@@ -184,6 +185,99 @@ final class PartnerSettlementAccountTest extends BankPostingTestCase
         $lines = $this->linesByAccountCode($entry);
         self::assertSame(['debit' => 890.0, 'credit' => 1210.0], $lines[self::DOMESTIC] ?? null, 'Předpis i zúčtování zálohy na 321.200.');
         self::assertArrayNotHasKey('321', $lines);
+    }
+
+    /** BEZ OPRAVY PADÁ: penále jde na pohledávku z karty odběratele, ruční předkontace má přednost. */
+    public function testPenaltyUsesCustomerCard(): void
+    {
+        $customer = $this->customer('Odběratel penále', self::RECEIVABLE);
+        $penalty = $this->issued('SYNPSA04', $customer, 'penalty', 500.0, 0.0);
+        $lines = $this->signature($this->posting->buildFromInvoice($this->supplierId, $penalty));
+        self::assertContains(self::RECEIVABLE . '|debit|500.00', $lines, 'Penále na pohledávce z karty.');
+        self::assertNotContains('311|debit|500.00', $lines);
+
+        $manual = $this->signature($this->posting->buildFromInvoice($this->supplierId, $penalty, ['rule_key' => 'invoice.penalty.issued']));
+        self::assertContains('311|debit|500.00', $manual, 'Ručně zvolená předkontace má přednost.');
+
+        $plain = $this->issued('SYNPSA05', $this->customer('Odběratel penále bez karty', null), 'penalty', 500.0, 0.0);
+        self::assertContains('311|debit|500.00', $this->signature($this->posting->buildFromInvoice($this->supplierId, $plain)), 'Bez karty beze změny.');
+    }
+
+    /**
+     * BEZ OPRAVY PADÁ: uhrazená přijatá faktura zůstane při přeúčtování na účtu, na kterém
+     * je zaúčtovaná a který úhrada vyrovnala; neuhrazená přejde na nový účet z karty.
+     */
+    public function testRepostKeepsPostedPayableOfPaidPurchaseOnly(): void
+    {
+        $vendor = $this->vendor('Dodavatel přeúčtování', null);
+        $paid = $this->postedPurchase('SYN-PSA-RP-PAID', $vendor, 'invoice');
+        $unpaid = $this->postedPurchase('SYN-PSA-RP-OPEN', $vendor, 'invoice');
+        $tx = $this->transaction($this->statement(), -50.0, ['match_status' => 'manual']);
+        $this->paymentMatch($tx, $paid, 50.0);
+        self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+
+        $this->container->get(ClientRepository::class)->setPartnerSettlementAccounts($vendor, $this->supplierId, [
+            PartnerSettlementAccount::PAYABLE_FIELD => self::DOMESTIC,
+        ]);
+        $sync = $this->container->get(DocumentJournalSync::class);
+        $sync->repostForceEdit($this->supplierId, 'purchase_invoice', $paid, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $sync->repostForceEdit($this->supplierId, 'purchase_invoice', $unpaid, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $paidLines = $this->linesByAccountCode($this->documentEntry('purchase_invoice', $paid));
+        self::assertSame(121.0, $paidLines['321']['credit'] ?? null, 'Částečně uhrazená faktura zůstává na 321.');
+        self::assertArrayNotHasKey(self::DOMESTIC, $paidLines);
+        self::assertSame(121.0, $this->linesByAccountCode($this->documentEntry('purchase_invoice', $unpaid))[self::DOMESTIC]['credit'] ?? null,
+            'Neuhrazená faktura přejde na účet z karty.');
+    }
+
+    /** BEZ OPRAVY PADÁ: přeúčtování stornem a novým zápisem předá účet stornovaného zápisu. */
+    public function testRepostAfterReversalKeepsPostedPayableWhenPassed(): void
+    {
+        $vendor = $this->vendor('Dodavatel storno', null);
+        $paid = $this->postedPurchase('SYN-PSA-RV', $vendor, 'invoice');
+        $this->payCash($paid, 121.0);
+        $this->container->get(ClientRepository::class)->setPartnerSettlementAccounts($vendor, $this->supplierId, [
+            PartnerSettlementAccount::PAYABLE_FIELD => self::DOMESTIC,
+        ]);
+        $posted = (new PartnerSettlementAccount($this->db))->postedSettlementAccount($this->supplierId, 'purchase_invoice', $paid);
+        self::assertSame('321', $posted);
+        $this->posting->reverse($this->supplierId, $this->documentEntry('purchase_invoice', $paid), ['user_id' => $this->userId]);
+
+        self::assertContains(self::DOMESTIC . '|credit|121.00', $this->signature($this->posting->buildFromPurchaseInvoice($this->supplierId, $paid)),
+            'Bez živého zápisu a bez předaného účtu platí karta.');
+        self::assertContains('321|credit|121.00', $this->signature($this->posting->buildFromPurchaseInvoice(
+            $this->supplierId, $paid, ['posted_saldo_account' => $posted],
+        )), 'S účtem stornovaného zápisu zůstává uhrazený doklad na něm.');
+    }
+
+    /** BEZ OPRAVY PADÁ: uhrazená vydaná faktura zůstává na pohledávce svého zápisu. */
+    public function testRepostKeepsPostedReceivableOfPaidInvoice(): void
+    {
+        $customer = $this->customer('Odběratel přeúčtování', null);
+        $invoice = $this->issued('SYNPSA06', $customer, 'invoice', 1000.0, 210.0);
+        $this->postIssued($invoice);
+        $tx = $this->transaction($this->statement(), 500.0, ['match_status' => 'auto_exact', 'matched_invoice_id' => $invoice]);
+        $this->invoicePayment($invoice, $tx, 500.0);
+        $this->db->pdo()->prepare('UPDATE invoices SET paid_total = 500 WHERE id = ?')->execute([$invoice]);
+        $open = $this->issued('SYNPSA07', $customer, 'invoice', 1000.0, 210.0);
+        $this->postIssued($open);
+
+        $this->db->pdo()->prepare('UPDATE clients SET receivable_account_code = ? WHERE id = ?')->execute([self::RECEIVABLE, $customer]);
+        self::assertSame('311|debit|1210.00', $this->signature($this->posting->buildFromInvoice($this->supplierId, $invoice))[0], 'Uhrazená zůstává na 311.');
+        self::assertSame(self::RECEIVABLE . '|debit|1210.00', $this->signature($this->posting->buildFromInvoice($this->supplierId, $open))[0], 'Neuhrazená přejde na kartu.');
+    }
+
+    /** BEZ OPRAVY PADÁ: totéž pravidlo platí pro účet závazku pro účtenky. */
+    public function testRepostKeepsPostedPayableOfPaidReceiptWithReceiptSetting(): void
+    {
+        $vendor = $this->vendor('Dodavatel účtenky', null);
+        $paid = $this->postedPurchase('SYN-PSA-RC-PAID', $vendor, 'receipt');
+        $unpaid = $this->postedPurchase('SYN-PSA-RC-OPEN', $vendor, 'receipt');
+        $this->payCash($paid, 121.0);
+        $this->db->pdo()->prepare("UPDATE supplier SET receipt_payable_account_code = '325' WHERE id = ?")->execute([$this->supplierId]);
+
+        self::assertContains('321|credit|121.00', $this->signature($this->posting->buildFromPurchaseInvoice($this->supplierId, $paid)), 'Uhrazená účtenka zůstává na 321.');
+        self::assertContains('325|credit|121.00', $this->signature($this->posting->buildFromPurchaseInvoice($this->supplierId, $unpaid)), 'Neuhrazená přejde na 325.');
     }
 
     /** Bez nastavení na kartě i ve firmě: zápis přijaté i vydané faktury beze změny. */

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountDefinitionRepository;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -106,12 +107,46 @@ final class PurchasePayableAccount
      * @param string $rulePayable závazek z použité předkontace dokladu
      * @param string $defaultPayable závazek výchozí předkontace přijatých dokladů
      */
-    public function forPosting(int $supplierId, array $pi, string $rulePayable, string $defaultPayable): string
+    public function forPosting(int $supplierId, array $pi, string $rulePayable, string $defaultPayable, ?string $postedSaldo = null): string
     {
         if ((string) ($pi['document_kind'] ?? '') !== 'receipt' || $rulePayable !== $defaultPayable) {
             return $rulePayable;
         }
-        return $this->receiptSetting($supplierId) ?? $rulePayable;
+        $setting = $this->receiptSetting($supplierId);
+        if ($setting === null) {
+            return $rulePayable;
+        }
+        return $this->keptForPaidDocument($supplierId, (int) ($pi['id'] ?? 0), $postedSaldo) ?? $setting;
+    }
+
+    /**
+     * Uhrazený (i částečně) a zaúčtovaný doklad zůstává při opětovném zaúčtování na závazku,
+     * na kterém v deníku leží, i když se mezitím změnilo nastavení (karta dodavatele, účet pro
+     * zahraniční dodavatele, účet pro účtenky): úhrady už ten účet vyrovnaly a přesun by saldo
+     * rozdělil na dva účty. Neuhrazený doklad přejde na nové nastavení. Volá se jen tam, kde
+     * by se nastavení uplatnilo, bez nastavení je zápis beze změny.
+     *
+     * @param string|null $postedSaldo závazek zápisu, který volající právě stornuje; null = živý zápis
+     */
+    public function keptForPaidDocument(int $supplierId, int $purchaseInvoiceId, ?string $postedSaldo = null): ?string
+    {
+        if ($purchaseInvoiceId <= 0 || !$this->hasPayment($supplierId, $purchaseInvoiceId)) {
+            return null;
+        }
+        return $postedSaldo ?? $this->postedPayable($supplierId, $purchaseInvoiceId);
+    }
+
+    /**
+     * Má přijatý doklad evidovanou úhradu (banka včetně karty, pokladna, zápočty, zápočet
+     * dobropisu, úhrada mimo evidenci)? Součet ze SSOT {@see PurchaseSettledExpr}.
+     */
+    public function hasPayment(int $supplierId, int $purchaseInvoiceId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . PurchaseSettledExpr::settled('pi') . ' FROM purchase_invoices pi WHERE pi.supplier_id = ? AND pi.id = ?'
+        );
+        $stmt->execute([$supplierId, $purchaseInvoiceId]);
+        return abs((float) $stmt->fetchColumn()) >= 0.005;
     }
 
     /**

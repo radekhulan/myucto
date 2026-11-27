@@ -114,6 +114,9 @@ final class DocumentJournalSync
                 $owned = DocumentPostingGroup::hasOwnedEntries($members);
                 $entryId = (int) $members[0]['id'];
                 $today = date('Y-m-d');
+                // Saldokontní účet stornovaného zápisu: uhrazený doklad na něm po opravě zůstane
+                // i se změněnou kartou partnera ({@see PartnerSettlementAccount}).
+                $postedSaldo = (new PartnerSettlementAccount($this->db))->postedSettlementAccount($supplierId, $sourceType, $sourceId);
                 // Storno starého zápisu do DNEŠNÍHO otevřeného období (ne do uzavřeného
                 //    období dokladu). Explicitní entry_date=dnešek obchází default reverse()
                 //    (období originálu), které je tu uzavřené.
@@ -132,10 +135,14 @@ final class DocumentJournalSync
 
                 // Znovu zaúčtuj opravený doklad do AKTUÁLNÍHO otevřeného období (dnešek).
                 $lines = $sourceType === 'invoice'
-                    ? $this->posting->buildFromInvoice($supplierId, $sourceId, ['entry_date' => $today])
+                    ? $this->posting->buildFromInvoice($supplierId, $sourceId, array_filter([
+                        'entry_date' => $today,
+                        'posted_saldo_account' => $postedSaldo,
+                    ], static fn (mixed $value): bool => $value !== null))
                     : $this->posting->buildFromPurchaseInvoice($supplierId, $sourceId, array_filter([
                         'entry_date' => $today,
                         'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $sourceId),
+                        'posted_saldo_account' => $postedSaldo,
                     ], static fn (mixed $value): bool => $value !== null));
                 $postMeta = $meta;
                 $postMeta['entry_date']  = $today;

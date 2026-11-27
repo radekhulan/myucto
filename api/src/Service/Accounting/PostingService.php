@@ -154,6 +154,7 @@ final class PostingService
     public const DEFAULT_ISSUED_RULE_KEY = 'invoice.services.issued';
     public const DEFAULT_RECEIVED_RULE_KEY = 'invoice.services.received';
     public const DEFAULT_RECEIVED_ASSET_RULE_KEY = 'invoice.dhm.received';
+    public const PENALTY_RULE_KEY = 'invoice.penalty.issued';
 
     /** @var array<int, ?string> per-request cache supplier_id => locked_until (B8). */
     private array $lockedUntilCache = [];
@@ -2029,6 +2030,7 @@ final class PostingService
                     && $this->advanceSettlementAccounts($supplierId, 'sale')['on_saldo']),
             (string) $receivable,
             fn (): string => $this->ruleCode($supplierId, self::DEFAULT_ISSUED_RULE_KEY, 'debit', '311'),
+            self::postedSaldoOpt($opts),
         );
 
         // Rozpad výnosu po POLOŽKÁCH (1177) — zrcadlo nákladové strany z §DM. Faktura běžně
@@ -2155,9 +2157,20 @@ final class PostingService
             throw new PostingException('document_not_postable', 'Penalizační faktura #' . $invoiceId . ' má nulovou částku.');
         }
 
-        $rule       = $this->rules->resolve($supplierId, $opts['rule_key'] ?? 'invoice.penalty.issued');
-        $receivable = $rule['debit_account_code'] ?? '311';
+        $rule       = $this->rules->resolve($supplierId, $opts['rule_key'] ?? self::PENALTY_RULE_KEY);
         $revenue    = $rule['credit_account_code'] ?? '644';
+        // Pohledávka z karty odběratele stejně jako u faktury ({@see PartnerSettlementAccount}).
+        // Protiúčet řádku penále nezná (itemCounterAccount ho odmítne), ruční předkontace
+        // má přednost. Bez nastavení beze změny.
+        $receivable = $this->partnerSettlement()->saleReceivable(
+            $supplierId,
+            $inv,
+            null,
+            fn (): bool => isset($opts['rule_key']),
+            (string) ($rule['debit_account_code'] ?? '311'),
+            fn (): string => $this->ruleCode($supplierId, self::PENALTY_RULE_KEY, 'debit', '311'),
+            self::postedSaldoOpt($opts),
+        );
         $cc = $opts['cost_center'] ?? null;
 
         // Dobropis penalizace (záporná částka) obrací strany.
@@ -2385,7 +2398,8 @@ final class PostingService
             $pi,
             $itemCounter,
             fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
-            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, $defaultKey),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, $defaultKey, self::postedSaldoOpt($opts)),
+            self::postedSaldoOpt($opts),
         );
         $cc = $opts['cost_center'] ?? null;
 
@@ -3414,7 +3428,8 @@ final class PostingService
             $pi,
             $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead),
             fn (): bool => isset($opts['rule_key']) || $this->purchaseAdvanceOnSaldo($supplierId, $pi),
-            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY),
+            fn (): string => $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY, self::postedSaldoOpt($opts)),
+            self::postedSaldoOpt($opts),
         );
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
@@ -3432,7 +3447,7 @@ final class PostingService
      * @param array<string,mixed> $pi
      * @param array<string,mixed>|null $rule
      */
-    private function purchasePayable(int $supplierId, array $pi, ?array $rule, string $defaultKey): string
+    private function purchasePayable(int $supplierId, array $pi, ?array $rule, string $defaultKey, ?string $postedSaldo = null): string
     {
         $rulePayable = (string) ($rule['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE);
         if ((string) ($pi['document_kind'] ?? '') !== 'receipt') {
@@ -3444,7 +3459,21 @@ final class PostingService
             $pi,
             $rulePayable,
             (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
+            $postedSaldo,
         );
+    }
+
+    /**
+     * Saldokontní účet zápisu, který volající před přeúčtováním stornuje
+     * (`opts['posted_saldo_account']`, {@see PartnerSettlementAccount::postedSettlementAccount}).
+     * Bez něj se uhrazený doklad drží účtu svého živého zápisu.
+     *
+     * @param array<string,mixed> $opts
+     */
+    private static function postedSaldoOpt(array $opts): ?string
+    {
+        $code = $opts['posted_saldo_account'] ?? null;
+        return is_string($code) && $code !== '' ? $code : null;
     }
 
     private function partnerSettlement(): PartnerSettlementAccount

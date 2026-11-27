@@ -71,19 +71,33 @@ final class PartnerSettlementAccount
      * @param string|null $itemCounter protiúčet z řádků dokladu
      * @param \Closure():bool $keepRule explicitní předkontace od volajícího nebo záloha vedená na saldokontu
      * @param \Closure():string $legacy dosavadní závazek (předkontace, nastavení účtenek)
+     * @param string|null $postedSaldo závazek zápisu dokladu, který volající právě stornuje
+     *                                 (přeúčtování stornem a novým zápisem); null = živý zápis
      */
-    public function purchasePayable(int $supplierId, array $pi, ?string $itemCounter, \Closure $keepRule, \Closure $legacy): string
-    {
+    public function purchasePayable(
+        int $supplierId,
+        array $pi,
+        ?string $itemCounter,
+        \Closure $keepRule,
+        \Closure $legacy,
+        ?string $postedSaldo = null,
+    ): string {
         if ($itemCounter !== null) {
             return $itemCounter;
         }
-        $partner = $this->purchasePartnerAccount($supplierId, (int) ($pi['id'] ?? 0));
+        $id = (int) ($pi['id'] ?? 0);
+        $partner = $this->purchasePartnerAccount($supplierId, $id);
         if ($partner === null || $keepRule()) {
             return $legacy();
         }
+        $payables = new PurchasePayableAccount($this->db);
+        $kept = $payables->keptForPaidDocument($supplierId, $id, $postedSaldo);
+        if ($kept !== null) {
+            return $kept;
+        }
         $parentId = (int) ($pi['parent_purchase_invoice_id'] ?? 0);
         if ((string) ($pi['document_kind'] ?? '') === 'credit_note' && $parentId > 0) {
-            return (new PurchasePayableAccount($this->db))->postedPayable($supplierId, $parentId) ?? $partner;
+            return $payables->postedPayable($supplierId, $parentId) ?? $partner;
         }
         return $partner;
     }
@@ -95,7 +109,8 @@ final class PartnerSettlementAccount
      * @param string|null $itemCounter protiúčet z řádků dokladu
      * @param \Closure():bool $keepRule explicitní předkontace od volajícího nebo záloha vedená na saldokontu
      * @param string $ruleReceivable pohledávka použité předkontace
-     * @param \Closure():string $defaultReceivable pohledávka výchozí předkontace vydaných faktur
+     * @param \Closure():string $defaultReceivable pohledávka výchozí předkontace téhož druhu dokladu
+     * @param string|null $postedSaldo pohledávka zápisu, který volající právě stornuje; null = živý zápis
      */
     public function saleReceivable(
         int $supplierId,
@@ -104,18 +119,27 @@ final class PartnerSettlementAccount
         \Closure $keepRule,
         string $ruleReceivable,
         \Closure $defaultReceivable,
+        ?string $postedSaldo = null,
     ): string {
         if ($itemCounter !== null) {
             return $itemCounter;
         }
-        $partner = $this->customerAccount($supplierId, (int) ($inv['id'] ?? 0));
+        $id = (int) ($inv['id'] ?? 0);
+        $partner = $this->customerAccount($supplierId, $id);
         // Hlavičková předkontace s jinou pohledávkou (např. prodej majetku na 315) zůstává.
         if ($partner === null || $keepRule() || $ruleReceivable !== $defaultReceivable()) {
             return $ruleReceivable;
         }
+        $synthetic = substr($partner, 0, 3);
+        if (self::issuedHasPayment($this->db->pdo(), $supplierId, $id)) {
+            $posted = $postedSaldo ?? $this->postedReceivable($supplierId, $id, $synthetic);
+            if ($posted !== null) {
+                return $posted;
+            }
+        }
         $parentId = (int) ($inv['parent_invoice_id'] ?? 0);
         if ((string) ($inv['invoice_type'] ?? '') === 'credit_note' && $parentId > 0) {
-            return $this->postedReceivable($supplierId, $parentId, substr($partner, 0, 3)) ?? $partner;
+            return $this->postedReceivable($supplierId, $parentId, $synthetic) ?? $partner;
         }
         return $partner;
     }
@@ -283,6 +307,35 @@ final class PartnerSettlementAccount
                 : $this->validateReceivable($supplierId, $raw, $field);
         }
         return $out;
+    }
+
+    /**
+     * Saldokontní účet živého zápisu dokladu (závazek přijatého, pohledávka vydaného podle
+     * syntetiky předkontace úhrady pohledávek). Volá ho přeúčtování, které zápis nejdřív
+     * stornuje, aby uhrazený doklad zůstal na svém účtu ({@see purchasePayable}).
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     */
+    public function postedSettlementAccount(int $supplierId, string $sourceType, int $documentId): ?string
+    {
+        return $sourceType === 'purchase_invoice'
+            ? (new PurchasePayableAccount($this->db))->postedPayable($supplierId, $documentId)
+            : $this->postedReceivable(
+                $supplierId,
+                $documentId,
+                (new ItemPostingAccounts($this->db, $this->rules()))->receivableSynthetic($supplierId),
+            );
+    }
+
+    /**
+     * Má vydaný doklad evidovanou úhradu? `paid_total` drží všechny kanály úhrady vydané
+     * faktury (banka, pokladna, zápočet, GoPay, karta), zrcadlo {@see PurchasePayableAccount::hasPayment}.
+     */
+    public static function issuedHasPayment(\PDO $pdo, int $supplierId, int $invoiceId): bool
+    {
+        $stmt = $pdo->prepare('SELECT paid_total FROM invoices WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $invoiceId]);
+        return abs((float) $stmt->fetchColumn()) >= 0.005;
     }
 
     /**
