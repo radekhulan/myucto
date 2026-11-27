@@ -67,6 +67,7 @@
     { "name": "profile-shortcuts", "path_pattern": "^/profile/shortcuts/?$", "kind": "router_redirect", "permission": "profile", "access": "write", "redirect_to": "/profile/password?tab=shortcuts" },
     { "name": "profile-passkeys", "path_pattern": "^/profile/passkeys/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=passkeys", "canonical_handoff": { "to": "/profile/password?tab=passkeys" } },
     { "name": "profile-session-lock", "path_pattern": "^/profile/session-lock/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=session-lock" },
+    { "name": "profile-display", "path_pattern": "^/profile/display/?$", "kind": "permission", "permission": "profile", "access": "read" },
 
     { "name": "isds-gateway-callback", "path_pattern": "^/isds-gateway/callback/?$", "kind": "self_service" },
 

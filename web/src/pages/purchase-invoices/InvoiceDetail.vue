@@ -1198,7 +1198,7 @@ useWindowRefresh(async () => {
       <!-- Hlavička se zalamuje podle místa, ne podle breakpointu: ve sloupci vedle náhledu PDF
            by štítky vedle akcí dostaly tak úzký pruh, že by šel každý na vlastní řádek. -->
       <div class="flex flex-wrap items-start justify-between gap-3 md:gap-4" data-test="detail-header">
-        <h1 class="text-2xl font-semibold flex items-center gap-x-3 gap-y-2 flex-wrap min-w-0 flex-[1_1_28rem] *:whitespace-nowrap *:max-w-full">
+        <h1 class="text-2xl font-semibold flex items-center gap-x-3 gap-y-2 flex-wrap min-w-0 flex-[1_1_20rem] *:whitespace-nowrap *:max-w-full">
           <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
           <span v-else class="text-neutral-400 font-mono">#{{ invoice.id }}</span>
           <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(invoice.status)">
