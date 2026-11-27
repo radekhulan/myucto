@@ -14,6 +14,9 @@ use MyInvoice\Service\Accounting\AccountBalanceSign;
  * u každého řádku platí PS + obrat od začátku období = KS. Skrývají se jen účty, které mají
  * ve všech čtyřech sloupcích nulu, takže skrytí nezmění žádný součet.
  *
+ * Účet upravený průběžným časovým rozlišením a odpisy (volba pohledu) nese v buňce `spread`
+ * úpravu obratu se znaménkem podle typu účtu; obraty i konečný stav ji už obsahují.
+ *
  * Tvar řádků (`lines`) skládá jen tahle třída. Obrazovka i XLSX je kreslí beze změny, proto
  * mají stejný tvar i při zapnutých přepínačích.
  */
@@ -123,6 +126,7 @@ final class StatementAccountColumns
                 ? ($r['parent_normal_side'] !== null ? (string) $r['parent_normal_side'] : null)
                 : ($r['normal_side'] !== null ? (string) $r['normal_side'] : null),
             'raw' => ['ps' => $ps, 'month' => $month[(int) $r['id']] ?? 0, 'ytd' => $ytd, 'ks' => $ps + $ytd],
+            'spread' => isset($r['spread']) ? self::cents($r['spread']) : 0,
         ];
     }
 
@@ -154,9 +158,10 @@ final class StatementAccountColumns
                     if ((int) $leaf['account_id'] === (int) $leaf['synthetic_id'] && count($group) === 1) {
                         continue;
                     }
-                    $analytics[] = self::cell('analytic', $leaf['account_id'], $leaf['account_code'], $leaf['name'], $leaf['account_type'], $leaf['normal_side'], $leaf['raw']);
+                    $analytics[] = self::cell('analytic', $leaf['account_id'], $leaf['account_code'], $leaf['name'], $leaf['account_type'], $leaf['normal_side'], $leaf['raw'], $leaf['spread']);
                 }
-                $cell = self::cell('synthetic', (int) $group[0]['synthetic_id'], (string) $code, $group[0]['synthetic_name'], $group[0]['account_type'], $group[0]['synthetic_normal_side'], $raw);
+                $cell = self::cell('synthetic', (int) $group[0]['synthetic_id'], (string) $code, $group[0]['synthetic_name'], $group[0]['account_type'], $group[0]['synthetic_normal_side'], $raw,
+                    (int) array_sum(array_column($group, 'spread')));
                 $cells[] = ['analytics' => $analytics] + $cell;
             }
             $out[$side] = $cells;
@@ -169,10 +174,10 @@ final class StatementAccountColumns
      * @param array<string,int> $raw hodnoty MD − D v haléřích
      * @return array<string,mixed>
      */
-    private static function cell(string $kind, int $id, string $code, string $name, string $type, ?string $normalSide, array $raw): array
+    private static function cell(string $kind, int $id, string $code, string $name, string $type, ?string $normalSide, array $raw, int $spread = 0): array
     {
         $factor = AccountBalanceSign::factor($type);
-        return [
+        return ($spread === 0 ? [] : ['spread' => self::money1($spread * $factor)]) + [
             'kind'         => $kind,
             'account_id'   => $id,
             'account_code' => $code,

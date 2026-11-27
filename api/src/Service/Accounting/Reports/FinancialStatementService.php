@@ -360,10 +360,15 @@ final class FinancialStatementService
      * obrazovku, XLSX a PDF: chce navíc dotaz na obraty měsíce, který souhrny nad více firmami
      * neplatí. Rámec 504 má vlastní pohled a sloupce nemá.
      *
+     * `$accrualSpread` = průběžné časové rozlišení a odpisy mimo deník ({@see InterimAccrualAdjustment}),
+     * stejné úpravy jako výkaz: přičtou se k obratům období (i měsíce dne výkazu) a ke konečným
+     * stavům dotčených listových účtů, jako by byly zaúčtované k datu výkazu. Řádky nesou
+     * úpravu v klíči `spread`, souhrn je v `accrual_spread`.
+     *
      * @param array{hide_zero:bool, analytics:bool}|null $columns
      * @return array<string,mixed>
      */
-    public function accountView(int $supplierId, int $periodId, ?string $asOf, ?DimensionFilter $dimension = null, ?array $columns = null): array
+    public function accountView(int $supplierId, int $periodId, ?string $asOf, ?DimensionFilter $dimension = null, ?array $columns = null, bool $accrualSpread = false): array
     {
         $context = $this->frameworkResolver->context($supplierId, $periodId, $asOf);
         if ($context['framework'] === 'cz_504') {
@@ -389,6 +394,12 @@ final class FinancialStatementService
             $supplierId, $from, $asOf, $from, true,
             $dimension !== null ? ['dimension' => $dimension] : [], true,
         );
+        $spreadOn = $accrualSpread && $dimension === null;
+        $spread = $spreadOn ? $this->interimAccruals->compute($supplierId, $from, $asOf) : null;
+        $spreadById = [];
+        if ($spread !== null && $spread['deltas'] !== []) {
+            [$raw, $spreadById] = $this->applySpreadToTrialBalance($supplierId, $asOf, $raw, $spread['deltas']);
+        }
 
         $sectionOf = function (string $accountCode) use ($map, $sectionByRow): string {
             foreach ($this->mapper->entriesFor($map, $accountCode, null) as $m) {
@@ -418,7 +429,7 @@ final class FinancialStatementService
                 'synthetic_code' => (string) ($r['parent_code'] ?? $r['account_code']),
                 'synthetic_name' => (string) ($r['parent_name'] ?? $r['name']),
                 'delta'          => $delta,
-            ];
+            ] + (isset($r['spread']) ? ['spread' => self::cents($r['spread'])] : []);
             if (in_array($type, ['asset', 'liability', 'equity'], true)) {
                 $balanceLeaves[] = $leaf;
             } elseif ($type === 'revenue' || $type === 'expense') {
@@ -510,7 +521,64 @@ final class FinancialStatementService
                 'technical_residual' => $money($technicalCents),
                 'unassigned_count'   => count($sections['unassigned']['expenses']) + count($sections['unassigned']['revenues']),
             ],
-        ] + ($columns === null ? [] : ['columns' => $this->accountColumns($supplierId, $raw, $sectionOf, $from, $asOf, $dimension, $columns)]);
+        ] + ($columns === null ? [] : ['columns' => $this->accountColumns($supplierId, $raw, $sectionOf, $from, $asOf, $dimension, $columns, $spreadById)])
+          + ($accrualSpread ? ['accrual_spread' => self::accrualSpreadSummary($spreadOn, $spread, null)] : []);
+    }
+
+    /**
+     * Dopad úprav průběžného rozlišení na výsledek hospodaření: výnosy − náklady úprav, tedy
+     * záporný součet MD − D výsledkových účtů (třídy 5 a 6).
+     *
+     * @param array<string,float> $deltas
+     */
+    public static function spreadProfitEffect(array $deltas): float
+    {
+        $cents = 0;
+        foreach ($deltas as $code => $delta) {
+            if (in_array(substr((string) $code, 0, 1), ['5', '6'], true)) {
+                $cents -= self::cents($delta);
+            }
+        }
+        return $cents / 100;
+    }
+
+    /**
+     * Přičte úpravy průběžného rozlišení (účet => MD − D) k obratům období řádků předvahy
+     * s analytikami. Účet bez pohybu se doplní z osnovy platné k `asOf`. Účet, který osnova
+     * nezná, je chyba: úprava by z pohledu tiše vypadla a rozvaha by nebilancovala.
+     *
+     * @param list<array<string,mixed>> $raw
+     * @param array<string,float> $deltas
+     * @return array{0:list<array<string,mixed>>, 1:array<int,float>} řádky, úprava podle id účtu
+     */
+    private function applySpreadToTrialBalance(int $supplierId, string $asOf, array $raw, array $deltas): array
+    {
+        $byCode = [];
+        foreach ($raw as $i => $r) {
+            $byCode[(string) $r['account_code']] = $i;
+        }
+        $missing = array_values(array_filter(array_map('strval', array_keys($deltas)), static fn (string $c): bool => !isset($byCode[$c])));
+        foreach ($this->ledger->trialBalanceAccounts($supplierId, $asOf, $missing) as $r) {
+            $byCode[(string) $r['account_code']] = count($raw);
+            $raw[] = $r + ['ps_md' => 0.0, 'ps_d' => 0.0, 'to_md' => 0.0, 'to_d' => 0.0, 'to_count' => 0];
+        }
+        $byId = [];
+        foreach ($deltas as $code => $delta) {
+            $i = $byCode[(string) $code] ?? null;
+            if ($i === null) {
+                throw new ReportException('accrual_account_missing', 'Účet ' . $code . ' z průběžného časového rozlišení není v účtové osnově firmy.');
+            }
+            $delta = round((float) $delta, 2);
+            if ($delta > 0) {
+                $raw[$i]['to_md'] = round((float) $raw[$i]['to_md'] + $delta, 2);
+            } else {
+                $raw[$i]['to_d'] = round((float) $raw[$i]['to_d'] - $delta, 2);
+            }
+            $raw[$i]['spread'] = round((float) ($raw[$i]['spread'] ?? 0.0) + $delta, 2);
+            $byId[(int) $raw[$i]['id']] = $raw[$i]['spread'];
+        }
+        usort($raw, static fn (array $a, array $b): int => strcmp((string) $a['account_code'], (string) $b['account_code']));
+        return [$raw, $byId];
     }
 
     /**
@@ -519,13 +587,17 @@ final class FinancialStatementService
      * @param array{hide_zero:bool, analytics:bool} $options
      * @return array<string,mixed>
      */
-    private function accountColumns(int $supplierId, array $raw, callable $sectionOf, string $from, string $asOf, ?DimensionFilter $dimension, array $options): array
+    private function accountColumns(int $supplierId, array $raw, callable $sectionOf, string $from, string $asOf, ?DimensionFilter $dimension, array $options, array $spreadById = []): array
     {
         // Období nemusí začínat prvním dnem měsíce, obrat měsíce pak jde od jeho začátku.
         $monthFrom = max(substr($asOf, 0, 7) . '-01', $from);
         $monthRows = $this->ledger->monthlyTurnovers(
             $supplierId, $monthFrom, $asOf, true, $dimension !== null ? ['dimension' => $dimension] : [], true,
         );
+        // Úprava průběžného rozlišení patří k datu výkazu, tedy i do obratu jeho měsíce.
+        foreach ($spreadById as $accountId => $delta) {
+            $monthRows[] = ['account_id' => $accountId, 'month' => substr($asOf, 0, 7), 'md' => max(0.0, $delta), 'd' => max(0.0, -$delta)];
+        }
         return StatementAccountColumns::build($raw, $monthRows, $sectionOf, self::ACCOUNT_VIEW_SECTIONS, $options + [
             'from' => $from, 'month_from' => $monthFrom, 'as_of' => $asOf,
         ]);
@@ -602,7 +674,10 @@ final class FinancialStatementService
                 'name'         => $leaf['name'],
                 'md'           => $md / 100,
                 'd'            => $d / 100,
-            ];
+            ] + (isset($leaf['spread']) ? ['spread' => $leaf['spread'] / 100] : []);
+            if (isset($leaf['spread'])) {
+                $out[$key]['spread'] = (($out[$key]['spread'] ?? 0) + $leaf['spread']);
+            }
         }
         ksort($out, SORT_STRING);
         return array_values(array_map(static function (array $s): array {
@@ -611,6 +686,9 @@ final class FinancialStatementService
             }
             $s['md'] /= 100;
             $s['d'] /= 100;
+            if (isset($s['spread'])) {
+                $s['spread'] /= 100;
+            }
             return $s;
         }, $out));
     }
@@ -778,23 +856,38 @@ final class FinancialStatementService
             'values'      => $values,
             'values_prev' => $valuesPrev,
             'tax_offset'  => $taxOffsetOn ? $taxOffset : null,
-            'accrual_spread' => !$accrualSpread ? null : [
-                'applied' => $spreadOn,
-                // Důvod, proč se volba neuplatnila (výkaz za hodnotu dimenze).
-                'skipped_reason' => $spreadOn ? null : 'dimension',
-                'prepaid_expense' => $spread['prepaid_expense'] ?? 0.0,
-                'deferred_revenue' => $spread['deferred_revenue'] ?? 0.0,
-                'documents' => $spread['documents'] ?? 0,
-                'depreciation' => $spread['depreciation'] ?? 0.0,
-                'depreciation_assets' => $spread['depreciation_assets'] ?? 0,
-                'later_dated' => $spread['later_dated'] ?? ['deferred_revenue' => 0.0, 'prepaid_expense' => 0.0, 'depreciation' => 0.0, 'entries' => 0],
-                'prev' => $spreadPrev === null ? null : [
-                    'prepaid_expense' => $spreadPrev['prepaid_expense'],
-                    'deferred_revenue' => $spreadPrev['deferred_revenue'],
-                    'documents' => $spreadPrev['documents'],
-                    'depreciation' => $spreadPrev['depreciation'],
-                    'depreciation_assets' => $spreadPrev['depreciation_assets'],
-                ],
+            'accrual_spread' => !$accrualSpread ? null : self::accrualSpreadSummary($spreadOn, $spread, $spreadPrev),
+        ];
+    }
+
+    /**
+     * Souhrn průběžného rozlišení pro výstup výkazu i pohledu po účtech. `vh_effect` = o kolik
+     * úpravy mění výsledek hospodaření (Σ úprav rozvahových účtů, MD − D).
+     *
+     * @param array<string,mixed>|null $spread výstup {@see InterimAccrualAdjustment::compute()}
+     * @param array<string,mixed>|null $prev totéž k ends_on minulého období
+     * @return array<string,mixed>
+     */
+    private static function accrualSpreadSummary(bool $applied, ?array $spread, ?array $prev): array
+    {
+        return [
+            'applied' => $applied,
+            // Důvod, proč se volba neuplatnila (výkaz za hodnotu dimenze).
+            'skipped_reason' => $applied ? null : 'dimension',
+            'prepaid_expense' => $spread['prepaid_expense'] ?? 0.0,
+            'deferred_revenue' => $spread['deferred_revenue'] ?? 0.0,
+            'documents' => $spread['documents'] ?? 0,
+            'depreciation' => $spread['depreciation'] ?? 0.0,
+            'depreciation_assets' => $spread['depreciation_assets'] ?? 0,
+            'accrual_agenda' => $spread['accrual_agenda'] ?? 0.0,
+            'vh_effect' => self::spreadProfitEffect($spread['deltas'] ?? []),
+            'later_dated' => $spread['later_dated'] ?? ['deferred_revenue' => 0.0, 'prepaid_expense' => 0.0, 'depreciation' => 0.0, 'entries' => 0],
+            'prev' => $prev === null ? null : [
+                'prepaid_expense' => $prev['prepaid_expense'],
+                'deferred_revenue' => $prev['deferred_revenue'],
+                'documents' => $prev['documents'],
+                'depreciation' => $prev['depreciation'],
+                'depreciation_assets' => $prev['depreciation_assets'],
             ],
         ];
     }

@@ -39,12 +39,16 @@ final class YearEndTaxEstimateService
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
         private readonly TaxReturnService $taxReturns,
+        private readonly InterimAccrualAdjustment $interimAccruals,
     ) {}
 
     /**
+     * `$accrualSpread` = výsledovka k datu je s průběžným časovým rozlišením a odpisy; můstek
+     * pak začíná VH k datu s úpravami ({@see bridge()}).
+     *
      * @return array<string,mixed>
      */
-    public function estimate(int $supplierId, int $periodId, ?string $asOf = null): array
+    public function estimate(int $supplierId, int $periodId, ?string $asOf = null, bool $accrualSpread = false): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -95,7 +99,7 @@ final class YearEndTaxEstimateService
         $advances = round((float) ($result['advances_paid'] ?? 0), 2);
         $bridge = ($preview['podklady']['accounting_decree'] ?? '500') === '504'
             ? null
-            : $this->bridge($supplierId, $period, $asOf, $vhPosted);
+            : $this->bridge($supplierId, $period, $asOf, $vhPosted, $accrualSpread);
         $closingItems = array_values((array) ($closing['items'] ?? []));
         $vhAfterTax = round($vhBeforeTax - $tax, 2);
         $balance = self::balanceEffects($closingItems, $tax, round($vhAfterTax - $vhPosted, 2));
@@ -197,26 +201,44 @@ final class YearEndTaxEstimateService
      * konec období, není co přemosťovat (null). Rámec 504 má VH z vlastního zdroje
      * posouzení neziskové organizace, proto můstek nemá (volající vrací null).
      *
+     * S průběžným rozlišením ({@see InterimAccrualAdjustment}, tytéž úpravy jako výsledovka
+     * k datu) začíná VH k datu s úpravami (`vh_as_of`, bez nich `vh_as_of_posted`) a každá
+     * skupina zápisů s pozdějším datem se sníží o část, kterou úpravy už započetly (`spread`):
+     * úprava se přiřadí skupině podle rozvahového účtu (384, 381, 383/385/388/389, oprávky
+     * 07x/08x, jinak ostatní). Úprava bez zápisu s pozdějším datem (odklad dokladu, který
+     * zaúčtuje až uzávěrka) tak skupinu sníží pod nulu. Součet zůstává `vh_posted` na haléř.
+     *
      * @param array<string,mixed> $period
-     * @return array{as_of:string, ends_on:string, vh_as_of:float, groups:list<array{key:string,amount:float}>, vh_posted:float}|null
+     * @return array{as_of:string, ends_on:string, vh_as_of:float, vh_as_of_posted:float, accrual_spread:?float, groups:list<array{key:string,amount:float,spread:float}>, vh_posted:float}|null
      */
-    private function bridge(int $supplierId, array $period, ?string $asOf, float $vhPosted): ?array
+    private function bridge(int $supplierId, array $period, ?string $asOf, float $vhPosted, bool $accrualSpread = false): ?array
     {
         $endsOn = (string) $period['ends_on'];
         if ($asOf === null || $asOf >= $endsOn) {
             return null;
         }
         $raw = (new DppoBooksFingerprint($this->db))->profitBeforeTaxBridge($supplierId, (string) $period['starts_on'], $asOf, $endsOn);
-        $totalCents = (int) round($raw['as_of'] * 100);
-        $groups = [];
-        foreach ($raw['groups'] as $key => $amount) {
-            $cents = (int) round($amount * 100);
-            $totalCents += $cents;
-            if ($cents !== 0) {
-                $groups[] = ['key' => $key, 'amount' => $amount];
+        $spreadCents = array_fill_keys(DppoBooksFingerprint::BRIDGE_GROUPS, 0);
+        if ($accrualSpread) {
+            foreach ($this->interimAccruals->compute($supplierId, (string) $period['starts_on'], $asOf)['deltas'] as $code => $delta) {
+                $group = self::bridgeGroupOf((string) $code);
+                if ($group !== null) {
+                    $spreadCents[$group] += (int) round($delta * 100);
+                }
             }
         }
-        // Součet musí sedět na haléř. Nesedí jen při zaúčtování mezi dotazy: pak se můstek
+        $spreadTotal = array_sum($spreadCents);
+        $postedAsOfCents = (int) round($raw['as_of'] * 100);
+        $totalCents = $postedAsOfCents + $spreadTotal;
+        $groups = [];
+        foreach ($raw['groups'] as $key => $amount) {
+            $cents = (int) round($amount * 100) - $spreadCents[$key];
+            $totalCents += $cents;
+            if ($cents !== 0 || $spreadCents[$key] !== 0) {
+                $groups[] = ['key' => $key, 'amount' => round($cents / 100, 2), 'spread' => round($spreadCents[$key] / 100, 2)];
+            }
+        }
+        // Součet musí sedět na haléř (úpravy průběžného rozlišení se v něm odečtou). Nesedí jen při zaúčtování mezi dotazy: pak se můstek
         // radši nevrací, než aby blok ukázal nesouhlasící řádky.
         if ($totalCents !== (int) round($vhPosted * 100)) {
             error_log(sprintf('Odhad do konce roku (firma %d): můstek %.2f nesouhlasí s VH %.2f, vynechán.', $supplierId, $totalCents / 100, $vhPosted));
@@ -226,10 +248,29 @@ final class YearEndTaxEstimateService
         return [
             'as_of' => $asOf,
             'ends_on' => $endsOn,
-            'vh_as_of' => $raw['as_of'],
+            'vh_as_of' => round(($postedAsOfCents + $spreadTotal) / 100, 2),
+            'vh_as_of_posted' => $raw['as_of'],
+            'accrual_spread' => $accrualSpread ? round($spreadTotal / 100, 2) : null,
             'groups' => $groups,
             'vh_posted' => $vhPosted,
         ];
+    }
+
+    /**
+     * Skupina můstku ({@see DppoBooksFingerprint::BRIDGE_GROUPS}) úpravy průběžného rozlišení
+     * na rozvahovém účtu; výsledkové účty (třídy 5, 6) nese jejich rozvahový protějšek (null).
+     */
+    private static function bridgeGroupOf(string $code): ?string
+    {
+        $synthetic = substr($code, 0, 3);
+        return match (true) {
+            in_array($code[0] ?? '', ['5', '6'], true) => null,
+            $synthetic === '384' => 'deferred_revenue',
+            $synthetic === '381' => 'prepaid_expenses',
+            in_array($synthetic, ['383', '385', '388', '389'], true) => 'accruals',
+            str_starts_with($code, '07'), str_starts_with($code, '08') => 'depreciation',
+            default => 'other',
+        };
     }
 
     /** @param array<string,mixed> $result */

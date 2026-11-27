@@ -936,6 +936,31 @@ final class LedgerReportRepository
     }
 
     /**
+     * Účty osnovy platné k `asOf` ve tvaru řádku {@see trialBalanceRows()} s analytikami (bez
+     * částek): pro doplnění účtu, který v deníku pohyb nemá, ale výkaz na něm úpravu ukazuje.
+     *
+     * @param list<string> $codes
+     * @return list<array<string,mixed>>
+     */
+    public function trialBalanceAccounts(int $supplierId, string $asOf, array $codes): array
+    {
+        if ($codes === []) {
+            return [];
+        }
+        $accountDefinitions = AccountDefinitionRepository::relation($asOf, $supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.id, c.account_code, c.name, c.account_type, c.normal_side, c.is_synthetic,
+                    p.id AS parent_id, p.account_code AS parent_code, p.name AS parent_name,
+                    p.normal_side AS parent_normal_side
+               FROM {$accountDefinitions} c
+               LEFT JOIN {$accountDefinitions} p ON p.id = c.parent_id
+              WHERE c.supplier_id = ? AND c.account_code IN (" . implode(',', array_fill(0, count($codes), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...array_values($codes)]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Přičte změny zůstatků (účet => MD − D) k listovým řádkům zůstatků. Účet bez pohybu
      * v deníku se doplní z osnovy platné k `asOf` se svou syntetikou. Účet, který osnova
      * nezná, je chyba: úprava by z výkazu tiše vypadla a rozvaha by nebilancovala.

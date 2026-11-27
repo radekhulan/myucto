@@ -238,7 +238,7 @@ final class FinancialStatementAction
         $columns = (string) ($request->getQueryParams()['columns'] ?? '') === '1' ? $this->columnOptions($request) : null;
 
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $columns);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $columns, $params['accrual_spread'] ?? false);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -278,7 +278,7 @@ final class FinancialStatementAction
         }
 
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request));
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request), $params['accrual_spread'] ?? false);
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit, 'estimate' => isset($data['columns']) && \MyInvoice\Security\RequestAuthorization::canReadYearEndTaxEstimate($request) ? $this->pdfEstimate($supplierId, $params['period_id'], $data) : null]),
@@ -294,7 +294,7 @@ final class FinancialStatementAction
         }
 
         $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
-            ['report' => 'account_view_' . $part, 'format' => $format],
+            ['report' => 'account_view_' . $part, 'format' => $format] + (($params['accrual_spread'] ?? false) ? ['accrual_spread' => true] : []),
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $supplierId);
 
@@ -321,7 +321,7 @@ final class FinancialStatementAction
             return null;
         }
         try {
-            $estimate = $this->estimates->estimate($supplierId, $periodId, (string) $data['as_of']);
+            $estimate = $this->estimates->estimate($supplierId, $periodId, (string) $data['as_of'], ($data['accrual_spread']['applied'] ?? false) === true);
         } catch (\Throwable $e) {
             if (\MyInvoice\Infrastructure\Database\TransactionFailure::aborted($e)) {
                 throw $e;
@@ -489,7 +489,7 @@ final class FinancialStatementAction
         $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
         if ($dimension === false) return null;
 
-        // Průběžné časové rozlišení mimo deník: jen pohled výkazu, výchozí vypnutý.
+        // Průběžné časové rozlišení a odpisy mimo deník: výkazy i pohled po účtech, výchozí vypnuté.
         $spread = trim((string) ($q['accrual_spread'] ?? '0'));
         if (!in_array($spread, ['', '0', '1'], true)) {
             $err = Json::error($response, 'validation_failed', "accrual_spread musí být 0 nebo 1.", 422);

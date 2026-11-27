@@ -19,10 +19,11 @@ use Psr\Log\LoggerInterface;
  * Odhad do konce roku k výsledovce po účtech (interní, načítá se zvlášť, protože
  * přepočítává náhled DPPO).
  *
- *   GET /api/accounting/reports/statement-accounts/tax-estimate?period_id=&as_of=
+ *   GET /api/accounting/reports/statement-accounts/tax-estimate?period_id=&as_of=[&accrual_spread=1]
  *
  * `as_of` = den výkazu tabulky výsledovky (stejný význam jako u statement-accounts);
  * s ním odpověď nese můstek od VH k tomu dni k zaúčtovanému VH celého období.
+ * `accrual_spread=1` = tabulka je s průběžným rozlišením, můstek začíná VH k datu s ním.
  */
 final class YearEndTaxEstimateAction
 {
@@ -50,8 +51,13 @@ final class YearEndTaxEstimateAction
             return Json::error($response, 'validation_failed', 'as_of musí být datum (YYYY-MM-DD).', 422);
         }
 
+        $spread = trim((string) ($request->getQueryParams()['accrual_spread'] ?? '0'));
+        if (!in_array($spread, ['', '0', '1'], true)) {
+            return Json::error($response, 'validation_failed', 'accrual_spread musí být 0 nebo 1.', 422);
+        }
+
         try {
-            $data = $this->estimates->estimate($supplierId, $periodId, $asOf !== '' ? $asOf : null);
+            $data = $this->estimates->estimate($supplierId, $periodId, $asOf !== '' ? $asOf : null, $spread === '1');
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
