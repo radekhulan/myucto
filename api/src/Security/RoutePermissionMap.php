@@ -1045,6 +1045,7 @@ final class RoutePermissionMap
         ['*', '#^/api/stock/assemblies(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/fulfillment(/|$)#', 'stock.fulfillment.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/item-templates(/|$)#', 'stock.items.write', AccessLevel::WRITE],
+        ['POST', '#^/api/stock/items/[0-9]+/serial-assignments$#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/items(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/sets(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/opening-import(/|$)#', 'stock.documents.write', AccessLevel::WRITE],

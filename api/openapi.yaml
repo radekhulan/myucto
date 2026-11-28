@@ -26928,11 +26928,61 @@ paths:
     get:
       tags: [Stock]
       summary: Šarže, série, expirace a historie skladové karty
-      description: Klientská role dostává aktuální kusy a umístění; pole history je prázdné.
+      description: |
+        Klientská role dostává aktuální kusy a umístění s prázdným polem `history`.
+        U sériové karty uživatel s právem `stock.documents.write` dostane také
+        `serial_assignment_stock`: aktivní sklady s volnými celými kusy bez
+        sériového čísla a lokace. Každá položka obsahuje `warehouse_id`,
+        `warehouse_code` a celočíselné `quantity`.
       responses:
         '200':
           description: Režim sledování, přesné převodní jednotky, aktuální alokace a úplná historie.
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/items/{id}/serial-assignments:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [Stock]
+      summary: Přiřazení sériových čísel ke stávající zásobě karty
+      description: |
+        Vyžaduje `stock.documents.write`. Každé číslo označí jeden existující kus
+        bez série a lokace. Volitelná lokace patří do vybraného skladu a musí být
+        aktivní. Vznikne doklad `serial_assignment` bez změny množství či ocenění
+        skladu. Při chybě se vrátí celá dávka.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [warehouse_id, serial_numbers]
+              properties:
+                warehouse_id: { type: integer, minimum: 1 }
+                location_id: { type: [integer, 'null'], minimum: 1 }
+                serial_numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: { type: string, minLength: 1, maxLength: 184 }
+      responses:
+        '201':
+          description: Sériová čísla byla přiřazena.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [document_id, assigned]
+                properties:
+                  document_id: { type: integer, format: int64 }
+                  assigned: { type: integer, minimum: 1 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Nedostatek volných kusů, sériové číslo již skladem, uzavřené období nebo otevřená inventura. }
+        '422': { description: Neplatný vstup, sklad, lokace nebo režim sledování. }
   /api/v1/stock/items/{id}/tracking-choices:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -28660,6 +28710,8 @@ paths:
           - credit_note
           - purchase_invoice
           - inventory
+          - purchase_order
+          - serial_assignment
       - in: query
         name: warehouse_id
         schema:
@@ -50067,7 +50119,7 @@ components:
         id: { type: integer, format: int64 }
         supplier_id: { type: integer, format: int64 }
         doc_type: { type: string, enum: [receipt, issue, transfer] }
-        origin: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory, purchase_order] }
+        origin: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory, purchase_order, serial_assignment] }
         warehouse_id: { type: integer, format: int64 }
         warehouse_to_id: { type: [integer, 'null'], format: int64 }
         doc_number: { type: [string, 'null'] }

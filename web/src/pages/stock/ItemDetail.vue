@@ -14,7 +14,8 @@ import { hasSubCentPrice, roundUnitPrice } from '@/utils/unitPrice'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
-import { btnOutline } from '@/components/ui/buttonStyles'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import AssignStockSerialsDialog from '@/components/stock/AssignStockSerialsDialog.vue'
 import ItemDuplicateDialog from '@/components/stock/ItemDuplicateDialog.vue'
 import ItemTemplatesPanel from '@/components/stock/ItemTemplatesPanel.vue'
 import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
@@ -182,6 +183,11 @@ async function loadQuantities() {
 
 const movements = ref<StockLedgerRow[]>([])
 const tracking = ref<StockTrackingOverview | null>(null)
+const serialAssignmentOpen = ref(false)
+const serialAssignmentWarehouses = computed(() => item.value?.id === id.value && item.value.supplier_id === supplier.currentSupplierId
+  && tracking.value?.tracking_mode === 'serial' && auth.canWrite('stock.documents.write')
+  ? (tracking.value.serial_assignment_stock ?? []).filter(row => row.quantity > 0)
+  : [])
 const trackingSearch = ref('')
 const trackingPage = ref(1)
 const trackingPerPage = 20
@@ -218,6 +224,14 @@ async function loadItem() {
   } finally {
     loading.value = false
   }
+}
+
+function onSerialNumbersAssigned(count: number) {
+  serialAssignmentOpen.value = false
+  tracking.value = null
+  toast.success(t('stock.tracking.serial_assignment.success', { count }))
+  void loadItem()
+  void loadWarehouseLevels()
 }
 
 async function loadPackaging() {
@@ -260,6 +274,7 @@ onMounted(async () => {
 })
 watch(id, () => { contextGeneration++; productContext.value = null; void loadProductContext() })
 watch(() => supplier.currentSupplierId, () => { contextGeneration++; productContext.value = null; void loadProductContext() })
+watch([id, () => supplier.currentSupplierId], () => { serialAssignmentOpen.value = false })
 onBeforeUnmount(() => { contextGeneration++ })
 
 function exportFile(format: 'pdf' | 'xlsx') {
@@ -539,9 +554,18 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
             {{ t(tracking.tracking_mode === 'serial' ? 'stock.tracking.mode_serial' : 'stock.tracking.mode_lot') }}
           </h3>
-          <input v-if="tracking.inventory.length" v-model="trackingSearch" type="search"
-            :aria-label="t('stock.tracking.inventory_search')" :placeholder="t('stock.tracking.inventory_search')"
-            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm sm:max-w-xs" />
+          <div v-if="tracking.inventory.length || serialAssignmentWarehouses.length" class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <input v-if="tracking.inventory.length" v-model="trackingSearch" type="search"
+              :aria-label="t('stock.tracking.inventory_search')" :placeholder="t('stock.tracking.inventory_search')"
+              class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm sm:w-80" />
+            <button v-if="serialAssignmentWarehouses.length" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
+              data-test="open-serial-assignment" @click="serialAssignmentOpen = true">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" />
+              </svg>
+              {{ t('stock.tracking.serial_assignment.action') }}
+            </button>
+          </div>
         </div>
         <div v-if="tracking.inventory.length === 0" class="px-5 py-6 text-sm text-neutral-500">{{ t('stock.tracking.empty') }}</div>
         <div v-else-if="filteredTracking.length === 0" class="px-5 py-6 text-sm text-neutral-500" role="status">{{ t('stock.tracking.inventory_no_matches') }}</div>
@@ -559,6 +583,9 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
           <PaginationBar v-model:page="trackingPage" embedded :per-page="trackingPerPage" :total="filteredTracking.length" />
         </div>
       </div>
+      <AssignStockSerialsDialog v-if="serialAssignmentOpen && serialAssignmentWarehouses.length"
+        :item-id="item.id" :warehouses="serialAssignmentWarehouses"
+        @close="serialAssignmentOpen = false" @assigned="onSerialNumbersAssigned" />
 
       <!-- Tab Pohyby -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

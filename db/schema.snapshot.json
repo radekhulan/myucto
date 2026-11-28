@@ -1257,7 +1257,8 @@
         "2351_other_item_offset_settlement.sql",
         "2352_statement_504_group_accounts.sql",
         "2353_partner_settlement_accounts.sql",
-        "2354_stock_location_quantities.sql"
+        "2354_stock_location_quantities.sql",
+        "2355_stock_serial_assignment.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26721,7 +26722,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "journal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "origin": "enum('manual','invoice','credit_note','purchase_invoice','inventory','purchase_order') NOT NULL DEFAULT 'manual'",
+                "origin": "enum('manual','invoice','credit_note','purchase_invoice','inventory','purchase_order','serial_assignment') NOT NULL DEFAULT 'manual'",
                 "partner_name": "varchar(255) NULL DEFAULT NULL",
                 "purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "purchase_order_id": "bigint(20) unsigned NULL DEFAULT NULL",

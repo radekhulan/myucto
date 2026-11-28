@@ -16934,7 +16934,8 @@
       "credit_note": "Dobropis",
       "purchase_invoice": "Přijatá faktura",
       "inventory": "Inventura",
-      "purchase_order": "Objednávka dodavateli"
+      "purchase_order": "Objednávka dodavateli",
+      "serial_assignment": "Přiřazení sériových čísel"
     },
     "take_status": {
       "draft": "Založena",
@@ -17967,6 +17968,15 @@
       "add_allocation": "Přidat alokaci",
       "required_hint": "Před zaúčtováním rozdělte celé množství řádku.",
       "serial_number": "Sériové číslo",
+      "serial_assignment": {
+        "action": "Přiřadit sériová čísla",
+        "location": "Lokace (volitelná)",
+        "locations_error": "Lokace skladu se nepodařilo načíst ({message}).",
+        "hint": "Zadejte, vložte nebo načtěte čtečkou jedno sériové číslo na každý řádek.",
+        "count": "Zadaná čísla {count} z {available} dostupných kusů",
+        "batch_limit": "Při jednom přiřazení zadejte nejvýš {count} sériových čísel.",
+        "success": "Sériová čísla byla přiřazena ({count})."
+      },
       "lot_code": "Kód šarže",
       "no_location": "Bez lokace",
       "expires": "expirace",

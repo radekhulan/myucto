@@ -12,6 +12,7 @@ use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLandedCostRepository;
 use MyInvoice\Repository\StockTakeRepository;
+use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Repository\WarehouseRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use PDO;
@@ -78,6 +79,7 @@ final class StockDocumentService
         private readonly ReceiptCardUpdater $cardUpdates,
         private readonly StockAcquisitionCostService $acquisitionCosts,
         private readonly StockLocationService $locations,
+        private readonly StockTrackingRepository $trackingStock,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -310,6 +312,77 @@ final class StockDocumentService
         });
     }
 
+    public function assignSerials(
+        int $supplierId,
+        int $itemId,
+        int $warehouseId,
+        ?int $locationId,
+        array $serialNumbers,
+        ?int $userId,
+    ): array {
+        if (!array_is_list($serialNumbers) || $serialNumbers === [] || count($serialNumbers) > 1000) {
+            throw new StockException('invalid_tracking_allocations', 'Zadejte 1 až 1000 sériových čísel.', 422);
+        }
+        $allocations = [];
+        foreach ($serialNumbers as $serial) {
+            if (!is_string($serial) || trim($serial) === '') {
+                throw new StockException('tracking_identity_required', 'Každé sériové číslo musí být neprázdný text.', 422);
+            }
+            $allocations[] = ['serial_number' => trim($serial), 'quantity' => '1', 'location_id' => $locationId];
+        }
+        usort($allocations, static fn (array $a, array $b): int => strcmp($a['serial_number'], $b['serial_number']));
+        $date = date('Y-m-d');
+        return $this->runInTransaction(function () use ($supplierId, $itemId, $warehouseId, $allocations, $date, $userId): array {
+            $item = $this->trackingStock->item($supplierId, $itemId);
+            if ($item === null) {
+                throw new StockException('not_found', 'Skladová karta nenalezena.', 404);
+            }
+            if ($item['tracking_mode'] !== 'serial') {
+                throw new StockException('tracking_mode_mismatch', 'Na kartě musí být zapnuté sledování sériových čísel.', 422);
+            }
+            $this->guardPeriodOpen($supplierId, $date);
+            $this->guardHistoryUnlocked($supplierId, $date);
+            $this->requireActiveWarehouse($supplierId, $warehouseId);
+            $this->warehouses->lockForStockOperation($supplierId, [$warehouseId]);
+            $this->requireActiveWarehouse($supplierId, $warehouseId);
+            $this->guardNoOpenStockTake($supplierId, $warehouseId, null);
+            $this->levels->lockLevels($supplierId, [['warehouse_id' => $warehouseId, 'stock_item_id' => $itemId]]);
+            $count = count($allocations);
+            $this->requireSerialRemainder($supplierId, $itemId, $warehouseId, $count * 1000);
+            $trackingJson = $this->tracking->normalizeDraftInput($supplierId, $itemId, $allocations);
+            $documentId = $this->docs->insertHeader($supplierId, [
+                'doc_type' => 'transfer',
+                'origin' => 'serial_assignment',
+                'warehouse_id' => $warehouseId,
+                'warehouse_to_id' => $warehouseId,
+                'doc_date' => $date,
+                'description' => 'Přiřazení sériových čísel',
+                'created_by' => $userId,
+            ]);
+            $line = [
+                'document_id' => $documentId,
+                'stock_item_id' => $itemId,
+                'qty' => (string) $count,
+                'line_no' => 1,
+                'tracking_input_json' => $trackingJson,
+            ];
+            $lineId = $this->docs->insertLine($supplierId, $line);
+            $this->tracking->postLine($supplierId, 'receipt', $warehouseId, null, [
+                'id' => $lineId,
+                'tracking_mode' => 'serial',
+                'tracking_allocations' => json_decode($trackingJson, true, 512, JSON_THROW_ON_ERROR),
+            ] + $line);
+            $number = $this->series->next($supplierId, self::SERIES['transfer'], (int) substr($date, 0, 4));
+            if (!$this->docs->markPosted($supplierId, $documentId, $number, $userId)) {
+                throw new StockException('invalid_document', 'Přiřazení se nepodařilo uložit.', 500);
+            }
+            WebhookEvents::enqueue($this->db->pdo(), $supplierId, WebhookEvents::STOCK_POSTED, [
+                'stock_document_id' => $documentId, 'document_type' => 'transfer', 'warehouse_id' => $warehouseId,
+            ]);
+            return ['document_id' => $documentId, 'assigned' => $count];
+        });
+    }
+
     /** @return array<string,mixed> */
     private function doPost(int $supplierId, int $id, ?int $userId, array $shipmentAllowance = [], bool &$justPosted = false): array
     {
@@ -396,7 +469,7 @@ final class StockDocumentService
         $this->locations->applyDocument($supplierId, $docType, $warehouseId, $warehouseToId, $docDate, $lines, $warehouseLevels);
         if (!$locationTransfer) {
             foreach ($lines as $line) {
-                $this->tracking->postLine($supplierId, $docType, $warehouseId, $warehouseToId, $line);
+                $this->tracking->postLine($supplierId, $docType, $warehouseId, $warehouseToId, $line, $docDate);
             }
             foreach ($lines as $line) {
                 $this->applyLine($supplierId, $docType, $warehouseId, $warehouseToId, $docDate, $line);
@@ -503,6 +576,10 @@ final class StockDocumentService
             $pairs = $this->buildPairs($counterType, $counterWh, $counterWhTo, $origLines);
             $warehouseLevels = $this->levels->lockLevels($supplierId, $pairs);
             $locationTransfer = $counterType === 'transfer' && $counterWh === $counterWhTo;
+            if ($orig['origin'] === 'serial_assignment'
+                && $this->trackingStock->serialAssignmentWasUsed($supplierId, (int) $origLines[0]['id'])) {
+                throw new StockException('serial_assignment_already_used', 'Přiřazení nelze stornovat, některé sériové číslo už bylo vydáno nebo převedeno.', 409);
+            }
             if (!$locationTransfer) {
                 $this->snapshots->invalidate($supplierId, $pairs, $docDate);
                 $this->assertAvailability($supplierId, $counterType, $counterWh, $origLines);
@@ -564,6 +641,11 @@ final class StockDocumentService
                 $counterLines[] = ['id' => $counterLineId] + $counterLine;
                 $this->tracking->reverseLine($supplierId, (int) $line['id'], $counterLineId);
             }
+            if ($orig['origin'] === 'serial_assignment') {
+                $this->requireSerialRemainder($supplierId, (int) $origLines[0]['stock_item_id'], $counterWh, 0);
+            } elseif (!$locationTransfer && $counterType !== 'receipt') {
+                $this->guardUntrackedReversal($supplierId, $counterWh, $counterLines);
+            }
             $this->locations->applyDocument(
                 $supplierId,
                 $counterType,
@@ -606,6 +688,43 @@ final class StockDocumentService
             ]);
             return ['original' => $original, 'reversal' => $reversal];
         });
+    }
+
+    private function guardUntrackedReversal(int $supplierId, int $warehouseId, array $counterLines): void
+    {
+        $serialLines = array_filter($counterLines, static fn (array $line): bool => $line['tracking_mode'] === 'serial');
+        if ($serialLines === []) {
+            return;
+        }
+        $allocations = $this->tracking->canonicalAllocationsForLines($supplierId, array_column($serialLines, 'id'), 'out');
+        $outgoing = [];
+        $untracked = [];
+        foreach ($serialLines as $line) {
+            $itemId = $line['stock_item_id'];
+            $quantityT = StockValuation::qtyToT($line['qty']);
+            $outgoing[$itemId] = ($outgoing[$itemId] ?? 0) + $quantityT;
+            $trackedT = array_sum(array_map(StockValuation::qtyToT(...),
+                array_column($allocations[$line['id']] ?? [], 'quantity')));
+            $untracked[$itemId] = ($untracked[$itemId] ?? 0) + $quantityT - $trackedT;
+        }
+        foreach ($untracked as $itemId => $quantityT) {
+            if ($quantityT > 0) {
+                $this->requireSerialRemainder($supplierId, $itemId, $warehouseId, $outgoing[$itemId]);
+            }
+        }
+    }
+
+    private function requireSerialRemainder(int $supplierId, int $itemId, int $warehouseId, int $requiredT): void
+    {
+        $remainderT = $this->trackingStock->serialRemainders($supplierId, $itemId, $warehouseId)[0]['remainderT'] ?? 0;
+        if ($remainderT < $requiredT) {
+            throw new StockException('serial_assignment_insufficient_stock', 'Na skladě není dost kusů bez sériového čísla.', 409, [
+                'warehouse_id' => $warehouseId,
+                'stock_item_id' => $itemId,
+                'available_quantity' => StockValuation::tToDecimal(max(0, $remainderT)),
+                'required_quantity' => StockValuation::tToDecimal($requiredT),
+            ]);
+        }
     }
 
     /**
