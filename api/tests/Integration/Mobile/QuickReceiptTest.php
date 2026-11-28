@@ -276,6 +276,27 @@ final class QuickReceiptTest extends TestCase
         self::assertSame($clientId, (int) $this->scalar('SELECT client_id FROM invoices WHERE id = ?', [(int) $json['invoice']['id']]));
     }
 
+    /** Neplátce zjednodušený daňový doklad nevystavuje, limit § 30 ho nad 10 000 Kč nezastaví. */
+    public function testNonVatPayerReceiptWithoutClientOverSimplifiedLimit(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE eet_settings SET enabled = 0 WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $pdo->prepare(
+            "INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified)
+             VALUES (?, '1900-01-01', 0, 0)
+             ON DUPLICATE KEY UPDATE is_vat_payer = 0, is_identified = 0"
+        )->execute([$this->supplierId]);
+        $pdo->prepare('UPDATE supplier SET is_vat_payer = 0 WHERE id = ?')->execute([$this->supplierId]);
+
+        $body = ['channel' => 'cash', 'items' => [['description' => 'Kolo', 'quantity' => 1, 'unit_price' => '12000', 'vat_rate' => 0]]];
+        $response = $this->post($body, 'rcpt-nonpayer-1');
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $invoice = $this->row('SELECT * FROM invoices WHERE id = ?', [(int) $this->json($response)['invoice']['id']]);
+        self::assertSame('12000.00', $invoice['total_with_vat']);
+        self::assertSame('paid', $invoice['status']);
+        self::assertSame('1', (string) $this->scalar('SELECT is_walk_in FROM clients WHERE id = ?', [(int) $invoice['client_id']]));
+    }
+
     public function testUserWithoutEetPermissionIsRejectedWhenCompanyRecords(): void
     {
         try {

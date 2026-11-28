@@ -227,6 +227,29 @@ final class SimplifiedOnlyClientTest extends TestCase
         self::assertNull($this->gate->simplifiedOnlyClientRejection($this->invoices->find($id)));
     }
 
+    public function testNonVatPayerIssuesDocumentWithoutCustomerOverSimplifiedLimit(): void
+    {
+        $this->setVatPayerAt($this->db->pdo(), $this->supplierId, '1900-01-01', false);
+        $walkIn = $this->clients->findOrCreateWalkInCustomer($this->supplierId, $this->currencyId);
+        $walkInDoc = $this->draft($walkIn, simplified: true, total: 12100, vat: false);
+        $smallDoc = $this->draft($this->smallClient(), simplified: true, total: 12100, vat: false);
+
+        self::assertNull($this->gate->simplifiedRejection($this->invoices->find($walkInDoc)), 'Neplátce nevystavuje daňový doklad, limit § 30 se ho netýká.');
+        self::assertSame(200, $this->issueDraft($walkInDoc)['status']);
+        self::assertSame(200, $this->issueDraft($smallDoc)['status']);
+    }
+
+    public function testVatPayerDocumentWithoutCustomerOverLimitIsStillRefused(): void
+    {
+        $walkIn = $this->clients->findOrCreateWalkInCustomer($this->supplierId, $this->currencyId);
+        $id = $this->draft($walkIn, simplified: true, total: 12100);
+
+        $result = $this->issueDraft($id);
+
+        self::assertSame(422, $result['status']);
+        self::assertSame('simplified_document_not_allowed', $result['code']);
+    }
+
     public function testAutomaticIssueRespectsTheGate(): void
     {
         $id = $this->draft($this->smallClient(), simplified: false, total: 1000);

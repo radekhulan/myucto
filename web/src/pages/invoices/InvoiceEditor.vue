@@ -2180,12 +2180,16 @@ const computed_totals = computed(() => {
  *
  * Limit se posuzuje z částky VČETNĚ daně: doklad se základem 9 000 Kč je s 21 % na
  * 10 890 Kč, tedy nad limitem, přestože na základ se pohodlně vejde.
+ *
+ * Neplátce daňový doklad nevystavuje, podmínky § 30 se na něj nevztahují
+ * (serverová `InvoiceIssueTaxGate::issuesTaxDocument()`).
  */
 const SIMPLIFIED_FORBIDDEN_LINES: Record<string, string> = {
   '20': 'invoice.simplified_blocked_eu',
   '25': 'invoice.simplified_blocked_reverse_charge',
 }
 const simplifiedBlockedReason = computed<string | null>(() => {
+  if (!supplierIsVatPayer.value) return null
   const total = Math.abs(computed_totals.value.with_vat)
   if (total > SIMPLIFIED_LIMIT_WITH_VAT) {
     return t('invoice.simplified_blocked_limit', {

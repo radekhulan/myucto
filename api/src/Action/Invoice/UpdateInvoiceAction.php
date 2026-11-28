@@ -1277,7 +1277,9 @@ final class UpdateInvoiceAction
      * Důvod, proč doklad v podobě PO úpravě nemůže být zjednodušeným daňovým dokladem;
      * `null` = může, nebo zjednodušený není. Částka se počítá z položek, které se uloží
      * (z těla, jinak uložené), stejným výpočtem jako {@see InvoiceCalculator::recompute()},
-     * protože součty se přepočítají až po zápisu.
+     * protože součty se přepočítají až po zápisu. Neplátce daňový doklad nevystavuje,
+     * podmínky § 30 ZDPH se na něj nevztahují stejně jako při vystavení
+     * ({@see InvoiceIssueTaxGate::issuesTaxDocument()}).
      *
      * @param array<string,mixed> $body     tělo po sloučení s uloženou hlavičkou a defaulty
      * @param array<string,mixed> $existing
@@ -1287,7 +1289,12 @@ final class UpdateInvoiceAction
         $simplified = array_key_exists('is_simplified', $body)
             ? filter_var($body['is_simplified'], FILTER_VALIDATE_BOOLEAN)
             : !empty($existing['is_simplified']);
-        if (!$simplified) {
+        if (!$simplified || !$this->taxGate->issuesTaxDocument([
+            'supplier_id' => (int) $existing['supplier_id'],
+            'invoice_type' => (string) ($body['invoice_type'] ?? $existing['invoice_type'] ?? 'invoice'),
+            'issue_date' => (string) ($body['issue_date'] ?? $existing['issue_date']),
+            'tax_date' => $body['tax_date'] ?? $existing['tax_date'] ?? null,
+        ])) {
             return null;
         }
 
