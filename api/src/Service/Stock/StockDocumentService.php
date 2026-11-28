@@ -77,6 +77,7 @@ final class StockDocumentService
         private readonly UnitPrecision $unitPrecision,
         private readonly ReceiptCardUpdater $cardUpdates,
         private readonly StockAcquisitionCostService $acquisitionCosts,
+        private readonly StockLocationService $locations,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -338,6 +339,7 @@ final class StockDocumentService
         $warehouseId   = (int) $doc['warehouse_id'];
         $warehouseToId = $doc['warehouse_to_id'] !== null ? (int) $doc['warehouse_to_id'] : null;
         $docDate       = (string) $doc['doc_date'];
+        $locationTransfer = $docType === 'transfer' && $warehouseToId === $warehouseId;
 
         $lines = $this->docs->lines($supplierId, $id);
         if ($lines === []) {
@@ -352,8 +354,8 @@ final class StockDocumentService
         // 2a) Sklady musí být platné i v okamžiku post (mohly být deaktivovány po draftu).
         $this->requireActiveWarehouse($supplierId, $warehouseId);
         if ($docType === 'transfer') {
-            if ($warehouseToId === null || $warehouseToId === $warehouseId) {
-                throw new StockException('invalid_document', 'Převodka vyžaduje odlišný cílový sklad.');
+            if ($warehouseToId === null) {
+                throw new StockException('invalid_document', 'Převodka vyžaduje cílový sklad.');
             }
             $this->requireActiveWarehouse($supplierId, $warehouseToId);
         }
@@ -365,36 +367,40 @@ final class StockDocumentService
         // 2c) Otevřená inventura na dotčených skladech blokuje pohyby (A13).
         $this->warehouses->lockForStockOperation($supplierId, array_filter([$warehouseId, $warehouseToId]));
         $this->guardNoOpenStockTake($supplierId, $warehouseId, $warehouseToId);
+        $this->locations->validateLines($supplierId, $docType, $warehouseId, $warehouseToId, $lines, lock: true);
 
         // 3) Zámky VŠECH dotčených stavů jedním lockLevels (převodka: oba sklady).
         $pairs = $this->buildPairs($docType, $warehouseId, $warehouseToId, $lines);
-        $this->levels->lockLevels($supplierId, $pairs);
-        $this->snapshots->invalidate($supplierId, $pairs, $docDate);
+        $warehouseLevels = $this->levels->lockLevels($supplierId, $pairs);
 
         // 4) Backdating (§3.2): starší doc_date než poslední pohyb karty → replay
         //    NEJDŘÍV (normalizace stavů + guard uzavřených období), pod drženými zámky.
         $backdated = [];
-        foreach ($pairs as $pair) {
-            $last = $this->docs->lastPostedDocDateForItem($supplierId, $pair['warehouse_id'], $pair['stock_item_id']);
-            if ($last !== null && $docDate < $last) {
-                $backdated[] = $pair;
+        if (!$locationTransfer) {
+            $this->snapshots->invalidate($supplierId, $pairs, $docDate);
+            foreach ($pairs as $pair) {
+                $last = $this->docs->lastPostedDocDateForItem($supplierId, $pair['warehouse_id'], $pair['stock_item_id']);
+                if ($last !== null && $docDate < $last) {
+                    $backdated[] = $pair;
+                }
             }
-        }
-        foreach ($backdated as $pair) {
-            $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
-        }
-
-        // 5) Kontrola dostupnosti VŠECH výdejových noh najednou — PŘED výdejem
-        //    čísla řady (B3), s úplným výčtem chybějících položek (A3).
-        $this->assertAvailability($supplierId, $docType, $warehouseId, $lines, $shipmentAllowance);
-
-        foreach ($lines as $line) {
-            $this->tracking->postLine($supplierId, $docType, $warehouseId, $warehouseToId, $line);
+            foreach ($backdated as $pair) {
+                $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
+            }
+            if ($backdated !== []) {
+                $warehouseLevels = $this->levels->lockLevels($supplierId, $pairs);
+            }
+            $this->assertAvailability($supplierId, $docType, $warehouseId, $lines, $shipmentAllowance);
         }
 
-        // 6) Aplikace pohybů v deterministickém pořadí řádků (line_no, id).
-        foreach ($lines as $line) {
-            $this->applyLine($supplierId, $docType, $warehouseId, $warehouseToId, $docDate, $line);
+        $this->locations->applyDocument($supplierId, $docType, $warehouseId, $warehouseToId, $docDate, $lines, $warehouseLevels);
+        if (!$locationTransfer) {
+            foreach ($lines as $line) {
+                $this->tracking->postLine($supplierId, $docType, $warehouseId, $warehouseToId, $line);
+            }
+            foreach ($lines as $line) {
+                $this->applyLine($supplierId, $docType, $warehouseId, $warehouseToId, $docDate, $line);
+            }
         }
 
         // 7) Číslo řady až PO kontrolách (B3) + přepnutí do posted.
@@ -414,8 +420,10 @@ final class StockDocumentService
         // 7b) Stav objednávek dotčených tímhle pohybem — UVNITŘ téže transakce.
         //     Kdyby se přepočet dělal až po commitu, existovalo by okno, ve kterém
         //     zboží na skladě leží, ale objednávka pořád tvrdí, že je na cestě.
-        $this->recomputeTouchedOrders($supplierId, $lines);
-        $this->priceJobs->enqueue($supplierId, array_column($lines, 'stock_item_id'));
+        if (!$locationTransfer) {
+            $this->recomputeTouchedOrders($supplierId, $lines);
+            $this->priceJobs->enqueue($supplierId, array_column($lines, 'stock_item_id'));
+        }
 
         // 8) Způsob B — žádný deníkový zápis.
         $posted = $this->docs->findWithLines($supplierId, $id);
@@ -493,12 +501,12 @@ final class StockDocumentService
 
             // Zámky všech dotčených stavů (u převodky oba sklady dohromady).
             $pairs = $this->buildPairs($counterType, $counterWh, $counterWhTo, $origLines);
-            $this->levels->lockLevels($supplierId, $pairs);
-            $this->snapshots->invalidate($supplierId, $pairs, $docDate);
-
-            // Kontrola dostupnosti výdejových noh protidokladu — storno příjemky
-            // po výdejích nesmí vytvořit minus; PŘED výdejem čísla řady (B3).
-            $this->assertAvailability($supplierId, $counterType, $counterWh, $origLines);
+            $warehouseLevels = $this->levels->lockLevels($supplierId, $pairs);
+            $locationTransfer = $counterType === 'transfer' && $counterWh === $counterWhTo;
+            if (!$locationTransfer) {
+                $this->snapshots->invalidate($supplierId, $pairs, $docDate);
+                $this->assertAvailability($supplierId, $counterType, $counterWh, $origLines);
+            }
 
             $reason      = trim((string) ($meta['reason'] ?? ''));
             $description = 'Storno ' . (string) ($orig['doc_number'] ?? ('#' . $id))
@@ -520,6 +528,7 @@ final class StockDocumentService
                 'stock_take_id'       => $orig['stock_take_id'],
                 'created_by'          => $userId,
             ]);
+            $counterLines = [];
             foreach ($origLines as $line) {
                 // Stejné hodnoty (hodnotová neutralita §4.4) — NEpřeceňuje se.
                 //
@@ -531,7 +540,7 @@ final class StockDocumentService
                 // cestu, ani do rezervací — bez chyby, bez varování, jen jiné číslo
                 // na kartě. Regresi hlídá InTransitTest (R-1 + zrcadlový případ
                 // výdejky), který bez těchhle dvou řádků padá.
-                $counterLineId = $this->docs->insertLine($supplierId, [
+                $counterLine = [
                     'document_id'              => $counterId,
                     'stock_item_id'            => (int) $line['stock_item_id'],
                     'qty'                      => (string) $line['qty'],
@@ -546,9 +555,25 @@ final class StockDocumentService
                     'line_no'                  => (int) $line['line_no'],
                     'note'                     => $line['note'],
                     'tracking_input_json'      => $line['tracking_input_json'] ?? null,
-                ]);
+                    'location_id'              => $origType === 'transfer' ? $line['location_to_id'] : $line['location_id'],
+                    'location_to_id'           => $origType === 'transfer' ? $line['location_id'] : null,
+                    'tracking_mode'            => $line['tracking_mode'],
+                    'original_line_id'         => (int) $line['id'],
+                ];
+                $counterLineId = $this->docs->insertLine($supplierId, $counterLine);
+                $counterLines[] = ['id' => $counterLineId] + $counterLine;
                 $this->tracking->reverseLine($supplierId, (int) $line['id'], $counterLineId);
             }
+            $this->locations->applyDocument(
+                $supplierId,
+                $counterType,
+                $counterWh,
+                $counterWhTo,
+                $docDate,
+                $locationTransfer ? array_reverse($counterLines) : $counterLines,
+                $warehouseLevels,
+                reversal: true,
+            );
 
             $docNumber = $this->series->next($supplierId, self::SERIES[$counterType], (int) substr($docDate, 0, 4));
             if (!$this->docs->markPosted($supplierId, $counterId, $docNumber, $userId)) {
@@ -562,14 +587,13 @@ final class StockDocumentService
             // (is_reversal detekce), takže storno-výdeje jdou ve FIXNÍ původní ceně;
             // validace non-negative + uzavřených období v každém kroku. Selhání →
             // rollback celé transakce (vč. čísla řady i statusů).
-            foreach ($pairs as $pair) {
-                $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
+            if (!$locationTransfer) {
+                foreach ($pairs as $pair) {
+                    $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
+                }
+                $this->recomputeTouchedOrders($supplierId, $origLines);
+                $this->priceJobs->enqueue($supplierId, array_column($origLines, 'stock_item_id'));
             }
-
-            // Storno příjemky vrací zboží „na cestu" → stav objednávky se musí
-            // vrátit z received/partially_received zpátky, ve stejné transakci.
-            $this->recomputeTouchedOrders($supplierId, $origLines);
-            $this->priceJobs->enqueue($supplierId, array_column($origLines, 'stock_item_id'));
 
             $original = $this->docs->findWithLines($supplierId, $id);
             $reversal = $this->docs->findWithLines($supplierId, $counterId);
@@ -915,9 +939,6 @@ final class StockDocumentService
             if ($warehouseToId <= 0) {
                 throw new StockException('invalid_document', 'Převodka vyžaduje cílový sklad.');
             }
-            if ($warehouseToId === $warehouseId) {
-                throw new StockException('invalid_document', 'Cílový sklad převodky musí být odlišný od zdrojového.');
-            }
             $this->requireActiveWarehouse($supplierId, $warehouseToId);
         }
 
@@ -1023,6 +1044,9 @@ final class StockDocumentService
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,
                 'line_no'                  => $lineNo++,
                 'note'                     => self::nullableString($rl['note'] ?? null),
+                'tracking_mode'            => $meta[$itemId]['tracking_mode'],
+                'location_id'              => StockLocationService::id($rl['location_id'] ?? null),
+                'location_to_id'           => StockLocationService::id($rl['location_to_id'] ?? null),
                 'tracking_input_json'      => $this->tracking->normalizeDraftInput(
                     $supplierId,
                     $itemId,
@@ -1057,6 +1081,7 @@ final class StockDocumentService
             'allow_over_delivery' => !empty($body['allow_over_delivery']),
         ];
 
+        $this->locations->validateLines($supplierId, $docType, $warehouseId, $warehouseToId, $lines);
         $this->assertReferencesOwned($supplierId, $header, $lines);
         $this->assertCardSourceIsOwnInvoice($supplierId, $header, $lines);
 
@@ -1112,7 +1137,7 @@ final class StockDocumentService
         }
         $place = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, sku, name, item_type, is_active, supplier_id, unit
+            "SELECT id, sku, name, item_type, is_active, supplier_id, unit, tracking_mode
                FROM stock_items WHERE supplier_id = ? AND id IN ($place)"
         );
         $stmt->execute(array_merge([$supplierId], $ids));
@@ -1124,6 +1149,7 @@ final class StockDocumentService
                 'is_active' => (bool) $r['is_active'],
                 'item_type' => (string) $r['item_type'],
                 'unit'      => (string) $r['unit'],
+                'tracking_mode' => (string) $r['tracking_mode'],
             ];
         }
         return $out;

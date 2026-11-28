@@ -9,6 +9,8 @@ use PDO;
 
 final class StockLedgerReader
 {
+    public const WAREHOUSE_MOVEMENT_SQL = "(d.doc_type <> 'transfer' OR d.warehouse_to_id <> d.warehouse_id)";
+
     public function __construct(private readonly Connection $db) {}
 
     public function pairs(int $supplierId, string $date, ?int $warehouseId = null, ?int $categoryId = null): array
@@ -21,14 +23,17 @@ final class StockLedgerReader
             $lines = 'category_items ci STRAIGHT_JOIN stock_document_lines l ON l.stock_item_id = ci.id';
             $params = [$supplierId, $categoryId];
         }
+        $warehouseMovement = self::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare($cte . "SELECT DISTINCT warehouse_id, stock_item_id FROM (
             SELECT d.warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed')
+              AND {$warehouseMovement}
             UNION ALL
             SELECT d.warehouse_to_id AS warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer'
+              AND {$warehouseMovement}
         ) legs" . ($warehouseId !== null ? ' WHERE warehouse_id = ?' : '') . ' ORDER BY stock_item_id, warehouse_id');
         array_push($params, $supplierId, $date, $supplierId, $date);
         if ($warehouseId !== null) {
@@ -75,14 +80,17 @@ final class StockLedgerReader
         if ($warehouseId !== null) {
             $params[] = $warehouseId;
         }
+        $warehouseMovement = self::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare("SELECT * FROM (
             SELECT l.stock_item_id AS item_id, d.warehouse_id AS wh, " . self::lineColumns('d.warehouse_id') . "
             FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND l.stock_item_id IN ({$in}){$legA}
+              AND {$warehouseMovement}
             UNION ALL
             SELECT l.stock_item_id, d.warehouse_to_id, " . self::lineColumns('d.warehouse_to_id') . "
             FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer' AND l.stock_item_id IN ({$in}){$legB}
+              AND {$warehouseMovement}
         ) x ORDER BY item_id, wh, doc_date, booked_at, document_id, line_no, line_id");
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -112,6 +120,7 @@ final class StockLedgerReader
             }
             $where .= ' AND (' . implode(' OR ', $branches) . ')';
         }
+        $warehouseMovement = self::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare("SELECT " . self::lineColumns('?') . ",
             si.sku, si.name
             FROM stock_document_lines l FORCE INDEX (idx_sdl_valuation_cursor)
@@ -119,6 +128,7 @@ final class StockLedgerReader
             STRAIGHT_JOIN stock_items si ON si.id = l.stock_item_id AND si.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.stock_item_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed')
             AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))
+            AND {$warehouseMovement}
             {$where} ORDER BY l.doc_date, l.ledger_booked_at, l.document_id, l.line_no, l.id LIMIT {$limit}");
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -140,10 +150,12 @@ final class StockLedgerReader
 
     public function affectedDates(int $supplierId, int $warehouseId, int $itemId, string $fromDate): array
     {
+        $warehouseMovement = self::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare("SELECT DISTINCT l.doc_date FROM stock_document_lines l
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.stock_item_id = ? AND l.doc_date >= ? AND d.status IN ('posted','reversed')
-            AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))");
+            AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))
+            AND {$warehouseMovement}");
         $stmt->execute([$supplierId, $itemId, $fromDate, $warehouseId, $warehouseId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }

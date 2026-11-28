@@ -219,6 +219,18 @@ final class StockItemRepository
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
+    /** @param list<int> $ids @return array<int,string> */
+    public function eansForIds(int $supplierId, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT id, ean FROM stock_items WHERE supplier_id = ? AND id IN ('
+            . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([$supplierId, ...$ids]);
+        return array_filter($stmt->fetchAll(PDO::FETCH_KEY_PAIR), static fn (?string $ean): bool => $ean !== null && trim($ean) !== '');
+    }
+
     public function facets(int $supplierId, array $filters, int $limit = 100): array
     {
         $limit = max(1, min(500, $limit));

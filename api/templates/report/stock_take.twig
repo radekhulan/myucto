@@ -6,6 +6,7 @@ body{font-family:montserrat,dejavusans,sans-serif;font-size:8pt;color:#15131d}h1
 <h1>Inventurní soupis #{{ take.id }}</h1>
 <table class="meta">
 <tr><td class="label">Účetní jednotka</td><td>{{ supplier.company_name }}{% if supplier.ic %}, IČ {{ supplier.ic }}{% endif %}</td><td class="label">Sklad</td><td>{{ warehouse.code }} — {{ warehouse.name }}</td></tr>
+{% if location %}<tr><td class="label">Lokace</td><td colspan="3">{{ location.code }} - {{ location.name }}</td></tr>{% endif %}
 <tr><td class="label">Rozhodný den</td><td>{{ take.take_date|cz_date }}</td><td class="label">Způsob zjištění</td><td>{{ counting_method_label }}</td></tr>
 <tr><td class="label">Zahájení</td><td>{{ take.started_at }}</td><td class="label">Ukončení</td><td>{{ take.closed_at }}</td></tr>
 <tr><td class="label">Osoba zjišťující stav</td><td>{{ take.responsible_count_name }}</td><td class="label">Osoba odpovědná za inventuru</td><td>{{ take.responsible_inventory_name }}</td></tr>

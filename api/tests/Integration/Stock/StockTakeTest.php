@@ -4,8 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Stock;
 
+use MyInvoice\Action\Stock\StockTakeAction;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\StockTrackingRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockLocationService;
+use MyInvoice\Service\Stock\StockValuationJobService;
 use PHPUnit\Framework\Attributes\Group;
+use Psr\Http\Message\ServerRequestInterface;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Epic SKLAD, plán §8.2 scénář 12 — inventura end-to-end (start → snapshot →
@@ -200,6 +210,136 @@ final class StockTakeTest extends StockTestCase
         self::assertSame('counting', $prepared['status']);
         self::assertSame([$here], array_map(static fn (array $l): int => (int) $l['stock_item_id'], $prepared['lines']),
             'Příprava na pozadí má stejné pravidlo jako přímé spuštění.');
+    }
+
+    public function testLocationTakeListsAndValidatesItsScope(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $a = $this->location($supplierId, $warehouseId, 'A');
+        $b = $this->location($supplierId, $warehouseId, 'B');
+        $otherWarehouseId = $this->warehouse($supplierId, 'OTHER', false);
+        $otherWarehouseLocation = $this->location($supplierId, $otherWarehouseId, 'WRONG');
+        $otherSupplierId = $this->createSupplier();
+        $foreignLocation = $this->location($otherSupplierId, $this->warehouse($otherSupplierId), 'FOREIGN');
+        $action = $this->container->get(StockTakeAction::class);
+        $request = $this->takeRequest($supplierId, 'POST');
+        $body = $this->takeBody($warehouseId, '2099-02-01');
+
+        foreach ([$otherWarehouseLocation, $foreignLocation, 0, true] as $invalid) {
+            $response = $action->create($request->withParsedBody($body + ['location_id' => $invalid]), new Response());
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('stock.error.invalid_location', json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)['error']['code']);
+        }
+
+        $response = $action->create($request->withParsedBody($body + ['location_id' => $a]), new Response());
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $takeA = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($a, $takeA['location_id']);
+
+        $response = $action->create($request->withParsedBody($body + ['location_id' => $b]), new Response());
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $this->takes->start($supplierId, $takeA['id'], $this->userId);
+        $this->takes->close($supplierId, $takeA['id'], $this->userId);
+
+        $response = $action->create($request->withParsedBody($body + ['location_id' => $a]), new Response());
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('stock.error.stock_take_exists', json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)['error']['code']);
+        $response = $action->create($request->withParsedBody($body + ['location_id' => $b]), new Response());
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $takeB = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        $request = $this->takeRequest($supplierId, 'GET');
+        $response = $action->list($request->withQueryParams(['location_id' => (string) $b]), new Response());
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame([$takeB['id']], array_column(json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR), 'id'));
+        $response = $action->list($request->withQueryParams(['location_id' => '0']), new Response());
+        self::assertSame(422, $response->getStatusCode());
+    }
+
+    public function testLocationTakePreparesHistoricalQuantitiesAndPostsScopedAdjustments(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $locationId = $this->location($supplierId, $warehouseId, 'A');
+        $otherLocationId = $this->location($supplierId, $warehouseId, 'B');
+        $here = $this->item($supplierId, 'HERE');
+        $there = $this->item($supplierId, 'THERE');
+        $found = $this->item($supplierId, 'FOUND');
+        $tracked = $this->itemsRepo->insert($supplierId, [
+            'sku' => 'TRACKED', 'name' => 'Sledovaná karta', 'item_type' => 'goods', 'unit' => 'ks', 'tracking_mode' => 'lot',
+        ]);
+        $this->receiveAt($supplierId, $warehouseId, $locationId, $here, '4.000', '10.000000', '2099-01-01');
+        $this->receiveAt($supplierId, $warehouseId, $otherLocationId, $here, '6.000', '20.000000', '2099-01-01');
+        $this->receiveAt($supplierId, $warehouseId, $otherLocationId, $there, '3.000', '10.000000', '2099-01-01');
+        $this->receiveAt($supplierId, $warehouseId, $locationId, $here, '5.000', '16.000000', '2099-03-01');
+
+        $body = $this->takeBody($warehouseId, '2099-02-01') + ['location_id' => $locationId];
+        $take = $this->takes->create($supplierId, $body, $this->userId);
+        $action = $this->container->get(StockTakeAction::class);
+        $response = $action->start($this->takeRequest($supplierId, 'POST'), new Response(), ['id' => $take['id']]);
+        self::assertSame(202, $response->getStatusCode(), (string) $response->getBody());
+        $jobs = $this->container->get(StockValuationJobService::class);
+        for ($i = 0; $i < 20 && $this->takes->get($supplierId, $take['id'])['status'] === 'preparing'; $i++) {
+            $jobs->tick($supplierId);
+        }
+        $prepared = $this->takes->get($supplierId, $take['id']);
+        self::assertSame('counting', $prepared['status']);
+        self::assertSame([$here], array_column($prepared['lines'], 'stock_item_id'));
+        $line = $prepared['lines'][0];
+        self::assertSame('4.000', $line['expected_qty']);
+        self::assertSame('64.00', $line['expected_value']);
+        self::assertSame('16.000000', $line['surplus_unit_cost']);
+
+        try {
+            $this->takes->updateCounts($supplierId, $take['id'], ['add_item_ids' => [$tracked]], $this->userId);
+            self::fail('Inventura lokace nesmí ručně přidat sledovanou kartu.');
+        } catch (StockException $e) {
+            self::assertSame('invalid_document', $e->errorCode);
+        }
+        $withFound = $this->takes->updateCounts($supplierId, $take['id'], ['add_item_ids' => [$found]], $this->userId);
+        $foundLine = $this->findLine($withFound, $found);
+        self::assertSame('0.000', $foundLine['expected_qty']);
+        $this->takes->updateCounts($supplierId, $take['id'], ['lines' => [
+            ['id' => $line['id'], 'counted_qty' => '3.000'],
+            ['id' => $foundLine['id'], 'counted_qty' => '2.000', 'surplus_unit_cost' => '5.000000'],
+        ]], $this->userId);
+        $closed = $this->takes->close($supplierId, $take['id'], $this->userId);
+        self::assertSame($locationId, $closed['issue_document']['lines'][0]['location_id']);
+        self::assertSame($locationId, $closed['receipt_document']['lines'][0]['location_id']);
+        $locations = $this->container->get(StockLocationService::class);
+        $quantities = $locations->quantitiesAt($supplierId, $warehouseId, $locationId, '2099-02-01');
+        ksort($quantities);
+        self::assertSame([$here => '3.000', $found => '2.000'], $quantities);
+        self::assertSame('6.000', $locations->quantitiesAt($supplierId, $warehouseId, $otherLocationId, '2099-02-01')[$here]);
+        self::assertSame('8.000', $locations->quantitiesAt($supplierId, $warehouseId, $locationId, '2099-03-01')[$here]);
+    }
+
+    private function location(int $supplierId, int $warehouseId, string $code): int
+    {
+        return $this->container->get(StockTrackingRepository::class)
+            ->saveLocation($supplierId, $warehouseId, null, $code, 'Regál ' . $code, true);
+    }
+
+    private function receiveAt(int $supplierId, int $warehouseId, int $locationId, int $itemId, string $qty, string $cost, string $date): void
+    {
+        $draft = $this->documents->create($supplierId, [
+            'doc_type' => 'receipt',
+            'warehouse_id' => $warehouseId,
+            'doc_date' => $date,
+            'description' => 'Příjem na regál',
+            'lines' => [['stock_item_id' => $itemId, 'location_id' => $locationId, 'qty' => $qty, 'unit_cost' => $cost]],
+        ], $this->userId);
+        $this->documents->post($supplierId, $draft['id'], $this->userId);
+    }
+
+    private function takeRequest(int $supplierId, string $method): ServerRequestInterface
+    {
+        return (new ServerRequestFactory())->createServerRequest($method, '/api/v1/stock/takes', ['REMOTE_ADDR' => '127.0.0.1'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(101, 'Testovací skladník', 'staff', true, ['stock' => 1, 'stock.take' => 2]));
     }
 
     /** @return array<string,mixed> */

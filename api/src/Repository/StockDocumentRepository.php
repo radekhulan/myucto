@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Stock\StockLedgerReader;
 use PDO;
 
 /**
@@ -64,7 +65,7 @@ final class StockDocumentRepository
                     l.unit_cost, l.value_total, l.extra_cost, l.invoice_item_id,
                     l.purchase_invoice_item_id, l.purchase_order_line_id, l.remember_seller_code, l.fill_intrastat,
                     l.source_description, l.source_qty,
-                    l.line_no, l.note, l.tracking_input_json,
+                    l.line_no, l.note, l.tracking_input_json, l.location_id, l.location_to_id,
                     si.sku, si.name, si.unit, si.tracking_mode
                FROM stock_document_lines l
                JOIN stock_items si ON si.id = l.stock_item_id AND si.supplier_id = l.supplier_id
@@ -220,8 +221,8 @@ final class StockDocumentRepository
             'INSERT INTO stock_document_lines
                 (document_id, supplier_id, stock_item_id, doc_date, qty, unit_cost, value_total,
                  extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id, remember_seller_code, fill_intrastat,
-                 source_description, source_qty, line_no, note, tracking_input_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 source_description, source_qty, line_no, note, tracking_input_json, location_id, location_to_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             (int) $data['document_id'],
             $supplierId,
@@ -241,6 +242,8 @@ final class StockDocumentRepository
             (int) ($data['line_no'] ?? 0),
             $data['note'] ?? null,
             $data['tracking_input_json'] ?? null,
+            $data['location_id'] ?? null,
+            $data['location_to_id'] ?? null,
         ]);
         return (int) $pdo->lastInsertId();
     }
@@ -539,11 +542,13 @@ final class StockDocumentRepository
      */
     public function itemIdsMovedInWarehouse(int $supplierId, int $warehouseId, ?string $date = null): array
     {
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare(
             "SELECT DISTINCT l.stock_item_id
                FROM stock_document_lines l
                JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
               WHERE l.supplier_id = ? AND d.status IN ('posted','reversed')
+                AND $warehouseMovement
                 AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))"
             . ($date !== null ? ' AND d.doc_date <= ?' : '')
         );
@@ -624,12 +629,14 @@ final class StockDocumentRepository
      */
     public function lastPostedDocDateForItem(int $supplierId, int $warehouseId, int $stockItemId): ?string
     {
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare(
             "SELECT MAX(l.doc_date)
                FROM stock_document_lines l
                JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
               WHERE l.supplier_id = ? AND l.stock_item_id = ?
                 AND d.status IN " . self::LEDGER_STATUSES . "
+                AND $warehouseMovement
                 AND ((d.doc_type IN ('receipt','issue') AND d.warehouse_id = ?)
                      OR (d.doc_type = 'transfer' AND (d.warehouse_id = ? OR d.warehouse_to_id = ?)))"
         );
@@ -665,6 +672,7 @@ final class StockDocumentRepository
      */
     public function postedLinesForItemFrom(int $supplierId, int $warehouseId, int $stockItemId, string $fromDate): array
     {
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.id AS line_id, l.document_id, d.doc_type, d.origin, d.status,
                     l.doc_date, l.line_no, l.qty, l.unit_cost, l.value_total, l.extra_cost,
@@ -685,6 +693,7 @@ final class StockDocumentRepository
               WHERE l.supplier_id = ? AND l.stock_item_id = ?
                 AND d.status IN " . self::LEDGER_STATUSES . "
                 AND l.doc_date >= ?
+                AND $warehouseMovement
                 AND ((d.doc_type IN ('receipt','issue') AND d.warehouse_id = ?)
                      OR (d.doc_type = 'transfer' AND (d.warehouse_id = ? OR d.warehouse_to_id = ?)))
               ORDER BY l.doc_date ASC, d.booked_at ASC, l.document_id ASC, l.line_no ASC, l.id ASC"
@@ -751,6 +760,8 @@ final class StockDocumentRepository
         $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
         $r['fill_intrastat'] = (bool) ($r['fill_intrastat'] ?? false);
         $r['line_no'] = (int) $r['line_no'];
+        $r['location_id'] = $r['location_id'] !== null ? (int) $r['location_id'] : null;
+        $r['location_to_id'] = $r['location_to_id'] !== null ? (int) $r['location_to_id'] : null;
         $r['tracking_allocations'] = $r['tracking_input_json'] === null
             ? []
             : json_decode((string) $r['tracking_input_json'], true, 512, JSON_THROW_ON_ERROR);

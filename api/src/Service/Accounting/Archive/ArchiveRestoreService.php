@@ -137,6 +137,8 @@ final class ArchiveRestoreService
         'stock_levels',
         'stock_documents',
         'stock_document_lines',
+        'stock_location_levels',
+        'stock_location_movements',
         'external_entity_map',
         'stock_tracking_allocations',
         'stock_cycle_counts',

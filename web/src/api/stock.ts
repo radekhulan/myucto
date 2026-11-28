@@ -554,6 +554,18 @@ export interface WarehouseLocation {
   is_active: boolean
 }
 
+export interface StockLocationQuantity {
+  warehouse_id: number
+  location_id: number
+  location_code: string
+  location_name: string
+  stock_item_id: number
+  sku: string
+  name: string
+  unit: string
+  quantity: string
+}
+
 export interface TrackingAllocationInput {
   stock_tracking_unit_id?: number | null
   quantity: string | number
@@ -694,6 +706,8 @@ export interface StockDocumentLine {
   source_qty?: string | null
   line_no?: number
   note?: string | null
+  location_id?: number | null
+  location_to_id?: number | null
   tracking_mode?: StockTrackingMode
   tracking_allocations?: TrackingAllocationInput[]
   // joined (read-only, jen v odpovědi)
@@ -799,6 +813,8 @@ export interface StockDocumentPayload {
     source_description?: string
     source_qty?: string | number
     note?: string | null
+    location_id?: number | null
+    location_to_id?: number | null
     tracking_allocations?: TrackingAllocationInput[]
   }>
 }
@@ -856,6 +872,7 @@ export interface StockTake {
   id: number
   supplier_id: number
   warehouse_id: number
+  location_id?: number | null
   take_date: string
   status: StockTakeStatus
   note: string | null
@@ -1193,6 +1210,8 @@ export const stockApi = {
   updateWarehouse: (id: number, payload: WarehousePayload) => api.put<Warehouse>(`/stock/warehouses/${id}`, payload).then(r => r.data),
   deleteWarehouse: (id: number) => api.delete<{ deleted: true }>(`/stock/warehouses/${id}`).then(r => r.data),
   listLocations: (warehouseId?: number) => api.get<WarehouseLocation[]>('/stock/locations', { params: warehouseId ? { warehouse_id: warehouseId } : undefined }).then(r => r.data),
+  locationContents: (locationId: number, page: number, perPage: number) =>
+    api.get<{ data: StockLocationQuantity[]; meta: StockPageMeta }>(`/stock/locations/${locationId}/contents`, { params: { page, per_page: perPage } }).then(r => r.data),
   createLocation: (payload: { warehouse_id: number; code: string; name: string; is_active?: boolean }) => api.post<WarehouseLocation>('/stock/locations', payload).then(r => r.data),
   updateLocation: (id: number, payload: { warehouse_id: number; code: string; name: string; is_active?: boolean }) => api.put<WarehouseLocation>(`/stock/locations/${id}`, payload).then(r => r.data),
 
@@ -1338,10 +1357,10 @@ export const stockApi = {
     api.post<ReceiptInvoiceCreated>(`/stock/documents/${id}/invoice`, payload).then(r => r.data),
 
   // ── Inventury ───────────────────────────────────────────────────────────
-  listTakes: (filters: { warehouse_id?: number; status?: StockTakeStatus } = {}) =>
+  listTakes: (filters: { warehouse_id?: number; location_id?: number; status?: StockTakeStatus } = {}) =>
     api.get<StockTake[]>('/stock/takes', { params: toParams(filters) }).then(r => r.data),
   getTake: (id: number) => api.get<StockTake>(`/stock/takes/${id}`).then(r => r.data),
-  createTake: (payload: { warehouse_id: number; take_date: string; note?: string | null; counting_method: string; responsible_count_name: string; responsible_inventory_name: string }) =>
+  createTake: (payload: { warehouse_id: number; location_id?: number; take_date: string; note?: string | null; counting_method: string; responsible_count_name: string; responsible_inventory_name: string }) =>
     api.post<StockTake>('/stock/takes', payload).then(r => r.data),
   updateTake: (id: number, lines: Array<{ id: number; counted_qty: string | number | null; surplus_unit_cost?: string | number | null }>, addItemIds: number[] = []) =>
     api.put<StockTake>(`/stock/takes/${id}`, addItemIds.length > 0 ? { lines, add_item_ids: addItemIds } : { lines }).then(r => r.data),

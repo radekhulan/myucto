@@ -29,11 +29,33 @@ const takes = ref<StockTake[]>([])
 const cycles = ref<StockCycleCount[]>([])
 const warehouses = ref<Warehouse[]>([])
 const locations = ref<WarehouseLocation[]>([])
+const takeLocationFilter = ref<number | null>(null)
 const listLoading = ref(false)
+const listFailed = ref(false)
+const locationById = computed(() => new Map(locations.value.map(location => [location.id, `${location.code} - ${location.name}`])))
+const locationFilterOptions = computed(() => locations.value.map(location => ({
+  value: location.id, label: locationName(location.id), secondary: warehouseName(location.warehouse_id),
+})))
+let listRequest = 0
 
-async function loadList() {
+async function loadTakes() {
+  const request = ++listRequest
   listLoading.value = true
-  try { [takes.value, cycles.value] = await Promise.all([stockApi.listTakes(), stockApi.listCycleCounts()]) } catch { takes.value = []; cycles.value = [] } finally { listLoading.value = false }
+  listFailed.value = false
+  try {
+    const result = await stockApi.listTakes(takeLocationFilter.value === null ? {} : { location_id: takeLocationFilter.value })
+    if (request === listRequest) takes.value = result
+  } catch {
+    if (request === listRequest) listFailed.value = true
+  } finally {
+    if (request === listRequest) listLoading.value = false
+  }
+}
+async function loadCycles() {
+  try { cycles.value = await stockApi.listCycleCounts() } catch { cycles.value = [] }
+}
+async function loadList() {
+  await Promise.all([loadTakes(), loadCycles()])
 }
 
 const createOpen = ref(false)
@@ -52,12 +74,16 @@ onMounted(() => document.addEventListener('keydown', onCreateEscape))
 onBeforeUnmount(() => document.removeEventListener('keydown', onCreateEscape))
 const createForm = reactive({
   warehouse_id: null as number | null,
+  location_id: null as number | null,
   take_date: appIsoDate(),
   note: '',
   counting_method: 'physical_count',
   responsible_count_name: '',
   responsible_inventory_name: '',
 })
+const createLocationOptions = computed(() => locations.value
+  .filter(location => location.is_active && location.warehouse_id === createForm.warehouse_id)
+  .map(location => ({ value: location.id, label: locationName(location.id) })))
 const creating = ref(false)
 const cycleOpen = ref(false)
 const cycle = ref<StockCycleCount | null>(null)
@@ -69,7 +95,7 @@ async function createCycle() {
   try {
     cycle.value = await stockApi.createCycleCount({ warehouse_id: cycleForm.warehouse_id, location_id: cycleForm.location_id, category_id: cycleForm.category_id, take_date: cycleForm.take_date, note: cycleForm.note || undefined })
     cycleOpen.value = true
-    await loadList()
+    await loadCycles()
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 async function openCycle(row: StockCycleCount) {
@@ -80,7 +106,7 @@ async function saveCycle(close = false) {
   try {
     cycle.value = await stockApi.updateCycleCount(cycle.value.id, cycle.value.lines.map(l => ({ id: l.id, counted_qty: l.counted_qty, surplus_unit_cost: l.surplus_unit_cost })))
     if (close) cycle.value = await stockApi.closeCycleCount(cycle.value.id)
-    await loadList()
+    await loadCycles()
     toast.success(t('common.saved'))
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
@@ -90,6 +116,7 @@ async function createTake() {
   try {
     const take = await stockApi.createTake({
       warehouse_id: createForm.warehouse_id,
+      location_id: createForm.location_id ?? undefined,
       take_date: createForm.take_date,
       note: createForm.note || undefined,
       counting_method: createForm.counting_method,
@@ -200,7 +227,7 @@ let addItemSearchSeq = 0
 const addItemOptions = computed(() => {
   const present = new Set((take.value?.lines ?? []).map(l => l.stock_item_id))
   return addItemResults.value
-    .filter(i => !present.has(i.id))
+    .filter(i => !present.has(i.id) && (take.value?.location_id == null || (i.tracking_mode ?? 'none') === 'none'))
     .map(i => ({ value: i.id, label: `${i.sku} ${i.name}` }))
 })
 async function searchAddItem(query: string) {
@@ -271,9 +298,14 @@ watch(id, async (newId, oldId) => {
 })
 watch(preparationRunning, (value) => { if (preparationTimer) clearTimeout(preparationTimer); if (value) void pollPreparation() })
 watch(() => cycleForm.warehouse_id, () => { cycleForm.location_id = null })
+watch(() => createForm.warehouse_id, () => { createForm.location_id = null })
+watch(takeLocationFilter, () => { if (!id.value) void loadTakes() })
 
 function warehouseName(wid: number): string {
   return warehouses.value.find(w => w.id === wid)?.name ?? `#${wid}`
+}
+function locationName(locationId: number): string {
+  return locationById.value.get(locationId) ?? `#${locationId}`
 }
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-neutral-100 text-neutral-600',
@@ -298,12 +330,19 @@ const STATUS_BADGE: Record<string, string> = {
         </button>
       </div>
 
+      <div v-if="locationFilterOptions.length" class="mb-3 max-w-sm">
+        <label for="stock-take-location-filter" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_location') }}</label>
+        <SearchableSelect v-model="takeLocationFilter" input-id="stock-take-location-filter" :options="locationFilterOptions"
+          :placeholder="t('stock.takes.all_locations')" :clear-label="t('common.empty_state.clear_filters')" :no-results-label="t('common.no_results')" />
+      </div>
       <div v-if="listLoading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+      <EmptyState v-else-if="listFailed" boxed variant="failed" @action="loadTakes" />
       <EmptyState v-else-if="takes.length === 0" boxed icon="clipboardCheck"
-        :title="t('stock.takes.empty_title')"
-        :message="t('stock.takes.empty_hint')"
-        :cta="auth.canWrite('stock.take') ? t('stock.takes.new') : undefined"
-        @action="createOpen = true" />
+        :variant="takeLocationFilter === null ? 'empty' : 'filtered'"
+        :title="t(takeLocationFilter === null ? 'stock.takes.empty_title' : 'stock.takes.location_empty')"
+        :message="takeLocationFilter === null ? t('stock.takes.empty_hint') : undefined"
+        :cta="takeLocationFilter === null && auth.canWrite('stock.take') ? t('stock.takes.new') : undefined"
+        @action="takeLocationFilter === null ? (createOpen = true) : (takeLocationFilter = null)" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
@@ -318,7 +357,10 @@ const STATUS_BADGE: Record<string, string> = {
               <td class="px-3 py-2 whitespace-nowrap">
                 <RouterLink class="row-link" :to="`/stock/takes/${tk.id}`" @click.stop @auxclick.stop>{{ formatDate(tk.take_date) }}</RouterLink>
               </td>
-              <td class="px-3 py-2">{{ warehouseName(tk.warehouse_id) }}</td>
+              <td class="px-3 py-2">
+                {{ warehouseName(tk.warehouse_id) }}
+                <div v-if="tk.location_id != null" class="text-xs text-neutral-500">{{ locationName(tk.location_id) }}</div>
+              </td>
               <td class="px-3 py-2 text-center">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[tk.status]">{{ t(`stock.take_status.${tk.status}`) }}</span>
               </td>
@@ -349,11 +391,17 @@ const STATUS_BADGE: Record<string, string> = {
           <h3 class="text-lg font-semibold mb-3">{{ t('stock.takes.new') }}</h3>
           <div class="space-y-3">
             <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_warehouse') }}</label>
-              <select v-model="createForm.warehouse_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <label for="stock-take-warehouse" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_warehouse') }}</label>
+              <select id="stock-take-warehouse" v-model="createForm.warehouse_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                 <option :value="null">—</option>
                 <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
               </select>
+            </div>
+            <div v-if="createLocationOptions.length">
+              <label for="stock-take-location" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_location') }}</label>
+              <SearchableSelect v-model="createForm.location_id" input-id="stock-take-location" :options="createLocationOptions"
+                :placeholder="t('stock.cycles.all_locations')" :clear-label="t('stock.locations.clear_selection')" :no-results-label="t('common.no_results')" />
+              <p v-if="createForm.location_id !== null" class="mt-1 text-xs text-neutral-500">{{ t('stock.takes.location_untracked_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_date') }}</label>
@@ -416,7 +464,9 @@ const STATUS_BADGE: Record<string, string> = {
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h1 class="text-2xl font-semibold">{{ t('stock.takes.title') }} - {{ warehouseName(take.warehouse_id) }}</h1>
-            <p class="text-sm text-neutral-500 mt-0.5">{{ formatDate(take.take_date) }}</p>
+            <p class="text-sm text-neutral-500 mt-0.5">
+              {{ formatDate(take.take_date) }}<template v-if="take.location_id != null"> · {{ locationName(take.location_id) }}</template>
+            </p>
           </div>
           <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[take.status]">{{ t(`stock.take_status.${take.status}`) }}</span>
         </div>
@@ -500,7 +550,7 @@ const STATUS_BADGE: Record<string, string> = {
                   :placeholder="t('stock.takes.add_item_placeholder')" :no-results-label="t('common.no_results')" teleport
                   @search="searchAddItem" @update:model-value="addItem" />
               </div>
-              <p class="text-xs text-neutral-500 mt-1">{{ t('stock.takes.add_item_hint') }}</p>
+              <p class="text-xs text-neutral-500 mt-1">{{ t(take.location_id == null ? 'stock.takes.add_item_hint' : 'stock.takes.location_untracked_hint') }}</p>
             </div>
             <div v-if="auth.canWrite('stock.take')" class="px-5 py-3 border-t border-neutral-200 flex flex-wrap justify-end gap-2">
               <button @click="saveProgress" :disabled="savingLines" :class="btnOutline('primary')">

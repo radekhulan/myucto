@@ -7,7 +7,9 @@ namespace MyInvoice\Action\Stock;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockLocationRepository;
 use MyInvoice\Repository\StockTrackingRepository;
+use MyInvoice\Repository\WarehouseRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -15,6 +17,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stock\ExactUnitConversion;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockLocationService;
 use MyInvoice\Service\Stock\TrackingUnitRenameService;
 use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -32,6 +35,8 @@ final class StockTrackingAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $invoicePdf,
+        private readonly StockLocationRepository $locationBalances,
+        private readonly WarehouseRepository $warehouses,
     ) {}
 
     public function item(Request $request, Response $response, array $args): Response
@@ -228,6 +233,43 @@ final class StockTrackingAction
         if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
         $warehouseId = isset($request->getQueryParams()['warehouse_id']) ? (int) $request->getQueryParams()['warehouse_id'] : null;
         return Json::ok($response, $this->tracking->locations($supplierId, $warehouseId));
+    }
+
+    public function locationContents(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $location = $this->tracking->location($supplierId, (int) $args['id']);
+        if ($location === null) return Json::error($response, 'not_found', 'Lokace nenalezena.', 404);
+
+        return $this->locationPage($request, $response, $supplierId, (int) $location['id'], null, (int) $location['warehouse_id']);
+    }
+
+    public function itemLocations(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $itemId = (int) $args['id'];
+        if ($this->tracking->item($supplierId, $itemId) === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        try {
+            $warehouseId = StockLocationService::id($request->getQueryParams()['warehouse_id'] ?? null);
+        } catch (StockException $e) {
+            return Json::error($response, 'validation_failed', 'ID skladu musí být kladné celé číslo.', 422);
+        }
+        if ($warehouseId !== null && $this->warehouses->find($supplierId, $warehouseId) === null) {
+            return Json::error($response, 'not_found', 'Sklad nenalezen.', 404);
+        }
+
+        return $this->locationPage($request, $response, $supplierId, null, $itemId, $warehouseId);
+    }
+
+    private function locationPage(Request $request, Response $response, int $supplierId, ?int $locationId, ?int $itemId, ?int $warehouseId): Response
+    {
+        $page = Pagination::fromQuery($request->getQueryParams());
+        $result = $this->locationBalances->balances($supplierId, $locationId, $itemId, $warehouseId, $page['per_page'], $page['offset']);
+        return Json::ok($response, Pagination::envelope($result['rows'], $result['total'], $page['page'], $page['per_page']));
     }
 
     public function saveLocation(Request $request, Response $response, array $args = []): Response

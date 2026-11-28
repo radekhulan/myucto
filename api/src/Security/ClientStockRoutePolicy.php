@@ -14,8 +14,8 @@ final class ClientStockRoutePolicy
         if ($method === 'HEAD') $method = 'GET';
         $patterns = match ($method) {
             'GET' => [
-                '#^/api/stock/items(?:/search|/[0-9]+(?:/(?:packaging|customer-prices|tracking|tracking-choices))?)?$#D',
-                '#^/api/stock/(?:warehouses(?:/[0-9]+)?|locations|availability|quantities)$#D',
+                '#^/api/stock/items(?:/search|/[0-9]+(?:/(?:packaging|customer-prices|tracking|tracking-choices|locations))?)?$#D',
+                '#^/api/stock/(?:warehouses(?:/[0-9]+)?|locations(?:/[0-9]+/contents)?|availability|quantities)$#D',
                 '#^/api/stock/fulfillment/tasks(?:/[0-9]+)?$#D',
             ],
             'POST' => [

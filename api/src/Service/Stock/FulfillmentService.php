@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FulfillmentRepository;
+use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\WarehouseRepository;
 
 final class FulfillmentService
@@ -22,6 +23,7 @@ final class FulfillmentService
         private readonly StockDocumentService $documents,
         private readonly TrackingAllocationService $tracking,
         private readonly StockCommitmentService $commitments,
+        private readonly StockItemRepository $items,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -146,11 +148,17 @@ final class FulfillmentService
             }
 
             $lines = $this->repo->taskLines($supplierId, $taskId, true);
-            $matches = array_values(array_filter($lines, static function (array $line) use ($canonical): bool {
+            $legacyEans = [];
+            if ($task['source_type'] === 'sales_order') {
+                $legacyLines = array_filter($lines, static fn (array $line): bool => !array_key_exists('ean', $line['component_snapshot']));
+                $legacyEans = $this->items->eansForIds($supplierId, array_values(array_unique(array_column($legacyLines, 'stock_item_id'))));
+            }
+            $matches = array_values(array_filter($lines, static function (array $line) use ($canonical, $legacyEans): bool {
                 $snapshot = $line['component_snapshot'];
                 $code = $canonical['code'];
+                $ean = array_key_exists('ean', $snapshot) ? $snapshot['ean'] : ($legacyEans[$line['stock_item_id']] ?? null);
                 return mb_strtoupper((string) ($snapshot['sku'] ?? '')) === $code
-                    || (($snapshot['ean'] ?? null) !== null && mb_strtoupper((string) $snapshot['ean']) === $code);
+                    || ($ean !== null && mb_strtoupper((string) $ean) === $code);
             }));
             $line = null;
             foreach ($matches as $candidate) {
@@ -301,6 +309,7 @@ final class FulfillmentService
                     'line_no' => $index,
                     'note' => 'Fulfillment shipment #' . $shipmentId,
                     'invoice_item_id' => $item['component_snapshot']['invoice_item_id'] ?? null,
+                    'location_id' => $item['component_snapshot']['location_id'] ?? null,
                     'tracking_allocations' => $item['tracking_snapshot'],
                 ];
             }

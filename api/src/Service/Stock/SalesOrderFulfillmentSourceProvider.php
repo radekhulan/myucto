@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Service\Integration\IntegrationEventPublisher;
 use PDO;
 
@@ -14,6 +15,7 @@ final class SalesOrderFulfillmentSourceProvider implements FulfillmentSourceProv
         private readonly Connection $db,
         private readonly SalesOrderService $orders,
         private readonly IntegrationEventPublisher $events,
+        private readonly StockItemRepository $items,
     ) {}
 
     public function type(): string
@@ -53,6 +55,11 @@ final class SalesOrderFulfillmentSourceProvider implements FulfillmentSourceProv
             ];
         }
         if ($lines === []) throw new StockException('fulfillment_source_empty', 'Objednávka nemá aktivní rezervaci k vychystání.', 409);
+        $missingEans = array_filter($lines, static fn (array $line): bool => !array_key_exists('ean', $line['component_snapshot']));
+        $eans = $this->items->eansForIds($supplierId, array_values(array_unique(array_column($missingEans, 'stock_item_id'))));
+        foreach ($missingEans as $index => $line) {
+            $lines[$index]['component_snapshot']['ean'] = $eans[$line['stock_item_id']] ?? null;
+        }
         $document = $this->db->pdo()->prepare(
             'SELECT stock_document_id FROM sales_order_fulfillment_links
               WHERE supplier_id = ? AND order_id = ? AND stock_document_id IS NOT NULL ORDER BY shipment_id DESC LIMIT 1'

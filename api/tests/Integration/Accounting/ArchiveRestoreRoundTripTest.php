@@ -612,7 +612,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $documents->post($sid, $tracked['id'], $this->userId);
         $documents->reverse($sid, $tracked['id'], [], $this->userId);
         $receipt = $documents->create($sid, ['doc_type' => 'receipt', 'origin' => 'manual', 'description' => 'Syntetický archivní příjem', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d', strtotime('-2 days')),
-            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '10', 'unit_cost' => '5']]], $this->userId);
+            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '10', 'unit_cost' => '5', 'location_id' => $location]]], $this->userId);
         $documents->post($sid, $receipt['id'], $this->userId);
         $definition = ['components' => [['item_id' => $items['COMPONENT'], 'quantity' => '2']]];
         $container->get(\MyInvoice\Service\Eshop\Sets\ProductSetService::class)->save($sid, $items['SET'], 0, $definition);
@@ -629,7 +629,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $invoiceItemId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO stock_receipt_invoice_links (supplier_id, document_id, line_no, invoice_id) VALUES (?, ?, 1, ?)')->execute([$sid, $receipt['id'], $invoiceId]);
         $source = $documents->create($sid, ['doc_type' => 'issue', 'origin' => 'manual', 'description' => 'Syntetický archivní výdej', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d'), 'invoice_id' => $invoiceId,
-            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '1', 'invoice_item_id' => $invoiceItemId]]], $this->userId);
+            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '1', 'invoice_item_id' => $invoiceItemId, 'location_id' => $location]]], $this->userId);
         $fulfillment = $container->get(\MyInvoice\Service\Stock\FulfillmentService::class);
         $task = $fulfillment->createTask($sid, 'stock_issue_draft', (string) $source['id'], $this->userId);
         $fulfillment->scan($sid, $task['id'], ['client_operation_id' => 'archive-scan-001', 'code' => 'COMPONENT', 'quantity' => '1'], $this->userId, false);
@@ -661,6 +661,14 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $newSid = (int) $report['new_supplier_id'];
         $this->cleanupSuppliers[] = $newSid;
         $restoredItems = $pdo->query('SELECT sku, id FROM stock_items WHERE supplier_id = ' . $newSid)->fetchAll(PDO::FETCH_KEY_PAIR);
+        $locationBalances = $container->get(\MyInvoice\Repository\StockLocationRepository::class);
+        $located = $locationBalances->balances($newSid, null, (int) $restoredItems['COMPONENT'], null, 5, 0)['rows'];
+        self::assertCount(1, $located);
+        self::assertNotSame($location, $located[0]['location_id']);
+        self::assertSame('5.000', $located[0]['quantity']);
+        self::assertSame([(int) $restoredItems['COMPONENT'] => '5.000'], $locationBalances->quantitiesAt(
+            $newSid, $located[0]['warehouse_id'], $located[0]['location_id'], date('Y-m-d'),
+        ));
         $restoredOrder = $container->get(\MyInvoice\Service\Stock\SalesOrderService::class)->detail($newSid, $orderUuid);
         self::assertNotNull($restoredOrder);
         self::assertSame('1.000', $restoredOrder['reservations'][0]['remaining_qty']);

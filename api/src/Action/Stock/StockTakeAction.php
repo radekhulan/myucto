@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Stock;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Stock\StockException;
@@ -19,7 +20,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Inventury (Epic SKLAD §7.2 TakeWizard) — REST API.
  *
- *   GET    /api/stock/takes             — seznam (filtry warehouse_id, status)
+ *   GET    /api/stock/takes             — seznam (filtry warehouse_id, location_id, status)
  *   POST   /api/stock/takes             — nová inventura (draft)
  *   GET    /api/stock/takes/{id}        — detail vč. řádků
  *   PUT    /api/stock/takes/{id}        — zadání skutečných počtů (jen counting)
@@ -43,6 +44,7 @@ final class StockTakeAction
         private readonly IpMatcher $ipMatcher,
         private readonly StockTakePdfRenderer $pdfRenderer,
         private readonly WarehouseRepository $warehouses,
+        private readonly StockTrackingRepository $tracking,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -55,6 +57,13 @@ final class StockTakeAction
         $filters = [];
         if (!empty($q['warehouse_id'])) {
             $filters['warehouse_id'] = (int) $q['warehouse_id'];
+        }
+        if (isset($q['location_id'])) {
+            $locationId = filter_var($q['location_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($locationId === false) {
+                return Json::error($response, 'validation_failed', 'ID lokace musí být kladné celé číslo.', 422);
+            }
+            $filters['location_id'] = $locationId;
         }
         if (!empty($q['status'])) {
             $filters['status'] = (string) $q['status'];
@@ -74,7 +83,10 @@ final class StockTakeAction
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $result = $this->service->create($supplierId, $body, $this->userId($request));
-            $this->log($request, 'stock.take_created', (int) $result['id'], ['warehouse_id' => $result['warehouse_id'] ?? null]);
+            $this->log($request, 'stock.take_created', (int) $result['id'], [
+                'warehouse_id' => $result['warehouse_id'],
+                'location_id' => $result['location_id'],
+            ]);
             return Json::ok($response, $result, 201);
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
@@ -185,6 +197,7 @@ final class StockTakeAction
         try {
             $take = $this->service->get($supplierId, (int) $args['id']);
             $warehouse = $this->warehouses->find($supplierId, (int) $take['warehouse_id']);
+            $location = $take['location_id'] === null ? null : $this->tracking->location($supplierId, $take['location_id']);
             $stmt = $this->db->pdo()->prepare('SELECT company_name, ic FROM supplier WHERE id = ?');
             $stmt->execute([$supplierId]);
             $labels = [
@@ -196,6 +209,7 @@ final class StockTakeAction
             $bytes = $this->pdfRenderer->render([
                 'take' => $take,
                 'warehouse' => $warehouse ?? [],
+                'location' => $location,
                 'supplier' => $stmt->fetch(\PDO::FETCH_ASSOC) ?: [],
                 'counting_method_label' => $labels[(string) $take['counting_method']] ?? (string) $take['counting_method'],
             ]);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type Warehouse, type WarehousePayload, type WarehouseLocation } from '@/api/stock'
+import { stockApi, type Warehouse, type WarehousePayload, type WarehouseLocation, type StockLocationQuantity } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
@@ -25,6 +25,14 @@ const locationSearch = ref('')
 const locationStatus = ref<'all' | 'active' | 'inactive'>('all')
 const locationPage = ref(1)
 const locationsPerPage = 20
+const contentsLocation = ref<WarehouseLocation | null>(null)
+const contents = ref<StockLocationQuantity[]>([])
+const contentsPage = ref(1)
+const contentsTotal = ref(0)
+const contentsLoading = ref(false)
+const contentsError = ref('')
+const contentsPerPage = 20
+let contentsRequest = 0
 const normalizeSearch = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase()
 const filteredLocations = computed(() => {
   const terms = normalizeSearch(locationSearch.value.trim()).split(/\s+/).filter(Boolean)
@@ -85,6 +93,36 @@ function toggleLocations(warehouse: Warehouse) {
   locationSearch.value = ''
   locationStatus.value = 'all'
   void loadLocations(warehouse.id)
+}
+
+function openContents(location: WarehouseLocation) {
+  contentsLocation.value = location
+  contents.value = []
+  contentsTotal.value = 0
+  void loadContents(1)
+}
+
+function closeContents() {
+  contentsLocation.value = null
+  contentsRequest++
+}
+
+async function loadContents(page: number) {
+  if (!contentsLocation.value) return
+  const request = ++contentsRequest
+  contentsPage.value = page
+  contentsLoading.value = true
+  contentsError.value = ''
+  try {
+    const result = await stockApi.locationContents(contentsLocation.value.id, page, contentsPerPage)
+    if (request !== contentsRequest) return
+    contents.value = result.data
+    contentsTotal.value = result.meta.total
+  } catch (e: any) {
+    if (request === contentsRequest) contentsError.value = mapError(e)
+  } finally {
+    if (request === contentsRequest) contentsLoading.value = false
+  }
 }
 
 function mapError(e: any): string {
@@ -279,6 +317,11 @@ async function saveLocation() {
                     <span v-if="!location.is_active" class="text-xs text-neutral-500">{{ t('stock.locations.inactive') }}</span>
                   </div>
                 </div>
+                <button type="button" @click="openContents(location)" :title="t('stock.locations.contents')"
+                  :aria-label="t('stock.locations.contents_named', { code: location.code })" :class="btnOutline('neutral')">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.box" /></svg>
+                  <span class="hidden sm:inline">{{ t('stock.locations.contents') }}</span>
+                </button>
                 <button v-if="auth.canWrite('stock.items.write')" type="button" @click="openLocation(warehouse, location)"
                   :title="t('stock.locations.edit')" :aria-label="t('stock.locations.edit_named', { code: location.code })" :class="btnOutline('neutral')">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
@@ -290,6 +333,29 @@ async function saveLocation() {
         </section>
       </li>
     </ul>
+
+    <Modal v-if="contentsLocation" :title="t('stock.locations.contents_named', { code: contentsLocation.code })" widthClass="max-w-2xl" @close="closeContents">
+      <p v-if="contentsLoading" class="py-3 text-sm text-neutral-500" role="status">{{ t('common.loading') }}</p>
+      <EmptyState v-else-if="contentsError" variant="failed" dense :message="contentsError" @action="loadContents(contentsPage)" />
+      <p v-else-if="contents.length === 0" class="py-3 text-sm text-neutral-500">{{ t('stock.locations.contents_empty') }}</p>
+      <div v-else class="overflow-hidden rounded-md border border-neutral-200">
+        <table class="w-full text-sm">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-3 py-2 text-left font-medium">{{ t('stock.documents.col_item') }}</th>
+              <th class="px-3 py-2 text-right font-medium">{{ t('stock.documents.col_qty') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="row in contents" :key="row.stock_item_id">
+              <td class="px-3 py-2 break-words"><span class="font-mono text-xs text-neutral-500">{{ row.sku }}</span> {{ row.name }}</td>
+              <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ row.quantity }} {{ row.unit }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <PaginationBar :page="contentsPage" embedded :per-page="contentsPerPage" :total="contentsTotal" @update:page="loadContents" />
+      </div>
+    </Modal>
 
     <Modal v-if="modalOpen" :title="editing ? t('stock.warehouses.edit') : t('stock.warehouses.new')" widthClass="max-w-md" @close="modalOpen = false">
       <div class="space-y-3">

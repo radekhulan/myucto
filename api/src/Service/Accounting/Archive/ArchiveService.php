@@ -142,6 +142,8 @@ final class ArchiveService
         'stock_levels'                => 'warehouse_id, stock_item_id',
         'stock_documents'             => 'id',
         'stock_document_lines'        => 'id',
+        'stock_location_levels'       => 'id',
+        'stock_location_movements'    => 'id',
         'external_entity_map'         => 'id',
         'stock_tracking_allocations'  => 'id',
         'stock_cycle_counts'          => 'id',

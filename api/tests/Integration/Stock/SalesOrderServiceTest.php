@@ -83,6 +83,67 @@ final class SalesOrderServiceTest extends StockTestCase
         self::assertSame(['sales_order.confirmed'], array_column($events, 'event_type'));
     }
 
+    public function testSalesOrderTaskCanScanEanWithLeadingZeroIncludingLegacyTaskLines(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'SO-SCAN-EAN');
+        $ean = '0123456789012';
+        $this->db->pdo()->prepare('UPDATE stock_items SET ean = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$ean, $supplierId, $itemId]);
+        $this->receiveStock($supplierId, $warehouseId, $itemId, '2.000', 20.0, date('Y-m-d', strtotime('-1 day')));
+        $order = $this->orders->create(
+            $supplierId,
+            $this->draft($supplierId, $this->client($supplierId), $warehouseId, $itemId, 'TEST-SO-EAN', '2.000'),
+            $this->userId,
+        );
+        $order = $this->orders->confirm($supplierId, (int) $order['id'], 'confirm-ean-scan');
+        $task = $this->fulfillment->createTask($supplierId, 'sales_order', $order['order_uuid'], $this->userId);
+        $first = $this->fulfillment->scan($supplierId, $task['id'], [
+            'client_operation_id' => 'scan-order-ean', 'code' => $ean,
+        ], $this->userId, false);
+        self::assertSame('1.000', $first['picked_qty']);
+        self::assertSame($ean, $task['lines'][0]['component_snapshot']['ean']);
+
+        $this->db->pdo()->prepare("UPDATE fulfillment_task_lines
+            SET component_snapshot = JSON_REMOVE(component_snapshot, '$.ean') WHERE supplier_id = ? AND id = ?")
+            ->execute([$supplierId, $task['lines'][0]['id']]);
+        $second = $this->fulfillment->scan($supplierId, $task['id'], [
+            'client_operation_id' => 'scan-legacy-order-ean', 'code' => $ean,
+        ], $this->userId, false);
+        self::assertSame('2.000', $second['picked_qty']);
+        self::assertSame('packing', $second['status']);
+    }
+
+    public function testReplenishingAnOrderAddsEanToNewFulfillmentLines(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $firstItem = $this->item($supplierId, 'SO-AVAILABLE');
+        $secondItem = $this->item($supplierId, 'SO-REPLENISHED');
+        $ean = '0012345678905';
+        $this->db->pdo()->prepare('UPDATE stock_items SET ean = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$ean, $supplierId, $secondItem]);
+        $this->receiveStock($supplierId, $warehouseId, $firstItem, '1.000', 20.0, date('Y-m-d'));
+        $payload = $this->draft($supplierId, $this->client($supplierId), $warehouseId, $firstItem, 'TEST-SO-REPLENISHED');
+        $payload['allocation_policy'] = 'partial';
+        $payload['lines'][] = ['stock_item_id' => $secondItem] + $payload['lines'][0];
+        $order = $this->orders->create($supplierId, $payload, $this->userId);
+        $order = $this->orders->confirm($supplierId, $order['id'], 'confirm-first-line');
+        $task = $this->fulfillment->createTask($supplierId, 'sales_order', $order['order_uuid'], $this->userId);
+        self::assertSame([$firstItem], array_column($task['lines'], 'stock_item_id'));
+
+        $this->receiveStock($supplierId, $warehouseId, $secondItem, '1.000', 20.0, date('Y-m-d'));
+        $this->orders->confirm($supplierId, $order['id'], 'confirm-replenished-line');
+        $task = $this->fulfillment->find($supplierId, $task['id']);
+        $newLine = array_column($task['lines'], null, 'stock_item_id')[$secondItem];
+        self::assertSame($ean, $newLine['component_snapshot']['ean']);
+        $scan = $this->fulfillment->scan($supplierId, $task['id'], [
+            'client_operation_id' => 'scan-replenished-ean', 'code' => $ean,
+        ], $this->userId, false);
+        self::assertSame($newLine['id'], $scan['task_line_id']);
+    }
+
     public function testReservedStockOnlyShipsThroughItsTaskAndPartialShipmentKeepsRemainder(): void
     {
         $supplierId = $this->createSupplier();
