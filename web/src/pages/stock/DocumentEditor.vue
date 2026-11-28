@@ -319,7 +319,7 @@ function buildPayload(rows: LineRow[]): StockDocumentPayload {
   return {
     doc_type: form.doc_type,
     // H2: u NAČTENÉHO dokladu přenes hlavičkovou vazbu (jinak update utne PF/FV/inventuru).
-    origin: doc.value?.origin,
+    origin: doc.value?.origin === 'serial_assignment' ? undefined : doc.value?.origin,
     doc_date: form.doc_date,
     description: form.description.trim(),
     warehouse_id: form.warehouse_id!,

@@ -16934,7 +16934,8 @@
       "credit_note": "Credit note",
       "purchase_invoice": "Received invoice",
       "inventory": "Stock take",
-      "purchase_order": "Purchase order"
+      "purchase_order": "Purchase order",
+      "serial_assignment": "Serial number assignment"
     },
     "take_status": {
       "draft": "Created",
@@ -17967,6 +17968,15 @@
       "add_allocation": "Add allocation",
       "required_hint": "Allocate the full line quantity before posting.",
       "serial_number": "Serial number",
+      "serial_assignment": {
+        "action": "Assign serial numbers",
+        "location": "Location (optional)",
+        "locations_error": "Warehouse locations could not be loaded ({message}).",
+        "hint": "Type, paste or scan one serial number per line.",
+        "count": "{count} serial numbers entered for {available} available units",
+        "batch_limit": "Enter up to {count} serial numbers in one assignment.",
+        "success": "Serial numbers assigned ({count})."
+      },
       "lot_code": "Lot code",
       "no_location": "No location",
       "expires": "expires",

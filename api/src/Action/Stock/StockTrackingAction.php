@@ -16,6 +16,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stock\ExactUnitConversion;
+use MyInvoice\Service\Stock\StockDocumentService;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockLocationService;
 use MyInvoice\Service\Stock\TrackingUnitRenameService;
@@ -37,6 +38,7 @@ final class StockTrackingAction
         private readonly InvoicePdfRenderer $invoicePdf,
         private readonly StockLocationRepository $locationBalances,
         private readonly WarehouseRepository $warehouses,
+        private readonly StockDocumentService $documents,
     ) {}
 
     public function item(Request $request, Response $response, array $args): Response
@@ -45,13 +47,63 @@ final class StockTrackingAction
         if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
         $item = $this->tracking->item($supplierId, (int) $args['id']);
         if ($item === null) return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
-        return Json::ok($response, [
+        $data = [
             'tracking_mode' => $item['tracking_mode'],
             'base_unit' => $item['unit'],
             'units' => $this->tracking->units($supplierId, (int) $item['id']),
             'inventory' => $this->tracking->inventory($supplierId, (int) $item['id']),
             'history' => RequestAuthorization::isClientType($request) ? [] : $this->tracking->history($supplierId, (int) $item['id']),
-        ]);
+        ];
+        if ($item['tracking_mode'] === 'serial'
+            && !RequestAuthorization::isClientType($request)
+            && RequestAuthorization::allows($request, 'stock.documents.write', AccessLevel::WRITE)) {
+            $data['serial_assignment_stock'] = [];
+            foreach ($this->tracking->serialRemainders($supplierId, (int) $item['id']) as $row) {
+                if ($row['is_active'] && $row['remainderT'] >= 1000) {
+                    $data['serial_assignment_stock'][] = [
+                        'warehouse_id' => $row['warehouse_id'],
+                        'warehouse_code' => $row['warehouse_code'],
+                        'quantity' => intdiv($row['remainderT'], 1000),
+                    ];
+                }
+            }
+        }
+        return Json::ok($response, $data);
+    }
+
+    public function assignSerials(Request $request, Response $response, array $args): Response
+    {
+        if (RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
+        }
+        if (!$this->requirePermission($request, $response, 'stock.documents.write', AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        $warehouseId = $body['warehouse_id'] ?? null;
+        $serials = $body['serial_numbers'] ?? null;
+        if (!is_int($warehouseId) || $warehouseId <= 0 || !is_array($serials)) {
+            return Json::error($response, 'validation_failed', 'Zadejte sklad a seznam sériových čísel.', 422);
+        }
+        $itemId = (int) $args['id'];
+        $userId = $this->userId($request);
+        try {
+            $locationId = StockLocationService::id($body['location_id'] ?? null);
+            $result = $this->documents->assignSerials($supplierId, $itemId, $warehouseId, $locationId, $serials, $userId);
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $this->logger->log(
+            'stock.serials_assigned',
+            $userId,
+            'stock_document',
+            $result['document_id'],
+            ['stock_item_id' => $itemId, 'warehouse_id' => $warehouseId, 'location_id' => $locationId, 'assigned' => $result['assigned']],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+        return Json::ok($response, $result, 201);
     }
 
     /**

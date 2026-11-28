@@ -1,5 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
+import { stockApi, type SerialAssignmentStock } from '@/api/stock'
 
 const m = vi.hoisted(() => ({
   item: {} as Record<string, unknown>,
@@ -8,12 +10,16 @@ const m = vi.hoisted(() => ({
   vatRates: [{ id: 1, rate_percent: 21, is_reverse_charge: false }] as Array<Record<string, unknown>>,
   deniedWrite: new Set<string>(),
   inventory: [] as Array<Record<string, unknown>>,
+  assignmentStock: [] as SerialAssignmentStock[],
+  assignSerialNumbers: vi.fn(),
+  listLocations: vi.fn(),
 }))
 
 vi.mock('@/api/stock', () => ({
   stockApi: {
     getItem: vi.fn(async () => ({
       id: 42,
+      supplier_id: 1,
       sku: 'ITEM-42',
       name: 'Synthetic item',
       item_type: 'goods',
@@ -25,7 +31,9 @@ vi.mock('@/api/stock', () => ({
       ...m.item,
     })),
     itemMovements: vi.fn(async () => ({ opening_balance: '0', items: [] })),
-    itemTracking: vi.fn(async () => ({ tracking_mode: m.item.tracking_mode, base_unit: 'pcs', inventory: m.inventory })),
+    itemTracking: vi.fn(async () => ({ tracking_mode: m.item.tracking_mode, base_unit: 'pcs', inventory: m.inventory, serial_assignment_stock: m.assignmentStock })),
+    assignSerialNumbers: m.assignSerialNumbers,
+    listLocations: m.listLocations,
     itemMovementsExportUrl: vi.fn(() => ''),
     levels: vi.fn(async () => ({ data: m.levels, meta: { total: m.levels.length } })),
   },
@@ -56,9 +64,8 @@ vi.mock('@/composables/useFormat', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canRead: () => true, canWrite: (key: string) => !m.deniedWrite.has(key) }),
 }))
-vi.mock('@/stores/supplier', () => ({
-  useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { id: 1, is_vat_payer: true } }),
-}))
+const supplier = reactive({ currentSupplierId: 1, currentSupplier: { id: 1, is_vat_payer: true } })
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }))
@@ -75,6 +82,110 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 import ItemDetail from '../ItemDetail.vue'
 
 describe('ItemDetail overview', () => {
+  it('přiřadí čísla ve vybraném skladu a lokaci, při chybě zachová vstup a po uložení obnoví přehled', async () => {
+    m.item = { tracking_mode: 'serial' }
+    m.assignmentStock = [
+      { warehouse_id: 1, warehouse_code: 'MAIN', quantity: 1 },
+      { warehouse_id: 2, warehouse_code: 'SHOW', quantity: 1001 },
+    ]
+    m.listLocations.mockImplementation(async (warehouseId: number) => [
+      { id: warehouseId * 10, warehouse_id: warehouseId, code: 'CURRENT', name: 'Current', is_active: true },
+      { id: 100, warehouse_id: warehouseId, code: 'INACTIVE', name: 'Inactive', is_active: false },
+    ])
+    m.assignSerialNumbers.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { data: { error: { message: 'Sériové číslo už je skladem.', serial_number: '0007' } } },
+    }).mockImplementationOnce(async () => {
+      m.assignmentStock = []
+      m.inventory = [{ stock_tracking_unit_id: 12, warehouse_id: 2, location_id: 20, serial_number: '0008', quantity: '1' }]
+      return { document_id: 12, assigned: 2 }
+    })
+    vi.mocked(stockApi.itemTracking).mockClear()
+    vi.mocked(stockApi.levels).mockClear()
+    const wrapper = mount(ItemDetail, {
+      global: { stubs: {
+        ActionBar: true, EmptyState: true, ItemDuplicateDialog: true, ItemTemplatesPanel: true, ProductRelationsPanel: true,
+        RouterLink: { template: '<a><slot /></a>' }, Modal: { template: '<div role="dialog"><slot /></div>' },
+      } },
+    })
+    try {
+      await flushPromises()
+      await wrapper.get('[data-test="open-serial-assignment"]').trigger('click')
+      supplier.currentSupplierId = 2
+      await flushPromises()
+      expect(wrapper.find('[data-test="open-serial-assignment"]').exists()).toBe(false)
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      supplier.currentSupplierId = 1
+      await flushPromises()
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      await wrapper.get('[data-test="open-serial-assignment"]').trigger('click')
+      await flushPromises()
+      const input = wrapper.get<HTMLTextAreaElement>('textarea')
+      const location = wrapper.get<HTMLSelectElement>('[data-test="serial-assignment-location"]')
+      const submit = wrapper.get<HTMLButtonElement>('[data-action="assign-serials"]')
+      expect(location.text()).not.toContain('INACTIVE')
+      await location.setValue('10')
+      await input.setValue(' 0007 \r\n\r\n SN-B ')
+      await input.trigger('keydown', { key: 'Enter' })
+      expect(submit.element.disabled).toBe(true)
+      expect(m.assignSerialNumbers).not.toHaveBeenCalled()
+      await wrapper.get('[data-test="serial-assignment-warehouse"]').setValue('2')
+      await flushPromises()
+      expect(location.element.selectedIndex).toBe(0)
+      await location.setValue('20')
+      await input.setValue(Array.from({ length: 1001 }, (_, index) => `SN-${index}`).join('\n'))
+      expect(submit.element.disabled).toBe(true)
+      expect(wrapper.get('[role="alert"]').text()).toContain('stock.tracking.serial_assignment.batch_limit')
+      await input.setValue(' 0007 \r\n\r\n SN-B ')
+      await submit.trigger('click')
+      await flushPromises()
+      expect(m.assignSerialNumbers).toHaveBeenNthCalledWith(1, 42, {
+        warehouse_id: 2, location_id: 20, serial_numbers: ['0007', 'SN-B'],
+      })
+      expect(wrapper.get('[role="alert"]').text()).toBe('Sériové číslo už je skladem. (0007)')
+      expect(input.element.value).toContain('0007')
+      expect(location.element.selectedIndex).toBe(1)
+      await input.setValue('0008\nSN-B')
+      await submit.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="open-serial-assignment"]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('0008')
+      expect(stockApi.itemTracking).toHaveBeenCalledTimes(2)
+      expect(stockApi.levels).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper.unmount()
+      supplier.currentSupplierId = 1
+      m.item = {}
+      m.assignmentStock = []
+      m.inventory = []
+      m.assignSerialNumbers.mockReset()
+      m.listLocations.mockReset()
+    }
+  })
+
+  it.each([
+    { mode: 'serial', quantity: 1, canWrite: false },
+    { mode: 'serial', quantity: 0, canWrite: true },
+    { mode: 'lot', quantity: 1, canWrite: true },
+  ])('nenabízí přiřazení mimo dostupnou sériovou zásobu s právem zápisu ($mode, $quantity, $canWrite)', async ({ mode, quantity, canWrite }) => {
+    m.item = { tracking_mode: mode }
+    m.assignmentStock = [{ warehouse_id: 1, warehouse_code: 'MAIN', quantity }]
+    if (!canWrite) m.deniedWrite.add('stock.documents.write')
+    const wrapper = mount(ItemDetail, {
+      global: { stubs: { ActionBar: true, EmptyState: true, ItemDuplicateDialog: true, ItemTemplatesPanel: true, ProductRelationsPanel: true, RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    try {
+      await flushPromises()
+      expect(wrapper.find('[data-test="open-serial-assignment"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+      m.item = {}
+      m.assignmentStock = []
+      m.deniedWrite.clear()
+    }
+  })
+
   it('stránkuje sériová čísla a hledá podle čísla, skladu a pozice', async () => {
     m.item = { tracking_mode: 'serial' }
     m.inventory = Array.from({ length: 24 }, (_, index) => ({

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Stock\StockValuation;
 use PDO;
 
 final class StockTrackingRepository
@@ -17,6 +18,41 @@ final class StockTrackingRepository
         $stmt->execute([$supplierId, $itemId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $row;
+    }
+
+    public function serialRemainders(int $supplierId, int $itemId, ?int $warehouseId = null): array
+    {
+        $warehouseFilter = $warehouseId === null ? '' : ' AND sl.warehouse_id = ?';
+        $stmt = $this->db->pdo()->prepare("SELECT sl.warehouse_id, w.code AS warehouse_code, w.is_active,
+                   sl.qty - COALESCE(tracked.quantity, 0) - COALESCE(located.quantity, 0) AS remainder
+              FROM stock_levels sl FORCE INDEX (idx_sl_item)
+              JOIN warehouses w ON w.supplier_id = sl.supplier_id AND w.id = sl.warehouse_id
+              LEFT JOIN (
+                  SELECT a.warehouse_id, SUM(CASE WHEN a.direction = 'in' THEN a.quantity ELSE -a.quantity END) AS quantity
+                    FROM stock_tracking_units u
+                    STRAIGHT_JOIN stock_tracking_allocations a FORCE INDEX (ix_tracking_history) ON a.supplier_id = u.supplier_id
+                      AND a.stock_tracking_unit_id = u.id
+                   WHERE u.supplier_id = ? AND u.stock_item_id = ?
+                   GROUP BY a.warehouse_id
+              ) tracked ON tracked.warehouse_id = sl.warehouse_id
+              LEFT JOIN (
+                  SELECT warehouse_id, SUM(quantity) AS quantity FROM stock_location_levels
+                   WHERE supplier_id = ? AND stock_item_id = ?
+                   GROUP BY warehouse_id
+              ) located ON located.warehouse_id = sl.warehouse_id
+             WHERE sl.supplier_id = ? AND sl.stock_item_id = ?$warehouseFilter
+             ORDER BY w.code, w.id");
+        $params = [$supplierId, $itemId, $supplierId, $itemId, $supplierId, $itemId];
+        if ($warehouseId !== null) {
+            $params[] = $warehouseId;
+        }
+        $stmt->execute($params);
+        return array_map(static fn (array $row): array => [
+            'warehouse_id' => (int) $row['warehouse_id'],
+            'warehouse_code' => $row['warehouse_code'],
+            'is_active' => (bool) $row['is_active'],
+            'remainderT' => StockValuation::qtyToT((string) $row['remainder']),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     public function location(int $supplierId, int $locationId, bool $lock = false): ?array
@@ -186,15 +222,46 @@ final class StockTrackingRepository
         return $out;
     }
 
-    public function balance(int $supplierId, int $unitId,?int $warehouseId = null, ?int $locationId = null, bool $allLocations = false): int
+    public function serialAssignmentWasUsed(int $supplierId, int $lineId): bool
     {
-        $sql = "SELECT COALESCE(SUM(CASE WHEN a.direction = 'in' THEN a.quantity ELSE -a.quantity END), 0) FROM stock_tracking_allocations a JOIN stock_document_lines l ON l.id = a.stock_document_line_id AND l.supplier_id = a.supplier_id JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id WHERE a.supplier_id = ? AND a.stock_tracking_unit_id = ? AND d.status IN ('draft','posted','reversed')";
-        $params = [$supplierId, $unitId];
+        $stmt = $this->db->pdo()->prepare("SELECT 1
+              FROM stock_tracking_allocations a
+              STRAIGHT_JOIN stock_tracking_allocations later FORCE INDEX (ix_tracking_history)
+                 ON later.supplier_id = a.supplier_id AND later.stock_tracking_unit_id = a.stock_tracking_unit_id
+                AND later.id > a.id AND later.direction = 'out'
+             WHERE a.supplier_id = ? AND a.stock_document_line_id = ? AND a.direction = 'in'
+             LIMIT 1");
+        $stmt->execute([$supplierId, $lineId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function balance(
+        int $supplierId,
+        int $unitId,
+        ?int $warehouseId = null,
+        ?int $locationId = null,
+        bool $allLocations = false,
+        ?string $assignmentAsOf = null,
+    ): int
+    {
+        $quantity = "CASE WHEN a.direction = 'in' THEN a.quantity ELSE -a.quantity END";
+        $total = "SUM($quantity)";
+        $params = [];
+        if ($assignmentAsOf !== null) {
+            $dated = "SUM(CASE WHEN d.origin <> 'serial_assignment' OR d.doc_date <= ? THEN $quantity ELSE 0 END)";
+            $total = "LEAST($total, $dated)";
+            $params[] = $assignmentAsOf;
+        }
+        $sql = "SELECT COALESCE($total, 0) FROM stock_tracking_allocations a
+            JOIN stock_document_lines l ON l.id = a.stock_document_line_id AND l.supplier_id = a.supplier_id
+            JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+            WHERE a.supplier_id = ? AND a.stock_tracking_unit_id = ? AND d.status IN ('draft','posted','reversed')";
+        array_push($params, $supplierId, $unitId);
         if ($warehouseId !== null) { $sql .= ' AND a.warehouse_id = ?'; $params[] = $warehouseId; }
         if (!$allLocations) { $sql .= ' AND a.location_id <=> ?'; $params[] = $locationId; }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
-        return \MyInvoice\Service\Stock\StockValuation::qtyToT((string) $stmt->fetchColumn());
+        return StockValuation::qtyToT((string) $stmt->fetchColumn());
     }
 
     public function history(int $supplierId, int $itemId): array

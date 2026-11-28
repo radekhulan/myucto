@@ -182,6 +182,8 @@ Průběh můžete bezpečně zavřít a znovu otevřít, dokončené dávky se n
 > Karty se sledováním šarží nebo sériových čísel naskladněte ruční příjemkou,
 > kde lze vyplnit úplné alokace. Prodat je pak jde přímo fakturou s výběrem kusů
 > ([§ 37.5.1](#3751-vydej-fakturou)).
+> Pokud jste už převzali zásobu sériové karty bez čísel, doplníte je
+> [v detailu karty](#prirazeni-seriovych-cisel-k-prevzate-zasobe).
 
 ### 37.4.4 Převzetí historie skladu z jiného programu
 
@@ -1225,6 +1227,24 @@ a karty. Šarže dovoluje množství a volitelné datum expirace. Na detailu kar
 v přehledu aktuální zásoby lze hledat sériové číslo, šarži, kód skladu nebo pozice.
 Pohyby ukazují historii od příjmu přes převody a výdeje po vratku. Storno použije
 přesně stejné identity a množství jako původní doklad.
+
+#### Přiřazení sériových čísel k převzaté zásobě
+
+V **Sklad → Skladové karty** otevřete detail sériové karty a v **Přehledu**
+v části **Sériová čísla** vyberte **Přiřadit sériová čísla**. Tlačítko je
+dostupné s právem zapisovat skladové doklady, když na aktivním skladu zbývají
+celé kusy bez sériového čísla a lokace.
+
+Vyberte sklad a případně aktivní cílovou lokaci. Zadejte nebo načtěte čtečkou
+jedno sériové číslo na řádek. Dávka pojme nejvýš 1 000 čísel a patří jedné lokaci.
+Přiřazené kusy jsou dostupné pro výdej a převod ode dne přiřazení. V historii
+je vidět doklad **Přiřazení sériových čísel**. Množství a ocenění skladu
+zůstávají stejné. Chybné přiřazení můžete stornovat, dokud žádný kus z dávky
+nebyl vydán ani převeden.
+
+Čtečka nebo integrace může přiřazení poslat také přes
+`POST /api/v1/stock/items/{id}/serial-assignments` s `warehouse_id`,
+`serial_numbers` a volitelným `location_id`.
 
 Překlep v kódu šarže nebo v datu spotřeby opravíte na úpravě skladové karty
 (`Sklad → Skladové karty`, tlačítko **Upravit**, právo **Spravovat skladové karty**).

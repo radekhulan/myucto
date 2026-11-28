@@ -16,7 +16,7 @@ export type StockItemEetKind = 'standard' | 'specific_voucher' | 'stored_value'
 export type StockItemLifecycleStatus = 'draft' | 'ready' | 'retired'
 export type StockTrackingMode = 'none' | 'lot' | 'serial'
 export type StockDocType = 'receipt' | 'issue' | 'transfer'
-export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory' | 'purchase_order'
+export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory' | 'purchase_order' | 'serial_assignment'
 export type StockDocStatus = 'draft' | 'posted' | 'reversed'
 export type StockTakeStatus = 'draft' | 'preparing' | 'counting' | 'closed'
 export type LandedCostAllocation = 'by_value' | 'by_qty'
@@ -591,6 +591,13 @@ export interface StockTrackingOverview {
   units: Array<{ id: number; unit_code: string; numerator: number; denominator: number }>
   inventory: Array<{ stock_tracking_unit_id: number; tracking_type: 'lot' | 'serial'; lot_code: string | null; serial_number: string | null; expires_on: string | null; warehouse_id: number; location_id: number | null; warehouse_code: string; location_code: string | null; quantity: string }>
   history: Array<Record<string, unknown>>
+  serial_assignment_stock?: SerialAssignmentStock[]
+}
+
+export interface SerialAssignmentStock {
+  warehouse_id: number
+  warehouse_code: string
+  quantity: number
 }
 
 /** Oprava kódu a data spotřeby šarže; chybějící klíč hodnotu ponechá, `expires_on: null` expiraci smaže. */
@@ -791,7 +798,7 @@ export interface StockDocument {
 
 export interface StockDocumentPayload {
   doc_type: StockDocType
-  origin?: StockDocOrigin
+  origin?: Exclude<StockDocOrigin, 'serial_assignment'>
   doc_date: string
   description: string
   warehouse_id: number
@@ -1273,6 +1280,8 @@ export const stockApi = {
     return downloadUrl(`/stock/items/${id}/movements/export?${params.toString()}`)
   },
   itemTracking: (id: number) => api.get<StockTrackingOverview>(`/stock/items/${id}/tracking`).then(r => r.data),
+  assignSerialNumbers: (id: number, payload: { warehouse_id: number; location_id: number | null; serial_numbers: string[] }) =>
+    api.post<{ document_id: number; assigned: number }>(`/stock/items/${id}/serial-assignments`, payload).then(r => r.data),
   /** Nabídka kusů pro řádek faktury: skladem ve skladu, u dobropisu i kusy k vrácení (returnable). */
   trackingChoices: (id: number, params: { warehouse_id?: number | null; invoice_id?: number | null }) =>
     api.get<StockTrackingChoices>(`/stock/items/${id}/tracking-choices`, {

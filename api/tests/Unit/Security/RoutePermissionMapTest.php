@@ -15,6 +15,7 @@ final class RoutePermissionMapTest extends TestCase
     {
         $map = new RoutePermissionMap();
         $cases = [
+            ['POST', '/api/stock/items/7/serial-assignments', 'stock.documents.write', AccessLevel::WRITE],
             ['GET', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
             ['PUT', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
             ['POST', '/api/accounting/assets/7/depreciation/revision', 'assets.depreciation', AccessLevel::WRITE],

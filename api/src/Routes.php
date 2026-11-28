@@ -4713,6 +4713,7 @@ final class Routes
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
             $g->get   ('/items/{id:[0-9]+}/tracking',   [\MyInvoice\Action\Stock\StockTrackingAction::class, 'item']);
+            $g->post  ('/items/{id:[0-9]+}/serial-assignments', [\MyInvoice\Action\Stock\StockTrackingAction::class, 'assignSerials']);
             $g->get   ('/items/{id:[0-9]+}/tracking-choices', [\MyInvoice\Action\Stock\StockTrackingAction::class, 'choices']);
             // Výchozí účet a dimenze produktu (Účtování podle dimenzí, F1).
             $g->get   ('/items/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getProduct']);

@@ -76,7 +76,7 @@ final class TrackingAllocationService
         return json_encode($normalized, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
-    public function postLine(int $supplierId, string $docType, int $warehouseId, ?int $warehouseToId, array $line): void
+    public function postLine(int $supplierId, string $docType, int $warehouseId, ?int $warehouseToId, array $line, ?string $docDate = null): void
     {
         $mode = (string) ($line['tracking_mode'] ?? 'none');
         $allocations = $line['tracking_allocations'] ?? [];
@@ -118,7 +118,7 @@ final class TrackingAllocationService
                 $this->tracking->insertAllocation($supplierId, (int) $line['id'], $unit['id'], $warehouseId, $fromLocation, 'in', (string) $entry['quantity']);
                 continue;
             }
-            $this->assertAvailable($supplierId, $unit, $warehouseId, $fromLocation, $qtyT);
+            $this->assertAvailable($supplierId, $unit, $warehouseId, $fromLocation, $qtyT, $mode === 'serial' ? $docDate : null);
             $this->tracking->insertAllocation($supplierId, (int) $line['id'], $unit['id'], $warehouseId, $fromLocation, 'out', (string) $entry['quantity']);
             if ($docType === 'transfer') {
                 if ($warehouseToId === null) throw new StockException('invalid_document', 'Převodka nemá cílový sklad.', 422);
@@ -255,9 +255,10 @@ final class TrackingAllocationService
         return (int) $location['id'];
     }
 
-    private function assertAvailable(int $supplierId, array $unit, int $warehouseId, ?int $locationId, int $requestedT): void
+    private function assertAvailable(int $supplierId, array $unit, int $warehouseId, ?int $locationId, int $requestedT, ?string $assignmentAsOf = null): void
     {
-        $availableT = $this->tracking->balance($supplierId, (int) $unit['id'], $warehouseId, $locationId);
+        $assignmentDate = $assignmentAsOf !== null && $assignmentAsOf < date('Y-m-d') ? $assignmentAsOf : null;
+        $availableT = $this->tracking->balance($supplierId, (int) $unit['id'], $warehouseId, $locationId, assignmentAsOf: $assignmentDate);
         if ($availableT < $requestedT) {
             throw new StockException('tracking_insufficient_stock', 'Na zvolené šarži, sériovém čísle nebo lokaci není dostatečný stav.', 409, [
                 'stock_tracking_unit_id' => (int) $unit['id'],
