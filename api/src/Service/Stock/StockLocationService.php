@@ -29,9 +29,13 @@ final class StockLocationService
         foreach ($lines as $line) {
             $from = $line['location_id'];
             $to = $line['location_to_id'];
-            if ($type === 'transfer' && $warehouse === $destination
-                && ($from === $to || $line['tracking_mode'] !== 'none')) {
-                throw new StockException('stock_location_invalid', 'Přesun v rámci skladu vyžaduje dvě různá umístění karty bez sledování.', 422);
+            if ($type === 'transfer' && $warehouse === $destination) {
+                if ($from === null && $to === null) {
+                    throw new StockException('invalid_document', 'Cílový sklad převodky musí být odlišný od zdrojového.');
+                }
+                if ($from === $to || $line['tracking_mode'] !== 'none') {
+                    throw new StockException('stock_location_invalid', 'Přesun v rámci skladu vyžaduje dvě různá umístění karty bez sledování.', 422);
+                }
             }
             if (($from !== null || $to !== null) && $line['tracking_mode'] !== 'none') {
                 throw new StockException('stock_location_invalid', 'U sledované karty zadejte lokaci u šarže nebo sériového čísla.', 422);

@@ -11,6 +11,7 @@ use MyInvoice\Service\Stock\SalesOrderFulfillmentSourceProvider;
 use MyInvoice\Service\Stock\SalesOrderInvoiceService;
 use MyInvoice\Service\Stock\SalesOrderService;
 use MyInvoice\Service\Stock\StockCommitmentService;
+use MyInvoice\Service\Stock\StockException;
 use PHPUnit\Framework\Attributes\Group;
 
 #[Group('integration')]
@@ -106,7 +107,7 @@ final class SalesOrderServiceTest extends StockTestCase
         self::assertSame($ean, $task['lines'][0]['component_snapshot']['ean']);
 
         $this->db->pdo()->prepare("UPDATE fulfillment_task_lines
-            SET component_snapshot = JSON_REMOVE(component_snapshot, '$.ean') WHERE supplier_id = ? AND id = ?")
+            SET component_snapshot = JSON_REMOVE(component_snapshot, '$.ean', '$.ean_from_stock_item') WHERE supplier_id = ? AND id = ?")
             ->execute([$supplierId, $task['lines'][0]['id']]);
         $second = $this->fulfillment->scan($supplierId, $task['id'], [
             'client_operation_id' => 'scan-legacy-order-ean', 'code' => $ean,
@@ -142,6 +143,41 @@ final class SalesOrderServiceTest extends StockTestCase
             'client_operation_id' => 'scan-replenished-ean', 'code' => $ean,
         ], $this->userId, false);
         self::assertSame($newLine['id'], $scan['task_line_id']);
+    }
+
+    public function testNewEanMatchDoesNotChangeExistingSkuScan(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $code = '0123456789012';
+        $eanItem = $this->item($supplierId, 'SO-EAN-COLLISION');
+        $skuItem = $this->item($supplierId, $code);
+        $this->db->pdo()->prepare('UPDATE stock_items SET ean = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$code, $supplierId, $eanItem]);
+        $this->receiveStock($supplierId, $warehouseId, $eanItem, '1.000', 20.0, date('Y-m-d'));
+        $this->receiveStock($supplierId, $warehouseId, $skuItem, '1.000', 20.0, date('Y-m-d'));
+        $payload = $this->draft($supplierId, $this->client($supplierId), $warehouseId, $eanItem, 'TEST-SO-CODE-COLLISION');
+        $payload['lines'][] = ['stock_item_id' => $skuItem] + $payload['lines'][0];
+        $order = $this->orders->create($supplierId, $payload, $this->userId);
+        $order = $this->orders->confirm($supplierId, $order['id'], 'confirm-code-collision');
+        $task = $this->fulfillment->createTask($supplierId, 'sales_order', $order['order_uuid'], $this->userId);
+        self::assertSame([$eanItem, $skuItem], array_column($task['lines'], 'stock_item_id'));
+
+        $scan = $this->fulfillment->scan($supplierId, $task['id'], [
+            'client_operation_id' => 'scan-known-sku', 'code' => $code,
+        ], $this->userId, false);
+        self::assertSame($task['lines'][1]['id'], $scan['task_line_id']);
+
+        try {
+            $this->fulfillment->scan($supplierId, $task['id'], [
+                'client_operation_id' => 'scan-known-sku-again', 'code' => $code,
+            ], $this->userId, false);
+            self::fail('Opakovaný sken již vychystaného SKU nesmí přidat jinou kartu se stejným EAN.');
+        } catch (StockException $e) {
+            self::assertSame('fulfillment_scan_unknown', $e->errorCode);
+        }
+        $reloaded = $this->fulfillment->find($supplierId, $task['id']);
+        self::assertSame('0.000', $reloaded['lines'][0]['picked_qty']);
     }
 
     public function testReservedStockOnlyShipsThroughItsTaskAndPartialShipmentKeepsRemainder(): void

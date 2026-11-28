@@ -797,8 +797,11 @@ final class SalesOrderService
                 'sales_order_line_uuid' => (string) $allocation['line']['line_uuid'],
                 'description' => (string) $allocation['line']['description'],
                 'sku' => (string) ($allocation['line']['sku_snapshot'] ?? ''),
-                'ean' => $eans[$allocation['stock_item_id']] ?? null,
             ];
+            if (!array_key_exists('ean', $componentSnapshot)) {
+                $componentSnapshot['ean'] = $eans[$allocation['stock_item_id']] ?? null;
+                $componentSnapshot['ean_from_stock_item'] = true;
+            }
             $upsert->execute([
                 $task['id'],
                 $supplierId,

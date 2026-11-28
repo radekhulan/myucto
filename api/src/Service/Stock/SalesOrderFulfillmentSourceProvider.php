@@ -59,6 +59,7 @@ final class SalesOrderFulfillmentSourceProvider implements FulfillmentSourceProv
         $eans = $this->items->eansForIds($supplierId, array_values(array_unique(array_column($missingEans, 'stock_item_id'))));
         foreach ($missingEans as $index => $line) {
             $lines[$index]['component_snapshot']['ean'] = $eans[$line['stock_item_id']] ?? null;
+            $lines[$index]['component_snapshot']['ean_from_stock_item'] = true;
         }
         $document = $this->db->pdo()->prepare(
             'SELECT stock_document_id FROM sales_order_fulfillment_links

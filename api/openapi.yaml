@@ -28904,7 +28904,16 @@ paths:
                 lines:
                   type: array
                   items:
-                    $ref: '#/components/schemas/StockDocumentLine'
+                    type: object
+                    properties:
+                      location_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Lokace příjmu nebo zdrojová lokace výdeje a převodu. Jen pro karty bez sledování.
+                      location_to_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Cílová lokace převodu pro kartu bez sledování.
                 landed_costs:
                   type: array
                   description: |
@@ -38401,7 +38410,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write. Sken přijímá SKU nebo EAN položky z výdejního konceptu i prodejní objednávky.
+      description: |
+        Vyžaduje scope read_write. Sken přijímá SKU nebo EAN položky z výdejního konceptu i prodejní objednávky.
+        U prodejní objednávky má při shodě kódů dosavadní SKU nebo EAN komponenty setu
+        přednost před nově načteným EAN běžné skladové karty.
       requestBody:
         required: true
         content:

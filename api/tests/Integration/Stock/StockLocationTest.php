@@ -16,6 +16,25 @@ use Slim\Psr7\Response;
 #[Group('integration')]
 final class StockLocationTest extends StockTestCase
 {
+    public function testSameWarehouseTransferWithoutLocationKeepsExistingErrorCode(): void
+    {
+        $supplier = $this->createSupplier();
+        $warehouse = $this->warehouse($supplier);
+        $item = $this->item($supplier, 'LOC-NONE');
+
+        try {
+            $this->documents->create($supplier, [
+                'doc_type' => 'transfer', 'warehouse_id' => $warehouse, 'warehouse_to_id' => $warehouse,
+                'doc_date' => '2099-01-01', 'description' => 'Převodka bez lokací',
+                'lines' => [['stock_item_id' => $item, 'qty' => '1']],
+            ], $this->userId);
+            self::fail('Převodka do stejného skladu bez lokací musí být odmítnuta.');
+        } catch (StockException $e) {
+            self::assertSame('invalid_document', $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+        }
+    }
+
     public function testAutomaticIssueUsesUnassignedThenNamedStockAndReversalRestoresTheSplit(): void
     {
         $supplier = $this->createSupplier();
