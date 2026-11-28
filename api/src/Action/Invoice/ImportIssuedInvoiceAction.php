@@ -9,12 +9,15 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
@@ -30,6 +33,8 @@ use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Oss\OssItemDeriver;
 use MyInvoice\Service\Oss\OssItemPlanner;
+use MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard;
+use MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -81,6 +86,7 @@ final class ImportIssuedInvoiceAction
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly SnapshotBuilder $snapshots,
         private readonly MigratedDocumentWriter $writer,
+        private readonly DimensionService $dimensions,
         private readonly VarsymbolGenerator $varsymbol,
         private readonly StatsRecomputer $stats,
         private readonly DocumentAutoPoster $autoPoster,
@@ -109,6 +115,7 @@ final class ImportIssuedInvoiceAction
         $errors = [];
         $doc = $this->parseHeader($body, $errors);
         $items = $this->parseItems($body['items'] ?? null, $errors);
+        $headerDimensions = self::parseDimensions($body['dimensions'] ?? null, $errors);
         if ($errors !== []) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 422, ['fields' => $errors]);
         }
@@ -260,8 +267,17 @@ final class ImportIssuedInvoiceAction
 
         $pdo = $this->db->pdo();
         $ownTransaction = !$pdo->inTransaction();
-        if ($ownTransaction) $pdo->beginTransaction();
+        $useSavepoint = !$ownTransaction && $headerDimensions !== [];
+        if ($ownTransaction) {
+            $pdo->beginTransaction();
+        } elseif ($useSavepoint) {
+            $pdo->exec('SAVEPOINT import_issued_invoice');
+        }
         try {
+            if ($headerDimensions !== []) {
+                (new IssuanceUseGuard($this->db))->lockContext($supplierId);
+                (new PaymentMutationContext($this->db))->acquire($supplierId);
+            }
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $supplierId,
                 invoiceType: $doc['invoice_type'],
@@ -307,18 +323,30 @@ final class ImportIssuedInvoiceAction
                     OssMigrationPolicy::DOMESTIC_COLUMNS,
                 ), $i);
             }
+            if ($headerDimensions !== []) {
+                $this->dimensions->saveDocument($supplierId, 'invoice', $id, $headerDimensions, null);
+            }
             $this->clients->markAsCustomer($doc['client_id'], $supplierId);
-            if ($ownTransaction) $pdo->commit();
-        } catch (\PDOException $e) {
-            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownTransaction) {
+                $pdo->commit();
+            } elseif ($useSavepoint) {
+                $pdo->exec('RELEASE SAVEPOINT import_issued_invoice');
+            }
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif ($useSavepoint && $pdo->inTransaction() && !TransactionFailure::rollbackIfAborted($pdo, $e)) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT import_issued_invoice');
+                $pdo->exec('RELEASE SAVEPOINT import_issued_invoice');
+            }
+            if ($e instanceof DimensionException) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
             // Souběžný import téhož čísla: předběžná kontrola výš ho nezachytila,
             // unikátní index ano. I tady vracíme id existujícího dokladu.
-            if (self::varsymbolDuplicateMessage($e, $doc['varsymbol']) !== null) {
+            if ($e instanceof \PDOException && self::varsymbolDuplicateMessage($e, $doc['varsymbol']) !== null) {
                 return $this->duplicate($response, $doc['varsymbol'], $this->existingId($supplierId, $doc['varsymbol']));
             }
-            throw $e;
-        } catch (\Throwable $e) {
-            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
 
@@ -361,6 +389,20 @@ final class ImportIssuedInvoiceAction
         $this->stats->recomputeAfterCommit($id);
 
         return Json::ok($response, $this->repo->find($id), 201);
+    }
+
+    /** @param array<string,list<string>> $errors @return array<int,int> */
+    private static function parseDimensions(mixed $raw, array &$errors): array
+    {
+        if ($raw === null) {
+            return [];
+        }
+        if (is_array($raw) && array_all($raw, static fn (mixed $valueId, int|string $typeId): bool =>
+            is_int($typeId) && $typeId > 0 && is_int($valueId) && $valueId > 0)) {
+            return $raw;
+        }
+        $errors['dimensions'][] = 'Dimenze hlavičky musí být mapa kladných ID typů na kladná ID hodnot.';
+        return [];
     }
 
     /**

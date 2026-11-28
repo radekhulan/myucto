@@ -5275,6 +5275,10 @@ paths:
         řádky jsou přesně ty, které přišly, a z nich čte evidence DPH, přiznání i kontrolní
         hlášení.
 
+        Volitelné `dimensions` přiřadí dimenze hlavičky faktury nebo dobropisu při
+        importu. Platí i v daňové evidenci a stačí běžné oprávnění k importu se
+        scope `read_write`. Doklad i dimenze se uloží v jedné transakci.
+
         Částky se jen ověří (jinak `422 validation_failed` s detaily v `error.fields`):
         u každé položky `total_with_vat = total_without_vat + total_vat` na haléř a DPH
         odpovídající sazbě ze základu s tolerancí 1,00 v měně dokladu (zaokrouhlení daně
@@ -5316,7 +5320,8 @@ paths:
         '400':
           description: |
             Odběratel neexistuje (`client_not_found`) nebo odkaz míří na cizí firmu
-            (`invalid_reference`).
+            (`invalid_reference`). Hodnota dimenze je pro firmu nedostupná nebo
+            nepatří pod uvedený typ (`invalid_dimension`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5343,6 +5348,7 @@ paths:
             Doklad se stejným číslem už u firmy existuje (`varsymbol_duplicate`; `error.existing_invoice_id`
             nese jeho id, takže opakovaný import se dá rozpoznat), doklad spadá do uzavřeného
             účetního období (`period_closed`) nebo do už podaného období DPH (`period_filed`).
+            Firma má při zadání dimenzí tuto funkci vypnutou (`dimensions_disabled`).
           content:
             application/json:
               schema:
@@ -5359,7 +5365,8 @@ paths:
             Neplatný vstup nebo nesedící částky (`validation_failed`, detaily v `error.fields`),
             opravovaná faktura dobropisu neexistuje (`parent_invoice_not_found`), přenesená
             povinnost bez DIČ odběratele (`reverse_charge_dic_missing`) nebo firma k datu
-            plnění není plátcem DPH (`not_vat_payer_at_date`).
+            plnění není plátcem DPH (`not_vat_payer_at_date`). Vybraná hodnota dimenze je
+            uzavřená (`dimension_closed`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -56295,6 +56302,18 @@ components:
           description: "Platební VS odlišný od čísla dokladu. null = odvodit z čísla dokladu."
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
+        dimensions:
+          anyOf:
+            - type: object
+              propertyNames: { pattern: '^[1-9][0-9]*$' }
+              additionalProperties: { type: integer, minimum: 1 }
+            - type: array
+              maxItems: 0
+            - type: 'null'
+          description: |
+            Mapa ID typu dimenze na ID aktivní hodnoty dostupné pro firmu. Firma musí
+            mít dimenze zapnuté. Při vynechání nebo prázdné mapě proběhne běžný import.
+          example: { '12': 34 }
         vat_classification_code: { type: [string, "null"], description: "Hlavičkový kód členění plnění; prázdné = doplní se podle položek." }
         parent_invoice_id: { type: [integer, "null"], description: "Jen dobropis: id opravované faktury (vystavená, nestornovaná, téže firmy), jinak 422 `parent_invoice_not_found`." }
         parent_varsymbol: { type: [string, "null"], description: "Jen dobropis: číslo opravované faktury místo jejího id." }

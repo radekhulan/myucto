@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Invoice;
 use MyInvoice\Action\Invoice\ImportIssuedInvoiceAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\ApiScopeMiddleware;
+use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
@@ -16,6 +18,8 @@ use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Factory\AppFactory;
+use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response as Psr7Response;
 
@@ -57,6 +61,9 @@ final class ImportIssuedInvoiceActionTest extends TestCase
     /** @var list<int> */
     private array $periodIds = [];
 
+    /** @var array<int,int> */
+    private array $dimensionTypes = [];
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);
@@ -88,9 +95,9 @@ final class ImportIssuedInvoiceActionTest extends TestCase
             $this->markTestSkipped('Dodavatel nemá měnu CZK.');
         }
 
-        $stmt = $pdo->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT accounting_mode, dimensions_enabled FROM supplier WHERE id = ?');
         $stmt->execute([$this->supplierId]);
-        $this->supplierBackup = ['accounting_mode' => $stmt->fetchColumn()];
+        $this->supplierBackup = $stmt->fetch(PDO::FETCH_ASSOC);
         // Daňová evidence: bez deníku a bez automatického zaúčtování, které by po sobě
         // nechalo zápisy. Uzavřené období si test zapne sám.
         $pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
@@ -115,6 +122,8 @@ final class ImportIssuedInvoiceActionTest extends TestCase
                 $pdo->exec("DELETE FROM credit_note_offsets WHERE invoice_id IN ({$in}) OR credit_note_id IN ({$in})");
                 $pdo->exec("DELETE FROM invoice_payments WHERE invoice_id IN ({$in})");
                 $pdo->exec("DELETE FROM invoice_items WHERE invoice_id IN ({$in})");
+                $pdo->prepare("DELETE FROM document_dimensions WHERE supplier_id = ? AND doc_type = 'invoice' AND doc_id IN ({$in})")
+                    ->execute([$this->supplierId]);
                 foreach (array_reverse($ids) as $id) {
                     $pdo->exec("DELETE FROM invoices WHERE id = {$id}");
                 }
@@ -131,9 +140,12 @@ final class ImportIssuedInvoiceActionTest extends TestCase
         foreach ($this->periodIds as $id) {
             $pdo->prepare('DELETE FROM accounting_periods WHERE id = ?')->execute([$id]);
         }
+        foreach ($this->dimensionTypes as $typeId => $supplierId) {
+            $pdo->prepare('DELETE FROM dimension_types WHERE supplier_id = ? AND id = ?')->execute([$supplierId, $typeId]);
+        }
         if ($this->supplierBackup !== []) {
-            $pdo->prepare('UPDATE supplier SET accounting_mode = ? WHERE id = ?')
-                ->execute([$this->supplierBackup['accounting_mode'], $this->supplierId]);
+            $pdo->prepare('UPDATE supplier SET accounting_mode = ?, dimensions_enabled = ? WHERE id = ?')
+                ->execute([$this->supplierBackup['accounting_mode'], $this->supplierBackup['dimensions_enabled'], $this->supplierId]);
         }
 
         $this->db->close();
@@ -238,6 +250,117 @@ final class ImportIssuedInvoiceActionTest extends TestCase
         self::assertSame('2096-06-02', $row['corrective_delivered_on']);
         self::assertSame('-121.00', $row['total_with_vat']);
         self::assertSame('-21.00', $this->items((int) $row['id'])[0]['total_vat']);
+    }
+
+    public function testOrdinaryApiTokenImportsInvoiceAndCreditNoteWithDifferentHeaderDimensions(): void
+    {
+        $this->setDimensionsEnabled(true);
+        $type = $this->createDimensionType($this->supplierId);
+        $firstShop = $this->createDimensionValue($this->supplierId, $type, 'SHOP-A');
+        $secondShop = $this->createDimensionValue($this->supplierId, $type, 'SHOP-B');
+
+        $invoice = $this->call($this->payload() + ['dimensions' => [$type => $firstShop]], 'read_write');
+        self::assertSame(201, $invoice['status'], json_encode($invoice['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame([$type => $firstShop], $this->headerDimensions((int) $invoice['body']['id']));
+
+        $payload = $this->payload();
+        $payload['invoice_type'] = 'credit_note';
+        $payload['varsymbol'] .= '-D';
+        $payload['parent_invoice_id'] = $invoice['body']['id'];
+        $payload['dimensions'] = [$type => $secondShop];
+        foreach (['total_without_vat', 'total_vat', 'total_with_vat', 'rounding'] as $key) {
+            $payload[$key] = -$payload[$key];
+        }
+        foreach ($payload['items'] as &$item) {
+            foreach (['quantity', 'total_without_vat', 'total_vat', 'total_with_vat'] as $key) {
+                $item[$key] = -$item[$key];
+            }
+        }
+        unset($item);
+        $creditNote = $this->call($payload, 'read_write');
+        self::assertSame(201, $creditNote['status'], json_encode($creditNote['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame([$type => $secondShop], $this->headerDimensions((int) $creditNote['body']['id']));
+        self::assertSame([$type => $firstShop], $this->headerDimensions((int) $invoice['body']['id']));
+    }
+
+    public function testImportRejectsForeignDimensionAndAllowsRetry(): void
+    {
+        $this->setDimensionsEnabled(true);
+        $pdo = $this->db->pdo();
+        $other = $pdo->prepare('SELECT id FROM supplier WHERE id <> ? ORDER BY id LIMIT 1');
+        $other->execute([$this->supplierId]);
+        $otherSupplierId = (int) $other->fetchColumn();
+        self::assertGreaterThan(0, $otherSupplierId, 'Test vyžaduje druhou firmu z testovacích dat.');
+        $foreignType = $this->createDimensionType($otherSupplierId);
+        $foreignValue = $this->createDimensionValue($otherSupplierId, $foreignType, 'FOREIGN');
+
+        $rejected = $this->call($this->payload() + ['dimensions' => [$foreignType => $foreignValue]], 'read_write');
+        self::assertSame(400, $rejected['status']);
+        self::assertSame('invalid_dimension', $rejected['body']['error']['code']);
+        self::assertSame([], $this->invoiceIds());
+
+        $type = $this->createDimensionType($this->supplierId);
+        $value = $this->createDimensionValue($this->supplierId, $type, 'SHOP-A');
+        $corrected = $this->call($this->payload() + ['dimensions' => [$type => $value]], 'read_write');
+        self::assertSame(201, $corrected['status']);
+        self::assertSame([$type => $value], $this->headerDimensions((int) $corrected['body']['id']));
+    }
+
+    public function testInvalidDimensionRollsBackImportInsideExistingTransaction(): void
+    {
+        $this->setDimensionsEnabled(true);
+        $type = $this->createDimensionType($this->supplierId);
+        $value = $this->createDimensionValue($this->supplierId, $type, 'CLOSED', false);
+        $term = 'importdimension' . bin2hex(random_bytes(6));
+        $valid = $this->payload();
+        $valid['varsymbol'] .= '-P';
+        $valid['items'][0]['description'] = $term;
+        $invalid = $this->payload();
+        $invalid['items'][0]['description'] = $term;
+        $invalid['dimensions'] = [$type => $value];
+
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $first = $this->call($valid, 'read_write');
+            self::assertSame(201, $first['status']);
+            $firstId = (int) $first['body']['id'];
+
+            $result = $this->call($invalid, 'read_write');
+            self::assertSame(422, $result['status']);
+            self::assertSame('dimension_closed', $result['body']['error']['code']);
+            self::assertTrue($pdo->inTransaction());
+            self::assertSame([$firstId], $this->invoiceIds());
+            $pdo->commit();
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+
+        $search = $pdo->prepare('SELECT ii.invoice_id FROM invoice_items ii
+            JOIN invoices i ON i.id = ii.invoice_id
+            WHERE i.supplier_id = ? AND MATCH(ii.description) AGAINST (? IN BOOLEAN MODE)');
+        $search->execute([$this->supplierId, $term]);
+        self::assertSame([$firstId], array_map('intval', $search->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    public function testImportWithoutDimensionsWorksWhenDimensionsAreDisabled(): void
+    {
+        $this->setDimensionsEnabled(false);
+        $type = $this->createDimensionType($this->supplierId);
+        $value = $this->createDimensionValue($this->supplierId, $type, 'SHOP-A');
+        $invalid = $this->call($this->payload() + ['dimensions' => [$type => ['value_id' => $value]]], 'read_write');
+        self::assertSame(422, $invalid['status']);
+        self::assertArrayHasKey('dimensions', $invalid['body']['error']['fields']);
+        $disabled = $this->call($this->payload() + ['dimensions' => [$type => $value]], 'read_write');
+        self::assertSame(409, $disabled['status']);
+        self::assertSame('dimensions_disabled', $disabled['body']['error']['code']);
+        self::assertSame([], $this->invoiceIds());
+
+        $imported = $this->call($this->payload(), 'read_write');
+        self::assertSame(201, $imported['status']);
+        self::assertSame([], $this->headerDimensions((int) $imported['body']['id']));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -415,19 +538,63 @@ final class ImportIssuedInvoiceActionTest extends TestCase
      * @param array<string,mixed> $body
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function call(array $body): array
+    private function call(array $body, ?string $tokenScope = null): array
     {
         $request = (new ServerRequestFactory())
-            ->createServerRequest('POST', '/api/invoices/import')
+            ->createServerRequest('POST', $tokenScope === null ? '/api/invoices/import' : '/api/v1/invoices/import')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
             ->withParsedBody($body);
 
-        $response = ($this->action)($request, new Psr7Response());
+        if ($tokenScope !== null) {
+            $responseFactory = new ResponseFactory();
+            $app = AppFactory::create($responseFactory);
+            $app->post('/api/invoices/import', $this->action);
+            $app->add(new ApiScopeMiddleware($responseFactory));
+            $app->add(new ApiVersionRewriteMiddleware());
+            $response = $app->handle($request
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
+                ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => $tokenScope]));
+        } else {
+            $response = ($this->action)($request, new Psr7Response());
+        }
         $response->getBody()->rewind();
         $decoded = json_decode((string) $response->getBody(), true);
 
         return ['status' => $response->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
+    }
+
+    private function setDimensionsEnabled(bool $enabled): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET dimensions_enabled = ? WHERE id = ?')
+            ->execute([(int) $enabled, $this->supplierId]);
+    }
+
+    private function createDimensionType(int $supplierId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO dimension_types (supplier_id, code, name) VALUES (?, ?, ?)')
+            ->execute([$supplierId, $this->prefix . '-' . count($this->dimensionTypes), 'Zdrojový e-shop']);
+        $typeId = (int) $pdo->lastInsertId();
+        $this->dimensionTypes[$typeId] = $supplierId;
+        return $typeId;
+    }
+
+    private function createDimensionValue(int $supplierId, int $type, string $code, bool $active = true): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO dimension_values (supplier_id, type_id, code, name, is_active) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$supplierId, $type, $code, $code, (int) $active]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** @return array<int,int> */
+    private function headerDimensions(int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT dimension_type_id, dimension_value_id FROM document_dimensions
+            WHERE supplier_id = ? AND doc_type = 'invoice' AND doc_id = ? AND item_no = 0");
+        $stmt->execute([$this->supplierId, $invoiceId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     /** @return list<int> */
