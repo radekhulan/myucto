@@ -98,6 +98,22 @@ final class LicenseActionItemTest extends TestCase
         }
     }
 
+    /**
+     * Karta licence jde skrýt.
+     *
+     * Widget nabízí nabídku skrytí každé kartě, která nemá `dismissible => false`,
+     * a ta musí mít protějšek v {@see CrmAggregationService::DISMISSIBLE_ITEM_TYPES}.
+     * Bez toho uživatel skrytí zvolí a dostane „Invalid item_type: license".
+     */
+    public function testLicenseItemCanBeDismissed(): void
+    {
+        $item = CrmAggregationService::licenseActionItem($this->state(LicenseState::TRIAL_EXPIRED), self::NOW);
+
+        self::assertNotNull($item);
+        self::assertArrayNotHasKey('dismissible', $item, 'Karta skrývání nabízí, takže musí být i povolená.');
+        self::assertContains($item['type'], CrmAggregationService::DISMISSIBLE_ITEM_TYPES);
+    }
+
     /** Překročený rozsah nese počty — bez nich uživatel neví, co má rozšířit. */
     public function testOverageCarriesCountsAndDeadline(): void
     {
