@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\Stock\StockLedgerReader;
 use PDO;
 
 /**
@@ -416,6 +417,7 @@ final class StockLevelRepository
             $typeCond = $receiptLeg
                 ? "d.doc_type = 'transfer'"
                 : "d.doc_type IN ('receipt','issue','transfer')";
+            $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
             $documentCols = $withDocuments
                 ? ", inv.id AS invoice_id, inv.varsymbol AS invoice_number, inv.invoice_type, inv.client_id,
                    {$clientName} AS client_name,
@@ -440,7 +442,7 @@ final class StockLevelRepository
                       JOIN warehouses w ON w.id = {$warehouseExpr} AND w.supplier_id = l.supplier_id{$documentJoins}
                      WHERE l.supplier_id = ? AND l.stock_item_id = ?
                        AND d.status IN ('posted','reversed')
-                       AND {$typeCond}";
+                       AND {$typeCond} AND {$warehouseMovement}";
             $params[] = $supplierId;
             $params[] = $stockItemId;
             if ($warehouseId !== null) {

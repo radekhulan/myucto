@@ -285,8 +285,10 @@ final class StockValueTrendService
     private function fingerprint(int $supplierId, string $last, ?int $warehouseId, string $since): string
     {
         $pdo = $this->db->pdo();
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
         $changed = $pdo->prepare("SELECT COUNT(*), COALESCE(SUM(UNIX_TIMESTAMP(d.updated_at)), 0), COALESCE(SUM(d.status = 'reversed'), 0)
-            FROM stock_documents d WHERE d.supplier_id = ? AND d.updated_at >= ? AND d.status IN ('posted','reversed') AND d.doc_date <= ?"
+            FROM stock_documents d WHERE d.supplier_id = ? AND d.updated_at >= ? AND d.status IN ('posted','reversed') AND d.doc_date <= ?
+              AND {$warehouseMovement}"
             . ($warehouseId !== null ? ' AND (d.warehouse_id = ? OR d.warehouse_to_id = ?)' : ''));
         $changed->execute(array_merge([$supplierId, $since, $last], $warehouseId !== null ? [$warehouseId, $warehouseId] : []));
         $rollbacks = $pdo->prepare('SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM catalog_jobs WHERE supplier_id = ? AND kind = ? AND updated_at >= ?');
@@ -311,15 +313,18 @@ final class StockValueTrendService
         if ($warehouseId !== null) {
             $params[] = $warehouseId;
         }
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
         $this->db->pdo()->prepare("INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id, movements)
             SELECT ?, ?, wh, item, COUNT(*) FROM (
                 SELECT d.warehouse_id AS wh, l.stock_item_id AS item FROM stock_document_lines l
                 STRAIGHT_JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                 WHERE l.supplier_id = ? AND l.stock_item_id BETWEEN ? AND ? AND l.doc_date <= ? AND d.status IN ('posted','reversed'){$legA}
+                  AND {$warehouseMovement}
                 UNION ALL
                 SELECT d.warehouse_to_id, l.stock_item_id FROM stock_document_lines l
                 STRAIGHT_JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                 WHERE l.supplier_id = ? AND l.stock_item_id BETWEEN ? AND ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer'{$legB}
+                  AND {$warehouseMovement}
             ) legs GROUP BY wh, item")->execute($params);
     }
 

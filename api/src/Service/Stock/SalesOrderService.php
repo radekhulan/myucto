@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Service\Integration\WebhookEvents;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Service\Integration\IntegrationEventPublisher;
 use PDO;
 
@@ -20,6 +21,7 @@ final class SalesOrderService
         private readonly SalesOrderLineExpander $lineExpander,
         private readonly StockCommitmentService $commitments,
         private readonly IntegrationEventPublisher $events,
+        private readonly StockItemRepository $items,
     ) {}
 
     /** @return array{items:list<array<string,mixed>>,total:int,limit:int,offset:int} */
@@ -762,6 +764,9 @@ final class SalesOrderService
         $task = $taskStmt->fetch(PDO::FETCH_ASSOC);
         if ($task === false || $task['status'] === 'cancelled') return;
 
+        $missingEans = array_filter($allocations, static fn (array $allocation): bool => !array_key_exists('ean', (array) $allocation['snapshot']));
+        $eans = $this->items->eansForIds($supplierId, array_values(array_unique(array_column($missingEans, 'stock_item_id'))));
+
         $reservationStmt = $pdo->prepare(
             'SELECT qty_reserved, qty_released FROM sales_order_reservations
               WHERE supplier_id = ? AND order_id = ? AND order_line_id = ? AND component_no = ?'
@@ -793,6 +798,10 @@ final class SalesOrderService
                 'description' => (string) $allocation['line']['description'],
                 'sku' => (string) ($allocation['line']['sku_snapshot'] ?? ''),
             ];
+            if (!array_key_exists('ean', $componentSnapshot)) {
+                $componentSnapshot['ean'] = $eans[$allocation['stock_item_id']] ?? null;
+                $componentSnapshot['ean_from_stock_item'] = true;
+            }
             $upsert->execute([
                 $task['id'],
                 $supplierId,

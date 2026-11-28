@@ -27,6 +27,7 @@ final class StockValuationJobService
         private readonly \MyInvoice\Repository\StockDocumentRepository $documents,
         private readonly StockValuationCategoryGroups $categoryGroups,
         private readonly StockValuationCategory $categories,
+        private readonly StockLocationService $locations,
     ) {}
 
     public function enqueue(int $supplierId, string $date, array $filters = []): array
@@ -58,6 +59,7 @@ final class StockValuationJobService
             $this->warehouses->lockForStockOperation($supplierId, array_keys($versions));
             $versions = $this->snapshots->versions($supplierId, array_keys($versions));
             $takeId = (int) ($filters['stock_take_id'] ?? 0);
+            $locationId = $takeId > 0 ? ($filters['location_id'] ?? null) : null;
             if ($takeId === 0) {
                 $existing = $pdo->prepare("SELECT id, input_json FROM catalog_jobs
                     WHERE supplier_id = ? AND kind = 'stock_valuation' AND input_version = 1
@@ -87,22 +89,27 @@ final class StockValuationJobService
                 $input['category'] = $categoryInput;
             }
             $jobId = $this->jobs->enqueue($supplierId, 'stock_valuation', $input);
-            $sql = 'INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id)
-                SELECT ?, supplier_id, warehouse_id, stock_item_id FROM stock_levels WHERE supplier_id = ?';
-            $params = [$jobId, $supplierId];
-            if ($warehouseId !== null) {
-                $sql .= ' AND warehouse_id = ?';
-                $params[] = $warehouseId;
-            }
-            if ($categoryId !== null) {
-                $sql .= ' AND stock_item_id IN (' . $categoryItems . ')';
-                array_push($params, $supplierId, $categoryId);
-            }
-            $pdo->prepare($sql)->execute($params);
-            if ($takeId > 0 && $warehouseId !== null) {
-                $pdo->prepare('INSERT IGNORE INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id)
-                    SELECT ?, supplier_id, ?, id FROM stock_items WHERE supplier_id = ? AND is_active = 1')
-                    ->execute([$jobId, $warehouseId, $supplierId]);
+            if ($locationId !== null && $warehouseId !== null) {
+                $quantities = $this->locations->quantitiesAt($supplierId, $warehouseId, (int) $locationId, $date);
+                $this->seedLocationRows($supplierId, $warehouseId, $jobId, $quantities);
+            } else {
+                $sql = 'INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id)
+                    SELECT ?, supplier_id, warehouse_id, stock_item_id FROM stock_levels WHERE supplier_id = ?';
+                $params = [$jobId, $supplierId];
+                if ($warehouseId !== null) {
+                    $sql .= ' AND warehouse_id = ?';
+                    $params[] = $warehouseId;
+                }
+                if ($categoryId !== null) {
+                    $sql .= ' AND stock_item_id IN (' . $categoryItems . ')';
+                    array_push($params, $supplierId, $categoryId);
+                }
+                $pdo->prepare($sql)->execute($params);
+                if ($takeId > 0 && $warehouseId !== null) {
+                    $pdo->prepare('INSERT IGNORE INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id)
+                        SELECT ?, supplier_id, ?, id FROM stock_items WHERE supplier_id = ? AND is_active = 1')
+                        ->execute([$jobId, $warehouseId, $supplierId]);
+                }
             }
             $pdo->prepare('UPDATE catalog_jobs SET total = (SELECT COUNT(*) FROM stock_valuation_rows WHERE job_id = ? AND supplier_id = ?) WHERE id = ? AND supplier_id = ?')
                 ->execute([$jobId, $supplierId, $jobId, $supplierId]);
@@ -116,6 +123,21 @@ final class StockValuationJobService
                 $pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    /** @param array<int,string> $quantities */
+    private function seedLocationRows(int $supplierId, int $warehouseId, int $jobId, array $quantities): void
+    {
+        $pdo = $this->db->pdo();
+        foreach (array_chunk($quantities, self::BATCH_CARDS, true) as $batch) {
+            $values = implode(',', array_fill(0, count($batch), '(?, ?, ?, ?, ?)'));
+            $params = [];
+            foreach ($batch as $itemId => $quantity) {
+                array_push($params, $jobId, $supplierId, $warehouseId, $itemId, $quantity);
+            }
+            $pdo->prepare("INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id, location_qty)
+                VALUES {$values}")->execute($params);
         }
     }
 
@@ -212,6 +234,11 @@ final class StockValuationJobService
         }
         $pdo = $this->db->pdo();
         $pdo->prepare('DELETE FROM stock_take_lines WHERE supplier_id = ? AND stock_take_id = ?')->execute([$supplierId, $takeId]);
+        if ($take['location_id'] !== null) {
+            $this->insertLocationTakeLines($supplierId, $takeId, $jobId, (int) $take['warehouse_id'], $date);
+            $this->takes->updateStatus($supplierId, $takeId, 'counting', ['started_at' => date('Y-m-d H:i:s')]);
+            return;
+        }
         $pdo->prepare('INSERT INTO stock_take_lines (stock_take_id, supplier_id, stock_item_id, expected_qty, expected_value, counted_qty, surplus_unit_cost)
             SELECT ?, r.supplier_id, r.stock_item_id, r.qty, r.value_total, NULL,
                 CASE WHEN r.qty > 0 THEN r.value_total / r.qty ELSE NULL END
@@ -227,6 +254,7 @@ final class StockValuationJobService
                     JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                    WHERE l.supplier_id = t.supplier_id AND l.stock_item_id = t.stock_item_id
                      AND d.status IN ('posted','reversed') AND d.doc_date <= ?
+                     AND " . StockLedgerReader::WAREHOUSE_MOVEMENT_SQL . "
                      AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?)))")
             ->execute([$supplierId, $takeId, $date, (int) $take['warehouse_id'], (int) $take['warehouse_id']]);
         $costUpdate = $pdo->prepare('UPDATE stock_take_lines SET surplus_unit_cost = ?
@@ -238,6 +266,35 @@ final class StockValuationJobService
             $costUpdate->execute([$cost, $supplierId, $takeId, $itemId]);
         }
         $this->takes->updateStatus($supplierId, $takeId, 'counting', ['started_at' => date('Y-m-d H:i:s')]);
+    }
+
+    private function insertLocationTakeLines(int $supplierId, int $takeId, int $jobId, int $warehouseId, string $date): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO stock_take_lines (stock_take_id, supplier_id, stock_item_id, expected_qty, expected_value, surplus_unit_cost)
+            SELECT ?, r.supplier_id, r.stock_item_id, r.location_qty,
+                COALESCE(ROUND(CAST(r.value_total * r.location_qty AS DECIMAL(65,18)) / NULLIF(r.qty, 0), 2), 0),
+                ROUND(CAST(r.value_total AS DECIMAL(65,18)) / NULLIF(r.qty, 0), 6)
+            FROM stock_valuation_rows r JOIN stock_items i ON i.id = r.stock_item_id AND i.supplier_id = r.supplier_id
+            WHERE r.supplier_id = ? AND r.job_id = ? AND r.completed = 1
+                AND i.tracking_mode = 'none' AND (i.is_active = 1 OR r.location_qty <> 0)")
+            ->execute([$takeId, $supplierId, $jobId]);
+
+        $missing = $pdo->prepare('SELECT stock_item_id FROM stock_take_lines
+            WHERE supplier_id = ? AND stock_take_id = ? AND surplus_unit_cost IS NULL');
+        $missing->execute([$supplierId, $takeId]);
+        $itemIds = $missing->fetchAll(PDO::FETCH_COLUMN);
+        if ($itemIds === []) {
+            return;
+        }
+        $costs = $this->documents->lastKnownUnitCosts($supplierId, $warehouseId, $date);
+        $update = $pdo->prepare('UPDATE stock_take_lines SET surplus_unit_cost = ?
+            WHERE supplier_id = ? AND stock_take_id = ? AND stock_item_id = ?');
+        foreach ($itemIds as $itemId) {
+            if (isset($costs[$itemId])) {
+                $update->execute([$costs[$itemId], $supplierId, $takeId, $itemId]);
+            }
+        }
     }
 
     public function result(int $supplierId, int $jobId, int $page = 1, int $limit = 100): array

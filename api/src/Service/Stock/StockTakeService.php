@@ -9,6 +9,7 @@ use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLevelRepository;
 use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\StockTakeRepository;
+use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Repository\WarehouseRepository;
 
 /**
@@ -36,6 +37,8 @@ final class StockTakeService
         private readonly StockDocumentRepository $documentRepository,
         private readonly StockValuationJobService $valuationJobs,
         private readonly \MyInvoice\Service\Eshop\CatalogJobService $jobs,
+        private readonly StockTrackingRepository $tracking,
+        private readonly StockLocationService $locations,
     ) {}
 
     /**
@@ -70,34 +73,17 @@ final class StockTakeService
             );
         }
 
-        // Jen jedna otevřená (draft/counting) inventura na sklad zaráz.
-        $open = $this->openTakeForWarehouse($supplierId, $warehouseId);
-        if ($open !== null) {
-            throw new StockException(
-                'stock_take_in_progress',
-                'Na skladu už je rozpracovaná inventura.',
-                409,
-                ['warehouse_id' => $warehouseId, 'stock_take_id' => (int) $open['id']],
-            );
-        }
-
-        // Unikátní constraint uq_st_supplier_wh_date je na (sklad, datum) bez ohledu na stav
-        // — i uzavřená inventura blokuje další ke stejnému dni. Pre-check, ať uživatel dostane
-        // hlášku (a odkaz na existující) místo syrového 500 z PDO.
-        $existing = $this->takeForWarehouseAndDate($supplierId, $warehouseId, $takeDate);
-        if ($existing !== null) {
-            throw new StockException(
-                'stock_take_exists',
-                'Pro tento sklad a datum už inventura existuje.',
-                409,
-                ['warehouse_id' => $warehouseId, 'take_date' => $takeDate, 'stock_take_id' => (int) $existing['id']],
-            );
+        $rawLocation = $body['location_id'] ?? null;
+        $locationId = $rawLocation === null ? null : filter_var($rawLocation, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($locationId === false || is_bool($rawLocation) || is_float($rawLocation)) {
+            throw new StockException('invalid_location', 'Lokace nepatří zvolenému skladu.', 422);
         }
 
         try {
             return $this->runInTransaction(function () use (
                 $supplierId,
                 $warehouseId,
+                $locationId,
                 $takeDate,
                 $countingMethod,
                 $responsibleCount,
@@ -105,8 +91,34 @@ final class StockTakeService
                 $body,
                 $userId,
             ): array {
+                $this->warehouses->lockForStockOperation($supplierId, [$warehouseId]);
+                if ($locationId !== null) {
+                    $location = $this->tracking->location($supplierId, $locationId, true);
+                    if ($location === null || $location['warehouse_id'] !== $warehouseId || !$location['is_active']) {
+                        throw new StockException('invalid_location', 'Lokace nepatří zvolenému skladu nebo je neaktivní.', 422);
+                    }
+                }
+                $open = $this->takes->openForWarehouse($supplierId, $warehouseId);
+                if ($open !== null) {
+                    throw new StockException(
+                        'stock_take_in_progress',
+                        'Na skladu už je rozpracovaná inventura.',
+                        409,
+                        ['warehouse_id' => $warehouseId, 'stock_take_id' => (int) $open['id']],
+                    );
+                }
+                $existing = $this->takes->findForDate($supplierId, $warehouseId, $locationId, $takeDate);
+                if ($existing !== null) {
+                    throw new StockException(
+                        'stock_take_exists',
+                        $locationId === null ? 'Pro tento sklad a datum už inventura existuje.' : 'Pro tuto lokaci a datum už inventura existuje.',
+                        409,
+                        ['warehouse_id' => $warehouseId, 'location_id' => $locationId, 'take_date' => $takeDate, 'stock_take_id' => (int) $existing['id']],
+                    );
+                }
                 $id = $this->takes->insert($supplierId, [
                     'warehouse_id' => $warehouseId,
+                    'location_id'  => $locationId,
                     'take_date'    => $takeDate,
                     'status'       => 'draft',
                     'note'         => self::nullableString($body['note'] ?? null),
@@ -118,28 +130,16 @@ final class StockTakeService
                 return $this->get($supplierId, $id);
             });
         } catch (\PDOException $e) {
-            // Backstop pro race (dvě inventury naráz) — SQLSTATE 23000 = integrity constraint.
-            if ((string) $e->getCode() === '23000') {
+            if ((int) ($e->errorInfo[1] ?? 0) === 1062) {
                 throw new StockException(
                     'stock_take_exists',
-                    'Pro tento sklad a datum už inventura existuje.',
+                    $locationId === null ? 'Pro tento sklad a datum už inventura existuje.' : 'Pro tuto lokaci a datum už inventura existuje.',
                     409,
-                    ['warehouse_id' => $warehouseId, 'take_date' => $takeDate],
+                    ['warehouse_id' => $warehouseId, 'location_id' => $locationId, 'take_date' => $takeDate],
                 );
             }
             throw $e;
         }
-    }
-
-    /** @return array<string,mixed>|null inventura skladu k danému dni (jakýkoli stav). */
-    private function takeForWarehouseAndDate(int $supplierId, int $warehouseId, string $takeDate): ?array
-    {
-        foreach ($this->takes->list($supplierId, ['warehouse_id' => $warehouseId]) as $t) {
-            if (substr((string) $t['take_date'], 0, 10) === $takeDate) {
-                return $t;
-            }
-        }
-        return null;
     }
 
     /**
@@ -176,15 +176,18 @@ final class StockTakeService
                 (string) $take['take_date'],
             );
 
-            $moved = $this->documentRepository->itemIdsMovedInWarehouse($supplierId, $warehouseId, (string) $take['take_date']);
+            $locationQuantities = $take['location_id'] === null ? null : $this->locations->quantitiesAt(
+                $supplierId, $warehouseId, $take['location_id'], (string) $take['take_date'],
+            );
+            $moved = $locationQuantities ?? $this->documentRepository->itemIdsMovedInWarehouse($supplierId, $warehouseId, (string) $take['take_date']);
             $itemIds = [];
             foreach ($activeItems as $item) {
                 if (isset($moved[(int) $item['id']])) {
                     $itemIds[(int) $item['id']] = true;
                 }
             }
-            foreach ($byItem as $itemId => $item) {
-                if (StockValuation::qtyToT((string) $item['qty']) !== 0) {
+            foreach ($locationQuantities ?? array_column($byItem, 'qty', 'stock_item_id') as $itemId => $quantity) {
+                if (StockValuation::qtyToT((string) $quantity) !== 0) {
                     $itemIds[$itemId] = true;
                 }
             }
@@ -192,12 +195,20 @@ final class StockTakeService
             $lines = [];
             foreach (array_keys($itemIds) as $itemId) {
                 $lvl = $byItem[$itemId] ?? null;
-                $expectedQty = (string) ($lvl['qty'] ?? '0.000');
-                $expectedValue = (string) ($lvl['value_total'] ?? '0.00');
-                $qty = (float) $expectedQty;
-                $suggestedCost = $qty > 0.0
-                    ? number_format((float) $expectedValue / $qty, 6, '.', '')
+                $warehouseQty = (string) ($lvl['qty'] ?? '0.000');
+                $warehouseValue = (string) ($lvl['value_total'] ?? '0.00');
+                $hasWarehouseStock = StockValuation::qtyToT($warehouseQty) > 0;
+                $suggestedCost = $hasWarehouseStock
+                    ? ($locationQuantities === null
+                        ? number_format((float) $warehouseValue / (float) $warehouseQty, 6, '.', '')
+                        : bcround(bcdiv($warehouseValue, $warehouseQty, 18), 6))
                     : ($lastCosts[$itemId] ?? null);
+                $expectedQty = $locationQuantities[$itemId] ?? $warehouseQty;
+                $expectedValue = $locationQuantities === null
+                    ? $warehouseValue
+                    : ($hasWarehouseStock
+                        ? bcround(bcdiv(bcmul($expectedQty, $warehouseValue, 5), $warehouseQty, 18), 2)
+                        : '0.00');
                 $lines[] = [
                     'stock_item_id'  => $itemId,
                     'expected_qty'   => $expectedQty,
@@ -234,6 +245,7 @@ final class StockTakeService
             }
             $job = $this->valuationJobs->enqueue($supplierId, $take['take_date'], [
                 'warehouse_id' => (int) $take['warehouse_id'], 'stock_take_id' => $id,
+                'location_id' => $take['location_id'],
             ]);
             $this->takes->updateStatus($supplierId, $id, 'preparing', ['preparation_job_id' => $job['id']]);
             return $this->get($supplierId, $id);
@@ -297,8 +309,12 @@ final class StockTakeService
                     if ($itemId <= 0 || isset($present[$itemId])) {
                         continue;
                     }
-                    if ($this->items->find($supplierId, $itemId) === null) {
+                    $item = $this->items->find($supplierId, $itemId);
+                    if ($item === null) {
                         throw new StockException('invalid_document', 'Skladová karta nenalezena.', 422);
+                    }
+                    if ($take['location_id'] !== null && $item['tracking_mode'] !== 'none') {
+                        throw new StockException('invalid_document', 'Do inventury lokace lze přidat jen kartu bez sledování šarží a sériových čísel.', 422);
                     }
                     $this->takes->insertLine($supplierId, $id, [
                         'stock_item_id' => $itemId,
@@ -399,11 +415,13 @@ final class StockTakeService
                         'stock_item_id' => $itemId,
                         'qty'           => StockValuation::tToDecimal($diffT),
                         'unit_cost'     => number_format($surplusUnitCost, 6, '.', ''),
+                        'location_id'   => $take['location_id'],
                     ];
                 } else {
                     $shortageLines[] = [
                         'stock_item_id' => $itemId,
                         'qty'           => StockValuation::tToDecimal(-$diffT),
+                        'location_id'   => $take['location_id'],
                     ];
                 }
             }
@@ -486,17 +504,6 @@ final class StockTakeService
     public function list(int $supplierId, array $filters): array
     {
         return $this->takes->list($supplierId, $filters);
-    }
-
-    /** @return array<string,mixed>|null nejnovější otevřená (draft/counting) inventura skladu */
-    private function openTakeForWarehouse(int $supplierId, int $warehouseId): ?array
-    {
-        foreach ($this->takes->list($supplierId, ['warehouse_id' => $warehouseId]) as $t) {
-            if (in_array((string) $t['status'], ['draft', 'preparing', 'counting'], true)) {
-                return $t;
-            }
-        }
-        return null;
     }
 
     /**

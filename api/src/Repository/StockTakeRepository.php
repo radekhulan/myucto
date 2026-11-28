@@ -9,14 +9,14 @@ use PDO;
 
 /**
  * Repository pro stock_takes + stock_take_lines — inventury (Epic SKLAD, §29–30 ZoÚ).
- * Per tenant (supplier_id); UNIQUE (supplier_id, warehouse_id, take_date).
+ * Per tenant (supplier_id); UNIQUE (supplier_id, warehouse_id, location_key, take_date).
  * status=counting blokuje post skladových pohybů na daném skladu (rozhodnutí A13) —
  * hasOpenCounting() to hlídá pro caller (PostingService/StockDocumentService).
  */
 final class StockTakeRepository
 {
     private const COLUMNS =
-        'id, supplier_id, warehouse_id, take_date, status, note, counting_method,
+        'id, supplier_id, warehouse_id, location_id, take_date, status, note, counting_method,
          responsible_count_name, responsible_inventory_name, started_at, receipt_document_id,
          issue_document_id, created_by, closed_by, closed_at, created_at, updated_at, preparation_job_id';
 
@@ -36,7 +36,7 @@ final class StockTakeRepository
     }
 
     /**
-     * @param array{warehouse_id?:int, status?:string} $filters
+     * @param array{warehouse_id?:int, location_id?:int, status?:string} $filters
      * @return list<array<string,mixed>>
      */
     public function list(int $supplierId, array $filters = []): array
@@ -47,6 +47,10 @@ final class StockTakeRepository
             $where[] = 'warehouse_id = ?';
             $params[] = (int) $filters['warehouse_id'];
         }
+        if (isset($filters['location_id'])) {
+            $where[] = 'location_id = ?';
+            $params[] = $filters['location_id'];
+        }
         if (!empty($filters['status'])) {
             $where[] = 'status = ?';
             $params[] = (string) $filters['status'];
@@ -55,10 +59,33 @@ final class StockTakeRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . ' FROM stock_takes
               WHERE ' . implode(' AND ', $where) . '
-              ORDER BY take_date DESC'
+              ORDER BY take_date DESC, id DESC'
         );
         $stmt->execute($params);
         return array_map([self::class, 'cast'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    public function findForDate(int $supplierId, int $warehouseId, ?int $locationId, string $date): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM stock_takes
+              WHERE supplier_id = ? AND warehouse_id = ? AND location_key = ? AND take_date = ? FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $warehouseId, $locationId ?? 0, $date]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
+    public function openForWarehouse(int $supplierId, int $warehouseId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT " . self::COLUMNS . " FROM stock_takes
+              WHERE supplier_id = ? AND warehouse_id = ? AND status IN ('draft','preparing','counting')
+              ORDER BY take_date DESC, id DESC LIMIT 1 FOR UPDATE"
+        );
+        $stmt->execute([$supplierId, $warehouseId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
     }
 
     /**
@@ -78,7 +105,7 @@ final class StockTakeRepository
     }
 
     /**
-     * @param array{warehouse_id:int, take_date:string, status?:string, note?:?string,
+     * @param array{warehouse_id:int, location_id?:?int, take_date:string, status?:string, note?:?string,
      *     counting_method?:?string, responsible_count_name?:?string,
      *     responsible_inventory_name?:?string, created_by?:?int} $data
      */
@@ -87,12 +114,13 @@ final class StockTakeRepository
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO stock_takes
-                (supplier_id, warehouse_id, take_date, status, note, counting_method,
+                (supplier_id, warehouse_id, location_id, take_date, status, note, counting_method,
                  responsible_count_name, responsible_inventory_name, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (int) $data['warehouse_id'],
+            $data['location_id'] ?? null,
             (string) $data['take_date'],
             (string) ($data['status'] ?? 'draft'),
             $data['note'] ?? null,
@@ -234,6 +262,7 @@ final class StockTakeRepository
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['warehouse_id'] = (int) $r['warehouse_id'];
+        $r['location_id'] = $r['location_id'] !== null ? (int) $r['location_id'] : null;
         $r['preparation_job_id'] = $r['preparation_job_id'] !== null ? (int) $r['preparation_job_id'] : null;
         $r['receipt_document_id'] = $r['receipt_document_id'] !== null ? (int) $r['receipt_document_id'] : null;
         $r['issue_document_id'] = $r['issue_document_id'] !== null ? (int) $r['issue_document_id'] : null;

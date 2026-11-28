@@ -56,6 +56,8 @@ interface LineRow {
   fill_intrastat: boolean
   source_description: string | null
   source_qty: string | null
+  location_id: number | null
+  location_to_id: number | null
   tracking_mode: StockTrackingMode
   tracking_allocations: TrackingAllocationInput[]
   tracking_units: Array<{ unit_code: string; numerator: number; denominator: number }>
@@ -64,7 +66,7 @@ function blankLine(): LineRow {
   return {
     stock_item_id: null, qty: '1', unit_cost: '', extra_cost: '', note: '', unit: '', option: null,
     purchase_invoice_item_id: null, remember_seller_code: false, fill_intrastat: false, source_description: null, source_qty: null,
-    tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
+    location_id: null, location_to_id: null, tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
   }
 }
 
@@ -136,6 +138,17 @@ const isImported = computed(() => !!doc.value?.history_import_job_id)
 const readOnly = computed(() => isPosted.value || isReversed.value)
 const isTransfer = computed(() => form.doc_type === 'transfer')
 const isReceipt = computed(() => form.doc_type === 'receipt')
+const isLocationTransfer = computed(() => isTransfer.value && form.warehouse_id !== null && form.warehouse_id === form.warehouse_to_id)
+const locationById = computed(() => new Map(locations.value.map(location => [location.id, {
+  value: location.id, label: `${location.code} - ${location.name}`, warehouseId: location.warehouse_id, active: location.is_active,
+  secondary: location.is_active ? undefined : t('stock.locations.inactive'),
+}])))
+const sourceLocationOptions = computed(() => [...locationById.value.values()].filter(location =>
+  location.warehouseId === form.warehouse_id && (!isReceipt.value || location.active),
+))
+const targetLocationOptions = computed(() => [...locationById.value.values()].filter(location =>
+  location.warehouseId === form.warehouse_to_id && location.active,
+))
 
 async function loadRefData() {
   try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
@@ -165,6 +178,10 @@ async function loadTrackingUnits(row: LineRow, itemId: number) {
 function onSelect(rowIndex: number, itemId: number | null) {
   const row = lines.value[rowIndex]
   if (!row) return
+  if (row.stock_item_id !== itemId) {
+    row.location_id = null
+    row.location_to_id = null
+  }
   row.stock_item_id = itemId
   if (itemId === null) { row.option = null; row.unit = ''; row.tracking_mode = 'none'; row.tracking_allocations = []; row.tracking_units = []; return }
   const si = itemsCache.get(itemId)
@@ -183,6 +200,18 @@ function onSelect(rowIndex: number, itemId: number | null) {
 
 function addLine() { lines.value.push(blankLine()) }
 function removeLine(i: number) { lines.value.splice(i, 1) }
+function changeWarehouse(field: 'location_id' | 'location_to_id') {
+  for (const row of lines.value) row[field] = null
+  if (field === 'location_id') void refreshAvailability()
+}
+function changeDocumentType(type: StockDocType) {
+  form.doc_type = type
+  if (type !== 'transfer') changeWarehouse('location_to_id')
+}
+function selectedLocation(id: number | null) {
+  if (id === null) return null
+  return locationById.value.get(id) ?? { value: id, label: `#${id}` }
+}
 function addTracking(row: LineRow) {
   row.tracking_allocations.push({ quantity: row.tracking_mode === 'serial' ? '1.000' : row.qty, serial_number: null, lot_code: null, expires_on: null, location_id: null, location_to_id: null })
 }
@@ -239,6 +268,8 @@ async function loadDocument() {
         fill_intrastat: l.fill_intrastat === true,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
+        location_id: l.location_id ?? null,
+        location_to_id: l.location_to_id ?? null,
         tracking_mode: l.tracking_mode ?? 'none',
         tracking_allocations: (l.tracking_allocations ?? []).map(a => ({ ...a, unit_code: a.unit_code ?? '' })),
         tracking_units: [],
@@ -315,6 +346,8 @@ function buildPayload(rows: LineRow[]): StockDocumentPayload {
         source_description: l.source_description ?? undefined,
         source_qty: l.source_qty ?? undefined,
         note: l.note.trim() || undefined,
+        location_id: l.tracking_mode === 'none' ? l.location_id : undefined,
+        location_to_id: isTransfer.value && l.tracking_mode === 'none' ? l.location_to_id : undefined,
         tracking_allocations: l.tracking_mode === 'none' ? undefined : l.tracking_allocations,
       }
     }),
@@ -328,12 +361,19 @@ const reversing = ref(false)
 function validate(): boolean {
   error.value = ''
   if (!form.warehouse_id) { error.value = t('stock.documents.field_warehouse'); return false }
-  if (isTransfer.value && (!form.warehouse_to_id || form.warehouse_to_id === form.warehouse_id)) {
+  if (isTransfer.value && !form.warehouse_to_id) {
     error.value = t('stock.documents.field_warehouse_to'); return false
   }
   if (!form.description.trim()) { error.value = t('stock.documents.field_description'); return false }
-  if (lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0).length === 0) {
+  const validLines = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
+  if (validLines.length === 0) {
     error.value = t('stock.documents.no_lines'); return false
+  }
+  if (isLocationTransfer.value && validLines.some(line => line.tracking_mode !== 'none')) {
+    error.value = t('stock.documents.location_transfer_untracked'); return false
+  }
+  if (isLocationTransfer.value && validLines.some(line => line.location_id === line.location_to_id)) {
+    error.value = t('stock.documents.location_transfer_distinct'); return false
   }
   if (lines.value.some(l => l.stock_item_id != null && quantityTooPrecise(l.qty, l.unit))) {
     error.value = t('stock.error.quantity_decimals'); return false
@@ -470,8 +510,13 @@ onMounted(async () => {
     if (typeof qItem === 'string' && /^\d+$/.test(qItem)) {
       try {
         const si = await stockApi.getItem(Number(qItem))
-        itemsCache.set(si.id, { id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id, sale_price_without_vat: si.sale_price_without_vat })
-        lines.value = [{ ...blankLine(), stock_item_id: si.id, option: { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit } }]
+        itemsCache.set(si.id, si)
+        lines.value = [{
+          ...blankLine(), stock_item_id: si.id, unit: si.unit, tracking_mode: si.tracking_mode ?? 'none',
+          option: { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit },
+        }]
+        void loadTrackingUnits(lines.value[0], si.id)
+        void refreshAvailability()
       } catch { /* ignore */ }
     }
   }
@@ -506,7 +551,7 @@ onMounted(async () => {
 
       <div v-if="!readOnly && !isEdit" class="mb-4">
         <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden">
-          <button v-for="dt in (['receipt', 'issue', 'transfer'] as const)" :key="dt" type="button" @click="form.doc_type = dt"
+          <button v-for="dt in (['receipt', 'issue', 'transfer'] as const)" :key="dt" type="button" @click="changeDocumentType(dt)"
             class="cursor-pointer px-3 h-9 text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap"
             :class="form.doc_type === dt ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-600 hover:bg-neutral-50'">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -525,16 +570,16 @@ onMounted(async () => {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ isTransfer ? t('stock.documents.field_warehouse_from') : t('stock.documents.field_warehouse') }}</label>
-            <select v-model="form.warehouse_id" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:bg-neutral-50 text-sm">
+            <select v-model="form.warehouse_id" :disabled="readOnly" @change="changeWarehouse('location_id')" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:bg-neutral-50 text-sm">
               <option :value="null">—</option>
               <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
             </select>
           </div>
           <div v-if="isTransfer">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.documents.field_warehouse_to') }}</label>
-            <select v-model="form.warehouse_to_id" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:bg-neutral-50 text-sm">
+            <select v-model="form.warehouse_to_id" :disabled="readOnly" @change="changeWarehouse('location_to_id')" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:bg-neutral-50 text-sm">
               <option :value="null">—</option>
-              <option v-for="w in warehouses" :key="w.id" :value="w.id" :disabled="w.id === form.warehouse_id">{{ w.name }}</option>
+              <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
             </select>
           </div>
           <div>
@@ -591,7 +636,7 @@ onMounted(async () => {
                 @update:model-value="(v: number | null) => onSelect(i, v)"
               />
               <p v-if="!isReceipt && row.stock_item_id" class="text-xs mt-0.5 text-neutral-400">
-                {{ t('stock.documents.col_available') }}: {{ rowAvailability(row) }}
+                {{ t(row.location_id !== null || isLocationTransfer ? 'stock.documents.col_available_warehouse' : 'stock.documents.col_available') }}: {{ rowAvailability(row) }}
               </p>
               <div v-if="row.remember_seller_code && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
                 <span>{{ t('stock.receipt.remember_line_note') }}</span>
@@ -620,7 +665,7 @@ onMounted(async () => {
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_unit_cost') }}</label>
               <input v-if="isReceipt" v-model="row.unit_cost" v-select-on-focus type="number" step="0.000001" min="0" :readonly="readOnly"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm disabled:bg-neutral-50" :disabled="readOnly" />
-              <div v-else class="h-10 flex items-center justify-end text-xs text-neutral-400 italic">{{ t('stock.documents.price_computed_hint') }}</div>
+              <div v-else class="h-10 flex items-center justify-end text-xs text-neutral-400 italic">{{ isLocationTransfer ? t('stock.documents.location_transfer_valuation') : t('stock.documents.price_computed_hint') }}</div>
               <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce
                    níž se při načtení dokladu neplní. Bez tohohle řádku uživatel
                    nevidí, že tam nějaká částka je, a další náklad přičte navrch. -->
@@ -638,6 +683,22 @@ onMounted(async () => {
                 class="cursor-pointer w-9 h-9 inline-flex items-center justify-center text-danger-500 hover:bg-danger-50 rounded-md">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
               </button>
+            </div>
+            <div v-if="row.stock_item_id !== null && row.tracking_mode === 'none' && (isLocationTransfer || row.location_id !== null || row.location_to_id !== null || (!readOnly && (sourceLocationOptions.length || (isTransfer && targetLocationOptions.length))))"
+              class="sm:col-span-12 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
+              <div>
+                <label :for="`stock-line-${i}-location`" class="block text-xs font-medium text-neutral-600 mb-1">{{ isTransfer ? t('stock.documents.field_location_from') : t('stock.documents.field_location') }}</label>
+                <SearchableSelect v-model="row.location_id" :input-id="`stock-line-${i}-location`" :options="sourceLocationOptions"
+                  :selected-option="selectedLocation(row.location_id)" :disabled="readOnly || (!sourceLocationOptions.length && row.location_id === null)"
+                  :placeholder="t(isReceipt || isLocationTransfer || readOnly ? 'stock.tracking.no_location' : 'stock.documents.automatic_location')"
+                  :clear-label="t('stock.locations.clear_selection')" :no-results-label="t('common.no_results')" />
+              </div>
+              <div v-if="isTransfer">
+                <label :for="`stock-line-${i}-location-to`" class="block text-xs font-medium text-neutral-600 mb-1">{{ t('stock.documents.field_location_to') }}</label>
+                <SearchableSelect v-model="row.location_to_id" :input-id="`stock-line-${i}-location-to`" :options="targetLocationOptions"
+                  :selected-option="selectedLocation(row.location_to_id)" :disabled="readOnly || (!targetLocationOptions.length && row.location_to_id === null)"
+                  :placeholder="t('stock.tracking.no_location')" :clear-label="t('stock.locations.clear_selection')" :no-results-label="t('common.no_results')" />
+              </div>
             </div>
             <div v-if="row.tracking_mode !== 'none'" class="sm:col-span-12 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
               <div class="flex flex-wrap items-center justify-between gap-2 mb-2">

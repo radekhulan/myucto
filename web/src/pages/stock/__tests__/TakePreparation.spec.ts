@@ -12,11 +12,18 @@ const mocks = vi.hoisted(() => ({
     { id: 6, name: 'Archiv', depth: 0, archived: true },
   ]),
   createCycleCount: vi.fn(async (payload: Record<string, unknown>) => ({ id: 3, warehouse_id: 1, location_id: null, category_id: payload.category_id ?? null, category_name: 'Ruční nářadí', status: 'queued', take_date: '2026-09-01', note: null, preparation_job_id: 9, lines: [] })),
+  createTake: vi.fn(async () => ({ id: 8 })),
+  listTakes: vi.fn(async () => []),
 }))
 vi.mock('@/api/stock', () => ({ stockApi: {
   listWarehouses: vi.fn(async () => [{ id: 1, name: 'Hlavní', is_active: true }]),
-  listLocations: vi.fn(async () => []),
-  listTakes: vi.fn(async () => []),
+  listLocations: vi.fn(async () => [
+    { id: 11, warehouse_id: 1, code: 'A-1', name: 'Horní', is_active: true },
+    { id: 12, warehouse_id: 1, code: 'A-2', name: 'Dolní', is_active: false },
+    { id: 13, warehouse_id: 2, code: 'B-1', name: 'Vedlejší', is_active: true },
+  ]),
+  listTakes: mocks.listTakes,
+  createTake: mocks.createTake,
   listCycleCounts: vi.fn(async () => [
     { id: 2, warehouse_id: 1, location_id: null, category_id: 5, category_name: 'Ruční nářadí', status: 'counting', take_date: '2026-09-01', note: null, preparation_job_id: null, lines: [] },
     { id: 1, warehouse_id: 1, location_id: null, category_id: null, category_name: null, status: 'closed', take_date: '2026-08-01', note: null, preparation_job_id: null, lines: [] },
@@ -53,6 +60,36 @@ describe('stock take preparation recovery', () => {
       expect(mocks.cancel).toHaveBeenCalledWith(7)
     } finally { wrapper.unmount() }
   })
+})
+
+it('filtruje inventury a zakládá inventuru podle zvolené lokace', async () => {
+  mocks.route.params = {}
+  mocks.listTakes.mockClear()
+  mocks.createTake.mockClear()
+  const wrapper = shallowMount(TakeWizard, mountOptions)
+  try {
+    await flushPromises()
+    const locationSelect = (inputId: string) => wrapper.findAllComponents({ name: 'SearchableSelect' }).find(select => select.props('inputId') === inputId)!
+    const filter = locationSelect('stock-take-location-filter')
+    filter.vm.$emit('update:modelValue', 11)
+    await flushPromises()
+    expect(mocks.listTakes).toHaveBeenLastCalledWith({ location_id: 11 })
+    filter.vm.$emit('update:modelValue', null)
+    await flushPromises()
+    expect(mocks.listTakes).toHaveBeenLastCalledWith({})
+
+    await wrapper.findAll('button').find(button => button.text() === 'stock.takes.new')!.trigger('click')
+    await wrapper.get('#stock-take-warehouse').setValue('1')
+    const createLocation = locationSelect('stock-take-location')
+    expect(createLocation.props('options')).toMatchObject([{ value: 11 }])
+    createLocation.vm.$emit('update:modelValue', 11)
+    const people = wrapper.findAll('input:not([type])')
+    await people[0]!.setValue('Skladník')
+    await people[1]!.setValue('Inventurník')
+    await wrapper.findAll('button').find(button => button.text() === 'common.create')!.trigger('click')
+    await flushPromises()
+    expect(mocks.createTake).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ warehouse_id: 1, location_id: 11 }))
+  } finally { wrapper.unmount() }
 })
 
 describe('cycle count scoped to a category', () => {

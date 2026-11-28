@@ -58,6 +58,7 @@ final class StockIssueDraftFulfillmentSource implements FulfillmentSourceProvide
                     'invoice_item_id' => $line['invoice_item_id'] ?? null,
                     'stock_item_id' => (int) $line['stock_item_id'],
                     'warehouse_id' => (int) $document['warehouse_id'],
+                    'location_id' => $line['location_id'],
                     'sku' => (string) $line['sku'],
                     'ean' => self::itemEan($this->db, $supplierId, (int) $line['stock_item_id']),
                     'name' => (string) $line['name'],

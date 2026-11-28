@@ -26294,6 +26294,31 @@ paths:
         '200': { description: Uloženo }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/locations/{id}/contents:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Aktuální obsah skladové lokace
+      description: Vrací kladná množství karet na lokaci v základních jednotkách. Sledované karty jsou sečtené přes šarže a sériová čísla.
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, minimum: 5, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Stránka obsahu lokace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockLocationBalances' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/stock/items/search:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -27233,6 +27258,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CatalogNeighbors' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/items/{id}/locations:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Aktuální množství karty po skladových lokacích
+      description: Vrací pojmenované lokace s kladným množstvím. Zásoba bez přiřazené lokace je součástí celkového stavu skladu.
+      parameters:
+        - in: query
+          name: warehouse_id
+          schema: { type: integer, format: int64, minimum: 1 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, minimum: 5, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Stránka stavů po lokacích
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockLocationBalances' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/{id}/movements:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -27246,6 +27300,7 @@ paths:
       description: |
         Stránkovaný výpis pohybů karty s běžnou bilancí (`balance_after` po každém
         řádku) a počáteční bilancí (`opening_balance`) k dané stránce.
+        Převodky mezi lokacemi téhož skladu jsou v seznamu `/stock/documents`.
 
         Pohyb vyvolaný fakturou nebo dobropisem nese `invoice_id`, `invoice_number`,
         `invoice_type`, prodejní cenu řádku (`sale_unit_price` bez DPH za `sale_unit`
@@ -27285,7 +27340,7 @@ paths:
       tags: [Stock]
       summary: Export skladové karty (PDF/XLSX)
       description: |
-        Kompletní historie pohybů karty (bez stránkování, celý rozsah dle filtrů
+        Kompletní historie pohybů karty mezi sklady, příjmů a výdejů (bez stránkování, celý rozsah dle filtrů
         `warehouse_id`/`from`/`to`) jako soubor ke stažení.
       parameters:
         - in: query
@@ -28636,15 +28691,15 @@ paths:
       tags:
       - Stock
       summary: Nový skladový doklad (draft)
-      description: 'Založí draft dokladu (hlavička + řádky). U `doc_type=transfer` je povinný i
-
-        `warehouse_to_id` (odlišný od `warehouse_id`). U příjemky se ocenění řádků
-
-        (`unit_cost`/`extra_cost`) počítá zadanou pořizovací cenou; u výdeje/převodky
-
-        se doplní až při zaúčtování (`post`).
-
-        '
+      description: |
+        Založí koncept dokladu. U `doc_type=transfer` je povinné `warehouse_to_id`.
+        Při shodném zdrojovém a cílovém skladu musí mít každý řádek kartu bez sledování
+        a odlišná umístění. `null` v takové převodce znamená zásobu bez přiřazené lokace.
+        Přesun v rámci skladu ponechá množství a ocenění celého skladu stejné.
+        U běžného výdeje a převodu mezi sklady bez zdrojové lokace se čerpá nejdřív
+        zásoba bez lokace a pak dostupná množství z pojmenovaných lokací podle jejich ID.
+        Cena příjemky vychází ze zadané pořizovací ceny. Ocenění běžného výdeje a převodu
+        mezi sklady se doplní až při zaúčtování.
       requestBody:
         required: true
         content:
@@ -28715,6 +28770,14 @@ paths:
                         type: integer
                       qty:
                         type: string
+                      location_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Lokace příjmu nebo zdrojová lokace výdeje a převodu. Jen pro karty bez sledování.
+                      location_to_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Cílová lokace převodu pro kartu bez sledování.
                       unit_cost:
                         type: string
                         description: Jen u receipt.
@@ -28842,6 +28905,15 @@ paths:
                   type: array
                   items:
                     type: object
+                    properties:
+                      location_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Lokace příjmu nebo zdrojová lokace výdeje a převodu. Jen pro karty bez sledování.
+                      location_to_id:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Cílová lokace převodu pro kartu bez sledování.
                 landed_costs:
                   type: array
                   description: |
@@ -28902,7 +28974,7 @@ paths:
       responses:
         '200': { description: 'Zaúčtováno — doklad vč. `warnings` (např. neaktivní karta na řádku).' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'Nedostatek zásob, otevřená inventura na skladu, nebo uzavřené účetní období.' }
+        '409': { description: 'Nedostatek zásob ve skladu nebo lokaci (`stock_location_insufficient`), otevřená inventura nebo uzavřené účetní období.' }
         '422': { description: 'Doklad není draft, nebo je neplatný (chybí sklad/řádky).' }
   /api/v1/stock/documents/{id}/invoice:
     parameters:
@@ -29120,16 +29192,29 @@ paths:
           name: warehouse_id
           schema: { type: integer }
         - in: query
+          name: location_id
+          description: Jen inventury založené pro danou skladovou lokaci.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - in: query
           name: status
-          schema: { type: string, enum: [draft, counting, closed] }
+          schema: { type: string, enum: [draft, preparing, counting, closed] }
       responses:
-        '200': { description: OK }
+        '200':
+          description: Seznam inventur.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockTake' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
     post:
       tags: [Stock]
       summary: Nová inventura (draft)
       description: |
-        Založí novou inventuru ve stavu `draft`. Na skladu smí být rozpracovaná
-        (draft/counting) jen jedna inventura zaráz — jinak 409.
+        Založí inventuru ve stavu `draft` pro celý sklad nebo pro vybranou aktivní lokaci.
+        Inventura lokace zahrnuje karty bez sledování šarží a sériových čísel.
+        Na skladu může být současně jedna rozpracovaná inventura. Pro stejný sklad,
+        stejnou lokaci (nebo celý sklad) a rozhodné datum lze založit jednu inventuru.
       requestBody:
         required: true
         content:
@@ -29139,15 +29224,20 @@ paths:
               required: [warehouse_id, take_date, counting_method, responsible_count_name, responsible_inventory_name]
               properties:
                 warehouse_id: { type: integer }
+                location_id: { type: [integer, "null"], format: int64, minimum: 1 }
                 take_date: { type: string, format: date }
                 note: { type: [string, "null"] }
                 counting_method: { type: string, enum: [physical_count, measurement, weighing, other] }
                 responsible_count_name: { type: string, maxLength: 255 }
                 responsible_inventory_name: { type: string, maxLength: 255 }
       responses:
-        '201': { description: Vytvořeno }
-        '409': { description: 'Na skladu už běží rozpracovaná inventura.' }
-        '422': { description: 'Sklad nenalezen nebo neaktivní, nebo chybí datum.' }
+        '201':
+          description: Vytvořeno
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTake' }
+        '409': { description: 'Na skladu už běží rozpracovaná inventura nebo pro zvolený rozsah a datum už inventura existuje.' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/takes/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -29160,7 +29250,11 @@ paths:
       summary: Detail inventury
       description: Vč. řádků s `diff_qty` (rozdíl skutečnost−očekávání, `null` pokud nepočítáno).
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTake' }
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Stock]
@@ -29177,8 +29271,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [lines]
               properties:
+                add_item_ids:
+                  type: array
+                  description: Karty nalezené při sčítání. Při inventuře lokace lze přidat jen karty bez sledování.
+                  items: { type: integer, format: int64, minimum: 1 }
                 lines:
                   type: array
                   items:
@@ -29206,7 +29303,8 @@ paths:
       - Stock
       summary: Asynchronní příprava inventury
       description: Založí úlohu přípravy očekávaných stavů k rozhodnému datu inventury. Do dokončení nelze zadávat
-        počty. Opakované zahájení vrací stávající přípravu.
+        počty. Opakované zahájení vrací stávající přípravu. U inventury lokace se množství bere ze
+        zvolené lokace a jednotková cena ze skladu.
       responses:
         '202':
           description: OK
@@ -29232,7 +29330,8 @@ paths:
         Spočítá rozdíly (skutečnost−očekávání) na počítaných řádcích a vygeneruje
         rozdílové skladové doklady (origin=`inventory`, rovnou zaúčtované) — souhrnnou
         příjemku za přebytky a/nebo souhrnnou výdejku za manka; nepočítané řádky
-        (`counted_qty=null`) beze změny. Přepne inventuru do stavu `closed`. Lze
+        (`counted_qty=null`) beze změny. Rozdíly inventury lokace se zapíšou do zvolené lokace.
+        Přepne inventuru do stavu `closed`. Lze
         uzavřít jen inventuru ve fázi `counting`.
       responses:
         '200': { description: 'Uzavřeno — vč. `receipt_document`/`issue_document` (může být `null`).' }
@@ -38311,7 +38410,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write. Sken přijímá SKU nebo EAN položky z výdejního konceptu i prodejní objednávky.
+        U prodejní objednávky má při shodě kódů dosavadní SKU nebo EAN komponenty setu
+        přednost před nově načteným EAN běžné skladové karty.
       requestBody:
         required: true
         content:
@@ -48993,11 +49095,25 @@ components:
               qty_consumed: { type: string }
               qty_released: { type: string }
               remaining_qty: { type: string }
+    StockTake:
+      type: object
+      required: [id, warehouse_id, location_id, take_date, status]
+      properties:
+        id: { type: integer, format: int64 }
+        warehouse_id: { type: integer, format: int64 }
+        location_id:
+          type: [integer, "null"]
+          format: int64
+          description: 'ID inventarizované lokace. Null označuje inventuru celého skladu.'
+        take_date: { type: string, format: date }
+        status: { type: string, enum: [draft, preparing, counting, closed] }
+        lines: { type: array, items: { type: object } }
     StockTakePreparation:
       type: object
       properties:
         id:
           type: integer
+        location_id: { type: [integer, "null"], format: int64 }
         status:
           type: string
           enum:
@@ -49906,6 +50022,8 @@ components:
         document_id: { type: integer, format: int64 }
         supplier_id: { type: integer, format: int64 }
         stock_item_id: { type: integer, format: int64 }
+        location_id: { type: [integer, 'null'], format: int64, minimum: 1, description: Lokace příjmu nebo zdrojová lokace u karty bez sledování. }
+        location_to_id: { type: [integer, 'null'], format: int64, minimum: 1, description: Cílová lokace převodu u karty bez sledování. }
         doc_date: { type: [string, 'null'], format: date }
         qty: { type: string }
         unit_cost: { type: string }
@@ -49920,6 +50038,9 @@ components:
         source_qty: { type: [string, 'null'] }
         line_no: { type: integer }
         note: { type: [string, 'null'] }
+        tracking_allocations:
+          type: array
+          items: { $ref: '#/components/schemas/StockTrackingAllocationInput' }
         sku: { type: string, readOnly: true }
         name: { type: string, readOnly: true }
         unit: { type: string, readOnly: true }
@@ -50118,6 +50239,33 @@ components:
         code: { type: string, maxLength: 50 }
         name: { type: string, maxLength: 100 }
         is_active: { type: boolean, default: true }
+    StockLocationBalances:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required: [warehouse_id, location_id, location_code, location_name, stock_item_id, sku, name, unit, quantity]
+            properties:
+              warehouse_id: { type: integer, format: int64 }
+              location_id: { type: integer, format: int64 }
+              location_code: { type: string }
+              location_name: { type: string }
+              stock_item_id: { type: integer, format: int64 }
+              sku: { type: string }
+              name: { type: string }
+              unit: { type: string }
+              quantity: { type: string, example: '12.500' }
+        meta:
+          type: object
+          required: [total, page, per_page, pages]
+          properties:
+            total: { type: integer }
+            page: { type: integer }
+            per_page: { type: integer }
+            pages: { type: integer }
     StockTrackingUnitUpdate:
       type: object
       properties:

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FulfillmentRepository;
+use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\WarehouseRepository;
 
 final class FulfillmentService
@@ -22,6 +23,7 @@ final class FulfillmentService
         private readonly StockDocumentService $documents,
         private readonly TrackingAllocationService $tracking,
         private readonly StockCommitmentService $commitments,
+        private readonly StockItemRepository $items,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -146,19 +148,12 @@ final class FulfillmentService
             }
 
             $lines = $this->repo->taskLines($supplierId, $taskId, true);
-            $matches = array_values(array_filter($lines, static function (array $line) use ($canonical): bool {
-                $snapshot = $line['component_snapshot'];
-                $code = $canonical['code'];
-                return mb_strtoupper((string) ($snapshot['sku'] ?? '')) === $code
-                    || (($snapshot['ean'] ?? null) !== null && mb_strtoupper((string) $snapshot['ean']) === $code);
-            }));
-            $line = null;
-            foreach ($matches as $candidate) {
-                if (StockValuation::qtyToT($candidate['picked_qty']) < StockValuation::qtyToT($candidate['expected_qty'])) {
-                    $line = $candidate;
-                    break;
-                }
+            $legacyEans = [];
+            if ($task['source_type'] === 'sales_order') {
+                $legacyLines = array_filter($lines, static fn (array $line): bool => !array_key_exists('ean', $line['component_snapshot']));
+                $legacyEans = $this->items->eansForIds($supplierId, array_values(array_unique(array_column($legacyLines, 'stock_item_id'))));
             }
+            $line = self::lineForScan($lines, $canonical['code'], $legacyEans);
             if ($line === null && $override && $targetLineId > 0) {
                 foreach ($lines as $candidate) {
                     if ((int) $candidate['id'] === $targetLineId) {
@@ -204,6 +199,33 @@ final class FulfillmentService
             $this->repo->addScanOperation($supplierId, $taskId, $operationId, $hash, $canonical, $result, $userId);
             return $result;
         });
+    }
+
+    private static function lineForScan(array $lines, string $code, array $legacyEans): ?array
+    {
+        $fallback = null;
+        $matchesExistingCode = false;
+        foreach ($lines as $candidate) {
+            $snapshot = $candidate['component_snapshot'];
+            $hasStoredEan = array_key_exists('ean', $snapshot);
+            $ean = $hasStoredEan ? $snapshot['ean'] : ($legacyEans[$candidate['stock_item_id']] ?? null);
+            $matchesSku = mb_strtoupper((string) ($snapshot['sku'] ?? '')) === $code;
+            $matchesEan = $ean !== null && mb_strtoupper((string) $ean) === $code;
+            if (!$matchesSku && !$matchesEan) {
+                continue;
+            }
+
+            $existingCode = $matchesSku || ($hasStoredEan && empty($snapshot['ean_from_stock_item']));
+            $matchesExistingCode = $matchesExistingCode || $existingCode;
+            if (StockValuation::qtyToT($candidate['picked_qty']) >= StockValuation::qtyToT($candidate['expected_qty'])) {
+                continue;
+            }
+            if ($existingCode) {
+                return $candidate;
+            }
+            $fallback ??= $candidate;
+        }
+        return $matchesExistingCode ? null : $fallback;
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed> */
@@ -301,6 +323,7 @@ final class FulfillmentService
                     'line_no' => $index,
                     'note' => 'Fulfillment shipment #' . $shipmentId,
                     'invoice_item_id' => $item['component_snapshot']['invoice_item_id'] ?? null,
+                    'location_id' => $item['component_snapshot']['location_id'] ?? null,
                     'tracking_allocations' => $item['tracking_snapshot'],
                 ];
             }

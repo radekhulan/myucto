@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Stock;
 
+use MyInvoice\Repository\StockTrackingRepository;
+use MyInvoice\Service\Stock\CycleCountService;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockLedgerReader;
 use MyInvoice\Service\Stock\StockReportService;
 use MyInvoice\Service\Stock\StockValuationCategoryGroups;
 use MyInvoice\Service\Stock\StockValueTrendService;
@@ -202,6 +205,48 @@ final class StockValueTrendTest extends StockTestCase
             }
         }
         self::assertNotSame('0.00', $this->trend($sid, $dates, null, $root)['totals']['2026-02-28']['value_total']);
+    }
+
+    public function testLocationTransferKeepsWarehouseLedgerAndValuationUnchanged(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->item($sid, 'BIN-TEST');
+        $tracking = $this->container->get(StockTrackingRepository::class);
+        $from = $tracking->saveLocation($sid, $wh, null, 'A1', 'Regál A1', true);
+        $to = $tracking->saveLocation($sid, $wh, null, 'B1', 'Regál B1', true);
+
+        $receipt = $this->documents->create($sid, [
+            'doc_type' => 'receipt', 'warehouse_id' => $wh, 'doc_date' => '2026-01-10',
+            'description' => 'Příjem na lokaci',
+            'lines' => [['stock_item_id' => $item, 'qty' => '4', 'unit_cost' => '10', 'location_id' => $from]],
+        ], $this->userId);
+        $this->documents->post($sid, (int) $receipt['id'], $this->userId);
+        $transfer = $this->documents->create($sid, [
+            'doc_type' => 'transfer', 'warehouse_id' => $wh, 'warehouse_to_id' => $wh, 'doc_date' => '2026-01-15',
+            'description' => 'Přesun mezi lokacemi',
+            'lines' => [['stock_item_id' => $item, 'qty' => '2', 'location_id' => $from, 'location_to_id' => $to]],
+        ], $this->userId);
+        $this->documents->post($sid, (int) $transfer['id'], $this->userId);
+
+        self::assertSame(['qtyT' => 4000, 'valueC' => 4000], $this->level($sid, $wh, $item));
+        self::assertSame([(int) $receipt['id']], array_column($this->levelsRepo->ledgerForItem($sid, $item), 'document_id'));
+        self::assertSame('4.000', $this->levelsRepo->ledgerQtyBefore($sid, $item, ['warehouse_id' => $wh], 2));
+        $ledger = $this->container->get(StockLedgerReader::class);
+        self::assertSame([], $ledger->affectedDates($sid, $wh, $item, '2026-01-11'));
+
+        $report = $this->container->get(StockReportService::class);
+        $valuation = $report->valuation($sid, '2026-01-31', ['warehouse_id' => $wh]);
+        self::assertSame('4.000', $valuation['items'][0]['qty']);
+        self::assertSame('40.00', $valuation['totals']['value_total']);
+        $trend = $this->trend($sid, ['2026-01-31'], $wh, null);
+        self::assertSame('40.00', $trend['totals']['2026-01-31']['value_total']);
+
+        $cycles = $this->container->get(CycleCountService::class);
+        $cycle = $cycles->create($sid, ['warehouse_id' => $wh, 'take_date' => '2026-01-31'], $this->userId);
+        $cycles->tick($sid);
+        $counts = $cycles->get($sid, (int) $cycle['id']);
+        self::assertSame('4.000', $counts['lines'][0]['expected_qty']);
     }
 
     public function testMoreBatchesGiveTheSameResult(): void

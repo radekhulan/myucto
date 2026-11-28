@@ -380,8 +380,11 @@ výběr kusů, které jsou ve zvoleném skladu skladem:
 
 ### 37.5.3 Převod mezi sklady
 
-V editoru dokladu přepněte typ na **Převodka**, zvolte různý zdrojový a cílový
-sklad, přidejte řádky a zaúčtujte. Číslo má tvar `PRE-RRRR-NNNN`.
+V editoru dokladu přepněte typ na **Převodka**, zvolte zdrojový a cílový sklad,
+přidejte řádky a zaúčtujte. Číslo má tvar `PRE-RRRR-NNNN`. Při přesunu nesledované
+karty uvnitř skladu zvolte stejný sklad na obou stranách a na každém řádku dvě různá
+umístění. Jedno z nich může být **Bez lokace**. Množství a ocenění celého skladu
+zůstává při tomto přesunu stejné.
 
 ### 37.5.4 Faktura z příjemky
 
@@ -418,7 +421,8 @@ Zaúčtovaný doklad nejde upravit. V editoru klikněte na **Stornovat**, vyplň
 
 1. Otevřete `Sklad → Inventury` a klikněte na **Nová inventura**.
 2. Zvolte **sklad**, **datum**, způsob zjištění skutečného stavu a odpovědné
-   osoby. Poznámka je nepovinná.
+   osoby. Pro inventuru nesledovaných karet na jedné pozici zvolte také **Lokaci**.
+   Poznámka je nepovinná.
 3. Počkejte, až skončí příprava očekávaných stavů (průběh je vidět v detailu
    inventury), a klikněte na **Zahájit sčítání**.
 4. U každé položky zadejte **skutečně napočítané množství**. Sedí-li stav, pomůže
@@ -1041,6 +1045,13 @@ Množství je v jednotce karty. Má-li ta jednotka nastavená desetinná místa 
 editor přesnější zadání zvýrazní a doklad neuloží (nic se nezaokrouhluje), viz
 [§ 37.12.2](#37122-skladove-karty).
 
+U karty bez sledování lze na příjemce a výdejce zadat **Lokaci** a na převodce
+**Zdrojovou lokaci** a **Cílovou lokaci**. Příjem bez vybrané lokace se eviduje
+bez umístění. Při výdeji nebo převodu do jiného skladu s automatickým výběrem se
+nejdřív čerpá zásoba bez umístění a potom zásoba z pojmenovaných lokací v pořadí
+jejich založení. U ručně zvolené zdrojové lokace musí být dané množství právě tam.
+Storno vrátí množství do stejných umístění, která použil původní doklad.
+
 Akce v hlavičce editoru: **Zaúčtovat** (uloží a rovnou zaúčtuje), **Uložit koncept**,
 tisk do PDF a u zaúčtovaného dokladu **Stornovat** (přes dialog s polem **Důvod storna**).
 
@@ -1197,10 +1208,15 @@ místo mazání." a nabídne deaktivaci.
 
 Tlačítko **Skladové pozice** u vybraného skladu rozbalí jeho seznam pozic. Hledat lze
 podle kódu nebo názvu. Sklad lze rozdělit na volitelné **lokace**. Lokace vždy
-patří právě jednomu skladu a nelze ji při editaci přesunout jinam. U karet se
-sledováním šarží nebo sériových čísel může příjemka, výdejka a převodka určit
-zdrojovou a cílovou lokaci. Karta bez zapnutého sledování dál používá běžný stav
-skladu a při fakturaci ani při skladovém pohybu nevyžaduje žádnou lokaci.
+patří právě jednomu skladu a nelze ji při editaci přesunout jinam. Tlačítko
+**Obsah pozice** ukazuje karty a aktuální množství na vybrané pozici. U karet se
+sledováním zadáváte lokaci u šarže nebo sériového čísla. U ostatních karet je
+volba lokace přímo na řádku skladového dokladu. Dřívější zásoby bez přiřazené
+lokace můžete do konkrétních pozic rozdělit převodkami v rámci jednoho skladu.
+
+Pro skladové čtečky vrací `GET /api/v1/stock/locations/{id}/contents` obsah pozice
+a `GET /api/v1/stock/items/{id}/locations` množství karty na jednotlivých pozicích.
+Přehled inventur lze filtrovat podle `location_id` na `GET /api/v1/stock/takes`.
 
 Na kartě lze zapnout sledování **šarží a expirace** nebo **sériových čísel**.
 Zaúčtování sledované karty vyžaduje rozdělit celé množství řádku do alokací.
@@ -1266,13 +1282,15 @@ se tyto jednotky nepromítají, k tomu slouží balení karty
 `Sklad → Inventury` slouží k fyzické kontrole skutečného stavu zásob podle
 § 29 a 30 zákona o účetnictví. Založíte ji tlačítkem **Nová inventura**: zvolíte
 **sklad**, **datum**, způsob zjištění skutečného stavu a osoby odpovědné za zjištění
-stavu a za provedení inventury. Poznámka je nepovinná.
+stavu a za provedení inventury. Volitelná **Lokace** omezí inventuru na karty bez
+sledování se stavem na této pozici. Případné rozdíly se zaúčtují na stejnou pozici.
+Poznámka je nepovinná.
 
 Na daném skladu smí běžet vždy jen **jedna otevřená** inventura (ve stavu Založena
 nebo Probíhá sčítání). Dokud ji neuzavřete, další na tentýž sklad založit nejde, a to
 bez ohledu na zvolené datum („Na skladu už je rozpracovaná inventura."). Nezávisle na
-tom je i v databázi vynucené, že na jeden sklad a den existuje nejvýš jeden záznam
-inventury vůbec.
+tom platí, že na jeden den lze založit jednu inventuru celého skladu a jednu
+inventuru každé jeho pozice. Seznam inventur lze podle lokace filtrovat.
 
 Průvodce inventurou má tři kroky. Mezi založením a sčítáním probíhá příprava
 očekávaných stavů na pozadí (Založena, Příprava, Probíhá sčítání, Uzavřena). Dokud
@@ -1346,7 +1364,7 @@ u řádků inventury, karty mimo rozsah se nezmění. Seznam cyklických inventu
 detail zobrazuje zvolenou kategorii. Smazáním kategorie se inventura nesmaže, jen
 přestane kategorii zobrazovat. Na jednom skladu a lokaci smí současně běžet jen jedna
 cyklická inventura, i když se kategorie liší. Běžná (roční) inventura se na kategorii
-omezit nedá a vždy zahrne celý sklad.
+omezit nedá. Při založení lze vybrat celý sklad nebo jednu lokaci pro nesledované karty.
 
 ### 37.12.8 Skladové sestavy
 
@@ -1926,7 +1944,8 @@ uzamkne pro tuto úlohu, takže jej už nelze samostatně upravit, smazat ani za
 a zásoba se nevydá dvakrát. Pro prodejní objednávku zvolte příslušný zdroj
 a identifikátor (UUID) objednávky, nebo otevřete vychystání přímo z jejího detailu.
 
-Na mobilní obrazovce skladník skenuje **SKU nebo EAN**. Každý sken nese vlastní
+Na mobilní obrazovce skladník skenuje **SKU nebo EAN** u úloh založených z výdejky
+i z prodejní objednávky. Každý sken nese vlastní
 identifikátor operace, takže opakování stejného požadavku po výpadku nepřidá další
 kus. Cizí kód a množství nad požadovaný počet systém odmítne. Oprávněná odchylka
 vyžaduje samostatné právo a uvedený důvod.

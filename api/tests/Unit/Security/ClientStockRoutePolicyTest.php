@@ -29,6 +29,7 @@ final class ClientStockRoutePolicyTest extends TestCase
         foreach ([
             ['GET', '/api/stock/items', true], ['GET', '/api/stock/items/search', true], ['GET', '/api/stock/items/1', true],
             ['GET', '/api/stock/items/1/tracking', true], ['GET', '/api/stock/items/1/tracking-choices', true],
+            ['GET', '/api/stock/items/1/locations', true], ['GET', '/api/stock/locations/1/contents', true],
             ['POST', '/api/stock/items/quote', true], ['POST', '/api/stock/items', true], ['PUT', '/api/stock/items/1', true],
             ['PUT', '/api/stock/items/1/packaging', true], ['PUT', '/api/stock/items/1/customer-prices', true],
             ['GET', '/api/stock/warehouses', true], ['GET', '/api/stock/locations', true], ['GET', '/api/stock/quantities', true],

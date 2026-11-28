@@ -1256,7 +1256,8 @@
         "2350_clients_advance_paid_accounts.sql",
         "2351_other_item_offset_settlement.sql",
         "2352_statement_504_group_accounts.sql",
-        "2353_partner_settlement_accounts.sql"
+        "2353_partner_settlement_accounts.sql",
+        "2354_stock_location_quantities.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26661,6 +26662,8 @@
                 "invoice_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "ledger_booked_at": "timestamp NULL DEFAULT NULL",
                 "line_no": "int(10) unsigned NOT NULL DEFAULT 0",
+                "location_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "location_to_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "purchase_invoice_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -26678,6 +26681,8 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_sdl_ii": "BTREE (invoice_item_id)",
                 "fk_sdl_item": "BTREE (stock_item_id)",
+                "fk_sdl_location": "BTREE (supplier_id, location_id)",
+                "fk_sdl_location_to": "BTREE (supplier_id, location_to_id)",
                 "idx_sdl_document": "BTREE (document_id, line_no)",
                 "idx_sdl_item_ledger": "BTREE (supplier_id, stock_item_id, doc_date, id)",
                 "idx_sdl_pii": "BTREE (purchase_invoice_item_id)",
@@ -26689,6 +26694,8 @@
                 "fk_sdl_document": "(document_id) -> stock_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_sdl_ii": "(invoice_item_id) -> invoice_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_sdl_item": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_sdl_location": "(supplier_id, location_id) -> warehouse_locations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_sdl_location_to": "(supplier_id, location_to_id) -> warehouse_locations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_sdl_pii": "(purchase_invoice_item_id) -> purchase_invoice_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_sdl_pol": "(purchase_order_line_id) -> purchase_order_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
@@ -27286,6 +27293,64 @@
             },
             "checks": []
         },
+        "stock_location_levels": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "location_id": "bigint(20) unsigned NOT NULL",
+                "quantity": "decimal(14,3) NOT NULL",
+                "stock_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "warehouse_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_sll_location": "BTREE (supplier_id, warehouse_id, location_id)",
+                "ix_sll_location_item": "BTREE (supplier_id, location_id, stock_item_id)",
+                "uq_sll_item_location": "UNIQUE BTREE (supplier_id, stock_item_id, warehouse_id, location_id)"
+            },
+            "foreign_keys": {
+                "fk_sll_item": "(supplier_id, stock_item_id) -> stock_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sll_location": "(supplier_id, warehouse_id, location_id) -> warehouse_locations (supplier_id, warehouse_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sll_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_sll_quantity": "`quantity` >= 0"
+            }
+        },
+        "stock_location_movements": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "doc_date": "date NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "location_id": "bigint(20) unsigned NOT NULL",
+                "quantity": "decimal(14,3) NOT NULL",
+                "stock_document_line_id": "bigint(20) unsigned NOT NULL",
+                "stock_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "warehouse_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_slm_location": "BTREE (supplier_id, warehouse_id, location_id)",
+                "ix_slm_item_date": "BTREE (supplier_id, stock_item_id, warehouse_id, doc_date)",
+                "ix_slm_line": "BTREE (supplier_id, stock_document_line_id)",
+                "ix_slm_location_date": "BTREE (supplier_id, location_id, doc_date, stock_item_id)"
+            },
+            "foreign_keys": {
+                "fk_slm_item": "(supplier_id, stock_item_id) -> stock_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_slm_line": "(supplier_id, stock_document_line_id) -> stock_document_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_slm_location": "(supplier_id, warehouse_id, location_id) -> warehouse_locations (supplier_id, warehouse_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_slm_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_slm_quantity": "`quantity` <> 0"
+            }
+        },
         "stock_media": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -27584,6 +27649,8 @@
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "issue_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "location_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "location_key": "bigint(20) unsigned NULL DEFAULT NULL STORED GENERATED AS (coalesce(`location_id`,0))",
                 "note": "text NULL DEFAULT NULL",
                 "preparation_job_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "receipt_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -27598,11 +27665,14 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_st_location": "BTREE (supplier_id, warehouse_id, location_id)",
                 "fk_st_wh": "BTREE (warehouse_id)",
+                "idx_st_supplier_location_date": "BTREE (supplier_id, location_id, take_date, id)",
                 "idx_st_supplier_status": "BTREE (supplier_id, status)",
-                "uq_st_supplier_wh_date": "UNIQUE BTREE (supplier_id, warehouse_id, take_date)"
+                "uq_st_supplier_wh_location_date": "UNIQUE BTREE (supplier_id, warehouse_id, location_key, take_date)"
             },
             "foreign_keys": {
+                "fk_st_location": "(supplier_id, warehouse_id, location_id) -> warehouse_locations (supplier_id, warehouse_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_st_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_st_wh": "(warehouse_id) -> warehouses (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
@@ -27681,6 +27751,7 @@
                 "completed": "tinyint(1) NOT NULL DEFAULT 0",
                 "cursor_json": "longtext NULL DEFAULT NULL",
                 "job_id": "bigint(20) unsigned NOT NULL",
+                "location_qty": "decimal(14,3) NULL DEFAULT NULL",
                 "movements": "bigint(20) unsigned NOT NULL DEFAULT 0",
                 "qty": "decimal(18,3) NOT NULL DEFAULT 0.000",
                 "started": "tinyint(1) NOT NULL DEFAULT 0",

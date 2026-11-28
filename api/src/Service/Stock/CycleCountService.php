@@ -123,7 +123,8 @@ final class CycleCountService
             return;
         }
         if ($cycle['location_id'] !== null) return;
-        $stmt = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN d.doc_type = 'receipt' AND d.warehouse_id = ? THEN l.qty WHEN d.doc_type = 'issue' AND d.warehouse_id = ? THEN -l.qty WHEN d.doc_type = 'transfer' AND d.warehouse_id = ? THEN -l.qty WHEN d.doc_type = 'transfer' AND d.warehouse_to_id = ? THEN l.qty ELSE 0 END), 0) FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id JOIN stock_cycle_count_documents ccd ON ccd.supplier_id = l.supplier_id AND ccd.cycle_count_id = ? AND ccd.stock_document_id = l.document_id WHERE l.supplier_id = ? AND l.stock_item_id = ?");
+        $warehouseMovement = StockLedgerReader::WAREHOUSE_MOVEMENT_SQL;
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN d.doc_type = 'receipt' AND d.warehouse_id = ? THEN l.qty WHEN d.doc_type = 'issue' AND d.warehouse_id = ? THEN -l.qty WHEN d.doc_type = 'transfer' AND d.warehouse_id = ? THEN -l.qty WHEN d.doc_type = 'transfer' AND d.warehouse_to_id = ? THEN l.qty ELSE 0 END), 0) FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id JOIN stock_cycle_count_documents ccd ON ccd.supplier_id = l.supplier_id AND ccd.cycle_count_id = ? AND ccd.stock_document_id = l.document_id WHERE l.supplier_id = ? AND l.stock_item_id = ? AND {$warehouseMovement}");
         $stmt->execute([$cycle['warehouse_id'], $cycle['warehouse_id'], $cycle['warehouse_id'], $cycle['warehouse_id'], $cycle['id'], $supplierId, $itemId]);
         $pdo->prepare('INSERT INTO stock_cycle_count_lines (supplier_id, cycle_count_id, stock_item_id, stock_tracking_unit_id, expected_qty) VALUES (?, ?, ?, NULL, ?)')->execute([$supplierId, $cycle['id'], $itemId, (string) $stmt->fetchColumn()]);
     }

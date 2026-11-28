@@ -4692,10 +4692,12 @@ final class Routes
             $g->put   ('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'update']);
             $g->delete('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'delete']);
             $g->get   ('/locations',                    [\MyInvoice\Action\Stock\StockTrackingAction::class, 'locations']);
+            $g->get   ('/locations/{id:[0-9]+}/contents', [\MyInvoice\Action\Stock\StockTrackingAction::class, 'locationContents']);
             $g->post  ('/locations',                    [\MyInvoice\Action\Stock\StockTrackingAction::class, 'saveLocation']);
             $g->put   ('/locations/{id:[0-9]+}',        [\MyInvoice\Action\Stock\StockTrackingAction::class, 'saveLocation']);
 
             $g->get   ('/items/search',                 [\MyInvoice\Action\Stock\StockItemAction::class, 'search']);
+            $g->get   ('/items/{id:[0-9]+}/locations',   [\MyInvoice\Action\Stock\StockTrackingAction::class, 'itemLocations']);
             // Nacenění řádků dokladu v jednotce řádku (balení) — issue #17.
             $g->post  ('/items/quote',                  [\MyInvoice\Action\Stock\StockItemQuoteAction::class, 'quote']);
             $g->get   ('/item-templates',               [\MyInvoice\Action\Stock\StockItemAction::class, 'templates']);
