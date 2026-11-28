@@ -3408,6 +3408,7 @@ final class Routes
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/draft', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'currentDraft']);
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'getDraft']);
             $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/reset', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'reset']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/legal-profile', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'pinLegalProfile']);
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/source', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'draftSource']);
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/{collection:decisions|activities|funding-pools|funding-links}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'collection']);
             $g->patch('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/{collection:decisions|activities|funding-pools|funding-links}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'patch']);

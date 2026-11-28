@@ -65,6 +65,34 @@ final class FundingPagedJ6Test extends TestCase
         }
     }
 
+    /** #402 krok 2, A14: připnutí nové revize právního profilu nepovolí změnu potvrzené volby osvobození daru. */
+    public function testPinningNewLegalProfileRevisionKeepsGiftElectionLocked(): void
+    {
+        $this->fundingSource(false);
+        $legal = new \MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService($this->db);
+        $profile = ['kind' => 'narrow_vpp', 'entity_type' => 'association', 'main_activity_nonbusiness' => true, 'legal_basis' => 'zdp_17a', 'evidence' => self::PRIVATE_SENTINEL];
+        $legal->confirm($this->supplier, $this->period, ['expected_revision' => 0, 'idempotency_key' => 'gift-legal-1', 'reason' => 'Synthetic', 'profile' => $profile], $this->actor);
+        $assessment = $this->pagedFundingAssessment(0);
+        $legal->confirm($this->supplier, $this->period, ['expected_revision' => 1, 'idempotency_key' => 'gift-legal-2', 'reason' => 'Synthetic',
+            'profile' => ['evidence' => 'Synthetic amended statutes'] + $profile], $this->actor);
+
+        $drafts = $this->container->get(J6AssessmentDraftService::class);
+        $draft = $drafts->openCurrent($this->supplier, $this->period, null, null, $this->actor);
+        self::assertSame(1, $draft['header']['legal_profile']['revision_no']);
+        $draft = $drafts->pinLegalProfile($this->supplier, $this->period, $draft['id'], $draft['revision_no'], $this->actor);
+        self::assertSame(2, $draft['header']['legal_profile']['revision_no']);
+        $draft = $drafts->patchDecisions($this->supplier, $this->period, $draft['id'], $draft['revision_no'], [['source_id' => 'line:' . $this->income,
+            'payload' => ['title' => 'gift', 'evidence' => self::PRIVATE_SENTINEL, 'facts' => ['claim_exemption' => false,
+                'income_treatment' => 'nonbusiness_activity', 'income_attribution_evidence' => self::PRIVATE_SENTINEL]]]], [], $this->actor);
+        $context = new J6DraftContext($this->supplier, $this->period, $draft['id'], $draft['revision_no'], $this->actor, $draft['source_input_hash']);
+        try {
+            $this->container->get(J6AssessmentConfirmationService::class)->confirm($context, 'gift-changed-after-pin', self::PRIVATE_SENTINEL, $assessment);
+            self::fail('A pinned legal profile revision must not unlock the confirmed gift election.');
+        } catch (NonprofitTaxAssessmentException $failure) {
+            self::assertSame('nonprofit_tax_gift_election_locked', $failure->errorCode);
+        }
+    }
+
     public function testChoicesOfferGiftFromPagedAssessment(): void
     {
         $this->fundingSource(false);

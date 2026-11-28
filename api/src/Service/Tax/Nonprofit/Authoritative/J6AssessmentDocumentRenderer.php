@@ -31,10 +31,16 @@ final class J6AssessmentDocumentRenderer extends ReportPdfRendererBase
             !== $bridge['assessed_result_cents']) {
             throw new \UnexpectedValueException('Paged J6 assessment bridge does not reconcile.');
         }
-        $profileName = ['narrow_vpp' => 'Veřejně prospěšný poplatník s úzkým základem daně',
+        $names = ['narrow_vpp' => 'Veřejně prospěšný poplatník s úzkým základem daně',
             'broad_vpp' => 'Veřejně prospěšný poplatník s širokým základem daně',
             'non_vpp' => 'Mimo režim veřejně prospěšného poplatníka',
-            'documented' => 'Uživatelem doložené postavení pro dané období'][$profile['kind'] ?? ''] ?? ($profile['kind'] ?? '');
+            'svj' => 'Společenství vlastníků jednotek',
+            'documented' => 'Uživatelem doložené postavení pro dané období'];
+        $profileName = $names[$profile['kind'] ?? ''] ?? ($profile['kind'] ?? '');
+        // Ruční posouzení s doloženou identitou (převzatou z právního profilu) ji v dokumentu uvede.
+        if (($profile['kind'] ?? null) === 'documented' && is_string($profile['entity_kind'] ?? null)) {
+            $profileName .= ' (' . ($names[$profile['entity_kind']] ?? $profile['entity_kind']) . ')';
+        }
         return [
             'Posouzení' => [['Údaj', 'Hodnota'], [
                 ['Rozsah', 'Souhrn klasifikačního posouzení před obecnými úpravami základu daně.'],
@@ -44,7 +50,11 @@ final class J6AssessmentDocumentRenderer extends ReportPdfRendererBase
                 ['Aktuálnost při exportu', $payload['current_confirmed'] ? 'Aktuální potvrzené posouzení' : 'Historická nebo neaktuální revize'],
                 ['Potvrzení uživatelem / čas', $assessment['created_by'] . ' / ' . $assessment['created_at']],
                 ['Důvod', $assessment['reason']], ['Postavení poplatníka', $profileName],
-                ['Doložení postavení', (string) ($profile['evidence'] ?? '')], ['Metodika', $assessment['ruleset']],
+                ['Doložení postavení', (string) ($profile['evidence'] ?? '')],
+                ['Původ postavení', is_array($payload['legal_profile'] ?? null)
+                    ? 'Právní profil DPPO, revize ' . $payload['legal_profile']['revision_no'] . ' (otisk ' . $payload['legal_profile']['record_hash'] . ')'
+                    : 'Bez připnuté revize právního profilu DPPO'],
+                ['Metodika', $assessment['ruleset']],
                 ['Otisk zdrojových podkladů', $assessment['source_input_hash']],
                 ['Otisk zmrazeného podkladu', $assessment['snapshot_input_hash']],
                 ['Otisk potvrzení', $assessment['receipt_hash']],

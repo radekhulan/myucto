@@ -5,7 +5,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { nonprofitTaxJ6Api } from '@/api/nonprofitTaxJ6'
 import type {
   J6ActivityRow, J6AssessmentHistoryPage, J6AssessmentSummary, J6CurrentSourceHeader, J6DecisionRow, J6DocumentFormat, J6DraftEnvelope,
-  J6DraftOpenRequest, J6LinkRow, J6MemberRow, J6PoolKind, J6PoolRow, J6PreviewKind,
+  J6DraftOpenRequest, J6LegalProfileStatus, J6LinkRow, J6MemberRow, J6PoolKind, J6PoolRow, J6PreviewKind,
   J6PreviewPage, J6PreviewReceipt, J6ProfileKind, J6SourceRow, J6TaxDecision,
 } from '@/api/nonprofitTaxJ6Types'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -15,7 +15,7 @@ import { centsText, parseCents } from '@/utils/nonprofitTaxDraft'
 import J6SourceFindings from './J6SourceFindings.vue'
 
 const props = defineProps<{ supplierId: number; periodId: number; canManage: boolean; reloadKey: number }>()
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const PAGE_LIMIT = 100
 const expenseTitles = ['cost', 'nonbusiness_cost', 'excluded_cost', 'withholding_interest_cost']
 type Tab = 'source' | 'decisions' | 'activities' | 'pools' | 'links' | 'preview' | 'history'
@@ -41,6 +41,9 @@ const entityKind = ref('')
 const manualMethod = ref(false)
 const methodBasis = ref('')
 const methodEvidence = ref('')
+const legalProfile = ref<J6LegalProfileStatus | null>(null)
+// Stav profilu je načtený; bez něj nejde poznat, zda postavení převezme server.
+const legalKnown = ref(false)
 
 const sourceRows = ref<J6SourceRow[]>([])
 const sourceFindings = ref<{ line_id: number; code: string }[]>([])
@@ -108,15 +111,43 @@ const deductibleIsFixedZero = computed(() => isExpenseDecision.value
 watch([deductibleAmount, decisionSourceRow, () => decision.value.source_id, () => decision.value.payload.title], () => {
   deductibleError.value = ''
 })
-const profileValid = computed(() => !!profileKind.value && profileEvidence.value.trim().length > 0
-  && (!manualMethod.value || (methodBasis.value.trim().length > 0 && methodEvidence.value.trim().length > 0)))
+// S potvrzeným právním profilem DPPO převezme postavení i podklad server (J6LegalProfileMatch).
+const profileLocked = computed(() => !!legalProfile.value?.current)
+const legalState = computed(() => legalProfile.value?.state ?? null)
+const methodValid = computed(() => !manualMethod.value || (methodBasis.value.trim().length > 0 && methodEvidence.value.trim().length > 0))
+const profileValid = computed(() => (legalKnown.value || !props.canManage) && methodValid.value
+  && (profileLocked.value || (!!profileKind.value && profileEvidence.value.trim().length > 0)))
+const canPinLegalProfile = computed(() => !!draft.value && editable.value && !!legalProfile.value?.pinnable)
+// Konflikt s modulem SVJ bez potvrzeného profilu: reset převezme jen postavení vybrané ve formuláři.
+const svjModuleConflict = computed(() => legalState.value === 'conflict' && !legalProfile.value?.current)
+const resetFixesConflict = computed(() => !svjModuleConflict.value
+  || profileKind.value === 'svj' || (profileKind.value === 'documented' && entityKind.value === 'svj'))
+// Profil, který nejde ověřit: server odmítne založení, reset, náhled i potvrzení (J6NonprofitTaxAction::legalState).
+const legalUnavailable = computed(() => legalState.value === 'unavailable' || !!legalProfile.value?.error)
+const legalUnavailableReason = computed(() => {
+  const failure = legalProfile.value?.error
+  if (!failure) return ''
+  return te('nonprofitTaxJ6.legalProfile.errors.' + failure.code) ? t('nonprofitTaxJ6.legalProfile.errors.' + failure.code) : failure.message
+})
+const entityKindLabel = computed(() => profileLocked.value && entityKind.value ? t('nonprofitTaxJ6.profiles.' + entityKind.value) : entityKind.value)
+const draftPostureLabel = computed(() => {
+  const profile = draft.value?.header.profile
+  const kind = profile?.kind === 'documented' ? (profile.entity_kind ?? 'documented') : (profile?.kind ?? 'documented')
+  return t('nonprofitTaxJ6.profiles.' + kind)
+})
+const lockedRevision = computed(() => legalProfile.value?.pinned?.revision_no ?? legalProfile.value?.current?.revision_no ?? 0)
 const knownErrors = new Set([
   'nonprofit_tax_period_locked', 'nonprofit_tax_draft_changed', 'nonprofit_tax_draft_source_not_captured',
   'nonprofit_tax_assessment_changed', 'nonprofit_tax_idempotency_conflict', 'nonprofit_tax_cursor_stale',
   'nonprofit_tax_legacy_history_requires_migration', 'nonprofit_tax_sources_incomplete',
   'nonprofit_tax_reconciliation_failed', 'nonprofit_tax_review_required', 'nonprofit_tax_gift_election_locked',
   'nonprofit_tax_facts_incomplete', 'nonprofit_tax_framework_unsupported', 'nonprofit_tax_preview_not_found',
+  'nonprofit_tax_legal_profile_conflict', 'nonprofit_tax_legal_profile_mismatch', 'nonprofit_tax_legal_profile_missing',
 ])
+// Generace hlášky (každá nová hláška) a generace stavu obrazovky (přehled, akce); obě zneplatní čekající obnovu profilu.
+let errorGeneration = 0
+let screenGeneration = 0
+const legalProfileErrors = new Set(['nonprofit_tax_legal_profile_conflict', 'nonprofit_tax_legal_profile_mismatch', 'nonprofit_tax_legal_profile_missing'])
 
 function codeOf(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
@@ -143,17 +174,99 @@ function report(value: unknown) {
     acknowledged.value = false
   }
   const translated = code && knownErrors.has(code) ? t('nonprofitTaxJ6.errors.' + code) : undefined
-  error.value = code === 'nonprofit_tax_facts_incomplete' ? apiErrorMessage(value, translated) : translated ?? apiErrorMessage(value)
+  const message = code === 'nonprofit_tax_facts_incomplete' ? apiErrorMessage(value, translated) : translated ?? apiErrorMessage(value)
+  // Nová hláška nahrazuje výsledky dřívějších obnov stavu profilu.
+  const generation = ++errorGeneration
+  // Profil se mezitím změnil (potvrzení v jiném okně): obnovit stav profilu a pole postavení.
+  if (code && legalProfileErrors.has(code)) {
+    const conflict = code === 'nonprofit_tax_legal_profile_conflict'
+    // Konflikt vysvětlí box stavu profilu; chybový pruh jen tehdy, když se stav nepodaří obnovit.
+    error.value = conflict ? '' : message
+    void refreshLegalProfile().then((refreshed) => {
+      // Mezitím přišla jiná hláška, přehled nebo akce: výsledek už nepatří k tomuto stavu obrazovky.
+      if (generation !== errorGeneration || refreshed === 'discarded') return
+      // U zastaralého konceptu radí pruh „obnovte přehled“; rada k resetu nebo opakování by mu odporovala.
+      if (refreshed === 'stale') error.value = ''
+      // Bez obnoveného stavu neplatí „formulář jsme obnovili“: rada obnovit přehled.
+      else if (refreshed === 'failed') error.value = code === 'nonprofit_tax_legal_profile_mismatch' ? t('nonprofitTaxJ6.legalProfile.refreshFailed') : message
+      else if (conflict && legalState.value !== 'conflict') error.value = message
+    })
+    return
+  }
+  error.value = message
+}
+/** Smaže hlášku na začátku akce nebo přehledu a zneplatní čekající obnovu stavu profilu. */
+function clearError() {
+  errorGeneration++
+  screenGeneration++
+  error.value = ''
 }
 function requestBody(): J6DraftOpenRequest {
-  if (!profileKind.value) throw new Error('nonprofitTaxJ6.profileRequired')
-  const profile: J6DraftOpenRequest['profile'] = { kind: profileKind.value, evidence: profileEvidence.value.trim() }
-  if (profileKind.value === 'documented' && entityKind.value.trim()) profile.entity_kind = entityKind.value.trim()
-  if (!manualMethod.value) return { profile }
+  let body: J6DraftOpenRequest = {}
+  if (!profileLocked.value) {
+    if (!profileKind.value) throw new Error('nonprofitTaxJ6.profileRequired')
+    const profile: NonNullable<J6DraftOpenRequest['profile']> = { kind: profileKind.value, evidence: profileEvidence.value.trim() }
+    if (profileKind.value === 'documented' && entityKind.value.trim()) profile.entity_kind = entityKind.value.trim()
+    body = { profile }
+  }
+  if (!manualMethod.value) return body
   const period = current.value?.header.period
   if (!period) throw new Error('nonprofitTaxJ6.periodRequired')
-  return { profile, method: { mode: 'documented_manual', valid_from: period.starts_on, valid_to: period.ends_on,
+  return { ...body, method: { mode: 'documented_manual', valid_from: period.starts_on, valid_to: period.ends_on,
     legal_basis: methodBasis.value.trim(), evidence: methodEvidence.value.trim() } }
+}
+/**
+ * Pole postavení. Se zamčeným profilem postavení, které převezme založení nebo reset konceptu
+ * (postavení konceptu v konfliktu ukazuje box stavu profilu); doložení je z konceptu, v konfliktu
+ * a bez konceptu prázdné (převezme se z profilu). Bez profilu podle konceptu; bez profilu
+ * i konceptu zůstává rozepsaný ruční výběr.
+ */
+function syncProfileFields() {
+  const header = draft.value?.header
+  const legal = legalProfile.value?.current
+  if (legal) {
+    profileKind.value = manualMethod.value ? 'documented' : legal.kind
+    entityKind.value = manualMethod.value ? legal.kind : ''
+    profileEvidence.value = header && legalState.value !== 'conflict' ? header.profile.evidence : ''
+    return
+  }
+  if (!header) return
+  profileKind.value = header.profile.kind
+  profileEvidence.value = header.profile.evidence
+  entityKind.value = header.profile.entity_kind ?? ''
+}
+/**
+ * Obnoví stav profilu po chybě akce. 'discarded' = během požadavku se změnila firma, období,
+ * místní koncept nebo proběhl přehled či akce (výsledek patří jinému stavu); novější hlášku
+ * chrání generace hlášek v report();
+ * 'stale' = koncept na serveru změnila jiná operace.
+ */
+async function refreshLegalProfile(): Promise<'ok' | 'failed' | 'discarded' | 'stale'> {
+  if (!props.canManage) return 'failed'
+  const supplier = props.supplierId
+  const period = props.periodId
+  const draftKey = () => envelope.value ? envelope.value.draft.id + ':' + envelope.value.draft.revision_no : null
+  const startedFor = draftKey()
+  const startedGeneration = screenGeneration
+  const changed = () => supplier !== props.supplierId || period !== props.periodId || draftKey() !== startedFor
+    || screenGeneration !== startedGeneration
+  try {
+    const mine = await nonprofitTaxJ6Api.currentDraft(supplier, period)
+    if (changed()) return 'discarded'
+    // Stav profilu by patřil jiné hlavičce, než jakou obrazovka ukazuje.
+    if (startedFor !== null && (mine.draft ? mine.draft.id + ':' + mine.draft.revision_no : null) !== startedFor) {
+      stale.value = true
+      return 'stale'
+    }
+    legalProfile.value = mine.legal_profile
+    legalKnown.value = true
+    if (envelope.value) envelope.value = { ...envelope.value, legal_profile: mine.legal_profile }
+    if (!draft.value || profileLocked.value) syncProfileFields()
+    return 'ok'
+  } catch {
+    // Chybu akce hlásí report(); obnova stavu profilu je jen doplněk.
+    return changed() ? 'discarded' : 'failed'
+  }
 }
 function invalidatePages() {
   sourceRows.value = []
@@ -183,6 +296,8 @@ function invalidatePages() {
 }
 function adopt(next: J6DraftEnvelope) {
   envelope.value = next
+  legalProfile.value = next.legal_profile
+  legalKnown.value = true
   stale.value = false
   confirmRetry.value = null
   invalidatePages()
@@ -192,17 +307,32 @@ function idempotencyKey() {
   return 'j6-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)
 }
 
+let loadedContext = ''
 async function loadOverview() {
   const supplier = props.supplierId
   const period = props.periodId
+  // Jiná firma nebo období: rozepsané postavení (třeba převzaté z profilu předchozího období) nepatří sem.
+  // Návrat do téže záložky (KeepAlive) rozepsaný ruční výběr zachová.
+  if (loadedContext !== supplier + ':' + period) {
+    loadedContext = supplier + ':' + period
+    profileKind.value = ''
+    profileEvidence.value = ''
+    entityKind.value = ''
+    manualMethod.value = false
+    methodBasis.value = ''
+    methodEvidence.value = ''
+  }
   loading.value = true
-  error.value = ''
+  clearError()
+  stale.value = false
   envelope.value = null
   decisionSource.value = null
   invalidatePages()
   historyCursor.value = null
   historyBack.value = []
   historyAction.value = null
+  legalProfile.value = null
+  legalKnown.value = false
   try {
     const [summary, firstHistory, mine] = await Promise.all([
       nonprofitTaxJ6Api.periodSummary(supplier, period),
@@ -213,15 +343,18 @@ async function loadOverview() {
     current.value = summary.source
     latest.value = summary.latest
     history.value = firstHistory
+    legalProfile.value = mine?.legal_profile ?? null
+    legalKnown.value = !!mine
     if (mine?.draft && mine.capabilities) {
-      adopt({ draft: mine.draft, capabilities: mine.capabilities })
-      profileKind.value = mine.draft.header.profile.kind
-      profileEvidence.value = mine.draft.header.profile.evidence
-      entityKind.value = mine.draft.header.profile.entity_kind ?? ''
+      adopt({ draft: mine.draft, capabilities: mine.capabilities, legal_profile: mine.legal_profile })
+      // Metodu nastavit před poli postavení: zamčený výběr z ní odvozuje cíl resetu.
       manualMethod.value = !!mine.draft.header.method
       methodBasis.value = mine.draft.header.method?.legal_basis ?? ''
       methodEvidence.value = mine.draft.header.method?.evidence ?? ''
+      syncProfileFields()
       await loadSource(null)
+    } else {
+      syncProfileFields()
     }
   } catch (value) { report(value) }
   finally { loading.value = false }
@@ -230,22 +363,40 @@ const headConfirmedId = computed(() => history.value.head.status === 'confirmed'
 async function openDraft() {
   if (!profileValid.value || busy.value) return
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     adopt(await nonprofitTaxJ6Api.openDraft(props.supplierId, props.periodId, requestBody()))
+    syncProfileFields()
     active.value = 'source'
     await loadSource(null)
   } catch (value) { report(value) }
   finally { busy.value = false }
 }
 async function resetDraft() {
-  if (!draft.value || !profileValid.value || !window.confirm(t('nonprofitTaxJ6.resetWarning'))) return
+  if (!draft.value || busy.value || !profileValid.value || !resetFixesConflict.value || legalUnavailable.value
+    || !window.confirm(t('nonprofitTaxJ6.resetWarning'))) return
   busy.value = true
+  clearError()
   try {
     adopt(await nonprofitTaxJ6Api.resetDraft(props.supplierId, props.periodId, draft.value.id, {
       expected_revision: draft.value.revision_no,
       ...requestBody(),
     }))
+    syncProfileFields()
+    await loadSource(null)
+  } catch (value) { report(value) }
+  finally { busy.value = false }
+}
+/** Připne aktuální revizi právního profilu se stejným postavením; rozhodnutí konceptu zůstanou. */
+async function pinLegalProfile() {
+  if (!draft.value || !canPinLegalProfile.value || busy.value) return
+  busy.value = true
+  clearError()
+  try {
+    adopt(await nonprofitTaxJ6Api.pinLegalProfile(props.supplierId, props.periodId, draft.value.id, {
+      expected_revision: draft.value.revision_no,
+    }))
+    syncProfileFields()
     await loadSource(null)
   } catch (value) { report(value) }
   finally { busy.value = false }
@@ -328,7 +479,7 @@ function assessSource(row: J6SourceRow) {
 async function mutate(run: () => Promise<J6DraftEnvelope>, reload: Tab) {
   if (!draft.value || busy.value) return
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     adopt(await run())
     active.value = reload
@@ -466,7 +617,7 @@ async function changeMember(id: string, remove = false) {
 async function createPreview() {
   if (!draft.value || busy.value) return
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     preview.value = await nonprofitTaxJ6Api.preview(props.supplierId, props.periodId, draft.value.id, draft.value.revision_no)
     previewKind.value = 'result'
@@ -490,7 +641,7 @@ async function confirmAssessment(retry = false) {
       expected_assessment_id: headConfirmedId.value, reason: reason.value.trim(), idempotency_key: idempotencyKey() } }
   }
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     await nonprofitTaxJ6Api.confirm(props.supplierId, props.periodId, confirmRetry.value.draftId, confirmRetry.value.body)
     confirmRetry.value = null
@@ -511,6 +662,8 @@ async function loadHistory(cursor: string | null) {
     if (cursor !== null && codeOf(value) === 'nonprofit_tax_cursor_stale') {
       // Mezitím vznikla nová revize: kurzor patří staré hlavě historie, načteme ji od začátku.
       historyBack.value = []
+      // Jen nová hláška: listování historií nemění koncept, obnovený stav profilu dál platí.
+      errorGeneration++
       error.value = t('nonprofitTaxJ6.historyChanged')
       await loadHistory(null)
       return
@@ -531,7 +684,7 @@ async function runHistoryAction() {
   const action = historyAction.value
   if (!action || busy.value || !historyAcknowledged.value || !historyReason.value.trim()) return
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     if (action.kind === 'withdraw') {
       await nonprofitTaxJ6Api.withdraw(props.supplierId, props.periodId, action.row.id,
@@ -623,14 +776,18 @@ async function downloadExport(id: number) {
 
 const actions = computed<ActionItem[]>(() => [
   { key: 'open', label: t('nonprofitTaxJ6.openDraft'), icon: 'plus', tier: 'primary', variant: 'primary',
-    show: !draft.value, disabled: !profileValid.value || busy.value || !props.canManage, run: openDraft },
+    show: !draft.value, disabled: !profileValid.value || busy.value || !props.canManage || legalUnavailable.value, run: openDraft },
   { key: 'preview', label: t('nonprofitTaxJ6.preview'), icon: 'eye', tier: 'primary', variant: 'primary',
-    show: !!draft.value, disabled: !capabilities.value?.can_preview || stale.value || busy.value, run: createPreview },
+    show: !!draft.value, disabled: !capabilities.value?.can_preview || stale.value || busy.value || legalState.value === 'conflict' || legalUnavailable.value, run: createPreview },
   { key: 'reset', label: t('nonprofitTaxJ6.resetDraft'), icon: 'cycle', tier: 'overflow', variant: 'warning',
-    show: !!draft.value && props.canManage, disabled: !editable.value || !profileValid.value, run: resetDraft },
+    show: !!draft.value && props.canManage, disabled: !editable.value || busy.value || !profileValid.value || !resetFixesConflict.value || legalUnavailable.value, run: resetDraft },
   { key: 'refresh', label: t('nonprofitTaxJ6.reload'), icon: 'cycle', tier: 'secondary', run: loadOverview },
 ])
 
+watch(manualMethod, () => {
+  // Bez konceptu nebo se zamčeným profilem ukáže výběr, co převezme založení nebo reset s ruční metodou.
+  if (!draft.value || profileLocked.value) syncProfileFields()
+})
 watch(() => props.reloadKey, () => { void loadOverview() })
 onMounted(() => { void loadOverview() })
 </script>
@@ -660,20 +817,48 @@ onMounted(() => { void loadOverview() })
         {{ t('nonprofitTaxJ6.latestRevision', { revision: latest.revision_no }) }} · {{ t('nonprofitTaxJ6.status.' + latest.status) }}
         <template v-if="latest.summary"> · {{ t('nonprofitTaxJ6.assessedResult') }}: <span class="font-mono">{{ money(latest.summary.assessed_result_cents) }}</span></template>
         <template v-if="latest.conversion_required"> · {{ t('nonprofitTaxJ6.conversionRequired') }}</template>
+        <template v-if="latest.legal_profile"> · <span data-test="latest-legal-profile">{{ t('nonprofitTaxJ6.legalProfile.latest', { revision: latest.legal_profile.revision_no }) }}</span></template>
       </p>
       <J6SourceFindings v-if="current.finding_count > 0" :key="current.input_hash" :current-hash="current.input_hash" :supplier-id="props.supplierId" :period-id="props.periodId" />
+      <div v-if="props.canManage" data-test="legal-profile-status" role="status"
+        :class="['rounded-lg border p-3 text-sm', legalState === 'conflict' ? 'border-warning-300 bg-warning-50 text-warning-800' : 'border-neutral-200 bg-neutral-50 text-neutral-700']">
+        <template v-if="legalState === 'conflict'">
+          <p class="font-medium">{{ t('nonprofitTaxJ6.legalProfile.conflictTitle') }}</p>
+          <p v-if="svjModuleConflict" class="mt-1">{{ t('nonprofitTaxJ6.legalProfile.svjModule', { draft: draftPostureLabel }) }}</p>
+          <p v-else class="mt-1">{{ t('nonprofitTaxJ6.legalProfile.conflict', { draft: draftPostureLabel, profile: t('nonprofitTaxJ6.profiles.' + (legalProfile?.current?.kind ?? 'documented')) }) }}</p>
+        </template>
+        <p v-else-if="legalState === 'pinned_same_kind_outdated'">{{ t('nonprofitTaxJ6.legalProfile.outdated', { pinned: legalProfile?.pinned?.revision_no ?? 0, current: legalProfile?.current?.revision_no ?? 0 }) }}</p>
+        <p v-else-if="legalState === 'unavailable' || legalProfile?.error" data-test="legal-profile-error">{{ t('nonprofitTaxJ6.legalProfile.unavailable', { message: legalUnavailableReason }) }}</p>
+        <p v-else-if="legalState === 'manual' && legalProfile?.current && legalProfile.pinnable">{{ t('nonprofitTaxJ6.legalProfile.unpinned', { current: legalProfile.current.revision_no }) }}</p>
+        <p v-else-if="legalState === 'manual' && legalProfile?.current">{{ t('nonprofitTaxJ6.legalProfile.unverified', { current: legalProfile.current.revision_no }) }}</p>
+        <p v-else-if="profileLocked">{{ t('nonprofitTaxJ6.legalProfile.adopted', { revision: lockedRevision }) }}</p>
+        <p v-else>{{ t('nonprofitTaxJ6.legalProfile.none') }}</p>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <button v-if="legalState === 'conflict'" type="button" data-test="legal-profile-reset" :class="btnOutline('warning')" class="whitespace-nowrap" :disabled="!editable || busy || !profileValid || !resetFixesConflict || legalUnavailable" @click="resetDraft">
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.cycle" /></svg>{{ t('nonprofitTaxJ6.resetDraft') }}
+          </button>
+          <button v-if="canPinLegalProfile" type="button" data-test="legal-profile-pin" :class="btnOutline('success')" class="whitespace-nowrap" :disabled="busy" @click="pinLegalProfile">
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('nonprofitTaxJ6.legalProfile.pin') }}
+          </button>
+          <RouterLink :to="{ name: 'accounting-nonprofit-dppo', query: { period: String(props.periodId) } }" data-test="legal-profile-link" class="whitespace-nowrap text-xs font-medium text-primary-600 hover:underline">
+            {{ profileLocked ? t('nonprofitTaxJ6.legalProfile.open') : t('nonprofitTaxJ6.legalProfile.confirm') }} →
+          </RouterLink>
+        </div>
+      </div>
       <div class="grid gap-3 md:grid-cols-2">
         <label :class="formLabel">{{ t('nonprofitTaxJ6.profile') }}
-          <select v-model="profileKind" data-test="profile-kind" :class="formInput" class="mt-1" :disabled="!!draft && !editable">
+          <select v-model="profileKind" data-test="profile-kind" :class="formInput" class="mt-1" :disabled="profileLocked || (!!draft && !editable)">
             <option value="">{{ t('nonprofitTaxJ6.choose') }}</option>
             <option v-for="kind in ['narrow_vpp','broad_vpp','non_vpp','svj','documented']" :key="kind" :value="kind">{{ t('nonprofitTaxJ6.profiles.' + kind) }}</option>
           </select>
         </label>
         <label v-if="profileKind === 'documented'" class="text-sm">{{ t('nonprofitTaxJ6.entityKind') }}
-          <input v-model="entityKind" maxlength="100" :class="formInput" class="mt-1" />
+          <input v-if="profileLocked" :value="entityKindLabel" data-test="entity-kind" :class="formInput" class="mt-1" disabled />
+          <input v-else v-model="entityKind" data-test="entity-kind" maxlength="100" :class="formInput" class="mt-1" />
         </label>
         <label :class="formLabel" class="md:col-span-2">{{ t('nonprofitTaxJ6.profileEvidence') }}
-          <textarea v-model="profileEvidence" data-test="profile-evidence" rows="2" maxlength="2000" :class="formTextarea" class="mt-1" />
+          <textarea v-model="profileEvidence" data-test="profile-evidence" rows="2" maxlength="2000" :class="formTextarea" class="mt-1"
+            :disabled="profileLocked" :placeholder="profileLocked && !profileEvidence ? t('nonprofitTaxJ6.legalProfile.evidenceFromProfile') : undefined" />
         </label>
         <label class="flex items-center gap-2 text-sm md:col-span-2"><input v-model="manualMethod" type="checkbox" />{{ t('nonprofitTaxJ6.manualMethod') }}</label>
         <template v-if="manualMethod">
@@ -814,7 +999,7 @@ onMounted(() => { void loadOverview() })
         </div>
       </article>
       <p v-if="!history.rows.length" class="text-sm text-neutral-600">{{ t('nonprofitTaxJ6.noHistory') }}</p>
-      <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutline('neutral')" :disabled="!historyBack.length" @click="historyPrevious"><svg class="h-4 w-4 shrink-0 rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.previous') }}</button><button type="button" :class="btnOutline('neutral')" :disabled="!history.after" @click="historyNext"><svg class="h-4 w-4 shrink-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.next') }}</button></div>
+      <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutline('neutral')" :disabled="!historyBack.length" @click="historyPrevious"><svg class="h-4 w-4 shrink-0 rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.previous') }}</button><button type="button" data-test="history-next" :class="btnOutline('neutral')" :disabled="!history.after" @click="historyNext"><svg class="h-4 w-4 shrink-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.next') }}</button></div>
       <div v-if="selectedAssessment && frozenSummary" class="rounded-lg border border-neutral-200 bg-surface p-4 space-y-3"><h3 class="font-semibold">{{ t('nonprofitTaxJ6.frozenAssessment', { id: selectedAssessment }) }}</h3><pre class="overflow-auto text-xs">{{ JSON.stringify(frozenSummary, null, 2) }}</pre><div class="flex flex-wrap gap-2"><button v-for="kind in (['source','decision','result','coverage','usage'] as const)" :key="kind" type="button" :class="frozenKind === kind ? 'rounded-md bg-primary-600 px-3 py-2 text-sm text-white' : btnOutline('neutral')" @click="selectFrozen(kind)">{{ t('nonprofitTaxJ6.previewKinds.' + kind) }}</button></div><pre class="overflow-auto text-xs">{{ JSON.stringify(frozenRows, null, 2) }}</pre><div class="flex flex-wrap gap-2"><button type="button" :class="btnOutline('neutral')" :disabled="!frozenBack.length" @click="frozenPrevious"><svg class="h-4 w-4 shrink-0 rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.previous') }}</button><button type="button" :class="btnOutline('neutral')" :disabled="!frozenAfter" @click="frozenNext"><svg class="h-4 w-4 shrink-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitTaxJ6.next') }}</button></div></div>
     </section>
 

@@ -4,7 +4,7 @@ import { requestSupplierId } from '@/workspace/supplierContext'
 import type {
   J6ActivityRow, J6AssessmentCompletion, J6AssessmentHistoryPage, J6AssessmentSummary, J6ConfirmRequest,
   J6ConvertRequest, J6CurrentDraft, J6CurrentSourceHeader, J6DecisionRow, J6DocumentFormat, J6PeriodSummary, J6WithdrawRequest, J6DraftCollectionPage, J6DraftEnvelope, J6DraftOpenRequest,
-  J6DraftResetRequest, J6DraftSourcePage, J6FrozenCalculationPage, J6FrozenKind, J6FrozenSourcePage,
+  J6DraftResetRequest, J6DraftSourcePage, J6PinLegalProfileRequest, J6FrozenCalculationPage, J6FrozenKind, J6FrozenSourcePage,
   J6LinkRow, J6MemberRow, J6PatchRequest, J6PoolKind, J6PoolRow, J6PreviewKind, J6PreviewPage,
   J6PreviewReceipt, J6SourceFindingFilter, J6SourceFindingPage, J6SourceFindingSummary, J6TaxActivity, J6TaxDecision, J6TaxFundingLink, J6TaxPool,
 } from './nonprofitTaxJ6Types'
@@ -48,6 +48,7 @@ export const nonprofitTaxJ6Api = {
   openDraft: (supplier: number, period: number, body: J6DraftOpenRequest) => api.post<J6DraftEnvelope>(`${base(period)}/draft`, body, options(supplier)).then(r => r.data),
   getDraft: (supplier: number, period: number, id: number) => api.get<J6DraftEnvelope>(draft(period, id), options(supplier)).then(r => r.data),
   resetDraft: (supplier: number, period: number, id: number, body: J6DraftResetRequest) => api.post<J6DraftEnvelope>(`${draft(period, id)}/reset`, body, options(supplier)).then(r => r.data),
+  pinLegalProfile: (supplier: number, period: number, id: number, body: J6PinLegalProfileRequest) => api.post<J6DraftEnvelope>(`${draft(period, id)}/legal-profile`, body, options(supplier)).then(r => r.data),
   draftSource: (supplier: number, period: number, id: number, after?: string | null, limit = PAGE_LIMIT) => api.get<J6DraftSourcePage>(`${draft(period, id)}/source`, { ...options(supplier), params: params(after, limit) }).then(r => r.data),
   decisions: (supplier: number, period: number, id: number, after?: string | null, limit = PAGE_LIMIT) => getCollection<J6DecisionRow>(supplier, period, id, 'decisions', after, limit),
   activities: (supplier: number, period: number, id: number, after?: string | null, limit = PAGE_LIMIT) => getCollection<J6ActivityRow>(supplier, period, id, 'activities', after, limit),

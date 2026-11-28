@@ -45873,6 +45873,7 @@ components:
       - created_by
       - created_at
       - summary
+      - legal_profile
       properties:
         id:
           type: integer
@@ -45917,6 +45918,23 @@ components:
         receipt_hash:
           anyOf:
           - type: string
+          - type: 'null'
+        legal_profile:
+          description: Revize právního profilu DPPO, ze které koncept převzal postavení (připnutí v hlavičce rozhodnutí). Null u posouzení s ručně zadaným postavením, u odvolání a u starších formátů.
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - id
+            - revision_no
+            - record_hash
+            properties:
+              id:
+                type: integer
+              revision_no:
+                type: integer
+              record_hash:
+                type: string
           - type: 'null'
         conversion_required:
           type: boolean
@@ -48858,6 +48876,8 @@ components:
                   status: { type: string, enum: [ok, failed, not_evaluated] }
                   code: { type: string, nullable: true }
                   message: { type: string, nullable: true }
+                  pinned_profile_revision: { type: integer, nullable: true, description: 'Jen u profile_match: revize právního profilu připnutá potvrzeným posouzením J6 (null = posouzení bez připnutí nebo žádné).' }
+                  current_profile_revision: { type: integer, nullable: true, description: 'Jen u profile_match: aktuální revize právního profilu období. Jiná revize se stejným postavením chybou není.' }
     NonprofitDppoOperationCapability:
       type: object
       required: [allowed, code, message]

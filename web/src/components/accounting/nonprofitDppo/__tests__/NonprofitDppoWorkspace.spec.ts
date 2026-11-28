@@ -51,6 +51,46 @@ describe('Nonprofit DPPO workspace', () => {
   expect(w.text()).toContain('Synthetic other finding')
   w.unmount()
  })
+ it('shows the legal profile revision pinned by the J6 assessment next to the current one', async () => {
+  const steps = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'ok', code: null, message: null,
+   ...(step === 'profile_match' ? { pinned_profile_revision: 1, current_profile_revision: 2 } : {}) }))
+  api.readiness.mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: steps, preparation_findings: [] } })
+  const w = render(); await flushPromises()
+  await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
+  expect(w.get('[data-test=readiness-steps] li[data-step=profile_match] [data-test=readiness-profile-revisions]').text())
+   .toContain('nonprofitDppo.readiness.profileRevisions')
+  expect(w.findAll('[data-test=readiness-profile-revisions]')).toHaveLength(1)
+  w.unmount()
+ })
+ it('hides the revision note when the J6 assessment pins the current profile revision', async () => {
+  const steps = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'ok', code: null, message: null,
+   ...(step === 'profile_match' ? { pinned_profile_revision: 2, current_profile_revision: 2 } : {}) }))
+  api.readiness.mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: steps, preparation_findings: [] } })
+  const w = render(); await flushPromises()
+  await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
+  expect(w.find('[data-test=readiness-profile-revisions]').exists()).toBe(false)
+  w.unmount()
+ })
+ it('does not switch the period from the J6 link while an operation is running', async () => {
+  api.periods.mockResolvedValue([period, { ...period, id: 8, fiscal_year: 2025, starts_on: '2025-01-01', ends_on: '2025-12-31' }])
+  let release!: (value: unknown) => void
+  api.readiness.mockImplementationOnce(() => new Promise(r => { release = r }))
+  const w = mount(Workspace, { props: { supplier: 1, canManage: true, initialPeriod: 7 }, global: { stubs: { ActionBar, DateInput: true, RouterLink } } }); await flushPromises()
+  await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
+  await w.setProps({ initialPeriod: 8 }); await flushPromises()
+  expect(api.profile).toHaveBeenLastCalledWith(1, 7)
+  expect((w.get('[data-field=period]').element as HTMLSelectElement).value).toBe('7')
+  release({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: [], preparation_findings: [] } }); await flushPromises()
+  w.unmount()
+ })
+ it('preselects the period from the J6 legal profile link', async () => {
+  api.periods.mockResolvedValue([period, { ...period, id: 8, fiscal_year: 2025, starts_on: '2025-01-01', ends_on: '2025-12-31' }])
+  const w = mount(Workspace, { props: { supplier: 1, canManage: true, initialPeriod: 8 }, global: { stubs: { ActionBar, DateInput: true, RouterLink } } }); await flushPromises()
+  expect(api.profile).toHaveBeenLastCalledWith(1, 8)
+  await w.setProps({ initialPeriod: 7 }); await flushPromises()
+  expect(api.profile).toHaveBeenLastCalledWith(1, 7)
+  w.unmount()
+ })
  it('does not leave the previous readiness result visible when a new check fails', async () => {
   const ok = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'ok', code: null, message: null }))
   api.readiness.mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: ok, preparation_findings: [] } })

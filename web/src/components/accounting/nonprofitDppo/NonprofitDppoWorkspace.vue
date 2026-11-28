@@ -10,7 +10,7 @@ import { nonprofitDppoApi as api } from '@/api/nonprofitDppo'
 import type { AccountingPeriod } from '@/api/accounting'
 import type { RouteLocationRaw } from 'vue-router'
 import type { AcceptanceState, LegalConfirm, LegalKind, LegalOverview, NonprofitDppoState, NonprofitOperationKey, ReadinessStepKey, SavingConfirm, SavingEvent, SavingOverview, SavingPlan, SavingReverseConfirm, SavingSource, SavingUseInput } from '@/api/nonprofitDppoTypes'
-const props = defineProps<{ supplier: number; canManage: boolean; canEditReturn?: boolean }>()
+const props = defineProps<{ supplier: number; canManage: boolean; canEditReturn?: boolean; initialPeriod?: number }>()
 const { t, locale } = useI18n()
 const periods = ref<AccountingPeriod[]>([]), period = ref(0), legal = ref<LegalOverview | null>(null), savings = ref<SavingOverview | null>(null), native = ref<NonprofitDppoState | null>(null)
 const acceptance = ref<AcceptanceState | null>(null)
@@ -23,6 +23,9 @@ const pending = ref<Pending | null>(null)
 
 let alive = true, generation = 0, revision = 0
 const selectedPeriod = computed(() => periods.value.find(p => p.id === period.value))
+// Opakovaný proklik z daňového posouzení jiného období u už otevřené obrazovky přepne období.
+// Proklik z posouzení J6 nepřepne období během rozpracované nebo nejisté operace (výběr je pak vypnutý).
+watch(() => props.initialPeriod, next => { if (next && !locked.value && periods.value.some(p => p.id === next)) period.value = next })
 const source = computed(() => savings.value?.sources.find(s => s.source.id === sourceId.value))
 const cost = computed(() => source.value?.eligible_costs.find(c => c.cost_line_id === costId.value))
 const reversible = computed(() => source.value?.events.filter(e => e.operation === 'use' && !source.value?.events.some(r => r.operation === 'reverse_use' && r.original_id === e.id)) || [])
@@ -70,7 +73,7 @@ async function checkReadiness() {
 async function reload() {
  if (uncertain.value) return
  const supplier = props.supplier, ticket = ++generation; busy.value = true; error.value = ''; legal.value = null; native.value = null; savings.value = null; resetReview()
- try { const [available, overview, accepted] = await Promise.all([api.periods(supplier), api.savings(supplier), api.acceptance(supplier)]); if (!current(ticket, supplier)) return; periods.value = available; savings.value = overview; acceptance.value = accepted ?? null; const next = available.some(p => p.id === period.value) ? period.value : available[0]?.id || 0; if (period.value === next) await loadProfile(); else period.value = next }
+ try { const [available, overview, accepted] = await Promise.all([api.periods(supplier), api.savings(supplier), api.acceptance(supplier)]); if (!current(ticket, supplier)) return; periods.value = available; savings.value = overview; acceptance.value = accepted ?? null; const next = available.some(p => p.id === period.value) ? period.value : available.find(p => p.id === props.initialPeriod)?.id || available[0]?.id || 0; if (period.value === next) await loadProfile(); else period.value = next }
  catch (e) { if (current(ticket, supplier)) error.value = message(e) } finally { if (current(ticket, supplier)) busy.value = false }
 }
 watch(period, loadProfile)
@@ -162,7 +165,7 @@ function eventLabel(e: SavingEvent) {
    <section v-if="readinessSteps.length" class="space-y-2" data-test="readiness-steps">
     <h3 class="font-semibold">{{ t('nonprofitDppo.readiness.title') }}</h3>
     <ul class="space-y-1 text-sm">
-     <li v-for="step in readinessSteps" :key="step.step" :data-step="step.step" :data-status="step.status"><span class="font-medium">{{ t(`nonprofitDppo.readiness.steps.${step.step}`) }}</span> · <span :class="step.status === 'ok' ? 'text-success-700' : step.status === 'failed' ? 'text-warning-700' : 'text-neutral-500'">{{ t(`nonprofitDppo.readiness.status.${step.status}`) }}</span><span v-if="step.message"> - {{ step.message }}</span><RouterLink v-if="step.status === 'failed' && stepLink(step.step)" :to="stepLink(step.step)!" data-test="readiness-link" class="ml-2 text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">{{ t(`nonprofitDppo.readiness.links.${step.step}`) }} →</RouterLink></li>
+     <li v-for="step in readinessSteps" :key="step.step" :data-step="step.step" :data-status="step.status"><span class="font-medium">{{ t(`nonprofitDppo.readiness.steps.${step.step}`) }}</span> · <span :class="step.status === 'ok' ? 'text-success-700' : step.status === 'failed' ? 'text-warning-700' : 'text-neutral-500'">{{ t(`nonprofitDppo.readiness.status.${step.status}`) }}</span><span v-if="step.message"> - {{ step.message }}</span><span v-if="step.step === 'profile_match' && step.pinned_profile_revision != null && step.current_profile_revision != null && step.pinned_profile_revision !== step.current_profile_revision" data-test="readiness-profile-revisions" class="text-neutral-600"> · {{ t('nonprofitDppo.readiness.profileRevisions', { pinned: step.pinned_profile_revision, current: step.current_profile_revision }) }}</span><RouterLink v-if="step.status === 'failed' && stepLink(step.step)" :to="stepLink(step.step)!" data-test="readiness-link" class="ml-2 text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">{{ t(`nonprofitDppo.readiness.links.${step.step}`) }} →</RouterLink></li>
     </ul>
    </section>
    <ul v-if="otherFindings.length" class="list-disc space-y-1 pl-5"><li v-for="finding in otherFindings" :key="finding.code">{{ finding.message }}</li></ul>

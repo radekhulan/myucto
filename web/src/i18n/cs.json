@@ -44242,6 +44242,7 @@
     "reductionUncertain": "Výsledek uložení není známý. Ověřte aktuální návrh. Stejný požadavek lze opakovat pouze nad původní nezměněnou revizí.",
     "readiness": {
       "title": "Připravenost výpočtu",
+      "profileRevisions": "posouzení vychází z revize profilu {pinned}, aktuální je revize {current}",
       "steps": {
         "sources": "Podklady a daňové posouzení",
         "legal_profile": "Právní profil",
@@ -44727,8 +44728,28 @@
     "currentSource": "Aktuální zdrojové podklady",
     "rows": "{count} účetních řádků",
     "findings": "{count} nálezů",
-    "profile": "Právní profil",
-    "profileEvidence": "Důkaz právního profilu",
+    "profile": "Postavení poplatníka",
+    "profileEvidence": "Doložení postavení",
+    "legalProfile": {
+      "adopted": "Postavení a jeho doložení jsou převzaté z právního profilu DPPO, revize {revision}. Změnit je lze jen potvrzením nové revize profilu.",
+      "outdated": "Koncept má připnutou revizi {pinned} právního profilu, aktuální je revize {current} se stejným postavením. Rozhodnutí v konceptu zůstávají platná; připnutím převezmete aktuální revizi.",
+      "unpinned": "Koncept vznikl před potvrzením právního profilu (aktuální revize {current}). Postavení souhlasí; připnutím doložíte, ze které revize vychází.",
+      "conflictTitle": "Postavení konceptu nesouhlasí s právním profilem DPPO",
+      "conflict": "Koncept posuzuje postavení „{draft}“, potvrzený profil období uvádí „{profile}“. Náhled ani potvrzení nejsou možné. „Zachytit podklady znovu“ převezme aktuální profil a smaže dosavadní rozhodnutí.",
+      "none": "Období nemá potvrzený právní profil DPPO. Postavení zadejte ručně, nebo nejdřív potvrďte právní profil.",
+      "open": "Otevřít právní profil DPPO",
+      "confirm": "Potvrdit právní profil",
+      "pin": "Připnout aktuální revizi",
+      "evidenceFromProfile": "Převezme se z právního profilu DPPO",
+      "unverified": "Ruční koncept bez doloženého druhu organizace vznikl před potvrzením právního profilu (aktuální revize {current}) a s profilem se neporovnává. „Zachytit podklady znovu“ převezme postavení z profilu.",
+      "svjModule": "Koncept posuzuje postavení „{draft}“, ale v období je zapnutý modul SVJ, který vyžaduje postavení SVJ. Zvolte postavení SVJ a použijte „Zachytit podklady znovu“; dosavadní rozhodnutí se smažou.",
+      "unavailable": "Právní profil DPPO období teď nejde ověřit: {message} Založení a reset konceptu, náhled i potvrzení počkají, až profil opravíte novým potvrzením.",
+      "latest": "postavení z právního profilu DPPO, revize {revision}",
+      "refreshFailed": "Zadané postavení nesouhlasí s potvrzeným právním profilem DPPO a stav profilu se nepodařilo načíst. Obnovte přehled a akci zopakujte.",
+      "errors": {
+        "nonprofit_dppo_legal_profile_invalid": "Postavení v profilu neodpovídá doložené právní formě nebo zapnutému modulu SVJ."
+      }
+    },
     "entityKind": "Doložený druh organizace",
     "choose": "Vyberte",
     "profiles": {
@@ -44862,7 +44883,10 @@
       "nonprofit_tax_gift_election_locked": "Volbu osvobození daru už nelze v této revizi změnit.",
       "nonprofit_tax_facts_incomplete": "Chybí rozhodné skutečnosti nebo jejich důkaz.",
       "nonprofit_tax_framework_unsupported": "Účetní rámec nebo období není pro tento výpočet podporované.",
-      "nonprofit_tax_preview_not_found": "Náhled vypršel nebo už nepatří aktuální revizi. Připravte nový náhled."
+      "nonprofit_tax_preview_not_found": "Náhled vypršel nebo už nepatří aktuální revizi. Připravte nový náhled.",
+      "nonprofit_tax_legal_profile_conflict": "Postavení konceptu nesouhlasí s potvrzeným právním profilem DPPO. Použijte „Zachytit podklady znovu“, převezme aktuální profil.",
+      "nonprofit_tax_legal_profile_mismatch": "Zadané postavení nesouhlasí s potvrzeným právním profilem DPPO. Formulář jsme obnovili podle profilu, akci zopakujte.",
+      "nonprofit_tax_legal_profile_missing": "Období nemá potvrzený právní profil DPPO, který by šlo připnout."
     },
     "sourceFindings": {
       "title": "Zjištění podkladů",

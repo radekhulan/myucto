@@ -20,9 +20,11 @@ use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6AssessmentWithdrawalService;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6DraftContext;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6HttpCursor;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6LegacyAssessmentConversionService;
+use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6LegalProfileMatch;
 use MyInvoice\Service\Tax\Nonprofit\Authoritative\J6SourceFindingService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentException;
 use MyInvoice\Service\Tax\Nonprofit\Snapshot\SnapshotCursor;
+use MyInvoice\Service\Tax\Return\TaxReturnException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
@@ -50,6 +52,7 @@ final class J6NonprofitTaxAction
         private readonly J6LegacyAssessmentConversionService $conversion,
         private readonly J6AssessmentDocumentRenderer $documents,
         private readonly J6SourceFindingService $findings,
+        private readonly J6LegalProfileMatch $legalProfiles,
     ) {}
 
     public function source(Request $request, Response $response, array $args): Response
@@ -91,9 +94,10 @@ final class J6NonprofitTaxAction
     public function open(Request $request, Response $response, array $args): Response
     {
         return $this->draftHandle($request, $response, true, function(int $supplier) use ($request, $args): array {
-            $body = $this->body($request, ['profile', 'method'], ['profile']);
+            // Postavení v těle je volitelné: s potvrzeným profilem DPPO se převezme z něj.
+            $body = $this->body($request, ['profile', 'method'], []);
             $this->profile($body);
-            $draft = $this->drafts->openCurrent($supplier, (int) $args['periodId'], $body['profile'], $body['method'] ?? null, $this->actor($request));
+            $draft = $this->drafts->openCurrent($supplier, (int) $args['periodId'], $body['profile'] ?? null, $body['method'] ?? null, $this->actor($request));
             return $this->envelope($request, $draft);
         });
     }
@@ -101,8 +105,10 @@ final class J6NonprofitTaxAction
     public function currentDraft(Request $request, Response $response, array $args): Response
     {
         return $this->draftHandle($request, $response, false, function(int $supplier) use ($request, $args): array {
-            $draft = $this->queries->current($supplier, (int) $args['periodId'], $this->actor($request));
-            return $draft === null ? ['draft' => null, 'capabilities' => null] : $this->envelope($request, $draft);
+            $period = (int) $args['periodId'];
+            $draft = $this->queries->current($supplier, $period, $this->actor($request));
+            return $draft === null ? ['draft' => null, 'capabilities' => null,
+                'legal_profile' => $this->legalState(null, $supplier, $period)] : $this->envelope($request, $draft);
         });
     }
 
@@ -115,10 +121,21 @@ final class J6NonprofitTaxAction
     public function reset(Request $request, Response $response, array $args): Response
     {
         return $this->draftHandle($request, $response, true, function(int $supplier) use ($request, $args): array {
-            $body = $this->body($request, ['expected_revision', 'profile', 'method'], ['expected_revision', 'profile']);
+            $body = $this->body($request, ['expected_revision', 'profile', 'method'], ['expected_revision']);
             $this->profile($body);
             $draft = $this->drafts->resetCurrent($supplier, (int) $args['periodId'], (int) $args['draftId'],
-                $this->positive($body['expected_revision']), $body['profile'], $body['method'] ?? null, $this->actor($request));
+                $this->positive($body['expected_revision']), $body['profile'] ?? null, $body['method'] ?? null, $this->actor($request));
+            return $this->envelope($request, $draft);
+        });
+    }
+
+    /** Připne aktuální revizi právního profilu stejného postavení; rozhodnutí konceptu zůstanou. */
+    public function pinLegalProfile(Request $request, Response $response, array $args): Response
+    {
+        return $this->draftHandle($request, $response, true, function(int $supplier) use ($request, $args): array {
+            $body = $this->body($request, ['expected_revision'], ['expected_revision']);
+            $draft = $this->drafts->pinLegalProfile($supplier, (int) $args['periodId'], (int) $args['draftId'],
+                $this->positive($body['expected_revision']), $this->actor($request));
             return $this->envelope($request, $draft);
         });
     }
@@ -380,7 +397,23 @@ final class J6NonprofitTaxAction
         }
         return ['draft' => $view, 'capabilities' => ['can_edit' => $edit, 'can_preview' => $edit && $complete,
             'can_confirm' => $edit && $complete, 'source_complete' => $complete,
-            'reason_code' => !$captured ? 'nonprofit_tax_draft_source_not_captured' : ($complete ? null : 'nonprofit_tax_sources_incomplete')]];
+            'reason_code' => !$captured ? 'nonprofit_tax_draft_source_not_captured' : ($complete ? null : 'nonprofit_tax_sources_incomplete')],
+            'legal_profile' => $this->legalState($view['header'], $view['supplier_id'], $view['period_id'])];
+    }
+
+    /**
+     * Stav shody s právním profilem pro odpověď. Běží i po commitu mutace konceptu, proto chyba
+     * čtení profilu (nepotvrditelný profil, chybějící období) nesmí změnit odpověď provedené akce:
+     * vrátí se stav `unavailable` s kódem chyby. Náhled a potvrzení tutéž chybu vrátí jako 4xx.
+     */
+    private function legalState(?array $header, int $supplier, int $period): array
+    {
+        try {
+            return J6LegalProfileMatch::state($header, $this->legalProfiles->context($supplier, $period));
+        } catch (TaxReturnException | NonprofitTaxAssessmentException $error) {
+            return ['state' => $header === null ? null : 'unavailable', 'current' => null, 'pinned' => null, 'pinnable' => false,
+                'error' => ['code' => $error->errorCode, 'message' => $error->getMessage()]];
+        }
     }
 
     private function binding(Request $request, array $owner, string $type, string $kind, int $limit): array
@@ -474,7 +507,7 @@ final class J6NonprofitTaxAction
 
     private function profile(array $body): void
     {
-        if (!is_array($body['profile']) || (isset($body['method']) && !is_array($body['method']))) throw new \InvalidArgumentException('Profile and method must be objects.');
+        if ((array_key_exists('profile', $body) && !is_array($body['profile'])) || (isset($body['method']) && !is_array($body['method']))) throw new \InvalidArgumentException('Profile and method must be objects.');
     }
 
     private function patchBody(Request $request): array
@@ -510,7 +543,8 @@ final class J6NonprofitTaxAction
             $result = $work($this->currentSupplierId($request));
             $response = $result instanceof Response ? $result : Json::ok($response, $result);
             return $response->withHeader('Cache-Control', 'private, no-store')->withHeader('X-Content-Type-Options', 'nosniff');
-        } catch (NonprofitTaxAssessmentException $error) {
+        } catch (NonprofitTaxAssessmentException | TaxReturnException $error) {
+            // TaxReturnException nese čtení právního profilu DPPO (J6LegalProfileMatch::context).
             return Json::error($response, $error->errorCode, $error->getMessage(), $error->httpStatus);
         } catch (\InvalidArgumentException $error) {
             return Json::error($response, 'invalid_input', 'Požadavek na daňové posouzení není platný.', 400);

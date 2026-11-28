@@ -81,6 +81,9 @@ final readonly class J6AssessmentReadService
             'assessment' => $this->view($assessment),
             'period' => $sourceHeader['period'],
             'profile' => $decisionHeader['profile'] ?? null,
+            // Ověřená hlavička rozhodnutí: připnutá revize právního profilu DPPO, ze které postavení pochází.
+            // U odvolání popisuje dokument odvolané rozhodnutí (postavení i připnutí), souhrn revize připnutí nenese.
+            'legal_profile' => $decisionHeader['legal_profile'] ?? null,
             'bridge' => $receipt->summary,
             'current_confirmed' => $head['assessment_id'] === $assessmentId && $head['status'] === 'confirmed',
             'full_evidence_format' => 'application/x-ndjson'];
@@ -180,7 +183,8 @@ final readonly class J6AssessmentReadService
             'created_at' => $assessment['created_at'], 'summary' => $receipt?->summary,
             'source_input_hash' => $receipt?->sourceInputHash,
             'snapshot_input_hash' => $receipt?->snapshotInputHash,
-            'receipt_hash' => $receipt?->toArray()['receipt_hash']];
+            'receipt_hash' => $receipt?->toArray()['receipt_hash'],
+            'legal_profile' => $assessment['legal_profile'] ?? null];
         return $view;
     }
 }

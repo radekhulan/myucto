@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Nonprofit;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\NonprofitTaxAssessmentRepository;
+use MyInvoice\Repository\NonprofitTaxPagedAssessmentRepository;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 
 /**
@@ -56,15 +57,43 @@ final readonly class NonprofitDppoReadiness
             $this->provider->gather($supplierId, (int) $period['fiscal_year'], [], static function (string $step) use (&$passed): void {
                 $passed[$step] = true;
             });
-            return ['ready' => true, 'steps' => array_map(static fn (string $step): array => ['step' => $step, 'status' => 'ok', 'code' => null, 'message' => null], self::STEPS), 'findings' => []];
+            return $this->withProfileRevisions(['ready' => true, 'steps' => array_map(static fn (string $step): array => ['step' => $step, 'status' => 'ok', 'code' => null, 'message' => null], self::STEPS), 'findings' => []],
+                $supplierId, (int) $period['id']);
         } catch (TaxReturnException | NonprofitTaxAssessmentException $error) {
             $failure = ['code' => $error->errorCode, 'message' => $error->getMessage()];
         }
-        return self::afterFailure($passed, $failure, fn (string $step): array|false|null => match ($step) {
+        return $this->withProfileRevisions(self::afterFailure($passed, $failure, fn (string $step): array|false|null => match ($step) {
             'sources' => $this->assessment($supplierId, (int) $period['id']),
             'legal_profile' => $this->legalProfile($supplierId, (int) $period['id']),
             default => false,
-        });
+        }), $supplierId, (int) $period['id']);
+    }
+
+    /**
+     * Krok profile_match doplní, kterou revizi právního profilu připnulo potvrzené posouzení J6
+     * a která je aktuální (J6LegalProfileMatch). Shodu dál rozhoduje výpočet podle kind;
+     * rozdílná revize při stejném postavení chybou není.
+     */
+    private function withProfileRevisions(array $readiness, int $supplierId, int $periodId): array
+    {
+        // Jen doplňková informace: profil, který nejde doložit, ani nečitelná revize posouzení nesmí
+        // připravenost shodit; chybu hlásí příslušný krok výpočtu.
+        try {
+            $current = (new NonprofitLegalProfileService($this->db))->assessmentContext($supplierId, $periodId)['legal_profile']['revision_no'] ?? null;
+        } catch (TaxReturnException | NonprofitTaxAssessmentException) {
+            $current = null;
+        }
+        try {
+            $latest = (new NonprofitTaxPagedAssessmentRepository($this->db))->latest($supplierId, $periodId);
+            $pinned = ($latest['status'] ?? null) === 'confirmed' ? ($latest['legal_profile']['revision_no'] ?? null) : null;
+        } catch (\JsonException | \UnexpectedValueException | \InvalidArgumentException) {
+            $pinned = null;
+        }
+        foreach ($readiness['steps'] as &$step) {
+            if ($step['step'] === 'profile_match') $step += ['pinned_profile_revision' => $pinned, 'current_profile_revision' => $current];
+        }
+        unset($step);
+        return $readiness;
     }
 
     /**

@@ -17,6 +17,14 @@ final class NonprofitTaxRules
         foreach (['profile', 'decisions', 'activities', 'funding', 'funding_sources', 'funding_costs', 'method'] as $key) {
             if (array_key_exists($key, $assessment) && !is_array($assessment[$key])) self::invalid('Posouzení musí obsahovat strukturované podklady.');
         }
+        // Připnutá revize právního profilu DPPO (J6LegalProfileMatch): jen identita a otisk revize.
+        if (array_key_exists('legal_profile', $assessment)) {
+            $pin = $assessment['legal_profile'];
+            if (!is_array($pin) || count($pin) !== 3 || !is_int($pin['id'] ?? null) || $pin['id'] <= 0 || !is_int($pin['revision_no'] ?? null) || $pin['revision_no'] <= 0
+                || !is_string($pin['record_hash'] ?? null) || preg_match('/^[a-f0-9]{64}$/D', $pin['record_hash']) !== 1) {
+                self::invalid('Připnutí právního profilu musí obsahovat identitu, revizi a otisk potvrzení.');
+            }
+        }
         foreach (['decisions', 'activities', 'funding', 'funding_sources', 'funding_costs'] as $key) {
             foreach ($assessment[$key] ?? [] as $item) {
                 if (!is_array($item)) self::invalid('Jednotlivé podklady posouzení musí být strukturované.');

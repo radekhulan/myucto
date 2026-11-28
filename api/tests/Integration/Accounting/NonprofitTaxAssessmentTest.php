@@ -258,6 +258,55 @@ final class NonprofitTaxAssessmentTest extends TestCase
         self::assertSame($confirmed, $this->repository->find($this->supplier, $confirmed['id']));
     }
 
+    /** #402 krok 2, A11: legacy cesta dál kontroluje postavení proti profilu ze snímku a proti modulu SVJ. */
+    public function testLegacyConfirmationKeepsLegalProfileCheck(): void
+    {
+        $this->post('602', '100.00');
+        (new \MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period,
+            ['expected_revision' => 0, 'idempotency_key' => 'legacy-legal-' . $this->supplier, 'reason' => 'Synthetic review',
+                'profile' => ['kind' => 'narrow_vpp', 'entity_type' => 'association', 'main_activity_nonbusiness' => true,
+                    'legal_basis' => 'zdp_17a', 'evidence' => 'Synthetic statutes']], $this->actor);
+        $snapshot = $this->service->read($this->supplier, $this->period)['snapshot'];
+        self::assertSame('narrow_vpp', $snapshot['legal_profile']['profile']['kind']);
+        $broad = $this->assessment($snapshot);
+        $broad['profile']['kind'] = 'broad_vpp';
+        $this->refusedWith('potvrzeným právním profilem', fn () => $this->service->preview($this->supplier, $this->period, $broad));
+        $this->refusedWith('potvrzeným právním profilem', fn () => $this->service->confirm($this->supplier, $this->period,
+            $broad, $snapshot['input_hash'], 'Jiné postavení', 'legacy-broad', $this->actor));
+        self::assertSame('confirmed', $this->service->confirm($this->supplier, $this->period, $this->assessment($snapshot),
+            $snapshot['input_hash'], 'Stejné postavení', 'legacy-narrow', $this->actor)['status']);
+    }
+
+    public function testLegacyConfirmationRejectsForgedLegalProfilePin(): void
+    {
+        $this->post('602', '100.00');
+        $snapshot = $this->service->read($this->supplier, $this->period)['snapshot'];
+        $forged = $this->assessment($snapshot) + ['legal_profile' => ['id' => 1, 'revision_no' => 1, 'record_hash' => str_repeat('a', 64)]];
+        $this->refusedWith('Připnutí právního profilu nelze zadat ručně', fn () => $this->service->confirm($this->supplier, $this->period,
+            $forged, $snapshot['input_hash'], 'Podvržené připnutí', 'legacy-forged', $this->actor));
+    }
+
+    public function testLegacyConfirmationKeepsSvjModuleCheck(): void
+    {
+        $this->post('602', '100.00');
+        (new \MyInvoice\Repository\Property\PropertyProfileRepository($this->db))->save($this->supplier, ['expected_revision' => 0,
+            'effective_from' => '2026-01-01T00:00:00Z', 'effective_to' => null, 'enabled' => true, 'reason' => 'Synthetic SVJ module',
+            'title_ref' => 'Synthetic legal title', 'idempotency_key' => 'legacy-svj-' . $this->supplier], $this->actor);
+        $snapshot = $this->service->read($this->supplier, $this->period)['snapshot'];
+        self::assertNotSame([], $snapshot['svj_module_proof'] ?? []);
+        $this->refusedWith('profil SVJ', fn () => $this->service->confirm($this->supplier, $this->period,
+            $this->assessment($snapshot), $snapshot['input_hash'], 'Bez SVJ', 'legacy-svj', $this->actor));
+    }
+
+    private function refusedWith(string $message, callable $work): void
+    {
+        try { $work(); self::fail('Expected refusal: ' . $message); }
+        catch (NonprofitTaxAssessmentException $e) {
+            self::assertSame('nonprofit_tax_facts_incomplete', $e->errorCode);
+            self::assertStringContainsString($message, $e->getMessage());
+        }
+    }
+
     public function testGiftElectionSurvivesWithdrawal(): void
     {
         $this->post('682', '250.00');
