@@ -86,7 +86,7 @@ jobs:
     # session — tedy zrovna to, co hlídá nejcitlivější garance autentizace.
     services:
       mariadb:
-        image: mariadb:11.8
+        image: mariadb:11.8.10@sha256:73c35e8483b56390cc98f8d6d9840244bd03c929aea7109490641b9389a18088
         env:
           MARIADB_ROOT_PASSWORD: ci
           MARIADB_DATABASE: myinvoice_ci
