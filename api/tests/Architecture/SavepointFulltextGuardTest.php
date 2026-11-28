@@ -28,6 +28,8 @@ final class SavepointFulltextGuardTest extends TestCase
             => 'DDKP a finální faktura vznikají s novými položkami. Existující položky se nepřepisují.',
         'MyInvoice\Action\Bank\BankStatementAction::manualMatchSplit'
             => 'DDKP a finální faktura vznikají s novými položkami. Existující položky se nepřepisují.',
+        'MyInvoice\Action\Invoice\ImportIssuedInvoiceAction::__invoke'
+            => 'Import vkládá texty do položek nového dokladu. Vrácení importu při neplatné dimenzi zachová dříve vložené položky i jejich vyhledávání.',
         'MyInvoice\Action\Invoice\SetInvoiceAccrualAction::__invoke'
             => 'Mění jen accrual_from a accrual_to. Popis řádku se nemění.',
         'MyInvoice\Action\PurchaseInvoice\ChangePurchaseInvoiceVatTreatmentAction::__invoke'
